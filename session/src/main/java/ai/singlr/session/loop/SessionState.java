@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -49,6 +50,7 @@ public final class SessionState {
   private final AtomicReference<CostEstimate> cost = new AtomicReference<>(CostEstimate.zero());
   private final AtomicReference<Optional<ResultMessage>> terminal =
       new AtomicReference<>(Optional.empty());
+  private final AtomicBoolean contextWarningFired = new AtomicBoolean(false);
 
   /**
    * Build a fresh state for a new session. The state starts at turn {@code 0} with empty history.
@@ -127,6 +129,24 @@ public final class SessionState {
    */
   public List<Message> historySnapshot() {
     return List.copyOf(history);
+  }
+
+  /**
+   * Replace the entire history with the given list. Used by context compaction and by a {@code
+   * PreModelTurnHook} returning {@code MutateInput} carrying a fresh history. The supplied list is
+   * defensively copied so subsequent caller mutations don't leak in.
+   *
+   * @param newHistory the replacement history; non-null. Contents are defensively copied
+   * @throws NullPointerException if {@code newHistory} or any element is null
+   */
+  public void replaceHistory(List<Message> newHistory) {
+    Objects.requireNonNull(newHistory, "newHistory must not be null");
+    var copy = new java.util.ArrayList<Message>(newHistory.size());
+    for (var m : newHistory) {
+      copy.add(Objects.requireNonNull(m, "newHistory must not contain null"));
+    }
+    history.clear();
+    history.addAll(copy);
   }
 
   /**
@@ -221,5 +241,35 @@ public final class SessionState {
    */
   public Optional<ResultMessage> terminal() {
     return terminal.get();
+  }
+
+  /**
+   * Mark the {@code ContextWarning} watermark as fired for this session. The flag is sticky until
+   * {@link #resetContextWarningFlag()} is called — once the watermark crosses {@code 0.85}, the
+   * loop should not re-emit a warning on every subsequent turn that stays above the threshold.
+   *
+   * @return {@code true} if this call flipped the flag (i.e. the caller should emit the event);
+   *     {@code false} if it was already set
+   */
+  public boolean tryFireContextWarning() {
+    return contextWarningFired.compareAndSet(false, true);
+  }
+
+  /**
+   * Clear the {@code ContextWarning}-fired flag. Called after a successful compaction so a future
+   * climb back through {@code 0.85} re-fires the watermark. Day 1 (watermark-only) never calls
+   * this; Day 2 (compaction) wires it after {@code ContextEdited}.
+   */
+  public void resetContextWarningFlag() {
+    contextWarningFired.set(false);
+  }
+
+  /**
+   * Whether the {@code ContextWarning} watermark has been emitted in this session.
+   *
+   * @return {@code true} if emitted at least once
+   */
+  public boolean contextWarningFired() {
+    return contextWarningFired.get();
   }
 }

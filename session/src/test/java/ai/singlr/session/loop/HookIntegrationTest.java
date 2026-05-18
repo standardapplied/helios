@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.common.CostCalculator;
+import ai.singlr.core.context.TokenCounter;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Model;
 import ai.singlr.core.model.ModelChunk;
@@ -22,6 +23,7 @@ import ai.singlr.core.runtime.SessionContext;
 import ai.singlr.core.tool.Tool;
 import ai.singlr.core.tool.ToolResult;
 import ai.singlr.session.ConcurrencyLimits;
+import ai.singlr.session.ContextCompactor;
 import ai.singlr.session.QueryEvent;
 import ai.singlr.session.ResultMessage;
 import ai.singlr.session.SessionLimits;
@@ -156,7 +158,16 @@ final class HookIntegrationTest {
             CLOCK,
             CostCalculator.ZERO);
     return new AgentLoop(
-        runner, new StopClassifier(), hooks, dispatch, queue, events::add, contextFactory(), CLOCK);
+        runner,
+        new StopClassifier(),
+        hooks,
+        dispatch,
+        queue,
+        events::add,
+        contextFactory(),
+        CLOCK,
+        TokenCounter.charBased(),
+        ContextCompactor.disabled());
   }
 
   private static SessionState freshState() {

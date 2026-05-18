@@ -221,4 +221,28 @@ final class SessionStateTest {
     var ex = assertThrows(NullPointerException.class, () -> state.setTerminal(null));
     assertEquals("result must not be null", ex.getMessage());
   }
+
+  @Test
+  void contextWarningFlagStartsClear() {
+    var state = build();
+    assertFalse(state.contextWarningFired());
+  }
+
+  @Test
+  void tryFireContextWarningIsFirstWins() {
+    var state = build();
+    assertTrue(state.tryFireContextWarning());
+    assertTrue(state.contextWarningFired());
+    assertFalse(state.tryFireContextWarning(), "second call must return false");
+    assertTrue(state.contextWarningFired());
+  }
+
+  @Test
+  void resetContextWarningFlagReArms() {
+    var state = build();
+    state.tryFireContextWarning();
+    state.resetContextWarningFlag();
+    assertFalse(state.contextWarningFired());
+    assertTrue(state.tryFireContextWarning(), "post-reset try must succeed again");
+  }
 }

@@ -7,6 +7,7 @@ package ai.singlr.session;
 import ai.singlr.core.common.CostCalculator;
 import ai.singlr.core.common.Ids;
 import ai.singlr.core.common.Strings;
+import ai.singlr.core.context.TokenCounter;
 import ai.singlr.core.model.Model;
 import ai.singlr.core.schema.OutputSchema;
 import ai.singlr.session.execution.ExecutionProvider;
@@ -69,6 +70,17 @@ import java.util.Optional;
  * @param systemPrompt optional system-role message prepended to the conversation history before the
  *     first user message. Presets (CodeAct, RLM, custom) supply their strategy text here so the
  *     agent loop carries it to every model turn through the standard system-role channel
+ * @param tokenCounter estimates running history's token footprint after each model turn. When usage
+ *     crosses {@code 0.85} of {@link SessionLimits#maxContextTokens()}, the loop emits a {@link
+ *     QueryEvent.ContextWarning ContextWarning}; the same counter is used to detect the 0.95
+ *     compaction watermark. Defaults to {@link TokenCounter#charBased()} — wire a provider-specific
+ *     tokenizer when accuracy matters more than the per-turn cost. Non-null
+ * @param contextCompactor shrinks the conversation history when usage crosses {@code 0.95} of
+ *     {@link SessionLimits#maxContextTokens()}. Defaults to a {@link
+ *     DropMiddleToolResultsCompactor} bound to {@code model} — preserves the system prompt +
+ *     opening turn + recent trajectory, summarises the middle. Library users can override via
+ *     {@code Builder.withContextCompactor} or opt out wholesale with {@link
+ *     ContextCompactor#disabled()}. Non-null
  */
 public record SessionOptions(
     Model model,
@@ -83,7 +95,9 @@ public record SessionOptions(
     CostCalculator costCalculator,
     ExecutionProvider executionProvider,
     Optional<OutputSchema<?>> outputSchema,
-    Optional<String> systemPrompt) {
+    Optional<String> systemPrompt,
+    TokenCounter tokenCounter,
+    ContextCompactor contextCompactor) {
 
   /**
    * Canonical constructor.
@@ -109,6 +123,8 @@ public record SessionOptions(
     Objects.requireNonNull(executionProvider, "executionProvider must not be null");
     Objects.requireNonNull(outputSchema, "outputSchema must not be null");
     Objects.requireNonNull(systemPrompt, "systemPrompt must not be null");
+    Objects.requireNonNull(tokenCounter, "tokenCounter must not be null");
+    Objects.requireNonNull(contextCompactor, "contextCompactor must not be null");
   }
 
   /**
@@ -140,7 +156,9 @@ public record SessionOptions(
         .withCostCalculator(costCalculator)
         .withExecutionProvider(executionProvider)
         .withOutputSchema(outputSchema.orElse(null))
-        .withSystemPrompt(systemPrompt.orElse(null));
+        .withSystemPrompt(systemPrompt.orElse(null))
+        .withTokenCounter(tokenCounter)
+        .withContextCompactor(contextCompactor);
   }
 
   /**
@@ -163,6 +181,8 @@ public record SessionOptions(
     private ExecutionProvider executionProvider = NoopExecutionProvider.INSTANCE;
     private OutputSchema<?> outputSchema;
     private String systemPrompt;
+    private TokenCounter tokenCounter = TokenCounter.charBased();
+    private ContextCompactor contextCompactor;
 
     private Builder() {}
 
@@ -366,6 +386,37 @@ public record SessionOptions(
     }
 
     /**
+     * Set the token counter the agent loop uses to estimate context-window fill after each model
+     * turn. Defaults to {@link TokenCounter#charBased()} — a cheap heuristic suitable for English
+     * text. Wire a provider-specific tokenizer for multimodal-heavy or non-English workloads.
+     *
+     * @param tokenCounter non-null counter
+     * @return this builder
+     * @throws NullPointerException if {@code tokenCounter} is null
+     */
+    public Builder withTokenCounter(TokenCounter tokenCounter) {
+      this.tokenCounter = Objects.requireNonNull(tokenCounter, "tokenCounter must not be null");
+      return this;
+    }
+
+    /**
+     * Set the {@link ContextCompactor} the agent loop invokes when running history crosses {@code
+     * 0.95} of {@link SessionLimits#maxContextTokens()}. If unset, the default is a {@link
+     * DropMiddleToolResultsCompactor} bound to the session's {@code model}. Pass {@link
+     * ContextCompactor#disabled()} to opt out of automatic compaction wholesale; pass a custom
+     * implementation to override the head/tail policy or summarisation prompt.
+     *
+     * @param contextCompactor non-null compactor
+     * @return this builder
+     * @throws NullPointerException if {@code contextCompactor} is null
+     */
+    public Builder withContextCompactor(ContextCompactor contextCompactor) {
+      this.contextCompactor =
+          Objects.requireNonNull(contextCompactor, "contextCompactor must not be null");
+      return this;
+    }
+
+    /**
      * Apply a {@link SessionPreset} to this builder. The preset's {@code apply} function receives
      * this builder, layers configuration onto it, and returns it for chaining. Multiple presets
      * stack associatively — later {@code apply(...)} calls overwrite earlier ones when they touch
@@ -393,6 +444,10 @@ public record SessionOptions(
         throw new IllegalStateException("model is required");
       }
       var id = sessionId != null ? sessionId : "sess-" + Ids.newId();
+      var compactor =
+          contextCompactor != null
+              ? contextCompactor
+              : DropMiddleToolResultsCompactor.newBuilder(model).build();
       return new SessionOptions(
           model,
           id,
@@ -406,7 +461,9 @@ public record SessionOptions(
           costCalculator,
           executionProvider,
           Optional.ofNullable(outputSchema),
-          Optional.ofNullable(systemPrompt));
+          Optional.ofNullable(systemPrompt),
+          tokenCounter,
+          compactor);
     }
   }
 }

@@ -149,7 +149,9 @@ public final class AgentSessionImpl implements AgentSession {
             steeringQueue,
             publisher::submit,
             contextFactory,
-            clock);
+            clock,
+            options.tokenCounter(),
+            options.contextCompactor());
   }
 
   /**

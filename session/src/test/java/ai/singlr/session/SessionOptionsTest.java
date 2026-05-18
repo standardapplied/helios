@@ -7,12 +7,14 @@ package ai.singlr.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.common.CostCalculator;
 import ai.singlr.core.common.CostEstimate;
+import ai.singlr.core.context.TokenCounter;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Model;
 import ai.singlr.core.model.Response;
@@ -75,7 +77,9 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
                     Optional.empty(),
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("model must not be null", ex.getMessage());
   }
 
@@ -98,7 +102,9 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
                     Optional.empty(),
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("sessionId must not be null", ex.getMessage());
   }
 
@@ -121,7 +127,9 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
                     Optional.empty(),
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("sessionId must not be blank", ex.getMessage());
   }
 
@@ -144,7 +152,9 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
                     Optional.empty(),
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("limits must not be null", ex.getMessage());
   }
 
@@ -167,7 +177,9 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
                     Optional.empty(),
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("concurrency must not be null", ex.getMessage());
   }
 
@@ -190,7 +202,9 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
                     Optional.empty(),
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("clock must not be null", ex.getMessage());
   }
 
@@ -213,7 +227,9 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
                     Optional.empty(),
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("tools must not be null", ex.getMessage());
   }
 
@@ -236,7 +252,9 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
                     Optional.empty(),
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("hooks must not be null", ex.getMessage());
   }
 
@@ -259,7 +277,9 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
                     Optional.empty(),
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("permission must not be null", ex.getMessage());
   }
 
@@ -282,7 +302,9 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
                     Optional.empty(),
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("memoryBackend must not be null", ex.getMessage());
   }
 
@@ -305,7 +327,9 @@ final class SessionOptionsTest {
                     null,
                     NoopExecutionProvider.INSTANCE,
                     Optional.empty(),
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("costCalculator must not be null", ex.getMessage());
   }
 
@@ -328,7 +352,9 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     null,
                     Optional.empty(),
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("executionProvider must not be null", ex.getMessage());
   }
 
@@ -351,7 +377,9 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
                     null,
-                    Optional.empty()));
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("outputSchema must not be null", ex.getMessage());
   }
 
@@ -374,8 +402,105 @@ final class SessionOptionsTest {
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
                     Optional.empty(),
-                    null));
+                    null,
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled()));
     assertEquals("systemPrompt must not be null", ex.getMessage());
+  }
+
+  @Test
+  void canonicalConstructorRejectsNullTokenCounter() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new SessionOptions(
+                    stubModel(),
+                    "sess",
+                    SessionLimits.defaults(),
+                    ConcurrencyLimits.defaults(),
+                    Clock.systemUTC(),
+                    ToolRegistry.empty(),
+                    List.of(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    CostCalculator.ZERO,
+                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    Optional.empty(),
+                    null,
+                    ContextCompactor.disabled()));
+    assertEquals("tokenCounter must not be null", ex.getMessage());
+  }
+
+  @Test
+  void canonicalConstructorRejectsNullContextCompactor() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new SessionOptions(
+                    stubModel(),
+                    "sess",
+                    SessionLimits.defaults(),
+                    ConcurrencyLimits.defaults(),
+                    Clock.systemUTC(),
+                    ToolRegistry.empty(),
+                    List.of(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    CostCalculator.ZERO,
+                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    null));
+    assertEquals("contextCompactor must not be null", ex.getMessage());
+  }
+
+  @Test
+  void builderDefaultsContextCompactorToDropMiddle() {
+    var opts = SessionOptions.newBuilder().withModel(stubModel()).build();
+    assertNotNull(opts.contextCompactor());
+    // default is DropMiddleToolResultsCompactor — verify it's not the disabled singleton
+    assertNotSame(ContextCompactor.disabled(), opts.contextCompactor());
+  }
+
+  @Test
+  void withContextCompactorRejectsNull() {
+    var b = SessionOptions.newBuilder().withModel(stubModel());
+    var ex = assertThrows(NullPointerException.class, () -> b.withContextCompactor(null));
+    assertEquals("contextCompactor must not be null", ex.getMessage());
+  }
+
+  @Test
+  void withContextCompactorIsThreadedThroughBuildAndToBuilder() {
+    var disabled = ContextCompactor.disabled();
+    var opts =
+        SessionOptions.newBuilder().withModel(stubModel()).withContextCompactor(disabled).build();
+    assertSame(disabled, opts.contextCompactor());
+    assertSame(disabled, opts.toBuilder().build().contextCompactor());
+  }
+
+  @Test
+  void builderDefaultsTokenCounterToCharBased() {
+    var opts = SessionOptions.newBuilder().withModel(stubModel()).build();
+    assertSame(TokenCounter.charBased(), opts.tokenCounter());
+  }
+
+  @Test
+  void withTokenCounterRejectsNull() {
+    var b = SessionOptions.newBuilder().withModel(stubModel());
+    var ex = assertThrows(NullPointerException.class, () -> b.withTokenCounter(null));
+    assertEquals("tokenCounter must not be null", ex.getMessage());
+  }
+
+  @Test
+  void withTokenCounterIsThreadedThroughBuildAndToBuilder() {
+    TokenCounter custom = msgs -> 42L;
+    var opts = SessionOptions.newBuilder().withModel(stubModel()).withTokenCounter(custom).build();
+    assertSame(custom, opts.tokenCounter());
+    assertSame(custom, opts.toBuilder().build().tokenCounter());
   }
 
   @Test

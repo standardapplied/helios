@@ -235,13 +235,22 @@ var agent = new Agent(AgentConfig.newBuilder()
 
 ### Context compaction
 
-`DefaultContextCompactor` runs a four-phase algorithm tuned from Hermes Agent's
-production behaviour: prune oversized tool results, boundary-align so
-tool_call/tool_result pairs never split, generate a structured summary with
-iterative carryover so info survives multiple compactions, then sanitize
-orphans. Override thresholds via `CompactionConfig` or swap the compactor with
-`AgentConfig.Builder.withContextCompactor(...)`. `NoOpContextCompactor.INSTANCE`
-disables compaction wholesale.
+Session-level compaction lives in `helios-session`. The agent loop estimates context fill
+through a pluggable `TokenCounter` (default char-based, ~4 chars/token) and reacts at two
+watermarks:
+
+- **0.85** of `SessionLimits.maxContextTokens()` → emits `QueryEvent.ContextWarning(usagePct)`
+  once, so UIs and audit consumers can log or pause the session before overflow.
+- **0.95** → invokes the configured `ContextCompactor`, swaps the returned history in, and
+  emits `QueryEvent.ContextEdited(removedBlocks, tokensBefore, tokensAfter)`.
+
+The default `DropMiddleToolResultsCompactor` preserves the system prompt + opening turn and the
+most recent trajectory, replacing the middle with a one-call summary against the session's
+model. Override head/tail policy and summary prompt via its Builder, swap the whole compactor
+through `SessionOptions.Builder.withContextCompactor(...)`, opt out with
+`ContextCompactor.disabled()`, or do ad-hoc rewrites by returning
+`HookOutcome.mutate(Map.of("history", rewritten))` from a `PreModelTurnHook`. See
+[`session/README.md`](session/README.md#context-compaction) for the full surface.
 
 ### Dreaming — offline memory consolidation
 

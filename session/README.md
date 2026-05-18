@@ -198,6 +198,53 @@ Hook outcomes that drop a message (`OnUserMessageHook.Block`) emit
 Each cap maps to its own terminal `ResultMessage` subtype (`ErrorMaxTurns`,
 `ErrorMaxBudgetUsd`, `ErrorMaxWallClock`, etc.).
 
+## Context compaction
+
+Long sessions outgrow the model's context window. The session loop estimates running history
+fill via a pluggable `TokenCounter` (default: `TokenCounter.charBased()`, a cheap
+~4-chars-per-token heuristic) and reacts at two watermarks:
+
+- **0.85** — emits `QueryEvent.ContextWarning(usagePct)` once, so UIs and audit consumers can
+  log or pause the session for SME review before the model hits a hard overflow.
+- **0.95** — invokes the configured `ContextCompactor`, swaps the returned history in, and
+  emits `QueryEvent.ContextEdited(removedBlocks, tokensBefore, tokensAfter)`. The warning flag
+  resets so a future re-climb fires the watermark again.
+
+The default compactor — `DropMiddleToolResultsCompactor` — preserves the system prompt + opening
+turn (`headPreserved`, default 3), preserves the recent trajectory (`tailPreserved`, default 20),
+and replaces everything in between with a single user-role summary produced by one call against
+the session's `Model`. If the summary call throws or returns blank, the compactor returns the
+history unchanged — compaction failure never crashes the loop.
+
+Three library-user tiers of control:
+
+```java
+// 1) Default — DropMiddleToolResultsCompactor bound to the session's model
+var session = AgentSession.create(SessionPresets.workspace(model, repo).build());
+
+// 2) BYO compactor — Letta-style, vector-recall, custom head/tail policy, etc.
+var custom = DropMiddleToolResultsCompactor.newBuilder(cheapHaikuModel)
+    .withHeadPreserved(5)
+    .withTailPreserved(30)
+    .withSummaryPrompt("Summarise focusing on file edits and unresolved questions.")
+    .build();
+var session2 = AgentSession.create(
+    SessionPresets.workspace(model, repo).withContextCompactor(custom).build());
+
+// 3) Opt out wholesale — long sessions overflow naturally with an ErrorDuringExecution
+var session3 = AgentSession.create(
+    SessionPresets.workspace(model, repo)
+        .withContextCompactor(ContextCompactor.disabled())
+        .build());
+```
+
+For ad-hoc, hook-driven rewrites (no `ContextCompactor` subclass), register a
+`PreModelTurnHook` that returns `HookOutcome.mutate(Map.of("history", rewrittenHistory))`.
+The loop swaps the history and emits `HookFired` with `outcomeKind=MutateInput`.
+
+`SessionOptions.Builder.withTokenCounter(...)` swaps the estimator — wire a provider-specific
+tokenizer (Anthropic's, OpenAI's tiktoken, etc.) when the char-based default is too rough.
+
 ## Going further
 
 - The HTTP surface — `helios-runtime` — exposes a session over REST + SSE for any

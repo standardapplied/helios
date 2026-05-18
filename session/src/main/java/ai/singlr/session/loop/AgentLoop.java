@@ -4,8 +4,10 @@
  */
 package ai.singlr.session.loop;
 
+import ai.singlr.core.context.TokenCounter;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Response;
+import ai.singlr.session.ContextCompactor;
 import ai.singlr.session.QueryEvent;
 import ai.singlr.session.ResultMessage;
 import ai.singlr.session.SerializedError;
@@ -59,6 +61,21 @@ import java.util.function.Function;
  */
 public final class AgentLoop {
 
+  /**
+   * Watermark fraction of {@link SessionLimits#maxContextTokens()} at which a {@link
+   * QueryEvent.ContextWarning} fires for the first time. Sticky for the rest of the session until a
+   * successful compaction clears the flag. 0.85 gives library users (and the compactor) ~15% of the
+   * window to react before the model errors out.
+   */
+  static final double CONTEXT_WARNING_WATERMARK = 0.85;
+
+  /**
+   * Watermark fraction of {@link SessionLimits#maxContextTokens()} at which the loop invokes the
+   * configured {@link ContextCompactor}. 0.95 keeps a 5% safety margin against the underlying
+   * context window; below the warning watermark we'd compact too eagerly.
+   */
+  static final double CONTEXT_COMPACT_WATERMARK = 0.95;
+
   private final TurnRunner turnRunner;
   private final StopClassifier classifier;
   private final HookRegistry hooks;
@@ -67,6 +84,8 @@ public final class AgentLoop {
   private final Function<SessionState, HookContext> hookContextFactory;
   private final Clock clock;
   private final EventEmitter emitter;
+  private final TokenCounter tokenCounter;
+  private final ContextCompactor contextCompactor;
 
   /**
    * Build an agent loop.
@@ -80,6 +99,10 @@ public final class AgentLoop {
    * @param hookContextFactory builds a per-fire {@link HookContext} from the session state;
    *     non-null
    * @param clock supplies event timestamps; non-null
+   * @param tokenCounter estimator used after each model turn to detect when running history
+   *     approaches the context window; non-null. {@link TokenCounter#charBased()} is the default
+   * @param contextCompactor invoked when usage crosses {@link #CONTEXT_COMPACT_WATERMARK};
+   *     non-null. Pass {@link ContextCompactor#disabled()} to opt out of automatic compaction
    * @throws NullPointerException if any argument is null
    */
   public AgentLoop(
@@ -90,7 +113,9 @@ public final class AgentLoop {
       SteeringQueue steeringQueue,
       Consumer<QueryEvent> eventSink,
       Function<SessionState, HookContext> hookContextFactory,
-      Clock clock) {
+      Clock clock,
+      TokenCounter tokenCounter,
+      ContextCompactor contextCompactor) {
     this.turnRunner = Objects.requireNonNull(turnRunner, "turnRunner must not be null");
     this.classifier = Objects.requireNonNull(classifier, "classifier must not be null");
     this.hooks = Objects.requireNonNull(hooks, "hooks must not be null");
@@ -99,6 +124,9 @@ public final class AgentLoop {
     this.hookContextFactory =
         Objects.requireNonNull(hookContextFactory, "hookContextFactory must not be null");
     this.clock = Objects.requireNonNull(clock, "clock must not be null");
+    this.tokenCounter = Objects.requireNonNull(tokenCounter, "tokenCounter must not be null");
+    this.contextCompactor =
+        Objects.requireNonNull(contextCompactor, "contextCompactor must not be null");
     this.emitter = new EventEmitter(eventSink, hooks, hookContextFactory, clock);
   }
 
@@ -147,6 +175,7 @@ public final class AgentLoop {
       if (state.isTerminal()) {
         return terminateWithExistingTerminal(state);
       }
+      checkContextWatermark(state, limits);
       var terminal =
           classifier.classify(
               state,
@@ -319,6 +348,66 @@ public final class AgentLoop {
         new QueryEvent.LoopEnded(
             state.sessionId(), state.currentTurnIndex(), clock.instant(), existing));
     return existing;
+  }
+
+  /**
+   * Count tokens in the current history, fire {@link QueryEvent.ContextWarning} on the first
+   * crossing of {@link #CONTEXT_WARNING_WATERMARK}, and invoke the {@link ContextCompactor} on
+   * crossings of {@link #CONTEXT_COMPACT_WATERMARK}. Successful compaction clears the warning flag
+   * so a future re-climb fires the watermark again.
+   */
+  private void checkContextWatermark(SessionState state, SessionLimits limits) {
+    var maxTokens = limits.maxContextTokens();
+    if (maxTokens <= 0) {
+      return;
+    }
+    var tokens = tokenCounter.count(state.historySnapshot());
+    var usagePct = (double) tokens / (double) maxTokens;
+    if (usagePct >= CONTEXT_WARNING_WATERMARK && state.tryFireContextWarning()) {
+      emitter.emit(
+          state,
+          new QueryEvent.ContextWarning(
+              state.sessionId(), state.currentTurnIndex(), clock.instant(), usagePct));
+    }
+    if (usagePct >= CONTEXT_COMPACT_WATERMARK) {
+      runCompactor(state, maxTokens, tokens);
+    }
+  }
+
+  /**
+   * Invoke the configured {@link ContextCompactor}, swap in the returned history, and emit {@link
+   * QueryEvent.ContextEdited} when the compactor actually shrank the history. A returned identity
+   * (same instance) or no-shrink result is treated as a no-op — the compactor opted out for this
+   * turn and the warning flag stays set.
+   */
+  private void runCompactor(SessionState state, long maxTokens, long tokensBefore) {
+    var historyBefore = state.historySnapshot();
+    List<Message> historyAfter;
+    try {
+      historyAfter = contextCompactor.compact(historyBefore, state);
+    } catch (RuntimeException e) {
+      // A throwing compactor must not crash the loop — log and skip.
+      return;
+    }
+    if (historyAfter == null || historyAfter == historyBefore) {
+      return;
+    }
+    if (historyAfter.size() >= historyBefore.size()) {
+      return;
+    }
+    state.replaceHistory(historyAfter);
+    var tokensAfter = tokenCounter.count(state.historySnapshot());
+    var removedBlocks = historyBefore.size() - historyAfter.size();
+    state.resetContextWarningFlag();
+    emitter.emit(
+        state,
+        new QueryEvent.ContextEdited(
+            state.sessionId(),
+            state.currentTurnIndex(),
+            clock.instant(),
+            removedBlocks,
+            tokensBefore,
+            tokensAfter));
   }
 
   private ResultMessage emptyHistoryError(SessionState state) {

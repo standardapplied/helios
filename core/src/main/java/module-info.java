@@ -14,6 +14,8 @@
  *   <li>{@code tool} — the {@code Tool} builder, executor contract, and result types.
  *   <li>{@code common} — value types reused across modules ({@code Result}, {@code CostEstimate},
  *       {@code CostCalculator}, {@code Strings}, {@code Ids}, {@code SecretRegistry}, etc.).
+ *   <li>{@code context} — {@code TokenCounter} SPI used by the agent loop to estimate conversation
+ *       context fill and trigger watermark events.
  *   <li>{@code fault} — retry / circuit-breaker / timeout primitives.
  *   <li>{@code schema} — output-schema + provenance support for structured generation.
  *   <li>{@code embedding} — provider-agnostic embedding interface (impl in helios-onnx).
@@ -32,6 +34,7 @@ module ai.singlr.core {
   requires java.net.http;
 
   exports ai.singlr.core.common;
+  exports ai.singlr.core.context;
   exports ai.singlr.core.embedding;
   exports ai.singlr.core.events;
   exports ai.singlr.core.fault;

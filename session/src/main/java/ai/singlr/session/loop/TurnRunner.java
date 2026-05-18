@@ -237,6 +237,10 @@ public final class TurnRunner {
   /**
    * Apply a turn-level hook outcome (PreModelTurn / PostModelTurn). Updates state for terminal /
    * injected outcomes and tells the caller whether to keep going.
+   *
+   * <p>{@code MutateInput} at PreModelTurn carries the "history" key (a {@code List<Message>}) and
+   * rewrites the conversation history wholesale — the BYO-compactor-as-hook path. At PostModelTurn,
+   * {@code MutateInput} is not meaningful and is treated as Continue.
    */
   private TurnLevelDecision handleTurnLevel(
       SessionState state, HookDecision decision, TurnPhase phase) {
@@ -258,7 +262,14 @@ public final class TurnRunner {
             : TurnLevelDecision.CONTINUE;
       }
       case HookOutcome.MutateInput m -> {
-        // MutateInput not meaningful at turn level; treated as Continue.
+        if (phase == TurnPhase.PRE_MODEL_TURN) {
+          var replacement = extractHistory(m.newInput());
+          if (replacement != null) {
+            state.replaceHistory(replacement);
+            state.resetContextWarningFlag();
+            emitter.emitHookFired(state, hookName, phase.phaseName(), "MutateInput");
+          }
+        }
         return TurnLevelDecision.CONTINUE;
       }
       case HookOutcome.Block b -> {
@@ -266,6 +277,27 @@ public final class TurnRunner {
         return TurnLevelDecision.CONTINUE;
       }
     }
+  }
+
+  /**
+   * Pull a {@code List<Message>} out of a {@code MutateInput} payload under the "history" key.
+   * Returns null when the key is absent, the value is the wrong type, or any element is not a
+   * {@link Message} — the loop then treats the outcome as a no-op Continue rather than rewriting
+   * the history with a malformed payload.
+   */
+  private static List<Message> extractHistory(Map<String, Object> newInput) {
+    var raw = newInput.get("history");
+    if (!(raw instanceof List<?> list)) {
+      return null;
+    }
+    var copy = new java.util.ArrayList<Message>(list.size());
+    for (var element : list) {
+      if (!(element instanceof Message message)) {
+        return null;
+      }
+      copy.add(message);
+    }
+    return List.copyOf(copy);
   }
 
   /**

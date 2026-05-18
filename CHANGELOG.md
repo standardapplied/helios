@@ -2,6 +2,43 @@
 
 All notable changes to Helios are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [2.1.0] — 2026-05-18
+
+Context compaction lands. Long-running sessions (e.g. a 30-turn SDTM mapping with lots of `csvSample` peeking and `kb_read` calls) previously crashed against the provider's hard context window — the loop appended turns, the next request overflowed, and the user saw an ungraceful `ErrorDuringExecution`. The v2.0.0 cut declared the surface (`QueryEvent.ContextWarning`, `QueryEvent.ContextEdited`, `SessionLimits.maxContextTokens` with `"soft trigger for compaction"` in Javadoc) but nothing read it. 2.1.0 wires it end-to-end.
+
+### Added — `core.context.TokenCounter` (new public API in `helios-core`)
+
+Pluggable estimator for conversation token fill. The agent loop calls it after every model turn to detect the watermarks. Default `TokenCounter.charBased()` is a cheap ~4-chars-per-token heuristic plus a small per-message overhead, conservative for typical English text. Provider-specific tokenizers (Anthropic's, OpenAI tiktoken, etc.) can be wired via `SessionOptions.Builder.withTokenCounter(...)` when accuracy matters more than per-turn cost.
+
+### Added — `ai.singlr.session.ContextCompactor` SPI + `DropMiddleToolResultsCompactor`
+
+`ContextCompactor.compact(history, state) → history`. The default `DropMiddleToolResultsCompactor.newBuilder(summaryModel).withHeadPreserved(3).withTailPreserved(20).build()` preserves the head (system prompt + opening user turn) and the tail (recent trajectory), replacing the middle with a single user-role summary produced by one call against the supplied summary model. Throwing or blank summaries return the history unchanged — compaction failure never crashes the loop. `ContextCompactor.disabled()` opts out wholesale for deployments that prefer fail-loud overflow.
+
+### Added — Agent loop wires the two watermarks
+
+After each model turn, the loop counts tokens, then:
+
+- At `tokens/maxContextTokens >= 0.85`, emits `QueryEvent.ContextWarning(usagePct)` once. Sticky per session — the warning flag clears only on a successful compaction.
+- At `tokens/maxContextTokens >= 0.95`, invokes the configured `ContextCompactor`. If the result is a real shrink, the loop swaps history, emits `QueryEvent.ContextEdited(removedBlocks, tokensBefore, tokensAfter)`, and clears the warning flag so a future re-climb re-fires.
+
+A no-shrink result (identity reference or same-size list) is treated as a no-op — `ContextEdited` is not emitted and the warning flag stays set.
+
+### Added — `PreModelTurnHook.MutateInput` wired (was previously treated as `Continue`)
+
+For library users who'd rather write a hook than implement the full SPI: return `HookOutcome.mutate(Map.of("history", rewrittenHistory))` from a `PreModelTurnHook`. The loop swaps in the rewritten history, clears the warning flag, and emits `HookFired` with `outcomeKind=MutateInput`. Malformed payloads (missing `"history"` key, wrong type, non-`Message` elements) fall back to `Continue` rather than crashing.
+
+### Added — `SessionState.replaceHistory(List<Message>)`
+
+Used by both compaction and `PreModelTurnHook.MutateInput`. Defensive copy, rejects null elements. Plus `tryFireContextWarning()` / `resetContextWarningFlag()` / `contextWarningFired()` for first-wins watermark gating.
+
+### Changed — `SessionOptions` adds two record components
+
+`tokenCounter` and `contextCompactor` are now part of the canonical record. The Builder API is additive (`withTokenCounter(...)`, `withContextCompactor(...)`); defaults apply if you don't set them. Direct canonical-ctor callers must update — there are none in published Helios consumers since all use the Builder.
+
+### Note on design
+
+The Phase 6c spec suggested the default compactor would read `state.model()`; the impl binds the summary `Model` at compactor construction instead. `SessionState` does not carry a `Model`. This keeps `SessionState` decoupled from provider state and lets deployers wire a cheaper summary model (Haiku/Flash) than the conversation's primary model — a common production pattern.
+
 ## [2.0.0] — 2026-05-17
 
 **Major release. Breaking — no v1 compatibility shim.** v2 reframes the SDK around a long-lived agent loop (`AgentSession`) rather than v1's one-shot `Agent.run(...)`. The v1 surfaces (`core.agent.Agent`, `core.workflow`, `core.memory`, `core.eval`, the `RlmHarness`/`CodeActHarness` family) are deleted. The v1 line stays buildable via the `main-v1` branch for a few months.
