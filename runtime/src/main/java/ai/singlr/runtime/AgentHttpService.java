@@ -212,6 +212,14 @@ public final class AgentHttpService implements HttpService {
               public void onSubscribe(Flow.Subscription s) {
                 subscription.set(s);
                 s.request(Long.MAX_VALUE);
+                // Synthetic Ready event so clients can synchronously confirm subscription is
+                // live before triggering work — closes the race between Helidon writing 200 OK
+                // and the subscriber actually registering on the SubmissionPublisher.
+                try {
+                  sink.emit(SseEvent.builder().name("Ready").data("{}").build());
+                } catch (Exception ignored) {
+                  // sink failures are handled in onNext below
+                }
               }
 
               @Override

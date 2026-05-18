@@ -608,6 +608,7 @@ final class AgentHttpServiceIntegrationTest {
 
     private final List<SseLog> collected = new ArrayList<>();
     private final CountDownLatch terminal = new CountDownLatch(1);
+    private final CountDownLatch ready = new CountDownLatch(1);
     private final Thread worker;
 
     SseEventReader(HttpClient http, URI uri) {
@@ -626,6 +627,7 @@ final class AgentHttpServiceIntegrationTest {
                                   .build(),
                               BodyHandlers.ofInputStream());
                       if (resp.statusCode() != 200) {
+                        ready.countDown();
                         terminal.countDown();
                         return;
                       }
@@ -643,6 +645,9 @@ final class AgentHttpServiceIntegrationTest {
                               synchronized (collected) {
                                 collected.add(log);
                               }
+                              if ("Ready".equals(currentEvent)) {
+                                ready.countDown();
+                              }
                               if ("LoopEnded".equals(currentEvent)) {
                                 terminal.countDown();
                               }
@@ -659,9 +664,19 @@ final class AgentHttpServiceIntegrationTest {
                     } catch (Exception ignored) {
                       // network failures end the stream; terminal latch may already have fired
                     } finally {
+                      ready.countDown();
                       terminal.countDown();
                     }
                   });
+    }
+
+    /**
+     * Block until the server confirms subscription is live by emitting the synthetic {@code Ready}
+     * SSE event. Closes the race between Helidon writing 200 OK and the subscriber actually
+     * registering on the publisher — without this, events submitted in the window get lost.
+     */
+    void awaitReady() throws InterruptedException {
+      assertTrue(ready.await(5, TimeUnit.SECONDS), "SSE subscription Ready event not received");
     }
 
     List<SseLog> awaitTerminal() throws InterruptedException {
@@ -673,7 +688,10 @@ final class AgentHttpServiceIntegrationTest {
     }
   }
 
-  private SseEventReader startEventReader(HttpClient http, String base, String sessionId) {
-    return new SseEventReader(http, URI.create(base + "/sessions/" + sessionId + "/events"));
+  private SseEventReader startEventReader(HttpClient http, String base, String sessionId)
+      throws InterruptedException {
+    var reader = new SseEventReader(http, URI.create(base + "/sessions/" + sessionId + "/events"));
+    reader.awaitReady();
+    return reader;
   }
 }

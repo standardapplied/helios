@@ -2,7 +2,19 @@
 
 All notable changes to Helios are documented here. Versions follow [SemVer](https://semver.org/).
 
-## [2.1.1] — 2026-05-18
+## [2.1.2] — 2026-05-18
+
+Re-cut of 2.1.1 plus a fix for an SSE-subscribe race that surfaced during the 2.1.1 release workflow. **2.1.1 never reached Maven Central** — the release-action test phase tripped over the race and skipped the deploy. 2.1.2 is the first publicly-published version with the Phase 6c P0 fixes from 2.1.1 (see entry below) plus this fix.
+
+### Fixed — SSE subscription race in `helios-runtime`
+
+`GET /sessions/{id}/events` writes the HTTP 200 response before the SSE handler's `Flow.Subscriber.onSubscribe` registers with the session's `SubmissionPublisher`. Clients that issued `POST /sessions/{id}/messages` immediately after seeing the 200 could lose the early events submitted in that window (`UserMessageReceived` most commonly). `AgentHttpService.eventsHandler` now emits a synthetic `Ready` SSE event from inside `onSubscribe(...)` so clients can synchronously confirm subscription is live before triggering work. Backwards-compatible — clients that ignore unknown event types see no behavior change beyond the new event.
+
+### Cleaned up — top-level `README.md`
+
+Removed v1 cruft (the v1 `Agent` / `Workflow` / `Team` / `RlmHarness` / `CodeActHarness` / `Memory` / `core.eval` surface was deleted in the v2.0.0 cut and the README still described it). Rewritten around the actual v2 shape: direct `Model` use, `AgentSession` + `SessionPresets`, the `helios-runtime` HTTP surface, the `helios-repl` substrate + `CodeActPreset`, durability primitives (with the note that session integration is pending), `helios-persistence` Pg* impls (no `PgMemory`).
+
+## [2.1.1] — 2026-05-18 (failed release — never published)
 
 P0 robustness fixes for the context compaction pipeline shipped in 2.1.0. The default compactor could split tool-call/tool-result pairs across slice boundaries (provider rejection), a hung summary call could block the entire session loop, summary-call spend was invisible to the cost gate, and the watermark only fired AFTER a turn — so a previous turn's huge tool result could overflow the next request before we ever compacted. All four are addressed here.
 
