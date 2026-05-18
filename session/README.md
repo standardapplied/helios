@@ -213,8 +213,10 @@ fill via a pluggable `TokenCounter` (default: `TokenCounter.charBased()`, a chea
 The default compactor — `DropMiddleToolResultsCompactor` — preserves the system prompt + opening
 turn (`headPreserved`, default 3), preserves the recent trajectory (`tailPreserved`, default 20),
 and replaces everything in between with a single user-role summary produced by one call against
-the session's `Model`. If the summary call throws or returns blank, the compactor returns the
-history unchanged — compaction failure never crashes the loop.
+the session's `Model`. The compactor walks both slice boundaries to keep assistant `tool_call`
+messages with their matching `TOOL` responses — providers reject histories where these split.
+If no safe boundary exists, the summary call throws / times out / returns blank, the compactor
+returns the history unchanged — compaction failure never crashes the loop.
 
 Three library-user tiers of control:
 
@@ -227,6 +229,7 @@ var custom = DropMiddleToolResultsCompactor.newBuilder(cheapHaikuModel)
     .withHeadPreserved(5)
     .withTailPreserved(30)
     .withSummaryPrompt("Summarise focusing on file edits and unresolved questions.")
+    .withSummaryTimeout(Duration.ofSeconds(30))  // bound the summary call
     .build();
 var session2 = AgentSession.create(
     SessionPresets.workspace(model, repo).withContextCompactor(custom).build());
@@ -244,6 +247,11 @@ The loop swaps the history and emits `HookFired` with `outcomeKind=MutateInput`.
 
 `SessionOptions.Builder.withTokenCounter(...)` swaps the estimator — wire a provider-specific
 tokenizer (Anthropic's, OpenAI's tiktoken, etc.) when the char-based default is too rough.
+
+The compaction step's `Usage` (input/output tokens consumed by the summary call) flows through
+`SessionState.usage()` and the session's `CostCalculator` so `SessionLimits.maxBudgetMicroUsd`
+gates compaction spend along with normal turn spend. Custom compactors report this via
+`CompactionResult.usage()`; pure-trim compactors return `CompactionResult.noOp(history)`.
 
 ## Going further
 

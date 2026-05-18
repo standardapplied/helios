@@ -50,15 +50,20 @@ import java.util.List;
 public interface ContextCompactor {
 
   /**
-   * Produce a shorter history from the given one.
+   * Produce a shorter history from the given one. Implementations that invoke a model for
+   * summarisation report the model call's {@code Usage} on the returned {@link CompactionResult} so
+   * the agent loop can accumulate it into the session totals and apply the configured cost
+   * calculator. Pure-trim implementations return {@link CompactionResult#noOp(List)} or {@code new
+   * CompactionResult(history, Usage.of(0, 0))}.
    *
    * @param history the current conversation history; non-null, may be empty
    * @param state the per-session state; non-null. Carries the running {@code sessionId}, {@code
    *     currentTurnIndex}, accumulated {@code usage}, etc.
-   * @return the new history; non-null. May be the supplied {@code history} unchanged when nothing
-   *     was dropped — the loop detects the no-shrink and does not emit {@code ContextEdited}
+   * @return the result carrying the new history + usage consumed; non-null. The result's history
+   *     may be the supplied {@code history} unchanged when nothing was dropped — the loop detects
+   *     the no-shrink and does not emit {@code ContextEdited}
    */
-  List<Message> compact(List<Message> history, SessionState state);
+  CompactionResult compact(List<Message> history, SessionState state);
 
   /**
    * A no-op compactor. The agent loop will still emit {@code ContextWarning} at the 0.85 watermark

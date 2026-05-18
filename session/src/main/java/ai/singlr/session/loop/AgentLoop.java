@@ -7,6 +7,7 @@ package ai.singlr.session.loop;
 import ai.singlr.core.context.TokenCounter;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Response;
+import ai.singlr.session.CompactionResult;
 import ai.singlr.session.ContextCompactor;
 import ai.singlr.session.QueryEvent;
 import ai.singlr.session.ResultMessage;
@@ -171,6 +172,10 @@ public final class AgentLoop {
         return terminate(state, emptyHistoryError(state));
       }
       state.beginTurn();
+      checkContextWatermark(state, limits);
+      if (state.isTerminal()) {
+        return terminateWithExistingTerminal(state);
+      }
       var outcome = turnRunner.runTurn(state, limits);
       if (state.isTerminal()) {
         return terminateWithExistingTerminal(state);
@@ -375,24 +380,30 @@ public final class AgentLoop {
   }
 
   /**
-   * Invoke the configured {@link ContextCompactor}, swap in the returned history, and emit {@link
-   * QueryEvent.ContextEdited} when the compactor actually shrank the history. A returned identity
-   * (same instance) or no-shrink result is treated as a no-op — the compactor opted out for this
-   * turn and the warning flag stays set.
+   * Invoke the configured {@link ContextCompactor}, swap in the returned history, accumulate any
+   * usage reported by the compactor (e.g. summary call spend) through the {@link
+   * TurnRunner#accumulateUsageAndCost} helper, and emit {@link QueryEvent.ContextEdited} when the
+   * compactor actually shrank the history. A returned identity (same instance) or no-shrink result
+   * is treated as a no-op — the compactor opted out for this turn and the warning flag stays set. A
+   * throwing compactor is swallowed; the loop continues.
    */
   private void runCompactor(SessionState state, long maxTokens, long tokensBefore) {
     var historyBefore = state.historySnapshot();
-    List<Message> historyAfter;
+    CompactionResult result;
     try {
-      historyAfter = contextCompactor.compact(historyBefore, state);
+      result = contextCompactor.compact(historyBefore, state);
     } catch (RuntimeException e) {
-      // A throwing compactor must not crash the loop — log and skip.
       return;
     }
-    if (historyAfter == null || historyAfter == historyBefore) {
+    if (result == null) {
       return;
     }
-    if (historyAfter.size() >= historyBefore.size()) {
+    var compactionUsage = result.usage();
+    if (compactionUsage.inputTokens() > 0 || compactionUsage.outputTokens() > 0) {
+      turnRunner.accumulateUsageAndCost(state, compactionUsage);
+    }
+    var historyAfter = result.history();
+    if (historyAfter == historyBefore || historyAfter.size() >= historyBefore.size()) {
       return;
     }
     state.replaceHistory(historyAfter);

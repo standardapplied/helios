@@ -7,10 +7,19 @@ package ai.singlr.session;
 import ai.singlr.core.common.Strings;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Model;
+import ai.singlr.core.model.Response.Usage;
+import ai.singlr.core.model.Role;
 import ai.singlr.session.loop.SessionState;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -30,15 +39,28 @@ import java.util.logging.Logger;
  *       artefact rather than a real user instruction.
  * </ol>
  *
- * <p>When the history's length is {@code <= head + tail}, the compactor returns the history
- * unchanged — the loop interprets that as "no-op" and does not emit {@code ContextEdited}.
+ * <h2>Tool-call boundary alignment</h2>
  *
- * <p>If the summary model throws or returns blank, the compactor logs a WARNING and returns the
- * original history. Compaction failure must not crash the session — the watermark will fire again
- * next turn and the library user can switch to a stricter compactor.
+ * <p>Naive slicing would split assistant {@code tool_call} messages from their matching {@code
+ * TOOL} responses across the head/middle or middle/tail boundary, producing a history every
+ * provider rejects ({@code tool_use without matching tool_result}). This compactor walks the head
+ * boundary forward and the tail boundary backward until each slice is self-consistent (a complete
+ * prefix / complete suffix wrt pending tool-call ids). When no safe cut exists at or past the
+ * requested boundaries — i.e. the history is one giant tool-call sequence — the compactor returns
+ * the original history unchanged via {@link CompactionResult#noOp(List)}.
  *
- * <p>Simpler than the v1 4-phase compactor: no protected-tail tokenisation, no iterative carryover,
- * just first/middle/last with one summary call.
+ * <h2>Summary call resilience</h2>
+ *
+ * <p>The summary model call runs on a virtual thread under a configurable timeout (default {@value
+ * #DEFAULT_SUMMARY_TIMEOUT_SECONDS}s). If the call throws, times out, or returns blank, the
+ * compactor logs a WARNING and returns the original history. Compaction failure must not crash the
+ * session — the watermark will fire again on the next turn and the library user can switch to a
+ * stricter compactor.
+ *
+ * <p>Successful calls report the summary call's {@code Usage} on the returned {@link
+ * CompactionResult} so the agent loop can accumulate it into session totals + apply the configured
+ * {@code CostCalculator}. Without this, compaction spend would be invisible to {@code
+ * SessionLimits.maxBudgetMicroUsd} gating.
  */
 public final class DropMiddleToolResultsCompactor implements ContextCompactor {
 
@@ -47,6 +69,7 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
 
   private static final int DEFAULT_HEAD_PRESERVED = 3;
   private static final int DEFAULT_TAIL_PRESERVED = 20;
+  private static final int DEFAULT_SUMMARY_TIMEOUT_SECONDS = 60;
   private static final String DEFAULT_SUMMARY_PROMPT =
       "You are a summariser. The following messages are earlier turns of a tool-using agent's "
           + "conversation. Produce a concise (under 200 words) summary that preserves: (1) the "
@@ -58,12 +81,14 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
   private final int headPreserved;
   private final int tailPreserved;
   private final String summaryPrompt;
+  private final Duration summaryTimeout;
 
   private DropMiddleToolResultsCompactor(Builder b) {
     this.summaryModel = b.summaryModel;
     this.headPreserved = b.headPreserved;
     this.tailPreserved = b.tailPreserved;
     this.summaryPrompt = b.summaryPrompt;
+    this.summaryTimeout = b.summaryTimeout;
   }
 
   /**
@@ -87,7 +112,7 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
   }
 
   /**
-   * The number of head messages preserved across compaction.
+   * The number of head messages preserved across compaction (before boundary alignment).
    *
    * @return positive count
    */
@@ -96,7 +121,7 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
   }
 
   /**
-   * The number of tail messages preserved across compaction.
+   * The number of tail messages preserved across compaction (before boundary alignment).
    *
    * @return positive count
    */
@@ -104,37 +129,56 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
     return tailPreserved;
   }
 
+  /**
+   * The per-call timeout applied to the summarisation model call.
+   *
+   * @return non-null positive duration
+   */
+  public Duration summaryTimeout() {
+    return summaryTimeout;
+  }
+
   @Override
-  public List<Message> compact(List<Message> history, SessionState state) {
+  public CompactionResult compact(List<Message> history, SessionState state) {
     Objects.requireNonNull(history, "history must not be null");
     Objects.requireNonNull(state, "state must not be null");
 
     if (history.size() <= headPreserved + tailPreserved) {
-      return history;
+      return CompactionResult.noOp(history);
     }
 
-    var head = history.subList(0, headPreserved);
-    var middle = history.subList(headPreserved, history.size() - tailPreserved);
-    var tail = history.subList(history.size() - tailPreserved, history.size());
+    var headCut = adjustHead(history, headPreserved);
+    var tailStart = adjustTailStart(history, history.size() - tailPreserved);
+    if (headCut < 0 || tailStart < 0 || headCut >= tailStart) {
+      return CompactionResult.noOp(history);
+    }
+
+    var head = history.subList(0, headCut);
+    var middle = history.subList(headCut, tailStart);
+    var tail = history.subList(tailStart, history.size());
 
     String summary;
+    Usage usage;
     try {
       var request = new ArrayList<Message>(2);
       request.add(Message.system(summaryPrompt));
       request.add(Message.user(renderMiddle(middle)));
-      var response = summaryModel.chat(List.copyOf(request));
-      summary = response == null ? null : response.content();
+      var response = invokeSummary(state, request);
+      if (response == null) {
+        return CompactionResult.noOp(history);
+      }
+      summary = response.content();
+      usage = response.usage() != null ? response.usage() : Usage.of(0, 0);
     } catch (RuntimeException e) {
       LOG.log(
           Level.WARNING,
           e,
           () ->
-              "Context compaction summary call failed; leaving history "
-                  + "unchanged. Session "
+              "Context compaction summary call failed; leaving history unchanged. Session "
                   + state.sessionId()
                   + " turn "
                   + state.currentTurnIndex());
-      return history;
+      return CompactionResult.noOp(history);
     }
 
     if (Strings.isBlank(summary)) {
@@ -144,21 +188,120 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
                   + state.sessionId()
                   + " turn "
                   + state.currentTurnIndex());
-      return history;
+      return CompactionResult.noOp(history);
     }
 
     var summaryMessage = Message.user(SUMMARY_PREFIX + summary);
-    var newHistory = new ArrayList<Message>(headPreserved + 1 + tailPreserved);
+    var newHistory = new ArrayList<Message>(head.size() + 1 + tail.size());
     newHistory.addAll(head);
     newHistory.add(summaryMessage);
     newHistory.addAll(tail);
-    return List.copyOf(newHistory);
+    return new CompactionResult(List.copyOf(newHistory), usage);
+  }
+
+  /**
+   * Run the summary call on a virtual thread under the configured timeout. On timeout the worker
+   * thread is interrupted (best effort) and this returns null so the caller falls back to no-op
+   * compaction.
+   */
+  private ai.singlr.core.model.Response<Void> invokeSummary(
+      SessionState state, List<Message> request) {
+    var future = new CompletableFuture<ai.singlr.core.model.Response<Void>>();
+    var worker =
+        Thread.ofVirtual()
+            .name("helios-compaction-summary")
+            .start(
+                () -> {
+                  try {
+                    future.complete(summaryModel.chat(List.copyOf(request)));
+                  } catch (Throwable t) {
+                    future.completeExceptionally(t);
+                  }
+                });
+    try {
+      return future.get(summaryTimeout.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (TimeoutException e) {
+      worker.interrupt();
+      LOG.warning(
+          () ->
+              "Context compaction summary timed out after "
+                  + summaryTimeout
+                  + "; leaving history unchanged. Session "
+                  + state.sessionId()
+                  + " turn "
+                  + state.currentTurnIndex());
+      return null;
+    } catch (ExecutionException e) {
+      if (e.getCause() instanceof RuntimeException re) {
+        throw re;
+      }
+      throw new RuntimeException(e.getCause());
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      worker.interrupt();
+      throw new RuntimeException(e);
+    }
+  }
+
+  /**
+   * Walk forward from {@code proposed} to the smallest {@code k >= proposed} where messages {@code
+   * [0..k)} contain no pending (unmatched) tool-call ids. Returns {@code -1} when no safe boundary
+   * exists in the remaining history.
+   */
+  static int adjustHead(List<Message> history, int proposed) {
+    var pending = new HashSet<String>();
+    for (var k = 0; k <= history.size(); k++) {
+      if (k >= proposed && pending.isEmpty()) {
+        return k;
+      }
+      if (k == history.size()) {
+        break;
+      }
+      var m = history.get(k);
+      if (m.role() == Role.ASSISTANT && m.hasToolCalls()) {
+        for (var c : m.toolCalls()) {
+          if (c.id() != null) {
+            pending.add(c.id());
+          }
+        }
+      } else if (m.role() == Role.TOOL && m.toolCallId() != null) {
+        pending.remove(m.toolCallId());
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * Walk backward from {@code proposed} to the largest {@code j <= proposed} where messages {@code
+   * [j..n)} contain no orphan tool responses (no TOOL message whose tool_call id is at index {@code
+   * < j}). Returns {@code -1} when no safe boundary exists.
+   */
+  static int adjustTailStart(List<Message> history, int proposed) {
+    var orphans = new HashSet<String>();
+    var j = history.size();
+    while (j > 0) {
+      j--;
+      var m = history.get(j);
+      if (m.role() == Role.TOOL && m.toolCallId() != null) {
+        orphans.add(m.toolCallId());
+      } else if (m.role() == Role.ASSISTANT && m.hasToolCalls()) {
+        for (var c : m.toolCalls()) {
+          if (c.id() != null) {
+            orphans.remove(c.id());
+          }
+        }
+      }
+      if (j <= proposed && orphans.isEmpty()) {
+        return j;
+      }
+    }
+    return orphans.isEmpty() ? 0 : -1;
   }
 
   private static String renderMiddle(List<Message> middle) {
     var sb = new StringBuilder();
     for (var m : middle) {
-      sb.append('[').append(m.role().name().toLowerCase(java.util.Locale.ROOT)).append("] ");
+      sb.append('[').append(m.role().name().toLowerCase(Locale.ROOT)).append("] ");
       if (m.content() != null) {
         sb.append(m.content());
       }
@@ -179,14 +322,15 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
     private int headPreserved = DEFAULT_HEAD_PRESERVED;
     private int tailPreserved = DEFAULT_TAIL_PRESERVED;
     private String summaryPrompt = DEFAULT_SUMMARY_PROMPT;
+    private Duration summaryTimeout = Duration.ofSeconds(DEFAULT_SUMMARY_TIMEOUT_SECONDS);
 
     private Builder(Model summaryModel) {
       this.summaryModel = Objects.requireNonNull(summaryModel, "summaryModel must not be null");
     }
 
     /**
-     * Set the number of head messages preserved across compaction. Default {@value
-     * #DEFAULT_HEAD_PRESERVED}.
+     * Set the number of head messages preserved (before boundary alignment may extend it forward to
+     * keep tool-call pairs intact). Default {@value #DEFAULT_HEAD_PRESERVED}.
      *
      * @param headPreserved positive count
      * @return this builder
@@ -201,8 +345,8 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
     }
 
     /**
-     * Set the number of tail messages preserved across compaction. Default {@value
-     * #DEFAULT_TAIL_PRESERVED}.
+     * Set the number of tail messages preserved (before boundary alignment may shift it backward to
+     * keep tool-call pairs intact). Default {@value #DEFAULT_TAIL_PRESERVED}.
      *
      * @param tailPreserved positive count
      * @return this builder
@@ -232,6 +376,26 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
         throw new IllegalArgumentException("summaryPrompt must not be blank");
       }
       this.summaryPrompt = summaryPrompt;
+      return this;
+    }
+
+    /**
+     * Set the per-call timeout for the summary model call. Default {@value
+     * #DEFAULT_SUMMARY_TIMEOUT_SECONDS} seconds. Bound this aggressively for latency-sensitive
+     * deployments — a hung summary call would otherwise block the entire session loop.
+     *
+     * @param summaryTimeout non-null positive duration
+     * @return this builder
+     * @throws NullPointerException if {@code summaryTimeout} is null
+     * @throws IllegalArgumentException if {@code summaryTimeout} is zero or negative
+     */
+    public Builder withSummaryTimeout(Duration summaryTimeout) {
+      Objects.requireNonNull(summaryTimeout, "summaryTimeout must not be null");
+      if (summaryTimeout.isZero() || summaryTimeout.isNegative()) {
+        throw new IllegalArgumentException(
+            "summaryTimeout must be positive, got " + summaryTimeout);
+      }
+      this.summaryTimeout = summaryTimeout;
       return this;
     }
 

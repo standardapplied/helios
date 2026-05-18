@@ -20,6 +20,7 @@ import ai.singlr.core.model.Response.Usage;
 import ai.singlr.core.runtime.CancellationToken;
 import ai.singlr.core.runtime.SessionContext;
 import ai.singlr.core.tool.Tool;
+import ai.singlr.session.CompactionResult;
 import ai.singlr.session.ConcurrencyLimits;
 import ai.singlr.session.ContextCompactor;
 import ai.singlr.session.QueryEvent;
@@ -680,7 +681,7 @@ final class AgentLoopTest {
     ContextCompactor shrinking =
         (history, state) -> {
           compactorCalled.incrementAndGet();
-          return List.of(history.get(history.size() - 1));
+          return CompactionResult.noOp(List.of(history.get(history.size() - 1)));
         };
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, perMessage, shrinking)
         .run(freshState(), limits);
@@ -706,7 +707,7 @@ final class AgentLoopTest {
     ContextCompactor neverShrinks =
         (history, state) -> {
           compactorCalled.incrementAndGet();
-          return history;
+          return CompactionResult.noOp(history);
         };
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, mid, neverShrinks)
         .run(freshState(), limits);
@@ -721,7 +722,7 @@ final class AgentLoopTest {
     queue.offer(UserMessage.text("hi"));
     TokenCounter loud = msgs -> 96L;
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
-    ContextCompactor noOp = (history, state) -> history;
+    ContextCompactor noOp = (history, state) -> CompactionResult.noOp(history);
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, noOp)
         .run(freshState(), limits);
     assertTrue(
@@ -736,7 +737,8 @@ final class AgentLoopTest {
     TokenCounter loud = msgs -> 96L;
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
     ContextCompactor swap =
-        (history, state) -> new ArrayList<>(history); // same size — must be ignored
+        (history, state) ->
+            CompactionResult.noOp(new ArrayList<>(history)); // same size — must be ignored
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, swap)
         .run(freshState(), limits);
     assertTrue(
@@ -795,7 +797,8 @@ final class AgentLoopTest {
     TokenCounter loud = msgs -> 96L;
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
     ContextCompactor shrinking =
-        (history, state) -> history.subList(history.size() - 1, history.size());
+        (history, state) ->
+            CompactionResult.noOp(history.subList(history.size() - 1, history.size()));
     buildLoopWith(multi, queue, loud, shrinking).run(freshState(), limits);
     var warnings = events.stream().filter(e -> e instanceof QueryEvent.ContextWarning).count();
     var edits = events.stream().filter(e -> e instanceof QueryEvent.ContextEdited).count();
@@ -888,5 +891,86 @@ final class AgentLoopTest {
     loop.run(state, SessionLimits.defaults());
     // History keeps the single user message + assistant response — no rewrite occurred.
     assertEquals("hi", state.historySnapshot().get(0).content());
+  }
+
+  // ── pre-turn watermark check (P0-3) ──────────────────────────────────────
+
+  @Test
+  void preTurnWatermarkFiresBeforeModelCallWhenHistoryAlreadyExceeds() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("hi"));
+    var modelCalls = new AtomicInteger(0);
+    TokenCounter perMessage = msgs -> 96L * msgs.size();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
+    var compacted = new AtomicInteger(0);
+    ContextCompactor shrinking =
+        (history, state) -> {
+          compacted.incrementAndGet();
+          return CompactionResult.noOp(history.subList(history.size() - 1, history.size()));
+        };
+    Model recorder =
+        new Model() {
+          @Override
+          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+            modelCalls.incrementAndGet();
+            return Response.newBuilder()
+                .withContent("ok")
+                .withFinishReason(FinishReason.STOP)
+                .withUsage(Usage.of(1, 1))
+                .build();
+          }
+
+          @Override
+          public String id() {
+            return "test";
+          }
+
+          @Override
+          public String provider() {
+            return "test";
+          }
+        };
+    buildLoopWith(recorder, queue, perMessage, shrinking).run(freshState(), limits);
+    // Pre-turn check fires BEFORE the model call. Counter returns 96*size; after drainAndAppend
+    // history has 1 message → tokens=96, usage=0.96 ≥ 0.95 → compactor invoked at PRE-TURN.
+    assertTrue(compacted.get() >= 1, "pre-turn compaction must fire");
+    assertEquals(1, modelCalls.get(), "model is called once after pre-turn compaction");
+  }
+
+  // ── compaction cost accumulation (P0-2b) ─────────────────────────────────
+
+  @Test
+  void compactionUsageAccumulatesIntoSessionTotals() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("hi"));
+    TokenCounter loud = msgs -> 96L * msgs.size();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
+    ContextCompactor reporting =
+        (history, state) ->
+            new CompactionResult(
+                history.subList(history.size() - 1, history.size()), Usage.of(200, 40));
+    var state = freshState();
+    buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, reporting)
+        .run(state, limits);
+    // Model turn contributes 1+1, compaction contributes 200+40.
+    assertTrue(state.usage().inputTokens() >= 200, "compaction input tokens must accumulate");
+    assertTrue(state.usage().outputTokens() >= 40, "compaction output tokens must accumulate");
+  }
+
+  @Test
+  void zeroUsageCompactionDoesNotInvokeCostAccounting() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("hi"));
+    TokenCounter loud = msgs -> 96L * msgs.size();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
+    ContextCompactor pureTrim =
+        (history, state) ->
+            CompactionResult.noOp(history.subList(history.size() - 1, history.size()));
+    var state = freshState();
+    buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, pureTrim)
+        .run(state, limits);
+    // Only the model turn's 1+1 contributes; compactor reports zero usage.
+    assertEquals(1, state.usage().inputTokens());
+    assertEquals(1, state.usage().outputTokens());
   }
 }

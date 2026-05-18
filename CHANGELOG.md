@@ -2,6 +2,40 @@
 
 All notable changes to Helios are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [2.1.1] — 2026-05-18
+
+P0 robustness fixes for the context compaction pipeline shipped in 2.1.0. The default compactor could split tool-call/tool-result pairs across slice boundaries (provider rejection), a hung summary call could block the entire session loop, summary-call spend was invisible to the cost gate, and the watermark only fired AFTER a turn — so a previous turn's huge tool result could overflow the next request before we ever compacted. All four are addressed here.
+
+### Changed — `ContextCompactor.compact(...)` now returns `CompactionResult` (history + usage)
+
+Breaking change to the freshly-minted 2.1.0 SPI: implementations return a `CompactionResult(history, usage)` record so the agent loop can accumulate the compaction step's `Usage` into the session totals and apply the configured `CostCalculator`. Without this, summary-call spend was invisible to `SessionLimits.maxBudgetMicroUsd` gating. Per Helios's [clean-slate policy for internal users][cleanslate], breaking a 1-day-old SPI is preferable to carrying the wart. Custom compactors update by wrapping their return: `CompactionResult.noOp(history)` for pure trim, `new CompactionResult(history, summaryUsage)` for compactors that call a model.
+
+[cleanslate]: https://github.com/anthropic/helios/blob/main/CLAUDE.md
+
+### Fixed — `DropMiddleToolResultsCompactor` now boundary-aligns tool-call pairs
+
+Naive `subList(0, head) | subList(head, n-tail) | subList(n-tail, n)` slicing could split assistant `tool_call` messages from their matching `TOOL` responses — providers reject the resulting history with `tool_use without matching tool_result`. The compactor now walks the head boundary forward and the tail boundary backward (`adjustHead`, `adjustTailStart`) until both slices are self-consistent wrt pending tool-call ids. When no safe cut exists, the compactor returns the original history via `CompactionResult.noOp(...)`.
+
+### Fixed — Summary call timeout
+
+The summary model call previously ran synchronously on the loop's virtual thread; a hung provider call hung the entire session. The default compactor now runs the call on a dedicated virtual thread under a configurable timeout (`withSummaryTimeout(Duration)`, default 60s). On timeout the worker is interrupted (best effort), the compaction returns no-op, and the watermark will re-fire next turn.
+
+### Fixed — Summary call spend accumulates into session totals
+
+The summary call's `Response.usage()` is now reported on `CompactionResult.usage()`. The agent loop accumulates it via a new `TurnRunner.accumulateUsageAndCost(state, usage)` helper, applying the configured `CostCalculator` against the session's model id — so `SessionLimits.maxBudgetMicroUsd` correctly gates compaction spend.
+
+### Fixed — Pre-turn watermark check
+
+The watermark check ran ONLY after the assistant's response was appended. If a previous turn's huge tool result already pushed history past 0.95, the next request was sent BEFORE compaction had a chance to fire. The loop now checks the watermark immediately after `state.beginTurn()` (pre-turn) AND after `turnRunner.runTurn` (post-turn). Pre-turn compaction rewrites the history the model receives.
+
+### Added — `CompactionResult` record + `noOp(history)` factory
+
+New record `ai.singlr.session.CompactionResult(List<Message> history, Response.Usage usage)`. `CompactionResult.noOp(history)` is the canonical no-op factory.
+
+### Added — `SessionState.replaceHistory(List<Message>)` defensive copy
+
+Already in 2.1.0 but now explicitly documented: defensively copies the supplied list and rejects null elements. Used by both compaction and `PreModelTurnHook.MutateInput`.
+
 ## [2.1.0] — 2026-05-18
 
 Context compaction lands. Long-running sessions (e.g. a 30-turn SDTM mapping with lots of `csvSample` peeking and `kb_read` calls) previously crashed against the provider's hard context window — the loop appended turns, the next request overflowed, and the user saw an ungraceful `ErrorDuringExecution`. The v2.0.0 cut declared the surface (`QueryEvent.ContextWarning`, `QueryEvent.ContextEdited`, `SessionLimits.maxContextTokens` with `"soft trigger for compaction"` in Javadoc) but nothing read it. 2.1.0 wires it end-to-end.

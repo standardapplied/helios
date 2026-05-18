@@ -165,8 +165,7 @@ public final class TurnRunner {
       state.appendMessage(
           Message.assistant(streamOutcome.assistantContent(), List.of(), streamOutcome.metadata()));
     }
-    state.accumulateUsage(streamOutcome.usage());
-    state.accumulateCost(costCalculator.cost(model.id(), streamOutcome.usage()));
+    accumulateUsageAndCost(state, streamOutcome.usage());
 
     // PostModelTurn
     var response =
@@ -188,6 +187,23 @@ public final class TurnRunner {
             : new TurnOutcome(
                 FinishReason.TOOL_CALLS, streamOutcome.assistantContent(), streamOutcome.usage());
     return turnEnded(state, finalOutcome);
+  }
+
+  /**
+   * Accumulate {@code usage} into the session totals and apply the configured {@link
+   * CostCalculator} against {@link Model#id()} to update accumulated cost. Exposed to the {@link
+   * AgentLoop} so {@code ContextCompactor}-reported {@code Usage} (e.g. summary call spend) flows
+   * through the same cost gate as a normal model turn.
+   *
+   * @param state the session state; non-null
+   * @param usage the usage to accumulate; non-null. {@link Usage#of(int, int) Usage.of(0, 0)} is a
+   *     legal no-op
+   */
+  void accumulateUsageAndCost(SessionState state, Usage usage) {
+    Objects.requireNonNull(state, "state must not be null");
+    Objects.requireNonNull(usage, "usage must not be null");
+    state.accumulateUsage(usage);
+    state.accumulateCost(costCalculator.cost(model.id(), usage));
   }
 
   private TurnOutcome finalOutcomeAfterTerminate(SessionState state) {

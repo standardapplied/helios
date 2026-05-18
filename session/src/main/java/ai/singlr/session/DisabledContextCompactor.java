@@ -22,9 +22,9 @@ final class DisabledContextCompactor implements ContextCompactor {
   private DisabledContextCompactor() {}
 
   @Override
-  public List<Message> compact(List<Message> history, SessionState state) {
+  public CompactionResult compact(List<Message> history, SessionState state) {
     Objects.requireNonNull(history, "history must not be null");
     Objects.requireNonNull(state, "state must not be null");
-    return history;
+    return CompactionResult.noOp(history);
   }
 }
