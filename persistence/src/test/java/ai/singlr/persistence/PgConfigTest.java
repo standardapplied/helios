@@ -76,4 +76,44 @@ class PgConfigTest {
   void nullDbClientThrows() {
     assertThrows(NullPointerException.class, () -> PgConfig.newBuilder().build());
   }
+
+  // Schema name is interpolated verbatim into SQL via String.replace("%s", schema). Helidon
+  // DbClient cannot parameterise identifiers, so the validator at construction time is the only
+  // line of defence against SQL injection through a config-driven schema name. The valid shape is
+  // Postgres' unquoted identifier: leading letter/underscore, [letters digits underscore] tail,
+  // length ≤ 63 (NAMEDATALEN-1).
+
+  @Test
+  void schemaWithSqlMetacharsRejected() {
+    var builder = PgConfig.newBuilder().withDbClient(PgTestSupport.dbClient());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> builder.withSchema("public; DROP TABLE helios_traces;--").build());
+  }
+
+  @Test
+  void schemaWithSpaceRejected() {
+    var builder = PgConfig.newBuilder().withDbClient(PgTestSupport.dbClient());
+    assertThrows(IllegalArgumentException.class, () -> builder.withSchema("my schema").build());
+  }
+
+  @Test
+  void schemaWithLeadingDigitRejected() {
+    var builder = PgConfig.newBuilder().withDbClient(PgTestSupport.dbClient());
+    assertThrows(IllegalArgumentException.class, () -> builder.withSchema("9bad").build());
+  }
+
+  @Test
+  void schemaTooLongRejected() {
+    var builder = PgConfig.newBuilder().withDbClient(PgTestSupport.dbClient());
+    var sixtyFour = "a".repeat(64);
+    assertThrows(IllegalArgumentException.class, () -> builder.withSchema(sixtyFour).build());
+  }
+
+  @Test
+  void schemaWithUnderscoreAndDigitsAccepted() {
+    var config =
+        PgConfig.newBuilder().withDbClient(PgTestSupport.dbClient()).withSchema("_my_2nd").build();
+    assertEquals("_my_2nd", config.schema());
+  }
 }
