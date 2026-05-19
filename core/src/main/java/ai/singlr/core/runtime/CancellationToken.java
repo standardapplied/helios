@@ -123,6 +123,19 @@ public final class CancellationToken {
   }
 
   /**
+   * Visible-for-testing accessor exposing the count of currently-attached callbacks. Used to verify
+   * that per-call sites (tool dispatch, question gateway) correctly invoke {@link
+   * Registration#remove()} when their guarded work finishes, so callbacks do not accumulate on the
+   * long-lived per-session token.
+   *
+   * @return the number of {@link #onCancel(Runnable)} registrations that have not yet fired or been
+   *     removed
+   */
+  public int activeCallbackCountForTests() {
+    return callbacks.size();
+  }
+
+  /**
    * Handle for a callback registered via {@link CancellationToken#onCancel(Runnable)}. Calling
    * {@link #remove()} detaches the callback so it will not fire on subsequent token cancellation.
    *
