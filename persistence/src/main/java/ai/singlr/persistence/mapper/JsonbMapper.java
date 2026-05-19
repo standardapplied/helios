@@ -7,6 +7,7 @@ package ai.singlr.persistence.mapper;
 
 import ai.singlr.core.common.Strings;
 import ai.singlr.core.model.ToolCall;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import tools.jackson.core.type.TypeReference;
@@ -75,7 +76,7 @@ public final class JsonbMapper {
       throw new IllegalArgumentException("maxBytes must be positive");
     }
     var json = MAPPER.writeValueAsString(obj);
-    var byteLen = json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    var byteLen = json.getBytes(StandardCharsets.UTF_8).length;
     if (byteLen > maxBytes) {
       throw new IllegalArgumentException(
           "JSONB payload exceeds "

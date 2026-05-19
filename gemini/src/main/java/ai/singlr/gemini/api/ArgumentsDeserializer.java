@@ -2,6 +2,7 @@
 
 package ai.singlr.gemini.api;
 
+import ai.singlr.core.common.Strings;
 import java.util.Map;
 import tools.jackson.core.JsonParser;
 import tools.jackson.databind.DeserializationContext;
@@ -40,7 +41,7 @@ public final class ArgumentsDeserializer extends ValueDeserializer<Map<String, O
     }
     if (node.isString()) {
       var raw = node.asString();
-      if (raw == null || raw.isBlank()) {
+      if (Strings.isBlank(raw)) {
         return Map.of();
       }
       return STRING_PARSER.readValue(raw, Map.class);

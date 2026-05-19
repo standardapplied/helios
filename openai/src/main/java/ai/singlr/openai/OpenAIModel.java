@@ -6,6 +6,7 @@
 package ai.singlr.openai;
 
 import ai.singlr.core.common.HttpClientFactory;
+import ai.singlr.core.common.Strings;
 import ai.singlr.core.model.CloseableIterator;
 import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.Message;
@@ -38,6 +39,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -78,8 +80,8 @@ public class OpenAIModel implements Model {
     if (config == null) {
       throw new IllegalArgumentException("config is required");
     }
-    var hasCustomEndpoint = config.baseUrl() != null && !config.baseUrl().isBlank();
-    if (!hasCustomEndpoint && (config.apiKey() == null || config.apiKey().isBlank())) {
+    var hasCustomEndpoint = !Strings.isBlank(config.baseUrl());
+    if (!hasCustomEndpoint && Strings.isBlank(config.apiKey())) {
       throw new IllegalArgumentException(
           "config with valid apiKey is required (or set baseUrl + auth header)");
     }
@@ -489,9 +491,9 @@ public class OpenAIModel implements Model {
   }
 
   HttpRequest buildHttpRequest(String jsonBody) {
-    var defaults = new java.util.LinkedHashMap<String, String>();
+    var defaults = new LinkedHashMap<String, String>();
     defaults.put("Content-Type", "application/json");
-    if (config.apiKey() != null && !config.apiKey().isBlank()) {
+    if (!Strings.isBlank(config.apiKey())) {
       defaults.put("Authorization", "Bearer " + config.apiKey());
     }
     var builder =

@@ -5,6 +5,7 @@
 package ai.singlr.core.model;
 
 import ai.singlr.core.model.Response.Usage;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -140,12 +141,12 @@ public sealed interface ModelChunk
       }
       Objects.requireNonNull(usage, "usage must not be null");
       Objects.requireNonNull(metadata, "metadata must not be null");
-      metadata = java.util.Map.copyOf(metadata);
+      metadata = Map.copyOf(metadata);
     }
 
     /** Back-compat convenience for callers that don't supply metadata. */
     public MessageStop(String stopReason, Usage usage) {
-      this(stopReason, usage, java.util.Map.of());
+      this(stopReason, usage, Map.of());
     }
   }
 

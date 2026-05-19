@@ -5,6 +5,8 @@
 
 package ai.singlr.gemini;
 
+import ai.singlr.core.common.Strings;
+
 /**
  * Supported Gemini model identifiers.
  *
@@ -62,7 +64,7 @@ public enum GeminiModelId {
    * @return the matching GeminiModelId, or null if not found
    */
   public static GeminiModelId fromId(String id) {
-    if (id == null || id.isBlank()) {
+    if (Strings.isBlank(id)) {
       return null;
     }
     for (var model : values()) {

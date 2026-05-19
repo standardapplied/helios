@@ -5,6 +5,7 @@
 package ai.singlr.session;
 
 import ai.singlr.core.common.Strings;
+import ai.singlr.core.model.Message;
 import ai.singlr.core.runtime.CancellationToken;
 import ai.singlr.core.runtime.SessionContext;
 import ai.singlr.session.ask.AskUserQuestionRequest;
@@ -105,9 +106,7 @@ public final class AgentSessionImpl implements AgentSession {
     var concurrency = options.concurrency();
     var cancellation = new CancellationToken();
     this.state = new SessionState(sessionId, cancellation, clock);
-    options
-        .systemPrompt()
-        .ifPresent(prompt -> this.state.appendMessage(ai.singlr.core.model.Message.system(prompt)));
+    options.systemPrompt().ifPresent(prompt -> this.state.appendMessage(Message.system(prompt)));
     this.sessionContext = new SessionContext(sessionId, cancellation, clock);
     this.steeringQueue = new SteeringQueue(concurrency.maxQueuedUserMessages());
     this.publisherExecutor = Executors.newVirtualThreadPerTaskExecutor();

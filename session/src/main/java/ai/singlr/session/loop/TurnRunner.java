@@ -26,6 +26,7 @@ import ai.singlr.session.hooks.HookRegistry;
 import ai.singlr.session.tools.ToolBinding;
 import ai.singlr.session.tools.ToolVisibilityContext;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -325,7 +326,7 @@ public final class TurnRunner {
     if (!(raw instanceof List<?> list)) {
       return null;
     }
-    var copy = new java.util.ArrayList<Message>(list.size());
+    var copy = new ArrayList<Message>(list.size());
     for (var element : list) {
       if (!(element instanceof Message message)) {
         return null;

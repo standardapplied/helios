@@ -8,6 +8,7 @@ import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import ai.singlr.core.common.Result;
+import ai.singlr.core.common.Strings;
 import ai.singlr.core.embedding.EmbeddingConfig;
 import ai.singlr.core.embedding.EmbeddingModel;
 import java.io.IOException;
@@ -96,7 +97,7 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
 
   @Override
   public Result<float[]> embedQuery(String query, String customQueryPrefix) {
-    if (query == null || query.isBlank()) {
+    if (Strings.isBlank(query)) {
       return Result.failure("Query must not be null or empty");
     }
     var prefix = customQueryPrefix != null ? customQueryPrefix : spec.queryPrefix();
@@ -110,7 +111,7 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
 
   @Override
   public Result<float[]> embedDocument(String document, String customDocumentPrefix) {
-    if (document == null || document.isBlank()) {
+    if (Strings.isBlank(document)) {
       return Result.failure("Document must not be null or empty");
     }
     var prefix = customDocumentPrefix != null ? customDocumentPrefix : spec.documentPrefix();
@@ -125,7 +126,7 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
 
     var embeddings = new float[texts.length][];
     for (var i = 0; i < texts.length; i++) {
-      if (texts[i] == null || texts[i].isBlank()) {
+      if (Strings.isBlank(texts[i])) {
         return Result.failure("Text at index %d is null or empty".formatted(i));
       }
       var result = embed(texts[i]);

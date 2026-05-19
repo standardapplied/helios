@@ -6,6 +6,7 @@
 package ai.singlr.core.tool;
 
 import ai.singlr.core.common.Strings;
+import ai.singlr.core.schema.SchemaGenerator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -136,7 +137,7 @@ public record Tool(
         if (param.itemsClass() != null) {
           // Record-shaped items: derive the schema via SchemaGenerator so we get a full
           // {type, properties, required} object without the tool author hand-rolling it.
-          itemsSchema = ai.singlr.core.schema.SchemaGenerator.generate(param.itemsClass()).toMap();
+          itemsSchema = SchemaGenerator.generate(param.itemsClass()).toMap();
         } else if (param.items() != null) {
           var hand = new LinkedHashMap<String, Object>();
           hand.put("type", param.items().type().jsonType());

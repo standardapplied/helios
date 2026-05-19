@@ -7,6 +7,7 @@ package ai.singlr.session;
 import ai.singlr.core.common.Strings;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Model;
+import ai.singlr.core.model.Response;
 import ai.singlr.core.model.Response.Usage;
 import ai.singlr.core.model.Role;
 import ai.singlr.session.loop.SessionState;
@@ -204,9 +205,8 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
    * thread is interrupted (best effort) and this returns null so the caller falls back to no-op
    * compaction.
    */
-  private ai.singlr.core.model.Response<Void> invokeSummary(
-      SessionState state, List<Message> request) {
-    var future = new CompletableFuture<ai.singlr.core.model.Response<Void>>();
+  private Response<Void> invokeSummary(SessionState state, List<Message> request) {
+    var future = new CompletableFuture<Response<Void>>();
     var worker =
         Thread.ofVirtual()
             .name("helios-compaction-summary")

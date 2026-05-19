@@ -7,6 +7,7 @@ package ai.singlr.session.permissions;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 /**
  * Per-session UX-level policy: which tool calls to allow silently, which to ask the user about, and
@@ -129,7 +130,7 @@ public record Permission(
    */
   public Optional<PermissionRule> firstRuleFor(String toolName) {
     Objects.requireNonNull(toolName, "toolName must not be null");
-    return java.util.stream.Stream.of(deny, allow, ask)
+    return Stream.of(deny, allow, ask)
         .flatMap(List::stream)
         .filter(r -> r.toolName().equals(toolName))
         .findFirst();

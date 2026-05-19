@@ -5,6 +5,8 @@
 
 package ai.singlr.anthropic;
 
+import ai.singlr.core.common.Strings;
+
 /**
  * Supported Anthropic Claude model identifiers.
  *
@@ -82,7 +84,7 @@ public enum AnthropicModelId {
    * @return the matching AnthropicModelId, or null if not found
    */
   public static AnthropicModelId fromId(String id) {
-    if (id == null || id.isBlank()) {
+    if (Strings.isBlank(id)) {
       return null;
     }
     for (var model : values()) {

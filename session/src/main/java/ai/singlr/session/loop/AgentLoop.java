@@ -5,6 +5,7 @@
 package ai.singlr.session.loop;
 
 import ai.singlr.core.context.TokenCounter;
+import ai.singlr.core.model.InlineFile;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Response;
 import ai.singlr.session.CompactionResult;
@@ -22,6 +23,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -270,16 +272,15 @@ public final class AgentLoop {
     }
   }
 
-  private static java.util.List<ai.singlr.core.model.InlineFile> collectAttachments(
-      List<UserMessage> messages) {
-    var attachments = new ArrayList<ai.singlr.core.model.InlineFile>();
+  private static List<InlineFile> collectAttachments(List<UserMessage> messages) {
+    var attachments = new ArrayList<InlineFile>();
     for (var m : messages) {
       attachments.addAll(m.attachments());
     }
     return attachments;
   }
 
-  private static String stringField(java.util.Map<String, Object> map, String key) {
+  private static String stringField(Map<String, Object> map, String key) {
     var v = map.get(key);
     return v instanceof String s ? s : null;
   }
