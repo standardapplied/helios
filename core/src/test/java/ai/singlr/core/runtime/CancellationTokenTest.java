@@ -231,4 +231,39 @@ final class CancellationTokenTest {
     CancellationToken.Registration.NOOP.remove();
     CancellationToken.Registration.NOOP.remove();
   }
+
+  @Test
+  void activeCallbackCountTracksRegisterAndRemove() {
+    // Theme G regression test: SessionQuestionGateway used to drop the Registration returned by
+    // onCancel(), accumulating one callback per AskUserQuestion call over the session's lifetime.
+    // The fix captures the Registration and calls remove() in finally. This test exercises the
+    // capture-and-remove pattern N times directly against the token and asserts the count returns
+    // to zero each cycle — proving the leak-prevention contract holds.
+    var t = new CancellationToken();
+    assertEquals(0, t.activeCallbackCountForTests(), "fresh token has no callbacks");
+
+    for (var i = 0; i < 100; i++) {
+      var reg = t.onCancel(() -> {});
+      assertEquals(1, t.activeCallbackCountForTests(), "callback present mid-cycle");
+      reg.remove();
+      assertEquals(
+          0,
+          t.activeCallbackCountForTests(),
+          "callback removed at end of cycle; if missing, registrations accumulate and the"
+              + " long-lived per-session token leaks closures across every per-call ask / tool"
+              + " dispatch");
+    }
+  }
+
+  @Test
+  void activeCallbackCountIsZeroAfterFire() {
+    // After cancel() fires, the callbacks list is cleared. The count accessor reflects that, so
+    // a leak test against the token can run pre-cancel without false positives.
+    var t = new CancellationToken();
+    t.onCancel(() -> {});
+    t.onCancel(() -> {});
+    assertEquals(2, t.activeCallbackCountForTests());
+    t.cancel("done");
+    assertEquals(0, t.activeCallbackCountForTests(), "list cleared after fire");
+  }
 }

@@ -328,6 +328,42 @@ class ModelConfigTest {
   }
 
   @Test
+  void toStringRedactsApiKey() {
+    var config = ModelConfig.of("sk-supersecret-abc123-do-not-log");
+    var rendered = config.toString();
+    assertFalse(
+        rendered.contains("sk-supersecret-abc123-do-not-log"),
+        "ModelConfig.toString must not leak the API key into logs/exceptions/crash dumps");
+    assertTrue(
+        rendered.contains("apiKey="),
+        "toString should still mention the apiKey field for diagnostic context");
+  }
+
+  @Test
+  void toStringWithNullApiKeyDoesNotCrash() {
+    var config = ModelConfig.newBuilder().build();
+    var rendered = config.toString();
+    assertTrue(rendered.contains("apiKey=null"));
+  }
+
+  @Test
+  void toStringRedactsHeaderValues() {
+    // Users can stick secrets into arbitrary header values (Azure api-key, x-api-key, custom
+    // bearer tokens). The toString must not echo them back into logs.
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("k")
+            .withHeader("api-key", "azure-secret-xyz")
+            .withHeader("Authorization", "Bearer leak-me")
+            .build();
+    var rendered = config.toString();
+    assertFalse(rendered.contains("azure-secret-xyz"));
+    assertFalse(rendered.contains("Bearer leak-me"));
+    assertTrue(rendered.contains("api-key"), "header names are safe to show");
+    assertTrue(rendered.contains("Authorization"));
+  }
+
+  @Test
   void copyBuilderPreservesBaseUrlAndHeaders() {
     var original =
         ModelConfig.newBuilder()

@@ -5,6 +5,8 @@
 
 package ai.singlr.openai;
 
+import ai.singlr.core.common.Strings;
+
 /**
  * Supported OpenAI model identifiers.
  *
@@ -71,7 +73,7 @@ public enum OpenAIModelId {
    * @return the matching OpenAIModelId, or null if not found
    */
   public static OpenAIModelId fromId(String id) {
-    if (id == null || id.isBlank()) {
+    if (Strings.isBlank(id)) {
       return null;
     }
     for (var model : values()) {

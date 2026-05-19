@@ -5,6 +5,7 @@
 package ai.singlr.session;
 
 import ai.singlr.core.common.Strings;
+import ai.singlr.core.model.Message;
 import ai.singlr.core.runtime.CancellationToken;
 import ai.singlr.core.runtime.SessionContext;
 import ai.singlr.session.ask.AskUserQuestionRequest;
@@ -105,9 +106,7 @@ public final class AgentSessionImpl implements AgentSession {
     var concurrency = options.concurrency();
     var cancellation = new CancellationToken();
     this.state = new SessionState(sessionId, cancellation, clock);
-    options
-        .systemPrompt()
-        .ifPresent(prompt -> this.state.appendMessage(ai.singlr.core.model.Message.system(prompt)));
+    options.systemPrompt().ifPresent(prompt -> this.state.appendMessage(Message.system(prompt)));
     this.sessionContext = new SessionContext(sessionId, cancellation, clock);
     this.steeringQueue = new SteeringQueue(concurrency.maxQueuedUserMessages());
     this.publisherExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -136,7 +135,7 @@ public final class AgentSessionImpl implements AgentSession {
             hookRegistry,
             toolDispatch,
             steeringQueue,
-            publisher::submit,
+            this::safeEmit,
             contextFactory,
             clock,
             options.costCalculator());
@@ -147,12 +146,51 @@ public final class AgentSessionImpl implements AgentSession {
             hookRegistry,
             toolDispatch,
             steeringQueue,
-            publisher::submit,
+            this::safeEmit,
             contextFactory,
             clock,
             options.tokenCounter(),
             options.contextCompactor());
   }
+
+  /**
+   * Bounded-blocking publish for events emitted by the agent loop and turn runner. A slow or
+   * unresponsive subscriber (e.g. a paused SSE client) fills its 256-item buffer and would
+   * otherwise pin the agent loop on the next {@code publisher.submit(...)} indefinitely. {@link
+   * SubmissionPublisher#offer(Object, long, TimeUnit, java.util.function.BiPredicate)} replaces the
+   * blocking submit with a bounded wait that drops the event on overflow.
+   *
+   * <p>Critical control events (terminal {@link QueryEvent.LoopEnded}, {@link
+   * QueryEvent.QuestionAsked}) get a longer wait — they MUST reach subscribers for the session to
+   * be useful. Routine events ({@link QueryEvent.AssistantText}, {@link QueryEvent.ToolUse}, etc.)
+   * get a shorter wait and are dropped on overflow with a FINE log so operators can correlate gaps
+   * in their event stream to slow consumers.
+   */
+  private void safeEmit(QueryEvent event) {
+    var timeoutMs = isCriticalEvent(event) ? CRITICAL_EMIT_TIMEOUT_MS : ROUTINE_EMIT_TIMEOUT_MS;
+    var dropped = publisher.offer(event, timeoutMs, TimeUnit.MILLISECONDS, (sub, e) -> false);
+    if (dropped < 0) {
+      var level = isCriticalEvent(event) ? Level.WARNING : Level.FINE;
+      LOGGER.log(
+          level,
+          () ->
+              "dropped "
+                  + event.getClass().getSimpleName()
+                  + " for "
+                  + Math.abs(dropped)
+                  + " slow subscriber(s) on session "
+                  + sessionId);
+    }
+  }
+
+  private static boolean isCriticalEvent(QueryEvent event) {
+    return event instanceof QueryEvent.LoopEnded
+        || event instanceof QueryEvent.QuestionAsked
+        || event instanceof QueryEvent.Error;
+  }
+
+  private static final long ROUTINE_EMIT_TIMEOUT_MS = 1_000L;
+  private static final long CRITICAL_EMIT_TIMEOUT_MS = 30_000L;
 
   /**
    * Fire {@code executionProvider.onSessionStart(sessionContext)} and react to its outcome. When
@@ -386,15 +424,21 @@ public final class AgentSessionImpl implements AgentSession {
       Objects.requireNonNull(request, "request must not be null");
       var future = new CompletableFuture<AskUserQuestionResponse>();
       pendingQuestions.put(request.questionId(), future);
-      state
-          .cancellation()
-          .onCancel(
-              () ->
-                  future.completeExceptionally(
-                      new CancellationException(
-                          state.cancellation().reason().orElse("session cancelled"))));
+      // Capture the Registration so we can remove the callback in finally. Without this every
+      // AskUserQuestion call accumulates a permanent closure on the session's long-lived
+      // CancellationToken — a session with N questions over its life leaks N callbacks (each
+      // pinning the completed future via the closure capture). Mirrors the pattern in
+      // LocalProcessExecutionProvider.runProcess.
+      var cancelRegistration =
+          state
+              .cancellation()
+              .onCancel(
+                  () ->
+                      future.completeExceptionally(
+                          new CancellationException(
+                              state.cancellation().reason().orElse("session cancelled"))));
       try {
-        publisher.submit(
+        safeEmit(
             new QueryEvent.QuestionAsked(
                 sessionId, state.currentTurnIndex(), Instant.now(clock), request));
         return future.get();
@@ -406,6 +450,7 @@ public final class AgentSessionImpl implements AgentSession {
                 + " failed: "
                 + (cause == null ? "no cause" : cause.getMessage()));
       } finally {
+        cancelRegistration.remove();
         pendingQuestions.remove(request.questionId());
       }
     }

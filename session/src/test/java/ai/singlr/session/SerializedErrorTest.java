@@ -100,4 +100,31 @@ final class SerializedErrorTest {
     var ex = assertThrows(NullPointerException.class, () -> SerializedError.of((Throwable) null));
     assertEquals("throwable must not be null", ex.getMessage());
   }
+
+  @Test
+  void withoutStackTracePreservesKindAndMessage() {
+    var err = new SerializedError("kind", "msg", List.of("frame1", "frame2", "frame3"));
+    var redacted = err.withoutStackTrace();
+    assertEquals("kind", redacted.kind());
+    assertEquals("msg", redacted.message());
+    assertEquals(List.of(), redacted.stackTrace());
+  }
+
+  @Test
+  void withoutStackTraceReturnsSameInstanceWhenAlreadyEmpty() {
+    var err = SerializedError.of("kind", "msg");
+    assertTrue(
+        err == err.withoutStackTrace(),
+        "no-op fast path — avoid allocation when there's nothing to redact");
+  }
+
+  @Test
+  void withoutStackTraceLeavesOriginalAlone() {
+    var err = new SerializedError("kind", "msg", List.of("frame1"));
+    err.withoutStackTrace();
+    assertEquals(
+        List.of("frame1"),
+        err.stackTrace(),
+        "withoutStackTrace must return a new record, never mutate the original");
+  }
 }

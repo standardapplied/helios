@@ -23,7 +23,7 @@ import tools.jackson.databind.annotation.JsonDeserialize;
  *   <li>{@code function_call} — carries {@link #id()}, {@link #name()}, {@link #arguments()},
  *       optional {@link #signature()}.
  *   <li>{@code function_result} — carries {@link #callId()}, optional {@link #name()}, {@link
- *       #result()}, and optional {@link #isError()}.
+ *       #result()}, and optional {@link #errorFlag()}.
  *   <li>{@code google_search_call} — carries {@link #id()}, {@link #arguments()}, optional {@link
  *       #signature()}.
  *   <li>{@code google_search_result} — carries {@link #callId()}, {@link #result()}, optional
@@ -41,8 +41,11 @@ import tools.jackson.databind.annotation.JsonDeserialize;
  *     google_search_result})
  * @param result tool result payload (for {@code function_result}, {@code google_search_result});
  *     per spec one of object / string / list of {@code FunctionResultSubcontent}
- * @param isError set to {@code true} on a {@code function_result} step when the tool invocation
- *     failed
+ * @param errorFlag set to {@code true} on a {@code function_result} step when the tool invocation
+ *     failed. Wire-encoded as {@code is_error}; the component is named {@code errorFlag} (not
+ *     {@code isError}) so the record accessor does not collide with Jackson's {@code is*()}
+ *     boolean-getter auto-detection, which would otherwise synthesise a parallel virtual property
+ *     {@code error}
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record Step(
@@ -55,7 +58,7 @@ public record Step(
     @JsonDeserialize(using = ArgumentsDeserializer.class) Map<String, Object> arguments,
     @JsonProperty("call_id") String callId,
     Object result,
-    @JsonProperty("is_error") Boolean isError) {
+    @JsonProperty("is_error") Boolean errorFlag) {
 
   public static Step userInput(String text) {
     return userInput(List.of(ContentItem.text(text)));
@@ -99,8 +102,9 @@ public record Step(
     return functionResult(callId, name, result, null);
   }
 
-  public static Step functionResult(String callId, String name, Object result, Boolean isError) {
-    return new Step("function_result", null, null, null, null, name, null, callId, result, isError);
+  public static Step functionResult(String callId, String name, Object result, Boolean errorFlag) {
+    return new Step(
+        "function_result", null, null, null, null, name, null, callId, result, errorFlag);
   }
 
   public boolean hasTypeUserInput() {

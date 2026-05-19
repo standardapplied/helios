@@ -8,6 +8,7 @@ import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import ai.singlr.core.common.Result;
+import ai.singlr.core.common.Strings;
 import ai.singlr.core.embedding.EmbeddingConfig;
 import ai.singlr.core.embedding.EmbeddingModel;
 import java.io.IOException;
@@ -96,7 +97,7 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
 
   @Override
   public Result<float[]> embedQuery(String query, String customQueryPrefix) {
-    if (query == null || query.isBlank()) {
+    if (Strings.isBlank(query)) {
       return Result.failure("Query must not be null or empty");
     }
     var prefix = customQueryPrefix != null ? customQueryPrefix : spec.queryPrefix();
@@ -110,7 +111,7 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
 
   @Override
   public Result<float[]> embedDocument(String document, String customDocumentPrefix) {
-    if (document == null || document.isBlank()) {
+    if (Strings.isBlank(document)) {
       return Result.failure("Document must not be null or empty");
     }
     var prefix = customDocumentPrefix != null ? customDocumentPrefix : spec.documentPrefix();
@@ -125,7 +126,7 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
 
     var embeddings = new float[texts.length][];
     for (var i = 0; i < texts.length; i++) {
-      if (texts[i] == null || texts[i].isBlank()) {
+      if (Strings.isBlank(texts[i])) {
         return Result.failure("Text at index %d is null or empty".formatted(i));
       }
       var result = embed(texts[i]);
@@ -149,12 +150,19 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
 
   @Override
   public void close() {
-    try {
-      if (ortSession != null) {
-        ortSession.close();
+    if (tokenizer != null) {
+      try {
+        tokenizer.close();
+      } catch (Exception e) {
+        LOGGER.log(Level.WARNING, "Error closing HuggingFace tokenizer", e);
       }
-    } catch (OrtException e) {
-      LOGGER.log(Level.WARNING, "Error closing ONNX session", e);
+    }
+    if (ortSession != null) {
+      try {
+        ortSession.close();
+      } catch (OrtException e) {
+        LOGGER.log(Level.WARNING, "Error closing ONNX session", e);
+      }
     }
   }
 
@@ -185,32 +193,38 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
       }
 
       var inputs = new HashMap<String, OnnxTensor>();
-      inputs.put("input_ids", OnnxTensor.createTensor(ortEnvironment, inputIds));
-      inputs.put("attention_mask", OnnxTensor.createTensor(ortEnvironment, attentionMask));
+      try {
+        // Build each tensor in turn. If any creation throws, the previously-built tensors are
+        // already in the map and the outer finally will close them — without this scope the
+        // cleanup block wraps only the run() call, leaking native tensor memory on every
+        // mid-construction failure.
+        inputs.put("input_ids", OnnxTensor.createTensor(ortEnvironment, inputIds));
+        inputs.put("attention_mask", OnnxTensor.createTensor(ortEnvironment, attentionMask));
 
-      if (spec.modelType() == OnnxModelSpec.ModelType.ENCODER) {
-        inputs.put("token_type_ids", OnnxTensor.createTensor(ortEnvironment, tokenTypeIds));
-      }
-
-      try (var result = ortSession.run(inputs)) {
-        float[] embedding;
-
-        if (spec.modelType() == OnnxModelSpec.ModelType.DECODER && result.size() > 1) {
-          var sentenceEmbedding = (float[][]) result.get(1).getValue();
-          embedding = sentenceEmbedding[0].clone();
-        } else if (result.get(0).getValue() instanceof float[][] pooled) {
-          embedding = pooled[0].clone();
-        } else {
-          var outputTensor = (float[][][]) result.get(0).getValue();
-          if (spec.modelType() == OnnxModelSpec.ModelType.DECODER) {
-            embedding = lastTokenPooling(outputTensor[0], attentionMask[0]);
-          } else {
-            embedding = meanPooling(outputTensor[0], attentionMask[0]);
-          }
+        if (spec.modelType() == OnnxModelSpec.ModelType.ENCODER) {
+          inputs.put("token_type_ids", OnnxTensor.createTensor(ortEnvironment, tokenTypeIds));
         }
 
-        normalize(embedding);
-        return Result.success(embedding);
+        try (var result = ortSession.run(inputs)) {
+          float[] embedding;
+
+          if (spec.modelType() == OnnxModelSpec.ModelType.DECODER && result.size() > 1) {
+            var sentenceEmbedding = (float[][]) result.get(1).getValue();
+            embedding = sentenceEmbedding[0].clone();
+          } else if (result.get(0).getValue() instanceof float[][] pooled) {
+            embedding = pooled[0].clone();
+          } else {
+            var outputTensor = (float[][][]) result.get(0).getValue();
+            if (spec.modelType() == OnnxModelSpec.ModelType.DECODER) {
+              embedding = lastTokenPooling(outputTensor[0], attentionMask[0]);
+            } else {
+              embedding = meanPooling(outputTensor[0], attentionMask[0]);
+            }
+          }
+
+          normalize(embedding);
+          return Result.success(embedding);
+        }
       } finally {
         for (var tensor : inputs.values()) {
           tensor.close();

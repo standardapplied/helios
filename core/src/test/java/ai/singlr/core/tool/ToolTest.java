@@ -413,6 +413,50 @@ class ToolTest {
   }
 
   @Test
+  void interruptedCauseRestoresInterruptStatus() {
+    var tool =
+        Tool.newBuilder()
+            .withName("blocking")
+            .withDescription("tool that wraps a blocking-call InterruptedException")
+            .withExecutor(
+                (args, ctx) -> {
+                  throw new RuntimeException(new InterruptedException("inner blocking call"));
+                })
+            .build();
+    assertFalse(Thread.currentThread().isInterrupted(), "test precondition");
+    try {
+      var result = tool.execute(Map.of());
+      assertFalse(result.success());
+      assertTrue(
+          Thread.currentThread().isInterrupted(),
+          "InterruptedException-as-cause in the executor must leave the calling thread's interrupt"
+              + " status set so the session loop can promptly cancel — otherwise the interrupt is"
+              + " silently swallowed by Tool.execute's catch (Exception)");
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
+  @Test
+  void nonInterruptedFailureLeavesInterruptStatusAlone() {
+    var tool =
+        Tool.newBuilder()
+            .withName("plain-fail")
+            .withDescription("ordinary failure")
+            .withExecutor(
+                (args, ctx) -> {
+                  throw new IllegalStateException("plain failure");
+                })
+            .build();
+    assertFalse(Thread.currentThread().isInterrupted(), "test precondition");
+    var result = tool.execute(Map.of());
+    assertFalse(result.success());
+    assertFalse(
+        Thread.currentThread().isInterrupted(),
+        "non-Interrupted failures must not spuriously set the calling thread's interrupt flag");
+  }
+
+  @Test
   void idempotentDefaultsToFalse() {
     var tool =
         Tool.newBuilder()

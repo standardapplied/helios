@@ -67,4 +67,19 @@ public record SerializedError(String kind, String message, List<String> stackTra
     var msg = throwable.getMessage();
     return new SerializedError(throwable.getClass().getName(), msg == null ? "" : msg, frames);
   }
+
+  /**
+   * Return a copy of this error with the stack-trace frame list stripped. Kind and message are
+   * preserved so consumers still see the error category and human-readable description; only the
+   * internal class-and-file-line frames are removed.
+   *
+   * <p>Used at trust boundaries (HTTP responses, SSE event serialisation) so library-internal
+   * structure does not leak to clients. When this error has no frames to begin with, returns {@code
+   * this} so the no-op path costs nothing.
+   *
+   * @return a {@code SerializedError} with the same kind and message and an empty stack trace
+   */
+  public SerializedError withoutStackTrace() {
+    return stackTrace.isEmpty() ? this : new SerializedError(kind, message, List.of());
+  }
 }

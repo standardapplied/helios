@@ -26,11 +26,14 @@ import ai.singlr.session.hooks.HookRegistry;
 import ai.singlr.session.tools.ToolBinding;
 import ai.singlr.session.tools.ToolVisibilityContext;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Drives one model turn end-to-end. Fires hooks at PreModelTurn, PostModelTurn, PreToolUse (per
@@ -66,6 +69,8 @@ import java.util.function.Function;
  * subscriber state.
  */
 public final class TurnRunner {
+
+  private static final Logger LOGGER = Logger.getLogger(TurnRunner.class.getName());
 
   private final Model model;
   private final HookRegistry hooks;
@@ -272,7 +277,7 @@ public final class TurnRunner {
       }
       case HookOutcome.Inject inj -> {
         emitter.emitHookFired(state, hookName, phase.phaseName(), "Inject");
-        steeringQueue.offer(UserMessage.text(inj.userMessage()));
+        offerOrLogDrop(inj.userMessage(), phase.phaseName(), hookName);
         return phase == TurnPhase.PRE_MODEL_TURN
             ? TurnLevelDecision.SKIP_MODEL
             : TurnLevelDecision.CONTINUE;
@@ -296,6 +301,21 @@ public final class TurnRunner {
   }
 
   /**
+   * Offer a hook-injected user message to the steering queue. Logs a WARNING if the queue rejects
+   * it (e.g. full at capacity) — without this, hook authors believe their {@code Inject} took
+   * effect but the loop never sees the message, producing impossible-to-debug cascading bugs.
+   */
+  private void offerOrLogDrop(String text, String phaseName, String hookName) {
+    if (!steeringQueue.offer(UserMessage.text(text))) {
+      LOGGER.log(
+          Level.WARNING,
+          "{0} hook ''{1}'' Inject was dropped: steering queue full; session continues without"
+              + " the injected message",
+          new Object[] {phaseName, hookName});
+    }
+  }
+
+  /**
    * Pull a {@code List<Message>} out of a {@code MutateInput} payload under the "history" key.
    * Returns null when the key is absent, the value is the wrong type, or any element is not a
    * {@link Message} — the loop then treats the outcome as a no-op Continue rather than rewriting
@@ -306,7 +326,7 @@ public final class TurnRunner {
     if (!(raw instanceof List<?> list)) {
       return null;
     }
-    var copy = new java.util.ArrayList<Message>(list.size());
+    var copy = new ArrayList<Message>(list.size());
     for (var element : list) {
       if (!(element instanceof Message message)) {
         return null;
@@ -367,7 +387,7 @@ public final class TurnRunner {
         }
         case HookOutcome.Inject inj -> {
           emitter.emitHookFired(state, preHookName, "PreToolUseHook", "Inject");
-          steeringQueue.offer(UserMessage.text(inj.userMessage()));
+          offerOrLogDrop(inj.userMessage(), "PreToolUseHook", preHookName);
           result = ToolResult.failure("tool skipped: hook injected user message");
         }
         case HookOutcome.Stop s -> {
@@ -409,7 +429,7 @@ public final class TurnRunner {
         }
         case HookOutcome.Inject inj -> {
           emitter.emitHookFired(state, postHookName, "PostToolUseHook", "Inject");
-          steeringQueue.offer(UserMessage.text(inj.userMessage()));
+          offerOrLogDrop(inj.userMessage(), "PostToolUseHook", postHookName);
         }
         case HookOutcome.Stop s -> {
           emitter.emitHookFired(state, postHookName, "PostToolUseHook", "Stop");

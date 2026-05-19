@@ -2,6 +2,8 @@
 
 package ai.singlr.onnx;
 
+import ai.singlr.core.common.Strings;
+
 /**
  * Supported ONNX embedding model identifiers.
  *
@@ -44,7 +46,7 @@ public enum OnnxModelId {
    * @return the matching OnnxModelId, or null if not found
    */
   public static OnnxModelId fromId(String id) {
-    if (id == null || id.isBlank()) {
+    if (Strings.isBlank(id)) {
       return null;
     }
     for (var model : values()) {

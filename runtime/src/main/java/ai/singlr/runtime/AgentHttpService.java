@@ -317,6 +317,11 @@ public final class AgentHttpService implements HttpService {
           Status.SERVICE_UNAVAILABLE_503,
           Map.of("error", "request interrupted while waiting for session result"));
     } catch (ExecutionException e) {
+      // Helios is a library; diagnostic info reaches the deployer, who decides whether to
+      // forward it to their downstream HTTP clients. The cause message is part of that
+      // diagnostic surface — stripping it here would force deployers to dig through server-side
+      // logs to correlate a failed request with what actually went wrong. Deployers that need to
+      // sanitise the body can wrap this response at their HTTP layer.
       LOGGER.log(
           Level.WARNING, "session " + sessionIdForLog + " result future failed exceptionally", e);
       var cause = e.getCause();

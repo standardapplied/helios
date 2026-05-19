@@ -298,6 +298,32 @@ class RetryPolicyTest {
   }
 
   @Test
+  void errorEscapesRetryPolicy() {
+    // OutOfMemoryError / StackOverflowError / LinkageError must escape — RetryPolicy.execute used
+    // to
+    // catch Throwable and wrap Errors in RetryExhaustedException, violating the framework's
+    // documented "Error subtypes escape so OOM/StackOverflow kill the host thread cleanly"
+    // invariant (see CLAUDE.md "Loop crash semantics").
+    var policy =
+        RetryPolicy.newBuilder()
+            .withMaxAttempts(5)
+            .withBackoff(Backoff.fixed(Duration.ofMillis(1)))
+            .build();
+    var attempts = new AtomicInteger(0);
+
+    assertThrows(
+        StackOverflowError.class,
+        () ->
+            policy.execute(
+                () -> {
+                  attempts.incrementAndGet();
+                  throw new StackOverflowError("simulated");
+                }));
+
+    assertEquals(1, attempts.get(), "Error must escape on first attempt, not retry");
+  }
+
+  @Test
   void predicateExceptionPreservesOriginalCause() {
     var policy =
         RetryPolicy.newBuilder()

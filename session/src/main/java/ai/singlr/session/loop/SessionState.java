@@ -13,6 +13,7 @@ import ai.singlr.session.ResultMessage;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -141,7 +142,7 @@ public final class SessionState {
    */
   public void replaceHistory(List<Message> newHistory) {
     Objects.requireNonNull(newHistory, "newHistory must not be null");
-    var copy = new java.util.ArrayList<Message>(newHistory.size());
+    var copy = new ArrayList<Message>(newHistory.size());
     for (var m : newHistory) {
       copy.add(Objects.requireNonNull(m, "newHistory must not contain null"));
     }

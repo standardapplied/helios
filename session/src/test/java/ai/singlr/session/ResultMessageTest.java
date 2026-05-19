@@ -323,4 +323,39 @@ final class ResultMessageTest {
       assertTrue(tag != null && !tag.isEmpty());
     }
   }
+
+  // ── withoutStackTraces ──────────────────────────────────────────────────────
+
+  @Test
+  void withoutStackTracesOnErrorDuringExecutionStripsFrames() {
+    var carrying = SerializedError.of(new IllegalStateException("internal detail"));
+    assertTrue(carrying.stackTrace().size() > 0, "test precondition");
+    var terminal = new ResultMessage.ErrorDuringExecution(SID, carrying, USAGE, COST, DUR);
+    var redacted = terminal.withoutStackTraces();
+    assertTrue(redacted instanceof ResultMessage.ErrorDuringExecution);
+    var redactedErr = ((ResultMessage.ErrorDuringExecution) redacted).error();
+    assertEquals(carrying.kind(), redactedErr.kind(), "kind preserved");
+    assertEquals(carrying.message(), redactedErr.message(), "message preserved");
+    assertEquals(
+        List.of(),
+        redactedErr.stackTrace(),
+        "frames stripped — they would otherwise leak internal class names and line numbers"
+            + " through every HTTP terminal response and SSE LoopEnded event");
+  }
+
+  @Test
+  void withoutStackTracesIsIdentityWhenNoError() {
+    var success = new ResultMessage.Success(SID, "ok", USAGE, COST, DUR);
+    assertSame(
+        success,
+        success.withoutStackTraces(),
+        "no error → no allocation; identity preservation lets callers short-circuit cheaply");
+  }
+
+  @Test
+  void withoutStackTracesIdentityWhenErrorAlreadyClean() {
+    var clean = SerializedError.of("kind", "msg"); // no frames
+    var terminal = new ResultMessage.ErrorDuringExecution(SID, clean, USAGE, COST, DUR);
+    assertSame(terminal, terminal.withoutStackTraces());
+  }
 }

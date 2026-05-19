@@ -29,6 +29,35 @@ Pick what you need — each jar is published independently:
 
 Most agentic apps want `helios-session` + one provider. Drop down to `helios-core`'s `Model` directly for one-shot calls; expose a session over HTTP with `helios-runtime`.
 
+## Production Readiness
+
+Helios is used in production but has documented limitations that you should understand before adopting it. This section is intentionally explicit so you can decide whether the current state fits your deployment risk profile.
+
+### What's hardened
+
+- **Fail-secure defaults.** `RuntimeServer.Builder` binds `127.0.0.1` (loopback) by default — external traffic is explicit opt-in via `withHost("0.0.0.0")`. The HTTP routes are unauthenticated and create real model-spending sessions, so deployers that expose externally should sit behind authenticated fronting infrastructure.
+- **Cooperative cancellation, no `Error` swallowing.** `RetryPolicy` and the session loop catch `Exception`, not `Throwable` — OOM / StackOverflow / LinkageError escape cleanly so the host JVM dies rather than retrying a corrupted process. `Tool.execute` preserves the calling thread's interrupt status when the executor's exception chain carries `InterruptedException`.
+- **Sandboxed subprocess execution with descendant reaping.** `JvmSandbox.close()` and its JVM-shutdown-hook path snapshot descendants before killing the parent, then forcibly destroy the snapshot — snippets that call `Runtime.exec(...)` cannot orphan grandchildren past sandbox lifetime. Uninterruptible JShell snippets are escalated through a documented ladder (`Thread.interrupt` → 1s join → `jshell.stop()` → 1s join).
+- **Path-traversal jails on every filesystem boundary.** `FilesystemKnowledge` (lexical `..`/absolute refusal + `toRealPath` symlink check), `OnnxModelDownloader` (refuses absolute paths and traversal in HuggingFace-supplied filenames), and `CommandGrant` (per-call temp working directory, argv pre-scan refusing registered secrets).
+- **SQL identifier validation on the persistence schema name.** `PgConfig` rejects schema names that don't match Postgres' unquoted-identifier shape, so configuration-driven schema names cannot inject SQL via the qualifier substitution.
+- **Secret redaction at the documented boundaries.** Every `CommandGrant` and `FilesystemKnowledge` invocation flows model-visible output through a shared `SecretRegistry`-derived `Redactor`. The REPL `SandboxBindingsListener` (operator telemetry of sandbox working memory) also redacts against the registry. `ModelConfig.toString()` redacts the API key and header values so accidental `log.info("config={}", cfg)` callsites don't leak credentials.
+- **No `Error` propagation from sandbox bindings collection.** `JvmSandboxBootstrap.collectBindings` catches `Throwable` per binding so a malicious `toString()` that throws `StackOverflowError` / `OutOfMemoryError` yields an `<error: …>` stub instead of escaping into the virtual thread's uncaught handler.
+- **Bounded HTTP/SSE backpressure.** `AgentSession`'s event publisher uses `SubmissionPublisher.offer(...)` with bounded timeouts (1s for routine events, 30s for control events like `LoopEnded` / `QuestionAsked` / `Error`). A slow or paused SSE client cannot pin the agent loop. Routine events may be dropped on a sustained slow consumer with a FINE log; control events use the longer timeout to maximise delivery.
+- **Test coverage.** JaCoCo gates at 95% instruction / 90% branch on `helios-core`, `helios-session`, `helios-runtime`. Tests across the project: ~3,200 unit tests. Provider modules (`helios-gemini`, `helios-anthropic`, `helios-openai`) are gated by environment variables for live-API integration tests; CI runs unit tests without those keys.
+
+### Known limitations
+
+These are documented intentionally — they're real and you should plan around them. We are working through them in priority order; this README will move them from "limitation" to "hardened" as each lands.
+
+- **Sandbox RPC channel rides on stdout.** `JvmSandbox` ↔ host RPC uses `\0RPC:`-prefixed lines on the subprocess stdout. A JShell snippet can obtain a raw `PrintStream` to `FileDescriptor.out` and forge RPC frames — resolving pending host-calls or invoking registered `HostFunction`s out-of-band. Mitigation today: don't expose the sandbox to untrusted code, deploy under an OS-level sandbox (Incus profile or similar). Planned fix: relocate the RPC channel to a Unix domain socket or dedicated pipe FD.
+- **Persistence layer does not redact through `SecretRegistry`.** `helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, and `helios_spans.attributes` are persisted verbatim. A tool whose output briefly carries a registered secret value lands that value in PostgreSQL until purge. Mitigation today: callers MUST redact before handing payloads to the persistence layer. Planned fix: thread `Redactor` through `PgConfig` and redact at the persistence boundary.
+- **Provider error bodies are echoed verbatim.** When a Gemini/Anthropic/OpenAI HTTP call returns non-200, the response body (capped at 64 KB) is appended to the thrown exception's message. Providers can echo request fragments, including user inline files. No `SecretRegistry` integration on this path yet.
+- **No backwards compatibility guarantee.** Helios is pre-1.0 in spirit — the public API may change between minor versions. Tag a known good version and pin it.
+- **`FinishReason.LENGTH` is terminal.** When the model truncates output at its `max_output_tokens` cap, the loop terminates with `ResultMessage.ErrorDuringExecution(kind="max-tokens")` rather than re-issuing. Deployers that previously relied on the loop continuing past LENGTH should adjust `max_output_tokens` in `ModelConfig`. This is a deliberate change from earlier behaviour — silent re-issue burned `maxTurns` of budget without making progress.
+- **Live integration coverage is environment-gated.** Provider integration tests run in CI under deployer-supplied API keys; you should add equivalent live tests for the workloads that matter to you before relying on the SDK in production-critical paths.
+
+If any of these is a deal-breaker for your use case, open an issue — prioritisation tracks demand.
+
 ## Installation
 
 ```xml
@@ -125,6 +154,14 @@ session.send(UserMessage.text("Refactor the loop module's package-info comments.
 
 Hooks, declarative permissions, cost tracking, budget caps, session limits, context compaction, the HTTP + SSE surface — see [`session/README.md`](session/README.md) for the full quickstart.
 
+### Terminal classification
+
+The loop terminates when the model's `FinishReason` indicates the session is done — `STOP` (natural completion), `CONTENT_FILTER` (refusal), `ERROR` (provider error), or `LENGTH` (response truncated at `max_output_tokens`). `LENGTH` produces `ResultMessage.ErrorDuringExecution(kind="max-tokens")` rather than re-issuing — deployers that need higher per-turn ceilings should raise `ModelConfig.maxOutputTokens` instead of relying on the loop to retry. See [Known limitations](#known-limitations) for the rationale (the previous behaviour silently burned `maxTurns` of budget without making progress).
+
+### Event delivery semantics
+
+`AgentSession.events()` is a `SubmissionPublisher<QueryEvent>` with a 256-item per-subscriber buffer. The agent loop emits via `offer(...)` with a bounded timeout, not blocking `submit`: routine events (text, tool use, hook fired) wait up to 1 s before dropping on a slow consumer; control events (`LoopEnded`, `QuestionAsked`, `Error`) wait up to 30 s. A subscriber that pauses indefinitely will see a gap in its event stream, but cannot pin the agent loop. Drops are logged (FINE for routine, WARNING for control).
+
 ### Context compaction
 
 The agent loop estimates context fill through a pluggable `TokenCounter` (default char-based, ~4 chars/token) and reacts at two watermarks:
@@ -152,7 +189,7 @@ try (var model = new AnthropicProvider().create(modelId, config)) {
 
 `AgentSession` is `AutoCloseable` and owns its loop, per-session publisher executor, and any pending tool/question state. Always use try-with-resources; `close()` cancels the loop, settles the result future, and waits up to 5s for the publisher executor to drain.
 
-`ReplSession` is `AutoCloseable` and owns its sandbox subprocess. `JvmSandbox` also installs a JVM shutdown hook so a leaked sandbox is force-killed on host JVM exit.
+`ReplSession` is `AutoCloseable` and owns its sandbox subprocess. `JvmSandbox` also installs a JVM shutdown hook so a leaked sandbox is force-killed on host JVM exit. Both the explicit close and the shutdown hook snapshot the subprocess's descendants and forcibly destroy them before the parent — snippets that call `Runtime.exec(...)` cannot leave orphaned grandchildren past the sandbox lifetime.
 
 ## Tools
 
@@ -389,13 +426,63 @@ var promptRegistry = new PgPromptRegistry(pgConfig);
 var durability = PgDurability.of(pgConfig);   // RunStore + ToolCallJournal
 ```
 
-Schema lives on the classpath at `ai/singlr/persistence/schema.sql` — run it against your database to create the `helios_*` tables. Optional custom schema prefix is applied to all generated SQL.
+Schema lives on the classpath at `ai/singlr/persistence/schema.sql` — run it against your database to create the `helios_*` tables. Optional custom schema prefix is applied to all generated SQL; the schema name is validated against Postgres' unquoted-identifier shape (`[A-Za-z_][A-Za-z0-9_]{0,62}`) at `PgConfig` construction.
 
-## Secret Redaction
+**Security note:** trace and journal payloads (`helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, `helios_spans.attributes`) are persisted verbatim — the persistence layer does **not** currently route through `SecretRegistry`. Callers must redact before handing payloads to `PgTraceStore` / `PgToolCallJournal` if their tool flows touch registered secrets. See [Known limitations](#known-limitations).
+
+## Security
+
+Helios is designed for production but has known limitations — see [Production Readiness](#production-readiness) above for the full hardening surface and the deferred items. This section documents the security primitives library users build on.
+
+### Secret redaction (`SecretRegistry` + `Redactor`)
 
 `core.common.SecretRegistry` is a thread-safe registry of secret values; `Redactor` (built via `registry.redactor()`) is an immutable Aho-Corasick byte-level scrubber that replaces every contiguous occurrence of a registered secret with `<redacted:NAME>`. Operates on raw bytes BEFORE UTF-8 decode so encoding mangling cannot bypass it. Validation: secrets must be ≥8 chars and pure ASCII. Overlap policy: leftmost-longest.
 
-`CommandGrant` and `FilesystemKnowledge` accept a shared `SecretRegistry` so a token a `CommandGrant("gh")` writes to a file stays redacted when the agent later reads it via `kb_read`.
+```java
+var registry = new SecretRegistry();
+registry.register("STRIPE_KEY", System.getenv("STRIPE_KEY"));
+registry.register("GH_TOKEN", System.getenv("GH_TOKEN"));
+```
+
+Share one registry across every component that produces model-visible or operator-visible output:
+
+- `CommandGrant.builder("gh").withSecretRegistry(registry)` — redacts stdout / stderr; refuses argv carrying a registered secret.
+- `FilesystemKnowledge.builder(root).withSecretRegistry(registry)` — redacts every `kb_grep` / `kb_read` result. A token a `CommandGrant("gh")` writes to a file stays redacted when the agent later reads it via `kb_read`.
+- `JShellExecutionProvider.Builder.withSecretRegistry(registry)` — redacts subprocess stdout / stderr, and wraps the deployer's `SandboxBindingsListener` so operator telemetry of working memory also redacts registered secrets.
+- `ModelConfig.toString()` — automatically elides the `apiKey` and every header value regardless of registry contents; safe to log a `ModelConfig` directly.
+
+The persistence layer does **not** route through the registry today — see [Known limitations](#known-limitations).
+
+### Sandbox security model
+
+Defense in depth, not a single boundary:
+
+1. **OS-level sandbox** (deployer's responsibility) — Incus, Docker, gVisor, etc. This is the authoritative escape boundary.
+2. **JVM subprocess sandbox** (`JvmSandbox`) — the model's code runs in a separate JVM with cleared environment, system-properties stripped from parent JVM args, classpath/modulepath inherited but agents (`-javaagent`, `-Dauth.token=…`) filtered, descendants reaped on close / shutdown hook, single-execute serialised via `Semaphore(1)`.
+3. **JShell prelude controls** — typed wrappers around `HostFunction`s, reserved-name skip on synthesiser, frozen `HostFunctionRegistry` after sandbox boot.
+
+The sandbox subprocess RPC currently rides on subprocess stdout with a `\0RPC:` magic prefix; this is forgeable from inside the sandbox and is the documented reason layer 1 (OS-level) is the authoritative boundary. See [Known limitations](#known-limitations).
+
+### Path-traversal jails
+
+Every filesystem boundary in the framework refuses traversal. Lexical normalise + `startsWith(root)` first (to reject `..` and absolute paths without dereferencing), then `toRealPath()` to refuse symlink escapes:
+
+- `FilesystemKnowledge` (kb_grep / kb_glob / kb_read on the curated corpus root)
+- `CommandGrant` (per-call temp cwd unless explicit `withCwd`)
+- `OnnxModelDownloader` (HF-supplied file paths against the local model cache)
+- `PgConfig` (Postgres schema name validated against unquoted-identifier shape)
+
+### HTTP surface defaults
+
+`RuntimeServer.Builder` binds **`127.0.0.1` by default** (loopback only). The routes are unauthenticated; expose externally only behind authenticated fronting infrastructure:
+
+```java
+var server = RuntimeServer.builder()
+    .withRegistry(SessionRegistry.inMemory())
+    .withOptionsFactory(sessionId -> ...)
+    // .withHost("0.0.0.0")  // opt-in for external traffic; document your auth story first
+    .build();
+```
 
 ## Design Principles
 

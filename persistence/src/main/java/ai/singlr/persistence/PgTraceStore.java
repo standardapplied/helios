@@ -23,6 +23,7 @@ import ai.singlr.persistence.sql.TraceSql;
 import ai.singlr.scimsql.ScimEngine;
 import io.helidon.dbclient.DbClient;
 import io.helidon.dbclient.DbRow;
+import io.helidon.dbclient.DbTransaction;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -241,8 +242,7 @@ public class PgTraceStore implements EventSink {
    * @param traceId the trace these spans belong to
    * @param topLevelSpans the top-level spans to insert
    */
-  private void insertSpansBfs(
-      io.helidon.dbclient.DbTransaction tx, UUID traceId, List<Span> topLevelSpans) {
+  private void insertSpansBfs(DbTransaction tx, UUID traceId, List<Span> topLevelSpans) {
 
     record SpanWithParent(Span span, UUID parentId) {}
 

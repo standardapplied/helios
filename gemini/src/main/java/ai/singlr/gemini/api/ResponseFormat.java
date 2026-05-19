@@ -5,6 +5,7 @@
 
 package ai.singlr.gemini.api;
 
+import ai.singlr.core.common.Strings;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Map;
@@ -55,7 +56,7 @@ public record ResponseFormat(
 
   /** Image output with the given MIME type and optional sizing hints. */
   public static ResponseFormat image(String mimeType, String aspectRatio, String imageSize) {
-    if (mimeType == null || mimeType.isBlank()) {
+    if (Strings.isBlank(mimeType)) {
       throw new IllegalArgumentException("mimeType is required for image response format");
     }
     return new ResponseFormat("image", mimeType, null, aspectRatio, imageSize);

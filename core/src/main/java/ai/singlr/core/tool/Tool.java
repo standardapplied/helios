@@ -6,6 +6,7 @@
 package ai.singlr.core.tool;
 
 import ai.singlr.core.common.Strings;
+import ai.singlr.core.schema.SchemaGenerator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -84,8 +85,20 @@ public record Tool(
     try {
       return executor.execute(arguments, context);
     } catch (Exception e) {
+      if (hasInterruptedCause(e)) {
+        Thread.currentThread().interrupt();
+      }
       return ToolResult.failure("Tool execution failed", e);
     }
+  }
+
+  private static boolean hasInterruptedCause(Throwable e) {
+    for (var cur = e; cur != null; cur = cur.getCause()) {
+      if (cur instanceof InterruptedException) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -124,7 +137,7 @@ public record Tool(
         if (param.itemsClass() != null) {
           // Record-shaped items: derive the schema via SchemaGenerator so we get a full
           // {type, properties, required} object without the tool author hand-rolling it.
-          itemsSchema = ai.singlr.core.schema.SchemaGenerator.generate(param.itemsClass()).toMap();
+          itemsSchema = SchemaGenerator.generate(param.itemsClass()).toMap();
         } else if (param.items() != null) {
           var hand = new LinkedHashMap<String, Object>();
           hand.put("type", param.items().type().jsonType());

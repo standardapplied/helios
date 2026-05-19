@@ -11,16 +11,19 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.repl.host.HostFunction;
 import ai.singlr.repl.host.HostFunctionRegistry;
 import ai.singlr.repl.protocol.ProcessTransport;
 import ai.singlr.repl.protocol.RpcChannel;
 import ai.singlr.repl.protocol.RpcMessage;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -195,6 +198,136 @@ class JvmSandboxTest {
   }
 
   @Test
+  @Timeout(value = 90, unit = TimeUnit.SECONDS)
+  void closeKillsSubprocessDescendantsNotJustTheParent() throws Exception {
+    // Theme E regression test: snippets can call Runtime.exec(...) and spawn descendants. Without
+    // process.descendants().forEach(::destroyForcibly) the parent dies on sandbox.close() but its
+    // grandchildren survive — an orphaned process leak. This test launches a real sandbox, runs
+    // a snippet that forks a long-running child, captures the child PID via submit(), closes the
+    // sandbox, and asserts the descendant PID is no longer alive.
+    var descendantPidHolder = new AtomicReference<Long>();
+    var registry = new HostFunctionRegistry();
+    registry.register(
+        new ai.singlr.repl.host.HostFunction(
+            "submit",
+            "test capture for descendant PID",
+            params -> {
+              var raw = params.get("output");
+              descendantPidHolder.set(Long.parseLong(raw.toString()));
+              return null;
+            }));
+    var config =
+        JvmSandboxConfig.newBuilder()
+            .withCallTimeout(Duration.ofSeconds(45))
+            .withExecutionTimeout(Duration.ofSeconds(30))
+            .build();
+
+    JvmSandbox sandbox = null;
+    try {
+      sandbox = JvmSandbox.create(config, registry);
+      var request =
+          ExecutionRequest.newBuilder()
+              .withCode(
+                  // 300s sleep — well beyond test timeout so we know any survival is a leak.
+                  "var grandchild = new ProcessBuilder(\"sleep\", \"300\").start();\n"
+                      + "submit(String.valueOf(grandchild.pid()));")
+              .withTimeout(Duration.ofSeconds(30))
+              .build();
+      var result = sandbox.execute(request);
+      assertEquals(0, result.exitCode(), "snippet failed; stderr was:\n" + result.stderr());
+      var descendantPid = descendantPidHolder.get();
+      assertNotNull(descendantPid, "snippet did not submit a PID");
+      assertTrue(
+          ProcessHandle.of(descendantPid).map(ProcessHandle::isAlive).orElse(false),
+          "test precondition: descendant should be alive after the snippet runs");
+
+      sandbox.close();
+      sandbox = null;
+
+      // Allow the OS a moment to deliver SIGKILL to the descendant.
+      var deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+      boolean dead = false;
+      while (System.nanoTime() < deadline) {
+        if (!ProcessHandle.of(descendantPid).map(ProcessHandle::isAlive).orElse(false)) {
+          dead = true;
+          break;
+        }
+        Thread.sleep(50);
+      }
+      assertTrue(
+          dead,
+          "descendant PID "
+              + descendantPid
+              + " survived sandbox.close() — process.descendants() walk did not reap it");
+    } finally {
+      if (sandbox != null) {
+        sandbox.close();
+      }
+      // Belt-and-braces: if the descendant is somehow still alive, kill it so the test machine
+      // doesn't leak processes.
+      var pid = descendantPidHolder.get();
+      if (pid != null) {
+        ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
+      }
+    }
+  }
+
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void destroyOnJvmShutdownKillsDescendantsAsWellAsParent() throws Exception {
+    // Same hardening, different entry point: destroyOnJvmShutdown is fired by the JVM shutdown
+    // hook to reap a sandbox the application forgot to close(). It must walk descendants too.
+    // The existing shutdownHookKillsLeakedProcess test covers parent-only termination via this
+    // path — here we extend it to a parent-with-child shape.
+    var parentPb = new ProcessBuilder("sh", "-c", "sleep 60 & echo $! ; wait");
+    parentPb.redirectErrorStream(true);
+    var parent = parentPb.start();
+    long childPid;
+    try (var reader =
+        new BufferedReader(
+            new InputStreamReader(parent.getInputStream(), StandardCharsets.UTF_8))) {
+      var line = reader.readLine();
+      assertNotNull(line, "shell did not echo child PID");
+      childPid = Long.parseLong(line.trim());
+    }
+    try {
+      assertTrue(parent.isAlive());
+      assertTrue(
+          ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false),
+          "test precondition: descendant should be alive before we trigger the shutdown hook");
+
+      var transport = new ProcessTransport(parent.getInputStream(), parent.getOutputStream());
+      var registry = new HostFunctionRegistry();
+      var channel = new RpcChannel(transport, registry, Duration.ofSeconds(1));
+      var sandbox = new JvmSandbox(parent, transport, channel, JvmSandboxConfig.defaults());
+
+      sandbox.destroyOnJvmShutdown();
+
+      assertTrue(parent.waitFor(5, TimeUnit.SECONDS));
+      assertFalse(parent.isAlive(), "parent should be dead");
+
+      var deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+      boolean childDead = false;
+      while (System.nanoTime() < deadline) {
+        if (!ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false)) {
+          childDead = true;
+          break;
+        }
+        Thread.sleep(50);
+      }
+      assertTrue(
+          childDead,
+          "descendant PID " + childPid + " survived destroyOnJvmShutdown — walk did not reap it");
+      sandbox.close();
+    } finally {
+      ProcessHandle.of(childPid).ifPresent(ProcessHandle::destroyForcibly);
+      if (parent.isAlive()) {
+        parent.destroyForcibly();
+      }
+    }
+  }
+
+  @Test
   void shutdownHookIsNoopAfterClose() throws Exception {
     var pb = new ProcessBuilder("sleep", "30");
     var process = pb.start();
@@ -306,8 +439,7 @@ class JvmSandboxTest {
               try {
                 // Read the request from stdin (we need to consume it to unblock)
                 var reader =
-                    new java.io.BufferedReader(
-                        new java.io.InputStreamReader(processStdin, StandardCharsets.UTF_8));
+                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
                 var line = reader.readLine();
                 if (line != null) {
                   // Parse the request to get the id
@@ -357,8 +489,7 @@ class JvmSandboxTest {
             () -> {
               try {
                 var reader =
-                    new java.io.BufferedReader(
-                        new java.io.InputStreamReader(processStdin, StandardCharsets.UTF_8));
+                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
                 var line = reader.readLine();
                 if (line != null) {
                   var reqJson = ProcessTransport.deserializeMessage(line);
@@ -404,8 +535,7 @@ class JvmSandboxTest {
             () -> {
               try {
                 var reader =
-                    new java.io.BufferedReader(
-                        new java.io.InputStreamReader(processStdin, StandardCharsets.UTF_8));
+                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
                 var line = reader.readLine();
                 if (line != null) {
                   var reqJson = ProcessTransport.deserializeMessage(line);
@@ -457,8 +587,7 @@ class JvmSandboxTest {
             () -> {
               try {
                 var reader =
-                    new java.io.BufferedReader(
-                        new java.io.InputStreamReader(processStdin, StandardCharsets.UTF_8));
+                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
                 var line = reader.readLine();
                 if (line != null) {
                   var reqJson = ProcessTransport.deserializeMessage(line);
@@ -515,8 +644,7 @@ class JvmSandboxTest {
             () -> {
               try {
                 var reader =
-                    new java.io.BufferedReader(
-                        new java.io.InputStreamReader(processStdin, StandardCharsets.UTF_8));
+                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
                 var line = reader.readLine();
                 if (line != null) {
                   var reqJson = ProcessTransport.deserializeMessage(line);
@@ -565,8 +693,7 @@ class JvmSandboxTest {
             () -> {
               try {
                 var reader =
-                    new java.io.BufferedReader(
-                        new java.io.InputStreamReader(processStdin, StandardCharsets.UTF_8));
+                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
                 var line = reader.readLine();
                 if (line != null) {
                   var reqJson = ProcessTransport.deserializeMessage(line);
@@ -619,8 +746,7 @@ class JvmSandboxTest {
             () -> {
               try {
                 var reader =
-                    new java.io.BufferedReader(
-                        new java.io.InputStreamReader(processStdin, StandardCharsets.UTF_8));
+                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
                 var line = reader.readLine();
                 if (line != null) {
                   var reqJson = ProcessTransport.deserializeMessage(line);
@@ -684,7 +810,7 @@ class JvmSandboxTest {
     var submittedHolder = new AtomicReference<>();
     var registry = new HostFunctionRegistry();
     registry.register(
-        new HostFunction(
+        new ai.singlr.repl.host.HostFunction(
             "submit",
             "stub submit for the JvmSandbox end-to-end test",
             params -> {
@@ -972,5 +1098,92 @@ class JvmSandboxTest {
         sandbox.close();
       }
     }
+  }
+
+  @Test
+  @Timeout(value = 90, unit = TimeUnit.SECONDS)
+  void uninterruptibleSnippetTimesOutWithoutWedgingTheSandbox() throws Exception {
+    // Theme E regression test: a CPU-bound snippet that doesn't check Thread.interrupt() used to
+    // outlive the timeout — Thread.interrupt() + 1 s join returned with the thread still running,
+    // and the dispatch path completed, but the snippet thread persisted as a zombie holding
+    // refs to capture streams. The escalation chain now goes interrupt → 1 s join → jshell.stop()
+    // → 1 s join. This test runs a CPU loop with a short execution timeout, asserts the dispatch
+    // returns promptly with the "timed out" stderr marker, and asserts the same sandbox is still
+    // usable for a follow-up call (proving the zombie thread didn't break it).
+    var registry = new HostFunctionRegistry();
+    var config =
+        JvmSandboxConfig.newBuilder()
+            .withCallTimeout(Duration.ofSeconds(45))
+            .withExecutionTimeout(Duration.ofSeconds(2))
+            .build();
+
+    JvmSandbox sandbox = null;
+    try {
+      sandbox = JvmSandbox.create(config, registry);
+      var tightLoop =
+          ExecutionRequest.newBuilder()
+              .withCode("long count = 0; while (true) { count++; }")
+              .withTimeout(Duration.ofMillis(800))
+              .build();
+      var startNanos = System.nanoTime();
+      var result = sandbox.execute(tightLoop);
+      var elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;
+
+      assertEquals(1, result.exitCode(), "uninterruptible loop should exit 1");
+      assertTrue(
+          result.stderr().contains("Execution timed out"),
+          "expected timeout marker; stderr was:\n" + result.stderr());
+      assertTrue(
+          elapsedMs < 10_000L,
+          "dispatch should return within ~10 s (interrupt + jshell.stop ladder); took "
+              + elapsedMs
+              + " ms");
+
+      // The sandbox must still be usable — the zombie thread, if any, must not corrupt subsequent
+      // executes. Without jshell.stop the underlying JShell engine could be left in a bad state.
+      var followup =
+          ExecutionRequest.newBuilder()
+              .withCode("var x = 1 + 1;")
+              .withTimeout(Duration.ofSeconds(5))
+              .build();
+      var followupResult = sandbox.execute(followup);
+      assertEquals(
+          0,
+          followupResult.exitCode(),
+          "follow-up execute should succeed; stderr was:\n" + followupResult.stderr());
+    } finally {
+      if (sandbox != null) {
+        sandbox.close();
+      }
+    }
+  }
+
+  @Test
+  void collectBindingsCatchHandlesThrowableNotJustException() throws Exception {
+    // Theme E defensive-hardening assertion: collectBindings catches Throwable (not Exception),
+    // so a binding's toString throwing StackOverflowError or OOM yields a "<error: …>" stub
+    // instead of escaping into the virtual thread's uncaught handler and abandoning the snapshot.
+    //
+    // We assert this at the source level rather than via integration: JShell's varValue catches
+    // most Error subtypes internally and returns null (varies across JDKs), so a behavioural test
+    // that reliably triggers the Throwable branch is brittle. The catch type is the
+    // security-critical invariant; this test prevents an unwitting future revert to
+    // `catch (Exception e)`.
+    var sourcePath = Path.of("src/main/java/ai/singlr/repl/sandbox/JvmSandboxBootstrap.java");
+    var source = Files.readString(sourcePath, StandardCharsets.UTF_8);
+    var collectBindingsStart = source.indexOf("Map<String, String> collectBindings(");
+    assertTrue(collectBindingsStart > 0, "collectBindings method declaration not found");
+    var collectBindingsEnd = source.indexOf("\n  }", collectBindingsStart);
+    var body = source.substring(collectBindingsStart, collectBindingsEnd);
+    assertTrue(
+        body.contains("catch (Throwable"),
+        "collectBindings must catch Throwable so StackOverflowError / OOM in a binding's"
+            + " toString cannot abort the snapshot; current body:\n"
+            + body);
+    assertFalse(
+        body.contains("catch (Exception e)"),
+        "collectBindings should not narrow to Exception — that's the regression we're guarding"
+            + " against; current body:\n"
+            + body);
   }
 }

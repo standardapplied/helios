@@ -360,8 +360,23 @@ public final class JvmSandboxBootstrap {
       try {
         evalThread.join(Duration.ofMillis(timeoutMs));
         if (evalThread.isAlive()) {
+          // First try cooperative interrupt — fast for snippets that block on IO or sleep.
           evalThread.interrupt();
           evalThread.join(Duration.ofMillis(1000));
+          if (evalThread.isAlive()) {
+            // The snippet ignored the interrupt (tight CPU loop, native call, etc.). Without
+            // jshell.stop() the thread keeps running, holding references to captureOut/captureErr
+            // and slowly accumulating. JShell's stop() asks the engine to interrupt the in-flight
+            // snippet at engine level, which the JShell evaluator honours promptly.
+            try {
+              jshell.stop();
+            } catch (RuntimeException jshellStopErr) {
+              // jshell.stop() is documented best-effort; failure here just means we leak this
+              // one thread. Log and proceed so the outer dispatch path doesn't wedge.
+              jshellStopErr.printStackTrace(captureErr);
+            }
+            evalThread.join(Duration.ofMillis(1000));
+          }
           captureErr.println("Execution timed out");
           exitCode.set(1);
         }
@@ -407,7 +422,12 @@ public final class JvmSandboxBootstrap {
       String repr;
       try {
         repr = jshell.varValue(snippet);
-      } catch (Exception e) {
+      } catch (Throwable e) {
+        // Catch Throwable here (not just Exception): a malicious toString() can throw
+        // StackOverflowError, OutOfMemoryError, or AssertionError. Aborting the snapshot would
+        // kill the response with no bindings map, and propagate out of doExecute into the virtual
+        // thread's uncaught handler. The "<error: …>" stub is a recoverable substitute regardless
+        // of the failure mode.
         repr = "<error: " + e.getClass().getSimpleName() + ": " + e.getMessage() + ">";
       }
       if (repr == null) {

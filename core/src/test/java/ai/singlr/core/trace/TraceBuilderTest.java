@@ -237,6 +237,28 @@ class TraceBuilderTest {
   }
 
   @Test
+  void malformedTokenAttributeDoesNotAbandonTrace() {
+    // A custom span emitter might write a non-integer "inputTokens" attribute (debugging
+    // annotation, mistake, etc). computeTotalTokens used to throw NumberFormatException at
+    // end-of-trace, abandoning the whole trace artifact for what should be a soft error.
+    var builder = TraceBuilder.start("agent-run");
+
+    var validSpan = builder.span("model.chat", SpanKind.MODEL_CALL);
+    validSpan.attribute("inputTokens", "10").attribute("outputTokens", "5");
+    validSpan.end();
+
+    var malformedSpan = builder.span("model.chat", SpanKind.MODEL_CALL);
+    malformedSpan.attribute("inputTokens", "not-a-number").attribute("outputTokens", "also-bad");
+    malformedSpan.end();
+
+    var trace = builder.end();
+
+    assertEquals(2, trace.spans().size());
+    assertEquals(
+        15, trace.totalTokens(), "malformed attributes contribute 0, valid spans still aggregate");
+  }
+
+  @Test
   void totalTokensDefaultsToZeroWhenNoSpans() {
     var trace = TraceBuilder.start("agent-run").end();
 

@@ -23,6 +23,13 @@ public final class HostFunctionRegistry {
    * synthesizer skips them, the trajectory-trace tracking wrapper excludes them from the
    * called-host-function count, and the system prompt does not advertise them as user-supplied.
    *
+   * <p>Not enforced at {@link #register(HostFunction)}: the framework itself legitimately registers
+   * some of these names ({@code submit} via {@code SubmitFunction} in {@code
+   * CodeActPreset.applyRlm}, {@code __getInput} via {@code InputFunction}). Reservation is a
+   * downstream concern handled by the prelude synthesizer (which won't emit typed wrappers for
+   * reserved names so {@code HostBridge.submit(...)} stays the canonical caller path) and the
+   * dispatch / trajectory-counting layer (which excludes these names from per-call metrics).
+   *
    * <p>Canonical single source of truth — every component that filters reserved names reads this
    * constant.
    */

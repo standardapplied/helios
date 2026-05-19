@@ -115,4 +115,21 @@ class HostFunctionRegistryTest {
         UnsupportedOperationException.class,
         () -> HostFunctionRegistry.RESERVED_NAMES.add("__hack"));
   }
+
+  @Test
+  void registerAcceptsReservedNamesForFrameworkWiring() {
+    // The framework legitimately registers reserved names via the public register() path —
+    // CodeActPreset.applyRlm wires SubmitFunction (name = "submit") and InputFunction (name =
+    // "__getInput") this way. Earlier review wanted register() to reject reserved names; rejected
+    // because it would break the documented v2 CodeAct preset. Defense moved downstream: the
+    // prelude synthesizer skips reserved names so no typed wrapper is emitted, leaving
+    // HostBridge.submit(...) as the canonical caller path; the dispatch / trajectory layer
+    // excludes them from per-call metrics. See SandboxPreludeSynthesisTest for the
+    // synthesizer-side enforcement.
+    var registry = new HostFunctionRegistry();
+    for (var reserved : HostFunctionRegistry.RESERVED_NAMES) {
+      registry.register(new HostFunction(reserved, "framework wiring", params -> null));
+    }
+    assertEquals(HostFunctionRegistry.RESERVED_NAMES.size(), registry.size());
+  }
 }

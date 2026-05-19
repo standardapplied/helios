@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -55,7 +56,7 @@ import java.util.function.Function;
  */
 public final class SessionRegistry {
 
-  private final ConcurrentHashMap<String, Entry> sessions = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<String, SessionEntry> sessions = new ConcurrentHashMap<>();
   private final Function<SessionOptions, AgentSession> factory;
   private final Clock clock;
   private final int maxSessions;
@@ -122,7 +123,7 @@ public final class SessionRegistry {
     }
     var session = factory.apply(options);
     Objects.requireNonNull(session, "factory returned null session");
-    var entry = new Entry(session, new AtomicReference<>());
+    var entry = new SessionEntry(session, new AtomicReference<>());
     var prev = sessions.putIfAbsent(options.sessionId(), entry);
     if (prev != null) {
       session.close();
@@ -234,12 +235,12 @@ public final class SessionRegistry {
             .min(
                 Comparator.comparing(
                     e -> e.getValue().terminatedAt().get(), Comparator.naturalOrder()))
-            .map(java.util.Map.Entry::getKey);
+            .map(Map.Entry::getKey);
     return oldestId.map(this::close).orElse(false);
   }
 
   /** Per-session bookkeeping: the session itself + the instant its result-future completed. */
-  private record Entry(AgentSession session, AtomicReference<Instant> terminatedAt) {}
+  private record SessionEntry(AgentSession session, AtomicReference<Instant> terminatedAt) {}
 
   /** Fluent builder for {@link SessionRegistry}. */
   public static final class Builder {

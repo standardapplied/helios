@@ -67,7 +67,14 @@ public final class JvmSandbox implements Sandbox {
       return;
     }
     if (process.isAlive()) {
+      // Snapshot descendants first — once the parent is killed, the OS reparents orphans to init
+      // and process.descendants() returns empty (the kernel no longer sees them in this subtree).
+      // The snapshot is followed immediately by the parent kill so the parent can't fork new
+      // descendants during the sweep; if it does, the new fork escapes — but the parent is dead
+      // within microseconds so the window is effectively closed.
+      var descendantsSnapshot = process.descendants().toList();
       process.destroyForcibly();
+      descendantsSnapshot.forEach(ProcessHandle::destroyForcibly);
     }
   }
 
@@ -275,7 +282,15 @@ public final class JvmSandbox implements Sandbox {
       // will the reader thread's blocking readLine() return with EOF. If we closed the
       // transport first, reader.close() could deadlock waiting for a read() that's pinned in a
       // native call. Once the subprocess is dead, transport.close() is a clean no-op wind-down.
+      //
+      // Snippets can call Runtime.exec(...) — without the descendants walk, orphaned
+      // grandchildren survive the sandbox. Snapshot descendants BEFORE killing the parent: once
+      // the parent dies, the OS reparents orphans to init and process.descendants() goes empty.
+      // The parent kill immediately after the snapshot closes the fork-new-descendant window
+      // (microseconds wide).
+      var descendantsSnapshot = process.descendants().toList();
       process.destroyForcibly();
+      descendantsSnapshot.forEach(ProcessHandle::destroyForcibly);
       try {
         process.waitFor(Duration.ofSeconds(5));
       } catch (InterruptedException e) {

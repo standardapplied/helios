@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.model.Message;
@@ -187,6 +188,33 @@ final class RuntimeServerTest {
     try {
       assertNotNull(server);
       assertTrue(server.port() > 0);
+    } finally {
+      server.close();
+    }
+  }
+
+  @Test
+  void defaultHostIsLoopbackNotAllInterfaces() {
+    // Fail-secure default: a deployer who forgets withHost(...) should NOT have their service
+    // exposed on every interface. POST /sessions is unauthenticated and spends real money on the
+    // configured model. Loopback is the conservative default; explicit withHost("0.0.0.0") is
+    // the opt-in for all-interfaces binding.
+    assertEquals("127.0.0.1", RuntimeServer.Builder.defaultHostForTests());
+    var server =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory())
+            .withPort(0)
+            .build();
+    try {
+      assertTimeoutPreemptively(
+          java.time.Duration.ofSeconds(2),
+          () -> {
+            try (var s = new java.net.Socket()) {
+              s.connect(new java.net.InetSocketAddress("127.0.0.1", server.port()), 1000);
+              assertTrue(s.isConnected());
+            }
+          });
     } finally {
       server.close();
     }

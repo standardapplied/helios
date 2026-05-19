@@ -38,7 +38,7 @@ public record RetryPolicy(
    * @throws InterruptedException if the thread is interrupted while waiting
    */
   public <T> T execute(Callable<T> operation) throws RetryExhaustedException, InterruptedException {
-    Throwable lastException = null;
+    Exception lastException = null;
 
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -46,7 +46,7 @@ public record RetryPolicy(
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
         throw e;
-      } catch (Throwable t) {
+      } catch (Exception t) {
         lastException = t;
 
         boolean shouldRetry;

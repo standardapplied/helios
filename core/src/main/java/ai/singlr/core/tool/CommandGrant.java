@@ -264,11 +264,11 @@ public final class CommandGrant {
     var exited = proc.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
     var timedOut = !exited;
     if (timedOut) {
-      proc.descendants().forEach(ProcessHandle::destroy);
       proc.destroy();
+      proc.descendants().forEach(ProcessHandle::destroy);
       if (!proc.waitFor(2, TimeUnit.SECONDS)) {
-        proc.descendants().forEach(ProcessHandle::destroyForcibly);
         proc.destroyForcibly();
+        proc.descendants().forEach(ProcessHandle::destroyForcibly);
         proc.waitFor(1, TimeUnit.SECONDS);
       }
     }

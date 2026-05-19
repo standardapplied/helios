@@ -216,8 +216,30 @@ final class StopClassifierTest {
   }
 
   @Test
-  void lengthContinues() {
-    assertTrue(classifier.classify(state(), defaults(), FinishReason.LENGTH, "", false).isEmpty());
+  void lengthTerminatesWithErrorDuringExecution() {
+    // LENGTH means the provider truncated the response at its max_output_tokens cap. Returning
+    // Optional.empty() makes the loop re-issue the same turn — the model will hit the same cap
+    // and the loop iterates until maxTurns burns out (~100 turns of wasted budget). Classifying as
+    // terminal at the first LENGTH avoids the burn and surfaces a meaningful error to the caller.
+    var terminal =
+        classifier
+            .classify(state(), defaults(), FinishReason.LENGTH, "partial output", false)
+            .orElseThrow();
+    var err = (ResultMessage.ErrorDuringExecution) terminal;
+    assertEquals("max-tokens", err.error().kind());
+    assertTrue(
+        err.error().message().contains("max_output_tokens")
+            || err.error().message().contains("response truncated"),
+        "message should indicate the response was truncated; got: " + err.error().message());
+  }
+
+  @Test
+  void lengthTerminatesEvenWhenAssistantContentIsBlank() {
+    // The model can hit LENGTH before producing any text (e.g. truncation mid-tool-call). The
+    // terminal still carries an informative error kind so callers don't have to disambiguate.
+    var terminal =
+        classifier.classify(state(), defaults(), FinishReason.LENGTH, "", false).orElseThrow();
+    assertTrue(terminal instanceof ResultMessage.ErrorDuringExecution);
   }
 
   @Test

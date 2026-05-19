@@ -2,6 +2,102 @@
 
 All notable changes to Helios are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [Unreleased] — production-hardening pass
+
+Wide-ranging hardening pass driven by an independent review of the v2 surface. Eleven theme commits on `review/production-hardening` plus a back-fill pass that landed real subprocess-level tests for the sandbox hardening and caught a real bug in the descendant-kill ordering.
+
+### Added — `SerializedError.withoutStackTrace()` + `ResultMessage.withoutStackTraces()`
+
+Library-provided utility methods for deployers who want to strip stack frames from terminals before forwarding to downstream clients. Helios itself does NOT auto-apply these — diagnostic info flows to the deployer by default; redaction is the deployer's call at their HTTP layer.
+
+### Added — `JShellExecutionProvider.redactingBindingsListener(registry, delegate)`
+
+Wraps a `SandboxBindingsListener` so operator telemetry of sandbox working memory automatically redacts against the configured `SecretRegistry`. Applied transparently when a registry is configured on the provider; `var apiKey = "sk-..."` in JShell working memory now reaches the listener as `var apiKey = "<redacted:NAME>"`.
+
+### Added — `CancellationToken.activeCallbackCountForTests()`
+
+Visible-for-testing accessor exposing the count of currently-attached `onCancel(...)` callbacks. Used to prove per-call sites correctly invoke `Registration#remove()` so callbacks don't accumulate on long-lived per-session tokens.
+
+### Changed — `RuntimeServer.Builder` defaults to `127.0.0.1`
+
+Fail-secure: the `POST /sessions` route is unauthenticated and creates real model-spending sessions; previously binding `0.0.0.0` by default exposed that surface to anything that could route to the host. Deployers who want external traffic opt in explicitly via `withHost("0.0.0.0")` or a specific interface.
+
+### Changed — `FinishReason.LENGTH` now terminates the loop
+
+When the provider truncates output at its `max_output_tokens` cap, `StopClassifier` now returns `ResultMessage.ErrorDuringExecution(kind="max-tokens")`. The previous behaviour mapped `LENGTH` to `Optional.empty()` (continue) — the loop would re-issue the same turn, the model would hit the same cap again, and `maxTurns` (default 100) silently burned through. Deployers that need higher per-turn ceilings should raise `ModelConfig.maxOutputTokens` instead of relying on the loop to retry. Breaking for callers that relied on the silent re-issue.
+
+### Changed — SSE event emit is bounded, no longer blocks indefinitely
+
+`AgentSession`'s event publisher previously used `SubmissionPublisher.submit(...)` which blocks the producer when any subscriber fills its 256-item buffer — a paused SSE client could pin the agent loop forever. The loop now emits via `offer(...)` with bounded timeouts: 1s for routine events (`AssistantText`, `ToolUse`, `ToolResult`, etc.) which may drop on a sustained slow consumer with a FINE log; 30s for control events (`LoopEnded`, `QuestionAsked`, `Error`) which log WARNING on the rare drop. Callers that depended on guaranteed delivery for routine events lose that guarantee.
+
+### Changed — `ModelConfig.toString()` redacts the API key and header values
+
+Records' default `toString()` includes every component; `apiKey` and every `headers` entry-value used to land verbatim in any `logger.info("config={}", cfg)` callsite. The override emits `apiKey=<redacted>` and `headers={Authorization=<redacted>, …}` — header names are preserved for diagnostic context.
+
+### Changed — Gemini API records renamed `is*()` → `hasType*()`
+
+Three records exposed boolean accessors (record components or helper methods) that Jackson 3.x's `AUTO_DETECT_IS_GETTERS` treats as virtual properties: `StreamingEvent.isInteractionCreated()` etc. → `hasType*()`; `InteractionResponse.isCompleted()` / `.isFailed()` / `.requiresAction()` → `hasStatus*()`; `Step.isError` record component → `errorFlag` (with `@JsonProperty("is_error")` preserving the wire format). Source-incompatible for direct callers of those methods.
+
+### Fixed — `JvmSandbox.close()` and shutdown hook reap subprocess descendants
+
+Snippets that call `Runtime.getRuntime().exec(...)` previously orphaned their grandchildren past sandbox lifetime — `process.destroyForcibly()` killed the parent but the descendant walk happened after, and once the parent dies the OS reparents orphans to init so `process.descendants()` returns empty. Both call sites now snapshot descendants BEFORE killing the parent, then forcibly destroy the snapshot. (The original fix in the branch had the ordering wrong; the back-fill subprocess test caught it.)
+
+### Fixed — Uninterruptible JShell snippets escalate via `jshell.stop()`
+
+A CPU-bound snippet that ignores `Thread.interrupt()` previously persisted as a zombie thread after `evalThread.join(1s)` returned with the thread still alive. The timeout ladder now goes `Thread.interrupt` → 1s join → `jshell.stop()` → 1s join, and the same sandbox is verified usable for a follow-up execute after the timeout.
+
+### Fixed — `JvmSandboxBootstrap.collectBindings` catches `Throwable`, not just `Exception`
+
+A binding whose `toString()` throws `StackOverflowError` / `OutOfMemoryError` previously escaped the per-binding `catch (Exception ...)`, aborting the snapshot and propagating into the virtual thread's uncaught handler. Now catches `Throwable` and renders `<error: …>` per binding.
+
+### Fixed — `RetryPolicy.execute` catches `Exception`, not `Throwable`
+
+`Error` subtypes (OOM, StackOverflow, LinkageError) previously got wrapped in `RetryExhaustedException` and propagated as a runtime exception, defeating the documented "Loop crash semantics" invariant where Errors escape so the host thread dies cleanly. Now narrowed to `Exception`.
+
+### Fixed — `Tool.execute` preserves interrupt status
+
+When the executor's exception chain carries an `InterruptedException` (typical for tools that wrap blocking calls), the calling thread's interrupt flag is now re-set before returning the failure `ToolResult`. Subsequent blocking calls observe the interrupt and the session loop can cancel promptly.
+
+### Fixed — `TraceBuilder.computeTotalTokens` soft-fails malformed token attributes
+
+A custom span emitter writing a non-integer `inputTokens`/`outputTokens` attribute previously threw `NumberFormatException` at `end()` time, abandoning the entire trace artifact. Malformed values now contribute 0 to the total; the trace builds with the rest of the spans intact.
+
+### Fixed — `CommandGrant` timeout kill ordering
+
+The descendant kill happened before the parent kill, leaving a window where the parent could fork new descendants during the sweep. Now kills the parent first (so it can't fork), then walks descendants.
+
+### Fixed — `SessionQuestionGateway` captures the cancellation `Registration`
+
+`ask(...)` registered an `onCancel(...)` callback and dropped the returned `Registration` on the floor; every `AskUserQuestion` call accumulated one inert closure pinning the completed future on the long-lived per-session `CancellationToken`. Now captured and `remove()`d in `finally`.
+
+### Fixed — `OnnxModelDownloader` rejects HuggingFace path traversal
+
+The HF API's `path` field used to flow verbatim into `Files.copy(... REPLACE_EXISTING)` with only a whitelisted `modelName` as the prior defence. A compromised mirror, MITM, or future malicious model card returning `"../../tmp/pwn"` or an absolute path could overwrite any JVM-writable file. `OnnxModelDownloader.resolveLocalPath` now refuses absolute paths and lexically rejects traversal after normalisation.
+
+### Fixed — `OnnxEmbeddingModel` tensor + tokenizer leaks
+
+`embedInternal` had the `OnnxTensor` cleanup `finally` scoped to the `ortSession.run(inputs)` try — an `OrtException` thrown by the second or third `OnnxTensor.createTensor` leaked the already-built tensors. The cleanup now wraps the entire creation + run block. `close()` also closes the DJL `HuggingFaceTokenizer` (holds native Rust allocations), where it previously closed only the `OrtSession`.
+
+### Fixed — `OnnxModelDownloader` idempotent finished-marker creation
+
+`Files.createFile(FINISHED_MARKER)` previously threw `FileAlreadyExistsException` on a concurrent second downloader, surfacing as an opaque init failure after the model itself downloaded fine. Marker creation now exists-checks then narrowly catches `FileAlreadyExistsException`.
+
+### Fixed — `PgConfig` rejects malformed schema names
+
+`PgConfig#qualify(sql)` interpolates the schema name into SQL via `String.replace("%s", schema)`. Helidon DbClient cannot parameterise identifiers, so the compact-constructor validator is the only line of defence if the schema name ever flows from configuration or external input. Validates against Postgres' unquoted-identifier shape: `[A-Za-z_][A-Za-z0-9_]{0,62}`.
+
+### Fixed — Gemini and Anthropic SSE `BufferedReader` use UTF-8 explicitly
+
+Both providers used the platform-default charset; pre-JDK-18 container base images on Linux default to `ISO-8859-1` and silently mangle multi-byte content (CJK assistant text, emoji, grounding citation titles). OpenAI was already correct; the other two now match.
+
+### Internal — convention sweep across the source tree
+
+Inline FQNs (`new java.util.ArrayList<…>`, `java.util.Map.of()`, etc.) replaced with proper imports across `helios-core`, `helios-session`, `helios-runtime`, `helios-persistence`. Inline `s == null || s.isBlank()` patterns replaced with `Strings.isBlank(s)` across `helios-gemini`, `helios-anthropic`, `helios-openai`, `helios-onnx`. Per `CLAUDE.md` conventions.
+
+### Known limitations carried into the next release
+
+Three review findings are deferred and documented in the README under "Known limitations": (1) the sandbox RPC channel rides on subprocess stdout and is forgeable from inside the sandbox — mitigated today by OS-level sandboxing, planned fix is a Unix domain socket; (2) the persistence layer does not route through `SecretRegistry` — callers must redact before handing payloads to `PgTraceStore` / `PgToolCallJournal`; (3) provider error bodies (Gemini/Anthropic/OpenAI) are echoed verbatim into exception messages — no `SecretRegistry` integration on this path yet.
+
 ## [2.1.2] — 2026-05-18
 
 Re-cut of 2.1.1 plus a fix for an SSE-subscribe race that surfaced during the 2.1.1 release workflow. **2.1.1 never reached Maven Central** — the release-action test phase tripped over the race and skipped the deploy. 2.1.2 is the first publicly-published version with the Phase 6c P0 fixes from 2.1.1 (see entry below) plus this fix.

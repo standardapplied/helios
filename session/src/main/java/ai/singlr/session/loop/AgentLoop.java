@@ -5,6 +5,7 @@
 package ai.singlr.session.loop;
 
 import ai.singlr.core.context.TokenCounter;
+import ai.singlr.core.model.InlineFile;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Response;
 import ai.singlr.session.CompactionResult;
@@ -22,10 +23,13 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Top-level orchestrator that drives one open-ended session to a terminal {@link ResultMessage}.
@@ -61,6 +65,8 @@ import java.util.function.Function;
  * {@link SteeringQueue}, {@link ToolDispatch}) are owned by the caller.
  */
 public final class AgentLoop {
+
+  private static final Logger LOGGER = Logger.getLogger(AgentLoop.class.getName());
 
   /**
    * Watermark fraction of {@link SessionLimits#maxContextTokens()} at which a {@link
@@ -266,16 +272,15 @@ public final class AgentLoop {
     }
   }
 
-  private static java.util.List<ai.singlr.core.model.InlineFile> collectAttachments(
-      List<UserMessage> messages) {
-    var attachments = new ArrayList<ai.singlr.core.model.InlineFile>();
+  private static List<InlineFile> collectAttachments(List<UserMessage> messages) {
+    var attachments = new ArrayList<InlineFile>();
     for (var m : messages) {
       attachments.addAll(m.attachments());
     }
     return attachments;
   }
 
-  private static String stringField(java.util.Map<String, Object> map, String key) {
+  private static String stringField(Map<String, Object> map, String key) {
     var v = map.get(key);
     return v instanceof String s ? s : null;
   }
@@ -323,7 +328,13 @@ public final class AgentLoop {
       }
       case HookOutcome.Inject inj -> {
         emitter.emitHookFired(state, hookName, "PreStopHook", "Inject");
-        steeringQueue.offer(UserMessage.text(inj.userMessage()));
+        if (!steeringQueue.offer(UserMessage.text(inj.userMessage()))) {
+          LOGGER.log(
+              Level.WARNING,
+              "PreStopHook ''{0}'' Inject was dropped: steering queue full; session will continue"
+                  + " without the injected message",
+              hookName);
+        }
         yield Optional.empty();
       }
       // MutateInput / Block are not meaningful at PreStop — treat as Continue.
@@ -393,6 +404,7 @@ public final class AgentLoop {
     try {
       result = contextCompactor.compact(historyBefore, state);
     } catch (RuntimeException e) {
+      LOGGER.log(Level.WARNING, "context compactor threw; leaving history unchanged this turn", e);
       return;
     }
     if (result == null) {

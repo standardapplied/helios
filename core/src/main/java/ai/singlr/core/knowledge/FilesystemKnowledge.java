@@ -13,6 +13,7 @@ import ai.singlr.core.tool.ToolParameter;
 import ai.singlr.core.tool.ToolResult;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
@@ -475,7 +476,7 @@ public final class FilesystemKnowledge {
             }
           }
         }
-      } catch (java.io.UncheckedIOException | IOException ignored) {
+      } catch (UncheckedIOException | IOException ignored) {
         // unreadable file — skip silently
       }
       return FileVisitResult.CONTINUE;
