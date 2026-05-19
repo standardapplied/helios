@@ -12,6 +12,7 @@ import ai.singlr.core.runtime.SessionContext;
 import ai.singlr.repl.ReplConfig;
 import ai.singlr.repl.ReplException;
 import ai.singlr.repl.ReplSession;
+import ai.singlr.repl.SandboxBindingsListener;
 import ai.singlr.session.execution.ExecutionCapabilities;
 import ai.singlr.session.execution.ExecutionProvider;
 import ai.singlr.session.execution.ExecutionRequest;
@@ -19,6 +20,7 @@ import ai.singlr.session.execution.ExecutionResult;
 import ai.singlr.session.execution.Runtime;
 import ai.singlr.session.execution.SessionStartOutcome;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -105,7 +107,9 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
   private final String startupSnippet;
 
   private JShellExecutionProvider(Builder b) {
-    this.replConfig = b.replConfig;
+    var bareConfig = b.replConfig;
+    this.secretRegistry = b.secretRegistry != null ? b.secretRegistry : new SecretRegistry();
+    this.replConfig = withRedactingBindingsListener(bareConfig, this.secretRegistry);
     this.maxConcurrentSessions = b.maxConcurrentSessions;
     this.sessionPermits = new Semaphore(maxConcurrentSessions);
     this.capabilities =
@@ -115,7 +119,6 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
             .withFilesystemWriteAllowed(b.filesystemWriteAllowed)
             .withMaxTimeout(b.maxTimeout)
             .build();
-    this.secretRegistry = b.secretRegistry != null ? b.secretRegistry : new SecretRegistry();
     this.startupSnippet = b.startupSnippet;
     this.shutdownHook = new Thread(this::reapAllSessions, "helios-jshell-shutdown");
     this.shutdownHookRegistered = b.registerShutdownHook;
@@ -409,6 +412,61 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     var stderrResult = redactor.redact(raw.stderr());
     return new RedactedOutput(
         stdoutResult.text(), stderrResult.text(), mergeCounts(stdoutResult, stderrResult));
+  }
+
+  /**
+   * Return a copy of {@code config} whose {@link SandboxBindingsListener} is wrapped to scrub every
+   * binding value through {@code registry}'s redactor before delivery. {@code stdout} and {@code
+   * stderr} are redacted upstream by {@link #redactRaw}; without this wrapper, operator telemetry
+   * receiving the bindings snapshot would see {@code var apiKey = "sk-..."} verbatim.
+   *
+   * <p>Returns {@code config} unchanged when no listener is configured.
+   */
+  private static ReplConfig withRedactingBindingsListener(
+      ReplConfig config, SecretRegistry registry) {
+    var listener = redactingBindingsListener(registry, config.sandboxBindingsListener());
+    if (listener == config.sandboxBindingsListener()) {
+      return config;
+    }
+    return new ReplConfig(
+        config.sandboxFactory(),
+        config.executionTimeout(),
+        config.maxConcurrentSessions(),
+        config.hostFunctions(),
+        config.maxOutputCharsToModel(),
+        listener,
+        config.maxBindingValueChars(),
+        config.maxBindingSnapshotChars(),
+        config.maxExecutedCodeChars());
+  }
+
+  /**
+   * Build a {@link SandboxBindingsListener} that decorates {@code delegate} with per-value
+   * redaction against {@code registry}. Returns {@code null} when {@code delegate} is null
+   * (preserves the null-disables semantics of {@link ReplConfig#sandboxBindingsListener()}).
+   *
+   * <p>Package-private for testing — the wrapping logic is the security-critical bit and is worth
+   * exercising directly without needing a full sandbox subprocess.
+   */
+  static SandboxBindingsListener redactingBindingsListener(
+      SecretRegistry registry, SandboxBindingsListener delegate) {
+    if (delegate == null) {
+      return null;
+    }
+    return (bindings, result) -> {
+      if (bindings.isEmpty()) {
+        delegate.onBindings(bindings, result);
+        return;
+      }
+      var redactor = registry.redactor();
+      var redacted = new LinkedHashMap<String, String>(bindings.size());
+      for (var entry : bindings.entrySet()) {
+        var value = entry.getValue();
+        redacted.put(entry.getKey(), value == null ? null : redactor.redact(value).text());
+      }
+      // Preserve declaration order — Map.copyOf would lose it. The listener never mutates.
+      delegate.onBindings(Collections.unmodifiableMap(redacted), result);
+    };
   }
 
   private static Map<String, Integer> mergeCounts(RedactionResult a, RedactionResult b) {

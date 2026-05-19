@@ -61,6 +61,20 @@ public sealed interface ResultMessage
   Duration duration();
 
   /**
+   * Return a redacted copy with any carried {@link SerializedError} stripped of stack-trace frames.
+   * Returns {@code this} unchanged when the terminal carries no error or the carried error is
+   * already free of frames. Used at trust boundaries (HTTP responses, SSE serialisation) so
+   * library-internal class names and file:line numbers do not leak to clients.
+   *
+   * <p>Default implementation: no-op. Overridden by {@link ErrorDuringExecution}.
+   *
+   * @return a stack-trace-free copy, or {@code this} when no redaction was needed
+   */
+  default ResultMessage withoutStackTraces() {
+    return this;
+  }
+
+  /**
    * Validate the four fields every subtype shares. Each record's canonical constructor calls this
    * before applying its own field-specific checks.
    *
@@ -177,6 +191,14 @@ public sealed interface ResultMessage
     public ErrorDuringExecution {
       validateCommon(sessionId, usage, cost, duration);
       Objects.requireNonNull(error, "error must not be null");
+    }
+
+    @Override
+    public ResultMessage withoutStackTraces() {
+      var redacted = error.withoutStackTrace();
+      return redacted == error
+          ? this
+          : new ErrorDuringExecution(sessionId, redacted, usage, cost, duration);
     }
   }
 

@@ -228,7 +228,7 @@ public final class AgentHttpService implements HttpService {
                   sink.emit(
                       SseEvent.builder()
                           .name(eventName(event))
-                          .data(objectMapper.writeValueAsString(event))
+                          .data(objectMapper.writeValueAsString(redactForWire(event)))
                           .build());
                 } catch (Exception ex) {
                   if (!isDisconnect(ex)) {
@@ -306,7 +306,7 @@ public final class AgentHttpService implements HttpService {
   static ResultLongPollOutcome awaitResult(
       CompletableFuture<ResultMessage> future, long timeoutSeconds, String sessionIdForLog) {
     try {
-      var terminal = future.get(timeoutSeconds, TimeUnit.SECONDS);
+      var terminal = future.get(timeoutSeconds, TimeUnit.SECONDS).withoutStackTraces();
       return new ResultLongPollOutcome(
           Status.OK_200, Map.of("type", terminal.getClass().getSimpleName(), "result", terminal));
     } catch (TimeoutException e) {
@@ -317,13 +317,12 @@ public final class AgentHttpService implements HttpService {
           Status.SERVICE_UNAVAILABLE_503,
           Map.of("error", "request interrupted while waiting for session result"));
     } catch (ExecutionException e) {
+      // Full cause logged server-side. The HTTP body must NOT echo cause.getMessage() — it may
+      // contain internal paths, secret fragments, or class names that should not exfiltrate.
       LOGGER.log(
           Level.WARNING, "session " + sessionIdForLog + " result future failed exceptionally", e);
-      var cause = e.getCause();
-      var msg = cause == null || cause.getMessage() == null ? "unknown" : cause.getMessage();
       return new ResultLongPollOutcome(
-          Status.INTERNAL_SERVER_ERROR_500,
-          Map.of("error", "session terminated abnormally: " + msg));
+          Status.INTERNAL_SERVER_ERROR_500, Map.of("error", "session terminated abnormally"));
     }
   }
 
@@ -396,6 +395,31 @@ public final class AgentHttpService implements HttpService {
 
   private static String eventName(QueryEvent event) {
     return event.getClass().getSimpleName();
+  }
+
+  /**
+   * Strip stack-trace frames from any error payload carried inside {@code event} before
+   * wire-serialisation. Used for SSE emit so terminal events ({@link QueryEvent.LoopEnded} carrying
+   * an {@link ResultMessage.ErrorDuringExecution}, or a standalone {@link QueryEvent.Error}) do not
+   * leak library-internal class names and file:line numbers to clients. Returns {@code event}
+   * unchanged when there is nothing to redact. Package-private for direct unit-test access.
+   */
+  static QueryEvent redactForWire(QueryEvent event) {
+    return switch (event) {
+      case QueryEvent.LoopEnded le -> {
+        var redacted = le.result().withoutStackTraces();
+        yield redacted == le.result()
+            ? le
+            : new QueryEvent.LoopEnded(le.sessionId(), le.turnIndex(), le.timestamp(), redacted);
+      }
+      case QueryEvent.Error err -> {
+        var redacted = err.error().withoutStackTrace();
+        yield redacted == err.error()
+            ? err
+            : new QueryEvent.Error(err.sessionId(), err.turnIndex(), err.timestamp(), redacted);
+      }
+      default -> event;
+    };
   }
 
   /**
