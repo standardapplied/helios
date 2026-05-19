@@ -155,6 +155,19 @@ public final class JvmSandbox implements Sandbox {
   /**
    * Create and start a new JVM subprocess sandbox.
    *
+   * <p><strong>Same-UID isolation assumption.</strong> The RPC channel rides on a Unix-domain
+   * socket inside a private 0700 directory, which blocks cross-UID attackers from enumerating or
+   * connecting to the socket. It does NOT defend against a process running under the same UID as
+   * the Helios host: between {@code listener.bind} and the subprocess's {@code connect}, a same-UID
+   * attacker that polls the temp directory can race the legitimate subprocess and win the single
+   * backlog slot, after which the host treats the attacker's connection as the sandbox RPC channel
+   * and the real subprocess fails to connect. Helios currently assumes the deployer arranges
+   * per-session UIDs (or any other OS-level mechanism that prevents same-UID coresidence with
+   * untrusted workloads — containers, namespaces, per-tenant service accounts). A future change
+   * will close the race authoritatively via Panama-based {@code SO_PEERCRED} (Linux) / {@code
+   * LOCAL_PEERCRED} (BSD/macOS) verification on accept; until then, do not run Helios alongside
+   * untrusted workloads under a shared UID.
+   *
    * @param config the sandbox configuration
    * @param registry the host function registry
    * @return a running sandbox
