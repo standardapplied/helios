@@ -4,7 +4,19 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased] — production-hardening pass
 
-Wide-ranging hardening pass driven by an independent review of the v2 surface. Eleven theme commits on `review/production-hardening` plus a back-fill pass that landed real subprocess-level tests for the sandbox hardening and caught a real bug in the descendant-kill ordering.
+Wide-ranging hardening pass driven by an independent review of the v2 surface. Eleven theme commits on the original `review/production-hardening` branch plus a back-fill pass (that caught a real descendant-kill ordering bug in the security tests) plus Path B: opt-in trace-side redaction (`PgConfig.withRedactor`) and the C1 sandbox-RPC-channel relocation closing the stdout-forgery vector.
+
+### Security — sandbox RPC moved off subprocess stdout (C1)
+
+`JvmSandbox` ↔ host RPC previously rode on the subprocess's stdout with a `\0RPC:`-prefixed magic line discriminator. A JShell snippet could write a forged frame directly to `FileDescriptor.out` (bypassing the captured-output redirection) and reach the host's RPC dispatcher — invoking any registered `HostFunction` out-of-band. Pre-fix behavioural test (`JvmSandboxTest.rawStdoutWriteDoesNotForgeAnRpcCallToHost`) confirmed the forgery worked.
+
+Now: per-session Unix domain socket bound in a private temp directory (mode 0700 on POSIX). Host accepts exactly one connection from the subprocess on startup, closes the listener, deletes the socket file. Subprocess stdout stays for captured-output only and is never parsed as RPC. The same behavioural test now confirms forged frames on stdout are inert. The vestigial `\0RPC:` prefix on subprocess→host frames is retained because it costs nothing and keeps the `ProcessTransport` test surface stable.
+
+Bootstrap now requires `--rpc-socket=<path>` as a launch argument and connects on startup; absence is a fatal error (exit code 2). Subprocess stdin is closed by the host post-spawn since the socket carries both directions of RPC.
+
+### Added — opt-in `PgConfig.Builder.withRedactor(Redactor)`
+
+Persistence layer can now apply a `Redactor` to trace and journal text fields before persisting. Default unset = verbatim capture (current behaviour, the documented evals / debug surface). Set the redactor and `PgTraceStore.store` / `PgToolCallJournal.start|complete|fail` route every text field through it; trace and span attribute maps are redacted per-value before `JsonbMapper.toJsonb`. Tool-call `args` is serialised first then passed through the redactor (byte-level scrubbing catches registered secrets in any JSON-string position).
 
 ### Added — `SerializedError.withoutStackTrace()` + `ResultMessage.withoutStackTraces()`
 
@@ -94,9 +106,9 @@ Both providers used the platform-default charset; pre-JDK-18 container base imag
 
 Inline FQNs (`new java.util.ArrayList<…>`, `java.util.Map.of()`, etc.) replaced with proper imports across `helios-core`, `helios-session`, `helios-runtime`, `helios-persistence`. Inline `s == null || s.isBlank()` patterns replaced with `Strings.isBlank(s)` across `helios-gemini`, `helios-anthropic`, `helios-openai`, `helios-onnx`. Per `CLAUDE.md` conventions.
 
-### Known limitations carried into the next release
+### Path B closed all three deferred items from the original review
 
-Three review findings are deferred and documented in the README under "Known limitations": (1) the sandbox RPC channel rides on subprocess stdout and is forgeable from inside the sandbox — mitigated today by OS-level sandboxing, planned fix is a Unix domain socket; (2) the persistence layer does not route through `SecretRegistry` — callers must redact before handing payloads to `PgTraceStore` / `PgToolCallJournal`; (3) provider error bodies (Gemini/Anthropic/OpenAI) are echoed verbatim into exception messages — no `SecretRegistry` integration on this path yet.
+C1 (sandbox stdout-RPC forgery) — fixed; see "Security — sandbox RPC moved off subprocess stdout" above. Theme J (persistence redaction) — reframed as the deployer's responsibility (the persistence layer's job is faithful capture for evals and debug) with an opt-in `PgConfig.Builder.withRedactor` hook for deployers who want defense-in-depth at the persistence boundary; see "Added — opt-in `PgConfig.Builder.withRedactor(Redactor)`" above. M4 (provider error body in exception messages) — left as documented diagnostic behaviour; deployers catch the exception at their call site and decide what to log.
 
 ## [2.1.2] — 2026-05-18
 

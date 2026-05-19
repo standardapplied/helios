@@ -1159,6 +1159,68 @@ class JvmSandboxTest {
   }
 
   @Test
+  @Timeout(value = 90, unit = TimeUnit.SECONDS)
+  void rawStdoutWriteDoesNotForgeAnRpcCallToHost() {
+    // C1 regression test: pre-fix, the JvmSandbox ↔ host RPC channel rode on the subprocess's
+    // stdout, with `\0RPC:` lines distinguishing RPC frames from regular print output. A snippet
+    // could obtain a raw PrintStream to FileDescriptor.out, write a forged `\0RPC:` frame, and
+    // the host's RPC parser dispatched it — invoking any registered HostFunction out-of-band.
+    //
+    // Post-fix: the RPC channel rides on a dedicated Unix domain socket. The host reads
+    // subprocess stdout only for captured output; no RPC parser ever sees it. A forged frame on
+    // stdout is just text content, never dispatched to a HostFunction.
+    var invocations = new java.util.concurrent.atomic.AtomicInteger();
+    var registry = new HostFunctionRegistry();
+    registry.register(
+        new ai.singlr.repl.host.HostFunction(
+            "auditCallback",
+            "test capture for forged RPC invocations",
+            params -> {
+              invocations.incrementAndGet();
+              return null;
+            }));
+    var config =
+        JvmSandboxConfig.newBuilder()
+            .withCallTimeout(Duration.ofSeconds(45))
+            .withExecutionTimeout(Duration.ofSeconds(30))
+            .build();
+    JvmSandbox sandbox = null;
+    try {
+      sandbox = JvmSandbox.create(config, registry);
+      // The snippet does what a malicious snippet would do: obtain a PrintStream wired directly
+      // to FileDescriptor.out (bypassing System.setOut redirection), then write a fully-formed
+      // forged JSON-RPC request frame including the `\0RPC:` magic prefix.
+      var attack =
+          "var raw = new java.io.PrintStream("
+              + "new java.io.FileOutputStream(java.io.FileDescriptor.out));"
+              + "raw.print(\"\\u0000RPC:{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":\\\"forged\\\","
+              + "\\\"method\\\":\\\"auditCallback\\\",\\\"params\\\":{}}\\n\");"
+              + "raw.flush();"
+              + "Thread.sleep(500);"; // give the host a chance to misparse if vulnerable
+      var result =
+          sandbox.execute(
+              ExecutionRequest.newBuilder()
+                  .withCode(attack)
+                  .withTimeout(Duration.ofSeconds(10))
+                  .build());
+
+      assertEquals(
+          0,
+          invocations.get(),
+          "raw-stdout RPC forgery must NOT reach the host's HostFunction dispatcher. The forged"
+              + " frame should land in captured stdout (or be discarded) — never be parsed as an"
+              + " RPC request. Subprocess result stdout: "
+              + result.stdout()
+              + " stderr: "
+              + result.stderr());
+    } finally {
+      if (sandbox != null) {
+        sandbox.close();
+      }
+    }
+  }
+
+  @Test
   void collectBindingsCatchHandlesThrowableNotJustException() throws Exception {
     // Theme E defensive-hardening assertion: collectBindings catches Throwable (not Exception),
     // so a binding's toString throwing StackOverflowError or OOM yields a "<error: …>" stub

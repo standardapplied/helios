@@ -13,7 +13,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.Channels;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -73,23 +78,71 @@ public final class JvmSandboxBootstrap {
     this.realOut = realOut;
   }
 
-  /** Subprocess entry point. */
+  /**
+   * Subprocess entry point. Expects exactly one argument, {@code --rpc-socket=<path>}, identifying
+   * the Unix domain socket the host bound for this sandbox. Connects on startup; the host accepts
+   * exactly one connection and closes its listener immediately, so this connection is the only RPC
+   * channel for the sandbox's lifetime. Subprocess stdin is unused (closed by the host) and
+   * subprocess stdout/stderr stay attached to the OS pipes for incidental capture only — they are
+   * never parsed as RPC, which closes the C1 forgery vector where a snippet could write a {@code
+   * \0RPC:} frame to raw {@code FileDescriptor.out} and reach the host's dispatcher.
+   */
   public static void main(String[] args) {
-    var realOut = System.out;
+    var socketPath = parseRpcSocketArg(args);
+    SocketChannel rpcSocket;
+    try {
+      rpcSocket = SocketChannel.open(StandardProtocolFamily.UNIX);
+      rpcSocket.connect(UnixDomainSocketAddress.of(socketPath));
+    } catch (IOException e) {
+      System.err.println(
+          "JvmSandboxBootstrap: failed to connect to RPC socket " + socketPath + ": " + e);
+      System.exit(2);
+      return;
+    }
+
+    var rpcOut = new PrintStream(Channels.newOutputStream(rpcSocket), true, StandardCharsets.UTF_8);
+    var rpcIn =
+        new BufferedReader(
+            new InputStreamReader(Channels.newInputStream(rpcSocket), StandardCharsets.UTF_8));
+
     var jshell = JShell.builder().executionEngine("local").build();
     addHostBridgeToJShellClasspath(jshell);
     jshell.eval("import static ai.singlr.repl.sandbox.HostBridge.*;");
     jshell.eval("import ai.singlr.repl.sandbox.HostBridge;");
     SandboxPrelude.install(jshell);
 
-    var stdinReader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
-    var bootstrap = new JvmSandboxBootstrap(jshell, stdinReader, realOut);
+    var bootstrap = new JvmSandboxBootstrap(jshell, rpcIn, rpcOut);
     setInstance(bootstrap);
 
     bootstrap.readLoop();
 
     jshell.close();
+    try {
+      rpcSocket.close();
+    } catch (IOException ignored) {
+      // best-effort
+    }
     System.exit(0);
+  }
+
+  /**
+   * Parse the mandatory {@code --rpc-socket=<path>} argument. Failing fast with exit code 2 if
+   * absent or malformed: the bootstrap has no usable fallback once stdout is no longer the RPC
+   * channel.
+   */
+  private static Path parseRpcSocketArg(String[] args) {
+    for (var arg : args) {
+      if (arg.startsWith("--rpc-socket=")) {
+        return Path.of(arg.substring("--rpc-socket=".length()));
+      }
+    }
+    System.err.println(
+        "JvmSandboxBootstrap: missing required --rpc-socket=<path> argument. The sandbox host"
+            + " (JvmSandbox) is responsible for binding the socket and passing the path; if you"
+            + " are seeing this manually, you are running the bootstrap outside its intended"
+            + " harness.");
+    System.exit(2);
+    throw new IllegalStateException("unreachable");
   }
 
   /**
