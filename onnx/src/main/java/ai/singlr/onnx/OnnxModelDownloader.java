@@ -104,17 +104,52 @@ final class OnnxModelDownloader implements AutoCloseable {
 
     for (var currFile : onnxFilesToDownload) {
       var localFileName = stripSubfolderPrefix(currFile, subfolder);
+      var destination = resolveLocalPath(localModelDir, localFileName);
       LOGGER.info("Downloading: %s -> %s".formatted(currFile, localFileName));
-      downloadFile(modelName, currFile, localModelDir.resolve(localFileName));
+      downloadFile(modelName, currFile, destination);
     }
 
     for (var currFile : rootFilesToDownload) {
+      var destination = resolveLocalPath(localModelDir, currFile);
       LOGGER.info("Downloading: %s".formatted(currFile));
-      downloadFile(modelName, currFile, localModelDir.resolve(currFile));
+      downloadFile(modelName, currFile, destination);
     }
 
-    Files.createFile(localModelDir.resolve(FINISHED_MARKER));
+    var marker = localModelDir.resolve(FINISHED_MARKER);
+    if (!Files.exists(marker)) {
+      try {
+        Files.createFile(marker);
+      } catch (java.nio.file.FileAlreadyExistsException ignored) {
+        // A concurrent downloader for the same model won the race. Both downloaded the same
+        // content; the marker is a flag, not state, so either creator is fine.
+      }
+    }
     LOGGER.info("Model download completed: %s".formatted(localModelDir));
+  }
+
+  /**
+   * Resolve a HuggingFace-API-supplied relative file path against the local model directory,
+   * refusing anything that escapes the directory either lexically (via {@code ..} traversal) or by
+   * supplying an absolute path. The HF API's {@code path} field flows verbatim from the network
+   * into {@link Files#copy}; without this jail a compromised mirror or future malicious model card
+   * could return {@code "../../tmp/pwn"} and overwrite any JVM-writable file. Visible for tests.
+   *
+   * @throws IOException when the requested path escapes the root or is absolute
+   */
+  static Path resolveLocalPath(Path root, String requested) throws IOException {
+    var normalizedRoot = root.toAbsolutePath().normalize();
+    var requestedPath = Paths.get(requested);
+    if (requestedPath.isAbsolute()) {
+      throw new IOException(
+          "HuggingFace API returned an absolute path; refusing to escape model cache: "
+              + requested);
+    }
+    var resolved = normalizedRoot.resolve(requestedPath).normalize();
+    if (!resolved.startsWith(normalizedRoot)) {
+      throw new IOException(
+          "HuggingFace API returned a path that escapes the model cache directory: " + requested);
+    }
+    return resolved;
   }
 
   Path modelPath() {
