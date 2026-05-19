@@ -155,6 +155,19 @@ public final class JvmSandbox implements Sandbox {
   /**
    * Create and start a new JVM subprocess sandbox.
    *
+   * <p><strong>Same-UID isolation assumption.</strong> The RPC channel rides on a Unix-domain
+   * socket inside a private 0700 directory, which blocks cross-UID attackers from enumerating or
+   * connecting to the socket. It does NOT defend against a process running under the same UID as
+   * the Helios host: between {@code listener.bind} and the subprocess's {@code connect}, a same-UID
+   * attacker that polls the temp directory can race the legitimate subprocess and win the single
+   * backlog slot, after which the host treats the attacker's connection as the sandbox RPC channel
+   * and the real subprocess fails to connect. Helios currently assumes the deployer arranges
+   * per-session UIDs (or any other OS-level mechanism that prevents same-UID coresidence with
+   * untrusted workloads — containers, namespaces, per-tenant service accounts). A future change
+   * will close the race authoritatively via Panama-based {@code SO_PEERCRED} (Linux) / {@code
+   * LOCAL_PEERCRED} (BSD/macOS) verification on accept; until then, do not run Helios alongside
+   * untrusted workloads under a shared UID.
+   *
    * @param config the sandbox configuration
    * @param registry the host function registry
    * @return a running sandbox
@@ -195,11 +208,9 @@ public final class JvmSandbox implements Sandbox {
         // Subprocess may have already closed it.
       }
 
-      acceptedRpc = acceptWithTimeout(listener, Duration.ofSeconds(10));
-      // Listener closed and socket file removed once we have the one connection. A snippet that
-      // discovers the path from argv/env now finds nothing to connect to.
-      listener.close();
+      var listenerForAccept = listener;
       listener = null;
+      acceptedRpc = acceptWithTimeout(listenerForAccept, config.subprocessStartupTimeout());
       Files.deleteIfExists(socketPath);
 
       var processTransport =
@@ -236,16 +247,18 @@ public final class JvmSandbox implements Sandbox {
   }
 
   /**
-   * Create a private temp directory the RPC socket lives in. Mode 0700 on POSIX filesystems; on
-   * non-POSIX (e.g. Windows) we rely on the JDK's default temp-dir ACLs. The directory is deleted
-   * by {@link #close()} along with its single socket file.
+   * Create a private temp directory the RPC socket lives in. Mode 0700 is set explicitly on POSIX
+   * filesystems. On non-POSIX filesystems (Windows) the {@link UnsupportedOperationException} is
+   * swallowed and the directory keeps whatever ACLs {@link Files#createTempDirectory} produced —
+   * which has not been validated by Helios; deployers running on Windows must verify the temp-dir
+   * ACL story for their JDK and filesystem before relying on cross-process isolation. The directory
+   * is deleted by {@link #close()} along with its single socket file.
    */
   private static Path createPrivateSocketDir() throws IOException {
     var dir = Files.createTempDirectory("helios-rpc-");
     try {
       Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
     } catch (UnsupportedOperationException ignored) {
-      // Non-POSIX filesystem (Windows) — default ACLs from createTempDirectory are appropriate.
     }
     return dir;
   }
@@ -253,9 +266,14 @@ public final class JvmSandbox implements Sandbox {
   /**
    * Accept exactly one inbound connection on {@code listener} or throw on timeout. Uses a virtual
    * thread so the calling thread retains its interrupt-status semantics and the timeout actually
-   * fires (blocking {@code ServerSocketChannel.accept()} has no built-in timeout in blocking mode).
+   * fires (blocking {@code ServerSocketChannel#accept} has no built-in timeout in blocking mode).
+   *
+   * <p>Takes ownership of {@code listener}: closes it on every exit path (success or any failure
+   * mode) before returning or throwing. Callers MUST NOT close the listener after this method
+   * returns — doing so was the source of the pre-fix double-close in the timeout cleanup path.
+   * Visible for testing.
    */
-  private static SocketChannel acceptWithTimeout(ServerSocketChannel listener, Duration timeout)
+  static SocketChannel acceptWithTimeout(ServerSocketChannel listener, Duration timeout)
       throws IOException {
     var accept =
         CompletableFuture.supplyAsync(
@@ -270,11 +288,6 @@ public final class JvmSandbox implements Sandbox {
     try {
       return accept.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
     } catch (TimeoutException e) {
-      try {
-        listener.close();
-      } catch (IOException ignored) {
-        // Best-effort wakeup so the accept thread unblocks.
-      }
       throw new IOException(
           "Subprocess did not connect to the RPC socket within "
               + timeout
@@ -290,6 +303,11 @@ public final class JvmSandbox implements Sandbox {
         throw io;
       }
       throw new IOException("RPC accept failed", cause);
+    } finally {
+      try {
+        listener.close();
+      } catch (IOException ignored) {
+      }
     }
   }
 
@@ -536,24 +554,36 @@ public final class JvmSandbox implements Sandbox {
     return !closed.get() && process.isAlive();
   }
 
+  /**
+   * Tear the sandbox down: kill the subprocess and any descendants it spawned, close the RPC
+   * channel and socket, join the stdout reader, and delete the private socket directory. Idempotent
+   * — second and later calls are no-ops.
+   *
+   * <p>Two limitations the caller should be aware of:
+   *
+   * <ul>
+   *   <li><strong>Descendant kill races concurrent forks.</strong> Descendants are snapshotted
+   *       before the parent is killed (after-kill the OS reparents to init and the snapshot goes
+   *       empty), then the snapshot is destroyed alongside the parent. A snippet inside a tight
+   *       {@link Runtime#exec} fork loop can spawn new descendants in the microsecond window
+   *       between snapshot and parent kill; those escape. Within a single JVM there is no portable
+   *       defense — bounding runaway descendant creation is the deployer's responsibility,
+   *       typically via cgroup pids.max or an external process supervisor.
+   *   <li><strong>Stdout reader join is best-effort.</strong> The reader's {@code readLine} returns
+   *       EOF when the subprocess's stdout pipe closes, which it does once {@link
+   *       Process#destroyForcibly} takes effect. A subprocess stuck in uninterruptible kernel sleep
+   *       (D-state) keeps the pipe open until the kernel unblocks it; the join then times out and
+   *       the reader virtual thread leaks. Bounded to one orphan thread per stuck session — does
+   *       not compound across sessions.
+   * </ul>
+   */
   @Override
   public void close() {
     if (closed.compareAndSet(false, true)) {
       try {
         Runtime.getRuntime().removeShutdownHook(shutdownHook);
       } catch (IllegalStateException alreadyShuttingDown) {
-        // JVM is already shutting down; the hook will run (or has run) and that's fine.
       }
-      // Destroy the subprocess FIRST so its stdout pipe closes on the OS side — only then
-      // will the reader thread's blocking readLine() return with EOF. If we closed the
-      // transport first, reader.close() could deadlock waiting for a read() that's pinned in a
-      // native call. Once the subprocess is dead, transport.close() is a clean no-op wind-down.
-      //
-      // Snippets can call Runtime.exec(...) — without the descendants walk, orphaned
-      // grandchildren survive the sandbox. Snapshot descendants BEFORE killing the parent: once
-      // the parent dies, the OS reparents orphans to init and process.descendants() goes empty.
-      // The parent kill immediately after the snapshot closes the fork-new-descendant window
-      // (microseconds wide).
       var descendantsSnapshot = process.descendants().toList();
       process.destroyForcibly();
       descendantsSnapshot.forEach(ProcessHandle::destroyForcibly);
@@ -568,14 +598,9 @@ public final class JvmSandbox implements Sandbox {
         try {
           rpcChannelSocket.close();
         } catch (IOException ignored) {
-          // best-effort
         }
       }
       if (stdoutReader != null) {
-        // The reader's BufferedReader is wrapping process.getInputStream(); destroying the
-        // subprocess above closes the underlying pipe, so readLine() returns EOF and the thread
-        // exits on its own. Join briefly so capturedStdout has the final tail before any caller
-        // reads it post-close.
         try {
           stdoutReader.join(Duration.ofSeconds(2));
         } catch (InterruptedException e) {

@@ -21,12 +21,17 @@ import java.io.InputStreamReader;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.lang.management.ManagementFactory;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -1212,6 +1217,175 @@ class JvmSandboxTest {
               + " RPC request. Subprocess result stdout: "
               + result.stdout()
               + " stderr: "
+              + result.stderr());
+    } finally {
+      if (sandbox != null) {
+        sandbox.close();
+      }
+    }
+  }
+
+  @Test
+  void acceptWithTimeoutClosesListenerOnSuccess() throws Exception {
+    var socketDir = Files.createTempDirectory("helios-rpc-test-");
+    var socketPath = socketDir.resolve("rpc.sock");
+    var listener = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
+    try {
+      listener.bind(UnixDomainSocketAddress.of(socketPath), 1);
+      var clientConnected = new CountDownLatch(1);
+      Thread.ofVirtual()
+          .start(
+              () -> {
+                try {
+                  Thread.sleep(50);
+                  var client = SocketChannel.open(StandardProtocolFamily.UNIX);
+                  client.connect(UnixDomainSocketAddress.of(socketPath));
+                  clientConnected.countDown();
+                  Thread.sleep(200);
+                  client.close();
+                } catch (Exception ignored) {
+                }
+              });
+      var accepted = JvmSandbox.acceptWithTimeout(listener, Duration.ofSeconds(5));
+      assertTrue(
+          clientConnected.await(5, TimeUnit.SECONDS), "client must connect within test budget");
+      assertNotNull(accepted, "successful accept must return the client channel");
+      assertFalse(
+          listener.isOpen(),
+          "acceptWithTimeout owns the listener: it must close on the success path so the caller"
+              + " does not double-close from a downstream cleanup");
+      accepted.close();
+    } finally {
+      if (listener.isOpen()) {
+        listener.close();
+      }
+      Files.deleteIfExists(socketPath);
+      Files.deleteIfExists(socketDir);
+    }
+  }
+
+  @Test
+  void acceptWithTimeoutClosesListenerOnTimeout() throws Exception {
+    var socketDir = Files.createTempDirectory("helios-rpc-test-");
+    var socketPath = socketDir.resolve("rpc.sock");
+    var listener = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
+    try {
+      listener.bind(UnixDomainSocketAddress.of(socketPath), 1);
+      assertThrows(
+          IOException.class, () -> JvmSandbox.acceptWithTimeout(listener, Duration.ofMillis(50)));
+      assertFalse(
+          listener.isOpen(),
+          "acceptWithTimeout must close the listener on timeout so the blocked accept thread"
+              + " unblocks via AsynchronousCloseException");
+    } finally {
+      if (listener.isOpen()) {
+        listener.close();
+      }
+      Files.deleteIfExists(socketPath);
+      Files.deleteIfExists(socketDir);
+    }
+  }
+
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void subprocessStartupTimeoutHonoursConfigAndSurfacesDurationInError() {
+    var startupTimeout = Duration.ofMillis(1);
+    var config = JvmSandboxConfig.newBuilder().withSubprocessStartupTimeout(startupTimeout).build();
+    var registry = new HostFunctionRegistry();
+    var thrown =
+        assertThrows(ai.singlr.repl.ReplException.class, () -> JvmSandbox.create(config, registry));
+    assertNotNull(thrown.getCause(), "expected wrapped cause");
+    var causeMessage = thrown.getCause().getMessage();
+    assertNotNull(causeMessage, "cause must carry a message");
+    assertTrue(
+        causeMessage.contains(startupTimeout.toString()),
+        "timeout error must include the configured duration ("
+            + startupTimeout
+            + "); got: "
+            + causeMessage);
+  }
+
+  @Test
+  @Timeout(value = 90, unit = TimeUnit.SECONDS)
+  void reflectionForgesAnRpcCallToHost() {
+    // EXPLOIT regression test for the limit C1 does NOT close:
+    //
+    // C1 moved the RPC channel off the subprocess's stdout onto a dedicated Unix domain socket,
+    // so a snippet writing to FileDescriptor.out can no longer forge an RPC frame the host parser
+    // sees (covered by rawStdoutWriteDoesNotForgeAnRpcCallToHost). But the underlying capability
+    // is still in-JVM and reachable through reflection against JvmSandboxBootstrap's private
+    // fields: a snippet that can call setAccessible(true) on the bootstrap's static `instance`
+    // and private `realOut` fields can grab the RPC socket's PrintStream and write a forged
+    // Request directly to the host.
+    //
+    // setAccessible(true) on a private field in a named module requires the module to be `open`
+    // or specifically opened via `--add-opens`. ai.singlr.repl does NOT open the sandbox package,
+    // so under a clean JPMS launch the snippet cannot reach the field. BUT: classpath-launched
+    // deployments put the bootstrap in an unnamed module which is fully open; and a parent JVM
+    // that uses `--add-opens=ai.singlr.repl/ai.singlr.repl.sandbox=...` (as Surefire does, and
+    // as common testing/instrumentation setups do) leaks that into the subprocess via
+    // JvmSandbox.shouldPropagateJvmArg, opening the package even under modulepath.
+    //
+    // This test documents that limit: it runs the reflection attack against the production launch
+    // path and asserts the forged auditCallback IS invoked. The fix path is documentation
+    // (precise C1 javadoc) plus a one-time WARNING at bootstrap startup when the module is
+    // unnamed — NOT closing the reflection gap, which is unreachable from inside a single-JVM
+    // sandbox without OS-level isolation (Incus is the load-bearing boundary). If a future
+    // change ever does close this gap, flip this test to assertEquals(0, ...).
+    var invocations = new java.util.concurrent.atomic.AtomicInteger();
+    var registry = new HostFunctionRegistry();
+    registry.register(
+        new ai.singlr.repl.host.HostFunction(
+            "auditCallback",
+            "test capture for forged RPC invocations",
+            params -> {
+              invocations.incrementAndGet();
+              return null;
+            }));
+    var config =
+        JvmSandboxConfig.newBuilder()
+            .withCallTimeout(Duration.ofSeconds(45))
+            .withExecutionTimeout(Duration.ofSeconds(30))
+            .build();
+    JvmSandbox sandbox = null;
+    try {
+      sandbox = JvmSandbox.create(config, registry);
+      // The attack: Class.forName the bootstrap (its location is on the JShell classpath via
+      // addHostBridgeToJShellClasspath, since HostBridge sits in the same jar), grab the static
+      // `instance` field reflectively, then pull `realOut` (which IS the RPC socket PrintStream
+      // post-C1) and write a fully-formed JSON-RPC Request frame.
+      var attack =
+          "var c = Class.forName(\"ai.singlr.repl.sandbox.JvmSandboxBootstrap\");"
+              + "var instField = c.getDeclaredField(\"instance\");"
+              + "instField.setAccessible(true);"
+              + "var b = instField.get(null);"
+              + "var realOutField = c.getDeclaredField(\"realOut\");"
+              + "realOutField.setAccessible(true);"
+              + "var out = (java.io.PrintStream) realOutField.get(b);"
+              + "synchronized (out) {"
+              + "  out.print(\"\\u0000RPC:{\\\"jsonrpc\\\":\\\"2.0\\\","
+              + "\\\"id\\\":\\\"forged-refl-1\\\","
+              + "\\\"method\\\":\\\"auditCallback\\\",\\\"params\\\":{}}\\n\");"
+              + "  out.flush();"
+              + "}"
+              + "Thread.sleep(500);";
+      var result =
+          sandbox.execute(
+              ExecutionRequest.newBuilder()
+                  .withCode(attack)
+                  .withTimeout(Duration.ofSeconds(15))
+                  .build());
+
+      assertTrue(
+          invocations.get() >= 1,
+          "Reflection-based RPC forgery should reach the host's HostFunction dispatcher in"
+              + " classpath launch mode. invocations="
+              + invocations.get()
+              + " result.exitCode="
+              + result.exitCode()
+              + " stdout="
+              + result.stdout()
+              + " stderr="
               + result.stderr());
     } finally {
       if (sandbox != null) {

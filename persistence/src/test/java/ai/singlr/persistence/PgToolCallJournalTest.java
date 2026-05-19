@@ -6,6 +6,7 @@
 package ai.singlr.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -14,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.core.common.Ids;
 import ai.singlr.core.runtime.ToolCallRecord;
 import ai.singlr.core.runtime.ToolCallStatus;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -213,6 +215,74 @@ class PgToolCallJournalTest {
         "args JSON should be scrubbed of the registered secret; got: " + record.args());
     assertEquals(
         "auth ok: " + marker, record.output(), "output should be scrubbed of registered secret");
+  }
+
+  @Test
+  void argsRedactionWalksNestedMapsAndLists() {
+    // The PgToolCallJournal.start path applies the redactor to each string leaf BEFORE Jackson
+    // serialises the args map. This test exercises the deep walk: the secret appears inside a
+    // nested map AND inside a list element, neither of which a top-level redaction pass would
+    // reach. Both occurrences must surface as <redacted:API_KEY> in the round-tripped args.
+    var registry = new ai.singlr.core.common.SecretRegistry();
+    var secret = "sk-supersecret-abc12345";
+    registry.register("API_KEY", secret);
+    var redactingJournal =
+        new PgToolCallJournal(
+            PgConfig.newBuilder()
+                .withDbClient(PgTestSupport.dbClient())
+                .withRedactor(registry.redactor())
+                .build());
+
+    var runId = PgTestSupport.newSeededRunId();
+    redactingJournal.start(
+        ToolCallRecord.newBuilder()
+            .withRunId(runId)
+            .withIteration(0)
+            .withToolCallId("c1")
+            .withToolName("call")
+            .withArgs(
+                Map.of(
+                    "headers", Map.of("Authorization", "Bearer " + secret),
+                    "items", List.of("alpha", secret, "omega"),
+                    "count", 7))
+            .withStartedAt(Ids.now())
+            .build());
+
+    var rec = redactingJournal.all(runId).get(0);
+    var argsAsString = String.valueOf(rec.args());
+    assertFalse(
+        argsAsString.contains(secret),
+        "deep-walk redaction should remove the secret from every nested string leaf;"
+            + " args="
+            + argsAsString);
+    var marker = "<redacted:API_KEY>";
+    assertTrue(
+        argsAsString.contains("Bearer " + marker),
+        "marker must appear inside the nested header map; args=" + argsAsString);
+    assertTrue(
+        argsAsString.contains(marker),
+        "marker must appear inside the list element; args=" + argsAsString);
+  }
+
+  @Test
+  void argsRedactionPassesThroughWhenNoRedactorConfigured() {
+    // Mirror property: with no redactor, the args walk is a no-op fast path that returns the
+    // same map reference. Persisted args are verbatim — the default behaviour callers rely on
+    // for evals and debugging.
+    var defaultJournal = new PgToolCallJournal(PgTestSupport.pgConfig());
+    var runId = PgTestSupport.newSeededRunId();
+    var raw = "sk-not-redacted-1234567";
+    defaultJournal.start(
+        ToolCallRecord.newBuilder()
+            .withRunId(runId)
+            .withIteration(0)
+            .withToolCallId("c1")
+            .withToolName("call")
+            .withArgs(Map.of("token", raw, "headers", Map.of("Authorization", raw)))
+            .withStartedAt(Ids.now())
+            .build());
+    var argsAsString = String.valueOf(defaultJournal.all(runId).get(0).args());
+    assertTrue(argsAsString.contains(raw), "no-redactor path should leave args verbatim");
   }
 
   @Test
