@@ -26,6 +26,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Top-level orchestrator that drives one open-ended session to a terminal {@link ResultMessage}.
@@ -61,6 +63,8 @@ import java.util.function.Function;
  * {@link SteeringQueue}, {@link ToolDispatch}) are owned by the caller.
  */
 public final class AgentLoop {
+
+  private static final Logger LOGGER = Logger.getLogger(AgentLoop.class.getName());
 
   /**
    * Watermark fraction of {@link SessionLimits#maxContextTokens()} at which a {@link
@@ -323,7 +327,13 @@ public final class AgentLoop {
       }
       case HookOutcome.Inject inj -> {
         emitter.emitHookFired(state, hookName, "PreStopHook", "Inject");
-        steeringQueue.offer(UserMessage.text(inj.userMessage()));
+        if (!steeringQueue.offer(UserMessage.text(inj.userMessage()))) {
+          LOGGER.log(
+              Level.WARNING,
+              "PreStopHook ''{0}'' Inject was dropped: steering queue full; session will continue"
+                  + " without the injected message",
+              hookName);
+        }
         yield Optional.empty();
       }
       // MutateInput / Block are not meaningful at PreStop — treat as Continue.
@@ -393,6 +403,7 @@ public final class AgentLoop {
     try {
       result = contextCompactor.compact(historyBefore, state);
     } catch (RuntimeException e) {
+      LOGGER.log(Level.WARNING, "context compactor threw; leaving history unchanged this turn", e);
       return;
     }
     if (result == null) {

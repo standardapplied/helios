@@ -228,17 +228,22 @@ public final class TraceBuilder implements SpanContainer {
     int total = 0;
     for (var span : completedSpans) {
       if (span.kind() == SpanKind.MODEL_CALL) {
-        var input = span.attributes().get("inputTokens");
-        var output = span.attributes().get("outputTokens");
-        if (input != null) {
-          total += Integer.parseInt(input);
-        }
-        if (output != null) {
-          total += Integer.parseInt(output);
-        }
+        total += parseTokenAttribute(span.attributes().get("inputTokens"));
+        total += parseTokenAttribute(span.attributes().get("outputTokens"));
       }
     }
     return total;
+  }
+
+  private static int parseTokenAttribute(String value) {
+    if (value == null) {
+      return 0;
+    }
+    try {
+      return Integer.parseInt(value);
+    } catch (NumberFormatException ignored) {
+      return 0;
+    }
   }
 
   private void collectCompletedSpans() {

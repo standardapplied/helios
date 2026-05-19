@@ -67,6 +67,9 @@ public final class JsonlEventSink implements EventSink, AutoCloseable {
     var line = EventJsonWriter.encode(event);
     lock.lock();
     try {
+      if (closed) {
+        throw new IllegalStateException("JsonlEventSink is closed");
+      }
       writer.write(line);
       writer.newLine();
       writer.flush();

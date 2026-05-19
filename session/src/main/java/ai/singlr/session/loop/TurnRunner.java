@@ -31,6 +31,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Drives one model turn end-to-end. Fires hooks at PreModelTurn, PostModelTurn, PreToolUse (per
@@ -66,6 +68,8 @@ import java.util.function.Function;
  * subscriber state.
  */
 public final class TurnRunner {
+
+  private static final Logger LOGGER = Logger.getLogger(TurnRunner.class.getName());
 
   private final Model model;
   private final HookRegistry hooks;
@@ -272,7 +276,7 @@ public final class TurnRunner {
       }
       case HookOutcome.Inject inj -> {
         emitter.emitHookFired(state, hookName, phase.phaseName(), "Inject");
-        steeringQueue.offer(UserMessage.text(inj.userMessage()));
+        offerOrLogDrop(inj.userMessage(), phase.phaseName(), hookName);
         return phase == TurnPhase.PRE_MODEL_TURN
             ? TurnLevelDecision.SKIP_MODEL
             : TurnLevelDecision.CONTINUE;
@@ -292,6 +296,21 @@ public final class TurnRunner {
         // Block not meaningful at turn level; treated as Continue.
         return TurnLevelDecision.CONTINUE;
       }
+    }
+  }
+
+  /**
+   * Offer a hook-injected user message to the steering queue. Logs a WARNING if the queue rejects
+   * it (e.g. full at capacity) — without this, hook authors believe their {@code Inject} took
+   * effect but the loop never sees the message, producing impossible-to-debug cascading bugs.
+   */
+  private void offerOrLogDrop(String text, String phaseName, String hookName) {
+    if (!steeringQueue.offer(UserMessage.text(text))) {
+      LOGGER.log(
+          Level.WARNING,
+          "{0} hook ''{1}'' Inject was dropped: steering queue full; session continues without"
+              + " the injected message",
+          new Object[] {phaseName, hookName});
     }
   }
 
@@ -367,7 +386,7 @@ public final class TurnRunner {
         }
         case HookOutcome.Inject inj -> {
           emitter.emitHookFired(state, preHookName, "PreToolUseHook", "Inject");
-          steeringQueue.offer(UserMessage.text(inj.userMessage()));
+          offerOrLogDrop(inj.userMessage(), "PreToolUseHook", preHookName);
           result = ToolResult.failure("tool skipped: hook injected user message");
         }
         case HookOutcome.Stop s -> {
@@ -409,7 +428,7 @@ public final class TurnRunner {
         }
         case HookOutcome.Inject inj -> {
           emitter.emitHookFired(state, postHookName, "PostToolUseHook", "Inject");
-          steeringQueue.offer(UserMessage.text(inj.userMessage()));
+          offerOrLogDrop(inj.userMessage(), "PostToolUseHook", postHookName);
         }
         case HookOutcome.Stop s -> {
           emitter.emitHookFired(state, postHookName, "PostToolUseHook", "Stop");

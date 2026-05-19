@@ -84,8 +84,20 @@ public record Tool(
     try {
       return executor.execute(arguments, context);
     } catch (Exception e) {
+      if (hasInterruptedCause(e)) {
+        Thread.currentThread().interrupt();
+      }
       return ToolResult.failure("Tool execution failed", e);
     }
+  }
+
+  private static boolean hasInterruptedCause(Throwable e) {
+    for (var cur = e; cur != null; cur = cur.getCause()) {
+      if (cur instanceof InterruptedException) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

@@ -69,6 +69,44 @@ public record ModelConfig(
   }
 
   /**
+   * Renders the config without leaking secret material. The {@code apiKey} component and every
+   * {@code headers} value are replaced with {@code <redacted>} — header names are preserved (useful
+   * for diagnostics) but values are not, since they routinely carry bearer tokens, Azure api-key
+   * entries, or other auth material. Java's default record {@code toString} would print every
+   * component verbatim and silently land secrets in stack traces, exception messages, and any
+   * logger.info("config={}", cfg) callsite.
+   */
+  @Override
+  public String toString() {
+    var sb = new StringBuilder("ModelConfig[");
+    sb.append("apiKey=").append(apiKey == null ? "null" : "<redacted>");
+    sb.append(", thinkingLevel=").append(thinkingLevel);
+    sb.append(", connectTimeout=").append(connectTimeout);
+    sb.append(", responseTimeout=").append(responseTimeout);
+    sb.append(", temperature=").append(temperature);
+    sb.append(", topP=").append(topP);
+    sb.append(", maxOutputTokens=").append(maxOutputTokens);
+    sb.append(", stopSequences=").append(stopSequences);
+    sb.append(", seed=").append(seed);
+    sb.append(", toolChoice=").append(toolChoice);
+    sb.append(", googleSearch=").append(googleSearch);
+    sb.append(", urlContext=").append(urlContext);
+    sb.append(", streamIdleTimeout=").append(streamIdleTimeout);
+    sb.append(", baseUrl=").append(baseUrl);
+    sb.append(", headers={");
+    var first = true;
+    for (var name : headers.keySet()) {
+      if (!first) {
+        sb.append(", ");
+      }
+      sb.append(name).append("=<redacted>");
+      first = false;
+    }
+    sb.append("}]");
+    return sb.toString();
+  }
+
+  /**
    * Resolve the effective base URL for a provider HTTP request. Returns the configured {@link
    * #baseUrl()} when set (non-null, non-blank); otherwise falls back to the provider's built-in
    * default. Used by {@code OpenAIModel}, {@code AnthropicModel}, {@code GeminiModel} to choose
