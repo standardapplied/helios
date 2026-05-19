@@ -82,12 +82,26 @@ public final class RuntimeServer implements AutoCloseable {
   /** Mutable builder for {@link RuntimeServer}. */
   public static final class Builder {
 
+    /**
+     * Fail-secure default: loopback only. The {@code POST /sessions} route is unauthenticated and
+     * creates real sessions on the configured model; binding all interfaces by default would expose
+     * that surface to anything that can route to the host. Deployers who genuinely want external
+     * traffic must opt in via {@link #withHost(String)} with {@code "0.0.0.0"} (or a specific
+     * external interface).
+     */
+    static final String DEFAULT_HOST = "127.0.0.1";
+
+    /** Visible for tests so the default value can be asserted without reflection. */
+    static String defaultHostForTests() {
+      return DEFAULT_HOST;
+    }
+
     private SessionRegistry registry;
     private Function<String, SessionOptions> optionsFactory;
     private ObjectMapper objectMapper;
     private String routePrefix = "/v1";
     private int port = 0;
-    private String host = "0.0.0.0";
+    private String host = DEFAULT_HOST;
 
     private Builder() {}
 
@@ -159,7 +173,11 @@ public final class RuntimeServer implements AutoCloseable {
     }
 
     /**
-     * Bind the HTTP listen host. Default {@code 0.0.0.0}.
+     * Bind the HTTP listen host. Default {@code 127.0.0.1} (loopback only — fail-secure). Pass
+     * {@code "0.0.0.0"} or a specific external interface to expose the service beyond the host;
+     * note that the HTTP routes are unauthenticated and the {@code POST /sessions} surface creates
+     * real model-spending sessions, so external binds should sit behind authenticated fronting
+     * infrastructure.
      *
      * @param host non-blank host
      * @return this builder
