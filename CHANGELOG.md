@@ -2,9 +2,66 @@
 
 All notable changes to Helios are documented here. Versions follow [SemVer](https://semver.org/).
 
-## [Unreleased] — production-hardening pass
+## [2.2.0] — 2026-05-19 — production-hardening pass
 
-Wide-ranging hardening pass driven by an independent review of the v2 surface. Eleven theme commits on the original `review/production-hardening` branch plus a back-fill pass (that caught a real descendant-kill ordering bug in the security tests) plus Path B: opt-in trace-side redaction (`PgConfig.withRedactor`) and the C1 sandbox-RPC-channel relocation closing the stdout-forgery vector.
+Wide-ranging hardening pass driven by an independent review of the v2 surface. Eleven theme commits on the original `review/production-hardening` branch plus a back-fill pass (that caught a real descendant-kill ordering bug in the security tests) plus Path B (opt-in trace-side redaction `PgConfig.withRedactor` and the C1 sandbox-RPC-channel relocation closing the stdout-forgery vector) plus Path C (closing the two Criticals from the Path B audit and tightening the surrounding code per its Highs and Mediums).
+
+### Security — redactor JSON-escape bypass (Path C Critical #2)
+
+`PgToolCallJournal.start` previously serialised `record.args()` via Jackson then ran the byte-level `Redactor` over the resulting JSON string. `SecretRegistry.register` accepted any ASCII byte, including JSON metacharacters (`"`, `\`, control chars), so when those bytes appeared in a registered secret Jackson escaped them during serialisation and the byte-level scan no longer matched the raw secret bytes — the secret survived verbatim in `helios_tool_calls.args_json`. Closed two ways:
+
+- `SecretRegistry.register()` now refuses control characters (`0x00–0x1F`, `0x7F`), double-quote, and backslash with a message naming the JSON-escape rationale. Registered secrets are now provably safe for byte-level redaction in both pre- and post-serialise call sites. Breaking for callers registering multi-line PEM keys or quote/backslash-containing secrets.
+- `PgToolCallJournal.start` now walks `record.args()` and redacts each string leaf BEFORE Jackson serialises (mirrors the safe pattern `PgTraceStore.redactValues` already uses for span attributes).
+
+Exploit test (`PgToolCallJournalTest.EXPLOIT_secretWithJsonSpecialBytesLeaksThroughPostSerialiseRedactor`) was committed first to prove the leak against unfixed code; reshaped into the registration-refusal tests in `SecretRegistryTest` and the nested-strings demonstration test in `PgToolCallJournalTest` after the fix.
+
+### Security — C1 reframed honestly (Path C Critical #1)
+
+The original C1 commit (Path B) claimed the stdout-RPC forgery vector was closed. It is — for the FileDescriptor.out path — but a JShell snippet can still reach `JvmSandboxBootstrap.realOut` (which now wraps the RPC socket directly) via `Class.forName` + `setAccessible(true)` and forge frames. The reflection access is gated by JPMS module accessibility:
+
+- Clean modulepath launch: `ai.singlr.repl` module-info does not open `ai.singlr.repl.sandbox`, so `setAccessible(true)` throws. Reflection path closed.
+- Classpath launch: bootstrap lives in the unnamed module, fully open to reflection. Forgery reproduces.
+- Modulepath launch with `--add-opens=ai.singlr.repl/ai.singlr.repl.sandbox=...` inherited from the parent (common with test runners and JVM instrumentation): equivalent to classpath for this gap.
+
+This release adds:
+
+- `JvmSandboxBootstrap.main()` javadoc rewritten to enumerate exactly what C1 closes vs. what it doesn't, the three launch regimes above, and the deployer's responsibility to arrange OS-level isolation around the host process for untrusted workloads. The intra-JVM defenses raise the bar but are not a substitute for an external boundary.
+- `warnIfReducedIsolation()` emits a one-line `WARNING` on stderr at bootstrap startup when the module is unnamed OR the sandbox package has been opened to unnamed modules — surfaces the reduced-isolation regime so deployers don't take a classpath launch by accident.
+- Exploit test (`JvmSandboxTest.reflectionForgesAnRpcCallToHost`) committed as a regression artifact pinning the known limit.
+
+### Security — same-UID bind/accept race documented (Path C High #3)
+
+`JvmSandbox.create()` binds a Unix-domain RPC socket in a 0700 temp directory and forks the JShell subprocess to connect back. The 0700 directory blocks cross-UID attackers from enumerating the socket, but a same-UID attacker that polls `/tmp/helios-rpc-*` can race the subprocess for the single `backlog=1` slot. Documented in `JvmSandbox.create()`'s javadoc as an explicit assumption — deployers must arrange per-session UIDs (containers, namespaces, per-tenant service accounts) or accept the limitation. A future change will close the race authoritatively via Panama-based `SO_PEERCRED` (Linux) / `LOCAL_PEERCRED` (BSD/macOS) verification on accept.
+
+### Added — `JvmSandboxConfig.withSubprocessStartupTimeout(Duration)` (Path C High #5)
+
+The 10-second wait for the subprocess to connect back on its RPC socket was previously hardcoded. JVM cold-start under heavy I/O (slow NAS-mounted JDK, security software scanning, profilers attached to parent) can exceed it, producing a confusing permanent launch failure. New builder option raises (or lowers) it; the default stays 10 s; the existing timeout-exceeded error message already names the configured duration so the failure mode is debuggable. Breaking for direct canonical-constructor callers (`JvmSandboxConfig` record gained a fourth component); Builder callers are unaffected.
+
+### Added — `JvmSandboxBootstrap.warnIfReducedIsolation`
+
+See "C1 reframed honestly" above. Package-private; emits WARNING to the supplied PrintStream when the bootstrap module's isolation properties are weakened by an unnamed-module launch or by `--add-opens` propagated from the parent.
+
+### Fixed — listener double-close on subprocess startup timeout (Path C Medium #6)
+
+`JvmSandbox.acceptWithTimeout` now takes ownership of the listener and closes it on every exit path (success, timeout, interrupt, execution failure) via try/finally. `JvmSandbox.create` transfers ownership before the call and no longer closes the listener itself. Previously the timeout cleanup path closed the listener twice — idempotent and harmless, but misleading and a latent footgun for a future refactor. Test-first: `acceptWithTimeoutClosesListenerOnSuccess` was RED before the fix.
+
+### Changed — `PgConfig.redact` and `redactValues` javadocs document reference semantics
+
+The methods return either the original input reference (when no redactor is configured) or a freshly-allocated string/map (when one is). The return type doesn't distinguish — callers MUST treat the result as read-only. Documented explicitly; no behaviour change. Addresses Path C Medium #7.
+
+### Changed — `JvmSandboxBootstrap.sendRpc` javadoc clarifies the `\0RPC:` prefix is required
+
+The `\0RPC:` magic prefix on subprocess→host frames is required by the host-side `ProcessTransport.receive` parser to distinguish RPC frames from incidental subprocess writes — not vestigial decoration on the dedicated channel. Documented to prevent a future "the channel is dedicated, drop the prefix" cleanup that would silently route every RPC response into the stdout buffer. Addresses Path C Medium #8.
+
+### Changed — `JvmSandbox.close()` javadoc documents two limits
+
+Descendant kill races snippets forking new descendants in the microsecond window between snapshot and parent kill; the new descendants escape. Stdout reader join is best-effort and may leak the reader virtual thread if the subprocess is stuck in uninterruptible kernel sleep (D-state) — bounded to one orphan per stuck session. Both limits are deployer-arranged-isolation territory (cgroup pids.max, external supervisor). No behaviour change. Addresses Path C Mediums #9 and #10.
+
+### Changed — `JvmSandbox.createPrivateSocketDir` javadoc is honest about Windows
+
+Previously claimed the JDK's default temp-dir ACLs were "appropriate" on non-POSIX filesystems. Helios has not validated this on Windows; the javadoc now states it explicitly and tells Windows deployers to verify the ACL story for their JDK and filesystem. Addresses Path C High #4.
+
+
 
 ### Security — sandbox RPC moved off subprocess stdout (C1)
 
