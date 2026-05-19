@@ -976,4 +976,98 @@ class PgTraceStoreTest {
     assertEquals(2, found.thumbsUpCount());
     assertEquals(1, found.thumbsDownCount());
   }
+
+  // ── opt-in trace-side redaction (PgConfig.withRedactor) ───────────────────
+
+  @Test
+  void traceTextFieldsArePersistedVerbatimByDefault() {
+    // Regression test for the documented default: without a redactor, traces store exactly what
+    // the loop and tools produced. Evals and debugging depend on this.
+    var raw = "Authorization: Bearer ghp_supersecret_12345678";
+    var trace =
+        Trace.newBuilder()
+            .withName("agent-run")
+            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
+            .withEndTime(OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(1))
+            .withInputText(raw)
+            .withOutputText(raw)
+            .withAttribute("captured", raw)
+            .build();
+
+    store.store(trace);
+    var found = store.findById(trace.id());
+
+    assertEquals(raw, found.inputText(), "default: input verbatim");
+    assertEquals(raw, found.outputText(), "default: output verbatim");
+    assertEquals(raw, found.attributes().get("captured"), "default: attribute verbatim");
+  }
+
+  @Test
+  void traceTextFieldsAreScrubbedWhenRedactorConfigured() {
+    var registry = new ai.singlr.core.common.SecretRegistry();
+    registry.register("GH_TOKEN", "ghp_supersecret_12345678");
+    var redactingStore =
+        new PgTraceStore(
+            PgConfig.newBuilder()
+                .withDbClient(PgTestSupport.dbClient())
+                .withRedactor(registry.redactor())
+                .build());
+
+    var raw = "Authorization: Bearer ghp_supersecret_12345678";
+    var trace =
+        Trace.newBuilder()
+            .withName("agent-run")
+            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
+            .withEndTime(OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(1))
+            .withInputText(raw)
+            .withOutputText(raw)
+            .withAttribute("captured", raw)
+            .build();
+
+    redactingStore.store(trace);
+    var found = redactingStore.findById(trace.id());
+
+    var expected = "Authorization: Bearer <redacted:GH_TOKEN>";
+    assertEquals(expected, found.inputText());
+    assertEquals(expected, found.outputText());
+    assertEquals(expected, found.attributes().get("captured"));
+  }
+
+  @Test
+  void spanFieldsAreScrubbedWhenRedactorConfigured() {
+    var registry = new ai.singlr.core.common.SecretRegistry();
+    registry.register("API_KEY", "sk-supersecret-abc12345");
+    var redactingStore =
+        new PgTraceStore(
+            PgConfig.newBuilder()
+                .withDbClient(PgTestSupport.dbClient())
+                .withRedactor(registry.redactor())
+                .build());
+
+    var raw = "leaked: sk-supersecret-abc12345 in span attr";
+    var span =
+        Span.newBuilder()
+            .withName("tool-call")
+            .withKind(SpanKind.TOOL_EXECUTION)
+            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
+            .withEndTime(OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(1))
+            .withError(raw)
+            .withAttribute("payload", raw)
+            .build();
+    var trace =
+        Trace.newBuilder()
+            .withName("agent-run")
+            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
+            .withEndTime(OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(2))
+            .withSpan(span)
+            .build();
+
+    redactingStore.store(trace);
+    var found = redactingStore.findById(trace.id());
+
+    var foundSpan = found.spans().getFirst();
+    var expected = "leaked: <redacted:API_KEY> in span attr";
+    assertEquals(expected, foundSpan.error());
+    assertEquals(expected, foundSpan.attributes().get("payload"));
+  }
 }

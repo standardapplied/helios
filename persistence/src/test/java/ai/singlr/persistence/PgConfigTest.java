@@ -3,9 +3,12 @@
 package ai.singlr.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.singlr.core.common.SecretRegistry;
 import org.junit.jupiter.api.Test;
 
 class PgConfigTest {
@@ -115,5 +118,65 @@ class PgConfigTest {
     var config =
         PgConfig.newBuilder().withDbClient(PgTestSupport.dbClient()).withSchema("_my_2nd").build();
     assertEquals("_my_2nd", config.schema());
+  }
+
+  // Opt-in trace-side redaction. Default unset = no-op = current verbatim behavior. Set to a
+  // Redactor and PgConfig.redact(text) scrubs against it before the persistence call sites pass
+  // the value to JsonbMapper / DbClient.
+
+  @Test
+  void redactorDefaultsToNull() {
+    var config = PgConfig.newBuilder().withDbClient(PgTestSupport.dbClient()).build();
+    assertNull(config.redactor(), "fresh config has no redactor — current verbatim behavior");
+  }
+
+  @Test
+  void redactPassesValueThroughWhenNoRedactorConfigured() {
+    var config = PgConfig.newBuilder().withDbClient(PgTestSupport.dbClient()).build();
+    var raw = "Authorization: Bearer ghp_supersecret_12345678";
+    assertSame(
+        raw,
+        config.redact(raw),
+        "default redact() must be a no-op — returns the same String reference so callers can't"
+            + " detect a per-call allocation cost");
+  }
+
+  @Test
+  void redactReturnsNullForNullInput() {
+    var config = PgConfig.newBuilder().withDbClient(PgTestSupport.dbClient()).build();
+    assertNull(config.redact(null));
+  }
+
+  @Test
+  void redactAppliesConfiguredRedactor() {
+    var registry = new SecretRegistry();
+    registry.register("GH_TOKEN", "ghp_supersecret_12345678");
+    var config =
+        PgConfig.newBuilder()
+            .withDbClient(PgTestSupport.dbClient())
+            .withRedactor(registry.redactor())
+            .build();
+    assertNotNull(config.redactor());
+
+    var raw = "Authorization: Bearer ghp_supersecret_12345678";
+    var redacted = config.redact(raw);
+    assertEquals(
+        "Authorization: Bearer <redacted:GH_TOKEN>",
+        redacted,
+        "value should pass through the configured redactor; got: " + redacted);
+  }
+
+  @Test
+  void withRedactorAcceptsNullToClear() {
+    var registry = new SecretRegistry();
+    registry.register("GH_TOKEN", "ghp_supersecret_12345678");
+    var config =
+        PgConfig.newBuilder()
+            .withDbClient(PgTestSupport.dbClient())
+            .withRedactor(registry.redactor())
+            .withRedactor(null)
+            .build();
+    assertNull(config.redactor());
+    assertSame("raw", config.redact("raw"));
   }
 }

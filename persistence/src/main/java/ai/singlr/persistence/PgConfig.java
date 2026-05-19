@@ -5,7 +5,10 @@
 
 package ai.singlr.persistence;
 
+import ai.singlr.core.common.Redactor;
 import io.helidon.dbclient.DbClient;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -20,8 +23,17 @@ import java.util.regex.Pattern;
  *     only line of defence against SQL injection if the schema name ever flows from configuration
  *     or external input
  * @param agentId the agent identifier for scoping data, or null when not needed
+ * @param redactor optional {@link Redactor} applied by {@link PgTraceStore} and {@link
+ *     PgToolCallJournal} to trace/journal text fields before persisting. {@code null} (default)
+ *     preserves verbatim capture — the library's standard behaviour, suitable for evals and
+ *     debugging. Deployers who want trace-side redaction without wrapping the journal themselves
+ *     can pass {@code registry.redactor()} from their session-level {@link
+ *     ai.singlr.core.common.SecretRegistry}. Source-level redaction (via {@code CommandGrant},
+ *     {@code FilesystemKnowledge}, {@code JShellExecutionProvider}) remains the recommended primary
+ *     mitigation; this hook is ergonomic sugar for deployers who need defense-in-depth at the
+ *     persistence boundary
  */
-public record PgConfig(DbClient dbClient, String schema, String agentId) {
+public record PgConfig(DbClient dbClient, String schema, String agentId, Redactor redactor) {
 
   private static final Pattern VALID_SCHEMA = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{0,62}");
 
@@ -47,6 +59,43 @@ public record PgConfig(DbClient dbClient, String schema, String agentId) {
     return sql.replace("%s", schema);
   }
 
+  /**
+   * Apply the configured {@link #redactor()} to {@code value} if set; otherwise return {@code
+   * value} unchanged. Returns the same reference when no redactor is configured so callers cannot
+   * detect a per-call allocation when redaction is off (the no-redactor path is the documented
+   * default).
+   *
+   * @param value the text to redact; {@code null} returns {@code null}
+   * @return redacted (or unchanged) text
+   */
+  public String redact(String value) {
+    if (redactor == null || value == null) {
+      return value;
+    }
+    return redactor.redact(value).text();
+  }
+
+  /**
+   * Apply the configured {@link #redactor()} to every value in {@code map} if set; otherwise return
+   * {@code map} unchanged. Returns the same map reference (not a copy) when no redactor is
+   * configured so the no-redactor path remains allocation-free. Keys are not redacted — attribute
+   * keys are expected to be operator-controlled tag names, not user content.
+   *
+   * @param map the attribute map; {@code null} returns {@code null}
+   * @return the map with redacted values, or {@code map} unchanged when no redactor is configured
+   */
+  public Map<String, String> redactValues(Map<String, String> map) {
+    if (redactor == null || map == null || map.isEmpty()) {
+      return map;
+    }
+    var redacted = new LinkedHashMap<String, String>(map.size());
+    for (var entry : map.entrySet()) {
+      var v = entry.getValue();
+      redacted.put(entry.getKey(), v == null ? null : redactor.redact(v).text());
+    }
+    return redacted;
+  }
+
   public static Builder newBuilder() {
     return new Builder();
   }
@@ -57,6 +106,7 @@ public record PgConfig(DbClient dbClient, String schema, String agentId) {
     private DbClient dbClient;
     private String schema;
     private String agentId;
+    private Redactor redactor;
 
     private Builder() {}
 
@@ -75,8 +125,20 @@ public record PgConfig(DbClient dbClient, String schema, String agentId) {
       return this;
     }
 
+    /**
+     * Set the {@link Redactor} applied to trace and journal text fields before persisting. Pass
+     * {@code null} to clear a previously-set redactor (default: unset / no-op). Source-level
+     * redaction at tool boundaries is the recommended primary mitigation; this hook is ergonomic
+     * sugar for deployers who want defense-in-depth at the persistence boundary without wrapping
+     * the journal themselves.
+     */
+    public Builder withRedactor(Redactor redactor) {
+      this.redactor = redactor;
+      return this;
+    }
+
     public PgConfig build() {
-      return new PgConfig(dbClient, schema, agentId);
+      return new PgConfig(dbClient, schema, agentId, redactor);
     }
   }
 }

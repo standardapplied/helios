@@ -159,4 +159,81 @@ class PgToolCallJournalTest {
     journal.start(record);
     assertNull(journal.all(runId).get(0).args());
   }
+
+  // ── opt-in journal-side redaction (PgConfig.withRedactor) ─────────────────
+
+  @Test
+  void toolCallFieldsPersistedVerbatimByDefault() {
+    var runId = PgTestSupport.newSeededRunId();
+    var raw = "ghp_supersecret_12345678";
+    journal.start(
+        ToolCallRecord.newBuilder()
+            .withRunId(runId)
+            .withIteration(0)
+            .withToolCallId("c1")
+            .withToolName("gh-cli")
+            .withArgs(Map.of("token", raw))
+            .withStartedAt(Ids.now())
+            .build());
+    journal.complete(runId, "c1", "auth ok: " + raw);
+
+    var record = journal.all(runId).get(0);
+    assertTrue(record.args().toString().contains(raw), "default: args verbatim");
+    assertEquals("auth ok: " + raw, record.output(), "default: output verbatim");
+  }
+
+  @Test
+  void toolCallFieldsAreScrubbedWhenRedactorConfigured() {
+    var registry = new ai.singlr.core.common.SecretRegistry();
+    registry.register("GH_TOKEN", "ghp_supersecret_12345678");
+    var redactingJournal =
+        new PgToolCallJournal(
+            PgConfig.newBuilder()
+                .withDbClient(PgTestSupport.dbClient())
+                .withRedactor(registry.redactor())
+                .build());
+
+    var runId = PgTestSupport.newSeededRunId();
+    redactingJournal.start(
+        ToolCallRecord.newBuilder()
+            .withRunId(runId)
+            .withIteration(0)
+            .withToolCallId("c1")
+            .withToolName("gh-cli")
+            .withArgs(Map.of("token", "ghp_supersecret_12345678"))
+            .withStartedAt(Ids.now())
+            .build());
+    redactingJournal.complete(runId, "c1", "auth ok: ghp_supersecret_12345678");
+
+    var record = redactingJournal.all(runId).get(0);
+    var marker = "<redacted:GH_TOKEN>";
+    assertTrue(
+        record.args().toString().contains(marker)
+            && !record.args().toString().contains("ghp_supersecret"),
+        "args JSON should be scrubbed of the registered secret; got: " + record.args());
+    assertEquals(
+        "auth ok: " + marker, record.output(), "output should be scrubbed of registered secret");
+  }
+
+  @Test
+  void failErrorIsScrubbedWhenRedactorConfigured() {
+    var registry = new ai.singlr.core.common.SecretRegistry();
+    registry.register("API_KEY", "sk-supersecret-abc12345");
+    var redactingJournal =
+        new PgToolCallJournal(
+            PgConfig.newBuilder()
+                .withDbClient(PgTestSupport.dbClient())
+                .withRedactor(registry.redactor())
+                .build());
+
+    var runId = PgTestSupport.newSeededRunId();
+    redactingJournal.start(started(runId, "c1", "lookup"));
+    redactingJournal.fail(runId, "c1", "401 Unauthorized: token=sk-supersecret-abc12345");
+
+    var record = redactingJournal.all(runId).get(0);
+    assertEquals(
+        "401 Unauthorized: token=<redacted:API_KEY>",
+        record.error(),
+        "fail() error path should be scrubbed");
+  }
 }

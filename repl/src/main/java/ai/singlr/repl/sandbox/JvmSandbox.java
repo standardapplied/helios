@@ -10,12 +10,27 @@ import ai.singlr.repl.ReplException;
 import ai.singlr.repl.host.HostFunctionRegistry;
 import ai.singlr.repl.protocol.ProcessTransport;
 import ai.singlr.repl.protocol.RpcChannel;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.lang.management.ManagementFactory;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.Channels;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -38,6 +53,10 @@ public final class JvmSandbox implements Sandbox {
   private final JvmSandboxConfig config;
   private final AtomicBoolean closed = new AtomicBoolean(false);
   private final Thread shutdownHook;
+  private final SocketChannel rpcChannelSocket;
+  private final Path socketDir;
+  private final StringBuilder capturedStdout;
+  private final Thread stdoutReader;
 
   /**
    * Create a sandbox wrapping an existing process. Used by the factory method and for testing.
@@ -49,10 +68,40 @@ public final class JvmSandbox implements Sandbox {
    */
   JvmSandbox(
       Process process, ProcessTransport transport, RpcChannel channel, JvmSandboxConfig config) {
+    this(process, transport, channel, config, null, null, null, null);
+  }
+
+  /**
+   * Full constructor including the dedicated RPC socket and the stdout-capture thread used by
+   * {@link #create(JvmSandboxConfig, HostFunctionRegistry)}. The 4-arg constructor above is kept
+   * for tests that wire a {@link ProcessTransport} directly over piped streams.
+   *
+   * @param rpcChannelSocket the accepted Unix-domain socket carrying RPC, or {@code null} if the
+   *     transport is not socket-backed (test injection path)
+   * @param socketDir the temp directory holding the socket file, deleted on {@link #close()}, or
+   *     {@code null}
+   * @param capturedStdout buffer the stdout reader thread appends to, or {@code null} when no
+   *     reader is wired
+   * @param stdoutReader virtual thread reading {@code process.getInputStream()} into {@code
+   *     capturedStdout}, or {@code null}
+   */
+  JvmSandbox(
+      Process process,
+      ProcessTransport transport,
+      RpcChannel channel,
+      JvmSandboxConfig config,
+      SocketChannel rpcChannelSocket,
+      Path socketDir,
+      StringBuilder capturedStdout,
+      Thread stdoutReader) {
     this.process = process;
     this.transport = transport;
     this.channel = channel;
     this.config = config;
+    this.rpcChannelSocket = rpcChannelSocket;
+    this.socketDir = socketDir;
+    this.capturedStdout = capturedStdout;
+    this.stdoutReader = stdoutReader;
     this.shutdownHook = new Thread(this::destroyOnJvmShutdown, "jvm-sandbox-shutdown-hook");
     Runtime.getRuntime().addShutdownHook(shutdownHook);
   }
@@ -75,6 +124,9 @@ public final class JvmSandbox implements Sandbox {
       var descendantsSnapshot = process.descendants().toList();
       process.destroyForcibly();
       descendantsSnapshot.forEach(ProcessHandle::destroyForcibly);
+    }
+    if (socketDir != null) {
+      deleteSocketDirQuietly(socketDir);
     }
   }
 
@@ -108,28 +160,211 @@ public final class JvmSandbox implements Sandbox {
    * @return a running sandbox
    */
   static JvmSandbox create(JvmSandboxConfig config, HostFunctionRegistry registry) {
+    Path socketDir = null;
+    ServerSocketChannel listener = null;
+    Process process = null;
+    SocketChannel acceptedRpc = null;
+    Thread stdoutThread = null;
     try {
+      // The RPC channel runs on a Unix domain socket bound in a private temp directory. The
+      // subprocess connects on startup using the path passed via --rpc-socket; the host accepts
+      // exactly one connection and then closes the listener (and deletes the socket file) so no
+      // other process — including a JShell snippet inside the subprocess — can connect a second
+      // time. Subprocess stdout stays for capture only and is never parsed as RPC, eliminating
+      // the C1 stdout-RPC forgery vector where a snippet could write a `\0RPC:` frame to raw
+      // FileDescriptor.out and reach the host's RPC dispatcher.
+      socketDir = createPrivateSocketDir();
+      var socketPath = socketDir.resolve("rpc.sock");
+      listener = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
+      listener.bind(UnixDomainSocketAddress.of(socketPath), 1);
+
       var javaHome = System.getProperty("java.home");
       var javaBin = javaHome + "/bin/java";
-      var pb = new ProcessBuilder(buildLaunchCommand(javaBin, config));
+      var pb = new ProcessBuilder(buildLaunchCommand(javaBin, config, socketPath.toString()));
       pb.redirectErrorStream(false);
       var env = pb.environment();
       env.clear();
       env.put("PATH", System.getenv().getOrDefault("PATH", ""));
       env.put("JAVA_HOME", javaHome);
-      var process = pb.start();
+      process = pb.start();
+      // Host doesn't write to subprocess stdin; close it so any read in the subprocess hits EOF
+      // immediately rather than blocking. RPC goes via the socket.
+      try {
+        process.getOutputStream().close();
+      } catch (IOException ignored) {
+        // Subprocess may have already closed it.
+      }
+
+      acceptedRpc = acceptWithTimeout(listener, Duration.ofSeconds(10));
+      // Listener closed and socket file removed once we have the one connection. A snippet that
+      // discovers the path from argv/env now finds nothing to connect to.
+      listener.close();
+      listener = null;
+      Files.deleteIfExists(socketPath);
+
       var processTransport =
-          new ProcessTransport(process.getInputStream(), process.getOutputStream());
+          new ProcessTransport(
+              Channels.newInputStream(acceptedRpc), Channels.newOutputStream(acceptedRpc));
       var rpcChannel = new RpcChannel(processTransport, registry, config.callTimeout());
+
+      var capturedStdout = new StringBuilder();
+      stdoutThread = startStdoutReader(process, capturedStdout);
+
       var customPrelude = SandboxPrelude.synthesizeCustomWrappers(registry);
       registry.freeze();
-      var sandbox = new JvmSandbox(process, processTransport, rpcChannel, config);
+      var sandbox =
+          new JvmSandbox(
+              process,
+              processTransport,
+              rpcChannel,
+              config,
+              acceptedRpc,
+              socketDir,
+              capturedStdout,
+              stdoutThread);
       if (!customPrelude.isBlank()) {
         installCustomPrelude(rpcChannel, customPrelude);
       }
       return sandbox;
     } catch (IOException e) {
+      cleanupOnFailure(listener, process, acceptedRpc, stdoutThread, socketDir);
       throw new ReplException("Failed to start JVM sandbox subprocess", e);
+    } catch (RuntimeException e) {
+      cleanupOnFailure(listener, process, acceptedRpc, stdoutThread, socketDir);
+      throw e;
+    }
+  }
+
+  /**
+   * Create a private temp directory the RPC socket lives in. Mode 0700 on POSIX filesystems; on
+   * non-POSIX (e.g. Windows) we rely on the JDK's default temp-dir ACLs. The directory is deleted
+   * by {@link #close()} along with its single socket file.
+   */
+  private static Path createPrivateSocketDir() throws IOException {
+    var dir = Files.createTempDirectory("helios-rpc-");
+    try {
+      Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
+    } catch (UnsupportedOperationException ignored) {
+      // Non-POSIX filesystem (Windows) — default ACLs from createTempDirectory are appropriate.
+    }
+    return dir;
+  }
+
+  /**
+   * Accept exactly one inbound connection on {@code listener} or throw on timeout. Uses a virtual
+   * thread so the calling thread retains its interrupt-status semantics and the timeout actually
+   * fires (blocking {@code ServerSocketChannel.accept()} has no built-in timeout in blocking mode).
+   */
+  private static SocketChannel acceptWithTimeout(ServerSocketChannel listener, Duration timeout)
+      throws IOException {
+    var accept =
+        CompletableFuture.supplyAsync(
+            () -> {
+              try {
+                return listener.accept();
+              } catch (IOException e) {
+                throw new java.util.concurrent.CompletionException(e);
+              }
+            },
+            r -> Thread.ofVirtual().name("helios-sandbox-rpc-accept").start(r));
+    try {
+      return accept.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (TimeoutException e) {
+      try {
+        listener.close();
+      } catch (IOException ignored) {
+        // Best-effort wakeup so the accept thread unblocks.
+      }
+      throw new IOException(
+          "Subprocess did not connect to the RPC socket within "
+              + timeout
+              + "; the launch"
+              + " probably failed — check stderr for the cause",
+          e);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IOException("Interrupted while waiting for subprocess RPC connect", e);
+    } catch (ExecutionException e) {
+      var cause = e.getCause();
+      if (cause instanceof IOException io) {
+        throw io;
+      }
+      throw new IOException("RPC accept failed", cause);
+    }
+  }
+
+  /** Reader thread that drains the subprocess's stdout into a shared buffer for execute results. */
+  private static Thread startStdoutReader(Process process, StringBuilder buffer) {
+    return Thread.ofVirtual()
+        .name("helios-sandbox-stdout-reader")
+        .start(
+            () -> {
+              try (var reader =
+                  new BufferedReader(
+                      new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                  synchronized (buffer) {
+                    if (!buffer.isEmpty()) {
+                      buffer.append('\n');
+                    }
+                    buffer.append(line);
+                  }
+                }
+              } catch (IOException ignored) {
+                // Stream closed by subprocess termination; nothing to do.
+              }
+            });
+  }
+
+  private static void cleanupOnFailure(
+      ServerSocketChannel listener,
+      Process process,
+      SocketChannel acceptedRpc,
+      Thread stdoutThread,
+      Path socketDir) {
+    if (listener != null) {
+      try {
+        listener.close();
+      } catch (IOException ignored) {
+        // best-effort
+      }
+    }
+    if (acceptedRpc != null) {
+      try {
+        acceptedRpc.close();
+      } catch (IOException ignored) {
+        // best-effort
+      }
+    }
+    if (process != null && process.isAlive()) {
+      process.destroyForcibly();
+    }
+    if (stdoutThread != null) {
+      stdoutThread.interrupt();
+    }
+    if (socketDir != null) {
+      deleteSocketDirQuietly(socketDir);
+    }
+  }
+
+  private static void deleteSocketDirQuietly(Path dir) {
+    try (var entries = Files.list(dir)) {
+      entries.forEach(
+          p -> {
+            try {
+              Files.deleteIfExists(p);
+            } catch (IOException ignored) {
+              // best-effort
+            }
+          });
+    } catch (IOException ignored) {
+      // dir already gone, fine
+    }
+    try {
+      Files.deleteIfExists(dir);
+    } catch (IOException ignored) {
+      // best-effort
     }
   }
 
@@ -179,6 +414,18 @@ public final class JvmSandbox implements Sandbox {
    * </ul>
    */
   static List<String> buildLaunchCommand(String javaBin, JvmSandboxConfig config) {
+    return buildLaunchCommand(javaBin, config, null);
+  }
+
+  /**
+   * Build the subprocess command, optionally including the {@code --rpc-socket=<path>} argument the
+   * {@link JvmSandboxBootstrap} parses to find the host-side Unix domain socket. {@code
+   * rpcSocketPath == null} produces a command line equivalent to the pre-2.1.3 launch (subprocess
+   * falls back to stdin/stdout RPC), which is still useful for unit tests of the command-builder
+   * itself — not used by the production {@link #create} path.
+   */
+  static List<String> buildLaunchCommand(
+      String javaBin, JvmSandboxConfig config, String rpcSocketPath) {
     var command = new ArrayList<String>();
     command.add(javaBin);
     command.add("-Xmx" + config.maxHeapMb() + "m");
@@ -202,6 +449,9 @@ public final class JvmSandbox implements Sandbox {
     }
 
     command.add("ai.singlr.repl.sandbox.JvmSandboxBootstrap");
+    if (rpcSocketPath != null) {
+      command.add("--rpc-socket=" + rpcSocketPath);
+    }
     return command;
   }
 
@@ -252,16 +502,32 @@ public final class JvmSandbox implements Sandbox {
       params.put("maxBindingValueChars", executeParams.maxBindingValueChars());
       params.put("maxBindingSnapshotChars", executeParams.maxBindingSnapshotChars());
       var result = channel.call("execute", params);
-      var stdout = transport.drainStdout();
+      var stdout = drainCapturedStdout();
       return toExecutionResult(request.code(), result, stdout);
     } catch (RpcChannel.RpcException e) {
-      var stdout = transport.drainStdout();
+      var stdout = drainCapturedStdout();
       return ExecutionResult.newBuilder()
           .withExecutedCode(request.code())
           .withStdout(stdout)
           .withStderr(e.getMessage())
           .withExitCode(1)
           .build();
+    }
+  }
+
+  /**
+   * Drain accumulated subprocess stdout (the dedicated capture thread populates it) and clear the
+   * buffer for the next execute. Falls back to {@link ProcessTransport#drainStdout()} when the
+   * sandbox was constructed via the test-injection path with no socket-backed capture thread.
+   */
+  private String drainCapturedStdout() {
+    if (capturedStdout == null) {
+      return transport.drainStdout();
+    }
+    synchronized (capturedStdout) {
+      var s = capturedStdout.toString();
+      capturedStdout.setLength(0);
+      return s;
     }
   }
 
@@ -298,6 +564,27 @@ public final class JvmSandbox implements Sandbox {
         LOG.log(Level.FINE, "Interrupted while waiting for sandbox process to exit", e);
       }
       channel.close();
+      if (rpcChannelSocket != null) {
+        try {
+          rpcChannelSocket.close();
+        } catch (IOException ignored) {
+          // best-effort
+        }
+      }
+      if (stdoutReader != null) {
+        // The reader's BufferedReader is wrapping process.getInputStream(); destroying the
+        // subprocess above closes the underlying pipe, so readLine() returns EOF and the thread
+        // exits on its own. Join briefly so capturedStdout has the final tail before any caller
+        // reads it post-close.
+        try {
+          stdoutReader.join(Duration.ofSeconds(2));
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+        }
+      }
+      if (socketDir != null) {
+        deleteSocketDirQuietly(socketDir);
+      }
     }
   }
 

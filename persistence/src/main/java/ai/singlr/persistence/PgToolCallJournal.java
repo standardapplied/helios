@@ -41,6 +41,11 @@ public class PgToolCallJournal implements ToolCallJournal {
   public void start(ToolCallRecord record) {
     Objects.requireNonNull(record, "record");
     try {
+      // Args serialise to JSON via JsonbMapper, then pass through config.redact() — the byte-level
+      // redactor will scrub any registered secret value regardless of its JSON context (string
+      // value, nested array, etc.). Output and error are text and redact directly.
+      var argsJson =
+          record.args() == null ? null : config.redact(JsonbMapper.objectToJsonb(record.args()));
       dbClient
           .execute()
           .dml(
@@ -49,10 +54,10 @@ public class PgToolCallJournal implements ToolCallJournal {
               record.toolCallId(),
               record.iteration(),
               record.toolName(),
-              record.args() == null ? null : JsonbMapper.objectToJsonb(record.args()),
+              argsJson,
               record.status().name(),
-              record.output(),
-              record.error(),
+              config.redact(record.output()),
+              config.redact(record.error()),
               record.startedAt(),
               record.endedAt());
     } catch (Exception e) {
@@ -71,7 +76,7 @@ public class PgToolCallJournal implements ToolCallJournal {
           .dml(
               config.qualify(ToolCallJournalSql.COMPLETE),
               ToolCallStatus.SUCCEEDED.name(),
-              output,
+              config.redact(output),
               Ids.now(),
               runId.toString(),
               toolCallId);
@@ -91,7 +96,7 @@ public class PgToolCallJournal implements ToolCallJournal {
           .dml(
               config.qualify(ToolCallJournalSql.FAIL),
               ToolCallStatus.FAILED.name(),
-              error,
+              config.redact(error),
               Ids.now(),
               runId.toString(),
               toolCallId);
