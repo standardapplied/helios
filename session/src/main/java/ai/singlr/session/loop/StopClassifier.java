@@ -26,11 +26,15 @@ import java.util.Optional;
  *   <li>Turn ceiling — current turn index has reached {@code limits.maxTurns()}.
  *   <li>Refusal — the provider reported {@link FinishReason#CONTENT_FILTER}.
  *   <li>Provider error — the provider reported {@link FinishReason#ERROR}.
+ *   <li>Response truncation — the provider reported {@link FinishReason#LENGTH} (its
+ *       max_output_tokens cap fired). Classifying this as terminal avoids the otherwise-silent
+ *       re-issue loop where the model keeps hitting the same cap until {@code maxTurns} elapses.
  *   <li>Natural completion — the provider reported {@link FinishReason#STOP} and no further user
  *       messages are queued.
  * </ol>
  *
- * <p>Any other outcome returns {@link Optional#empty()}, signalling the loop to continue.
+ * <p>Any other outcome returns {@link Optional#empty()}, signalling the loop to continue (currently
+ * only {@link FinishReason#TOOL_CALLS}).
  *
  * <h2>Thread-safety</h2>
  *
@@ -136,7 +140,20 @@ public final class StopClassifier {
                       state.usage(),
                       state.cost(),
                       state.elapsed()));
-      case TOOL_CALLS, LENGTH -> Optional.empty();
+      case LENGTH ->
+          Optional.of(
+              new ResultMessage.ErrorDuringExecution(
+                  state.sessionId(),
+                  SerializedError.of(
+                      "max-tokens",
+                      "response truncated at provider max_output_tokens cap"
+                          + (Strings.isBlank(assistantContent)
+                              ? ""
+                              : "; partial content: " + assistantContent)),
+                  state.usage(),
+                  state.cost(),
+                  state.elapsed()));
+      case TOOL_CALLS -> Optional.empty();
     };
   }
 }
