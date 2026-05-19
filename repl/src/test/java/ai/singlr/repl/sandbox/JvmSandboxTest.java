@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.repl.host.HostFunction;
 import ai.singlr.repl.host.HostFunctionRegistry;
 import ai.singlr.repl.protocol.ProcessTransport;
 import ai.singlr.repl.protocol.RpcChannel;
@@ -684,7 +683,7 @@ class JvmSandboxTest {
     var submittedHolder = new AtomicReference<>();
     var registry = new HostFunctionRegistry();
     registry.register(
-        new HostFunction(
+        new ai.singlr.repl.host.HostFunction(
             "submit",
             "stub submit for the JvmSandbox end-to-end test",
             params -> {

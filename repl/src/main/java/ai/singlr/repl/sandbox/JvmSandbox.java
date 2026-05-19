@@ -67,7 +67,9 @@ public final class JvmSandbox implements Sandbox {
       return;
     }
     if (process.isAlive()) {
+      // Kill the parent first so it cannot fork new children during the descendant sweep.
       process.destroyForcibly();
+      process.descendants().forEach(ProcessHandle::destroyForcibly);
     }
   }
 
@@ -275,7 +277,12 @@ public final class JvmSandbox implements Sandbox {
       // will the reader thread's blocking readLine() return with EOF. If we closed the
       // transport first, reader.close() could deadlock waiting for a read() that's pinned in a
       // native call. Once the subprocess is dead, transport.close() is a clean no-op wind-down.
+      //
+      // Order matters: kill the parent first so it cannot fork new descendants during the sweep,
+      // then walk its surviving descendants. Snippets can call Runtime.exec(...) — without this
+      // walk, orphaned grandchildren survive the sandbox.
       process.destroyForcibly();
+      process.descendants().forEach(ProcessHandle::destroyForcibly);
       try {
         process.waitFor(Duration.ofSeconds(5));
       } catch (InterruptedException e) {
