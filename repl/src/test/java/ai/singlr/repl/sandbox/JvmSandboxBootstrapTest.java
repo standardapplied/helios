@@ -71,8 +71,8 @@ class JvmSandboxBootstrapTest {
         "expected a single WARNING line to surface the reduced-isolation regime, got: " + written);
     assertTrue(written.contains("setAccessible"), "must explain the attack mechanism: " + written);
     assertTrue(
-        written.contains("Incus") || written.contains("OS-level"),
-        "must point at the load-bearing boundary: " + written);
+        written.contains("OS-level"),
+        "must point at the externally-arranged OS-level boundary: " + written);
   }
 
   @Test

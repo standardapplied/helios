@@ -21,12 +21,17 @@ import java.io.InputStreamReader;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.lang.management.ManagementFactory;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -1218,6 +1223,86 @@ class JvmSandboxTest {
         sandbox.close();
       }
     }
+  }
+
+  @Test
+  void acceptWithTimeoutClosesListenerOnSuccess() throws Exception {
+    var socketDir = Files.createTempDirectory("helios-rpc-test-");
+    var socketPath = socketDir.resolve("rpc.sock");
+    var listener = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
+    try {
+      listener.bind(UnixDomainSocketAddress.of(socketPath), 1);
+      var clientConnected = new CountDownLatch(1);
+      Thread.ofVirtual()
+          .start(
+              () -> {
+                try {
+                  Thread.sleep(50);
+                  var client = SocketChannel.open(StandardProtocolFamily.UNIX);
+                  client.connect(UnixDomainSocketAddress.of(socketPath));
+                  clientConnected.countDown();
+                  Thread.sleep(200);
+                  client.close();
+                } catch (Exception ignored) {
+                }
+              });
+      var accepted = JvmSandbox.acceptWithTimeout(listener, Duration.ofSeconds(5));
+      assertTrue(
+          clientConnected.await(5, TimeUnit.SECONDS), "client must connect within test budget");
+      assertNotNull(accepted, "successful accept must return the client channel");
+      assertFalse(
+          listener.isOpen(),
+          "acceptWithTimeout owns the listener: it must close on the success path so the caller"
+              + " does not double-close from a downstream cleanup");
+      accepted.close();
+    } finally {
+      if (listener.isOpen()) {
+        listener.close();
+      }
+      Files.deleteIfExists(socketPath);
+      Files.deleteIfExists(socketDir);
+    }
+  }
+
+  @Test
+  void acceptWithTimeoutClosesListenerOnTimeout() throws Exception {
+    var socketDir = Files.createTempDirectory("helios-rpc-test-");
+    var socketPath = socketDir.resolve("rpc.sock");
+    var listener = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
+    try {
+      listener.bind(UnixDomainSocketAddress.of(socketPath), 1);
+      assertThrows(
+          IOException.class, () -> JvmSandbox.acceptWithTimeout(listener, Duration.ofMillis(50)));
+      assertFalse(
+          listener.isOpen(),
+          "acceptWithTimeout must close the listener on timeout so the blocked accept thread"
+              + " unblocks via AsynchronousCloseException");
+    } finally {
+      if (listener.isOpen()) {
+        listener.close();
+      }
+      Files.deleteIfExists(socketPath);
+      Files.deleteIfExists(socketDir);
+    }
+  }
+
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void subprocessStartupTimeoutHonoursConfigAndSurfacesDurationInError() {
+    var startupTimeout = Duration.ofMillis(1);
+    var config = JvmSandboxConfig.newBuilder().withSubprocessStartupTimeout(startupTimeout).build();
+    var registry = new HostFunctionRegistry();
+    var thrown =
+        assertThrows(ai.singlr.repl.ReplException.class, () -> JvmSandbox.create(config, registry));
+    assertNotNull(thrown.getCause(), "expected wrapped cause");
+    var causeMessage = thrown.getCause().getMessage();
+    assertNotNull(causeMessage, "cause must carry a message");
+    assertTrue(
+        causeMessage.contains(startupTimeout.toString()),
+        "timeout error must include the configured duration ("
+            + startupTimeout
+            + "); got: "
+            + causeMessage);
   }
 
   @Test

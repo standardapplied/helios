@@ -63,7 +63,9 @@ public record PgConfig(DbClient dbClient, String schema, String agentId, Redacto
    * Apply the configured {@link #redactor()} to {@code value} if set; otherwise return {@code
    * value} unchanged. Returns the same reference when no redactor is configured so callers cannot
    * detect a per-call allocation when redaction is off (the no-redactor path is the documented
-   * default).
+   * default); when a redactor IS configured, returns a freshly-allocated string. Callers must treat
+   * the return value as read-only — never assume it's a distinct allocation from the input, and
+   * never assume the redactor was applied.
    *
    * @param value the text to redact; {@code null} returns {@code null}
    * @return redacted (or unchanged) text
@@ -77,9 +79,12 @@ public record PgConfig(DbClient dbClient, String schema, String agentId, Redacto
 
   /**
    * Apply the configured {@link #redactor()} to every value in {@code map} if set; otherwise return
-   * {@code map} unchanged. Returns the same map reference (not a copy) when no redactor is
-   * configured so the no-redactor path remains allocation-free. Keys are not redacted — attribute
-   * keys are expected to be operator-controlled tag names, not user content.
+   * {@code map} unchanged. When a redactor is configured the returned map is a fresh {@link
+   * LinkedHashMap}; when none is configured the input reference is returned verbatim. The return
+   * type does not distinguish the two cases — callers MUST treat the returned map as read-only and
+   * MUST NOT mutate it, since the caller may unknowingly be holding the original input. Keys are
+   * not redacted — attribute keys are expected to be operator-controlled tag names, not user
+   * content.
    *
    * @param map the attribute map; {@code null} returns {@code null}
    * @return the map with redacted values, or {@code map} unchanged when no redactor is configured

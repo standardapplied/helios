@@ -115,11 +115,11 @@ public final class JvmSandboxBootstrap {
    *
    * <p>Intra-JVM isolation between trusted bootstrap code and JShell-evaluated snippets is
    * fundamentally weak in any of those cases: anything reachable on the heap is reachable to a
-   * sufficiently motivated snippet via reflection in the absence of a SecurityManager. The
-   * load-bearing isolation boundary is OS-level — the per-session Incus sandbox in the reference
-   * deployment profile. The intra-JVM defenses (C1 stdout decoupling, the dedicated-socket
-   * lifecycle, this WARNING) catch casual mistakes and raise the bar; they are not a substitute for
-   * the OS sandbox.
+   * sufficiently motivated snippet via reflection in the absence of a SecurityManager. Deployers
+   * running untrusted snippet payloads are responsible for arranging OS-level isolation around the
+   * host process (containers, namespaces, separate UIDs per session, seccomp profiles); the
+   * intra-JVM defenses here (C1 stdout decoupling, the dedicated-socket lifecycle, this WARNING)
+   * raise the bar and catch casual mistakes but are not a substitute for an external boundary.
    *
    * <p>At startup this method emits a one-time {@code WARNING} on stderr when the bootstrap is
    * running in an unnamed module, naming the reduced-isolation regime explicitly so deployers who
@@ -191,10 +191,11 @@ public final class JvmSandboxBootstrap {
             + reason
             + ". A JShell snippet can use setAccessible(true) on private bootstrap fields to"
             + " obtain the RPC socket PrintStream and forge calls into the host. C1 closes the"
-            + " stdout-RPC forgery path only; the reflection forgery path requires JPMS"
-            + " isolation (modulepath launch, no --add-opens to ai.singlr.repl.sandbox) AND an"
-            + " OS-level sandbox (Incus profile) for production untrusted workloads. See the"
-            + " JvmSandboxBootstrap#main javadoc for the full isolation regime.");
+            + " stdout-RPC forgery path only; closing the reflection forgery path requires both"
+            + " JPMS isolation (modulepath launch, no --add-opens to ai.singlr.repl.sandbox) AND"
+            + " an externally-arranged OS-level isolation boundary around the host process for"
+            + " untrusted workloads. See the JvmSandboxBootstrap#main javadoc for the full"
+            + " isolation regime.");
   }
 
   /**
@@ -346,6 +347,15 @@ public final class JvmSandboxBootstrap {
     return result;
   }
 
+  /**
+   * Send a JSON-RPC message to the host over the dedicated RPC channel. The {@link
+   * ProcessTransport#RPC_PREFIX} magic prefix is required, not decorative: the host-side {@link
+   * ProcessTransport#receive} parser distinguishes RPC frames from incidental subprocess writes by
+   * the prefix, and would drop unprefixed lines into its stdout buffer (which the host no longer
+   * drains as a side channel since C1). The prefix is not strictly necessary on this dedicated
+   * socket — both peers know every byte is RPC — but the parser's contract still requires it. Do
+   * not remove it without changing {@code ProcessTransport.receive} in lockstep.
+   */
   void sendRpc(RpcMessage message) throws IOException {
     var json = ProcessTransport.serializeMessage(message);
     synchronized (realOut) {
