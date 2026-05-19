@@ -56,6 +56,46 @@ class JvmSandboxBootstrapTest {
   }
 
   @Test
+  void warnIfReducedIsolationFiresWhenSandboxPackageIsOpened() {
+    // The Surefire harness runs with --add-opens=ai.singlr.repl/ai.singlr.repl.sandbox=ALL-UNNAMED
+    // (also propagated to the JvmSandbox subprocess via shouldPropagateJvmArg). That open is what
+    // makes the reflection RPC forgery in JvmSandboxTest reproduce — so under this test JVM the
+    // WARNING must fire. Real production launches without --add-opens, in modulepath mode, will
+    // not trigger the WARNING.
+    var buffer = new ByteArrayOutputStream();
+    var stream = new PrintStream(buffer, true, StandardCharsets.UTF_8);
+    JvmSandboxBootstrap.warnIfReducedIsolation(stream);
+    var written = buffer.toString(StandardCharsets.UTF_8);
+    assertTrue(
+        written.startsWith("WARNING:"),
+        "expected a single WARNING line to surface the reduced-isolation regime, got: " + written);
+    assertTrue(written.contains("setAccessible"), "must explain the attack mechanism: " + written);
+    assertTrue(
+        written.contains("Incus") || written.contains("OS-level"),
+        "must point at the load-bearing boundary: " + written);
+  }
+
+  @Test
+  void warnIfReducedIsolationStaysSilentWhenIsolationIntact() {
+    // Mirror the production-side detection: the WARNING fires when the module is unnamed OR the
+    // sandbox package is open to the unnamed-module probe. When neither holds the early return
+    // must produce zero output. Surefire opens the package via --add-opens here, so under this
+    // JVM the precondition typically holds and the test self-skips; a clean modulepath launch
+    // would exercise the silent path.
+    var module = JvmSandboxBootstrap.class.getModule();
+    var unnamedProbe = ClassLoader.getPlatformClassLoader().getUnnamedModule();
+    var inReducedIsolation =
+        !module.isNamed() || module.isOpen("ai.singlr.repl.sandbox", unnamedProbe);
+    if (inReducedIsolation) {
+      return;
+    }
+    var buffer = new ByteArrayOutputStream();
+    JvmSandboxBootstrap.warnIfReducedIsolation(
+        new PrintStream(buffer, true, StandardCharsets.UTF_8));
+    assertEquals("", buffer.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
   void addHostBridgeToJShellClasspathIsSafe() {
     try (var fresh = JShell.builder().executionEngine("local").build()) {
       JvmSandboxBootstrap.addHostBridgeToJShellClasspath(fresh);

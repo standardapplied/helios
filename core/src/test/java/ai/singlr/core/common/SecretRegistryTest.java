@@ -84,6 +84,68 @@ class SecretRegistryTest {
   }
 
   @Test
+  void registerRefusesJsonSpecialQuote() {
+    var registry = new SecretRegistry();
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> registry.register("X", "tok\"en-12345678"));
+    assertTrue(ex.getMessage().contains("JSON-special"), ex.getMessage());
+  }
+
+  @Test
+  void registerRefusesJsonSpecialBackslash() {
+    var registry = new SecretRegistry();
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> registry.register("X", "tok\\en-12345678"));
+    assertTrue(ex.getMessage().contains("JSON-special"), ex.getMessage());
+  }
+
+  @Test
+  void registerRefusesNewline() {
+    var registry = new SecretRegistry();
+    var ex =
+        assertThrows(IllegalArgumentException.class, () -> registry.register("X", "abc\ndef12345"));
+    assertTrue(ex.getMessage().contains("control"), ex.getMessage());
+  }
+
+  @Test
+  void registerRefusesTab() {
+    var registry = new SecretRegistry();
+    var ex =
+        assertThrows(IllegalArgumentException.class, () -> registry.register("X", "abc\tdef12345"));
+    assertTrue(ex.getMessage().contains("control"), ex.getMessage());
+  }
+
+  @Test
+  void registerRefusesArbitraryControlByte() {
+    var registry = new SecretRegistry();
+    var ex =
+        assertThrows(IllegalArgumentException.class, () -> registry.register("X", "abcdef12345"));
+    assertTrue(ex.getMessage().contains("control"), ex.getMessage());
+    assertTrue(ex.getMessage().contains("0x01"), ex.getMessage());
+  }
+
+  @Test
+  void registerRefusesDelControlByte() {
+    var registry = new SecretRegistry();
+    var ex =
+        assertThrows(IllegalArgumentException.class, () -> registry.register("X", "abcdef12345"));
+    assertTrue(ex.getMessage().contains("control"), ex.getMessage());
+    assertTrue(ex.getMessage().contains("0x7F"), ex.getMessage());
+  }
+
+  @Test
+  void registerAcceptsPrintableAsciiWithCommonSymbols() {
+    // Sanity check the inverse: every byte in the legal range registers cleanly. Covers the symbol
+    // characters Jackson does NOT escape: =-_./+:@#$%& etc., plus spaces.
+    var registry = new SecretRegistry();
+    registry.register("X", "token-with_symbols.+/=@#:12345");
+    assertEquals(1, registry.size());
+    assertTrue(registry.leaks("noise token-with_symbols.+/=@#:12345 noise"));
+  }
+
+  @Test
   void leaksDetectsRegisteredValueAnywhere() {
     var registry = new SecretRegistry();
     registry.register("T", "ghp_secrettoken");

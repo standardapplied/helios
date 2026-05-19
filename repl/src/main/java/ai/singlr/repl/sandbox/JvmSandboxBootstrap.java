@@ -84,10 +84,49 @@ public final class JvmSandboxBootstrap {
    * exactly one connection and closes its listener immediately, so this connection is the only RPC
    * channel for the sandbox's lifetime. Subprocess stdin is unused (closed by the host) and
    * subprocess stdout/stderr stay attached to the OS pipes for incidental capture only — they are
-   * never parsed as RPC, which closes the C1 forgery vector where a snippet could write a {@code
-   * \0RPC:} frame to raw {@code FileDescriptor.out} and reach the host's dispatcher.
+   * never parsed as RPC.
+   *
+   * <p><strong>What C1 closes.</strong> The stdout-RPC forgery path: a snippet writing a {@code
+   * \0RPC:} frame to raw {@code FileDescriptor.out} can no longer reach the host's dispatcher,
+   * because the host parses RPC frames off the dedicated socket — not stdout — and the snippet has
+   * no handle to that socket. This is the property the {@code
+   * rawStdoutWriteDoesNotForgeAnRpcCallToHost} regression test pins down.
+   *
+   * <p><strong>What C1 does not close.</strong> The {@code realOut} {@code PrintStream} wrapping
+   * the RPC socket is a private field on this class. A snippet that can call {@code
+   * setAccessible(true)} on that field grabs the same handle the legitimate dispatcher uses and
+   * forges frames directly into the host. {@code setAccessible(true)} is gated by JPMS module
+   * accessibility:
+   *
+   * <ul>
+   *   <li><strong>JPMS launch</strong> (parent uses {@code --module-path}): {@code ai.singlr.repl}
+   *       is a named module and the module-info does not {@code open ai.singlr.repl.sandbox} to any
+   *       other module, so the reflective access throws {@code InaccessibleObjectException}. The
+   *       reflection path is closed.
+   *   <li><strong>Classpath launch</strong>: the class lives in an unnamed module, which is fully
+   *       open to reflection; {@code setAccessible(true)} succeeds. The reflection forgery
+   *       reproduces (see {@code reflectionForgesAnRpcCallToHost}).
+   *   <li><strong>JPMS launch with {@code --add-opens=ai.singlr.repl/ai.singlr.repl.sandbox=...}
+   *       inherited from the parent</strong>: equivalent to classpath launch for this gap. {@link
+   *       JvmSandbox#shouldPropagateJvmArg} forwards {@code --add-opens} into the subprocess, so
+   *       any parent that opened the package — including common test runners and JVM
+   *       instrumentation — leaks the open into the sandbox.
+   * </ul>
+   *
+   * <p>Intra-JVM isolation between trusted bootstrap code and JShell-evaluated snippets is
+   * fundamentally weak in any of those cases: anything reachable on the heap is reachable to a
+   * sufficiently motivated snippet via reflection in the absence of a SecurityManager. The
+   * load-bearing isolation boundary is OS-level — the per-session Incus sandbox in the reference
+   * deployment profile. The intra-JVM defenses (C1 stdout decoupling, the dedicated-socket
+   * lifecycle, this WARNING) catch casual mistakes and raise the bar; they are not a substitute for
+   * the OS sandbox.
+   *
+   * <p>At startup this method emits a one-time {@code WARNING} on stderr when the bootstrap is
+   * running in an unnamed module, naming the reduced-isolation regime explicitly so deployers who
+   * took a classpath launch by accident notice in development.
    */
   public static void main(String[] args) {
+    warnIfReducedIsolation(System.err);
     var socketPath = parseRpcSocketArg(args);
     SocketChannel rpcSocket;
     try {
@@ -123,6 +162,52 @@ public final class JvmSandboxBootstrap {
       // best-effort
     }
     System.exit(0);
+  }
+
+  /**
+   * Emit a single {@code WARNING} line on the provided stream when the bootstrap is running in an
+   * unnamed module (classpath launch) or when its package has been opened to all unnamed modules
+   * (typically via {@code --add-opens} inherited from a test runner or instrumentation parent). In
+   * either regime the {@code realOut} RPC socket reachable through {@code setAccessible(true)}; the
+   * WARNING surfaces the reduced isolation so deployers don't take it on accident. Visible for
+   * testing.
+   */
+  static void warnIfReducedIsolation(PrintStream err) {
+    var module = JvmSandboxBootstrap.class.getModule();
+    String reason;
+    if (!module.isNamed()) {
+      reason = "running in the unnamed module (classpath launch)";
+    } else if (isSandboxPackageOpenToUnnamedModules(module)) {
+      reason =
+          "running in module "
+              + module.getName()
+              + " but package ai.singlr.repl.sandbox is opened to unnamed modules"
+              + " (typically via --add-opens inherited from the parent JVM)";
+    } else {
+      return;
+    }
+    err.println(
+        "WARNING: ai.singlr.repl JvmSandboxBootstrap is "
+            + reason
+            + ". A JShell snippet can use setAccessible(true) on private bootstrap fields to"
+            + " obtain the RPC socket PrintStream and forge calls into the host. C1 closes the"
+            + " stdout-RPC forgery path only; the reflection forgery path requires JPMS"
+            + " isolation (modulepath launch, no --add-opens to ai.singlr.repl.sandbox) AND an"
+            + " OS-level sandbox (Incus profile) for production untrusted workloads. See the"
+            + " JvmSandboxBootstrap#main javadoc for the full isolation regime.");
+  }
+
+  /**
+   * Detect whether {@code ai.singlr.repl.sandbox} is open to the unnamed module of some classloader
+   * — the regime in which JShell-evaluated snippets, which live in their own classloader's unnamed
+   * module, can call {@code setAccessible(true)} on this class's private fields. {@link
+   * Module#isOpen(String)} checks only unconditional opens, so it misses {@code
+   * --add-opens=...=ALL-UNNAMED}; the two-argument overload with an unnamed-module probe catches
+   * it.
+   */
+  private static boolean isSandboxPackageOpenToUnnamedModules(Module module) {
+    var probe = ClassLoader.getPlatformClassLoader().getUnnamedModule();
+    return module.isOpen("ai.singlr.repl.sandbox", probe);
   }
 
   /**

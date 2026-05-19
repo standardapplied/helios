@@ -13,7 +13,10 @@ import ai.singlr.persistence.mapper.JsonbMapper;
 import ai.singlr.persistence.mapper.ToolCallRecordMapper;
 import ai.singlr.persistence.sql.ToolCallJournalSql;
 import io.helidon.dbclient.DbClient;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -41,11 +44,15 @@ public class PgToolCallJournal implements ToolCallJournal {
   public void start(ToolCallRecord record) {
     Objects.requireNonNull(record, "record");
     try {
-      // Args serialise to JSON via JsonbMapper, then pass through config.redact() — the byte-level
-      // redactor will scrub any registered secret value regardless of its JSON context (string
-      // value, nested array, etc.). Output and error are text and redact directly.
+      // Args are walked pre-serialise and each string leaf is redacted before Jackson sees it.
+      // This is the safe shape that PgTraceStore.redactValues already uses for span attributes;
+      // running the byte-level Redactor over Jackson's output would miss secrets whose bytes get
+      // escaped during serialisation. SecretRegistry also refuses JSON-unsafe bytes at
+      // registration so post-serialise scrubbing of plain text fields stays correct, but
+      // structured args go through the deep walk for clarity rather than relying on the
+      // registration constraint alone.
       var argsJson =
-          record.args() == null ? null : config.redact(JsonbMapper.objectToJsonb(record.args()));
+          record.args() == null ? null : JsonbMapper.objectToJsonb(redactArgs(record.args()));
       dbClient
           .execute()
           .dml(
@@ -64,6 +71,47 @@ public class PgToolCallJournal implements ToolCallJournal {
       throw new PgException(
           "Failed to insert tool-call journal entry for run " + record.runId(), e);
     }
+  }
+
+  /**
+   * Walk {@code args} and apply {@link PgConfig#redact(String)} to every string leaf, returning a
+   * new structure with the same shape. Non-string leaves (numbers, booleans, null) pass through
+   * unchanged. The walk preserves {@link Map} and {@link List} positions and produces fresh
+   * collections; the input is never mutated. Returns {@code args} unchanged when no redactor is
+   * configured so the default no-op path stays allocation-free.
+   */
+  private Map<String, Object> redactArgs(Map<String, Object> args) {
+    if (config.redactor() == null) {
+      return args;
+    }
+    return redactMap(args);
+  }
+
+  private Map<String, Object> redactMap(Map<String, Object> m) {
+    var out = new LinkedHashMap<String, Object>(m.size());
+    for (var e : m.entrySet()) {
+      out.put(e.getKey(), redactValue(e.getValue()));
+    }
+    return out;
+  }
+
+  @SuppressWarnings("unchecked")
+  private Object redactValue(Object v) {
+    return switch (v) {
+      case null -> null;
+      case String s -> config.redact(s);
+      case Map<?, ?> nested -> redactMap((Map<String, Object>) nested);
+      case List<?> list -> redactList(list);
+      default -> v;
+    };
+  }
+
+  private List<Object> redactList(List<?> list) {
+    var out = new ArrayList<Object>(list.size());
+    for (var v : list) {
+      out.add(redactValue(v));
+    }
+    return out;
   }
 
   @Override
