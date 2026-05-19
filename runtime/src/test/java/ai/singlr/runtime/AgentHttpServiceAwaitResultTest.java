@@ -66,25 +66,18 @@ final class AgentHttpServiceAwaitResultTest {
   }
 
   @Test
-  void exceptionallyCompletedFutureReturns500WithStaticMessage() {
-    // The cause's getMessage() can contain internal paths, secret fragments, or class details that
-    // we should not exfiltrate over HTTP. The full cause is logged server-side at WARNING; the
-    // body carries only a static, non-revealing string.
+  void exceptionallyCompletedFutureReturns500WithCauseMessage() {
+    // Helios is a library — diagnostic info flows to the deployer, who decides what to forward
+    // to downstream HTTP clients. Stripping cause.getMessage() here would force deployers to dig
+    // through server-side logs to correlate failed requests with what actually went wrong. The
+    // full cause is also logged at WARNING for server-side observability.
     var future = new CompletableFuture<ResultMessage>();
-    future.completeExceptionally(new IllegalStateException("backend exploded with /internal/path"));
+    future.completeExceptionally(new IllegalStateException("backend exploded"));
     var outcome = AgentHttpService.awaitResult(future, 5L, "sess-1");
     assertEquals(io.helidon.http.Status.INTERNAL_SERVER_ERROR_500, outcome.status());
     @SuppressWarnings("unchecked")
     var body = (Map<String, Object>) outcome.body();
-    var error = body.get("error").toString();
-    assertTrue(
-        error.contains("terminated abnormally"),
-        "static message preserved for the client; expected substring 'terminated abnormally' in '"
-            + error
-            + "'");
-    assertTrue(
-        !error.contains("backend exploded") && !error.contains("/internal/path"),
-        "cause message must not leak to the HTTP client; got '" + error + "'");
+    assertTrue(body.get("error").toString().contains("backend exploded"));
   }
 
   @Test
@@ -95,14 +88,14 @@ final class AgentHttpServiceAwaitResultTest {
     assertEquals(io.helidon.http.Status.INTERNAL_SERVER_ERROR_500, outcome.status());
     @SuppressWarnings("unchecked")
     var body = (Map<String, Object>) outcome.body();
-    assertTrue(body.get("error").toString().contains("terminated abnormally"));
+    assertTrue(body.get("error").toString().contains("unknown"));
   }
 
   @Test
-  void errorDuringExecutionTerminalIsStrippedOfStackFrames() {
-    // ErrorDuringExecution carries a SerializedError with frame strings — those frames would
-    // otherwise reach every HTTP client that long-polls /result, exposing internal class structure
-    // and file:line numbers. awaitResult must redact them before building the response body.
+  void errorDuringExecutionTerminalPreservesStackFrames() {
+    // The library does NOT auto-redact stack frames. Frames are useful diagnostic info for the
+    // deployer (and their support tooling); deployers that want them stripped before reaching
+    // their downstream clients can call result.withoutStackTraces() at their HTTP layer.
     var carrying = SerializedError.of(new IllegalStateException("internal detail"));
     assertTrue(carrying.stackTrace().size() > 0, "test precondition");
     var terminal =
@@ -114,19 +107,8 @@ final class AgentHttpServiceAwaitResultTest {
     assertEquals(io.helidon.http.Status.OK_200, outcome.status());
     @SuppressWarnings("unchecked")
     var body = (Map<String, Object>) outcome.body();
-    assertEquals("ErrorDuringExecution", body.get("type"));
     var resultObj = (ResultMessage.ErrorDuringExecution) body.get("result");
-    assertEquals(
-        java.util.List.of(),
-        resultObj.error().stackTrace(),
-        "stack frames stripped at the HTTP boundary");
-    assertEquals(
-        carrying.kind(),
-        resultObj.error().kind(),
-        "kind preserved — clients still see the error category");
-    assertEquals(
-        carrying.message(),
-        resultObj.error().message(),
-        "message preserved — clients still see what went wrong");
+    assertTrue(resultObj.error().stackTrace().size() > 0, "frames preserved for diagnostics");
+    assertEquals(carrying.message(), resultObj.error().message());
   }
 }
