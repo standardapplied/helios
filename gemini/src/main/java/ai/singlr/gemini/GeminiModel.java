@@ -634,16 +634,16 @@ public class GeminiModel implements Model {
       try {
         var event = objectMapper.readValue(json, StreamingEvent.class);
 
-        if (event.isInteractionCreated() || event.isInteractionCompleted()) {
+        if (event.hasTypeInteractionCreated() || event.hasTypeInteractionCompleted()) {
           return handleInteractionEnvelope(event);
         }
-        if (event.isStepStart()) {
+        if (event.hasTypeStepStart()) {
           return handleStepStart(event);
         }
-        if (event.isStepDelta()) {
+        if (event.hasTypeStepDelta()) {
           return handleStepDelta(event);
         }
-        if (event.isStepStop()) {
+        if (event.hasTypeStepStop()) {
           return handleStepStop(event);
         }
         return null;

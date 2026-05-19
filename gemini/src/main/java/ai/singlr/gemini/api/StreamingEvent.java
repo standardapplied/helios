@@ -49,19 +49,19 @@ public record StreamingEvent(
     @JsonProperty("interaction_id") String interactionId,
     String status) {
 
-  public boolean isInteractionCreated() {
+  public boolean hasTypeInteractionCreated() {
     return "interaction.created".equals(eventType);
   }
 
-  public boolean isInteractionCompleted() {
+  public boolean hasTypeInteractionCompleted() {
     return "interaction.completed".equals(eventType);
   }
 
-  public boolean isInteractionInProgress() {
+  public boolean hasTypeInteractionInProgress() {
     return "interaction.in_progress".equals(eventType);
   }
 
-  public boolean isInteractionRequiresAction() {
+  public boolean hasTypeInteractionRequiresAction() {
     return "interaction.requires_action".equals(eventType);
   }
 
@@ -71,19 +71,19 @@ public record StreamingEvent(
    * {@code interaction.requires_action} split. Carries {@link #interactionId()} and {@link
    * #status()}.
    */
-  public boolean isInteractionStatusUpdate() {
+  public boolean hasTypeInteractionStatusUpdate() {
     return "interaction.status_update".equals(eventType);
   }
 
-  public boolean isStepStart() {
+  public boolean hasTypeStepStart() {
     return "step.start".equals(eventType);
   }
 
-  public boolean isStepDelta() {
+  public boolean hasTypeStepDelta() {
     return "step.delta".equals(eventType);
   }
 
-  public boolean isStepStop() {
+  public boolean hasTypeStepStop() {
     return "step.stop".equals(eventType);
   }
 }

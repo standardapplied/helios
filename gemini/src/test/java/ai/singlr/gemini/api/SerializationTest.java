@@ -486,7 +486,7 @@ class SerializationTest {
     var response = objectMapper.readValue(json, InteractionResponse.class);
 
     assertEquals("int_123", response.id());
-    assertTrue(response.isCompleted());
+    assertTrue(response.hasStatusCompleted());
     assertNotNull(response.steps());
     assertEquals(1, response.steps().size());
 
@@ -533,7 +533,7 @@ class SerializationTest {
 
     var response = objectMapper.readValue(json, InteractionResponse.class);
 
-    assertTrue(response.requiresAction());
+    assertTrue(response.hasStatusRequiresAction());
     assertEquals(2, response.steps().size());
 
     var thought = response.steps().get(0);
@@ -566,7 +566,7 @@ class SerializationTest {
     assertTrue(step.hasTypeFunctionResult());
     assertEquals("fc_1", step.callId());
     assertEquals("get_weather", step.name());
-    assertEquals(Boolean.FALSE, step.isError());
+    assertEquals(Boolean.FALSE, step.errorFlag());
     @SuppressWarnings("unchecked")
     var result = (Map<String, Object>) step.result();
     assertEquals(72, result.get("temp"));
@@ -658,9 +658,9 @@ class SerializationTest {
         }
         """;
     var response = objectMapper.readValue(json, InteractionResponse.class);
-    assertTrue(response.isFailed());
-    assertFalse(response.isCompleted());
-    assertFalse(response.requiresAction());
+    assertTrue(response.hasStatusFailed());
+    assertFalse(response.hasStatusCompleted());
+    assertFalse(response.hasStatusRequiresAction());
   }
 
   @Test
@@ -919,30 +919,30 @@ class SerializationTest {
         objectMapper.readValue(
             "{\"event_type\":\"interaction.created\",\"interaction\":{\"id\":\"int_z\"}}",
             StreamingEvent.class);
-    assertTrue(created.isInteractionCreated());
-    assertFalse(created.isInteractionCompleted());
+    assertTrue(created.hasTypeInteractionCreated());
+    assertFalse(created.hasTypeInteractionCompleted());
 
     var inProgress =
         objectMapper.readValue(
             "{\"event_type\":\"interaction.in_progress\",\"interaction_id\":\"int_z\"}",
             StreamingEvent.class);
-    assertTrue(inProgress.isInteractionInProgress());
-    assertFalse(inProgress.isInteractionStatusUpdate());
+    assertTrue(inProgress.hasTypeInteractionInProgress());
+    assertFalse(inProgress.hasTypeInteractionStatusUpdate());
     assertEquals("int_z", inProgress.interactionId());
 
     var requires =
         objectMapper.readValue(
             "{\"event_type\":\"interaction.requires_action\",\"interaction_id\":\"int_z\"}",
             StreamingEvent.class);
-    assertTrue(requires.isInteractionRequiresAction());
+    assertTrue(requires.hasTypeInteractionRequiresAction());
 
     var statusUpdate =
         objectMapper.readValue(
             "{\"event_type\":\"interaction.status_update\","
                 + "\"interaction_id\":\"int_z\",\"status\":\"in_progress\"}",
             StreamingEvent.class);
-    assertTrue(statusUpdate.isInteractionStatusUpdate());
-    assertFalse(statusUpdate.isInteractionInProgress());
+    assertTrue(statusUpdate.hasTypeInteractionStatusUpdate());
+    assertFalse(statusUpdate.hasTypeInteractionInProgress());
     assertEquals("int_z", statusUpdate.interactionId());
     assertEquals("in_progress", statusUpdate.status());
 
@@ -951,13 +951,13 @@ class SerializationTest {
             "{\"event_type\":\"interaction.completed\","
                 + "\"interaction\":{\"id\":\"int_z\",\"status\":\"completed\"}}",
             StreamingEvent.class);
-    assertTrue(completed.isInteractionCompleted());
+    assertTrue(completed.hasTypeInteractionCompleted());
 
     var start =
         objectMapper.readValue(
             "{\"event_type\":\"step.start\",\"index\":0,\"step\":{\"type\":\"model_output\"}}",
             StreamingEvent.class);
-    assertTrue(start.isStepStart());
+    assertTrue(start.hasTypeStepStart());
     assertEquals(0, start.index());
     assertNotNull(start.step());
 
@@ -966,7 +966,7 @@ class SerializationTest {
             "{\"event_type\":\"step.delta\",\"index\":0,"
                 + "\"delta\":{\"type\":\"text\",\"text\":\"hi\"}}",
             StreamingEvent.class);
-    assertTrue(deltaText.isStepDelta());
+    assertTrue(deltaText.hasTypeStepDelta());
     assertNotNull(deltaText.delta());
     assertNull(deltaText.argumentsDelta());
 
@@ -974,13 +974,36 @@ class SerializationTest {
         objectMapper.readValue(
             "{\"event_type\":\"step.delta\",\"index\":1,\"arguments_delta\":\"{\\\"a\\\":1\"}",
             StreamingEvent.class);
-    assertTrue(deltaArgs.isStepDelta());
+    assertTrue(deltaArgs.hasTypeStepDelta());
     assertEquals("{\"a\":1", deltaArgs.argumentsDelta());
 
     var stop =
         objectMapper.readValue(
             "{\"event_type\":\"step.stop\",\"index\":0,\"status\":\"done\"}", StreamingEvent.class);
-    assertTrue(stop.isStepStop());
+    assertTrue(stop.hasTypeStepStop());
     assertEquals("done", stop.status());
+  }
+
+  @Test
+  void stepErrorFlagWireFormatIsStillIsError() throws Exception {
+    // Renaming the record component from isError to errorFlag (to avoid Jackson's is*() boolean
+    // getter auto-detection synthesising a parallel virtual "error" property) must NOT change the
+    // wire format. The @JsonProperty("is_error") binding keeps both directions on the original
+    // serialised name.
+    var stepIn =
+        objectMapper.readValue(
+            "{\"type\":\"function_result\",\"call_id\":\"fc_1\",\"is_error\":true,"
+                + "\"result\":\"boom\"}",
+            Step.class);
+    assertEquals(Boolean.TRUE, stepIn.errorFlag(), "deserialise reads is_error into errorFlag");
+
+    var stepOut = Step.functionResult("fc_2", "tool", Map.of("ok", true), Boolean.FALSE);
+    var json = objectMapper.writeValueAsString(stepOut);
+    assertTrue(
+        json.contains("\"is_error\":false"),
+        "serialise must emit is_error, never errorFlag/error — actual: " + json);
+    assertTrue(
+        !json.contains("\"errorFlag\""), "must not leak the internal field name to the wire");
+    assertTrue(!json.contains("\"error\":"), "must not emit a phantom 'error' property");
   }
 }
