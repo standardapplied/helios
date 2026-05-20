@@ -17,7 +17,8 @@ public enum GeminiModelId {
   // operators can override per-call via ModelConfig.Builder.withMaxOutputTokens.
   GEMINI_3_FLASH_PREVIEW("gemini-3-flash-preview", 1_048_576, 65_536),
   GEMINI_3_1_PRO_PREVIEW("gemini-3.1-pro-preview", 1_048_576, 65_536),
-  GEMINI_3_1_FLASH_LITE("gemini-3.1-flash-lite", 1_048_576, 65_536);
+  GEMINI_3_1_FLASH_LITE("gemini-3.1-flash-lite", 1_048_576, 65_536),
+  GEMINI_3_5_FLASH("gemini-3.5-flash", 1_048_576, 65_536);
 
   private final String id;
   private final int contextWindow;

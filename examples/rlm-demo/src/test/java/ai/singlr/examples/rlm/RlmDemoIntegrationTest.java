@@ -43,8 +43,8 @@ final class RlmDemoIntegrationTest {
     var apiKey = System.getenv("GEMINI_API_KEY");
     var config = ModelConfig.newBuilder().withApiKey(apiKey).build();
     var provider = new GeminiProvider();
-    mainModel = provider.create(GeminiModelId.GEMINI_3_1_PRO_PREVIEW.id(), config);
-    subModel = provider.create(GeminiModelId.GEMINI_3_FLASH_PREVIEW.id(), config);
+    mainModel = provider.create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
+    subModel = provider.create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
   }
 
   @AfterAll

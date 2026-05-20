@@ -49,7 +49,9 @@ helios/
 ├── onnx/                           # Local embeddings via ONNX Runtime
 ├── persistence/                    # PostgreSQL persistence — PgTraceStore + PgDurability via Helidon DbClient
 └── examples/
-    └── session-demo/               # Reference: full session run against Gemini with a real workspace
+    ├── session-demo/               # Reference: full session run against Gemini with a real workspace
+    ├── codeact-demo/               # AgentSession + CodeActPreset — Java-as-action loop against Gemini
+    └── rlm-demo/                   # AgentSession + CodeActPreset — nested "leader+worker" pattern on v2 primitives
 ```
 
 The v1 surface (`core.agent.Agent`, `core.workflow`, `core.memory`, `core.eval`, the
@@ -154,8 +156,10 @@ harnesses were removed in the v2 cut (spec §3.5). What survives is the substrat
 
 ## Example modules
 
-- **`examples/session-demo`** — end-to-end `AgentSession` integration against Gemini Flash with a real workspace. Validates the v2 session shape including `SessionPresets.workspace(...)`, the streaming `QueryEvent` flow, and the typed `runBlocking` path.
+- **`examples/session-demo`** — end-to-end `AgentSession` integration against Gemini with a real workspace. Validates the v2 session shape including `SessionPresets.workspace(...)`, the streaming `QueryEvent` flow, and the typed `runBlocking` path.
+- **`examples/codeact-demo`** — Java-as-action loop on `AgentSession` + `CodeActPreset`. The preset assembles the REPL substrate (JvmSandbox + ReplSession + CodeExecutionTool) onto a session and adds the CodeAct system prompt. Replaces the deleted v1 `CodeActHarness`.
+- **`examples/rlm-demo`** — leader-agent + worker-agent pattern rebuilt on v2 primitives (workers are Tools wrapping nested AgentSessions). Replaces the deleted v1 `RlmHarness`. Not "RLM" in the original RLM sense — kept the name for continuity, drop it when a better label sticks.
 
-The v1 example modules (`autoresearch-prompt`, `autoresearch-code`, `gepa-prompt`, `rlm-demo`, `rlm-demo-jpms`, `codeact-demo`, `workload-fixtures`) were deleted with the v1 core surface; their patterns will re-emerge as v2-shaped examples as the spec's later phases land.
+The other v1 example modules (`autoresearch-prompt`, `autoresearch-code`, `gepa-prompt`, `rlm-demo-jpms`, `workload-fixtures`) were deleted with the v1 core surface and have no v2 replacement yet.
 
 **Roadmap items tracked in `docs/specs/`** rather than in this file — keeps this README a description of what *is*, not a wish list.

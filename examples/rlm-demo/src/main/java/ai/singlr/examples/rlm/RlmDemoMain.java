@@ -56,8 +56,8 @@ public final class RlmDemoMain {
 
     var provider = new GeminiProvider();
     var config = ModelConfig.newBuilder().withApiKey(apiKey).build();
-    var mainModel = provider.create(GeminiModelId.GEMINI_3_1_PRO_PREVIEW.id(), config);
-    var subModel = provider.create(GeminiModelId.GEMINI_3_FLASH_PREVIEW.id(), config);
+    var mainModel = provider.create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
+    var subModel = provider.create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
 
     try {
       runDemo(mainModel, subModel);

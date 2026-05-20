@@ -57,7 +57,7 @@ public final class CodeActDemoMain {
     var model =
         new GeminiProvider()
             .create(
-                GeminiModelId.GEMINI_3_1_PRO_PREVIEW.id(),
+                GeminiModelId.GEMINI_3_5_FLASH.id(),
                 ModelConfig.newBuilder().withApiKey(apiKey).build());
 
     try {

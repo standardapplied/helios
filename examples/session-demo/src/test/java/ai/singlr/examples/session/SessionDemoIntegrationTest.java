@@ -68,7 +68,7 @@ final class SessionDemoIntegrationTest {
   static void setUp() {
     var apiKey = System.getenv("GEMINI_API_KEY");
     var config = ModelConfig.newBuilder().withApiKey(apiKey).build();
-    model = new GeminiProvider().create(GeminiModelId.GEMINI_3_FLASH_PREVIEW.id(), config);
+    model = new GeminiProvider().create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
   }
 
   @AfterAll
