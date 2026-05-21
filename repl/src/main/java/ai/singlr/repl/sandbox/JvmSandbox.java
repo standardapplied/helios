@@ -10,6 +10,7 @@ import ai.singlr.repl.ReplException;
 import ai.singlr.repl.host.HostFunctionRegistry;
 import ai.singlr.repl.protocol.ProcessTransport;
 import ai.singlr.repl.protocol.RpcChannel;
+import ai.singlr.repl.sandbox.policy.SandboxPolicySerialization;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -441,6 +442,11 @@ public final class JvmSandbox implements Sandbox {
    * rpcSocketPath == null} produces a command line equivalent to the pre-2.1.3 launch (subprocess
    * falls back to stdin/stdout RPC), which is still useful for unit tests of the command-builder
    * itself — not used by the production {@link #create} path.
+   *
+   * <p>A non-permissive {@link JvmSandboxConfig#sandboxPolicy()} is encoded via {@link
+   * SandboxPolicySerialization#encode(ai.singlr.repl.sandbox.policy.SandboxPolicy)} and appended as
+   * {@code --sandbox-policy=<encoded>}. A permissive policy is the bootstrap's own default, so it
+   * is not propagated — keeping the command line stable for the common case.
    */
   static List<String> buildLaunchCommand(
       String javaBin, JvmSandboxConfig config, String rpcSocketPath) {
@@ -469,6 +475,9 @@ public final class JvmSandbox implements Sandbox {
     command.add("ai.singlr.repl.sandbox.JvmSandboxBootstrap");
     if (rpcSocketPath != null) {
       command.add("--rpc-socket=" + rpcSocketPath);
+    }
+    if (!config.sandboxPolicy().isPermissive()) {
+      command.add("--sandbox-policy=" + SandboxPolicySerialization.encode(config.sandboxPolicy()));
     }
     return command;
   }

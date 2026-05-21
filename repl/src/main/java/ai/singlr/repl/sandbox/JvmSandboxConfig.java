@@ -5,6 +5,7 @@
 
 package ai.singlr.repl.sandbox;
 
+import ai.singlr.repl.sandbox.policy.SandboxPolicy;
 import java.time.Duration;
 
 /**
@@ -19,12 +20,20 @@ import java.time.Duration;
  *     scratch), when security software scans the binary on first exec, or when launching under
  *     instrumentation (profilers, native-image init). Exceeded launches fail with an {@code
  *     IOException} whose message names the configured duration so the failure mode is debuggable.
+ * @param sandboxPolicy declarative L2 policy enforced inside the subprocess by {@link
+ *     ai.singlr.repl.sandbox.policy.GuardedExecutionControl GuardedExecutionControl}. Defaults to
+ *     {@link SandboxPolicy#permissive()}, which is equivalent to no policy layer (the bootstrap's
+ *     own default) — non-permissive policies travel to the subprocess via a {@code
+ *     --sandbox-policy=<encoded>} argv flag. PR 1 ships the wiring with a no-op verifier; a
+ *     follow-up adds bytecode-level enforcement. Configuring a stricter policy today is
+ *     forward-compatible API surface.
  */
 public record JvmSandboxConfig(
     Duration executionTimeout,
     int maxHeapMb,
     Duration callTimeout,
-    Duration subprocessStartupTimeout) {
+    Duration subprocessStartupTimeout,
+    SandboxPolicy sandboxPolicy) {
 
   /** Default execution timeout: 30 seconds. */
   public static final Duration DEFAULT_EXECUTION_TIMEOUT = Duration.ofSeconds(30);
@@ -56,6 +65,9 @@ public record JvmSandboxConfig(
         || subprocessStartupTimeout.isZero()) {
       throw new IllegalArgumentException("Subprocess startup timeout must be positive");
     }
+    if (sandboxPolicy == null) {
+      throw new IllegalArgumentException("Sandbox policy must not be null");
+    }
   }
 
   /** Create a default configuration. */
@@ -64,7 +76,8 @@ public record JvmSandboxConfig(
         DEFAULT_EXECUTION_TIMEOUT,
         DEFAULT_MAX_HEAP_MB,
         DEFAULT_CALL_TIMEOUT,
-        DEFAULT_SUBPROCESS_STARTUP_TIMEOUT);
+        DEFAULT_SUBPROCESS_STARTUP_TIMEOUT,
+        SandboxPolicy.permissive());
   }
 
   public static Builder newBuilder() {
@@ -76,6 +89,7 @@ public record JvmSandboxConfig(
     private int maxHeapMb = DEFAULT_MAX_HEAP_MB;
     private Duration callTimeout = DEFAULT_CALL_TIMEOUT;
     private Duration subprocessStartupTimeout = DEFAULT_SUBPROCESS_STARTUP_TIMEOUT;
+    private SandboxPolicy sandboxPolicy = SandboxPolicy.permissive();
 
     private Builder() {}
 
@@ -104,9 +118,21 @@ public record JvmSandboxConfig(
       return this;
     }
 
+    /**
+     * Set the {@link SandboxPolicy} the subprocess enforces. Defaults to {@link
+     * SandboxPolicy#permissive()} — every snippet is accepted, equivalent to running without a
+     * policy layer. Pass a non-permissive policy to opt into bytecode-level deny enforcement (PR 1
+     * scaffolding: the policy travels to the subprocess but the verifier currently accepts every
+     * byte sequence).
+     */
+    public Builder withSandboxPolicy(SandboxPolicy sandboxPolicy) {
+      this.sandboxPolicy = sandboxPolicy;
+      return this;
+    }
+
     public JvmSandboxConfig build() {
       return new JvmSandboxConfig(
-          executionTimeout, maxHeapMb, callTimeout, subprocessStartupTimeout);
+          executionTimeout, maxHeapMb, callTimeout, subprocessStartupTimeout, sandboxPolicy);
     }
   }
 }

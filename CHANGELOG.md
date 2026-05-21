@@ -2,6 +2,45 @@
 
 All notable changes to Helios are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added — `SandboxPolicy` scaffolding for JShell L2 enforcement
+
+New `ai.singlr.repl.sandbox.policy` package introduces the seam through which a bytecode verifier rejects snippet invocations of denied APIs.
+
+Public surface:
+
+- `SandboxPolicy` record + Builder with `deniedClasses`, `deniedPackages`, `denyReflection`, `denyNativeAccess`, `denyDynamicClassDefinition`, `onViolation`. `SandboxPolicy.permissive()` is the default — denies nothing, equivalent to no policy layer.
+- `JvmSandboxConfig.withSandboxPolicy(SandboxPolicy)` Builder option. Permissive default preserves existing behaviour. Non-permissive policies travel via `--sandbox-policy=<base64>` argv encoded by `SandboxPolicySerialization`.
+- `GuardedExecutionControl` (subclasses `LocalExecutionControl`) and `GuardedExecutionControlProvider` replace JShell's stock `"local"` engine in `JvmSandboxBootstrap`. Every snippet class flows through `BytecodeVerifier.verify(...)` before `super.load(...)`.
+- `SandboxPolicyException` carries `deniedOwner` / `deniedMember` / `rule` for fault-localised tracebacks to the model.
+
+Why now: `SecurityManager` was finalised for removal by JEP 486 in JDK 24 and is permanently disabled on JDK 25. The only honest in-JVM enforcement is bytecode-level via JShell's `ExecutionControl` SPI. This remains defense-in-depth — the only authoritative isolation boundary is the host OS.
+
+Breaking for direct canonical-constructor callers of `JvmSandboxConfig` (record gained a fifth component, `sandboxPolicy`). Builder callers are unaffected.
+
+### Added — `PolicyBytecodeVerifier` real enforcement
+
+`BytecodeVerifier.forPolicy(SandboxPolicy)` now returns a real scanner (`PolicyBytecodeVerifier`) for non-permissive policies; permissive policies still get the `NO_OP` fast path. The scanner is built on the JDK Classfile API (JEP 484, finalised in JDK 24).
+
+Scope:
+
+- **Instruction families scanned**: `INVOKE*` (virtual/special/static/interface), `NEW`, `GET*`/`PUT*` fields, and `LDC` of `Class<?>` constants. `INVOKEDYNAMIC` is deliberately skipped — its bootstrap method reference points to platform code (`LambdaMetafactory`, `StringConcatFactory`, `ObjectMethods`); scanning it would reject every lambda and string concatenation without security benefit, while the dangerous capability (explicit `MethodHandles.lookup()`) is caught at the `INVOKESTATIC` site.
+- **Rule order on match**: explicit `deniedClasses` → `deniedPackages` → categorical `denyReflection` / `denyNativeAccess` / `denyDynamicClassDefinition`. The exception's `rule` label names the most specific user-configured rule when overlap occurs.
+- **Reflection rule**: denies entire `java/lang/reflect/*` and `java/lang/invoke/*` packages plus `Class.forName`, `Class.getMethod*`, `Class.getField*`, `Class.getConstructor*`, `Class.getDeclared*`. Non-reflective `Class` methods (`getName`, `cast`, `isInstance`, …) stay callable.
+- **Native-access rule**: denies `java/lang/foreign/*` and `System.loadLibrary` / `System.load` / `Runtime.loadLibrary` / `Runtime.load`.
+- **Dynamic-class-definition rule**: denies `MethodHandles.Lookup.defineClass`, `defineHiddenClass`, `defineHiddenClassWithClassData`, and `ClassLoader.defineClass`.
+
+**Denial surfacing**: JShell silently swallows the `ClassInstallException` thrown when the verifier rejects load (snippet stays `VALID`, no exception attached to `SnippetEvent`). `GuardedExecutionControl.verifyAll` writes the policy message to `System.err` before rewrapping into `ClassInstallException`; the sandbox bootstrap captures stderr during `execute` and forwards it back to the host as the eval result's `stderr` so the model receives a clean policy traceback. The seam's javadoc documents this defensive contract.
+
+### Added — policy verifier audit follow-ups
+
+Closes three gaps identified in the PR 2 self-review:
+
+- **Subprocess end-to-end enforcement test** (`SandboxPolicySubprocessEnforcementTest`). Launches a real `JvmSandbox` with a denying policy and asserts the policy message reaches the host as `ExecutionResult.stderr()`. Proves the full host→subprocess→verifier→stderr round trip beyond the in-process JShell tests.
+- **Extended reflection rule** on `java.lang.Class`. Now also denies `newInstance`, `getRecordComponents`, `getEnclosingMethod`, and `getEnclosingConstructor` in addition to `forName`, `getMethod*`, `getField*`, `getConstructor*`, and `getDeclared*`. Unit tests cover each new denial.
+- **Static-receiver-type limitation documented** on `PolicyBytecodeVerifier`'s class javadoc. `INVOKEVIRTUAL`/`INVOKEINTERFACE` carry the static compile-time owner, so a deny on a method declared on a non-final superclass can be bypassed by narrowing the receiver's static type to a subclass. Documents the practical mitigations: realistic class-load entry points (`MethodHandles.Lookup.defineClass`) are caught by direct name, `denyReflection` denies entire `java/lang/reflect/*` and `java/lang/invoke/*` packages, and OS-level isolation remains the authoritative perimeter.
+
 ## [2.2.0] — 2026-05-19 — production-hardening pass
 
 Wide-ranging hardening pass driven by an independent review of the v2 surface. Eleven theme commits on the original `review/production-hardening` branch plus a back-fill pass (that caught a real descendant-kill ordering bug in the security tests) plus Path B (opt-in trace-side redaction `PgConfig.withRedactor` and the C1 sandbox-RPC-channel relocation closing the stdout-forgery vector) plus Path C (closing the two Criticals from the Path B audit and tightening the surrounding code per its Highs and Mediums).

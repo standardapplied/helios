@@ -8,6 +8,9 @@ package ai.singlr.repl.sandbox;
 import ai.singlr.repl.protocol.ProcessTransport;
 import ai.singlr.repl.protocol.RpcError;
 import ai.singlr.repl.protocol.RpcMessage;
+import ai.singlr.repl.sandbox.policy.GuardedExecutionControlProvider;
+import ai.singlr.repl.sandbox.policy.SandboxPolicy;
+import ai.singlr.repl.sandbox.policy.SandboxPolicySerialization;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -128,6 +131,7 @@ public final class JvmSandboxBootstrap {
   public static void main(String[] args) {
     warnIfReducedIsolation(System.err);
     var socketPath = parseRpcSocketArg(args);
+    var policy = parseSandboxPolicyArg(args);
     SocketChannel rpcSocket;
     try {
       rpcSocket = SocketChannel.open(StandardProtocolFamily.UNIX);
@@ -144,7 +148,10 @@ public final class JvmSandboxBootstrap {
         new BufferedReader(
             new InputStreamReader(Channels.newInputStream(rpcSocket), StandardCharsets.UTF_8));
 
-    var jshell = JShell.builder().executionEngine("local").build();
+    var jshell =
+        JShell.builder()
+            .executionEngine(new GuardedExecutionControlProvider(policy), Map.of())
+            .build();
     addHostBridgeToJShellClasspath(jshell);
     jshell.eval("import static ai.singlr.repl.sandbox.HostBridge.*;");
     jshell.eval("import ai.singlr.repl.sandbox.HostBridge;");
@@ -209,6 +216,30 @@ public final class JvmSandboxBootstrap {
   private static boolean isSandboxPackageOpenToUnnamedModules(Module module) {
     var probe = ClassLoader.getPlatformClassLoader().getUnnamedModule();
     return module.isOpen("ai.singlr.repl.sandbox", probe);
+  }
+
+  /**
+   * Parse the optional {@code --sandbox-policy=<encoded>} argument. The host omits the flag when
+   * the configured policy is {@link SandboxPolicy#permissive() permissive}, so a missing flag means
+   * "permissive" — equivalent to no L2 policy layer. A present-but-malformed value is fatal (exit
+   * code 2) rather than silently degrading to permissive: under-enforcing without telling anyone is
+   * worse than refusing to launch.
+   */
+  static SandboxPolicy parseSandboxPolicyArg(String[] args) {
+    for (var arg : args) {
+      if (arg.startsWith("--sandbox-policy=")) {
+        var encoded = arg.substring("--sandbox-policy=".length());
+        try {
+          return SandboxPolicySerialization.decode(encoded);
+        } catch (IllegalArgumentException e) {
+          System.err.println(
+              "JvmSandboxBootstrap: malformed --sandbox-policy argument: " + e.getMessage());
+          System.exit(2);
+          throw new IllegalStateException("unreachable");
+        }
+      }
+    }
+    return SandboxPolicy.permissive();
   }
 
   /**

@@ -27,6 +27,7 @@ module ai.singlr.repl {
   exports ai.singlr.repl.codeact;
   exports ai.singlr.repl.execution;
   exports ai.singlr.repl.sandbox;
+  exports ai.singlr.repl.sandbox.policy;
   exports ai.singlr.repl.host;
   exports ai.singlr.repl.protocol;
 }
