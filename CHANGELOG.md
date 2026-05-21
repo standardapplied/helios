@@ -33,6 +33,22 @@ Scope:
 
 **Denial surfacing**: JShell silently swallows the `ClassInstallException` thrown when the verifier rejects load (snippet stays `VALID`, no exception attached to `SnippetEvent`). `GuardedExecutionControl.verifyAll` writes the policy message to `System.err` before rewrapping into `ClassInstallException`; the sandbox bootstrap captures stderr during `execute` and forwards it back to the host as the eval result's `stderr` so the model receives a clean policy traceback. The seam's javadoc documents this defensive contract.
 
+### Fixed — L3 module restriction crashed classpath-launched subprocesses
+
+Followup to the L3 landing below. Empirical testing exposed that `--limit-modules ai.singlr.repl,...` crashed the subprocess JVM at boot-layer init with "Module ai.singlr.repl not found" whenever the bootstrap was launched from classpath (the non-JPMS path) — classpath JARs are unnamed-module members, not observable named modules, so naming them in `--limit-modules` is fatal.
+
+Fix: `SubprocessModules.REQUIRED_ROOTS` no longer includes `ai.singlr.repl`; the bootstrap module name is now `SubprocessModules.BOOTSTRAP_MODULE` and `JvmSandbox.buildLaunchCommand` appends it to `--limit-modules` only when `parentUsesModulePath(parentArgs)` is true. Classpath launches get the JDK-only baseline; the bootstrap loads via classpath into the unnamed module which can read every observable JDK module.
+
+`SubprocessModules.limitModulesArg(boolean)` now takes a `modulepathLaunch` parameter from `JvmSandbox`. Breaking for direct callers of the previous zero-arg form, but the type is internal-facing and the JVM-launch logic is the only realistic consumer.
+
+New `SubprocessModulesClasspathLaunchTest` (3 tests) empirically launches the bootstrap with a manually-constructed classpath-only command (no `--module-path`, no `--add-modules ai.singlr.repl`) and verifies:
+
+- the subprocess starts (regression coverage for the pre-fix crash)
+- `java.sql` is absent from the subprocess's boot layer
+- `java.net.http` is also stripped under classpath launch — *stricter* than modulepath because module-info `requires` clauses are ignored when a JAR loads from classpath
+
+`SubprocessModulesTest` updated to cover both `modulepathLaunch=true` and `modulepathLaunch=false` paths.
+
 ### Added — L3 subprocess module restriction (`SubprocessModules`)
 
 New `ai.singlr.repl.sandbox.SubprocessModules` sealed interface controls the subprocess JVM's `--limit-modules` flag. Three factories:

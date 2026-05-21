@@ -473,12 +473,13 @@ public final class JvmSandbox implements Sandbox {
       command.add(classpath);
     }
 
-    if (parentUsesModulePath(parentArgs)) {
+    var modulepathLaunch = parentUsesModulePath(parentArgs);
+    if (modulepathLaunch) {
       command.add("--add-modules");
       command.add("ai.singlr.repl");
     }
 
-    var limitModules = config.subprocessModules().limitModulesArg();
+    var limitModules = config.subprocessModules().limitModulesArg(modulepathLaunch);
     if (!limitModules.isEmpty()) {
       command.add("--limit-modules");
       command.add(limitModules);

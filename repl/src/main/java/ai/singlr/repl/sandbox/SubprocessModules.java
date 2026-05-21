@@ -20,17 +20,29 @@ import java.util.Set;
  * eliminates whole categories at compile time, the verifier catches the rest at load time, and OS
  * isolation remains the authoritative perimeter (L5).
  *
- * <p><strong>Bootstrap-transitive-closure limit.</strong> {@code --limit-modules} restricts the
- * observable module universe but cannot strip modules that are transitively required by the
- * bootstrap subprocess's own classes. Today {@code ai.singlr.core} (a transitive dependency of the
- * sandbox bootstrap) requires {@code java.net.http} via {@code HttpClientFactory}, so {@code
- * java.net.http} stays in the resolved module graph under any {@link #minimal()} or {@link
- * #allowingExtras(String...)} configuration. {@link #minimal()} does successfully strip many other
- * modules ({@code java.sql}, {@code java.naming}, {@code java.scripting}, {@code java.desktop},
- * {@code java.security.sasl}, {@code jdk.httpserver}, ...) that the bootstrap doesn't transitively
- * require — those become non-observable at compile time, so snippets that {@code import java.sql.*}
- * fail with a clean diagnostic. Deployers who need to deny modules the bootstrap pulls in (e.g.
- * {@code java.net.http}) should reach for {@link
+ * <p><strong>Works under classpath and modulepath launches.</strong> {@code --limit-modules}
+ * applies at JVM startup regardless of how the bootstrap is launched. Under modulepath launch
+ * (Maven Surefire test scenarios, JPMS production deployments), {@code ai.singlr.repl} is added to
+ * the {@code --limit-modules} set so the bootstrap module remains observable. Under classpath
+ * launch, {@code ai.singlr.repl} is NOT added (it lives in the unnamed module on classpath and
+ * naming it would crash the JVM with "Module not found"); the JDK baseline is enough because the
+ * bootstrap loads via classpath into the unnamed module which reads all observable modules. {@link
+ * JvmSandbox#buildLaunchCommand} handles the conditional logic — callers configure intent here and
+ * launch mode is decided at launch time based on the parent's JVM arguments.
+ *
+ * <p><strong>Bootstrap-transitive-closure limit (modulepath only).</strong> Under modulepath
+ * launch, the bootstrap's transitive module dependencies stay observable regardless of {@code
+ * --limit-modules}. Today {@code ai.singlr.core} (a transitive dependency of the sandbox bootstrap)
+ * requires {@code java.net.http} via {@code HttpClientFactory}, so {@code java.net.http} stays in
+ * the resolved module graph under any {@link #minimal()} or {@link #allowingExtras(String...)}
+ * configuration when launched from modulepath. Under classpath launch the module-info {@code
+ * requires} clauses are ignored (classpath JARs are unnamed module members), so {@code
+ * java.net.http} IS stripped under {@link #minimal()} — classpath launches actually get stricter L3
+ * enforcement. {@link #minimal()} does successfully strip many modules ({@code java.sql}, {@code
+ * java.naming}, {@code java.scripting}, {@code java.desktop}, {@code java.security.sasl}, {@code
+ * jdk.httpserver}, ...) in BOTH launch modes — those become non-observable at compile time, so
+ * snippets that {@code import java.sql.*} fail with a clean diagnostic. Deployers on modulepath who
+ * need to deny modules the bootstrap transitively requires should reach for {@link
  * ai.singlr.repl.sandbox.policy.SandboxPolicy#deniedPackages() L2 deniedPackages} instead.
  *
  * <p>Sealed: callers exhaustively pattern-match on the variant. Three factories cover the realistic
@@ -51,9 +63,13 @@ public sealed interface SubprocessModules
     permits SubprocessModules.Unrestricted, SubprocessModules.Restricted {
 
   /**
-   * Modules the bootstrap subprocess always needs to start and run JShell. The transitive
-   * dependencies of these modules are pulled in by the module resolver, so this is the minimal
-   * <em>root</em> set rather than the full module-graph closure.
+   * JDK modules the bootstrap subprocess always needs to start and run JShell. Always included in
+   * {@code --limit-modules} regardless of launch mode.
+   *
+   * <p>{@code ai.singlr.repl} is deliberately NOT in this list — it's a user module that's only
+   * observable under modulepath launch. {@link JvmSandbox#buildLaunchCommand} appends it
+   * conditionally when the parent JVM uses {@code --module-path}; under classpath launch the
+   * bootstrap loads via classpath into the unnamed module and the JDK baseline suffices.
    *
    * <p>Includes:
    *
@@ -61,13 +77,16 @@ public sealed interface SubprocessModules
    *   <li>{@code java.base} — required by every Java program
    *   <li>{@code java.compiler}, {@code jdk.compiler}, {@code jdk.jshell} — JShell's
    *       compile-and-eval chain
-   *   <li>{@code ai.singlr.repl} — the bootstrap module (transitively pulls {@code ai.singlr.core},
-   *       {@code ai.singlr.session}, {@code java.logging}, {@code java.management}, {@code
-   *       tools.jackson.databind})
    * </ul>
    */
-  List<String> REQUIRED_ROOTS =
-      List.of("java.base", "java.compiler", "jdk.compiler", "jdk.jshell", "ai.singlr.repl");
+  List<String> REQUIRED_ROOTS = List.of("java.base", "java.compiler", "jdk.compiler", "jdk.jshell");
+
+  /**
+   * Bootstrap module name. Appended to {@code --limit-modules} by {@link JvmSandbox} only when the
+   * parent uses {@code --module-path}; naming it under classpath launch would crash the subprocess
+   * JVM with "Module not found".
+   */
+  String BOOTSTRAP_MODULE = "ai.singlr.repl";
 
   /**
    * The default — no restriction. Equivalent to the launch behaviour before L3 landed: the
@@ -112,26 +131,31 @@ public sealed interface SubprocessModules
 
   /**
    * Build the comma-separated argument value for {@code --limit-modules}, or return empty when this
-   * variant is {@link Unrestricted}. The caller appends {@code "--limit-modules"} + the result to
-   * the launch command iff the result is non-empty.
+   * variant is {@link Unrestricted}. {@code modulepathLaunch} is the launch-mode signal from {@link
+   * JvmSandbox#buildLaunchCommand} — when {@code true}, {@link #BOOTSTRAP_MODULE} is included; when
+   * {@code false} (classpath launch), it's omitted because the bootstrap class lives in the unnamed
+   * module and naming a non-observable module would crash the subprocess JVM.
+   *
+   * @param modulepathLaunch whether the parent JVM uses {@code --module-path} (i.e. the bootstrap
+   *     module is observable as a named module in the subprocess)
    */
-  String limitModulesArg();
+  String limitModulesArg(boolean modulepathLaunch);
 
   /** Singleton variant — no module restriction applied at launch. */
   record Unrestricted() implements SubprocessModules {
     private static final Unrestricted INSTANCE = new Unrestricted();
 
     @Override
-    public String limitModulesArg() {
+    public String limitModulesArg(boolean modulepathLaunch) {
       return "";
     }
   }
 
   /**
-   * Restricted variant — emits {@code --limit-modules} with {@link #REQUIRED_ROOTS} plus {@code
-   * extraModules}. Extras are deduplicated against the required roots at argument-building time
-   * (configuring {@code extras = {"java.base"}} is a no-op rather than an error — minor caller
-   * convenience).
+   * Restricted variant — emits {@code --limit-modules} with {@link #REQUIRED_ROOTS}, plus {@link
+   * #BOOTSTRAP_MODULE} when launched from modulepath, plus {@code extraModules}. Extras are
+   * deduplicated against the required roots at argument-building time (configuring {@code extras =
+   * {"java.base"}} is a no-op rather than an error — minor caller convenience).
    */
   record Restricted(Set<String> extraModules) implements SubprocessModules {
     public Restricted {
@@ -147,8 +171,11 @@ public sealed interface SubprocessModules
     }
 
     @Override
-    public String limitModulesArg() {
+    public String limitModulesArg(boolean modulepathLaunch) {
       var ordered = new LinkedHashSet<String>(REQUIRED_ROOTS);
+      if (modulepathLaunch) {
+        ordered.add(BOOTSTRAP_MODULE);
+      }
       ordered.addAll(extraModules);
       return String.join(",", ordered);
     }
