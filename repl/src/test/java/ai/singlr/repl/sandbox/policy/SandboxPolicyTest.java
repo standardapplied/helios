@@ -20,6 +20,7 @@ class SandboxPolicyTest {
   void permissiveDeniesNothing() {
     var p = SandboxPolicy.permissive();
     assertTrue(p.isPermissive());
+    assertEquals(Set.of(), p.allowedPackages());
     assertEquals(Set.of(), p.deniedClasses());
     assertEquals(Set.of(), p.deniedPackages());
     assertFalse(p.denyReflection());
@@ -37,6 +38,7 @@ class SandboxPolicyTest {
   void builderRoundtripsAllFields() {
     var p =
         SandboxPolicy.newBuilder()
+            .withAllowedPackages("java.lang", "java.util")
             .withDeniedClasses("java.lang.ProcessBuilder", "java.lang.Runtime")
             .withDeniedPackages("java.net.http", "java.nio.file")
             .withDenyReflection(true)
@@ -44,6 +46,7 @@ class SandboxPolicyTest {
             .withDenyDynamicClassDefinition(true)
             .withOnViolation(ViolationAction.THROW)
             .build();
+    assertEquals(Set.of("java.lang", "java.util"), p.allowedPackages());
     assertEquals(Set.of("java.lang.ProcessBuilder", "java.lang.Runtime"), p.deniedClasses());
     assertEquals(Set.of("java.net.http", "java.nio.file"), p.deniedPackages());
     assertTrue(p.denyReflection());
@@ -55,12 +58,19 @@ class SandboxPolicyTest {
 
   @Test
   void builderSetCollectionsOverloadRoundtrips() {
+    var allowed = new HashSet<String>();
+    allowed.add("java.util");
     var classes = new HashSet<String>();
     classes.add("a.B");
     var packages = new HashSet<String>();
     packages.add("c.d");
     var p =
-        SandboxPolicy.newBuilder().withDeniedClasses(classes).withDeniedPackages(packages).build();
+        SandboxPolicy.newBuilder()
+            .withAllowedPackages(allowed)
+            .withDeniedClasses(classes)
+            .withDeniedPackages(packages)
+            .build();
+    assertEquals(Set.of("java.util"), p.allowedPackages());
     assertEquals(Set.of("a.B"), p.deniedClasses());
     assertEquals(Set.of("c.d"), p.deniedPackages());
   }
@@ -69,6 +79,7 @@ class SandboxPolicyTest {
   void isPermissiveTrueForEmptyDeniesAndNoFlags() {
     var p =
         SandboxPolicy.newBuilder()
+            .withAllowedPackages()
             .withDeniedClasses()
             .withDeniedPackages()
             .withDenyReflection(false)
@@ -76,6 +87,12 @@ class SandboxPolicyTest {
             .withDenyDynamicClassDefinition(false)
             .build();
     assertTrue(p.isPermissive());
+  }
+
+  @Test
+  void isPermissiveFalseWhenAnyAllowedPackageSet() {
+    var p = SandboxPolicy.newBuilder().withAllowedPackages("java.lang").build();
+    assertFalse(p.isPermissive());
   }
 
   @Test
@@ -109,24 +126,57 @@ class SandboxPolicyTest {
   }
 
   @Test
+  void nullAllowedPackagesThrows() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SandboxPolicy(
+                null, Set.of(), Set.of(), false, false, false, ViolationAction.THROW));
+  }
+
+  @Test
   void nullDeniedClassesThrows() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new SandboxPolicy(null, Set.of(), false, false, false, ViolationAction.THROW));
+        () ->
+            new SandboxPolicy(
+                Set.of(), null, Set.of(), false, false, false, ViolationAction.THROW));
   }
 
   @Test
   void nullDeniedPackagesThrows() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new SandboxPolicy(Set.of(), null, false, false, false, ViolationAction.THROW));
+        () ->
+            new SandboxPolicy(
+                Set.of(), Set.of(), null, false, false, false, ViolationAction.THROW));
   }
 
   @Test
   void nullOnViolationThrows() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new SandboxPolicy(Set.of(), Set.of(), false, false, false, null));
+        () -> new SandboxPolicy(Set.of(), Set.of(), Set.of(), false, false, false, null));
+  }
+
+  @Test
+  void blankAllowedPackageEntryThrows() {
+    var bad = new HashSet<String>();
+    bad.add("");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SandboxPolicy(bad, Set.of(), Set.of(), false, false, false, ViolationAction.THROW));
+  }
+
+  @Test
+  void nullAllowedPackageEntryThrows() {
+    var bad = new HashSet<String>();
+    bad.add(null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SandboxPolicy(bad, Set.of(), Set.of(), false, false, false, ViolationAction.THROW));
   }
 
   @Test
@@ -135,7 +185,8 @@ class SandboxPolicyTest {
     bad.add("  ");
     assertThrows(
         IllegalArgumentException.class,
-        () -> new SandboxPolicy(bad, Set.of(), false, false, false, ViolationAction.THROW));
+        () ->
+            new SandboxPolicy(Set.of(), bad, Set.of(), false, false, false, ViolationAction.THROW));
   }
 
   @Test
@@ -144,7 +195,8 @@ class SandboxPolicyTest {
     bad.add(null);
     assertThrows(
         IllegalArgumentException.class,
-        () -> new SandboxPolicy(bad, Set.of(), false, false, false, ViolationAction.THROW));
+        () ->
+            new SandboxPolicy(Set.of(), bad, Set.of(), false, false, false, ViolationAction.THROW));
   }
 
   @Test
@@ -153,7 +205,8 @@ class SandboxPolicyTest {
     bad.add("");
     assertThrows(
         IllegalArgumentException.class,
-        () -> new SandboxPolicy(Set.of(), bad, false, false, false, ViolationAction.THROW));
+        () ->
+            new SandboxPolicy(Set.of(), Set.of(), bad, false, false, false, ViolationAction.THROW));
   }
 
   @Test
@@ -162,7 +215,8 @@ class SandboxPolicyTest {
     bad.add(null);
     assertThrows(
         IllegalArgumentException.class,
-        () -> new SandboxPolicy(Set.of(), bad, false, false, false, ViolationAction.THROW));
+        () ->
+            new SandboxPolicy(Set.of(), Set.of(), bad, false, false, false, ViolationAction.THROW));
   }
 
   @Test

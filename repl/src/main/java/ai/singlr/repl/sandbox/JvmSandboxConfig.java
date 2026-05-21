@@ -24,16 +24,21 @@ import java.time.Duration;
  *     ai.singlr.repl.sandbox.policy.GuardedExecutionControl GuardedExecutionControl}. Defaults to
  *     {@link SandboxPolicy#permissive()}, which is equivalent to no policy layer (the bootstrap's
  *     own default) — non-permissive policies travel to the subprocess via a {@code
- *     --sandbox-policy=<encoded>} argv flag. PR 1 ships the wiring with a no-op verifier; a
- *     follow-up adds bytecode-level enforcement. Configuring a stricter policy today is
- *     forward-compatible API surface.
+ *     --sandbox-policy=<encoded>} argv flag.
+ * @param subprocessModules L3 JDK-module restriction applied to the subprocess JVM via {@code
+ *     --limit-modules}. Defaults to {@link SubprocessModules#unrestricted()} — current pre-L3
+ *     behaviour, all JDK modules observable. Use {@link SubprocessModules#minimal()} to strip
+ *     everything beyond the required JShell / bootstrap chain, or {@link
+ *     SubprocessModules#allowingExtras(String...)} to add specific JDK modules (e.g. {@code
+ *     java.net.http}) on top of the minimal baseline.
  */
 public record JvmSandboxConfig(
     Duration executionTimeout,
     int maxHeapMb,
     Duration callTimeout,
     Duration subprocessStartupTimeout,
-    SandboxPolicy sandboxPolicy) {
+    SandboxPolicy sandboxPolicy,
+    SubprocessModules subprocessModules) {
 
   /** Default execution timeout: 30 seconds. */
   public static final Duration DEFAULT_EXECUTION_TIMEOUT = Duration.ofSeconds(30);
@@ -68,6 +73,9 @@ public record JvmSandboxConfig(
     if (sandboxPolicy == null) {
       throw new IllegalArgumentException("Sandbox policy must not be null");
     }
+    if (subprocessModules == null) {
+      throw new IllegalArgumentException("Subprocess modules must not be null");
+    }
   }
 
   /** Create a default configuration. */
@@ -77,7 +85,8 @@ public record JvmSandboxConfig(
         DEFAULT_MAX_HEAP_MB,
         DEFAULT_CALL_TIMEOUT,
         DEFAULT_SUBPROCESS_STARTUP_TIMEOUT,
-        SandboxPolicy.permissive());
+        SandboxPolicy.permissive(),
+        SubprocessModules.unrestricted());
   }
 
   public static Builder newBuilder() {
@@ -90,6 +99,7 @@ public record JvmSandboxConfig(
     private Duration callTimeout = DEFAULT_CALL_TIMEOUT;
     private Duration subprocessStartupTimeout = DEFAULT_SUBPROCESS_STARTUP_TIMEOUT;
     private SandboxPolicy sandboxPolicy = SandboxPolicy.permissive();
+    private SubprocessModules subprocessModules = SubprocessModules.unrestricted();
 
     private Builder() {}
 
@@ -130,9 +140,26 @@ public record JvmSandboxConfig(
       return this;
     }
 
+    /**
+     * Set the {@link SubprocessModules} restriction. Defaults to {@link
+     * SubprocessModules#unrestricted()} — current behaviour, all JDK modules observable in the
+     * subprocess. {@link SubprocessModules#minimal()} strips everything except the JShell /
+     * bootstrap chain; {@link SubprocessModules#allowingExtras(String...)} adds named JDK modules
+     * on top of the minimal baseline.
+     */
+    public Builder withSubprocessModules(SubprocessModules subprocessModules) {
+      this.subprocessModules = subprocessModules;
+      return this;
+    }
+
     public JvmSandboxConfig build() {
       return new JvmSandboxConfig(
-          executionTimeout, maxHeapMb, callTimeout, subprocessStartupTimeout, sandboxPolicy);
+          executionTimeout,
+          maxHeapMb,
+          callTimeout,
+          subprocessStartupTimeout,
+          sandboxPolicy,
+          subprocessModules);
     }
   }
 }

@@ -12,6 +12,7 @@ import java.lang.classfile.instruction.FieldInstruction;
 import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.NewObjectInstruction;
 import java.lang.constant.ClassDesc;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -83,6 +84,14 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
   private static final String FOREIGN_PKG = "java/lang/foreign/";
   private static final String CLASS_OWNER = "java/lang/Class";
 
+  /**
+   * Internal-form prefixes considered "JDK-scoped" for the allow-list rule. An owner under one of
+   * these is subject to the allow-list check; any other owner is treated as snippet-own / user code
+   * and bypasses allow-list (deny rules still apply).
+   */
+  private static final List<String> JDK_PREFIXES =
+      List.of("java/", "javax/", "jdk/", "sun/", "com/sun/");
+
   private static final Set<String> NATIVE_ACCESS_MEMBERS =
       Set.of(
           "java/lang/System.loadLibrary",
@@ -98,19 +107,24 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
           "java/lang/ClassLoader.defineClass");
 
   private final SandboxPolicy policy;
+  private final Set<String> allowedPackagesInternal;
   private final Set<String> deniedClassesInternal;
   private final Set<String> deniedPackagesInternal;
 
   /**
-   * Construct a verifier for {@code policy}. The policy's deny lists are eagerly converted to
-   * internal form ({@code java/lang/ProcessBuilder} rather than {@code java.lang.ProcessBuilder})
-   * so every per-instruction check is a single set lookup.
+   * Construct a verifier for {@code policy}. The policy's deny / allow lists are eagerly converted
+   * to internal form ({@code java/lang/ProcessBuilder} rather than {@code
+   * java.lang.ProcessBuilder}) so every per-instruction check is a single set lookup.
    */
   public PolicyBytecodeVerifier(SandboxPolicy policy) {
     if (policy == null) {
       throw new IllegalArgumentException("policy must not be null");
     }
     this.policy = policy;
+    this.allowedPackagesInternal =
+        policy.allowedPackages().stream()
+            .map(s -> s.replace('.', '/') + "/")
+            .collect(Collectors.toUnmodifiableSet());
     this.deniedClassesInternal =
         policy.deniedClasses().stream()
             .map(s -> s.replace('.', '/'))
@@ -173,6 +187,36 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
     if (policy.denyDynamicClassDefinition() && isDynamicClassDefinition(ownerInternal, member)) {
       throw new SandboxPolicyException(ownerInternal, member, "denyDynamicClassDefinition");
     }
+    if (!allowedPackagesInternal.isEmpty()
+        && isJdkScoped(ownerInternal)
+        && !isInAllowedPackage(ownerInternal)) {
+      throw new SandboxPolicyException(ownerInternal, member, "allowedPackages-default-deny");
+    }
+  }
+
+  /**
+   * Allow-list rule. Treats owners under {@code java/}, {@code javax/}, {@code jdk/}, {@code sun/},
+   * or {@code com/sun/} as JDK-scoped — subject to the allow-list. Everything else (snippet's own
+   * {@code REPL.$JShell$N} wrappers, user-declared helper classes, third-party JARs on the
+   * snippet's classpath) is considered user code and always allowed regardless of the allow-list.
+   * Caller has already established that {@code allowedPackages} is non-empty.
+   */
+  private static boolean isJdkScoped(String owner) {
+    for (var prefix : JDK_PREFIXES) {
+      if (owner.startsWith(prefix)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private boolean isInAllowedPackage(String owner) {
+    for (var pkg : allowedPackagesInternal) {
+      if (owner.startsWith(pkg)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

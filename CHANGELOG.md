@@ -33,6 +33,36 @@ Scope:
 
 **Denial surfacing**: JShell silently swallows the `ClassInstallException` thrown when the verifier rejects load (snippet stays `VALID`, no exception attached to `SnippetEvent`). `GuardedExecutionControl.verifyAll` writes the policy message to `System.err` before rewrapping into `ClassInstallException`; the sandbox bootstrap captures stderr during `execute` and forwards it back to the host as the eval result's `stderr` so the model receives a clean policy traceback. The seam's javadoc documents this defensive contract.
 
+### Added — L3 subprocess module restriction (`SubprocessModules`)
+
+New `ai.singlr.repl.sandbox.SubprocessModules` sealed interface controls the subprocess JVM's `--limit-modules` flag. Three factories:
+
+- `unrestricted()` — default; no `--limit-modules`, all JDK modules observable
+- `minimal()` — required roots only (`java.base`, `java.compiler`, `jdk.compiler`, `jdk.jshell`, `ai.singlr.repl`); strips `java.sql`, `java.naming`, `java.scripting`, `java.desktop`, `jdk.httpserver`, and most JDK modules the bootstrap doesn't transitively need
+- `allowingExtras(String...)` — required + named extras
+
+Wired through `JvmSandboxConfig.withSubprocessModules(...)`. Composes with L2 enforcement: limit-modules eliminates whole categories at compile time (snippets that `import java.sql.*` fail with a clean compiler diagnostic before the L2 verifier runs), the verifier catches the rest at load time.
+
+**Bootstrap-transitive-closure limit** documented on `SubprocessModules` javadoc: modules transitively required by the bootstrap (today `java.net.http` via `ai.singlr.core`'s `HttpClientFactory`) stay observable under any L3 setting. Deployers who need to strip those modules use L2 `deniedPackages` instead.
+
+`JvmSandbox.shouldPropagateJvmArg` extended to also filter `--add-modules` and `--limit-modules` from inherited parent args so Maven Surefire's propagated `--add-modules=ALL-MODULE-PATH` doesn't defeat the L3 restriction. Six new subprocess tests prove the round trip: `--limit-modules` reaches the subprocess JVM, target modules are absent from `ModuleLayer.boot()`, snippets fail to compile against them, and the `allowingExtras` path makes named modules observable again.
+
+Breaking for direct canonical-constructor callers of `JvmSandboxConfig` (record gained a sixth component, `subprocessModules`). Builder callers unaffected.
+
+### Added — allow-list policy mode + `SandboxPolicy.noEgress()` curated preset
+
+`SandboxPolicy` gains an `allowedPackages` field. When non-empty, the verifier flips for JDK-scoped owners (under `java/`, `javax/`, `jdk/`, `sun/`, `com/sun/`): default-deny, allow only if the owner's package matches one of the allowed prefixes. Non-JDK owners (the snippet's own `REPL.$JShell$N` wrappers, user helper classes, third-party JARs) bypass the allow-list — they're the verified code. Deny rules layer on top as overrides; rule label on violation is `allowedPackages-default-deny`.
+
+`SandboxPolicy.noEgress()` curated preset for the "compute with no egress" use case:
+
+- **Allows**: `java.lang`, `java.util` + sub-packages (`stream`, `function`, `regex`, `concurrent.atomic`), `java.math`, `java.time` + sub-packages, `java.text`, `java.io`
+- **Denies**: `java.lang.ProcessBuilder`, `java.lang.Runtime`, `java.lang.Thread`, `java.lang.ThreadGroup` (escape via `java.lang`); `java.io.FileReader`, `java.io.FileWriter`, `java.io.FileInputStream`, `java.io.FileOutputStream`, `java.io.RandomAccessFile`, `java.io.ObjectInputStream`, `java.io.ObjectOutputStream` (file IO + deserialization escapes via `java.io`)
+- **Enables** `denyReflection`, `denyNativeAccess`, `denyDynamicClassDefinition`
+
+Single API call for the most common enterprise posture; deployers customise from there.
+
+Breaking for direct canonical-constructor callers of `SandboxPolicy` (record gained `allowedPackages` as the first component). Builder callers and `permissive()` callers unaffected.
+
 ### Added — policy verifier audit follow-ups
 
 Closes three gaps identified in the PR 2 self-review:

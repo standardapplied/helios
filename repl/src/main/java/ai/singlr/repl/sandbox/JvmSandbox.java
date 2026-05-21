@@ -425,6 +425,12 @@ public final class JvmSandbox implements Sandbox {
    *             trust-store passwords) in system properties; propagating them to the sandbox
    *             subprocess would expose them to JShell-evaluated user code via {@code
    *             System.getProperties()}
+   *         <li>module-graph flags ({@code --add-modules}, {@code --limit-modules}) — Maven
+   *             Surefire and similar test runners propagate {@code --add-modules=ALL-MODULE-PATH}
+   *             which would re-add every module on the parent's module path and defeat any L3
+   *             {@code --limit-modules} restriction the bootstrap applies. The bootstrap re-adds
+   *             only what it provably needs ({@code ai.singlr.repl} via the explicit add-modules
+   *             below; everything else flows through transitive resolution).
    *       </ul>
    *   <li>Parent's {@code java.class.path} as {@code -cp} — safe for both JPMS and non-JPMS
    *       parents. Non-JPMS parents rely on this entirely; JPMS parents have it sparse but correct.
@@ -472,6 +478,12 @@ public final class JvmSandbox implements Sandbox {
       command.add("ai.singlr.repl");
     }
 
+    var limitModules = config.subprocessModules().limitModulesArg();
+    if (!limitModules.isEmpty()) {
+      command.add("--limit-modules");
+      command.add(limitModules);
+    }
+
     command.add("ai.singlr.repl.sandbox.JvmSandboxBootstrap");
     if (rpcSocketPath != null) {
       command.add("--rpc-socket=" + rpcSocketPath);
@@ -492,6 +504,9 @@ public final class JvmSandbox implements Sandbox {
       return false;
     }
     if (arg.startsWith("-D")) {
+      return false;
+    }
+    if (arg.startsWith("--add-modules") || arg.startsWith("--limit-modules")) {
       return false;
     }
     return true;

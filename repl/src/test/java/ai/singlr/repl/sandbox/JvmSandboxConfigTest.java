@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 class JvmSandboxConfigTest {
 
   private static final SandboxPolicy PERMISSIVE = SandboxPolicy.permissive();
+  private static final SubprocessModules UNRESTRICTED = SubprocessModules.unrestricted();
 
   @Test
   void defaultsFactory() {
@@ -27,19 +28,28 @@ class JvmSandboxConfigTest {
     assertEquals(Duration.ofSeconds(60), config.callTimeout());
     assertNotNull(config.sandboxPolicy());
     assertTrue(config.sandboxPolicy().isPermissive());
+    assertNotNull(config.subprocessModules());
+    assertTrue(config.subprocessModules() instanceof SubprocessModules.Unrestricted);
   }
 
   @Test
   void constructorSetsFields() {
     var policy = SandboxPolicy.newBuilder().withDenyReflection(true).build();
+    var modules = SubprocessModules.minimal();
     var config =
         new JvmSandboxConfig(
-            Duration.ofSeconds(10), 512, Duration.ofSeconds(30), Duration.ofSeconds(20), policy);
+            Duration.ofSeconds(10),
+            512,
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(20),
+            policy,
+            modules);
     assertEquals(Duration.ofSeconds(10), config.executionTimeout());
     assertEquals(512, config.maxHeapMb());
     assertEquals(Duration.ofSeconds(30), config.callTimeout());
     assertEquals(Duration.ofSeconds(20), config.subprocessStartupTimeout());
     assertSame(policy, config.sandboxPolicy());
+    assertSame(modules, config.subprocessModules());
   }
 
   @Test
@@ -48,7 +58,12 @@ class JvmSandboxConfigTest {
         IllegalArgumentException.class,
         () ->
             new JvmSandboxConfig(
-                null, 256, Duration.ofSeconds(60), Duration.ofSeconds(10), PERMISSIVE));
+                null,
+                256,
+                Duration.ofSeconds(60),
+                Duration.ofSeconds(10),
+                PERMISSIVE,
+                UNRESTRICTED));
   }
 
   @Test
@@ -57,7 +72,12 @@ class JvmSandboxConfigTest {
         IllegalArgumentException.class,
         () ->
             new JvmSandboxConfig(
-                Duration.ZERO, 256, Duration.ofSeconds(60), Duration.ofSeconds(10), PERMISSIVE));
+                Duration.ZERO,
+                256,
+                Duration.ofSeconds(60),
+                Duration.ofSeconds(10),
+                PERMISSIVE,
+                UNRESTRICTED));
   }
 
   @Test
@@ -70,7 +90,8 @@ class JvmSandboxConfigTest {
                 256,
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
-                PERMISSIVE));
+                PERMISSIVE,
+                UNRESTRICTED));
   }
 
   @Test
@@ -83,7 +104,8 @@ class JvmSandboxConfigTest {
                 0,
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
-                PERMISSIVE));
+                PERMISSIVE,
+                UNRESTRICTED));
   }
 
   @Test
@@ -96,7 +118,8 @@ class JvmSandboxConfigTest {
                 -1,
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
-                PERMISSIVE));
+                PERMISSIVE,
+                UNRESTRICTED));
   }
 
   @Test
@@ -105,7 +128,12 @@ class JvmSandboxConfigTest {
         IllegalArgumentException.class,
         () ->
             new JvmSandboxConfig(
-                Duration.ofSeconds(30), 256, null, Duration.ofSeconds(10), PERMISSIVE));
+                Duration.ofSeconds(30),
+                256,
+                null,
+                Duration.ofSeconds(10),
+                PERMISSIVE,
+                UNRESTRICTED));
   }
 
   @Test
@@ -114,7 +142,12 @@ class JvmSandboxConfigTest {
         IllegalArgumentException.class,
         () ->
             new JvmSandboxConfig(
-                Duration.ofSeconds(30), 256, Duration.ZERO, Duration.ofSeconds(10), PERMISSIVE));
+                Duration.ofSeconds(30),
+                256,
+                Duration.ZERO,
+                Duration.ofSeconds(10),
+                PERMISSIVE,
+                UNRESTRICTED));
   }
 
   @Test
@@ -127,7 +160,8 @@ class JvmSandboxConfigTest {
                 256,
                 Duration.ofSeconds(-1),
                 Duration.ofSeconds(10),
-                PERMISSIVE));
+                PERMISSIVE,
+                UNRESTRICTED));
   }
 
   @Test
@@ -137,22 +171,26 @@ class JvmSandboxConfigTest {
     assertEquals(JvmSandboxConfig.DEFAULT_MAX_HEAP_MB, config.maxHeapMb());
     assertEquals(JvmSandboxConfig.DEFAULT_CALL_TIMEOUT, config.callTimeout());
     assertTrue(config.sandboxPolicy().isPermissive());
+    assertTrue(config.subprocessModules() instanceof SubprocessModules.Unrestricted);
   }
 
   @Test
   void builderAllOptions() {
     var policy = SandboxPolicy.newBuilder().withDenyNativeAccess(true).build();
+    var modules = SubprocessModules.allowingExtras("java.net.http");
     var config =
         JvmSandboxConfig.newBuilder()
             .withExecutionTimeout(Duration.ofMinutes(2))
             .withMaxHeapMb(1024)
             .withCallTimeout(Duration.ofMinutes(5))
             .withSandboxPolicy(policy)
+            .withSubprocessModules(modules)
             .build();
     assertEquals(Duration.ofMinutes(2), config.executionTimeout());
     assertEquals(1024, config.maxHeapMb());
     assertEquals(Duration.ofMinutes(5), config.callTimeout());
     assertSame(policy, config.sandboxPolicy());
+    assertSame(modules, config.subprocessModules());
   }
 
   @Test
@@ -182,7 +220,12 @@ class JvmSandboxConfigTest {
         IllegalArgumentException.class,
         () ->
             new JvmSandboxConfig(
-                Duration.ofSeconds(30), 256, Duration.ofSeconds(60), Duration.ZERO, PERMISSIVE));
+                Duration.ofSeconds(30),
+                256,
+                Duration.ofSeconds(60),
+                Duration.ZERO,
+                PERMISSIVE,
+                UNRESTRICTED));
   }
 
   @Test
@@ -195,7 +238,8 @@ class JvmSandboxConfigTest {
                 256,
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(-1),
-                PERMISSIVE));
+                PERMISSIVE,
+                UNRESTRICTED));
   }
 
   @Test
@@ -204,7 +248,12 @@ class JvmSandboxConfigTest {
         IllegalArgumentException.class,
         () ->
             new JvmSandboxConfig(
-                Duration.ofSeconds(30), 256, Duration.ofSeconds(60), null, PERMISSIVE));
+                Duration.ofSeconds(30),
+                256,
+                Duration.ofSeconds(60),
+                null,
+                PERMISSIVE,
+                UNRESTRICTED));
   }
 
   @Test
@@ -213,7 +262,26 @@ class JvmSandboxConfigTest {
         IllegalArgumentException.class,
         () ->
             new JvmSandboxConfig(
-                Duration.ofSeconds(30), 256, Duration.ofSeconds(60), Duration.ofSeconds(10), null));
+                Duration.ofSeconds(30),
+                256,
+                Duration.ofSeconds(60),
+                Duration.ofSeconds(10),
+                null,
+                UNRESTRICTED));
+  }
+
+  @Test
+  void nullSubprocessModulesThrows() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new JvmSandboxConfig(
+                Duration.ofSeconds(30),
+                256,
+                Duration.ofSeconds(60),
+                Duration.ofSeconds(10),
+                PERMISSIVE,
+                null));
   }
 
   @Test
@@ -221,5 +289,12 @@ class JvmSandboxConfigTest {
     var policy = SandboxPolicy.newBuilder().withDenyDynamicClassDefinition(true).build();
     var config = JvmSandboxConfig.newBuilder().withSandboxPolicy(policy).build();
     assertSame(policy, config.sandboxPolicy());
+  }
+
+  @Test
+  void builderRoundtripsSubprocessModules() {
+    var modules = SubprocessModules.minimal();
+    var config = JvmSandboxConfig.newBuilder().withSubprocessModules(modules).build();
+    assertSame(modules, config.subprocessModules());
   }
 }

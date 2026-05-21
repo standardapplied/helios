@@ -25,6 +25,7 @@ import java.util.Set;
  */
 public final class SandboxPolicySerialization {
 
+  static final String FIELD_ALLOWED_PACKAGES = "allowedPackages";
   static final String FIELD_DENIED_CLASSES = "deniedClasses";
   static final String FIELD_DENIED_PACKAGES = "deniedPackages";
   static final String FIELD_DENY_REFLECTION = "denyReflection";
@@ -43,6 +44,7 @@ public final class SandboxPolicySerialization {
       throw new IllegalArgumentException("policy must not be null");
     }
     var sb = new StringBuilder();
+    appendField(sb, FIELD_ALLOWED_PACKAGES, joinSorted(policy.allowedPackages()));
     appendField(sb, FIELD_DENIED_CLASSES, joinSorted(policy.deniedClasses()));
     appendField(sb, FIELD_DENIED_PACKAGES, joinSorted(policy.deniedPackages()));
     appendField(sb, FIELD_DENY_REFLECTION, Boolean.toString(policy.denyReflection()));
@@ -93,6 +95,7 @@ public final class SandboxPolicySerialization {
 
   private static void applyField(SandboxPolicy.Builder builder, String key, String value) {
     switch (key) {
+      case FIELD_ALLOWED_PACKAGES -> builder.withAllowedPackages(splitList(value));
       case FIELD_DENIED_CLASSES -> builder.withDeniedClasses(splitList(value));
       case FIELD_DENIED_PACKAGES -> builder.withDeniedPackages(splitList(value));
       case FIELD_DENY_REFLECTION -> builder.withDenyReflection(Boolean.parseBoolean(value));

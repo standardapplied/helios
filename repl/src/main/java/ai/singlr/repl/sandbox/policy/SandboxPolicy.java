@@ -24,11 +24,15 @@ import java.util.Set;
  * kernel. Deployers running untrusted snippet payloads must arrange external isolation around the
  * Helios host process.
  *
- * <p><strong>PR 1 scaffolding.</strong> The fields below describe the full policy surface that
- * enforcement will honour. The verifier currently ships as {@link BytecodeVerifier#NO_OP} so a
- * policy configured today travels end-to-end but does not reject anything. Real enforcement lands
- * in the follow-up PR that fills in {@link BytecodeVerifier}.
- *
+ * @param allowedPackages opt-in allow-list of JDK package prefixes. When non-empty, the policy
+ *     flips from "default-allow" to "default-deny" for JDK-owned classes (those under {@code
+ *     java/}, {@code javax/}, {@code jdk/}, {@code sun/}, {@code com/sun/}): a JDK class is only
+ *     callable if its package matches one of the allowed prefixes. Non-JDK owners (the snippet's
+ *     own compiled classes — {@code REPL.$JShell$N}, user helper classes, third-party JARs on the
+ *     snippet's classpath) are always allowed regardless of this list, because they're the very
+ *     code being verified. Deny rules ({@code deniedClasses}, {@code deniedPackages}, the
+ *     categorical flags) still apply as overrides — deny wins over allow. Empty set means
+ *     allow-list mode is OFF (current pure deny-list behaviour).
  * @param deniedClasses fully-qualified class names the snippet must not invoke methods on (e.g.
  *     {@code "java.lang.ProcessBuilder"}). Empty set means no class-level denies.
  * @param deniedPackages package prefixes whose classes are denied transitively (e.g. {@code
@@ -52,6 +56,7 @@ import java.util.Set;
  *     when one is wired.
  */
 public record SandboxPolicy(
+    Set<String> allowedPackages,
     Set<String> deniedClasses,
     Set<String> deniedPackages,
     boolean denyReflection,
@@ -60,6 +65,10 @@ public record SandboxPolicy(
     ViolationAction onViolation) {
 
   public SandboxPolicy {
+    if (allowedPackages == null) {
+      throw new IllegalArgumentException(
+          "allowedPackages must not be null (use empty set instead)");
+    }
     if (deniedClasses == null) {
       throw new IllegalArgumentException("deniedClasses must not be null (use empty set instead)");
     }
@@ -68,6 +77,11 @@ public record SandboxPolicy(
     }
     if (onViolation == null) {
       throw new IllegalArgumentException("onViolation must not be null");
+    }
+    for (var name : allowedPackages) {
+      if (name == null || name.isBlank()) {
+        throw new IllegalArgumentException("allowedPackages entries must be non-blank");
+      }
     }
     for (var name : deniedClasses) {
       if (name == null || name.isBlank()) {
@@ -79,6 +93,7 @@ public record SandboxPolicy(
         throw new IllegalArgumentException("deniedPackages entries must be non-blank");
       }
     }
+    allowedPackages = Set.copyOf(allowedPackages);
     deniedClasses = Set.copyOf(deniedClasses);
     deniedPackages = Set.copyOf(deniedPackages);
   }
@@ -90,7 +105,71 @@ public record SandboxPolicy(
    * have one.
    */
   public static SandboxPolicy permissive() {
-    return new SandboxPolicy(Set.of(), Set.of(), false, false, false, ViolationAction.THROW);
+    return new SandboxPolicy(
+        Set.of(), Set.of(), Set.of(), false, false, false, ViolationAction.THROW);
+  }
+
+  /**
+   * Curated preset: "no egress". Lets the snippet read inputs, do compute, manipulate collections,
+   * format numbers and times, write to stdout / stderr — but blocks every path out of the sandbox:
+   * no process spawn, no network, no file IO, no reflection escape, no native code, no dynamic
+   * class definition.
+   *
+   * <p>Composition:
+   *
+   * <ul>
+   *   <li>{@code allowedPackages} = {@code java.lang}, {@code java.util}, {@code java.util.stream},
+   *       {@code java.util.function}, {@code java.util.regex}, {@code java.util.concurrent.atomic},
+   *       {@code java.math}, {@code java.time}, {@code java.time.format}, {@code
+   *       java.time.temporal}, {@code java.text}, {@code java.io} (for {@code System.out.println},
+   *       formatted output, in-memory streams) — the safe compute and stdio surface
+   *   <li>{@code deniedClasses} = the dangerous classes inside the allowed packages: {@code
+   *       java.lang.ProcessBuilder}, {@code java.lang.Runtime}, {@code java.lang.Thread}, {@code
+   *       java.lang.ThreadGroup}, plus the file / serialization classes in {@code java.io} ({@code
+   *       FileReader}, {@code FileWriter}, {@code FileInputStream}, {@code FileOutputStream},
+   *       {@code RandomAccessFile}, {@code ObjectInputStream}, {@code ObjectOutputStream})
+   *   <li>{@code denyReflection}, {@code denyNativeAccess}, {@code denyDynamicClassDefinition} all
+   *       enabled — categorical escape hatches closed
+   * </ul>
+   *
+   * <p>Deployers who need a single API call to lock the agent into "data crunching with no egress"
+   * reach for this preset and customise from there. Returns a fresh {@link SandboxPolicy}; pass
+   * directly to {@link
+   * ai.singlr.repl.sandbox.JvmSandboxConfig.Builder#withSandboxPolicy(SandboxPolicy)} or compose by
+   * round-tripping through a Builder.
+   */
+  public static SandboxPolicy noEgress() {
+    return new SandboxPolicy(
+        Set.of(
+            "java.lang",
+            "java.util",
+            "java.util.stream",
+            "java.util.function",
+            "java.util.regex",
+            "java.util.concurrent.atomic",
+            "java.math",
+            "java.time",
+            "java.time.format",
+            "java.time.temporal",
+            "java.text",
+            "java.io"),
+        Set.of(
+            "java.lang.ProcessBuilder",
+            "java.lang.Runtime",
+            "java.lang.Thread",
+            "java.lang.ThreadGroup",
+            "java.io.FileReader",
+            "java.io.FileWriter",
+            "java.io.FileInputStream",
+            "java.io.FileOutputStream",
+            "java.io.RandomAccessFile",
+            "java.io.ObjectInputStream",
+            "java.io.ObjectOutputStream"),
+        Set.of(),
+        true,
+        true,
+        true,
+        ViolationAction.THROW);
   }
 
   /**
@@ -99,7 +178,8 @@ public record SandboxPolicy(
    * so no argv flag needs to travel.
    */
   public boolean isPermissive() {
-    return deniedClasses.isEmpty()
+    return allowedPackages.isEmpty()
+        && deniedClasses.isEmpty()
         && deniedPackages.isEmpty()
         && !denyReflection
         && !denyNativeAccess
@@ -115,6 +195,7 @@ public record SandboxPolicy(
    * collection setters accept varargs to avoid forcing callers to build a set explicitly.
    */
   public static final class Builder {
+    private Set<String> allowedPackages = Set.of();
     private Set<String> deniedClasses = Set.of();
     private Set<String> deniedPackages = Set.of();
     private boolean denyReflection;
@@ -123,6 +204,18 @@ public record SandboxPolicy(
     private ViolationAction onViolation = ViolationAction.THROW;
 
     private Builder() {}
+
+    /** Opt into allow-list mode. See {@link SandboxPolicy#allowedPackages()}. */
+    public Builder withAllowedPackages(String... packages) {
+      this.allowedPackages = Set.of(packages);
+      return this;
+    }
+
+    /** Opt into allow-list mode. See {@link SandboxPolicy#allowedPackages()}. */
+    public Builder withAllowedPackages(Set<String> packages) {
+      this.allowedPackages = Set.copyOf(packages);
+      return this;
+    }
 
     public Builder withDeniedClasses(String... classes) {
       this.deniedClasses = Set.of(classes);
@@ -172,6 +265,7 @@ public record SandboxPolicy(
 
     public SandboxPolicy build() {
       return new SandboxPolicy(
+          allowedPackages,
           deniedClasses,
           deniedPackages,
           denyReflection,
