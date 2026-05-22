@@ -841,10 +841,19 @@ public class GeminiModel implements Model {
 
       Response.Usage usage = null;
       if (lastUsage != null) {
-        usage =
-            Response.Usage.of(
-                lastUsage.inputTokens() != null ? lastUsage.inputTokens() : 0,
-                lastUsage.outputTokens() != null ? lastUsage.outputTokens() : 0);
+        // Gemini's wire shape reports total_input_tokens as the TOTAL (cached + uncached) and
+        // total_cached_tokens as a SUBSET (only on Gemini 2.5+ which enables implicit caching
+        // automatically). Re-project to the disjoint Helios canonical shape: inputTokens carries
+        // only the uncached portion, cacheReadInputTokens carries the cached count, cache
+        // creation stays zero (Gemini does not premium implicit cache writes).
+        var totalInput = lastUsage.inputTokens() != null ? lastUsage.inputTokens() : 0;
+        var totalOutput = lastUsage.outputTokens() != null ? lastUsage.outputTokens() : 0;
+        var cached = lastUsage.cachedTokensOrZero();
+        // Defensive clamp: a server-side accounting bug reporting cached > total_input would
+        // produce a negative uncached value in naive arithmetic. Under-report uncached rather
+        // than emit a nonsensical negative count.
+        var uncachedInput = Math.max(0, totalInput - cached);
+        usage = Response.Usage.of(uncachedInput, totalOutput, 0, cached);
       }
 
       var citations =

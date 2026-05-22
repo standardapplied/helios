@@ -537,6 +537,7 @@ public class OpenAIModel implements Model {
     private boolean done = false;
     private int inputTokens = 0;
     private int outputTokens = 0;
+    private int cachedInputTokens = 0;
     private String responseStatus = null;
 
     StreamingIterator(
@@ -691,6 +692,7 @@ public class OpenAIModel implements Model {
               if (usage.outputTokens() != null) {
                 outputTokens = usage.outputTokens();
               }
+              cachedInputTokens = usage.cachedTokensOrZero();
             }
           }
           done = true;
@@ -739,8 +741,15 @@ public class OpenAIModel implements Model {
       }
 
       Response.Usage usage = null;
-      if (inputTokens > 0 || outputTokens > 0) {
-        usage = Response.Usage.of(inputTokens, outputTokens);
+      if (inputTokens > 0 || outputTokens > 0 || cachedInputTokens > 0) {
+        // OpenAI's wire shape reports input_tokens as TOTAL (cached + uncached) and
+        // input_tokens_details.cached_tokens as a SUBSET. The Helios canonical shape is disjoint
+        // — every token in exactly one class — so we subtract here. Bounded by zero in case the
+        // server ever reports a cached subset > total (would indicate a server-side accounting
+        // bug; we'd rather under-report uncached than synthesize a negative count).
+        var uncachedInput = Math.max(0, inputTokens - cachedInputTokens);
+        // OpenAI does not premium cache writes, so cacheCreationInputTokens stays zero.
+        usage = Response.Usage.of(uncachedInput, outputTokens, 0, cachedInputTokens);
       }
 
       String thinking = reasoningBuilder.isEmpty() ? null : reasoningBuilder.toString();

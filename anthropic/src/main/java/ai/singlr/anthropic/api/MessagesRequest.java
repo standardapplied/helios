@@ -12,10 +12,16 @@ import java.util.List;
 /**
  * Request body for the Claude Messages API.
  *
+ * <p>The {@code system} field accepts either a plain {@link String} (legacy shape, no prompt
+ * caching) or a {@code List<SystemContent>} (cache-aware shape — required by the API when any
+ * {@code SystemContent} block carries a {@code cache_control} annotation). {@link
+ * AnthropicModel#buildRequest} selects the shape based on whether prompt caching is enabled for the
+ * model; serialization is uniform because Jackson emits whichever runtime type the field holds.
+ *
  * @param model the model identifier
  * @param maxTokens maximum tokens to generate (required by Claude)
  * @param messages conversation messages
- * @param system system prompt (extracted from messages)
+ * @param system system prompt — {@link String} or {@code List<SystemContent>}, may be null
  * @param stream whether to stream the response
  * @param tools available tools for function calling
  * @param toolChoice controls how the model uses tools
@@ -31,7 +37,7 @@ public record MessagesRequest(
     String model,
     @JsonProperty("max_tokens") Integer maxTokens,
     List<MessageEntry> messages,
-    String system,
+    Object system,
     Boolean stream,
     List<ToolDefinition> tools,
     @JsonProperty("tool_choice") ToolChoiceConfig toolChoice,
@@ -43,6 +49,39 @@ public record MessagesRequest(
 
   public static Builder newBuilder() {
     return new Builder();
+  }
+
+  /**
+   * Diagnostic accessor that returns the system prompt as flat text regardless of which wire shape
+   * ({@link String} or {@code List<SystemContent>}) the request carries. Concatenates {@code text}
+   * fields of every {@link SystemContent} block in the array shape; returns {@code null} when no
+   * system is set.
+   *
+   * <p>This is for tests, traces, and audit log surfaces. The Anthropic API only sees the typed
+   * {@link #system()} field — never this projection.
+   *
+   * @return the flat system text, or {@code null} when no system content is set
+   */
+  public String systemAsText() {
+    return switch (system) {
+      case null -> null;
+      case String s -> s;
+      case List<?> list -> {
+        var joined = new StringBuilder();
+        for (var item : list) {
+          if (item instanceof SystemContent block) {
+            if (!joined.isEmpty()) {
+              joined.append("\n\n");
+            }
+            joined.append(block.text());
+          }
+        }
+        yield joined.length() == 0 ? null : joined.toString();
+      }
+      default ->
+          throw new IllegalStateException(
+              "unexpected system content type: " + system.getClass().getName());
+    };
   }
 
   /**
@@ -75,7 +114,7 @@ public record MessagesRequest(
     private String model;
     private Integer maxTokens;
     private List<MessageEntry> messages;
-    private String system;
+    private Object system;
     private Boolean stream;
     private List<ToolDefinition> tools;
     private ToolChoiceConfig toolChoice;
@@ -103,6 +142,19 @@ public record MessagesRequest(
     }
 
     public Builder withSystem(String system) {
+      this.system = system;
+      return this;
+    }
+
+    /**
+     * Cache-aware system prompt: list of {@link SystemContent} blocks. The Anthropic API requires
+     * this shape (not a plain string) whenever any block carries a {@code cache_control}
+     * annotation. Pass {@code null} to clear.
+     *
+     * @param system the system content blocks; may be null
+     * @return this builder
+     */
+    public Builder withSystem(List<SystemContent> system) {
       this.system = system;
       return this;
     }

@@ -8,6 +8,7 @@ package ai.singlr.openai.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.tool.ParameterType;
@@ -660,5 +661,68 @@ class SerializationTest {
     assertTrue(json.contains("\"output_text\""));
     assertTrue(json.contains("Hello"));
     assertTrue(json.contains("World"));
+  }
+
+  // ── prompt-caching usage shape (hv2-bug2 Issue 1 — OpenAI peer) ──────────
+
+  @Test
+  void apiUsageDeserializesInputTokensDetailsCachedTokens() throws Exception {
+    var usage =
+        objectMapper.readValue(
+            "{\"input_tokens\":2006,\"output_tokens\":150,\"total_tokens\":2156,"
+                + "\"input_tokens_details\":{\"cached_tokens\":1920}}",
+            ApiUsage.class);
+    assertEquals(2006, usage.inputTokens());
+    assertEquals(150, usage.outputTokens());
+    assertEquals(2156, usage.totalTokens());
+    assertEquals(1920, usage.cachedTokensOrZero());
+    assertNotNull(usage.inputTokensDetails());
+    assertEquals(1920, usage.inputTokensDetails().cachedTokens());
+  }
+
+  @Test
+  void apiUsageCachedTokensOrZeroHandlesMissingDetails() throws Exception {
+    var usage =
+        objectMapper.readValue(
+            "{\"input_tokens\":25,\"output_tokens\":15,\"total_tokens\":40}", ApiUsage.class);
+    assertEquals(
+        0,
+        usage.cachedTokensOrZero(),
+        "missing input_tokens_details must surface as cached=0, not NPE");
+    assertNull(usage.inputTokensDetails());
+  }
+
+  @Test
+  void apiUsageCachedTokensOrZeroHandlesPresentDetailsWithNullCount() throws Exception {
+    var usage =
+        objectMapper.readValue(
+            "{\"input_tokens\":25,\"output_tokens\":15,\"total_tokens\":40,"
+                + "\"input_tokens_details\":{}}",
+            ApiUsage.class);
+    assertEquals(
+        0,
+        usage.cachedTokensOrZero(),
+        "details object present but cached_tokens absent must also yield 0");
+    assertNotNull(usage.inputTokensDetails());
+    assertNull(usage.inputTokensDetails().cachedTokens());
+  }
+
+  @Test
+  void apiUsageDeserializesOutputTokensDetailsReasoningTokens() throws Exception {
+    var usage =
+        objectMapper.readValue(
+            "{\"input_tokens\":50,\"output_tokens\":300,\"total_tokens\":350,"
+                + "\"output_tokens_details\":{\"reasoning_tokens\":250}}",
+            ApiUsage.class);
+    assertNotNull(usage.outputTokensDetails());
+    assertEquals(250, usage.outputTokensDetails().reasoningTokens());
+  }
+
+  @Test
+  void apiUsageThreeArgConstructorOmitsDetails() {
+    var usage = new ApiUsage(10, 20, 30);
+    assertNull(usage.inputTokensDetails());
+    assertNull(usage.outputTokensDetails());
+    assertEquals(0, usage.cachedTokensOrZero());
   }
 }

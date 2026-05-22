@@ -6,12 +6,15 @@
 package ai.singlr.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.anthropic.api.ContentBlock;
+import ai.singlr.anthropic.api.MessagesRequest;
 import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.InlineFile;
 import ai.singlr.core.model.Message;
@@ -148,7 +151,7 @@ class AnthropicModelTest {
 
     var request = model.buildRequest(messages, List.of(), null);
 
-    assertEquals("You are helpful", request.system());
+    assertEquals("You are helpful", request.systemAsText());
     assertEquals(1, request.messages().size());
     assertEquals("user", request.messages().getFirst().role());
   }
@@ -398,8 +401,8 @@ class AnthropicModelTest {
     var request = model.buildRequest(List.of(Message.user("Extract")), List.of(), schema);
 
     assertNotNull(request.system());
-    assertTrue(request.system().contains("JSON"));
-    assertTrue(request.system().contains("schema"));
+    assertTrue(request.systemAsText().contains("JSON"));
+    assertTrue(request.systemAsText().contains("schema"));
   }
 
   @Test
@@ -648,8 +651,8 @@ class AnthropicModelTest {
     var messages = List.of(Message.system("Be helpful"), Message.user("Extract"));
     var request = model.buildRequest(messages, List.of(), schema);
 
-    assertTrue(request.system().startsWith("Be helpful"));
-    assertTrue(request.system().contains("JSON"));
+    assertTrue(request.systemAsText().startsWith("Be helpful"));
+    assertTrue(request.systemAsText().contains("JSON"));
   }
 
   @Test
@@ -966,5 +969,525 @@ class AnthropicModelTest {
     var httpRequest = model.buildHttpRequest("{}");
     assertEquals("t1", httpRequest.headers().firstValue("x-trace").orElseThrow());
     assertEquals("sk-ant-test", httpRequest.headers().firstValue("x-api-key").orElseThrow());
+  }
+
+  // ── prompt caching (hv2-bug2 Issue 1) ─────────────────────────────────────
+
+  @Test
+  void promptCachingDefaultsOn() {
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    assertTrue(
+        model.promptCachingEnabled(),
+        "Helios bills Anthropic via prompt caching by default — opt-out is explicit");
+  }
+
+  @Test
+  void promptCachingDisabledViaCachePolicy() {
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model =
+        new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.disabled());
+    var request =
+        model.buildRequest(
+            List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
+
+    // System emits the legacy plain-string shape — no cache_control, no array wrapping.
+    assertEquals("Be helpful", request.system());
+    // Last message stays as a String — caching annotation requires the array shape.
+    assertEquals("Hi", request.messages().getFirst().content());
+    assertFalse(model.promptCachingEnabled());
+    assertInstanceOf(CachePolicy.Disabled.class, model.cachePolicy());
+  }
+
+  @Test
+  void cachePolicyLongLivedAnnotatesWithOneHourTtl() {
+    // 1h TTL is opt-in; cache write at 2x base, read still at 0.10x. Verify the breakpoint
+    // payload reaches the system block intact so Anthropic bills the correct rate.
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model =
+        new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.longLived());
+    var request =
+        model.buildRequest(
+            List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
+
+    @SuppressWarnings("unchecked")
+    var systemBlocks = (List<ai.singlr.anthropic.api.SystemContent>) request.system();
+    var cc = systemBlocks.getFirst().cacheControl();
+    assertNotNull(cc);
+    assertEquals(ai.singlr.anthropic.api.CacheControl.TYPE_EPHEMERAL, cc.type());
+    assertEquals(
+        ai.singlr.anthropic.api.CacheControl.TTL_1_HOUR,
+        cc.ttl(),
+        "long-lived CachePolicy must propagate ttl='1h' to every cache breakpoint");
+    assertInstanceOf(CachePolicy.LongLived.class, model.cachePolicy());
+  }
+
+  @Test
+  void cachePolicyShortLivedHasNoExplicitTtl() {
+    // 5m is Anthropic's implicit default; sending ttl='5m' would still work but adds wire bloat.
+    // Verify the short-lived policy emits a breakpoint with no ttl field set.
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model =
+        new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.shortLived());
+    var request =
+        model.buildRequest(
+            List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
+
+    @SuppressWarnings("unchecked")
+    var systemBlocks = (List<ai.singlr.anthropic.api.SystemContent>) request.system();
+    var cc = systemBlocks.getFirst().cacheControl();
+    assertNotNull(cc);
+    assertNull(cc.ttl(), "short-lived policy must omit ttl so the wire stays minimal");
+  }
+
+  @Test
+  void constructorRejectsNullCachePolicy() {
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config, (CachePolicy) null));
+    assertEquals("cachePolicy is required", ex.getMessage());
+  }
+
+  @Test
+  void promptCachingAnnotatesSystemPromptWithCacheControl() {
+    // hv2-bug2 Issue 1 regression: without cache_control on the system prefix the Anthropic
+    // server bills every input token at the base rate, producing the Light Grid matchmaking
+    // baseline's flat $235.54 across 24 viewers. Annotated requests get the cache discount.
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request =
+        model.buildRequest(
+            List.of(Message.system("You are a careful assistant."), Message.user("Hi")),
+            List.of(),
+            null);
+
+    @SuppressWarnings("unchecked")
+    var systemBlocks = (List<ai.singlr.anthropic.api.SystemContent>) request.system();
+    assertEquals(1, systemBlocks.size());
+    var block = systemBlocks.getFirst();
+    assertEquals("text", block.type());
+    assertEquals("You are a careful assistant.", block.text());
+    assertNotNull(
+        block.cacheControl(),
+        "system prefix must carry a cache_control breakpoint for the default agent-loop pattern");
+    assertEquals(ai.singlr.anthropic.api.CacheControl.TYPE_EPHEMERAL, block.cacheControl().type());
+  }
+
+  @Test
+  void promptCachingOmitsSystemBlockWhenSystemPromptIsBlank() {
+    // No system prompt set; caching ON. The model must not synthesize an empty SystemContent
+    // block — Anthropic rejects empty system arrays and an empty text block wastes a breakpoint.
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    assertNull(request.system(), "blank system must serialize as omitted, not as an empty array");
+  }
+
+  @Test
+  void promptCachingAnnotatesLastToolWithCacheControl() {
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var tool1 =
+        Tool.newBuilder()
+            .withName("search")
+            .withDescription("search the web")
+            .withParameter(
+                ToolParameter.newBuilder()
+                    .withName("q")
+                    .withType(ParameterType.STRING)
+                    .withDescription("query")
+                    .withRequired(true)
+                    .build())
+            .withExecutor((args, ctx) -> ToolResult.success(""))
+            .build();
+    var tool2 =
+        Tool.newBuilder()
+            .withName("calculator")
+            .withDescription("compute arithmetic")
+            .withParameter(
+                ToolParameter.newBuilder()
+                    .withName("expr")
+                    .withType(ParameterType.STRING)
+                    .withDescription("the expression")
+                    .withRequired(true)
+                    .build())
+            .withExecutor((args, ctx) -> ToolResult.success(""))
+            .build();
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(tool1, tool2), null);
+
+    assertEquals(2, request.tools().size());
+    assertNull(
+        request.tools().get(0).cacheControl(),
+        "non-tail tool blocks must NOT carry cache_control — wastes a breakpoint");
+    assertNotNull(
+        request.tools().get(1).cacheControl(),
+        "the last tool anchors the cache breakpoint covering the entire tools array");
+    assertEquals(
+        ai.singlr.anthropic.api.CacheControl.TYPE_EPHEMERAL,
+        request.tools().get(1).cacheControl().type());
+  }
+
+  @Test
+  void promptCachingSingleToolGetsCacheControl() {
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var tool =
+        Tool.newBuilder()
+            .withName("solo")
+            .withDescription("a lone tool")
+            .withExecutor((args, ctx) -> ToolResult.success(""))
+            .build();
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(tool), null);
+    assertNotNull(request.tools().getFirst().cacheControl());
+  }
+
+  @Test
+  void promptCachingOmitsToolBreakpointWhenToolsEmpty() {
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    assertNull(request.tools(), "empty tools list serializes as omitted, no breakpoint");
+  }
+
+  @Test
+  void promptCachingPromotesLastMessageStringToBlockWithCacheControl() {
+    // String content cannot carry cache_control on the wire — must be promoted to a single-text
+    // block. This test guards the promotion path: a single string-content user message becomes a
+    // single-block list with the block annotated.
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request = model.buildRequest(List.of(Message.user("Latest turn")), List.of(), null);
+
+    var last = request.messages().getLast();
+    @SuppressWarnings("unchecked")
+    var blocks = (List<ContentBlock>) last.content();
+    assertEquals(1, blocks.size());
+    assertTrue(blocks.getFirst().hasTypeText());
+    assertEquals("Latest turn", blocks.getFirst().text());
+    assertNotNull(
+        blocks.getFirst().cacheControl(),
+        "the last message must anchor a cache breakpoint so the next turn reuses the prefix");
+  }
+
+  @Test
+  void promptCachingAnnotatesOnlyTailBlockOfMultiBlockMessage() {
+    // A multi-block message (e.g. text + image) must annotate the LAST block. Anthropic accepts a
+    // single cache_control per request slot; annotating multiple blocks of the same message would
+    // burn breakpoints with no incremental cacheability.
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var pngBytes = new byte[] {(byte) 0x89, 'P', 'N', 'G', 1, 2, 3};
+    var msg = Message.user("Look at this", List.of(InlineFile.of(pngBytes, "image/png")));
+    var request = model.buildRequest(List.of(msg), List.of(), null);
+
+    @SuppressWarnings("unchecked")
+    var blocks = (List<ContentBlock>) request.messages().getFirst().content();
+    assertEquals(2, blocks.size());
+    assertNull(blocks.get(0).cacheControl(), "non-tail block must not carry cache_control");
+    assertNotNull(blocks.get(1).cacheControl(), "tail block must carry cache_control");
+  }
+
+  @Test
+  void promptCachingAnnotatesLastTwoMessagesForRollingLookback() {
+    // Multiple user/assistant turns: BOTH the last and second-to-last messages get cache_control
+    // breakpoints. The pair gives the next turn's lookback a stable rolling write to find within
+    // Anthropic's 20-block lookback window, which would otherwise blind out the system+tools
+    // cache after roughly five tool-heavy agent turns.
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request =
+        model.buildRequest(
+            List.of(Message.user("hello"), Message.assistant("hi"), Message.user("how are you")),
+            List.of(),
+            null);
+
+    assertEquals(3, request.messages().size());
+    // First user (anchor of conversation) — plain string, no annotation.
+    assertEquals("hello", request.messages().get(0).content());
+    // Penultimate (assistant) — promoted to block list with cache_control on the tail block.
+    @SuppressWarnings("unchecked")
+    var penultimateBlocks = (List<ContentBlock>) request.messages().get(1).content();
+    assertEquals(1, penultimateBlocks.size());
+    assertNotNull(
+        penultimateBlocks.getFirst().cacheControl(),
+        "rolling lookback requires the penultimate message to carry a cache breakpoint");
+    // Last user — promoted to block list with cache_control on the tail block.
+    @SuppressWarnings("unchecked")
+    var lastBlocks = (List<ContentBlock>) request.messages().get(2).content();
+    assertEquals(1, lastBlocks.size());
+    assertNotNull(lastBlocks.getFirst().cacheControl());
+  }
+
+  @Test
+  void promptCachingSingleMessageOmitsPenultimateBreakpoint() {
+    // Single-message request: there's no second-to-last to annotate. Only the last gets a
+    // breakpoint — no synthetic empty breakpoint, no off-by-one.
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request = model.buildRequest(List.of(Message.user("solo")), List.of(), null);
+
+    assertEquals(1, request.messages().size());
+    @SuppressWarnings("unchecked")
+    var blocks = (List<ContentBlock>) request.messages().getFirst().content();
+    assertNotNull(blocks.getFirst().cacheControl());
+  }
+
+  @Test
+  void promptCachingAnnotatesPenultimateOnPriorAssistantMessage() {
+    // Verify the rolling breakpoint lands on an ASSISTANT message when that's the penultimate
+    // entry — Anthropic accepts cache_control on assistant content blocks too.
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request =
+        model.buildRequest(
+            List.of(Message.user("hi"), Message.assistant("hello!")), List.of(), null);
+
+    @SuppressWarnings("unchecked")
+    var penultimate = (List<ContentBlock>) request.messages().get(0).content();
+    @SuppressWarnings("unchecked")
+    var last = (List<ContentBlock>) request.messages().get(1).content();
+    assertEquals("user", request.messages().get(0).role());
+    assertEquals("assistant", request.messages().get(1).role());
+    assertNotNull(penultimate.getFirst().cacheControl());
+    assertNotNull(last.getFirst().cacheControl());
+  }
+
+  @Test
+  void promptCachingSkipsMessageBreakpointForEmptyContent() {
+    // Pathological: a user message with an empty string content (nothing to cache). The
+    // annotator must skip rather than synthesize an empty block. The other breakpoints (system,
+    // tools) still apply.
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request =
+        model.buildRequest(List.of(Message.system("S"), Message.user("")), List.of(), null);
+    // Last message stays as an empty string — no promotion to an empty block.
+    assertEquals("", request.messages().getFirst().content());
+    // System still cached.
+    @SuppressWarnings("unchecked")
+    var systemBlocks = (List<ai.singlr.anthropic.api.SystemContent>) request.system();
+    assertNotNull(systemBlocks.getFirst().cacheControl());
+  }
+
+  @Test
+  void promptCachingProducesFullBreakpointBudgetForMultiTurnAgentLoop() {
+    // The canonical multi-turn agent placement: system + tools + penultimate-message +
+    // last-message = 4 breakpoints. The penultimate breakpoint maintains rolling cache lookup
+    // within Anthropic's 20-block lookback window for long conversations.
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var tool =
+        Tool.newBuilder()
+            .withName("only")
+            .withDescription("only tool")
+            .withExecutor((args, ctx) -> ToolResult.success(""))
+            .build();
+    var request =
+        model.buildRequest(
+            List.of(
+                Message.system("be helpful"),
+                Message.user("hello"),
+                Message.assistant("hi"),
+                Message.user("how are you")),
+            List.of(tool),
+            null);
+
+    var breakpointCount = 0;
+    @SuppressWarnings("unchecked")
+    var systemBlocks = (List<ai.singlr.anthropic.api.SystemContent>) request.system();
+    if (systemBlocks.getLast().cacheControl() != null) breakpointCount++;
+    if (request.tools().getLast().cacheControl() != null) breakpointCount++;
+    @SuppressWarnings("unchecked")
+    var penultimateBlocks =
+        (List<ContentBlock>) request.messages().get(request.messages().size() - 2).content();
+    if (penultimateBlocks.getLast().cacheControl() != null) breakpointCount++;
+    @SuppressWarnings("unchecked")
+    var lastBlocks = (List<ContentBlock>) request.messages().getLast().content();
+    if (lastBlocks.getLast().cacheControl() != null) breakpointCount++;
+
+    assertEquals(
+        4,
+        breakpointCount,
+        "multi-turn agent loop uses Anthropic's full 4-breakpoint cache budget for rolling"
+            + " lookback");
+  }
+
+  @Test
+  void promptCachingSingleTurnUsesThreeBreakpoints() {
+    // First-turn shape (no prior conversation): system + tools + last-message = 3 breakpoints.
+    // No penultimate to annotate, so we stay one under the 4-breakpoint budget.
+    var config = ModelConfig.newBuilder().withApiKey("sk").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var tool =
+        Tool.newBuilder()
+            .withName("only")
+            .withDescription("only tool")
+            .withExecutor((args, ctx) -> ToolResult.success(""))
+            .build();
+    var request =
+        model.buildRequest(
+            List.of(Message.system("be helpful"), Message.user("hi")), List.of(tool), null);
+
+    var breakpointCount = 0;
+    @SuppressWarnings("unchecked")
+    var systemBlocks = (List<ai.singlr.anthropic.api.SystemContent>) request.system();
+    if (systemBlocks.getLast().cacheControl() != null) breakpointCount++;
+    if (request.tools().getLast().cacheControl() != null) breakpointCount++;
+    @SuppressWarnings("unchecked")
+    var lastBlocks = (List<ContentBlock>) request.messages().getLast().content();
+    if (lastBlocks.getLast().cacheControl() != null) breakpointCount++;
+
+    assertEquals(
+        3, breakpointCount, "single-turn first-call uses 3 of 4 breakpoints — no penultimate");
+  }
+
+  @Test
+  void messagesRequestSystemAsTextHandlesPlainStringShape() {
+    var request = MessagesRequest.newBuilder().withSystem("hello system").build();
+    assertEquals("hello system", request.systemAsText());
+  }
+
+  @Test
+  void messagesRequestSystemAsTextHandlesBlockArrayShape() {
+    var request =
+        MessagesRequest.newBuilder()
+            .withSystem(
+                List.of(
+                    ai.singlr.anthropic.api.SystemContent.text("first"),
+                    ai.singlr.anthropic.api.SystemContent.text("second")))
+            .build();
+    assertEquals("first\n\nsecond", request.systemAsText());
+  }
+
+  @Test
+  void messagesRequestSystemAsTextHandlesNull() {
+    var request = MessagesRequest.newBuilder().build();
+    assertNull(request.systemAsText());
+  }
+
+  // ── usage capture: cache tokens ───────────────────────────────────────────
+
+  @Test
+  void streamingIteratorCapturesCacheCreationAndReadTokensFromMessageStart() throws Exception {
+    var json =
+        "data: {\"type\":\"message_start\","
+            + "\"message\":{\"usage\":{\"input_tokens\":100,\"cache_creation_input_tokens\":900,"
+            + "\"cache_read_input_tokens\":500000,\"output_tokens\":0}}}\n"
+            + "data: {\"type\":\"content_block_start\",\"index\":0,"
+            + "\"content_block\":{\"type\":\"text\"}}\n"
+            + "data: {\"type\":\"content_block_delta\",\"index\":0,"
+            + "\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n"
+            + "data: {\"type\":\"content_block_stop\",\"index\":0}\n"
+            + "data: {\"type\":\"message_delta\","
+            + "\"delta\":{\"stop_reason\":\"end_turn\"},"
+            + "\"usage\":{\"output_tokens\":50}}\n"
+            + "data: {\"type\":\"message_stop\"}\n";
+    var done = drainSseFixture(json);
+    assertNotNull(done);
+    var usage = done.response().usage();
+    assertEquals(100, usage.inputTokens());
+    assertEquals(50, usage.outputTokens());
+    assertEquals(
+        900,
+        usage.cacheCreationInputTokens(),
+        "cache_creation_input_tokens from message_start surfaces in Response.Usage");
+    assertEquals(
+        500000,
+        usage.cacheReadInputTokens(),
+        "cache_read_input_tokens from message_start surfaces in Response.Usage");
+    assertEquals(
+        100 + 50 + 900 + 500000,
+        usage.totalTokens(),
+        "totalTokens sums every billable token class");
+  }
+
+  @Test
+  void streamingIteratorEmitsUsageWhenOnlyCacheTokensAreReported() throws Exception {
+    // Degenerate but legal: pure cache read, no uncached input. Anthropic still bills the cache
+    // read tokens; the Usage must surface so cost tracking accounts for it.
+    var json =
+        "data: {\"type\":\"message_start\","
+            + "\"message\":{\"usage\":{\"input_tokens\":0,\"cache_read_input_tokens\":1234,"
+            + "\"output_tokens\":0}}}\n"
+            + "data: {\"type\":\"message_delta\","
+            + "\"delta\":{\"stop_reason\":\"end_turn\"},"
+            + "\"usage\":{\"output_tokens\":0}}\n"
+            + "data: {\"type\":\"message_stop\"}\n";
+    var done = drainSseFixture(json);
+    assertNotNull(done);
+    assertNotNull(
+        done.response().usage(),
+        "any non-zero token class must surface a Usage record so cost tracking is not lost");
+    assertEquals(1234, done.response().usage().cacheReadInputTokens());
+  }
+
+  /**
+   * Drive a {@link AnthropicModel.StreamingIterator} against a canned SSE body and return its
+   * terminal {@code Done} event. Local to this test file so we don't bleed implementation-detail
+   * helpers across test classes.
+   */
+  private static ai.singlr.core.model.StreamEvent.Done drainSseFixture(String sseBody)
+      throws Exception {
+    var inputStream =
+        new java.io.ByteArrayInputStream(sseBody.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    java.net.http.HttpResponse<java.io.InputStream> response =
+        new java.net.http.HttpResponse<>() {
+          @Override
+          public int statusCode() {
+            return 200;
+          }
+
+          @Override
+          public java.net.http.HttpHeaders headers() {
+            return java.net.http.HttpHeaders.of(Map.of(), (a, b) -> true);
+          }
+
+          @Override
+          public java.io.InputStream body() {
+            return inputStream;
+          }
+
+          @Override
+          public java.util.Optional<java.net.http.HttpResponse<java.io.InputStream>>
+              previousResponse() {
+            return java.util.Optional.empty();
+          }
+
+          @Override
+          public java.net.http.HttpRequest request() {
+            return null;
+          }
+
+          @Override
+          public java.net.URI uri() {
+            return java.net.URI.create("https://test");
+          }
+
+          @Override
+          public java.net.http.HttpClient.Version version() {
+            return java.net.http.HttpClient.Version.HTTP_2;
+          }
+
+          @Override
+          public java.util.Optional<javax.net.ssl.SSLSession> sslSession() {
+            return java.util.Optional.empty();
+          }
+        };
+    try (var iterator =
+        new AnthropicModel.StreamingIterator(
+            response,
+            tools.jackson.databind.json.JsonMapper.builder().build(),
+            java.time.Duration.ofSeconds(5))) {
+      ai.singlr.core.model.StreamEvent.Done done = null;
+      while (iterator.hasNext()) {
+        var next = iterator.next();
+        if (next instanceof ai.singlr.core.model.StreamEvent.Done d) {
+          done = d;
+        }
+      }
+      return done;
+    }
   }
 }

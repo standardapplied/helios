@@ -13,7 +13,8 @@ import java.util.Map;
  * Content block in Claude Messages API.
  *
  * <p>Represents text, tool_use, tool_result, thinking, image, or document content blocks used in
- * both request messages and response content.
+ * both request messages and response content. Annotating a block with {@link #cacheControl()} marks
+ * the prefix up to and including this block as a prompt-cache breakpoint.
  *
  * @param type the block type: {@code "text"}, {@code "tool_use"}, {@code "tool_result"}, {@code
  *     "thinking"}, {@code "image"}, or {@code "document"}
@@ -27,6 +28,7 @@ import java.util.Map;
  * @param signature cryptographic signature for thinking round-trip (for type "thinking")
  * @param source nested source object (for "image" / "document" blocks) carrying the base64-encoded
  *     bytes plus media type
+ * @param cacheControl optional prompt-cache breakpoint anchored to this block
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ContentBlock(
@@ -39,24 +41,25 @@ public record ContentBlock(
     String content,
     String thinking,
     String signature,
-    Source source) {
+    Source source,
+    @JsonProperty("cache_control") CacheControl cacheControl) {
 
   public static ContentBlock text(String text) {
-    return new ContentBlock("text", text, null, null, null, null, null, null, null, null);
+    return new ContentBlock("text", text, null, null, null, null, null, null, null, null, null);
   }
 
   public static ContentBlock toolUse(String id, String name, Map<String, Object> input) {
-    return new ContentBlock("tool_use", null, id, name, input, null, null, null, null, null);
+    return new ContentBlock("tool_use", null, id, name, input, null, null, null, null, null, null);
   }
 
   public static ContentBlock toolResult(String toolUseId, String content) {
     return new ContentBlock(
-        "tool_result", null, null, null, null, toolUseId, content, null, null, null);
+        "tool_result", null, null, null, null, toolUseId, content, null, null, null, null);
   }
 
   public static ContentBlock thinking(String thinking, String signature) {
     return new ContentBlock(
-        "thinking", null, null, null, null, null, null, thinking, signature, null);
+        "thinking", null, null, null, null, null, null, thinking, signature, null, null);
   }
 
   /**
@@ -78,7 +81,8 @@ public record ContentBlock(
         null,
         null,
         null,
-        Source.base64(mediaType, base64Data));
+        Source.base64(mediaType, base64Data),
+        null);
   }
 
   /**
@@ -99,7 +103,21 @@ public record ContentBlock(
         null,
         null,
         null,
-        Source.base64(mediaType, base64Data));
+        Source.base64(mediaType, base64Data),
+        null);
+  }
+
+  /**
+   * Return a copy of this block carrying the given prompt-cache breakpoint. The Anthropic server
+   * treats every block at-or-before this one as the cache prefix.
+   *
+   * @param cacheControl the breakpoint; non-null
+   * @return a copy with {@code cache_control} set
+   */
+  public ContentBlock withCacheControl(CacheControl cacheControl) {
+    java.util.Objects.requireNonNull(cacheControl, "cacheControl must not be null");
+    return new ContentBlock(
+        type, text, id, name, input, toolUseId, content, thinking, signature, source, cacheControl);
   }
 
   public boolean hasTypeText() {

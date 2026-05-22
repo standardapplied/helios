@@ -636,4 +636,131 @@ class SerializationTest {
             .hasTypeMessageStop());
     assertTrue(objectMapper.readValue("{\"type\":\"error\"}", ApiStreamEvent.class).hasTypeError());
   }
+
+  // ── cache-control wire shape (hv2-bug2 Issue 1) ───────────────────────────
+
+  @Test
+  void serializeCacheControlEphemeralDefaultTtl() throws Exception {
+    var cc = CacheControl.ephemeral();
+    var json = objectMapper.writeValueAsString(cc);
+    assertEquals("{\"type\":\"ephemeral\"}", json);
+  }
+
+  @Test
+  void serializeCacheControlEphemeralOneHourTtl() throws Exception {
+    var cc = CacheControl.ephemeral(CacheControl.TTL_1_HOUR);
+    var json = objectMapper.writeValueAsString(cc);
+    assertTrue(json.contains("\"type\":\"ephemeral\""));
+    assertTrue(json.contains("\"ttl\":\"1h\""));
+  }
+
+  @Test
+  void cacheControlRejectsNullType() {
+    org.junit.jupiter.api.Assertions.assertThrows(
+        NullPointerException.class, () -> new CacheControl(null, null));
+  }
+
+  @Test
+  void cacheControlRejectsBlankType() {
+    var ex =
+        org.junit.jupiter.api.Assertions.assertThrows(
+            IllegalArgumentException.class, () -> new CacheControl("  ", null));
+    assertEquals("type must not be blank", ex.getMessage());
+  }
+
+  @Test
+  void serializeSystemContentWithCacheControl() throws Exception {
+    var block = SystemContent.text("Be careful").withCacheControl(CacheControl.ephemeral());
+    var json = objectMapper.writeValueAsString(block);
+    assertTrue(json.contains("\"type\":\"text\""));
+    assertTrue(json.contains("\"text\":\"Be careful\""));
+    assertTrue(json.contains("\"cache_control\":{\"type\":\"ephemeral\"}"));
+  }
+
+  @Test
+  void serializeContentBlockWithCacheControl() throws Exception {
+    var block = ContentBlock.text("user turn").withCacheControl(CacheControl.ephemeral());
+    var json = objectMapper.writeValueAsString(block);
+    assertTrue(json.contains("\"type\":\"text\""));
+    assertTrue(json.contains("\"text\":\"user turn\""));
+    assertTrue(json.contains("\"cache_control\":{\"type\":\"ephemeral\"}"));
+  }
+
+  @Test
+  void contentBlockWithCacheControlRejectsNull() {
+    org.junit.jupiter.api.Assertions.assertThrows(
+        NullPointerException.class, () -> ContentBlock.text("x").withCacheControl(null));
+  }
+
+  @Test
+  void systemContentWithCacheControlRejectsNull() {
+    org.junit.jupiter.api.Assertions.assertThrows(
+        NullPointerException.class, () -> SystemContent.text("x").withCacheControl(null));
+  }
+
+  @Test
+  void toolDefinitionWithCacheControlRoundTrips() throws Exception {
+    var def =
+        new ToolDefinition("calc", "compute", Map.of("type", "object"))
+            .withCacheControl(CacheControl.ephemeral());
+    var json = objectMapper.writeValueAsString(def);
+    assertTrue(json.contains("\"name\":\"calc\""));
+    assertTrue(json.contains("\"cache_control\":{\"type\":\"ephemeral\"}"));
+  }
+
+  @Test
+  void toolDefinitionWithCacheControlRejectsNull() {
+    var def = new ToolDefinition("calc", "compute", Map.of());
+    org.junit.jupiter.api.Assertions.assertThrows(
+        NullPointerException.class, () -> def.withCacheControl(null));
+  }
+
+  @Test
+  void messagesRequestSerializesArraySystemShape() throws Exception {
+    var request =
+        MessagesRequest.newBuilder()
+            .withModel("claude-opus-4-7")
+            .withMaxTokens(1024)
+            .withMessages(List.of(MessagesRequest.MessageEntry.user("Hi")))
+            .withSystem(
+                List.of(
+                    SystemContent.text("You are helpful")
+                        .withCacheControl(CacheControl.ephemeral())))
+            .build();
+    var json = objectMapper.writeValueAsString(request);
+    // system as array of objects with cache_control on the only block.
+    assertTrue(
+        json.contains(
+            "\"system\":[{\"type\":\"text\",\"text\":\"You are helpful\",\"cache_control\":{\"type\":\"ephemeral\"}}]"),
+        "system array wire shape must carry cache_control: " + json);
+  }
+
+  @Test
+  void messagesRequestSerializesPlainStringSystemShape() throws Exception {
+    var request =
+        MessagesRequest.newBuilder()
+            .withModel("claude-opus-4-7")
+            .withMaxTokens(1024)
+            .withMessages(List.of(MessagesRequest.MessageEntry.user("Hi")))
+            .withSystem("Plain string system")
+            .build();
+    var json = objectMapper.writeValueAsString(request);
+    assertTrue(
+        json.contains("\"system\":\"Plain string system\""),
+        "plain system field must serialize as a string when no caching is requested: " + json);
+  }
+
+  @Test
+  void apiUsageDeserializesCacheTokenFields() throws Exception {
+    // Verifies cache_creation_input_tokens / cache_read_input_tokens reach ApiUsage from the wire.
+    var usage =
+        objectMapper.readValue(
+            "{\"input_tokens\":10,\"output_tokens\":5,"
+                + "\"cache_creation_input_tokens\":7,\"cache_read_input_tokens\":42}",
+            ApiUsage.class);
+    assertEquals(10, usage.inputTokens());
+    assertEquals(5, usage.outputTokens());
+    assertEquals(7, usage.cacheCreationInputTokens());
+    assertEquals(42, usage.cacheReadInputTokens());
+  }
 }

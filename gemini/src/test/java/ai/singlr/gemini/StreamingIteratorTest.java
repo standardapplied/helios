@@ -762,6 +762,136 @@ class StreamingIteratorTest {
     }
   }
 
+  // ── implicit prompt caching on Gemini 2.5+ (hv2-bug2 Issue 1 — Gemini peer) ──
+
+  @org.junit.jupiter.api.Test
+  void cachedTokensSurfaceThroughResponseUsageInDisjointShape() {
+    // Gemini 2.5+ enables implicit prompt caching automatically. The Interactions API reports
+    // total_input_tokens as the TOTAL (inclusive of cached subset) and total_cached_tokens as
+    // the cached portion. The Helios provider must re-project into the disjoint Response.Usage
+    // shape so cost accounting at the Pricing layer never bills cached tokens at full input
+    // rate. Pre-fix: the bug surfaced as Light-Grid-style $0 cost data on Gemini workloads.
+    var envelope =
+        "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\","
+            + "\"usage\":{\"total_input_tokens\":2006,\"total_output_tokens\":150,"
+            + "\"total_tokens\":2156,\"total_cached_tokens\":1920}}}\n\n";
+    try (var iterator = createIterator(envelope, Duration.ofSeconds(5))) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getFirst();
+      var usage = done.response().usage();
+      assertNotNull(usage);
+      assertEquals(
+          2006 - 1920,
+          usage.inputTokens(),
+          "Helios inputTokens must be UNCACHED only — wire total_input_tokens minus cached");
+      assertEquals(150, usage.outputTokens());
+      assertEquals(
+          0,
+          usage.cacheCreationInputTokens(),
+          "Gemini does not premium implicit cache writes — cacheCreation stays 0");
+      assertEquals(
+          1920,
+          usage.cacheReadInputTokens(),
+          "total_cached_tokens surfaces as cacheReadInputTokens");
+      assertEquals(
+          (2006 - 1920) + 150 + 0 + 1920,
+          usage.totalTokens(),
+          "totalTokens sums every billable token across all four classes");
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void cachedTokensZeroProducesUsageWithDisjointSplit() {
+    // Gemini 2.5+ emits the field even when no cache hit occurred (cached=0). Verify the
+    // re-projection leaves inputTokens at the full wire value with cache fields at zero.
+    var envelope =
+        "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\","
+            + "\"usage\":{\"total_input_tokens\":50,\"total_output_tokens\":15,"
+            + "\"total_tokens\":65,\"total_cached_tokens\":0}}}\n\n";
+    try (var iterator = createIterator(envelope, Duration.ofSeconds(5))) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getFirst();
+      var usage = done.response().usage();
+      assertEquals(50, usage.inputTokens());
+      assertEquals(15, usage.outputTokens());
+      assertEquals(0, usage.cacheReadInputTokens());
+      assertEquals(0, usage.cacheCreationInputTokens());
+      assertEquals(65, usage.totalTokens());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void absentCachedTokensFieldTreatsCachedAsZeroForPre25Models() {
+    // Gemini 1.5 / 2.0 responses (and OpenAI-compatible proxies) omit total_cached_tokens.
+    // The cachedTokensOrZero() helper normalizes to 0 — no NPE, no synthetic cache attribution.
+    var envelope =
+        "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\","
+            + "\"usage\":{\"total_input_tokens\":25,\"total_output_tokens\":15,"
+            + "\"total_tokens\":40}}}\n\n";
+    try (var iterator = createIterator(envelope, Duration.ofSeconds(5))) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getFirst();
+      var usage = done.response().usage();
+      assertEquals(25, usage.inputTokens());
+      assertEquals(15, usage.outputTokens());
+      assertEquals(0, usage.cacheReadInputTokens());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void cachedTokensExceedingInputTokensDoesNotProduceNegativeUncached() {
+    // Defensive: a Gemini server-side accounting bug reporting cached > total_input would
+    // produce a negative uncached count under naive arithmetic. The provider clamps at zero.
+    var envelope =
+        "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\","
+            + "\"usage\":{\"total_input_tokens\":100,\"total_output_tokens\":20,"
+            + "\"total_tokens\":120,\"total_cached_tokens\":500}}}\n\n";
+    try (var iterator = createIterator(envelope, Duration.ofSeconds(5))) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getFirst();
+      var usage = done.response().usage();
+      assertEquals(0, usage.inputTokens(), "clamped to zero — never negative");
+      assertEquals(500, usage.cacheReadInputTokens());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void usageWithOnlyCachedTokensReportedStillSurfacesUsage() {
+    // Pure cache-hit edge case: total_input_tokens=0 but cached>0 (would indicate the server
+    // attributed everything to cache). The Usage object must still be populated so cost
+    // tracking accounts for the cache-read cost.
+    var envelope =
+        "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\","
+            + "\"usage\":{\"total_input_tokens\":0,\"total_output_tokens\":0,"
+            + "\"total_tokens\":1234,\"total_cached_tokens\":1234}}}\n\n";
+    try (var iterator = createIterator(envelope, Duration.ofSeconds(5))) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getFirst();
+      assertNotNull(done.response().usage());
+      assertEquals(1234, done.response().usage().cacheReadInputTokens());
+    }
+  }
+
   @org.junit.jupiter.api.Test
   void thoughtWithEmptySignatureIsIgnored() {
     var sse =

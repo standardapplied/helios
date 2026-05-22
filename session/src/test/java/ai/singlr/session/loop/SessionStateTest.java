@@ -143,7 +143,7 @@ final class SessionStateTest {
   @Test
   void accumulateUsagePreservesExplicitTotal() {
     var state = build();
-    state.accumulateUsage(new Usage(2, 3, 99));
+    state.accumulateUsage(new Usage(2, 3, 0, 0, 99));
     assertEquals(99, state.usage().totalTokens(), "explicit total carries through");
   }
 

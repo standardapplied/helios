@@ -52,6 +52,22 @@ class StreamingIteratorTest {
           + "\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\","
           + "\"output\":[],\"model\":\"gpt-4o\"}}\n\n";
 
+  /** Cache hit: 1920 of 2006 input tokens served from cache (canonical OpenAI shape). */
+  private static final String RESPONSE_COMPLETED_WITH_CACHED_TOKENS =
+      "data: {\"type\":\"response.completed\",\"response\":{"
+          + "\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\","
+          + "\"output\":[],\"model\":\"gpt-4o\","
+          + "\"usage\":{\"input_tokens\":2006,\"output_tokens\":150,\"total_tokens\":2156,"
+          + "\"input_tokens_details\":{\"cached_tokens\":1920}}}}\n\n";
+
+  /** Below 1024-token threshold: server reports cached_tokens=0 explicitly. */
+  private static final String RESPONSE_COMPLETED_WITH_ZERO_CACHED =
+      "data: {\"type\":\"response.completed\",\"response\":{"
+          + "\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\","
+          + "\"output\":[],\"model\":\"gpt-4o\","
+          + "\"usage\":{\"input_tokens\":50,\"output_tokens\":15,\"total_tokens\":65,"
+          + "\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n";
+
   private final tools.jackson.databind.ObjectMapper objectMapper =
       JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
 
@@ -283,6 +299,104 @@ class StreamingIteratorTest {
       assertEquals(3, events.size());
       var done = (StreamEvent.Done) events.getLast();
       assertEquals("Hello World", done.response().content());
+    }
+  }
+
+  // ── prompt-caching usage surfacing (hv2-bug2 Issue 1 — OpenAI peer) ──────
+
+  @org.junit.jupiter.api.Test
+  void cachedTokensSurfaceThroughResponseUsageInDisjointShape() {
+    // OpenAI reports input_tokens as the TOTAL (cached + uncached), with
+    // input_tokens_details.cached_tokens as the cached subset. The Helios provider must
+    // re-project into the disjoint Response.Usage shape so cost accounting doesn't
+    // double-count cached tokens at the base input rate.
+    var sse = TEXT_DELTA + RESPONSE_COMPLETED_WITH_CACHED_TOKENS;
+    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+      var events = new ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getLast();
+      var usage = done.response().usage();
+      assertEquals(
+          2006 - 1920,
+          usage.inputTokens(),
+          "Helios inputTokens must be UNCACHED only — wire input_tokens minus cached_tokens");
+      assertEquals(150, usage.outputTokens());
+      assertEquals(
+          0,
+          usage.cacheCreationInputTokens(),
+          "OpenAI does not premium cache writes, so cacheCreation is always 0");
+      assertEquals(
+          1920,
+          usage.cacheReadInputTokens(),
+          "cached_tokens from input_tokens_details surfaces as cacheReadInputTokens");
+      assertEquals(
+          (2006 - 1920) + 150 + 0 + 1920,
+          usage.totalTokens(),
+          "totalTokens sums every billable token across all four classes");
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void cachedTokensZeroProducesUsageWithDisjointSplit() {
+    // Below the 1024-token cache threshold, OpenAI reports cached_tokens=0 explicitly.
+    // Re-projection still applies: inputTokens stays at the full wire value, cache fields 0.
+    var sse = TEXT_DELTA + RESPONSE_COMPLETED_WITH_ZERO_CACHED;
+    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+      var events = new ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getLast();
+      var usage = done.response().usage();
+      assertEquals(50, usage.inputTokens());
+      assertEquals(15, usage.outputTokens());
+      assertEquals(0, usage.cacheReadInputTokens());
+      assertEquals(0, usage.cacheCreationInputTokens());
+      assertEquals(65, usage.totalTokens());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void absentInputTokensDetailsTreatsCachedAsZero() {
+    // Older API versions and OpenAI-compatible proxies omit input_tokens_details entirely.
+    // The provider's cachedTokensOrZero() helper normalizes to 0 so we never NPE.
+    var sse = TEXT_DELTA + RESPONSE_COMPLETED;
+    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+      var events = new ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getLast();
+      var usage = done.response().usage();
+      assertEquals(25, usage.inputTokens());
+      assertEquals(15, usage.outputTokens());
+      assertEquals(0, usage.cacheReadInputTokens());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void cachedTokensExceedingInputTokensDoesNotProduceNegativeUncached() {
+    // Defensive: an OpenAI accounting bug that reports cached_tokens > input_tokens would
+    // produce a negative uncached value in naive arithmetic. The provider clamps at zero —
+    // under-reporting uncached is safer than emitting a nonsensical negative token count.
+    var pathological =
+        "data: {\"type\":\"response.completed\",\"response\":{"
+            + "\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\","
+            + "\"output\":[],\"model\":\"gpt-4o\","
+            + "\"usage\":{\"input_tokens\":100,\"output_tokens\":20,\"total_tokens\":120,"
+            + "\"input_tokens_details\":{\"cached_tokens\":500}}}}\n\n";
+    var sse = TEXT_DELTA + pathological;
+    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+      var events = new ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getLast();
+      var usage = done.response().usage();
+      assertEquals(0, usage.inputTokens(), "clamped to zero — never negative");
+      assertEquals(500, usage.cacheReadInputTokens());
     }
   }
 

@@ -6,10 +6,12 @@
 package ai.singlr.anthropic;
 
 import ai.singlr.anthropic.api.ApiStreamEvent;
+import ai.singlr.anthropic.api.CacheControl;
 import ai.singlr.anthropic.api.ContentBlock;
 import ai.singlr.anthropic.api.ContentDelta;
 import ai.singlr.anthropic.api.MessagesRequest;
 import ai.singlr.anthropic.api.OutputConfig;
+import ai.singlr.anthropic.api.SystemContent;
 import ai.singlr.anthropic.api.ThinkingConfig;
 import ai.singlr.anthropic.api.ToolChoiceConfig;
 import ai.singlr.anthropic.api.ToolDefinition;
@@ -86,13 +88,39 @@ public class AnthropicModel implements Model {
   private final ModelConfig config;
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
+  private final CachePolicy cachePolicy;
 
+  /**
+   * Build a model with short-lived (5-minute) prompt caching enabled — the right default for agent
+   * loops where successive turns happen within seconds of each other. Cache breakpoints are placed
+   * on the system prompt, the last tool definition, and the last block of the latest message (the
+   * canonical agent-loop pattern). See {@link #AnthropicModel(AnthropicModelId, ModelConfig,
+   * CachePolicy)} for {@link CachePolicy#longLived() 1-hour TTL} or {@link CachePolicy#disabled()
+   * opt-out}.
+   */
   AnthropicModel(AnthropicModelId modelId, ModelConfig config) {
+    this(modelId, config, CachePolicy.shortLived());
+  }
+
+  /**
+   * Build a model with explicit prompt-caching policy.
+   *
+   * @param modelId the model identifier; non-null
+   * @param config the model configuration; non-null, must carry an apiKey or override headers
+   * @param cachePolicy {@link CachePolicy#shortLived()} (5m default), {@link
+   *     CachePolicy#longLived()} (1h), or {@link CachePolicy#disabled()}; non-null
+   * @throws IllegalArgumentException if {@code modelId} / {@code config} / {@code cachePolicy} is
+   *     null or the config lacks both an {@code apiKey} and a non-blank {@code baseUrl}
+   */
+  AnthropicModel(AnthropicModelId modelId, ModelConfig config, CachePolicy cachePolicy) {
     if (modelId == null) {
       throw new IllegalArgumentException("modelId is required");
     }
     if (config == null) {
       throw new IllegalArgumentException("config is required");
+    }
+    if (cachePolicy == null) {
+      throw new IllegalArgumentException("cachePolicy is required");
     }
     var hasCustomEndpoint = !Strings.isBlank(config.baseUrl());
     if (!hasCustomEndpoint && Strings.isBlank(config.apiKey())) {
@@ -101,9 +129,29 @@ public class AnthropicModel implements Model {
     }
     this.modelId = modelId;
     this.config = config;
+    this.cachePolicy = cachePolicy;
     this.httpClient = HttpClientFactory.create(config);
     this.objectMapper =
         JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
+  }
+
+  /**
+   * The {@link CachePolicy} that shapes outgoing requests — exposed for diagnostics, traces, and
+   * tests that verify request shaping.
+   *
+   * @return the configured policy; non-null
+   */
+  public CachePolicy cachePolicy() {
+    return cachePolicy;
+  }
+
+  /**
+   * Convenience accessor: whether the policy emits {@code cache_control} breakpoints.
+   *
+   * @return {@code true} for short-lived or long-lived policies; {@code false} for disabled
+   */
+  public boolean promptCachingEnabled() {
+    return cachePolicy.isEnabled();
   }
 
   @Override
@@ -320,20 +368,123 @@ public class AnthropicModel implements Model {
       temperature = null;
     }
 
-    return MessagesRequest.newBuilder()
-        .withModel(modelId.id())
-        .withMaxTokens(maxTokens)
-        .withMessages(apiMessages)
-        .withSystem(systemInstruction)
-        .withStream(true)
-        .withTools(toolDefs)
-        .withToolChoice(toolChoiceConfig)
-        .withTemperature(temperature)
-        .withTopP(config.topP())
-        .withStopSequences(config.stopSequences())
-        .withThinking(thinkingSpec.thinking())
-        .withOutputConfig(thinkingSpec.outputConfig())
-        .build();
+    var builder =
+        MessagesRequest.newBuilder()
+            .withModel(modelId.id())
+            .withMaxTokens(maxTokens)
+            .withMessages(apiMessages)
+            .withStream(true)
+            .withToolChoice(toolChoiceConfig)
+            .withTemperature(temperature)
+            .withTopP(config.topP())
+            .withStopSequences(config.stopSequences())
+            .withThinking(thinkingSpec.thinking())
+            .withOutputConfig(thinkingSpec.outputConfig());
+
+    if (cachePolicy.isEnabled()) {
+      var breakpoint = cachePolicy.breakpoint();
+      applySystemWithCache(builder, systemInstruction, breakpoint);
+      builder.withTools(withCachedTail(toolDefs, breakpoint));
+      annotateLastMessageForCaching(apiMessages, breakpoint);
+    } else {
+      builder.withSystem(systemInstruction);
+      builder.withTools(toolDefs);
+    }
+
+    return builder.build();
+  }
+
+  /**
+   * Promote a non-blank system string to the cache-aware array shape with a single ephemeral
+   * breakpoint on the only block; pass plain string (or {@code null}) when caching is disabled or
+   * when there is no system prompt. The Anthropic API only respects {@code cache_control} on the
+   * array shape, so the legacy string form silently misses cache hits even with caching enabled.
+   */
+  static void applySystemWithCache(
+      MessagesRequest.Builder builder, String systemInstruction, CacheControl breakpoint) {
+    if (Strings.isBlank(systemInstruction)) {
+      builder.withSystem((String) null);
+      return;
+    }
+    builder.withSystem(List.of(SystemContent.text(systemInstruction).withCacheControl(breakpoint)));
+  }
+
+  /**
+   * Return a copy of {@code defs} with the last tool annotated with {@code cache_control}. The
+   * Anthropic server treats the cache breakpoint as anchored to the end of the tools array; one
+   * breakpoint covers the entire section. Empty / null input passes through untouched.
+   */
+  static List<ToolDefinition> withCachedTail(List<ToolDefinition> defs, CacheControl breakpoint) {
+    if (defs == null || defs.isEmpty()) {
+      return defs;
+    }
+    var copy = new ArrayList<ToolDefinition>(defs.size());
+    for (var i = 0; i < defs.size() - 1; i++) {
+      copy.add(defs.get(i));
+    }
+    copy.add(defs.getLast().withCacheControl(breakpoint));
+    return List.copyOf(copy);
+  }
+
+  /**
+   * Mark the last (and second-to-last when present) message with a {@code cache_control}
+   * breakpoint. Together with the system and tools breakpoints this exhausts Anthropic's
+   * 4-breakpoint budget on the canonical agent-loop shape — the intended use of the budget.
+   *
+   * <h2>Why the second-to-last breakpoint matters</h2>
+   *
+   * Anthropic enforces a per-breakpoint <b>20-block lookback window</b> when resolving cache
+   * prefixes. A conversation that grows past 20 blocks of history (typical after ~5 agent turns
+   * with multi-tool-call rounds) makes the single last-message breakpoint blind to the system +
+   * tools cache prefix — every turn becomes a full cache miss.
+   *
+   * <p>Annotating the second-to-last message gives the cache a stable rolling write that the next
+   * turn's lookback can find: turn N writes prefixes at penultimate-msg-N AND last-msg-N; turn
+   * N+1's penultimate becomes turn N's last, and lookback chains cleanly.
+   *
+   * <p>String-content messages are promoted to a single-text-block list so the {@code
+   * cache_control} field has a block to attach to (Anthropic does not accept {@code cache_control}
+   * on a plain-string {@code content}). Empty-string and empty-list messages are skipped per slot —
+   * we never synthesize empty cache blocks.
+   */
+  static void annotateLastMessageForCaching(
+      List<MessagesRequest.MessageEntry> apiMessages, CacheControl breakpoint) {
+    if (apiMessages == null || apiMessages.isEmpty()) {
+      return;
+    }
+    var lastIdx = apiMessages.size() - 1;
+    annotateMessageEntryForCaching(apiMessages, lastIdx, breakpoint);
+    if (apiMessages.size() >= 2) {
+      annotateMessageEntryForCaching(apiMessages, lastIdx - 1, breakpoint);
+    }
+  }
+
+  /**
+   * Attach {@code breakpoint} to the last block of the message at {@code idx}, promoting a
+   * string-content message to single-block form first. Idempotent — re-annotating a block that
+   * already carries {@code cache_control} replaces it with the new breakpoint.
+   */
+  @SuppressWarnings("unchecked")
+  private static void annotateMessageEntryForCaching(
+      List<MessagesRequest.MessageEntry> apiMessages, int idx, CacheControl breakpoint) {
+    var entry = apiMessages.get(idx);
+    if (entry.content() instanceof String text) {
+      if (text.isEmpty()) {
+        return;
+      }
+      var block = ContentBlock.text(text).withCacheControl(breakpoint);
+      apiMessages.set(idx, new MessagesRequest.MessageEntry(entry.role(), List.of(block)));
+      return;
+    }
+    if (entry.content() instanceof List<?> raw && !raw.isEmpty()) {
+      var blocks = (List<ContentBlock>) raw;
+      var newBlocks = new ArrayList<ContentBlock>(blocks.size());
+      for (var i = 0; i < blocks.size() - 1; i++) {
+        newBlocks.add(blocks.get(i));
+      }
+      newBlocks.add(blocks.getLast().withCacheControl(breakpoint));
+      apiMessages.set(idx, new MessagesRequest.MessageEntry(entry.role(), List.copyOf(newBlocks)));
+    }
   }
 
   private static String appendSystemText(String existing, String additional) {
@@ -563,6 +714,8 @@ public class AnthropicModel implements Model {
     private boolean done = false;
     private int inputTokens = 0;
     private int outputTokens = 0;
+    private int cacheCreationInputTokens = 0;
+    private int cacheReadInputTokens = 0;
     private String stopReason = null;
 
     StreamingIterator(
@@ -655,6 +808,15 @@ public class AnthropicModel implements Model {
             var usage = event.message().usage();
             if (usage.inputTokens() != null) {
               inputTokens = usage.inputTokens();
+            }
+            // Cache tokens are first reported on message_start (initial accounting of cache
+            // writes/reads triggered by this turn's prefix). message_delta later carries the
+            // running output_tokens; cache counts do not change after start.
+            if (usage.cacheCreationInputTokens() != null) {
+              cacheCreationInputTokens = usage.cacheCreationInputTokens();
+            }
+            if (usage.cacheReadInputTokens() != null) {
+              cacheReadInputTokens = usage.cacheReadInputTokens();
             }
           }
           return null;
@@ -798,8 +960,13 @@ public class AnthropicModel implements Model {
       }
 
       Response.Usage usage = null;
-      if (inputTokens > 0 || outputTokens > 0) {
-        usage = Response.Usage.of(inputTokens, outputTokens);
+      if (inputTokens > 0
+          || outputTokens > 0
+          || cacheCreationInputTokens > 0
+          || cacheReadInputTokens > 0) {
+        usage =
+            Response.Usage.of(
+                inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens);
       }
 
       // Collect every thinking block in arrival order. The LinkedHashMap iteration order matches

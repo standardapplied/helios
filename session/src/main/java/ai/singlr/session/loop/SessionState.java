@@ -163,6 +163,8 @@ public final class SessionState {
             new Usage(
                 prev.inputTokens() + delta.inputTokens(),
                 prev.outputTokens() + delta.outputTokens(),
+                prev.cacheCreationInputTokens() + delta.cacheCreationInputTokens(),
+                prev.cacheReadInputTokens() + delta.cacheReadInputTokens(),
                 prev.totalTokens() + delta.totalTokens()));
   }
 

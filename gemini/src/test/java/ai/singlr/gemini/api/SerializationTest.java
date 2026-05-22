@@ -1006,4 +1006,52 @@ class SerializationTest {
         !json.contains("\"errorFlag\""), "must not leak the internal field name to the wire");
     assertTrue(!json.contains("\"error\":"), "must not emit a phantom 'error' property");
   }
+
+  // ── implicit prompt caching usage wire shape (hv2-bug2 Issue 1 — Gemini peer) ──
+
+  @Test
+  void interactionUsageDeserializesTotalCachedTokensFromWire() throws Exception {
+    var usage =
+        objectMapper.readValue(
+            "{\"total_input_tokens\":2006,\"total_output_tokens\":150,"
+                + "\"total_tokens\":2156,\"total_cached_tokens\":1920}",
+            InteractionUsage.class);
+    assertEquals(2006, usage.inputTokens());
+    assertEquals(150, usage.outputTokens());
+    assertEquals(2156, usage.totalTokens());
+    assertEquals(1920, usage.cachedTokens());
+    assertEquals(1920, usage.cachedTokensOrZero());
+  }
+
+  @Test
+  void interactionUsageCachedTokensOrZeroHandlesAbsentField() throws Exception {
+    var usage =
+        objectMapper.readValue(
+            "{\"total_input_tokens\":25,\"total_output_tokens\":15,\"total_tokens\":40}",
+            InteractionUsage.class);
+    assertEquals(
+        0,
+        usage.cachedTokensOrZero(),
+        "missing total_cached_tokens must surface as cached=0 (Gemini 1.5/2.0 path) — no NPE");
+    assertNull(usage.cachedTokens());
+  }
+
+  @Test
+  void interactionUsageCachedTokensZeroExplicitlyReportedOnGemini25() throws Exception {
+    // Gemini 2.5+ always emits the field, even when no cache hit happened.
+    var usage =
+        objectMapper.readValue(
+            "{\"total_input_tokens\":25,\"total_output_tokens\":15,"
+                + "\"total_tokens\":40,\"total_cached_tokens\":0}",
+            InteractionUsage.class);
+    assertEquals(0, usage.cachedTokens());
+    assertEquals(0, usage.cachedTokensOrZero());
+  }
+
+  @Test
+  void interactionUsageThreeArgConstructorOmitsCachedTokens() {
+    var usage = new InteractionUsage(40, 25, 15);
+    assertNull(usage.cachedTokens());
+    assertEquals(0, usage.cachedTokensOrZero());
+  }
 }

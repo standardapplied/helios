@@ -8,6 +8,7 @@ package ai.singlr.core.model;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -93,7 +94,28 @@ class ResponseTest {
 
     assertEquals(100, usage.inputTokens());
     assertEquals(50, usage.outputTokens());
+    assertEquals(0, usage.cacheCreationInputTokens());
+    assertEquals(0, usage.cacheReadInputTokens());
     assertEquals(150, usage.totalTokens());
+  }
+
+  @Test
+  void usageOfWithCacheTokens() {
+    var usage = Response.Usage.of(100, 50, 200, 5000);
+
+    assertEquals(100, usage.inputTokens());
+    assertEquals(50, usage.outputTokens());
+    assertEquals(200, usage.cacheCreationInputTokens());
+    assertEquals(5000, usage.cacheReadInputTokens());
+    assertEquals(
+        100 + 50 + 200 + 5000, usage.totalTokens(), "totalTokens sums every billable token class");
+  }
+
+  @Test
+  void usageOfWithCacheTokensRejectsOverflow() {
+    // input + output + cacheCreation + cacheRead would exceed Integer.MAX_VALUE.
+    var huge = Integer.MAX_VALUE - 10;
+    assertThrows(ArithmeticException.class, () -> Response.Usage.of(huge, huge, huge, huge));
   }
 
   @Test

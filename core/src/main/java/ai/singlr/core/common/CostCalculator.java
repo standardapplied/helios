@@ -66,22 +66,43 @@ public interface CostCalculator {
   }
 
   /**
-   * Per-million-token input and output rates for a single model. Rates are expressed in micro-USD
-   * per million tokens; storing per-million matches the unit every public rate card today publishes
-   * (e.g., "$15 per million input tokens") and keeps {@link #cost(Usage)} as an integer
-   * multiply-then-divide.
+   * Per-million-token rates for a single model, split across four billable token classes. Rates are
+   * expressed in micro-USD per million tokens; storing per-million matches the unit every public
+   * rate card today publishes (e.g., "$15 per million input tokens") and keeps {@link #cost(Usage)}
+   * as an integer multiply-then-divide.
    *
-   * @param inputMicroUsdPerMillion micro-USD per million input tokens; non-negative
+   * <p>Prompt caching, where supported by the provider, bills the four token classes at distinct
+   * rates: uncached input at {@code inputMicroUsdPerMillion}, output at {@code
+   * outputMicroUsdPerMillion}, cache writes at {@code cacheWriteMicroUsdPerMillion} (typically a
+   * small premium over base input), and cache reads at {@code cacheReadMicroUsdPerMillion}
+   * (typically a deep discount). Providers that do not report cache token counts always leave the
+   * cache fields at zero in {@link Usage}, so deployers without a caching story can keep using
+   * {@link #ofUsdPerMillion(double, double)} and pay only for input + output as before.
+   *
+   * @param inputMicroUsdPerMillion micro-USD per million uncached input tokens; non-negative
    * @param outputMicroUsdPerMillion micro-USD per million output tokens; non-negative
+   * @param cacheWriteMicroUsdPerMillion micro-USD per million cache-write input tokens;
+   *     non-negative
+   * @param cacheReadMicroUsdPerMillion micro-USD per million cache-read input tokens; non-negative
    */
-  record Pricing(long inputMicroUsdPerMillion, long outputMicroUsdPerMillion) {
+  record Pricing(
+      long inputMicroUsdPerMillion,
+      long outputMicroUsdPerMillion,
+      long cacheWriteMicroUsdPerMillion,
+      long cacheReadMicroUsdPerMillion) {
 
     private static final long TOKENS_PER_MILLION = 1_000_000L;
+
+    /** Anthropic's published premium ratio for prompt-cache writes against base input. */
+    public static final double ANTHROPIC_CACHE_WRITE_MULTIPLIER = 1.25d;
+
+    /** Anthropic's published discount ratio for prompt-cache reads against base input. */
+    public static final double ANTHROPIC_CACHE_READ_MULTIPLIER = 0.10d;
 
     /**
      * Canonical constructor.
      *
-     * @throws IllegalArgumentException if either rate is negative
+     * @throws IllegalArgumentException if any rate is negative
      */
     public Pricing {
       if (inputMicroUsdPerMillion < 0L) {
@@ -92,27 +113,94 @@ public interface CostCalculator {
         throw new IllegalArgumentException(
             "outputMicroUsdPerMillion must be non-negative, got " + outputMicroUsdPerMillion);
       }
+      if (cacheWriteMicroUsdPerMillion < 0L) {
+        throw new IllegalArgumentException(
+            "cacheWriteMicroUsdPerMillion must be non-negative, got "
+                + cacheWriteMicroUsdPerMillion);
+      }
+      if (cacheReadMicroUsdPerMillion < 0L) {
+        throw new IllegalArgumentException(
+            "cacheReadMicroUsdPerMillion must be non-negative, got " + cacheReadMicroUsdPerMillion);
+      }
     }
 
     /**
-     * Convenience for rates expressed in dollars-per-million-tokens. Tests and scripts; production
-     * callers should prefer the canonical constructor with raw micro-USD to avoid the
-     * floating-point conversion. Fractional micro-USD round half-up.
+     * Two-arg convenience constructor: no explicit cache rates. Cache-write and cache-read rates
+     * default to the base input rate, so deployers without a caching story compute exactly as
+     * before. The provider may still report cache token counts; they'll be billed at the base input
+     * rate rather than ignored, which keeps the math conservative — caching cannot make billing
+     * surface a lower number than the no-cache run reported.
+     *
+     * @param inputMicroUsdPerMillion micro-USD per million input tokens; non-negative
+     * @param outputMicroUsdPerMillion micro-USD per million output tokens; non-negative
+     */
+    public Pricing(long inputMicroUsdPerMillion, long outputMicroUsdPerMillion) {
+      this(
+          inputMicroUsdPerMillion,
+          outputMicroUsdPerMillion,
+          inputMicroUsdPerMillion,
+          inputMicroUsdPerMillion);
+    }
+
+    /**
+     * Convenience for rates expressed in dollars-per-million-tokens with no explicit cache rates.
+     * Tests and scripts; production callers should prefer the canonical constructor with raw
+     * micro-USD to avoid the floating-point conversion. Fractional micro-USD round half-up.
      *
      * @param inputUsdPerMillion USD per million input tokens; non-negative
      * @param outputUsdPerMillion USD per million output tokens; non-negative
-     * @return a {@code Pricing}
+     * @return a {@code Pricing} with cache rates defaulting to the input rate
      */
     public static Pricing ofUsdPerMillion(double inputUsdPerMillion, double outputUsdPerMillion) {
+      var inputMicro = Math.round(inputUsdPerMillion * CostEstimate.MICRO_USD_PER_USD);
+      var outputMicro = Math.round(outputUsdPerMillion * CostEstimate.MICRO_USD_PER_USD);
+      return new Pricing(inputMicro, outputMicro, inputMicro, inputMicro);
+    }
+
+    /**
+     * Convenience for rates expressed in dollars-per-million-tokens with explicit cache rates.
+     *
+     * @param inputUsdPerMillion USD per million uncached input tokens; non-negative
+     * @param outputUsdPerMillion USD per million output tokens; non-negative
+     * @param cacheWriteUsdPerMillion USD per million cache-write tokens; non-negative
+     * @param cacheReadUsdPerMillion USD per million cache-read tokens; non-negative
+     * @return a {@code Pricing}
+     */
+    public static Pricing ofUsdPerMillion(
+        double inputUsdPerMillion,
+        double outputUsdPerMillion,
+        double cacheWriteUsdPerMillion,
+        double cacheReadUsdPerMillion) {
       return new Pricing(
           Math.round(inputUsdPerMillion * CostEstimate.MICRO_USD_PER_USD),
-          Math.round(outputUsdPerMillion * CostEstimate.MICRO_USD_PER_USD));
+          Math.round(outputUsdPerMillion * CostEstimate.MICRO_USD_PER_USD),
+          Math.round(cacheWriteUsdPerMillion * CostEstimate.MICRO_USD_PER_USD),
+          Math.round(cacheReadUsdPerMillion * CostEstimate.MICRO_USD_PER_USD));
+    }
+
+    /**
+     * Build a {@code Pricing} using Anthropic's published prompt-cache ratios — cache writes at
+     * {@value #ANTHROPIC_CACHE_WRITE_MULTIPLIER}× base input, cache reads at {@value
+     * #ANTHROPIC_CACHE_READ_MULTIPLIER}× base input. Use for any Claude model whose rate card
+     * matches the published ratios; deployers paying a different ratio (volume discounts, custom
+     * enterprise pricing) should build a {@link Pricing} explicitly with the four-arg factory.
+     *
+     * @param inputUsdPerMillion USD per million uncached input tokens; non-negative
+     * @param outputUsdPerMillion USD per million output tokens; non-negative
+     * @return a {@code Pricing} with cache rates derived from {@code inputUsdPerMillion}
+     */
+    public static Pricing anthropicCaching(double inputUsdPerMillion, double outputUsdPerMillion) {
+      return ofUsdPerMillion(
+          inputUsdPerMillion,
+          outputUsdPerMillion,
+          inputUsdPerMillion * ANTHROPIC_CACHE_WRITE_MULTIPLIER,
+          inputUsdPerMillion * ANTHROPIC_CACHE_READ_MULTIPLIER);
     }
 
     /**
      * Compute the cost of one turn's usage at this pricing. Integer math: {@code (tokens × rate) /
-     * 1_000_000}. Sub-microUSD per-token amounts truncate to zero, which is exact for typical
-     * turn-sized aggregates and meaningless at the per-token margin.
+     * 1_000_000} per class, summed. Sub-microUSD per-token amounts truncate to zero, which is exact
+     * for typical turn-sized aggregates and meaningless at the per-token margin.
      *
      * @param usage the token usage; non-null
      * @return the cost as a non-negative {@link CostEstimate}
@@ -126,7 +214,16 @@ public interface CostCalculator {
       var outputMicro =
           Math.multiplyExact((long) usage.outputTokens(), outputMicroUsdPerMillion)
               / TOKENS_PER_MILLION;
-      return CostEstimate.ofMicroUsd(Math.addExact(inputMicro, outputMicro));
+      var cacheWriteMicro =
+          Math.multiplyExact((long) usage.cacheCreationInputTokens(), cacheWriteMicroUsdPerMillion)
+              / TOKENS_PER_MILLION;
+      var cacheReadMicro =
+          Math.multiplyExact((long) usage.cacheReadInputTokens(), cacheReadMicroUsdPerMillion)
+              / TOKENS_PER_MILLION;
+      return CostEstimate.ofMicroUsd(
+          Math.addExact(
+              Math.addExact(inputMicro, outputMicro),
+              Math.addExact(cacheWriteMicro, cacheReadMicro)));
     }
   }
 }
