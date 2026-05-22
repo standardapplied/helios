@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.lang.classfile.ClassFile;
 import java.lang.constant.ClassDesc;
+import java.lang.constant.ConstantDescs;
 import java.lang.constant.MethodTypeDesc;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
@@ -647,6 +648,189 @@ class PolicyBytecodeVerifierTest {
             SandboxPolicyException.class,
             () -> new PolicyBytecodeVerifier(policy).verify("Test", bytes));
     assertEquals("java/lang/Runtime", ex.deniedOwner());
+  }
+
+  // ── denyFileSystemAccess categorical (cwd-and-fs PR) ──────────────────────
+
+  @Test
+  void denyFileSystemAccessRejectsFilesReadAllBytes() {
+    var CD_Path = ClassDesc.of("java.nio.file.Path");
+    var bytes =
+        buildTestClass(
+            code -> {
+              code.aconst_null();
+              code.invokestatic(
+                  CD_Files,
+                  "readAllBytes",
+                  MethodTypeDesc.of(ConstantDescs.CD_byte.arrayType(), CD_Path));
+              code.pop();
+            });
+    var policy = SandboxPolicy.newBuilder().withDenyFileSystemAccess(true).build();
+    var ex =
+        assertThrows(
+            SandboxPolicyException.class,
+            () -> new PolicyBytecodeVerifier(policy).verify("Test", bytes));
+    assertEquals("java/nio/file/Files", ex.deniedOwner());
+    assertEquals("denyFileSystemAccess", ex.rule());
+  }
+
+  @Test
+  void denyFileSystemAccessRejectsPathsGet() {
+    var CD_Path = ClassDesc.of("java.nio.file.Path");
+    var CD_Paths = ClassDesc.of("java.nio.file.Paths");
+    var bytes =
+        buildTestClass(
+            code -> {
+              code.loadConstant("/tmp");
+              code.iconst_0();
+              code.anewarray(CD_String);
+              code.invokestatic(
+                  CD_Paths, "get", MethodTypeDesc.of(CD_Path, CD_String, CD_String.arrayType()));
+              code.pop();
+            });
+    var policy = SandboxPolicy.newBuilder().withDenyFileSystemAccess(true).build();
+    var ex =
+        assertThrows(
+            SandboxPolicyException.class,
+            () -> new PolicyBytecodeVerifier(policy).verify("Test", bytes));
+    assertEquals("java/nio/file/Paths", ex.deniedOwner());
+    assertEquals("denyFileSystemAccess", ex.rule());
+  }
+
+  @Test
+  void denyFileSystemAccessRejectsFileChannelOpen() {
+    var CD_FileChannel = ClassDesc.of("java.nio.channels.FileChannel");
+    var bytes =
+        buildTestClass(
+            code -> {
+              code.aconst_null();
+              code.iconst_0();
+              code.anewarray(ClassDesc.of("java.nio.file.OpenOption"));
+              code.invokestatic(
+                  CD_FileChannel,
+                  "open",
+                  MethodTypeDesc.of(
+                      CD_FileChannel,
+                      ClassDesc.of("java.nio.file.Path"),
+                      ClassDesc.of("java.nio.file.OpenOption").arrayType()));
+              code.pop();
+            });
+    var policy = SandboxPolicy.newBuilder().withDenyFileSystemAccess(true).build();
+    var ex =
+        assertThrows(
+            SandboxPolicyException.class,
+            () -> new PolicyBytecodeVerifier(policy).verify("Test", bytes));
+    assertEquals("java/nio/channels/FileChannel", ex.deniedOwner());
+    assertEquals("denyFileSystemAccess", ex.rule());
+  }
+
+  @Test
+  void denyFileSystemAccessRejectsFileInputStreamConstructor() {
+    var CD_FileInputStream = ClassDesc.of("java.io.FileInputStream");
+    var bytes =
+        buildTestClass(
+            code -> {
+              code.new_(CD_FileInputStream);
+              code.dup();
+              code.loadConstant("/etc/passwd");
+              code.invokespecial(
+                  CD_FileInputStream, "<init>", MethodTypeDesc.of(CD_void, CD_String));
+              code.pop();
+            });
+    var policy = SandboxPolicy.newBuilder().withDenyFileSystemAccess(true).build();
+    var ex =
+        assertThrows(
+            SandboxPolicyException.class,
+            () -> new PolicyBytecodeVerifier(policy).verify("Test", bytes));
+    assertEquals("java/io/FileInputStream", ex.deniedOwner());
+    assertEquals("denyFileSystemAccess", ex.rule());
+  }
+
+  @Test
+  void denyFileSystemAccessRejectsFileListMetadataLeak() {
+    // The reason this flag was added: prior noEgress let snippets do new File("/").list() because
+    // java.io.File itself isn't a denied class. The categorical flag closes that loophole.
+    var CD_File = ClassDesc.of("java.io.File");
+    var CD_StringArray = CD_String.arrayType();
+    var bytes =
+        buildTestClass(
+            code -> {
+              code.new_(CD_File);
+              code.dup();
+              code.loadConstant("/");
+              code.invokespecial(CD_File, "<init>", MethodTypeDesc.of(CD_void, CD_String));
+              code.invokevirtual(CD_File, "list", MethodTypeDesc.of(CD_StringArray));
+              code.pop();
+            });
+    var policy = SandboxPolicy.newBuilder().withDenyFileSystemAccess(true).build();
+    var ex =
+        assertThrows(
+            SandboxPolicyException.class,
+            () -> new PolicyBytecodeVerifier(policy).verify("Test", bytes));
+    assertEquals("java/io/File", ex.deniedOwner());
+    assertEquals("list", ex.deniedMember());
+    assertEquals("denyFileSystemAccess", ex.rule());
+  }
+
+  @Test
+  void denyFileSystemAccessRejectsFileExistsMetadataLeak() {
+    var CD_File = ClassDesc.of("java.io.File");
+    var bytes =
+        buildTestClass(
+            code -> {
+              code.new_(CD_File);
+              code.dup();
+              code.loadConstant("/etc/passwd");
+              code.invokespecial(CD_File, "<init>", MethodTypeDesc.of(CD_void, CD_String));
+              code.invokevirtual(CD_File, "exists", MethodTypeDesc.of(ConstantDescs.CD_boolean));
+              code.pop();
+            });
+    var policy = SandboxPolicy.newBuilder().withDenyFileSystemAccess(true).build();
+    var ex =
+        assertThrows(
+            SandboxPolicyException.class,
+            () -> new PolicyBytecodeVerifier(policy).verify("Test", bytes));
+    assertEquals("java/io/File", ex.deniedOwner());
+    assertEquals("exists", ex.deniedMember());
+  }
+
+  @Test
+  void denyFileSystemAccessLeavesPureStringFileMembersCallable() {
+    // new File(path) + getName + getAbsolutePath stay callable — they don't reach the kernel.
+    // This is the value of the per-method allow on java.io.File: snippets can still manipulate
+    // path strings for compute purposes.
+    var CD_File = ClassDesc.of("java.io.File");
+    var bytes =
+        buildTestClass(
+            code -> {
+              code.new_(CD_File);
+              code.dup();
+              code.loadConstant("/tmp/x");
+              code.invokespecial(CD_File, "<init>", MethodTypeDesc.of(CD_void, CD_String));
+              code.invokevirtual(CD_File, "getName", MethodTypeDesc.of(CD_String));
+              code.pop();
+            });
+    var policy = SandboxPolicy.newBuilder().withDenyFileSystemAccess(true).build();
+    new PolicyBytecodeVerifier(policy).verify("Test", bytes);
+    // No throw — getName is a pure-string accessor on File.
+  }
+
+  @Test
+  void denyFileSystemAccessOffLeavesEveryFileSystemPathOpen() {
+    // Sanity: the flag must be opt-in. Permissive baseline doesn't deny these.
+    var CD_Path = ClassDesc.of("java.nio.file.Path");
+    var bytes =
+        buildTestClass(
+            code -> {
+              code.aconst_null();
+              code.invokestatic(
+                  CD_Files,
+                  "readAllBytes",
+                  MethodTypeDesc.of(ConstantDescs.CD_byte.arrayType(), CD_Path));
+              code.pop();
+            });
+    new PolicyBytecodeVerifier(SandboxPolicy.permissive()).verify("Test", bytes);
+    // No throw.
   }
 
   /**

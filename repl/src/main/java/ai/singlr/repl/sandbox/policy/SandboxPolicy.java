@@ -51,6 +51,22 @@ import java.util.Set;
  *     defineHiddenClass}, and {@code ClassLoader.defineClass}. Without this, a snippet can
  *     synthesise bytes that bypass the verifier seam by defining classes in a loader the verifier
  *     never sees.
+ * @param denyFileSystemAccess if {@code true}, denies every snippet-callable path to the host
+ *     filesystem. Closes the read/write IO surface (the {@code File*Stream}, {@code FileReader},
+ *     {@code FileWriter}, {@code RandomAccessFile} family plus the {@code FileChannel} / {@code
+ *     AsynchronousFileChannel} channels and the entire {@code java.nio.file} package — so {@code
+ *     Files.readAllBytes}, {@code Files.list}, {@code Files.walk}, {@code Paths.get} and friends
+ *     are denied), and closes the metadata-leak surface on {@code java.io.File} itself ({@code
+ *     list} / {@code listFiles} / {@code exists} / {@code length} / {@code isDirectory} / {@code
+ *     canRead} and the other filesystem-touching members). Construction of {@code new File(path)}
+ *     and the purely-string methods ({@code getName}, {@code getPath}, {@code getAbsolutePath},
+ *     etc.) stay callable because they don't reach the filesystem.
+ *     <p>This is the right flag to set whenever the snippet's filesystem access should funnel
+ *     through host-owned tools (e.g. {@link ai.singlr.core.knowledge.FilesystemKnowledge}) rather
+ *     than raw {@code Files.readAllBytes} — set this flag, then expose the curated path-jail
+ *     surface as host tools. Combine with {@link
+ *     ai.singlr.repl.sandbox.JvmSandboxConfig#workingDirectory()} for defense-in-depth on
+ *     relative-path resolution.
  * @param onViolation how the verifier reports a violation. {@link ViolationAction#THROW} is the
  *     only mode in PR 1; a future {@code ASK_HOST} mode may route through a {@code QuestionGateway}
  *     when one is wired.
@@ -62,6 +78,7 @@ public record SandboxPolicy(
     boolean denyReflection,
     boolean denyNativeAccess,
     boolean denyDynamicClassDefinition,
+    boolean denyFileSystemAccess,
     ViolationAction onViolation) {
 
   public SandboxPolicy {
@@ -106,14 +123,15 @@ public record SandboxPolicy(
    */
   public static SandboxPolicy permissive() {
     return new SandboxPolicy(
-        Set.of(), Set.of(), Set.of(), false, false, false, ViolationAction.THROW);
+        Set.of(), Set.of(), Set.of(), false, false, false, false, ViolationAction.THROW);
   }
 
   /**
    * Curated preset: "no egress". Lets the snippet read inputs, do compute, manipulate collections,
    * format numbers and times, write to stdout / stderr — but blocks every path out of the sandbox:
-   * no process spawn, no network, no file IO, no reflection escape, no native code, no dynamic
-   * class definition.
+   * no process spawn, no network, no file IO (including the {@code java.io.File} metadata-leak
+   * surface and the {@code java.nio.file} package), no reflection escape, no native code, no
+   * dynamic class definition.
    *
    * <p>Composition:
    *
@@ -123,13 +141,15 @@ public record SandboxPolicy(
    *       {@code java.math}, {@code java.time}, {@code java.time.format}, {@code
    *       java.time.temporal}, {@code java.text}, {@code java.io} (for {@code System.out.println},
    *       formatted output, in-memory streams) — the safe compute and stdio surface
-   *   <li>{@code deniedClasses} = the dangerous classes inside the allowed packages: {@code
-   *       java.lang.ProcessBuilder}, {@code java.lang.Runtime}, {@code java.lang.Thread}, {@code
-   *       java.lang.ThreadGroup}, plus the file / serialization classes in {@code java.io} ({@code
-   *       FileReader}, {@code FileWriter}, {@code FileInputStream}, {@code FileOutputStream},
-   *       {@code RandomAccessFile}, {@code ObjectInputStream}, {@code ObjectOutputStream})
-   *   <li>{@code denyReflection}, {@code denyNativeAccess}, {@code denyDynamicClassDefinition} all
-   *       enabled — categorical escape hatches closed
+   *   <li>{@code deniedClasses} = the non-filesystem dangerous classes inside the allowed packages:
+   *       {@code java.lang.ProcessBuilder}, {@code java.lang.Runtime}, {@code java.lang.Thread},
+   *       {@code java.lang.ThreadGroup}, plus the serialization classes in {@code java.io} ({@code
+   *       ObjectInputStream}, {@code ObjectOutputStream}). File IO is no longer enumerated here —
+   *       {@code denyFileSystemAccess} below covers every {@code FileReader} / {@code FileWriter} /
+   *       {@code File*Stream} / {@code RandomAccessFile} opener plus the metadata-leak path on
+   *       {@code java.io.File} that previously survived this preset
+   *   <li>{@code denyReflection}, {@code denyNativeAccess}, {@code denyDynamicClassDefinition},
+   *       {@code denyFileSystemAccess} all enabled — every categorical escape hatch closed
    * </ul>
    *
    * <p>Deployers who need a single API call to lock the agent into "data crunching with no egress"
@@ -158,14 +178,10 @@ public record SandboxPolicy(
             "java.lang.Runtime",
             "java.lang.Thread",
             "java.lang.ThreadGroup",
-            "java.io.FileReader",
-            "java.io.FileWriter",
-            "java.io.FileInputStream",
-            "java.io.FileOutputStream",
-            "java.io.RandomAccessFile",
             "java.io.ObjectInputStream",
             "java.io.ObjectOutputStream"),
         Set.of(),
+        true,
         true,
         true,
         true,
@@ -183,7 +199,8 @@ public record SandboxPolicy(
         && deniedPackages.isEmpty()
         && !denyReflection
         && !denyNativeAccess
-        && !denyDynamicClassDefinition;
+        && !denyDynamicClassDefinition
+        && !denyFileSystemAccess;
   }
 
   public static Builder newBuilder() {
@@ -201,6 +218,7 @@ public record SandboxPolicy(
     private boolean denyReflection;
     private boolean denyNativeAccess;
     private boolean denyDynamicClassDefinition;
+    private boolean denyFileSystemAccess;
     private ViolationAction onViolation = ViolationAction.THROW;
 
     private Builder() {}
@@ -258,6 +276,18 @@ public record SandboxPolicy(
       return this;
     }
 
+    /**
+     * Deny every snippet-callable path to the host filesystem — {@code File*Stream}, {@code
+     * FileReader}, {@code FileWriter}, {@code RandomAccessFile}, {@code FileChannel} / {@code
+     * AsynchronousFileChannel}, the entire {@code java.nio.file} package, and the
+     * filesystem-touching members of {@code java.io.File}. See {@link
+     * SandboxPolicy#denyFileSystemAccess()}.
+     */
+    public Builder withDenyFileSystemAccess(boolean denyFileSystemAccess) {
+      this.denyFileSystemAccess = denyFileSystemAccess;
+      return this;
+    }
+
     public Builder withOnViolation(ViolationAction onViolation) {
       this.onViolation = onViolation;
       return this;
@@ -271,6 +301,7 @@ public record SandboxPolicy(
           denyReflection,
           denyNativeAccess,
           denyDynamicClassDefinition,
+          denyFileSystemAccess,
           onViolation);
     }
   }

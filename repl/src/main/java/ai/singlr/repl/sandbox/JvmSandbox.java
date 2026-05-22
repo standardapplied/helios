@@ -58,6 +58,7 @@ public final class JvmSandbox implements Sandbox {
   private final Path socketDir;
   private final StringBuilder capturedStdout;
   private final Thread stdoutReader;
+  private final Path ephemeralWorkingDir;
 
   /**
    * Create a sandbox wrapping an existing process. Used by the factory method and for testing.
@@ -69,13 +70,14 @@ public final class JvmSandbox implements Sandbox {
    */
   JvmSandbox(
       Process process, ProcessTransport transport, RpcChannel channel, JvmSandboxConfig config) {
-    this(process, transport, channel, config, null, null, null, null);
+    this(process, transport, channel, config, null, null, null, null, null);
   }
 
   /**
-   * Full constructor including the dedicated RPC socket and the stdout-capture thread used by
-   * {@link #create(JvmSandboxConfig, HostFunctionRegistry)}. The 4-arg constructor above is kept
-   * for tests that wire a {@link ProcessTransport} directly over piped streams.
+   * Full constructor including the dedicated RPC socket, the stdout-capture thread, and the
+   * per-session ephemeral working directory used by {@link #create(JvmSandboxConfig,
+   * HostFunctionRegistry)}. The 4-arg constructor above is kept for tests that wire a {@link
+   * ProcessTransport} directly over piped streams.
    *
    * @param rpcChannelSocket the accepted Unix-domain socket carrying RPC, or {@code null} if the
    *     transport is not socket-backed (test injection path)
@@ -85,6 +87,10 @@ public final class JvmSandbox implements Sandbox {
    *     reader is wired
    * @param stdoutReader virtual thread reading {@code process.getInputStream()} into {@code
    *     capturedStdout}, or {@code null}
+   * @param ephemeralWorkingDir per-session scratch directory created by {@link #create} when the
+   *     caller did not set {@link JvmSandboxConfig#workingDirectory()}, recursively deleted on
+   *     {@link #close()}; {@code null} when the caller supplied an explicit working directory or
+   *     when the test injection path skipped working-directory wiring entirely
    */
   JvmSandbox(
       Process process,
@@ -94,7 +100,8 @@ public final class JvmSandbox implements Sandbox {
       SocketChannel rpcChannelSocket,
       Path socketDir,
       StringBuilder capturedStdout,
-      Thread stdoutReader) {
+      Thread stdoutReader,
+      Path ephemeralWorkingDir) {
     this.process = process;
     this.transport = transport;
     this.channel = channel;
@@ -103,8 +110,18 @@ public final class JvmSandbox implements Sandbox {
     this.socketDir = socketDir;
     this.capturedStdout = capturedStdout;
     this.stdoutReader = stdoutReader;
+    this.ephemeralWorkingDir = ephemeralWorkingDir;
     this.shutdownHook = new Thread(this::destroyOnJvmShutdown, "jvm-sandbox-shutdown-hook");
     Runtime.getRuntime().addShutdownHook(shutdownHook);
+  }
+
+  /**
+   * Accessor for the per-session ephemeral working directory created by {@link #create}, or {@code
+   * null} when the caller pinned a working directory via {@link
+   * JvmSandboxConfig#workingDirectory()}. Exposed for tests that verify cwd containment.
+   */
+  Path ephemeralWorkingDirForTests() {
+    return ephemeralWorkingDir;
   }
 
   /**
@@ -128,6 +145,9 @@ public final class JvmSandbox implements Sandbox {
     }
     if (socketDir != null) {
       deleteSocketDirQuietly(socketDir);
+    }
+    if (ephemeralWorkingDir != null) {
+      deleteEphemeralCwdQuietly(ephemeralWorkingDir);
     }
   }
 
@@ -175,6 +195,7 @@ public final class JvmSandbox implements Sandbox {
    */
   static JvmSandbox create(JvmSandboxConfig config, HostFunctionRegistry registry) {
     Path socketDir = null;
+    Path ephemeralCwd = null;
     ServerSocketChannel listener = null;
     Process process = null;
     SocketChannel acceptedRpc = null;
@@ -192,9 +213,23 @@ public final class JvmSandbox implements Sandbox {
       listener = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
       listener.bind(UnixDomainSocketAddress.of(socketPath), 1);
 
+      // Working-directory resolution. When the caller pinned a path via
+      // JvmSandboxConfig.withWorkingDirectory(...), use it verbatim and don't track it for
+      // deletion (caller-owned lifecycle). Otherwise create a private per-session scratch dir;
+      // ephemeralCwd is tracked so close() / cleanup paths can delete it recursively. Either way
+      // we set ProcessBuilder.directory() so the subprocess never inherits the host JVM's cwd.
+      Path effectiveCwd;
+      if (config.workingDirectory() != null) {
+        effectiveCwd = config.workingDirectory();
+      } else {
+        ephemeralCwd = createEphemeralWorkingDir();
+        effectiveCwd = ephemeralCwd;
+      }
+
       var javaHome = System.getProperty("java.home");
       var javaBin = javaHome + "/bin/java";
       var pb = new ProcessBuilder(buildLaunchCommand(javaBin, config, socketPath.toString()));
+      pb.directory(effectiveCwd.toFile());
       pb.redirectErrorStream(false);
       var env = pb.environment();
       env.clear();
@@ -233,16 +268,17 @@ public final class JvmSandbox implements Sandbox {
               acceptedRpc,
               socketDir,
               capturedStdout,
-              stdoutThread);
+              stdoutThread,
+              ephemeralCwd);
       if (!customPrelude.isBlank()) {
         installCustomPrelude(rpcChannel, customPrelude);
       }
       return sandbox;
     } catch (IOException e) {
-      cleanupOnFailure(listener, process, acceptedRpc, stdoutThread, socketDir);
+      cleanupOnFailure(listener, process, acceptedRpc, stdoutThread, socketDir, ephemeralCwd);
       throw new ReplException("Failed to start JVM sandbox subprocess", e);
     } catch (RuntimeException e) {
-      cleanupOnFailure(listener, process, acceptedRpc, stdoutThread, socketDir);
+      cleanupOnFailure(listener, process, acceptedRpc, stdoutThread, socketDir, ephemeralCwd);
       throw e;
     }
   }
@@ -257,6 +293,23 @@ public final class JvmSandbox implements Sandbox {
    */
   private static Path createPrivateSocketDir() throws IOException {
     var dir = Files.createTempDirectory("helios-rpc-");
+    try {
+      Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
+    } catch (UnsupportedOperationException ignored) {
+    }
+    return dir;
+  }
+
+  /**
+   * Create a private per-session working directory the subprocess JVM is launched into. Mode 0700
+   * on POSIX filesystems for the same reason the socket dir is locked down — same-UID enumeration
+   * of the cwd's contents is the residual threat the JShell snippet itself shouldn't be able to
+   * carry out from inside, but reducing exposure to other processes on the host is cheap and
+   * principled. The directory is deleted recursively by {@link #close()} (or {@link
+   * #destroyOnJvmShutdown}) along with whatever transient files the snippet wrote.
+   */
+  private static Path createEphemeralWorkingDir() throws IOException {
+    var dir = Files.createTempDirectory("helios-sandbox-cwd-");
     try {
       Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
     } catch (UnsupportedOperationException ignored) {
@@ -341,7 +394,8 @@ public final class JvmSandbox implements Sandbox {
       Process process,
       SocketChannel acceptedRpc,
       Thread stdoutThread,
-      Path socketDir) {
+      Path socketDir,
+      Path ephemeralCwd) {
     if (listener != null) {
       try {
         listener.close();
@@ -365,6 +419,9 @@ public final class JvmSandbox implements Sandbox {
     if (socketDir != null) {
       deleteSocketDirQuietly(socketDir);
     }
+    if (ephemeralCwd != null) {
+      deleteEphemeralCwdQuietly(ephemeralCwd);
+    }
   }
 
   private static void deleteSocketDirQuietly(Path dir) {
@@ -382,6 +439,58 @@ public final class JvmSandbox implements Sandbox {
     }
     try {
       Files.deleteIfExists(dir);
+    } catch (IOException ignored) {
+      // best-effort
+    }
+  }
+
+  /**
+   * Recursively delete the ephemeral working directory and every file the snippet wrote into it.
+   * Symlinks are deleted as links (not followed) so a snippet that managed to {@code ln -s / leak}
+   * from inside the sandbox cannot trick host cleanup into walking the root filesystem. Every
+   * failure is swallowed — this runs from {@code close()} / the shutdown hook / the launch-failure
+   * path, and re-throwing would mask the original outcome. A residual orphan dir under the system
+   * temp area is the worst case; the OS's tmpwatch (or the deployer's housekeeping) will eventually
+   * reap it.
+   */
+  static void deleteEphemeralCwdQuietly(Path dir) {
+    if (!Files.exists(dir, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+      return;
+    }
+    try {
+      Files.walkFileTree(
+          dir,
+          java.util.EnumSet.noneOf(java.nio.file.FileVisitOption.class),
+          Integer.MAX_VALUE,
+          new java.nio.file.SimpleFileVisitor<Path>() {
+            @Override
+            public java.nio.file.FileVisitResult visitFile(
+                Path file, java.nio.file.attribute.BasicFileAttributes attrs) {
+              try {
+                Files.deleteIfExists(file);
+              } catch (IOException ignored) {
+                // best-effort
+              }
+              return java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult visitFileFailed(Path file, IOException exc) {
+              // Unreadable entries (broken symlink target permissions, racing deletes) are
+              // logged at FINE elsewhere; treat as already-gone for the cleanup walk.
+              return java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult postVisitDirectory(Path d, IOException exc) {
+              try {
+                Files.deleteIfExists(d);
+              } catch (IOException ignored) {
+                // best-effort
+              }
+              return java.nio.file.FileVisitResult.CONTINUE;
+            }
+          });
     } catch (IOException ignored) {
       // best-effort
     }
@@ -634,6 +743,9 @@ public final class JvmSandbox implements Sandbox {
       }
       if (socketDir != null) {
         deleteSocketDirQuietly(socketDir);
+      }
+      if (ephemeralWorkingDir != null) {
+        deleteEphemeralCwdQuietly(ephemeralWorkingDir);
       }
     }
   }

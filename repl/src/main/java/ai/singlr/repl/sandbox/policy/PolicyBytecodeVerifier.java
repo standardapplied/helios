@@ -82,7 +82,9 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
   private static final String REFLECTION_PKG = "java/lang/reflect/";
   private static final String INVOKE_PKG = "java/lang/invoke/";
   private static final String FOREIGN_PKG = "java/lang/foreign/";
+  private static final String NIO_FILE_PKG = "java/nio/file/";
   private static final String CLASS_OWNER = "java/lang/Class";
+  private static final String FILE_OWNER = "java/io/File";
 
   /**
    * Internal-form prefixes considered "JDK-scoped" for the allow-list rule. An owner under one of
@@ -105,6 +107,69 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
           "java/lang/invoke/MethodHandles$Lookup.defineHiddenClass",
           "java/lang/invoke/MethodHandles$Lookup.defineHiddenClassWithClassData",
           "java/lang/ClassLoader.defineClass");
+
+  /**
+   * Classes whose every member touches the host filesystem when the snippet invokes them. Includes
+   * the {@code java.io.File*Stream} / {@code Reader} / {@code Writer} family, {@code
+   * RandomAccessFile}, {@code FileDescriptor} (the FD container — exposes raw native FDs that
+   * bypass the IO chokepoint), and the file-backed NIO channels. The {@code java.nio.file} package
+   * is denied via a prefix check below rather than enumerated here because every member of that
+   * package touches the filesystem and the package gains classes across JDK versions.
+   */
+  private static final Set<String> FS_DENIED_OWNERS =
+      Set.of(
+          "java/io/FileInputStream",
+          "java/io/FileOutputStream",
+          "java/io/FileReader",
+          "java/io/FileWriter",
+          "java/io/RandomAccessFile",
+          "java/io/FileDescriptor",
+          "java/nio/channels/FileChannel",
+          "java/nio/channels/AsynchronousFileChannel");
+
+  /**
+   * Members on {@code java.io.File} that reach the filesystem (read directory contents, query
+   * existence / size / timestamps, create / delete / rename, query free space). Listed explicitly
+   * so {@code new File(path)} and the purely-string members ({@code getName}, {@code getPath},
+   * {@code getAbsolutePath}, {@code toString}, ...) stay callable — those don't touch the
+   * filesystem and they're how snippets manipulate path strings.
+   *
+   * <p>{@code toPath()} appears here because the returned {@link java.nio.file.Path} lives in
+   * {@code java.nio.file}, which the prefix check denies — but denying at the {@code File} boundary
+   * too gives a clearer rule label and short-circuits the call before the {@code Path} object is
+   * materialised.
+   */
+  private static final Set<String> FILE_UNSAFE_MEMBERS =
+      Set.of(
+          "list",
+          "listFiles",
+          "listRoots",
+          "exists",
+          "length",
+          "lastModified",
+          "isDirectory",
+          "isFile",
+          "isHidden",
+          "canRead",
+          "canWrite",
+          "canExecute",
+          "getCanonicalPath",
+          "getCanonicalFile",
+          "getFreeSpace",
+          "getTotalSpace",
+          "getUsableSpace",
+          "createNewFile",
+          "delete",
+          "deleteOnExit",
+          "mkdir",
+          "mkdirs",
+          "renameTo",
+          "setReadable",
+          "setWritable",
+          "setExecutable",
+          "setReadOnly",
+          "setLastModified",
+          "toPath");
 
   private final SandboxPolicy policy;
   private final Set<String> allowedPackagesInternal;
@@ -186,6 +251,9 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
     }
     if (policy.denyDynamicClassDefinition() && isDynamicClassDefinition(ownerInternal, member)) {
       throw new SandboxPolicyException(ownerInternal, member, "denyDynamicClassDefinition");
+    }
+    if (policy.denyFileSystemAccess() && isFileSystemAccess(ownerInternal, member)) {
+      throw new SandboxPolicyException(ownerInternal, member, "denyFileSystemAccess");
     }
     if (!allowedPackagesInternal.isEmpty()
         && isJdkScoped(ownerInternal)
@@ -280,6 +348,36 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
    */
   private static boolean isDynamicClassDefinition(String owner, String member) {
     return member != null && DYN_CLASS_DEF_MEMBERS.contains(owner + "." + member);
+  }
+
+  /**
+   * Filesystem-access rule. Denies three categories of snippet-callable filesystem reach:
+   *
+   * <ul>
+   *   <li>Every member of the {@code java.nio.file} package (prefix match). Catches {@code
+   *       Files.readAllBytes}, {@code Files.list}, {@code Files.walk}, {@code Paths.get}, {@code
+   *       FileSystems.getDefault}, {@code WatchService}, and every NIO entry point that touches the
+   *       filesystem.
+   *   <li>Every member of the file-IO opener classes — {@code File*Stream}, {@code FileReader},
+   *       {@code FileWriter}, {@code RandomAccessFile}, {@code FileDescriptor}, and the {@code
+   *       FileChannel} / {@code AsynchronousFileChannel} NIO channels. The class is denied outright
+   *       (every method), since opening a stream / channel is the only thing these classes exist
+   *       for.
+   *   <li>The filesystem-touching members of {@code java.io.File} (list, listFiles, exists, length,
+   *       lastModified, isDirectory, canRead, createNewFile, delete, mkdir, renameTo, and the other
+   *       queries / mutations enumerated in {@link #FILE_UNSAFE_MEMBERS}). The File class itself
+   *       remains callable for path-string construction and the purely-string accessors so snippets
+   *       can build / format / parse paths without touching the kernel.
+   * </ul>
+   */
+  private static boolean isFileSystemAccess(String owner, String member) {
+    if (owner.startsWith(NIO_FILE_PKG)) {
+      return true;
+    }
+    if (FS_DENIED_OWNERS.contains(owner)) {
+      return true;
+    }
+    return owner.equals(FILE_OWNER) && member != null && FILE_UNSAFE_MEMBERS.contains(member);
   }
 
   private static String internalNameFromDesc(ClassDesc desc) {

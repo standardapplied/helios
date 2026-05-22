@@ -6,6 +6,7 @@
 package ai.singlr.repl.sandbox;
 
 import ai.singlr.repl.sandbox.policy.SandboxPolicy;
+import java.nio.file.Path;
 import java.time.Duration;
 
 /**
@@ -31,6 +32,20 @@ import java.time.Duration;
  *     everything beyond the required JShell / bootstrap chain, or {@link
  *     SubprocessModules#allowingExtras(String...)} to add specific JDK modules (e.g. {@code
  *     java.net.http}) on top of the minimal baseline.
+ * @param workingDirectory the working directory the subprocess JVM is launched in. {@code null}
+ *     (default) means the {@link ai.singlr.repl.sandbox.JvmSandbox JvmSandbox} creates a private
+ *     {@code helios-sandbox-cwd-*} temp directory per session, sets it on {@link
+ *     ProcessBuilder#directory(java.io.File)}, and deletes it (recursively) when {@link
+ *     ai.singlr.repl.sandbox.JvmSandbox#close()} fires — predictable per-session scratch space, no
+ *     cross-session leak, no inheritance from the host JVM's cwd. Pass a non-null path to point the
+ *     subprocess at a caller-owned directory (e.g. a customer's per-tenant scratch mount);
+ *     caller-owned directories are <b>not</b> deleted by {@code close()}, only the ephemeral
+ *     default is.
+ *     <p>Restricting the working directory is necessary but not sufficient for filesystem
+ *     containment — absolute paths bypass cwd entirely. Combine with {@link
+ *     SandboxPolicy#denyFileSystemAccess()} to block snippet-direct filesystem reach; the cwd
+ *     option contains the relative-path resolution and provides the clean scratch surface, the
+ *     policy flag closes the absolute-path and metadata-leak escape routes.
  */
 public record JvmSandboxConfig(
     Duration executionTimeout,
@@ -38,7 +53,8 @@ public record JvmSandboxConfig(
     Duration callTimeout,
     Duration subprocessStartupTimeout,
     SandboxPolicy sandboxPolicy,
-    SubprocessModules subprocessModules) {
+    SubprocessModules subprocessModules,
+    Path workingDirectory) {
 
   /** Default execution timeout: 30 seconds. */
   public static final Duration DEFAULT_EXECUTION_TIMEOUT = Duration.ofSeconds(30);
@@ -76,6 +92,9 @@ public record JvmSandboxConfig(
     if (subprocessModules == null) {
       throw new IllegalArgumentException("Subprocess modules must not be null");
     }
+    // workingDirectory is intentionally nullable — null signals "create ephemeral per-session
+    // temp dir". When non-null we don't validate existence here; JvmSandbox will surface a
+    // launch-time IOException if ProcessBuilder.directory() rejects the path.
   }
 
   /** Create a default configuration. */
@@ -86,7 +105,8 @@ public record JvmSandboxConfig(
         DEFAULT_CALL_TIMEOUT,
         DEFAULT_SUBPROCESS_STARTUP_TIMEOUT,
         SandboxPolicy.permissive(),
-        SubprocessModules.unrestricted());
+        SubprocessModules.unrestricted(),
+        null);
   }
 
   public static Builder newBuilder() {
@@ -100,6 +120,7 @@ public record JvmSandboxConfig(
     private Duration subprocessStartupTimeout = DEFAULT_SUBPROCESS_STARTUP_TIMEOUT;
     private SandboxPolicy sandboxPolicy = SandboxPolicy.permissive();
     private SubprocessModules subprocessModules = SubprocessModules.unrestricted();
+    private Path workingDirectory;
 
     private Builder() {}
 
@@ -152,6 +173,21 @@ public record JvmSandboxConfig(
       return this;
     }
 
+    /**
+     * Pin the subprocess JVM's working directory. {@code null} (default) selects the per-session
+     * ephemeral scratch dir created by {@link JvmSandbox}; pass a non-null path to point the
+     * subprocess at a caller-owned directory. Caller-owned directories are not deleted by {@link
+     * JvmSandbox#close()}. See the record javadoc on {@link JvmSandboxConfig#workingDirectory()}
+     * for the rationale and the cwd / {@code denyFileSystemAccess} composition guidance.
+     *
+     * @param workingDirectory caller-owned path or {@code null} for the ephemeral default
+     * @return this builder
+     */
+    public Builder withWorkingDirectory(Path workingDirectory) {
+      this.workingDirectory = workingDirectory;
+      return this;
+    }
+
     public JvmSandboxConfig build() {
       return new JvmSandboxConfig(
           executionTimeout,
@@ -159,7 +195,8 @@ public record JvmSandboxConfig(
           callTimeout,
           subprocessStartupTimeout,
           sandboxPolicy,
-          subprocessModules);
+          subprocessModules,
+          workingDirectory);
     }
   }
 }

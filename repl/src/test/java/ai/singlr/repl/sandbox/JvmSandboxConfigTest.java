@@ -43,7 +43,8 @@ class JvmSandboxConfigTest {
             Duration.ofSeconds(30),
             Duration.ofSeconds(20),
             policy,
-            modules);
+            modules,
+            null);
     assertEquals(Duration.ofSeconds(10), config.executionTimeout());
     assertEquals(512, config.maxHeapMb());
     assertEquals(Duration.ofSeconds(30), config.callTimeout());
@@ -63,7 +64,8 @@ class JvmSandboxConfigTest {
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
                 PERMISSIVE,
-                UNRESTRICTED));
+                UNRESTRICTED,
+                null));
   }
 
   @Test
@@ -77,7 +79,8 @@ class JvmSandboxConfigTest {
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
                 PERMISSIVE,
-                UNRESTRICTED));
+                UNRESTRICTED,
+                null));
   }
 
   @Test
@@ -91,7 +94,8 @@ class JvmSandboxConfigTest {
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
                 PERMISSIVE,
-                UNRESTRICTED));
+                UNRESTRICTED,
+                null));
   }
 
   @Test
@@ -105,7 +109,8 @@ class JvmSandboxConfigTest {
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
                 PERMISSIVE,
-                UNRESTRICTED));
+                UNRESTRICTED,
+                null));
   }
 
   @Test
@@ -119,7 +124,8 @@ class JvmSandboxConfigTest {
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
                 PERMISSIVE,
-                UNRESTRICTED));
+                UNRESTRICTED,
+                null));
   }
 
   @Test
@@ -133,7 +139,8 @@ class JvmSandboxConfigTest {
                 null,
                 Duration.ofSeconds(10),
                 PERMISSIVE,
-                UNRESTRICTED));
+                UNRESTRICTED,
+                null));
   }
 
   @Test
@@ -147,7 +154,8 @@ class JvmSandboxConfigTest {
                 Duration.ZERO,
                 Duration.ofSeconds(10),
                 PERMISSIVE,
-                UNRESTRICTED));
+                UNRESTRICTED,
+                null));
   }
 
   @Test
@@ -161,7 +169,8 @@ class JvmSandboxConfigTest {
                 Duration.ofSeconds(-1),
                 Duration.ofSeconds(10),
                 PERMISSIVE,
-                UNRESTRICTED));
+                UNRESTRICTED,
+                null));
   }
 
   @Test
@@ -172,6 +181,22 @@ class JvmSandboxConfigTest {
     assertEquals(JvmSandboxConfig.DEFAULT_CALL_TIMEOUT, config.callTimeout());
     assertTrue(config.sandboxPolicy().isPermissive());
     assertTrue(config.subprocessModules() instanceof SubprocessModules.Unrestricted);
+    org.junit.jupiter.api.Assertions.assertNull(
+        config.workingDirectory(),
+        "default working directory must be null — signals ephemeral per-session dir");
+  }
+
+  @Test
+  void builderRoundtripsExplicitWorkingDirectory() {
+    var dir = java.nio.file.Path.of("/var/lib/agent/tenant-42");
+    var config = JvmSandboxConfig.newBuilder().withWorkingDirectory(dir).build();
+    assertEquals(dir, config.workingDirectory());
+  }
+
+  @Test
+  void builderAcceptsNullWorkingDirectoryAsEphemeralDefault() {
+    var config = JvmSandboxConfig.newBuilder().withWorkingDirectory(null).build();
+    org.junit.jupiter.api.Assertions.assertNull(config.workingDirectory());
   }
 
   @Test
@@ -225,7 +250,8 @@ class JvmSandboxConfigTest {
                 Duration.ofSeconds(60),
                 Duration.ZERO,
                 PERMISSIVE,
-                UNRESTRICTED));
+                UNRESTRICTED,
+                null));
   }
 
   @Test
@@ -239,7 +265,8 @@ class JvmSandboxConfigTest {
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(-1),
                 PERMISSIVE,
-                UNRESTRICTED));
+                UNRESTRICTED,
+                null));
   }
 
   @Test
@@ -253,7 +280,8 @@ class JvmSandboxConfigTest {
                 Duration.ofSeconds(60),
                 null,
                 PERMISSIVE,
-                UNRESTRICTED));
+                UNRESTRICTED,
+                null));
   }
 
   @Test
@@ -267,7 +295,8 @@ class JvmSandboxConfigTest {
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
                 null,
-                UNRESTRICTED));
+                UNRESTRICTED,
+                null));
   }
 
   @Test
@@ -281,6 +310,7 @@ class JvmSandboxConfigTest {
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
                 PERMISSIVE,
+                null,
                 null));
   }
 

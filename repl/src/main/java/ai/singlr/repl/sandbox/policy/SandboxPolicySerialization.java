@@ -31,6 +31,7 @@ public final class SandboxPolicySerialization {
   static final String FIELD_DENY_REFLECTION = "denyReflection";
   static final String FIELD_DENY_NATIVE = "denyNativeAccess";
   static final String FIELD_DENY_DYN_CLASS_DEF = "denyDynamicClassDefinition";
+  static final String FIELD_DENY_FILESYSTEM = "denyFileSystemAccess";
   static final String FIELD_ON_VIOLATION = "onViolation";
 
   private SandboxPolicySerialization() {}
@@ -51,6 +52,7 @@ public final class SandboxPolicySerialization {
     appendField(sb, FIELD_DENY_NATIVE, Boolean.toString(policy.denyNativeAccess()));
     appendField(
         sb, FIELD_DENY_DYN_CLASS_DEF, Boolean.toString(policy.denyDynamicClassDefinition()));
+    appendField(sb, FIELD_DENY_FILESYSTEM, Boolean.toString(policy.denyFileSystemAccess()));
     appendField(sb, FIELD_ON_VIOLATION, policy.onViolation().name());
     return Base64.getUrlEncoder()
         .withoutPadding()
@@ -102,6 +104,7 @@ public final class SandboxPolicySerialization {
       case FIELD_DENY_NATIVE -> builder.withDenyNativeAccess(Boolean.parseBoolean(value));
       case FIELD_DENY_DYN_CLASS_DEF ->
           builder.withDenyDynamicClassDefinition(Boolean.parseBoolean(value));
+      case FIELD_DENY_FILESYSTEM -> builder.withDenyFileSystemAccess(Boolean.parseBoolean(value));
       case FIELD_ON_VIOLATION -> builder.withOnViolation(ViolationAction.valueOf(value));
       default -> {}
     }

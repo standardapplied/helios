@@ -48,12 +48,25 @@ class NoEgressPresetTest {
   }
 
   @Test
-  void noEgressDeniesFileIoClasses() {
+  void noEgressDeniesFileIoViaCategoricalFlag() {
+    // 2.4.0 honesty pass: noEgress() used to enumerate FileInputStream / FileOutputStream /
+    // FileReader / FileWriter / RandomAccessFile in deniedClasses, but the prior leak path
+    // (java.io.File metadata methods like list / exists / canRead) survived because the File
+    // class itself wasn't enumerated. Rolling them into denyFileSystemAccess closes that gap and
+    // simplifies the deniedClasses set — file IO now travels through one flag.
     var p = SandboxPolicy.noEgress();
-    assertTrue(p.deniedClasses().contains("java.io.FileInputStream"));
-    assertTrue(p.deniedClasses().contains("java.io.FileOutputStream"));
-    assertTrue(p.deniedClasses().contains("java.io.FileReader"));
-    assertTrue(p.deniedClasses().contains("java.io.FileWriter"));
+    assertTrue(
+        p.denyFileSystemAccess(),
+        "noEgress() must enable denyFileSystemAccess to honestly close the filesystem surface");
+    assertFalse(
+        p.deniedClasses().contains("java.io.FileInputStream"),
+        "FileInputStream is now covered by denyFileSystemAccess; the explicit deny is removed");
+    assertFalse(
+        p.deniedClasses().contains("java.io.FileReader"),
+        "FileReader is now covered by denyFileSystemAccess; the explicit deny is removed");
+    assertFalse(
+        p.deniedClasses().contains("java.io.RandomAccessFile"),
+        "RandomAccessFile is now covered by denyFileSystemAccess; the explicit deny is removed");
   }
 
   @Test
@@ -62,6 +75,7 @@ class NoEgressPresetTest {
     assertTrue(p.denyReflection());
     assertTrue(p.denyNativeAccess());
     assertTrue(p.denyDynamicClassDefinition());
+    assertTrue(p.denyFileSystemAccess());
   }
 
   @Test
@@ -87,13 +101,46 @@ class NoEgressPresetTest {
 
   @Test
   void noEgressRejectsFileReader() {
-    assertSnippetDenied("var r = new java.io.FileReader(\"/etc/passwd\");", "java.io.FileReader");
+    assertSnippetDenied("var r = new java.io.FileReader(\"/etc/passwd\");", "denyFileSystemAccess");
+  }
+
+  @Test
+  void noEgressRejectsFileInputStream() {
+    assertSnippetDenied(
+        "var s = new java.io.FileInputStream(\"/etc/passwd\");", "denyFileSystemAccess");
   }
 
   @Test
   void noEgressRejectsFilesNio() {
+    // Hits the deny on java.nio.file.* first — denyFileSystemAccess fires before the allow-list
+    // default-deny because the categorical checks run earlier in checkOwnerMember.
+    assertSnippetDenied("var p = java.nio.file.Paths.get(\"/tmp\");", "denyFileSystemAccess");
+  }
+
+  @Test
+  void noEgressClosesTheFileMetadataLeakPathThatSurvivedPriorReleases() {
+    // The honesty fix: prior noEgress() let snippets do new File("/etc/passwd").exists() and
+    // new File("/").listFiles() because java.io.File itself was never in deniedClasses and the
+    // package-allow on java.io kept it callable. denyFileSystemAccess now closes both routes.
     assertSnippetDenied(
-        "var p = java.nio.file.Paths.get(\"/tmp\");", "allowedPackages-default-deny");
+        "boolean b = new java.io.File(\"/etc/passwd\").exists();", "denyFileSystemAccess");
+    assertSnippetDenied("var f = new java.io.File(\"/\").listFiles();", "denyFileSystemAccess");
+    assertSnippetDenied(
+        "long n = new java.io.File(\"/etc/passwd\").length();", "denyFileSystemAccess");
+  }
+
+  @Test
+  void noEgressRejectsFilesReadAllBytes() {
+    assertSnippetDenied(
+        "var bs = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(\"/etc/passwd\"));",
+        "denyFileSystemAccess");
+  }
+
+  @Test
+  void noEgressRejectsFileChannelOpen() {
+    assertSnippetDenied(
+        "var ch = java.nio.channels.FileChannel.open(java.nio.file.Path.of(\"/etc/passwd\"));",
+        "denyFileSystemAccess");
   }
 
   @Test

@@ -26,6 +26,7 @@ class SandboxPolicySerializationTest {
             .withDenyReflection(true)
             .withDenyNativeAccess(true)
             .withDenyDynamicClassDefinition(true)
+            .withDenyFileSystemAccess(true)
             .withOnViolation(ViolationAction.THROW)
             .build();
     var encoded = SandboxPolicySerialization.encode(original);
@@ -35,7 +36,37 @@ class SandboxPolicySerializationTest {
     assertEquals(original.denyReflection(), decoded.denyReflection());
     assertEquals(original.denyNativeAccess(), decoded.denyNativeAccess());
     assertEquals(original.denyDynamicClassDefinition(), decoded.denyDynamicClassDefinition());
+    assertEquals(original.denyFileSystemAccess(), decoded.denyFileSystemAccess());
     assertEquals(original.onViolation(), decoded.onViolation());
+  }
+
+  @Test
+  void roundtripDenyFileSystemAccessFlagInIsolation() {
+    var original = SandboxPolicy.newBuilder().withDenyFileSystemAccess(true).build();
+    var decoded = SandboxPolicySerialization.decode(SandboxPolicySerialization.encode(original));
+    assertTrue(decoded.denyFileSystemAccess());
+  }
+
+  @Test
+  void noEgressRoundtripsDenyFileSystemAccess() {
+    var encoded = SandboxPolicySerialization.encode(SandboxPolicy.noEgress());
+    var decoded = SandboxPolicySerialization.decode(encoded);
+    assertTrue(
+        decoded.denyFileSystemAccess(),
+        "noEgress() carries denyFileSystemAccess and the wire must preserve it");
+  }
+
+  @Test
+  void decodingPolicyWithoutDenyFileSystemAccessFieldDefaultsToFalse() {
+    // Forward-compat: an older bootstrap reading a newer wire (or a hand-crafted minimal policy)
+    // that omits the field must default to false rather than throw.
+    var minimal = "allowedPackages=|deniedClasses=|deniedPackages=|onViolation=THROW";
+    var encoded =
+        java.util.Base64.getUrlEncoder()
+            .withoutPadding()
+            .encodeToString(minimal.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    var decoded = SandboxPolicySerialization.decode(encoded);
+    org.junit.jupiter.api.Assertions.assertFalse(decoded.denyFileSystemAccess());
   }
 
   @Test
