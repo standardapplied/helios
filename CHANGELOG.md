@@ -4,6 +4,182 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-05-21 — cross-provider prompt caching + agent-loop hardening
+
+Closes the two issues reported in `reports/hv2-bug2.md` from the Light Grid
+matchmaking baseline (24 viewers, claude-opus-4-7) plus the
+`SessionOptions.outputSchema` transmission fix from the same bug report's
+sibling, and rolls in the four prior Unreleased commits (SandboxPolicy +
+PolicyBytecodeVerifier + L3 subprocess modules + audit follow-ups) into a
+single release. Prompt caching is now wired end-to-end on Anthropic,
+OpenAI, and Gemini; cost accounting reflects cache-read discounts; and the
+`LoopEnded → result()` happens-before contract is now guaranteed.
+
+### Fixed — `LoopEnded` delivery race between publisher and `result()` (hv2-bug2 Issue 2)
+
+`AgentSessionImpl.runLoop` resolved `resultFuture` INSIDE its try block;
+`closeRuntime()` (which drains the per-session publisher) ran in the
+immediately-following finally. A subscriber that captured `LoopEnded` for
+usage/cost observability could race the caller's read of `result().get()`
+or `runBlocking(...)` and silently drop data. The matchmaking baseline
+observed this on 3 of 24 viewers — `SessionUsageCapture.result()` returned
+null, logged cost was `$0.0000`.
+
+Fix: reorder so `closeRuntime()` runs BEFORE `resultFuture` settles. Every
+responsive subscriber observes `LoopEnded` by the time
+`result().get()` / `runBlocking(...)` unblocks. The 5-second
+publisher-executor grace stays in place — the change is purely about
+ordering. Simplified the `Throwable` rethrow path with a sneaky-throw
+helper so JaCoCo branch coverage stays clean (the prior `instanceof`
+cascade left unreachable `RuntimeException` / `IllegalStateException`
+branches since `AgentLoop` catches `Exception`).
+
+Three new tests (`subscriberObservesLoopEndedBeforeRunBlockingReturns`,
+`...BeforeResultFutureCompletes`,
+`multipleSlowSubscribersAllObserveLoopEndedBeforeRunBlockingReturns`)
+reproduce the race deterministically with a slow subscriber and fail
+pre-fix.
+
+### Added — Anthropic prompt caching (hv2-bug2 Issue 1)
+
+`AnthropicModel` now annotates outgoing requests with `cache_control`
+breakpoints by default and decodes the cache-token billing fields that
+the wire returns. The matchmaking baseline (12.3M input tokens) paid
+`$235.54` flat against `claude-opus-4-7`'s no-cache rate card; post-fix
+that same workload reuses the system + tools prefix across turns at the
+0.10× cache-read rate.
+
+Public surface:
+
+- `CachePolicy` sealed type (`Disabled` / `ShortLived` / `LongLived`) on
+  the `AnthropicModel(modelId, config, CachePolicy)` constructor. Default
+  is `shortLived()` (5m TTL, 1.25× write); `longLived()` (1h TTL, 2.00×
+  write) is opt-in for long-lived sessions where the cache prefix lives
+  more than 5 minutes between turns; `disabled()` opts out entirely.
+- `CacheControl` and `SystemContent` records for the wire representation.
+- `ContentBlock.withCacheControl(CacheControl)`,
+  `ToolDefinition.withCacheControl(...)`,
+  `MessagesRequest.systemAsText()` projection.
+- `MessagesRequest.system` widened from `String` to `Object` to carry
+  either the legacy plain string or the cache-aware `List<SystemContent>`
+  the API requires when `cache_control` annotations are present. Builder
+  callers are unaffected; direct canonical-constructor callers must pass
+  an `Object`. The `Builder.withSystem(List<SystemContent>)` overload is
+  the cache-aware path.
+- `ToolDefinition` record gained a `cacheControl` component; the prior
+  3-arg form is preserved as a convenience constructor.
+- `ContentBlock` record gained a `cacheControl` component; existing
+  factories (`text`, `toolUse`, `toolResult`, `image`, `document`,
+  `thinking`) keep their signatures and default the new field to null.
+
+Breakpoint placement (the canonical agent-loop pattern documented at
+`platform.claude.com/docs/en/build-with-claude/prompt-caching`):
+
+- end of system prompt (1 breakpoint)
+- end of tools array (1 breakpoint)
+- tail block of penultimate message — rolling, only when there are >=2
+  messages (1 breakpoint)
+- tail block of last message — rolling (1 breakpoint)
+
+The penultimate breakpoint is the critical addition for long agent loops:
+without it, after ~5 tool-heavy turns the conversation grows past
+Anthropic's 20-block lookback window and the system+tools cache becomes
+unreachable from the single last-message breakpoint — every turn becomes
+a full cache miss. The pair maintains rolling cache lookup at every turn
+boundary.
+
+`StreamingIterator` now captures `cache_creation_input_tokens` and
+`cache_read_input_tokens` from the `message_start` event and surfaces
+them through `Response.Usage` in the canonical disjoint form.
+
+### Added — OpenAI cache-read token surfacing
+
+`openai.api.ApiUsage` extended with `input_tokens_details.cached_tokens`
+(the Responses API field for cache reads) and
+`output_tokens_details.reasoning_tokens` (captured for trace fidelity).
+`cachedTokensOrZero()` helper normalizes the absent-field path (older API
+versions and OpenAI-compatible proxies). OpenAI's caching is automatic on
+prompts ≥1024 tokens — no request-shape changes needed.
+
+`OpenAIModel.StreamingIterator` extracts `cached_tokens` from
+`response.completed` and re-projects to the canonical Helios disjoint
+shape: wire `input_tokens` is the TOTAL with cached as a SUBSET, so the
+provider subtracts before mapping to `Response.Usage.inputTokens`.
+OpenAI does not premium cache writes, so `cacheCreationInputTokens` stays
+zero. Defensive clamp at zero in the pathological cached > input case.
+
+### Added — Gemini implicit-cache token surfacing (Interactions API v2)
+
+`gemini.api.InteractionUsage` gained `total_cached_tokens` (the
+Interactions API field, snake_case wire shape). Gemini 2.5+ models
+enable implicit caching automatically on the Interactions API surface —
+no request annotation needed; the server bills the cached portion at
+the discounted rate and reports the count. Pre-2.5 models omit the
+field; `cachedTokensOrZero()` normalizes both shapes.
+
+`GeminiModel.buildDoneEvent` re-projects to the disjoint Helios shape
+(same pattern as OpenAI: `total_input_tokens` is the TOTAL with
+cached as a SUBSET; subtract on the way in). Explicit caching (the
+`CachedContent` CRUD API) is intentionally NOT implemented — it's not
+supported by the Interactions API that Helios uses, only by the legacy
+`generateContent` endpoint.
+
+### Changed — canonical `Response.Usage` is now four-class disjoint
+
+`Response.Usage` extended from 3 to 5 fields:
+`(inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens, totalTokens)`.
+The four counts are disjoint — a token contributes to exactly one of them
+— so `CostCalculator.Pricing` can apply per-class rates without
+double-counting. The 2-arg `Usage.of(input, output)` factory is preserved
+and defaults cache fields to zero; the new
+`Usage.of(input, output, cacheCreation, cacheRead)` factory takes the full
+breakdown. `totalTokens` sums all four classes.
+
+Breaking for direct canonical-constructor callers
+(`new Usage(int, int, int)` becomes `new Usage(int, int, int, int, int)`).
+The framework's own `SessionState.accumulateUsage` was updated; one test
+call site in `SessionStateTest` was updated. No other internal callers.
+
+### Changed — `CostCalculator.Pricing` carries per-class rates
+
+`Pricing` extended from 2 to 4 rate fields:
+`(inputMicroUsdPerMillion, outputMicroUsdPerMillion, cacheWriteMicroUsdPerMillion, cacheReadMicroUsdPerMillion)`.
+The 2-arg constructor is preserved as a convenience that defaults cache
+rates to the base input rate — conservative, so a deployer who hasn't
+configured cache rates pays the same per-token amount on cached tokens
+as on uncached input (caching cannot make billing UNDER-report relative
+to the no-cache run).
+
+New factories:
+
+- `Pricing.ofUsdPerMillion(input, output)` — 2-arg convenience (cache
+  rates default to input rate)
+- `Pricing.ofUsdPerMillion(input, output, cacheWrite, cacheRead)` —
+  explicit 4-arg rates
+- `Pricing.anthropicCaching(input, output)` — Anthropic's published
+  multipliers (1.25× write for 5m, 0.10× read). For 1h TTL (2.00× write)
+  build a `Pricing` explicitly with the 4-arg factory.
+
+`Pricing.cost(Usage)` sums per-class contributions via integer
+multiply-then-divide with `Math.multiplyExact` overflow checks.
+
+### Fixed — `SessionOptions.outputSchema` now reaches the provider every turn
+
+The agent loop dispatched the unconstrained `Model.chatStream` regardless
+of whether a session-level `outputSchema` was configured. The schema
+reached the provider's native structured-output channel only via the
+unary `chat(messages, tools, outputSchema)` path the loop never took, so
+callers who set `withOutputSchema(...)` and then ran a session got
+freeform text loosely guided by the system prompt; the post-hoc
+`StructuredContentParser` validator failed against any non-trivial
+nested schema. Added
+`Model.chatStream(messages, tools, outputSchema, cancellation)` and
+wired `TurnRunner` to dispatch it whenever the session has an output
+schema. `CodeActPreset.withSubLm` — whose terminal answer is the
+in-sandbox `submit()` payload, not the assistant text — leaves the
+session-level `outputSchema` empty so its sandbox protocol stays
+load-bearing.
+
 ### Added — `SandboxPolicy` scaffolding for JShell L2 enforcement
 
 New `ai.singlr.repl.sandbox.policy` package introduces the seam through which a bytecode verifier rejects snippet invocations of denied APIs.
