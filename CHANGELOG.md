@@ -4,6 +4,116 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.3.1] — 2026-05-22 — JShell sandbox filesystem isolation
+
+Two layers of defense closing the "can a JShell snippet read /etc/passwd?"
+gap surfaced while auditing the post-2.3.0 sandbox surface. Defaults are
+now safe out of the box; deployers can opt out per layer when their
+workload genuinely needs raw filesystem access.
+
+### Added — `JvmSandboxConfig.withWorkingDirectory(Path)` + ephemeral default
+
+`ProcessBuilder` previously launched the subprocess with no `.directory()`
+call, so the JShell JVM inherited the host JVM's cwd. Relative-path file
+ops (`new File("data.csv")`) resolved into whatever workspace the
+deployer's service happened to be running from, and there was no API to
+configure where the subprocess ran.
+
+Now `JvmSandbox.create` resolves an effective working directory:
+
+- **Default (config.workingDirectory() == null)**: creates a private
+  per-session `helios-sandbox-cwd-*` temp dir (mode 0700 on POSIX), sets
+  it on `ProcessBuilder.directory()`, and recursively deletes it (with
+  every file the snippet wrote into it) on `close()`. Symlinks are
+  deleted as links, not followed — a snippet that managed to symlink
+  `/` from inside cannot trick host cleanup into walking the root
+  filesystem.
+- **Explicit caller-owned path**: the sandbox uses it verbatim and does
+  NOT delete it on `close()`. Caller manages lifecycle (e.g. a
+  customer's per-tenant scratch mount).
+
+`JvmSandboxConfig` gains a `workingDirectory` component. Breaking for
+direct canonical-constructor callers; Builder callers unaffected.
+
+### Added — `SandboxPolicy.denyFileSystemAccess` categorical flag
+
+cwd containment is necessary but not sufficient — absolute paths bypass
+cwd entirely. The L2 verifier already denied `FileReader` / `FileWriter`
+/ `File*Stream` / `RandomAccessFile` under `noEgress()`, but `java.io.File`
+itself stayed callable: `new File("/etc/passwd").exists()` / `.length()`
+/ `.listFiles()` / `.canRead()` all returned data via JNI without ever
+opening a stream, leaking filesystem metadata. `java.nio.file.*` was
+denied only via the allow-list default-deny under `noEgress`, not by a
+categorical flag.
+
+New `denyFileSystemAccess` boolean on `SandboxPolicy` (8th record
+component, behind the existing `denyReflection` / `denyNativeAccess` /
+`denyDynamicClassDefinition` pattern). `PolicyBytecodeVerifier`'s new
+`isFileSystemAccess` rule denies:
+
+- `java.nio.file.*` by prefix (`Files`, `Paths`, `Path`, `FileSystems`,
+  `WatchService`, every member of the package)
+- `java.nio.channels.FileChannel` and `AsynchronousFileChannel` by
+  whole-class
+- `java.io.FileInputStream` / `FileOutputStream` / `FileReader` /
+  `FileWriter` / `RandomAccessFile` / `FileDescriptor` by whole-class
+- `java.io.File`'s filesystem-touching members enumerated explicitly
+  (`list`, `listFiles`, `listRoots`, `exists`, `length`, `lastModified`,
+  `isDirectory`, `isFile`, `isHidden`, `canRead`, `canWrite`,
+  `canExecute`, `getCanonicalPath`, `getCanonicalFile`, `getFreeSpace`,
+  `getTotalSpace`, `getUsableSpace`, `createNewFile`, `delete`,
+  `deleteOnExit`, `mkdir`, `mkdirs`, `renameTo`, `setReadable`,
+  `setWritable`, `setExecutable`, `setReadOnly`, `setLastModified`,
+  `toPath`)
+
+Pure-string members on `File` (`getName`, `getPath`, `getAbsolutePath`,
+`toString`, `equals`, `hashCode`, `compareTo`, `toURI`, `isAbsolute`)
+stay callable so snippets can manipulate path strings for compute
+purposes — they don't reach the kernel.
+
+`SandboxPolicy` gains `denyFileSystemAccess` as the 8th record component.
+Breaking for direct canonical-constructor callers; Builder callers
+unaffected. `SandboxPolicySerialization` round-trips the new field;
+older bootstraps reading newer policies default it to false (forward
+compat).
+
+### Changed — `SandboxPolicy.noEgress()` is now honestly no-egress
+
+`noEgress()` previously enumerated `FileInputStream` / `FileOutputStream`
+/ `FileReader` / `FileWriter` / `RandomAccessFile` in `deniedClasses`,
+but the prior leak path (`java.io.File` metadata methods like
+`list` / `exists` / `canRead`) survived because the `File` class itself
+wasn't enumerated. Rolling them into `denyFileSystemAccess` closes that
+gap and simplifies the `deniedClasses` set — file IO now travels through
+one flag. Breaking for callers asserting the old `deniedClasses`
+contents directly; the categorical flag carries the deny now.
+
+### Test coverage
+
+19 new tests across the touched files (816 repl tests passing, was 797):
+
+- `PolicyBytecodeVerifierTest` (+8): `Files.readAllBytes`, `Paths.get`,
+  `FileChannel.open`, `FileInputStream` ctor, `File.list` /
+  `File.exists` metadata leaks; pure-string `File.getName` stays
+  callable; permissive baseline leaves the surface open
+- `NoEgressPresetTest` (+6): `denyFileSystemAccess` set on `noEgress`;
+  redundant `deniedClasses` entries removed; `File` metadata leak path
+  now closes; `Files.readAllBytes` / `FileChannel.open` / `FileReader`
+  / `FileInputStream` snippets denied with the right rule label
+- `SandboxPolicySerializationTest` (+3): full round-trip with the new
+  flag; isolated flag round-trip; forward-compat default to false on
+  absent field
+- `JvmSandboxConfigTest` (+3): default null; explicit path round-trip;
+  null-as-ephemeral-signal
+- `SandboxWorkingDirectoryTest` (NEW, 6 end-to-end via real subprocess):
+  default ephemeral cwd created and subprocess sees it as `user.dir`;
+  not the host JVM's cwd; deleted on close; recursive cleanup of
+  snippet-written nested files; caller-owned path used verbatim and
+  survives close; `denyFileSystemAccess` blocks
+  `Files.readAllBytes("/etc/passwd")` and
+  `new File("/etc/passwd").exists()` end-to-end with the policy
+  traceback reaching stderr
+
 ## [2.3.0] — 2026-05-21 — cross-provider prompt caching + agent-loop hardening
 
 Closes the two issues reported in `reports/hv2-bug2.md` from the Light Grid
