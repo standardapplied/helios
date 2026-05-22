@@ -30,6 +30,15 @@
             <artifactId>helios-gemini</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- Anthropic provider available for integration tests that prove the multimodal Read
+             tool round-trips through Claude's vision and PDF channels. Scoped to test to keep
+             the session-demo runtime classpath Gemini-only as the module's description states. -->
+        <dependency>
+            <groupId>ai.singlr</groupId>
+            <artifactId>helios-anthropic</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
