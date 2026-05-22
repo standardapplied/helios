@@ -230,7 +230,7 @@ public final class FilesystemKnowledge {
     PathMatcher globMatcher = null;
     if (globStr != null) {
       try {
-        globMatcher = FileSystems.getDefault().getPathMatcher("glob:" + globStr);
+        globMatcher = compileGlob(globStr);
       } catch (IllegalArgumentException e) {
         return failure("Invalid glob: " + e.getMessage());
       }
@@ -267,7 +267,7 @@ public final class FilesystemKnowledge {
     }
     PathMatcher matcher;
     try {
-      matcher = FileSystems.getDefault().getPathMatcher("glob:" + globStr);
+      matcher = compileGlob(globStr);
     } catch (IllegalArgumentException e) {
       return failure("Invalid glob: " + e.getMessage());
     }
@@ -373,6 +373,35 @@ public final class FilesystemKnowledge {
 
   private ToolResult failure(String message) {
     return ToolResult.failure(secretRegistry.redactor().redact(message).text());
+  }
+
+  /**
+   * Compile a glob pattern with Unix-tool semantics — {@code **&#47;*.md} matches markdown files
+   * anywhere, <i>including</i> at the corpus root.
+   *
+   * <p>Java NIO's default {@link FileSystems#getPathMatcher} treats {@code **} as "zero or more
+   * directory segments, with literal separator required after," so {@code **&#47;*.md} demands at
+   * least one parent directory and silently skips root-level files. Every other glob system agents
+   * are likely to have seen (ripgrep, fd, gitignore, Python pathlib, Go filepath/match) treats
+   * {@code **&#47;*.md} as recursive-including-root — and the {@code kb_glob} tool description
+   * itself uses {@code **&#47;*.md} as the example, so the model reaches for the pattern it can't
+   * actually use. Live agent-session tests caught this on the first run.
+   *
+   * <p>Fix: for any pattern starting with {@code **&#47;}, also try the pattern with that prefix
+   * stripped. A file matches if either form accepts it. Semantics preserved for non-{@code
+   * **&#47;}-leading patterns; existing call sites unaffected.
+   *
+   * @param pattern glob pattern in JDK syntax; non-null
+   * @return a matcher with the recursive-including-root fix applied
+   * @throws IllegalArgumentException if either compiled form is malformed
+   */
+  static PathMatcher compileGlob(String pattern) {
+    var primary = FileSystems.getDefault().getPathMatcher("glob:" + pattern);
+    if (pattern.startsWith("**/")) {
+      var rootForm = FileSystems.getDefault().getPathMatcher("glob:" + pattern.substring(3));
+      return path -> primary.matches(path) || rootForm.matches(path);
+    }
+    return primary;
   }
 
   private static String stringArg(Map<String, Object> args, String name) {

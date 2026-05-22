@@ -729,4 +729,59 @@ class FilesystemKnowledgeTest {
       assertFalse(r.output().contains("tokentokentoken"), t.name() + " leaked secret");
     }
   }
+
+  /**
+   * Live agent-session tests caught this on first run: an agent that reaches for {@code
+   * **&#47;*.md} (the natural pattern, also the one our own tool description uses as an example)
+   * got "no markdown files" against a corpus with root-level markdown files. JDK's NIO glob
+   * requires at least one directory segment after {@code **&#47;}. Every other glob system agents
+   * have seen (ripgrep, gitignore, Python pathlib) treats it as recursive-including-root. {@link
+   * FilesystemKnowledge#compileGlob} normalises to that semantic.
+   */
+  @Test
+  void kbGlobMatchesRootFilesWithRecursivePattern(@TempDir Path tmp) throws Exception {
+    Files.writeString(tmp.resolve("intro.md"), "# Intro\n");
+    Files.writeString(tmp.resolve("guide.md"), "# Guide\n");
+    Files.createDirectory(tmp.resolve("nested"));
+    Files.writeString(tmp.resolve("nested").resolve("deep.md"), "# Deep\n");
+    Files.writeString(tmp.resolve("config.yaml"), "k: v\n");
+
+    var kb = plain(tmp);
+    var result = toolNamed(kb, "kb_glob").execute(Map.of("pattern", "**/*.md"));
+    assertTrue(result.success(), result.output());
+    var out = result.output();
+    assertTrue(out.contains("intro.md"), "root file intro.md must match **/*.md: " + out);
+    assertTrue(out.contains("guide.md"), "root file guide.md must match **/*.md: " + out);
+    assertTrue(out.contains("deep.md"), "nested file must still match **/*.md: " + out);
+    assertFalse(out.contains("config.yaml"), "yaml file must not match **/*.md: " + out);
+  }
+
+  @Test
+  void kbGlobNonRecursivePatternMatchesOnlyRoot(@TempDir Path tmp) throws Exception {
+    Files.writeString(tmp.resolve("root.md"), "x");
+    Files.createDirectory(tmp.resolve("sub"));
+    Files.writeString(tmp.resolve("sub").resolve("nested.md"), "x");
+
+    var kb = plain(tmp);
+    // Bare *.md (without **/) must NOT match nested files — only the root form. Pin the
+    // semantic so a future "be helpful" extension doesn't make every pattern recursive.
+    var result = toolNamed(kb, "kb_glob").execute(Map.of("pattern", "*.md"));
+    assertTrue(result.success(), result.output());
+    var out = result.output();
+    assertTrue(out.contains("root.md"), out);
+    assertFalse(out.contains("nested.md"), "*.md must not match nested files: " + out);
+  }
+
+  @Test
+  void kbGrepGlobArgMatchesRootFilesToo(@TempDir Path tmp) throws Exception {
+    // Same fix applies to kb_grep's optional `glob` argument — without it, an agent that runs
+    // kb_grep with glob="**/*.md" against a root-only corpus would see zero matches.
+    Files.writeString(tmp.resolve("notes.md"), "alpha\nbeta gamma\n");
+    var kb = plain(tmp);
+    var result = toolNamed(kb, "kb_grep").execute(Map.of("pattern", "beta", "glob", "**/*.md"));
+    assertTrue(result.success(), result.output());
+    assertTrue(
+        result.output().contains("notes.md"),
+        "kb_grep with glob=**/*.md must match root markdown files: " + result.output());
+  }
 }
