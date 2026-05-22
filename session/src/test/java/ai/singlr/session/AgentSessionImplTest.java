@@ -44,6 +44,7 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 final class AgentSessionImplTest {
@@ -418,14 +419,8 @@ final class AgentSessionImplTest {
     var executor = s.publisherExecutorForTests();
     s.send(UserMessage.text("hi"));
     s.result().get(5, TimeUnit.SECONDS);
-    // runLoop() resolves resultFuture INSIDE its try block; closeRuntime() runs in the
-    // immediately-following finally — so the test thread can observe the future as complete a
-    // few instructions before the executor shutdown fires. Poll until isTerminated (which
-    // implies isShutdown) so the assertion is robust under any thread scheduling.
-    var deadlineNanos = System.nanoTime() + Duration.ofSeconds(7).toNanos();
-    while (!executor.isTerminated() && System.nanoTime() < deadlineNanos) {
-      Thread.sleep(10);
-    }
+    // closeRuntime() runs BEFORE resultFuture settles (hv2-bug2 Issue 2 fix), so the executor is
+    // already terminated by the time result().get() returns. No polling needed.
     assertTrue(executor.isShutdown(), "executor shut down after natural termination");
     assertTrue(executor.isTerminated(), "executor terminated after natural termination");
   }
@@ -631,6 +626,142 @@ final class AgentSessionImplTest {
     }
     awaitOnSessionEnd(provider);
     assertTrue(provider.endSeen.get());
+  }
+
+  // ── publisher-drain happens-before result settling (hv2-bug2 Issue 2) ────
+
+  @Test
+  void subscriberObservesLoopEndedBeforeRunBlockingReturns() throws Exception {
+    // Regression for hv2-bug2 Issue 2: a subscriber that captures LoopEnded for usage/cost
+    // observability must see the event BEFORE any caller of runBlocking / result().get()
+    // unblocks. Pre-fix the publisher executor drained asynchronously after the result future
+    // resolved, so an immediate read of the AtomicReference would still observe null. 3 of 24
+    // viewers in the Light Grid matchmaking baseline silently dropped cost data this way.
+    // A slow subscriber widens the race window so the bug is deterministic, not flaky.
+    var captured = new AtomicReference<ResultMessage>();
+    var subscribed = new CountDownLatch(1);
+    var slowSubscriber =
+        new Flow.Subscriber<QueryEvent>() {
+          @Override
+          public void onSubscribe(Flow.Subscription s) {
+            s.request(Long.MAX_VALUE);
+            subscribed.countDown();
+          }
+
+          @Override
+          public void onNext(QueryEvent event) {
+            try {
+              Thread.sleep(200);
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+            }
+            if (event instanceof QueryEvent.LoopEnded ended) {
+              captured.set(ended.result());
+            }
+          }
+
+          @Override
+          public void onError(Throwable t) {}
+
+          @Override
+          public void onComplete() {}
+        };
+    try (var s = buildSession(textOnceModel("done", FinishReason.STOP))) {
+      s.events().subscribe(slowSubscriber);
+      assertTrue(subscribed.await(2, TimeUnit.SECONDS), "subscriber must register");
+      var terminal = s.runBlocking(UserMessage.text("hi"));
+      assertNotNull(
+          captured.get(),
+          "subscriber must observe LoopEnded happens-before runBlocking returns — without "
+              + "this guarantee deployer-side usage/cost capture races and silently drops data");
+      assertEquals(terminal, captured.get());
+    }
+  }
+
+  @Test
+  void subscriberObservesLoopEndedBeforeResultFutureCompletes() throws Exception {
+    // Same happens-before contract from the result()-future side. A subscriber that captures the
+    // terminal and a separate thread polling result().get() must observe the same order: the
+    // subscriber sees LoopEnded BEFORE result().get() returns to its caller. Asserted from the
+    // result-future code path because runBlocking is a thin default; some deployers call
+    // result().get() directly (e.g. when wrapping the session in their own runtime).
+    var captured = new AtomicReference<ResultMessage>();
+    var slowSubscriber =
+        new Flow.Subscriber<QueryEvent>() {
+          @Override
+          public void onSubscribe(Flow.Subscription s) {
+            s.request(Long.MAX_VALUE);
+          }
+
+          @Override
+          public void onNext(QueryEvent event) {
+            try {
+              Thread.sleep(200);
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+            }
+            if (event instanceof QueryEvent.LoopEnded ended) {
+              captured.set(ended.result());
+            }
+          }
+
+          @Override
+          public void onError(Throwable t) {}
+
+          @Override
+          public void onComplete() {}
+        };
+    try (var s = buildSession(textOnceModel("done", FinishReason.STOP))) {
+      s.events().subscribe(slowSubscriber);
+      s.send(UserMessage.text("hi"));
+      var terminal = s.result().get(5, TimeUnit.SECONDS);
+      assertNotNull(captured.get(), "subscriber must see LoopEnded before result().get() returns");
+      assertEquals(terminal, captured.get());
+    }
+  }
+
+  @Test
+  void multipleSlowSubscribersAllObserveLoopEndedBeforeRunBlockingReturns() throws Exception {
+    // Two subscribers both slow. The drain must wait for ALL of them, not just the first.
+    var c1 = new AtomicReference<ResultMessage>();
+    var c2 = new AtomicReference<ResultMessage>();
+    Flow.Subscriber<QueryEvent> s1 = slowSubscriberCapturing(c1, 150);
+    Flow.Subscriber<QueryEvent> s2 = slowSubscriberCapturing(c2, 150);
+    try (var s = buildSession(textOnceModel("done", FinishReason.STOP))) {
+      s.events().subscribe(s1);
+      s.events().subscribe(s2);
+      s.runBlocking(UserMessage.text("hi"));
+      assertNotNull(c1.get(), "first subscriber must see LoopEnded");
+      assertNotNull(c2.get(), "second subscriber must see LoopEnded");
+    }
+  }
+
+  private static Flow.Subscriber<QueryEvent> slowSubscriberCapturing(
+      AtomicReference<ResultMessage> sink, long perEventSleepMs) {
+    return new Flow.Subscriber<QueryEvent>() {
+      @Override
+      public void onSubscribe(Flow.Subscription s) {
+        s.request(Long.MAX_VALUE);
+      }
+
+      @Override
+      public void onNext(QueryEvent event) {
+        try {
+          Thread.sleep(perEventSleepMs);
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+        }
+        if (event instanceof QueryEvent.LoopEnded ended) {
+          sink.set(ended.result());
+        }
+      }
+
+      @Override
+      public void onError(Throwable t) {}
+
+      @Override
+      public void onComplete() {}
+    };
   }
 
   @Test
@@ -854,15 +985,14 @@ final class AgentSessionImplTest {
   // ── helpers ───────────────────────────────────────────────────────────────
 
   /**
-   * Poll until the provider's {@code onSessionEnd} has fired, with a 7 s deadline. {@code
-   * runLoop()} resolves {@code resultFuture} INSIDE its try block; {@code closeRuntime()} (which
-   * invokes {@code onSessionEnd}) runs in the immediately-following finally — so the test thread
-   * can observe the future as complete a few instructions before {@code onSessionEnd} fires.
+   * Post-fix {@code closeRuntime()} runs BEFORE {@code resultFuture} settles, so {@code
+   * onSessionEnd} has fired by the time {@code result().get()} returns. The poll is now a no-op
+   * fast path that exists solely as defense-in-depth if the ordering ever regresses.
    */
   private static void awaitOnSessionEnd(LifecycleProvider provider) throws InterruptedException {
-    var deadlineNanos = System.nanoTime() + Duration.ofSeconds(7).toNanos();
+    var deadlineNanos = System.nanoTime() + Duration.ofSeconds(2).toNanos();
     while (!provider.endSeen.get() && System.nanoTime() < deadlineNanos) {
-      Thread.sleep(10);
+      Thread.sleep(5);
     }
   }
 

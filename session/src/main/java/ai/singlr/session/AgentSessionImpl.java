@@ -321,11 +321,17 @@ public final class AgentSessionImpl implements AgentSession {
   /**
    * Shut down the publisher and its per-session executor with a bounded grace period. Called from
    * exactly one of two mutually-exclusive paths — {@link #close()}'s pre-start branch, or {@link
-   * #runLoop()}'s {@code finally} — and never both, because the {@code started} CAS gates entry.
+   * #runLoop()} (after the loop returns, BEFORE the result future settles) — and never both,
+   * because the {@code started} CAS gates entry.
    *
    * <p>The 5-second grace mirrors the model-close pattern in CLAUDE.md: enough time for a
    * cooperative subscriber to drain its {@code onComplete} task, short enough that a wedged
-   * subscriber does not pin session shutdown.
+   * subscriber does not pin session shutdown. {@link
+   * java.util.concurrent.SubmissionPublisher#close()} signals an orderly shutdown that submits a
+   * final {@code onComplete} to every subscriber after their pending {@code onNext} tasks; {@link
+   * java.util.concurrent.ExecutorService#awaitTermination} then waits for those tasks to drain, so
+   * by the time this method returns every responsive subscriber has observed every emitted event
+   * including the terminal {@link QueryEvent.LoopEnded}.
    */
   private void closeRuntime() {
     if (providerAccepted) {
@@ -463,18 +469,49 @@ public final class AgentSessionImpl implements AgentSession {
     }
   }
 
+  /**
+   * Drive the loop to terminal, drain the per-session publisher so every subscriber observes the
+   * final {@link QueryEvent.LoopEnded}, then settle {@link #resultFuture}. The ordering
+   * (closeRuntime BEFORE the future resolves) is the happens-before guarantee that lets deployers
+   * read aggregates set by a {@code LoopEnded} subscriber immediately after {@code result().get()}
+   * / {@code runBlocking(...)} unblocks. Without it, a subscriber that captures usage / cost from
+   * {@code LoopEnded} races against the caller's read and silently drops data — observed as the
+   * matchmaking baseline's 3/24 viewers with {@code tokens=0/0 cost=$0.0000}.
+   *
+   * <p>{@link AgentLoop#run} catches {@code Exception} and {@link
+   * ai.singlr.session.hooks.HookRegistry} catches {@code RuntimeException}; in practice only {@link
+   * Error} subtypes (OOM, StackOverflow, LinkageError, AssertionError from a hook) reach the outer
+   * {@code catch}. We still capture {@link Throwable} as defense-in-depth against future contract
+   * drift — without it a RuntimeException escape would leave callers blocked on {@code
+   * result().join()} forever. The failure is held across the publisher drain so {@code
+   * closeRuntime} always runs; {@link #rethrowSneakily} preserves the original throwable type
+   * without an {@code instanceof} cascade that would leave unreachable branches in coverage.
+   */
   private void runLoop() {
+    ResultMessage terminal = null;
+    Throwable failure = null;
     try {
-      resultFuture.complete(loop.run(state, limits));
+      terminal = loop.run(state, limits);
     } catch (Throwable t) {
-      // AgentLoop.run catches Exception and returns a terminal; an Error subtype escaping (OOM,
-      // StackOverflow, LinkageError, AssertionError) must still settle the future, otherwise every
-      // caller blocked on result().join() hangs forever. Re-throw preserves AgentLoop's intent that
-      // unrecoverable Errors take down the host thread.
-      resultFuture.completeExceptionally(t);
-      throw t;
-    } finally {
-      closeRuntime();
+      failure = t;
     }
+    closeRuntime();
+    if (failure == null) {
+      resultFuture.complete(terminal);
+      return;
+    }
+    resultFuture.completeExceptionally(failure);
+    rethrowSneakily(failure);
+  }
+
+  /**
+   * Throw any {@link Throwable} as if it were unchecked, without an {@code instanceof} cascade. The
+   * cast is erased at runtime; the JVM rethrows the original type. Used by {@link #runLoop()} to
+   * propagate an escaping {@link Error} (the only realistic shape reaching it) without leaving
+   * unreachable RuntimeException / checked-exception branches behind.
+   */
+  @SuppressWarnings("unchecked")
+  private static <E extends Throwable> void rethrowSneakily(Throwable t) throws E {
+    throw (E) t;
   }
 }
