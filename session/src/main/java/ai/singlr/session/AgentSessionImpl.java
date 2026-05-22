@@ -138,7 +138,8 @@ public final class AgentSessionImpl implements AgentSession {
             this::safeEmit,
             contextFactory,
             clock,
-            options.costCalculator());
+            options.costCalculator(),
+            options.outputSchema().orElse(null));
     this.loop =
         new AgentLoop(
             turnRunner,

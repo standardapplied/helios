@@ -156,7 +156,8 @@ final class HookIntegrationTest {
             events::add,
             contextFactory(),
             CLOCK,
-            CostCalculator.ZERO);
+            CostCalculator.ZERO,
+            null);
     return new AgentLoop(
         runner,
         new StopClassifier(),

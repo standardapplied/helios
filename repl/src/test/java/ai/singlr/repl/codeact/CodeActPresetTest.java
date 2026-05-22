@@ -162,6 +162,34 @@ final class CodeActPresetTest {
   }
 
   @Test
+  void withSubLmLeavesSessionLevelOutputSchemaEmpty() {
+    // RLM terminates via the in-sandbox submit() function and an OnSubmitStopHook captures the
+    // payload. The terminal answer is the tool-call payload, never the assistant text — so the
+    // schema lives on SubmitFunction, not on SessionOptions. If the schema were on
+    // SessionOptions, the agent loop would push it into the provider's structured-output channel
+    // every turn, tempting the model to skip execute_code + submit() and emit conforming JSON
+    // directly, bypassing the sandbox-grounded protocol.
+    var options =
+        build(
+            CodeActPreset.withSubLm(Input.class, Answer.class, new Input("x"), fixedReply("any")));
+    assertTrue(
+        options.outputSchema().isEmpty(),
+        "withSubLm must not set SessionOptions.outputSchema — the schema travels with"
+            + " SubmitFunction instead");
+  }
+
+  @Test
+  void typedSetsSessionLevelOutputSchemaSoTheModelSeesItEveryTurn() {
+    // Typed CodeAct's terminal answer is the final assistant message. The schema is set on
+    // SessionOptions so the agent loop transmits it to the model on every turn via the provider's
+    // native structured-output channel.
+    var options = build(CodeActPreset.typed(Input.class, Answer.class, new Input("x")));
+    assertTrue(
+        options.outputSchema().isPresent(),
+        "typed CodeAct must set SessionOptions.outputSchema so the loop transmits it to the model");
+  }
+
+  @Test
   void requireExecuteCodeHookAlwaysRegistered() {
     var options = build(CodeActPreset.typed(Input.class, Answer.class, new Input("x")));
     var hookNames = options.hooks().stream().map(h -> h.name()).toList();

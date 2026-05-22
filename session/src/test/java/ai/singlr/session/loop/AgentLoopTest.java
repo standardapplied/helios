@@ -115,7 +115,15 @@ final class AgentLoopTest {
       Model model, SteeringQueue queue, TokenCounter counter, ContextCompactor compactor) {
     var runner =
         new TurnRunner(
-            model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, CostCalculator.ZERO);
+            model,
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            null);
     return new AgentLoop(
         runner,
         new StopClassifier(),
@@ -143,7 +151,8 @@ final class AgentLoopTest {
             events::add,
             CTX_FACTORY,
             CLOCK,
-            CostCalculator.ZERO);
+            CostCalculator.ZERO,
+            null);
     var classifier = new StopClassifier();
     var counter = TokenCounter.charBased();
     var compactor = ContextCompactor.disabled();
@@ -485,7 +494,8 @@ final class AgentLoopTest {
             events::add,
             CTX_FACTORY,
             CLOCK,
-            CostCalculator.ZERO);
+            CostCalculator.ZERO,
+            null);
     java.util.function.Consumer<QueryEvent> throwingSink =
         e -> {
           throw new RuntimeException("sink boom");
@@ -828,7 +838,8 @@ final class AgentLoopTest {
             events::add,
             CTX_FACTORY,
             CLOCK,
-            CostCalculator.ZERO);
+            CostCalculator.ZERO,
+            null);
     var loop =
         new AgentLoop(
             runner,
@@ -874,7 +885,8 @@ final class AgentLoopTest {
             events::add,
             CTX_FACTORY,
             CLOCK,
-            CostCalculator.ZERO);
+            CostCalculator.ZERO,
+            null);
     var loop =
         new AgentLoop(
             runner,

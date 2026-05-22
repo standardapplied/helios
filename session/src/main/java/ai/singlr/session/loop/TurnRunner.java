@@ -12,6 +12,7 @@ import ai.singlr.core.model.ModelChunk;
 import ai.singlr.core.model.Response;
 import ai.singlr.core.model.Response.Usage;
 import ai.singlr.core.model.ToolCall;
+import ai.singlr.core.schema.OutputSchema;
 import ai.singlr.core.tool.ToolResult;
 import ai.singlr.session.QueryEvent;
 import ai.singlr.session.ResultMessage;
@@ -80,6 +81,7 @@ public final class TurnRunner {
   private final Clock clock;
   private final EventEmitter emitter;
   private final CostCalculator costCalculator;
+  private final OutputSchema<?> outputSchema;
 
   /**
    * Build a turn runner.
@@ -97,7 +99,16 @@ public final class TurnRunner {
    * @param costCalculator converts per-turn {@link Usage} into a {@link
    *     ai.singlr.core.common.CostEstimate}; non-null. Use {@link CostCalculator#ZERO} to disable
    *     cost tracking
-   * @throws NullPointerException if any argument is null
+   * @param outputSchema the schema the model's text output must conform to, or {@code null} when
+   *     the session has no structured-output constraint. When non-null, the loop dispatches {@link
+   *     Model#chatStream(List, List, OutputSchema, ai.singlr.core.runtime.CancellationToken)} on
+   *     every turn so the schema rides the provider's native channel (Gemini {@code
+   *     response_format.schema}, OpenAI {@code text.format=json_schema}, Anthropic {@code
+   *     system_instruction} text). The schema is dormant on tool-calling turns (tool arguments
+   *     validate against the tool's own schema) and activates on text-output turns. When {@code
+   *     null}, the loop dispatches {@link Model#chatStream(List, List,
+   *     ai.singlr.core.runtime.CancellationToken)} and the model is free to produce arbitrary text
+   * @throws NullPointerException if any non-{@code outputSchema} argument is null
    */
   public TurnRunner(
       Model model,
@@ -107,7 +118,8 @@ public final class TurnRunner {
       Consumer<QueryEvent> eventSink,
       Function<SessionState, HookContext> hookContextFactory,
       Clock clock,
-      CostCalculator costCalculator) {
+      CostCalculator costCalculator,
+      OutputSchema<?> outputSchema) {
     this.model = Objects.requireNonNull(model, "model must not be null");
     this.hooks = Objects.requireNonNull(hooks, "hooks must not be null");
     this.toolDispatch = Objects.requireNonNull(toolDispatch, "toolDispatch must not be null");
@@ -116,6 +128,7 @@ public final class TurnRunner {
         Objects.requireNonNull(hookContextFactory, "hookContextFactory must not be null");
     this.clock = Objects.requireNonNull(clock, "clock must not be null");
     this.costCalculator = Objects.requireNonNull(costCalculator, "costCalculator must not be null");
+    this.outputSchema = outputSchema;
     this.emitter = new EventEmitter(eventSink, hooks, hookContextFactory, clock);
   }
 
@@ -148,7 +161,11 @@ public final class TurnRunner {
 
     var subscriber = new TurnSubscriber(state, emitter, clock);
     try {
-      var publisher = model.chatStream(state.historySnapshot(), visibleTools, state.cancellation());
+      var publisher =
+          outputSchema != null
+              ? model.chatStream(
+                  state.historySnapshot(), visibleTools, outputSchema, state.cancellation())
+              : model.chatStream(state.historySnapshot(), visibleTools, state.cancellation());
       publisher.subscribe(subscriber);
     } catch (Throwable t) {
       subscriber.onError(t);

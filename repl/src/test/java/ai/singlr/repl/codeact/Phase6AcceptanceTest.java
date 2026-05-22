@@ -78,6 +78,15 @@ final class Phase6AcceptanceTest {
       }
 
       @Override
+      public Flow.Publisher<ModelChunk> chatStream(
+          List<Message> messages,
+          List<Tool> tools,
+          OutputSchema<?> outputSchema,
+          CancellationToken cancellation) {
+        return chatStream(messages, tools, cancellation);
+      }
+
+      @Override
       public String id() {
         return id;
       }

@@ -920,4 +920,125 @@ final class AgentSessionImplTest {
       }
     };
   }
+
+  // ── outputSchema rides every model turn via the provider's native channel ──
+
+  /** Sample record so we can build a real {@link OutputSchema} for the wiring tests. */
+  public record Sample(String field) {}
+
+  /**
+   * Model that records whether the typed or the untyped {@code chatStream} overload was hit, and
+   * replays a single text turn either way. Mirrors {@code DispatchRecordingModel} in {@code
+   * TurnRunnerTest} but at the {@link AgentSession} layer so we observe the full wiring through
+   * {@link SessionOptions#transmitOutputSchemaToModel()}.
+   */
+  private static final class DispatchRecordingModel implements Model {
+    final java.util.concurrent.atomic.AtomicReference<OutputSchema<?>> seenSchema =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    final AtomicBoolean typedDispatch = new AtomicBoolean(false);
+    final AtomicBoolean untypedDispatch = new AtomicBoolean(false);
+
+    @Override
+    public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+      return Response.newBuilder().withContent("{\"field\":\"untyped\"}").build();
+    }
+
+    @Override
+    public Flow.Publisher<ai.singlr.core.model.ModelChunk> chatStream(
+        List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
+      untypedDispatch.set(true);
+      return one("{\"field\":\"untyped\"}");
+    }
+
+    @Override
+    public Flow.Publisher<ai.singlr.core.model.ModelChunk> chatStream(
+        List<Message> messages,
+        List<Tool> tools,
+        OutputSchema<?> outputSchema,
+        CancellationToken cancellation) {
+      typedDispatch.set(true);
+      seenSchema.set(outputSchema);
+      return one("{\"field\":\"typed-with-schema\"}");
+    }
+
+    private static Flow.Publisher<ai.singlr.core.model.ModelChunk> one(String content) {
+      return subscriber -> {
+        subscriber.onSubscribe(
+            new Flow.Subscription() {
+              private int i = 0;
+
+              @Override
+              public void request(long n) {
+                if (i == 0) {
+                  subscriber.onNext(new ai.singlr.core.model.ModelChunk.TextDelta(content));
+                  i = 1;
+                }
+                if (i == 1) {
+                  subscriber.onNext(
+                      new ai.singlr.core.model.ModelChunk.MessageStop(
+                          FinishReason.STOP.name(), Usage.of(1, 1), Map.of()));
+                  i = 2;
+                  subscriber.onComplete();
+                }
+              }
+
+              @Override
+              public void cancel() {}
+            });
+      };
+    }
+
+    @Override
+    public String id() {
+      return "dispatch-recorder";
+    }
+
+    @Override
+    public String provider() {
+      return "test";
+    }
+  }
+
+  @Test
+  void configuredOutputSchemaRidesEveryTurnAndCarriesThroughToTheProvider() throws Exception {
+    var schema = OutputSchema.of(Sample.class);
+    var model = new DispatchRecordingModel();
+    try (var session =
+        AgentSession.create(
+            SessionOptions.newBuilder()
+                .withModel(model)
+                .withSessionId(SID)
+                .withClock(CLOCK)
+                .withOutputSchema(schema)
+                .build())) {
+      var typed = session.runBlocking(UserMessage.text("go"), schema);
+      assertEquals("typed-with-schema", typed.field());
+    }
+    assertTrue(
+        model.typedDispatch.get(),
+        "configured outputSchema must route through the schema-bearing chatStream so the provider's"
+            + " native structured-output channel sees the schema on every turn — the matchmaking"
+            + " bug regression");
+    assertEquals(schema, model.seenSchema.get());
+    assertFalse(model.untypedDispatch.get());
+  }
+
+  @Test
+  void sessionWithoutOutputSchemaUsesTheUnconstrainedDispatch() throws Exception {
+    var model = new DispatchRecordingModel();
+    try (var session =
+        AgentSession.create(
+            SessionOptions.newBuilder()
+                .withModel(model)
+                .withSessionId(SID)
+                .withClock(CLOCK)
+                .build())) {
+      session.runBlocking(UserMessage.text("go"));
+    }
+    assertTrue(
+        model.untypedDispatch.get(),
+        "no outputSchema configured: the loop dispatches the unconstrained chatStream so the model"
+            + " is free to produce arbitrary text");
+    assertFalse(model.typedDispatch.get());
+  }
 }

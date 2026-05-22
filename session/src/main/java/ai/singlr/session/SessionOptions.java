@@ -61,12 +61,15 @@ import java.util.Optional;
  *     NoopExecutionProvider#INSTANCE} which refuses every runtime — wire {@code
  *     LocalProcessExecutionProvider.defaultPosix(secretRegistry)} (or your own implementation) when
  *     the session legitimately needs to run code. Non-null
- * @param outputSchema optional schema the session is expected to produce a typed value against.
- *     When present, presets like {@code CodeActPreset} that wire a {@code Submit} tool use this as
- *     the schema the submitted value must conform to; the {@code runBlocking(message, schema)}
- *     override still wins per-call. {@code Optional<OutputSchema<?>>} keeps the type wildcard at
- *     the field level so the record stays raw-type-free; the typed unwrap happens at the call site
- *     that knows the parametric output type
+ * @param outputSchema optional schema constraining the model's text output. When present, the
+ *     schema rides every model turn via the provider's native structured-output channel — Gemini
+ *     {@code response_format.schema}, OpenAI {@code text.format=json_schema}, Anthropic {@code
+ *     system_instruction} text. The schema is dormant on tool-calling turns and activates on
+ *     text-output turns, so the model produces conforming JSON exactly when it produces text.
+ *     Sessions whose terminal answer is a tool-call payload (e.g. {@code CodeActPreset.withSubLm}
+ *     with an in-sandbox {@code submit(...)} flow) leave this field empty and carry their schema on
+ *     the tool itself. The post-hoc validator inside {@link AgentSession#runBlocking(UserMessage,
+ *     OutputSchema)} takes its schema per-call and is independent of this field
  * @param systemPrompt optional system-role message prepended to the conversation history before the
  *     first user message. Presets (CodeAct, RLM, custom) supply their strategy text here so the
  *     agent loop carries it to every model turn through the standard system-role channel
@@ -355,9 +358,21 @@ public record SessionOptions(
 
     /**
      * Set (or clear) the {@link OutputSchema} the session is expected to produce. Pass {@code null}
-     * to clear. When present, presets that wire a {@code Submit}-style tool use this as the schema
-     * the submitted value is validated against; the {@link AgentSession#runBlocking(UserMessage,
-     * OutputSchema)} override still wins per-call.
+     * to clear.
+     *
+     * <p>When set, the schema is transmitted to the model on every turn via the provider's native
+     * structured-output channel — Gemini {@code response_format.schema}, OpenAI {@code
+     * text.format=json_schema}, Anthropic {@code system_instruction} text. The model interprets it
+     * as a constraint on its text output. On a turn where the model chooses to call a tool, the
+     * schema is dormant (tool arguments validate against the tool's own schema, not this one); on a
+     * terminal text-output turn, it activates and the model emits conforming JSON.
+     *
+     * <p>The schema is per-session config, not per-turn. The agent loop does not switch the schema
+     * on and off across turns — every model dispatch carries it.
+     *
+     * <p>The post-hoc validator inside {@link AgentSession#runBlocking(UserMessage, OutputSchema)}
+     * takes its schema per-call and is independent of this field; passing the same schema in both
+     * places is the common shape but not required.
      *
      * @param outputSchema nullable schema
      * @return this builder

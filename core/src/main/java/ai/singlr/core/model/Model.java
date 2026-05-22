@@ -118,6 +118,64 @@ public interface Model extends AutoCloseable {
   }
 
   /**
+   * Streaming chat with a structured-output schema. The schema is transmitted to the model via the
+   * provider's native structured-output channel (Gemini {@code response_format.schema}, OpenAI
+   * {@code text.format=json_schema}, Anthropic {@code system_instruction} text). The streamed
+   * chunks remain the same {@link ModelChunk} shape as the untyped variant — tool calls and
+   * structured-text responses both arrive as the usual {@code TextDelta} / {@code ToolUseStart} /
+   * {@code ToolUseStop} / {@code MessageStop} sequence. Callers that need the parsed value invoke
+   * {@link ai.singlr.core.schema.StructuredContentParser} on the accumulated assistant text after
+   * the final {@link ModelChunk.MessageStop}.
+   *
+   * <p>Default implementation falls back to the blocking {@link #chat(List, List, OutputSchema)}
+   * call and synthesises chunks from the resulting {@link Response}; production providers override
+   * to wire the schema into their per-turn streaming dispatch. The cancellation contract is
+   * identical to {@link #chatStream(List, List, CancellationToken)}.
+   *
+   * @param messages the conversation history
+   * @param tools available tools the model can call
+   * @param outputSchema the schema constraining the model's text output; non-null
+   * @param cancellation cooperative cancellation token; signal flowed through to {@code onError}
+   * @return a single-subscriber publisher of the normalised chunk sequence
+   * @throws NullPointerException if {@code outputSchema} or {@code cancellation} is null
+   */
+  default Flow.Publisher<ModelChunk> chatStream(
+      List<Message> messages,
+      List<Tool> tools,
+      OutputSchema<?> outputSchema,
+      CancellationToken cancellation) {
+    Objects.requireNonNull(outputSchema, "outputSchema must not be null");
+    Objects.requireNonNull(cancellation, "cancellation must not be null");
+    return chatStreamWithCapturedSchema(messages, tools, outputSchema, cancellation);
+  }
+
+  /**
+   * Wildcard-capture helper for the default {@link #chatStream(List, List, OutputSchema,
+   * CancellationToken)} implementation. The signature's {@code <T>} captures the call-site wildcard
+   * so {@link #chat(List, List, OutputSchema)} can be invoked without an unchecked cast; the typed
+   * parsed value is then discarded because streaming consumers accumulate the assistant text and
+   * parse it once after the final {@link ModelChunk.MessageStop}.
+   */
+  private <T> Flow.Publisher<ModelChunk> chatStreamWithCapturedSchema(
+      List<Message> messages,
+      List<Tool> tools,
+      OutputSchema<T> outputSchema,
+      CancellationToken cancellation) {
+    var typed = chat(messages, tools, outputSchema);
+    var erased =
+        Response.newBuilder()
+            .withContent(typed.content())
+            .withToolCalls(typed.toolCalls())
+            .withFinishReason(typed.finishReason())
+            .withUsage(typed.usage())
+            .withThinking(typed.thinking())
+            .withCitations(typed.citations())
+            .withMetadata(typed.metadata())
+            .build();
+    return subscriber -> deliverDefaultChunkSequence(erased, cancellation, subscriber);
+  }
+
+  /**
    * Synchronous best-effort delivery of the default-impl chunk sequence to a single subscriber.
    * Internal helper for the default {@link #chatStream(List, List, CancellationToken)} body;
    * provider overrides supply their own publishers and do not use this.

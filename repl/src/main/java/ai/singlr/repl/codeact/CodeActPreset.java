@@ -219,13 +219,26 @@ public final class CodeActPreset {
             boundFieldNames,
             List.of(),
             null);
+    // RLM terminates via the in-sandbox submit(...) host function captured by OnSubmitStopHook —
+    // the model's terminal answer is the tool-call payload, never the assistant text. The schema
+    // is owned by SubmitFunction (line above) for payload validation; the session-level
+    // outputSchema is left empty so the provider's structured-output channel does not tempt the
+    // model into short-circuiting the sandbox protocol by emitting conforming JSON directly.
     return composeBase(
-        builder, outputSchema, systemPrompt, provider, List.of(new OnSubmitStopHook(holder)));
+        builder, null, systemPrompt, provider, List.of(new OnSubmitStopHook(holder)));
   }
 
+  /**
+   * Shared composer for both typed and RLM presets.
+   *
+   * @param sessionOutputSchema when non-null, the schema is set on {@code SessionOptions} so the
+   *     agent loop transmits it to the model on every turn (typed CodeAct — the terminal answer is
+   *     the assistant text). When null, the session-level schema stays empty (RLM — the terminal
+   *     answer is the in-sandbox {@code submit(...)} payload, captured by {@link OnSubmitStopHook})
+   */
   private static SessionOptions.Builder composeBase(
       SessionOptions.Builder builder,
-      OutputSchema<?> outputSchema,
+      OutputSchema<?> sessionOutputSchema,
       String systemPrompt,
       OwnedExecutionProvider provider,
       List<Hook> extraHooks) {
@@ -233,7 +246,7 @@ public final class CodeActPreset {
     tools.add(ExecuteTool.binding(provider));
     builder
         .withTools(new ToolRegistry(tools))
-        .withOutputSchema(outputSchema)
+        .withOutputSchema(sessionOutputSchema)
         .withSystemPrompt(systemPrompt)
         .withExecutionProvider(provider)
         .withMemoryBackend(MemoryBackend.disabled())

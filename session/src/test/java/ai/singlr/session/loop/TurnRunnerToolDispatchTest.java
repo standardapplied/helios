@@ -146,7 +146,15 @@ final class TurnRunnerToolDispatchTest {
                 new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(5, 2))));
     var runner =
         new TurnRunner(
-            model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, CostCalculator.ZERO);
+            model,
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            null);
     var state = freshState();
     var outcome = runner.runTurn(state, SessionLimits.defaults());
 
@@ -188,7 +196,15 @@ final class TurnRunnerToolDispatchTest {
                 new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0))));
     var runner =
         new TurnRunner(
-            model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, CostCalculator.ZERO);
+            model,
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            null);
     var state = freshState();
     runner.runTurn(state, SessionLimits.defaults());
 
@@ -217,7 +233,15 @@ final class TurnRunnerToolDispatchTest {
                 new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0))));
     var runner =
         new TurnRunner(
-            model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, CostCalculator.ZERO);
+            model,
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            null);
     var state = freshState();
     var outcome = runner.runTurn(state, SessionLimits.defaults());
 
@@ -247,7 +271,15 @@ final class TurnRunnerToolDispatchTest {
                 new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0))));
     var runner =
         new TurnRunner(
-            model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, CostCalculator.ZERO);
+            model,
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            null);
     var state = new SessionState(SID, token, CLOCK);
     state.appendMessage(Message.user("call echo"));
     state.beginTurn();
@@ -273,7 +305,15 @@ final class TurnRunnerToolDispatchTest {
                 new ModelChunk.MessageStop("STOP", Usage.of(2, 2))));
     var runner =
         new TurnRunner(
-            model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, CostCalculator.ZERO);
+            model,
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            null);
     var state = freshState();
     var outcome = runner.runTurn(state, SessionLimits.defaults());
 
@@ -325,7 +365,15 @@ final class TurnRunnerToolDispatchTest {
         };
     var runner =
         new TurnRunner(
-            model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, CostCalculator.ZERO);
+            model,
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            null);
     runner.runTurn(freshState(), SessionLimits.defaults());
 
     assertEquals(1, capturedTools.get().size());

@@ -108,7 +108,7 @@ final class TurnRunnerTest {
 
   private TurnRunner runner(Model model) {
     return new TurnRunner(
-        model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, CostCalculator.ZERO);
+        model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, CostCalculator.ZERO, null);
   }
 
   @Test
@@ -125,7 +125,8 @@ final class TurnRunnerTest {
                     events::add,
                     CTX_FACTORY,
                     CLOCK,
-                    CostCalculator.ZERO));
+                    CostCalculator.ZERO,
+                    null));
     assertEquals("model must not be null", ex.getMessage());
   }
 
@@ -144,7 +145,8 @@ final class TurnRunnerTest {
                     events::add,
                     CTX_FACTORY,
                     CLOCK,
-                    CostCalculator.ZERO));
+                    CostCalculator.ZERO,
+                    null));
     assertEquals("hooks must not be null", ex.getMessage());
   }
 
@@ -163,7 +165,8 @@ final class TurnRunnerTest {
                     events::add,
                     CTX_FACTORY,
                     CLOCK,
-                    CostCalculator.ZERO));
+                    CostCalculator.ZERO,
+                    null));
     assertEquals("toolDispatch must not be null", ex.getMessage());
   }
 
@@ -182,7 +185,8 @@ final class TurnRunnerTest {
                     events::add,
                     CTX_FACTORY,
                     CLOCK,
-                    CostCalculator.ZERO));
+                    CostCalculator.ZERO,
+                    null));
     assertEquals("steeringQueue must not be null", ex.getMessage());
   }
 
@@ -194,7 +198,15 @@ final class TurnRunnerTest {
             NullPointerException.class,
             () ->
                 new TurnRunner(
-                    model, hooks, dispatch, queue, null, CTX_FACTORY, CLOCK, CostCalculator.ZERO));
+                    model,
+                    hooks,
+                    dispatch,
+                    queue,
+                    null,
+                    CTX_FACTORY,
+                    CLOCK,
+                    CostCalculator.ZERO,
+                    null));
     assertEquals("eventSink must not be null", ex.getMessage());
   }
 
@@ -206,7 +218,15 @@ final class TurnRunnerTest {
             NullPointerException.class,
             () ->
                 new TurnRunner(
-                    model, hooks, dispatch, queue, events::add, null, CLOCK, CostCalculator.ZERO));
+                    model,
+                    hooks,
+                    dispatch,
+                    queue,
+                    events::add,
+                    null,
+                    CLOCK,
+                    CostCalculator.ZERO,
+                    null));
     assertEquals("hookContextFactory must not be null", ex.getMessage());
   }
 
@@ -225,7 +245,8 @@ final class TurnRunnerTest {
                     events::add,
                     CTX_FACTORY,
                     null,
-                    CostCalculator.ZERO));
+                    CostCalculator.ZERO,
+                    null));
     assertEquals("clock must not be null", ex.getMessage());
   }
 
@@ -237,7 +258,7 @@ final class TurnRunnerTest {
             NullPointerException.class,
             () ->
                 new TurnRunner(
-                    model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, null));
+                    model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, null, null));
     assertEquals("costCalculator must not be null", ex.getMessage());
   }
 
@@ -613,5 +634,134 @@ final class TurnRunnerTest {
     runner(textModel("ok", FinishReason.STOP, Usage.of(1, 1)))
         .runTurn(state, SessionLimits.defaults());
     assertEquals(Duration.ZERO, state.elapsed());
+  }
+
+  // ── outputSchema dispatch: schema is transmitted to the model when configured ──
+
+  /**
+   * Sample record used to construct an {@link ai.singlr.core.schema.OutputSchema} for tests
+   * exercising the typed dispatch branch in {@link TurnRunner}.
+   */
+  public record Sample(String field) {}
+
+  /**
+   * Model that records which {@code chatStream} overload was invoked — the untyped variant or the
+   * typed-with-schema variant — and replays a single-text-delta turn either way. Lets a test assert
+   * that {@link TurnRunner} picks the typed dispatch precisely when {@code outputSchema} is
+   * non-null at construction time.
+   */
+  private static final class DispatchRecordingModel implements Model {
+    final AtomicReference<ai.singlr.core.schema.OutputSchema<?>> seenSchema =
+        new AtomicReference<>();
+    final java.util.concurrent.atomic.AtomicBoolean typedDispatch =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    final java.util.concurrent.atomic.AtomicBoolean untypedDispatch =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    @Override
+    public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+      return Response.newBuilder().withContent("untyped").build();
+    }
+
+    @Override
+    public Flow.Publisher<ModelChunk> chatStream(
+        List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
+      untypedDispatch.set(true);
+      return chunksOnce("untyped");
+    }
+
+    @Override
+    public Flow.Publisher<ModelChunk> chatStream(
+        List<Message> messages,
+        List<Tool> tools,
+        ai.singlr.core.schema.OutputSchema<?> outputSchema,
+        CancellationToken cancellation) {
+      typedDispatch.set(true);
+      seenSchema.set(outputSchema);
+      return chunksOnce("typed-with-schema");
+    }
+
+    private static Flow.Publisher<ModelChunk> chunksOnce(String content) {
+      return subscriber -> {
+        subscriber.onSubscribe(
+            new Flow.Subscription() {
+              private int i = 0;
+
+              @Override
+              public void request(long n) {
+                if (i == 0) {
+                  subscriber.onNext(new ModelChunk.TextDelta(content));
+                  i = 1;
+                }
+                if (i == 1) {
+                  subscriber.onNext(
+                      new ModelChunk.MessageStop(
+                          FinishReason.STOP.name(), Usage.of(1, 1), Map.of()));
+                  i = 2;
+                  subscriber.onComplete();
+                }
+              }
+
+              @Override
+              public void cancel() {}
+            });
+      };
+    }
+
+    @Override
+    public String id() {
+      return "dispatch-recorder";
+    }
+
+    @Override
+    public String provider() {
+      return "test";
+    }
+  }
+
+  @Test
+  void dispatchUsesUntypedChatStreamWhenOutputSchemaIsNull() {
+    var model = new DispatchRecordingModel();
+    var runner =
+        new TurnRunner(
+            model,
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            null);
+    runner.runTurn(freshState(), SessionLimits.defaults());
+    assertTrue(model.untypedDispatch.get(), "no outputSchema configured: must use untyped path");
+    assertEquals(false, model.typedDispatch.get(), "typed dispatch must not fire");
+  }
+
+  @Test
+  void dispatchUsesTypedChatStreamWhenOutputSchemaIsConfigured() {
+    var schema = ai.singlr.core.schema.OutputSchema.of(Sample.class);
+    var model = new DispatchRecordingModel();
+    var runner =
+        new TurnRunner(
+            model,
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            schema);
+    runner.runTurn(freshState(), SessionLimits.defaults());
+    assertTrue(model.typedDispatch.get(), "outputSchema set: must use typed-with-schema path");
+    assertEquals(
+        false,
+        model.untypedDispatch.get(),
+        "untyped dispatch must not fire — that's the bug the wiring fixes");
+    assertEquals(
+        schema,
+        model.seenSchema.get(),
+        "schema delivered to the provider must be the configured one");
   }
 }
