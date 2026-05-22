@@ -4,6 +4,145 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.3.2] — 2026-05-22 — ReadTool guardrails, multimodal Read, kb_glob Unix semantics
+
+Three layers of work bringing Helios's file-tool surface to Claude
+Code-grade production quality. Verified end-to-end against live Gemini
+3.5 Flash and Claude Sonnet 4.6 — 10 live agent-session integration
+tests, ~37 s total spend, two real bugs caught and fixed by the live
+tests that pure unit testing would have missed.
+
+### Added — `ToolResult.attachments` for multimodal tool returns
+
+Tools that surface a file the model should consume natively (a PNG for
+the vision channel, a PDF for the document channel) previously had
+nowhere to put the bytes. `ToolResult` was text-only.
+
+`ToolResult` record gains a 4th component `attachments: List<InlineFile>`
+with a canonical constructor that defensively copies and normalises
+null to `List.of()`. New `successWithAttachments(text, files)` factory
+and a `hasAttachments()` predicate. Existing `success(...)` /
+`failure(...)` factories preserved — all in-tree call sites stay
+source-compatible.
+
+The agent loop splices any returned attachments into a synthetic user
+follow-up message after the tool-result text, so the next round-trip
+carries the `InlineFiles` through every provider's existing
+`Message.user(text, inlineFiles)` plumbing. Zero per-provider adapter
+changes — Anthropic / OpenAI / Gemini all already know how to encode
+inline files in a user message.
+
+Breaking only for direct canonical-constructor callers of
+`ToolResult`; none exist outside `ToolResult` itself. `Tool` executors
+that have always used `ToolResult.success(...)` keep working without
+modification.
+
+### Changed — `ReadTool` rewritten with streaming, byte budgets, MIME dispatch
+
+Pre-2.3.2 `ReadTool` called `Files.readString(...)` on the entire file
+then trimmed to 2000 lines — a 500 MB log would buffer the lot before
+being chopped, no binary detection, PDFs decoded as UTF-8 into garbage,
+images had no native path at all.
+
+Now `ReadTool` streams via `BufferedReader` and stops at the first cap
+hit:
+
+- `MAX_FILE_SIZE_BYTES = 25 MB` on the source file, pre-checked via
+  `Files.size` before any I/O.
+- `MAX_LINE_BYTES = 1 MB` per emitted line, with inline truncation
+  marker for the minified-JSON-on-one-line case.
+- `MAX_OUTPUT_BYTES = 4 MB` total output cap.
+- Truncation messages teach the next move: `[truncated at line N;
+  M lines emitted. Use offset=N+1 to continue, or Grep for a narrower
+  target.]`
+- Binary detection (NUL-byte sniff in first 8 KB) fails fast with the
+  detected MIME named.
+
+`Files.probeContentType` with extension fallback drives a three-way
+dispatch:
+
+- `text/*` or no-MIME-with-clean-sniff → bounded text path.
+- `image/*` or `application/pdf` → returned as `InlineFile` attachment
+  through the new `ToolResult.attachments` channel.
+- Other binary → clean refusal with the detected MIME.
+
+Per-format caps tuned to real provider limits (verified against live
+docs during the audit):
+
+- `MAX_IMAGE_BYTES = 5 MB` matches Anthropic's published per-image
+  floor — the strictest of the three providers. Gemini and OpenAI
+  permit larger but failing here with a clear message beats racing
+  the API to a cryptic 400.
+- `MAX_PDF_BYTES = 20 MB` stays inside every provider's document
+  channel (Anthropic 32 MB request budget; Gemini 50 MB per document).
+
+Failure messages name the provider constraint and the recovery move
+(downsample for images, file-upload host tool for oversize PDFs).
+
+### Fixed — `kb_glob` matches root files with `**/*.md` (Unix glob semantics)
+
+Caught by the live agent-session tests added in this release. A fresh
+Gemini and a fresh Claude session, asked to list markdown files in a
+corpus with `intro.md` + `guide.md` at the root, both reached for
+`**/*.md` (the natural pattern, also the one our own `kb_glob` tool
+description uses as the example). Both got back "no markdown files."
+
+Java's NIO `PathMatcher` treats `**` as "zero or more characters
+including the separator," but requires the `/` after `**` to match a
+literal separator — so `**/*.md` against the relative path `intro.md`
+(zero separators) fails. Every other glob system agents have ever seen
+— ripgrep, fd, gitignore, Python `pathlib`, Go `filepath.Match` —
+treats `**/*.md` as "any markdown anywhere including root." Our own
+tool description tells agents to use it that way.
+
+Fix: `FilesystemKnowledge.compileGlob(pattern)` — when a pattern starts
+with `**/`, also compiles the pattern with that prefix stripped; a
+file matches if either form accepts it. Semantics preserved for
+non-`**/`-leading patterns. Applied to both `kb_glob` and `kb_grep`'s
+optional `glob` argument.
+
+### Live agent-session integration coverage
+
+Four new test files in `examples/session-demo`, all gated behind
+provider API keys so the suite stays runnable offline:
+
+- `ReadToolMultimodalThroughLoopIntegrationTest` (Gemini, 2 tests):
+  agent reads a real PNG → vision model describes it; agent reads a
+  real PDF → document channel extracts "Hello, world!"
+- `ReadToolMultimodalAnthropicIntegrationTest` (Claude Sonnet 4.6, 2
+  tests): same scenarios. Uses Anthropic's published vision-cookbook
+  PNG bytes after the hand-rolled grayscale PNG was rejected with
+  HTTP 400 "Could not process image" (real cross-provider PNG-variant
+  strictness divergence).
+- `FilesystemKnowledgeAgentSessionIntegrationTest` (Gemini, 3 tests):
+  agent uses `kb_glob` to list `**/*.md`, `kb_grep` to find "reactor",
+  `kb_read` on a config containing a registered secret — assistant's
+  reply must NOT contain raw secret bytes (proves end-to-end
+  redaction).
+- `FilesystemKnowledgeAgentSessionAnthropicIntegrationTest` (Claude,
+  3 tests): mirror of the Gemini suite, proves the redaction contract
+  holds provider-agnostically.
+
+10 live tests total, ~37 s spend on both providers combined. The PDF
+`/Length 51` vs actual-46-bytes mismatch and the Anthropic PNG
+strictness were both caught by these tests on the first run — the
+kind of failure modes only live integration testing surfaces.
+
+`examples/session-demo/pom.xml` gains `helios-anthropic` as a
+test-scope dependency so the Claude integration tests can construct an
+`AnthropicProvider`. The module's runtime classpath stays Gemini-only.
+
+### Test coverage totals
+
+- 45 new tests across 8 files (4 unit-test additions, 4 new
+  integration test files)
+- `helios-session` 1147 tests passing
+- `helios-core` 1289 tests passing (+9 across ToolResult and
+  FilesystemKnowledge)
+- Session + runtime coverage gates (>=95% instruction, >=90% branch)
+  intact
+- All 9 published-module javadoc clean
+
 ## [2.3.1] — 2026-05-22 — JShell sandbox filesystem isolation
 
 Two layers of defense closing the "can a JShell snippet read /etc/passwd?"
