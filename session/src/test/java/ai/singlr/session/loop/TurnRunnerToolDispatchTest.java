@@ -379,4 +379,95 @@ final class TurnRunnerToolDispatchTest {
     assertEquals(1, capturedTools.get().size());
     assertEquals("echo", capturedTools.get().get(0).name());
   }
+
+  @Test
+  void toolReturningAttachmentsAppendsFollowupUserMessageWithInlineFiles() {
+    // Verifies the Layer 2 loop-splice contract: when a tool returns ToolResult attachments,
+    // the loop appends a synthetic user message AFTER the tool-result message so the next turn's
+    // provider call carries the InlineFiles through the standard user-message multimodal path.
+    // Without this splice the bytes never reach the provider's vision/PDF channel.
+    var pngBytes = new byte[] {(byte) 0x89, 'P', 'N', 'G', 0, 1, 2, 3};
+    var attachmentTool =
+        Tool.newBuilder()
+            .withName("returnPng")
+            .withDescription("returns a tiny PNG as an attachment")
+            .withExecutor(
+                (args, ctx) ->
+                    ToolResult.successWithAttachments(
+                        "Returned image/png file (8 bytes) for inspection.",
+                        List.of(ai.singlr.core.model.InlineFile.of(pngBytes, "image/png"))))
+            .build();
+    var binding = ToolBinding.newBuilder(attachmentTool).withCategory(ToolCategory.READ).build();
+    var registry = new ToolRegistry(List.of(binding));
+    var dispatch = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
+    var call = new ToolCall("att-1", "returnPng", Map.of());
+    var model =
+        fixedChunkModel(
+            List.of(
+                new ModelChunk.ToolUseStop(call),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0))));
+    var runner =
+        new TurnRunner(
+            model,
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            null);
+    var state = freshState();
+    runner.runTurn(state, SessionLimits.defaults());
+
+    var history = state.historySnapshot();
+    // Expected shape: user("call echo"), assistant(toolCall), tool(text), user(synthetic+attached).
+    assertEquals(4, history.size(), "tool result + splice user message must both land in history");
+    var toolMsg = history.get(2);
+    assertEquals(ai.singlr.core.model.Role.TOOL, toolMsg.role());
+    assertEquals("Returned image/png file (8 bytes) for inspection.", toolMsg.content());
+
+    var splice = history.get(3);
+    assertEquals(ai.singlr.core.model.Role.USER, splice.role());
+    assertTrue(
+        splice.content().contains("tool 'returnPng' returned 1 attachment"),
+        "splice user message must name the tool and attachment count: " + splice.content());
+    assertEquals(1, splice.inlineFiles().size());
+    assertEquals("image/png", splice.inlineFiles().getFirst().mimeType());
+    org.junit.jupiter.api.Assertions.assertArrayEquals(
+        pngBytes,
+        splice.inlineFiles().getFirst().data(),
+        "the PNG bytes must reach the next turn unchanged");
+  }
+
+  @Test
+  void toolReturningNoAttachmentsLeavesConversationShapeUnchanged() {
+    // Sanity: when no attachments, no synthetic user message is appended. The shape is the
+    // pre-Layer-2 default (user + assistant + tool).
+    var registry = new ToolRegistry(List.of(echoBinding()));
+    var dispatch = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
+    var call = new ToolCall("e", "echo", Map.of("v", "no-attach"));
+    var model =
+        fixedChunkModel(
+            List.of(
+                new ModelChunk.ToolUseStop(call),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0))));
+    var runner =
+        new TurnRunner(
+            model,
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            null);
+    var state = freshState();
+    runner.runTurn(state, SessionLimits.defaults());
+
+    var history = state.historySnapshot();
+    assertEquals(3, history.size(), "no attachments -> no splice message");
+    assertEquals(ai.singlr.core.model.Role.TOOL, history.get(2).role());
+  }
 }

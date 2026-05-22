@@ -450,7 +450,7 @@ public final class TurnRunner {
         }
         case HookOutcome.Stop s -> {
           emitter.emitHookFired(state, postHookName, "PostToolUseHook", "Stop");
-          state.appendMessage(Message.tool(preCall.id(), preCall.name(), result.output()));
+          appendToolResultWithAttachments(state, preCall, result);
           state.setTerminal(successFor(state, s.result()));
           return true;
         }
@@ -458,9 +458,34 @@ public final class TurnRunner {
           // Block not meaningful at PostToolUse; treat as Continue.
         }
       }
-      state.appendMessage(Message.tool(preCall.id(), preCall.name(), result.output()));
+      appendToolResultWithAttachments(state, preCall, result);
     }
     return false;
+  }
+
+  /**
+   * Append a tool result to history, plus any multimodal attachments the tool returned. The text
+   * goes on the standard tool-result message; attachments ride a follow-up user message so every
+   * provider's existing {@code Message.user(text, inlineFiles)} plumbing handles wire encoding
+   * uniformly — no per-provider {@code tool_result} multimodal wiring required.
+   *
+   * <p>The follow-up text names what was attached so the model has a textual handle in conversation
+   * history even without re-reading the binary content on every subsequent turn. Empty-attachments
+   * results emit only the tool-result message — the synthetic user message is skipped to keep the
+   * conversation shape unchanged when no multimodal payload exists.
+   */
+  private static void appendToolResultWithAttachments(
+      SessionState state, ToolCall preCall, ToolResult result) {
+    state.appendMessage(Message.tool(preCall.id(), preCall.name(), result.output()));
+    if (result.hasAttachments()) {
+      var text =
+          "[tool '"
+              + preCall.name()
+              + "' returned "
+              + result.attachments().size()
+              + " attachment(s) for inspection]";
+      state.appendMessage(Message.user(text, result.attachments()));
+    }
   }
 
   private static String stringField(Map<String, Object> map, String key) {
