@@ -764,4 +764,71 @@ final class TurnRunnerTest {
         model.seenSchema.get(),
         "schema delivered to the provider must be the configured one");
   }
+
+  /**
+   * Defensive: when {@link ai.singlr.core.schema.StructuredOutputParseException} fires <i>and</i>
+   * the steering queue is full so the correction message can't be enqueued, the runner must let the
+   * underlying parse error surface (returns {@link FinishReason#ERROR}) rather than silently
+   * swallowing it.
+   */
+  @Test
+  void parseFailureWithFullSteeringQueueFallsThroughToErrorOutcome() {
+    var schema = ai.singlr.core.schema.OutputSchema.of(Sample.class);
+    var saturatedQueue = new ai.singlr.session.SteeringQueue(1);
+    saturatedQueue.offer(ai.singlr.session.UserMessage.text("pre-existing"));
+    var model =
+        new Model() {
+          @Override
+          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+            return Response.newBuilder().build();
+          }
+
+          @Override
+          public Flow.Publisher<ModelChunk> chatStream(
+              List<Message> messages,
+              List<Tool> tools,
+              ai.singlr.core.schema.OutputSchema<?> outputSchema,
+              CancellationToken cancellation) {
+            return subscriber ->
+                subscriber.onSubscribe(
+                    new Flow.Subscription() {
+                      @Override
+                      public void request(long n) {
+                        subscriber.onError(
+                            new ai.singlr.core.schema.StructuredOutputParseException(
+                                List.of("field is required"), "{\"wrong\":\"shape\"}"));
+                      }
+
+                      @Override
+                      public void cancel() {}
+                    });
+          }
+
+          @Override
+          public String id() {
+            return "test";
+          }
+
+          @Override
+          public String provider() {
+            return "test";
+          }
+        };
+    var runner =
+        new TurnRunner(
+            model,
+            hooks,
+            dispatch,
+            saturatedQueue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            schema);
+    var outcome = runner.runTurn(freshState(), SessionLimits.defaults());
+    assertEquals(
+        FinishReason.ERROR,
+        outcome.finishReason(),
+        "queue-full fallthrough: parse error must surface, not be silently swallowed");
+  }
 }

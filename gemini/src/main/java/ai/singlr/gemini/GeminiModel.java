@@ -144,7 +144,13 @@ public class GeminiModel implements Model {
       List<Message> messages, List<Tool> tools, OutputSchema<T> outputSchema) {
     var request = buildRequest(messages, tools, ResponseFormat.json(outputSchema.schema().toMap()));
     var response = streamAndDrain(request);
-    var parsed = parseStructuredContent(response.content(), outputSchema);
+    // Tool-calling turns are intermediate — structured output is the deliverable of a later
+    // text-only turn. Parsing incidental prose here throws and kills the session before the loop
+    // dispatches the tool.
+    T parsed = null;
+    if (response.toolCalls().isEmpty()) {
+      parsed = parseStructuredContent(response.content(), outputSchema);
+    }
 
     return Response.<T>newBuilder(outputSchema.type())
         .withContent(response.content())

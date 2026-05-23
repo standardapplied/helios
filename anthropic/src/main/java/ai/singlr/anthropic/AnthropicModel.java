@@ -198,7 +198,14 @@ public class AnthropicModel implements Model {
       List<Message> messages, List<Tool> tools, OutputSchema<T> outputSchema) {
     var request = buildRequest(messages, tools, outputSchema.schema().toMap());
     var response = streamAndDrain(request);
-    var parsed = parseStructuredContent(response.content(), outputSchema);
+    // Tool-calling turns are intermediate — structured output is the deliverable of a later
+    // text-only turn. Parsing the incidental prose (model's preamble before the tool_use block)
+    // as JSON throws and kills the session before the loop ever dispatches the tool. The schema
+    // still rides the request via the system instruction; the gate is on the response side only.
+    T parsed = null;
+    if (response.toolCalls().isEmpty()) {
+      parsed = parseStructuredContent(response.content(), outputSchema);
+    }
 
     return Response.<T>newBuilder(outputSchema.type())
         .withContent(response.content())
@@ -337,10 +344,20 @@ public class AnthropicModel implements Model {
 
     if (outputSchema != null) {
       var schemaJson = serializeValue(outputSchema);
+      // Two phrasings — the tool-using variant acknowledges the loop so the schema instruction
+      // doesn't fight the deployer's "use tools first, then emit JSON" guidance every turn.
+      // Without this contextualisation the loudest-instruction-wins effect causes Claude to skip
+      // tool dispatch on turn 0 and emit prose that fails downstream parse gating.
       var instruction =
-          "You must respond with valid JSON matching this schema:\n"
-              + schemaJson
-              + "\nDo not wrap the JSON in markdown code blocks. Output only the raw JSON.";
+          (tools == null || tools.isEmpty())
+              ? "You must respond with valid JSON matching this schema:\n"
+                  + schemaJson
+                  + "\nDo not wrap the JSON in markdown code blocks. Output only the raw JSON."
+              : "You may call the available tools to gather information."
+                  + " When you are ready to emit your final answer (not a tool call),"
+                  + " it must be valid JSON matching this schema:\n"
+                  + schemaJson
+                  + "\nDo not wrap the JSON in markdown code blocks. Output only the raw JSON.";
       systemInstruction = appendSystemText(systemInstruction, instruction);
     }
 

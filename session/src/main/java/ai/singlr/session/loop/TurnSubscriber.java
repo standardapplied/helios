@@ -129,6 +129,29 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     return new ArrayList<>(toolCalls);
   }
 
+  /**
+   * The terminal error captured by {@link #onError(Throwable)}, or {@code null} when the stream
+   * completed normally. Used by {@link TurnRunner} to inspect for recoverable conditions (e.g.
+   * {@link ai.singlr.core.schema.StructuredOutputParseException}) before letting the {@link
+   * ai.singlr.core.model.FinishReason#ERROR} verdict propagate to the {@link StopClassifier}.
+   *
+   * @return the error, or {@code null}
+   */
+  Throwable error() {
+    return error.get();
+  }
+
+  /**
+   * The text accumulated by {@link ModelChunk.TextDelta} events. Used by {@link TurnRunner} when
+   * {@link #error()} is set, so the assistant's pre-error tokens (if any) can be preserved in
+   * history alongside the corrective synthetic user message.
+   *
+   * @return the accumulated text; never null
+   */
+  String accumulatedContent() {
+    return content.toString();
+  }
+
   private Instant now() {
     return clock.instant();
   }

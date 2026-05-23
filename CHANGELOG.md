@@ -4,6 +4,83 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.3.3] — 2026-05-23 — outputSchema + tools fix; session-loop schema self-correction
+
+Three cooperating fixes for the Light Grid bug report (2026-05-22): an
+`AgentSession` configured with both a `ToolRegistry` and
+`SessionOptions.withOutputSchema(...)` used to terminate on turn 1 with
+`ProviderError: Failed to parse structured output: <prose>` because the
+provider's structured-output parse fired on the model's tool-calling
+prose preamble. The 6-second cliff-edge failure is now gone.
+
+### Fixed — Providers skip structured-output parse on tool-calling turns
+
+`AnthropicModel`, `OpenAIModel`, and `GeminiModel` now guard their
+`chat(messages, tools, outputSchema)` parse on
+`response.toolCalls().isEmpty()`. When the model chose to call a tool,
+structured output isn't the deliverable of that turn — the loop will
+dispatch and iterate. Pre-fix the prose preamble before a `tool_use`
+block (e.g. *"I'll work through this carefully."*) would fail the JSON
+parser and surface as a terminal `AnthropicException` / `OpenAIException`
+/ `GeminiException`. Post-fix the response carries `toolCalls` non-empty
+with `parsed` null, and the session loop continues normally.
+
+`Response.parsed()` had zero main-code readers; tests are the only
+observers, so returning null on tool-calling turns is a safe semantic
+tightening.
+
+### Fixed — Anthropic schema instruction is turn-aware when tools present
+
+`AnthropicModel.buildRequest` now emits two phrasings of the structured-
+output system instruction. Tool-less sessions keep the existing bare
+"You must respond with valid JSON matching this schema: …". Tool-using
+sessions get a turn-aware variant: *"You may call the available tools
+to gather information. When you are ready to emit your final answer
+(not a tool call), it must be valid JSON matching this schema: …"*.
+This stops the schema instruction from fighting the deployer's "use
+tools first, then emit JSON" guidance every turn, which on Light Grid's
+canary was causing Opus 4.7 to skip tool dispatch on turn 0 and emit
+prose preambles that then failed downstream parse gating.
+
+OpenAI and Gemini providers transmit the schema via their native
+channels (`text.format=json_schema` and `response_format.schema`
+respectively), so they don't carry this fix — only Anthropic relies on
+system-prompt injection for structured output.
+
+### Added — Session loop self-correction on `StructuredOutputParseException`
+
+`TurnRunner.trySelfCorrectSchema` pattern-matches
+`StructuredOutputParseException` on `subscriber.error()` after
+`awaitDone()`. When fired:
+
+1. The model's wrong attempt is appended to history as an assistant
+   message (so it sees its own attempt through conversation context on
+   the retry).
+2. `StructuredOutputParseException.correctionMessage()` — the field-
+   level diff only — is enqueued to the steering queue as a synthetic
+   user turn. The exception's `rawContent` is intentionally NOT echoed
+   into the correction text per the class's own cost-policy note (the
+   model already has it via the history-appended assistant message).
+3. The turn returns `FinishReason.TOOL_CALLS` so the loop iterates
+   regardless of steering-queue / classifier state.
+
+Retries are bounded by `SessionLimits.maxTurns()` — no dedicated
+parse-retry ceiling was added.
+
+Replaces the aspirational CLAUDE.md "Structured Output Resilience" row
+that described this path as existing in v2; it didn't until now.
+Other failure modes (syntactic JSON failure, provider IO errors) still
+terminate via `FinishReason.ERROR` as before — only the recoverable
+"parseable JSON, wrong shape" signal triggers self-correction.
+
+### Deprecated workarounds (informational)
+
+Deployers who dropped `SessionOptions.withOutputSchema(...)` and added
+post-hoc terminal parsing as a workaround (e.g. Light Grid's
+matchmaking agent) can now re-enable `withOutputSchema(...)` directly
+and remove their local `parseTerminal(...)` helpers — the session loop
+handles both the tool-calling and schema-mismatch paths natively.
+
 ## [2.3.2] — 2026-05-22 — ReadTool guardrails, multimodal Read, kb_glob Unix semantics
 
 Three layers of work bringing Helios's file-tool surface to Claude

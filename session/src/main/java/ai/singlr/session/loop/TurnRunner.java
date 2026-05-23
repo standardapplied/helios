@@ -13,6 +13,7 @@ import ai.singlr.core.model.Response;
 import ai.singlr.core.model.Response.Usage;
 import ai.singlr.core.model.ToolCall;
 import ai.singlr.core.schema.OutputSchema;
+import ai.singlr.core.schema.StructuredOutputParseException;
 import ai.singlr.core.tool.ToolResult;
 import ai.singlr.session.QueryEvent;
 import ai.singlr.session.ResultMessage;
@@ -172,6 +173,11 @@ public final class TurnRunner {
     }
     subscriber.awaitDone();
 
+    var schemaRecovery = trySelfCorrectSchema(state, subscriber);
+    if (schemaRecovery != null) {
+      return schemaRecovery;
+    }
+
     var streamOutcome = subscriber.toOutcome();
     var toolCalls = subscriber.toolCalls();
 
@@ -230,6 +236,50 @@ public final class TurnRunner {
 
   private TurnOutcome finalOutcomeAfterTerminate(SessionState state) {
     return new TurnOutcome(FinishReason.STOP, "", state.usage());
+  }
+
+  /**
+   * Schema-mismatch self-correction. When the model emitted parseable JSON that didn't match the
+   * session's configured {@link OutputSchema}, the provider raises {@link
+   * StructuredOutputParseException} (the only recoverable parse signal — syntactic JSON errors and
+   * provider IO errors still terminate via {@link FinishReason#ERROR}).
+   *
+   * <p>Recovery: append the model's wrong attempt to history as an assistant message so the model
+   * sees its own response through conversation context on the retry, then enqueue {@link
+   * StructuredOutputParseException#correctionMessage()} as a synthetic user turn — that's the
+   * field-level diff only, no rawContent echo (per the exception's class-level note on retry cost).
+   * Return a {@link TurnOutcome} with {@link FinishReason#TOOL_CALLS}; the TOOL_CALLS sentinel
+   * mirrors the {@code SKIP_MODEL} inject-hook path and routes back through the iteration boundary
+   * regardless of {@link StopClassifier} state. The overall retry count is bounded by {@link
+   * ai.singlr.session.SessionLimits#maxTurns()} — no dedicated parse-retry ceiling.
+   *
+   * <p>Returns {@code null} when the subscriber's error is not a {@link
+   * StructuredOutputParseException} (or there is no error, or the steering queue rejected the
+   * correction message), so the caller falls through to its regular turn-finalisation path and lets
+   * the underlying error surface as {@link ResultMessage.ErrorDuringExecution}.
+   */
+  private TurnOutcome trySelfCorrectSchema(SessionState state, TurnSubscriber subscriber) {
+    var err = subscriber.error();
+    if (!(err instanceof StructuredOutputParseException parseFailure)) {
+      return null;
+    }
+    var wrongAttempt = parseFailure.rawContent();
+    if (wrongAttempt == null || wrongAttempt.isEmpty()) {
+      // Real streaming providers may surface text deltas before the error fires; the subscriber
+      // has accumulated them even when the exception itself didn't carry rawContent.
+      wrongAttempt = subscriber.accumulatedContent();
+    }
+    if (!wrongAttempt.isEmpty()) {
+      state.appendMessage(Message.assistant(wrongAttempt, List.of(), Map.of()));
+    }
+    if (!steeringQueue.offer(UserMessage.text(parseFailure.correctionMessage()))) {
+      LOGGER.log(
+          Level.WARNING,
+          "schema-correction message was dropped: steering queue full; the loop will terminate"
+              + " on the underlying parse error");
+      return null;
+    }
+    return turnEnded(state, new TurnOutcome(FinishReason.TOOL_CALLS, "", state.usage()));
   }
 
   private TurnOutcome turnEnded(SessionState state, TurnOutcome outcome) {
