@@ -223,23 +223,26 @@ public final class AgentSessionImpl implements AgentSession {
           "onSessionStart threw "
               + e.getClass().getSimpleName()
               + ": "
-              + (e.getMessage() == null ? "(no message)" : e.getMessage()));
+              + (e.getMessage() == null ? "(no message)" : e.getMessage()),
+          e);
       return false;
     }
     Objects.requireNonNull(outcome, "onSessionStart returned null");
     if (outcome instanceof SessionStartOutcome.Refuse refuse) {
-      markRefused(refuse.reason());
+      markRefused(refuse.reason(), refuse.cause());
       return false;
     }
     return true;
   }
 
-  private void markRefused(String reason) {
+  private void markRefused(String reason, Throwable cause) {
+    var serialised = cause == null ? null : SerializedError.of(cause);
     var refusal =
         new ResultMessage.ErrorProviderUnavailable(
             sessionId,
             executionProvider.getClass().getSimpleName(),
             reason,
+            serialised,
             state.usage(),
             state.cost(),
             state.elapsed());

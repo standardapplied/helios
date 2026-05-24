@@ -6,8 +6,10 @@ package ai.singlr.session.execution;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -47,6 +49,42 @@ final class SessionStartOutcomeTest {
   void refuseRejectsEmptyReason() {
     var ex = assertThrows(IllegalArgumentException.class, () -> SessionStartOutcome.refuse(""));
     assertEquals("reason must not be blank", ex.getMessage());
+  }
+
+  @Test
+  void refuseWithCauseCarriesCauseAndReason() {
+    var io = new java.io.IOException("Cannot run program 'java': error=2");
+    var r = SessionStartOutcome.refuse("failed to spawn sandbox", io);
+    assertEquals("failed to spawn sandbox", r.reason());
+    assertSame(io, r.cause(), "underlying throwable must be preserved verbatim");
+    assertTrue(r.causeOpt().isPresent());
+    assertSame(io, r.causeOpt().get());
+  }
+
+  @Test
+  void refuseWithoutCauseHasNullCauseAndEmptyOptional() {
+    var r = SessionStartOutcome.refuse("pool saturated");
+    assertNull(r.cause(), "policy-driven refusal carries no underlying throwable");
+    assertTrue(r.causeOpt().isEmpty());
+  }
+
+  @Test
+  void refuseWithExplicitNullCauseEquivalentToNoCause() {
+    var r = SessionStartOutcome.refuse("provider closed", null);
+    assertNull(r.cause());
+    assertTrue(r.causeOpt().isEmpty());
+  }
+
+  @Test
+  void refuseWithCauseRejectsNullReason() {
+    var io = new java.io.IOException("boom");
+    assertThrows(NullPointerException.class, () -> SessionStartOutcome.refuse(null, io));
+  }
+
+  @Test
+  void refuseWithCauseRejectsBlankReason() {
+    var io = new java.io.IOException("boom");
+    assertThrows(IllegalArgumentException.class, () -> SessionStartOutcome.refuse("  ", io));
   }
 
   @Test

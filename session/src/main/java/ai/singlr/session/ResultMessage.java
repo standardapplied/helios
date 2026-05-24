@@ -9,6 +9,7 @@ import ai.singlr.core.common.Strings;
 import ai.singlr.core.model.Response.Usage;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Terminal result of an agent session.
@@ -206,13 +207,18 @@ public sealed interface ResultMessage
    * The session terminated before the agent loop began because an {@link
    * ai.singlr.session.execution.ExecutionProvider}'s {@code onSessionStart} returned a {@link
    * ai.singlr.session.execution.SessionStartOutcome.Refuse Refuse} — typically pool saturation,
-   * per-session auth failure, or in-flight provider shutdown.
+   * per-session auth failure, in-flight provider shutdown, or a caught exception during sandbox
+   * spawn.
    *
    * @param sessionId the session's id
    * @param providerName a short, stable name identifying which provider refused (e.g. the provider
    *     class's simple name); non-blank
    * @param reason the human-readable refusal reason carried from {@code
    *     SessionStartOutcome.Refuse}; non-blank
+   * @param cause the underlying error serialised from {@code SessionStartOutcome.Refuse#cause()},
+   *     or {@code null} when the refusal is a policy decision (saturation, auth) rather than a
+   *     caught exception. Deployers inspecting failures programmatically read the typed kind /
+   *     message / stack trace and walk the cause chain via {@link SerializedError#cause()}
    * @param usage accumulated token usage (always zero at this point)
    * @param cost accumulated cost (always zero at this point)
    * @param duration elapsed wall clock (typically tiny)
@@ -221,6 +227,7 @@ public sealed interface ResultMessage
       String sessionId,
       String providerName,
       String reason,
+      SerializedError cause,
       Usage usage,
       CostEstimate cost,
       Duration duration)
@@ -236,6 +243,15 @@ public sealed interface ResultMessage
       if (Strings.isBlank(reason)) {
         throw new IllegalArgumentException("reason must not be blank");
       }
+    }
+
+    /**
+     * The underlying serialised error, if any.
+     *
+     * @return an optional view of {@link #cause()}; empty for policy-driven refusals
+     */
+    public Optional<SerializedError> causeOpt() {
+      return Optional.ofNullable(cause);
     }
   }
 

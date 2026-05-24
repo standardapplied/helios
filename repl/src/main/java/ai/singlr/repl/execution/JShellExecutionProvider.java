@@ -236,7 +236,8 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     } catch (RuntimeException e) {
       sessionPermits.release();
       return SessionStartOutcome.refuse(
-          "failed to spawn JShell sandbox for session " + ctx.sessionId() + ": " + e.getMessage());
+          "failed to spawn JShell sandbox for session " + ctx.sessionId() + ": " + e.getMessage(),
+          e);
     }
     var existing = sessions.putIfAbsent(ctx.sessionId(), session);
     if (existing != null) {
@@ -269,7 +270,8 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
         safeClose(session);
         sessionPermits.release();
         return SessionStartOutcome.refuse(
-            "JShell startup snippet failed for session " + ctx.sessionId() + ": " + e.getMessage());
+            "JShell startup snippet failed for session " + ctx.sessionId() + ": " + e.getMessage(),
+            e);
       }
     }
     // Defense-in-depth: session-scoped cancellation also tears down, in case the host bypasses

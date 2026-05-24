@@ -53,6 +53,82 @@ class JvmSandboxTest {
         "must set a heap size from config.maxHeapMb");
   }
 
+  /**
+   * Regression for the cron.jar / relative-classpath bug: when the host JVM is launched as {@code
+   * java -jar target/cron.jar}, {@code System.getProperty("java.class.path")} returns the bare
+   * relative path {@code "target/cron.jar"}. The sandbox subprocess then sets its working directory
+   * to a private {@code /tmp/helios-sandbox-cwd-*} (so the model can't see host files), which means
+   * {@code target/cron.jar} no longer resolves. The subprocess dies with {@code
+   * ClassNotFoundException: ai.singlr.repl.sandbox.JvmSandboxBootstrap}, the host's accept loop
+   * times out 30 s later, and we surface a generic IOException to the caller.
+   *
+   * <p>The fix: every relative entry in {@code java.class.path} must be resolved against the host
+   * JVM's current working directory before being passed to the subprocess as {@code -cp}.
+   */
+  @Test
+  void buildLaunchCommandResolvesRelativeClasspathEntriesToAbsolute() {
+    var originalCp = System.getProperty("java.class.path");
+    var sep = System.getProperty("path.separator");
+    var hostCwd = Path.of("").toAbsolutePath();
+    try {
+      System.setProperty(
+          "java.class.path", "target/cron.jar" + sep + "libs/repository-1.0.0-SNAPSHOT.jar");
+      var config = JvmSandboxConfig.defaults();
+      var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config);
+
+      var cpIdx = cmd.indexOf("-cp");
+      assertTrue(cpIdx >= 0, "command must contain a -cp flag");
+      var cpArg = cmd.get(cpIdx + 1);
+
+      for (var entry : cpArg.split(java.util.regex.Pattern.quote(sep))) {
+        assertTrue(
+            Path.of(entry).isAbsolute(),
+            () ->
+                "classpath entry must be absolute — subprocess cwd differs from host JVM cwd, "
+                    + "so relative entries fail to resolve. Got: '"
+                    + entry
+                    + "' in cp='"
+                    + cpArg
+                    + "'");
+      }
+      assertTrue(
+          cpArg.contains(hostCwd.resolve("target/cron.jar").toString()),
+          () -> "relative 'target/cron.jar' must resolve against host cwd; got: " + cpArg);
+      assertTrue(
+          cpArg.contains(hostCwd.resolve("libs/repository-1.0.0-SNAPSHOT.jar").toString()),
+          () -> "every relative entry must resolve; got: " + cpArg);
+    } finally {
+      System.setProperty("java.class.path", originalCp);
+    }
+  }
+
+  /**
+   * Boundary: already-absolute entries must pass through unchanged, including when they're mixed
+   * with relative ones. Catches a partial fix that resolves everything (even absolute paths) or one
+   * that breaks when the classpath has zero relative entries.
+   */
+  @Test
+  void buildLaunchCommandLeavesAbsoluteClasspathEntriesUnchanged() {
+    var originalCp = System.getProperty("java.class.path");
+    var sep = System.getProperty("path.separator");
+    try {
+      var absoluteEntry = "/opt/lib/foo.jar";
+      var relativeEntry = "build/bar.jar";
+      System.setProperty("java.class.path", absoluteEntry + sep + relativeEntry);
+      var cmd = JvmSandbox.buildLaunchCommand("/fake/java", JvmSandboxConfig.defaults());
+      var cpArg = cmd.get(cmd.indexOf("-cp") + 1);
+      assertTrue(
+          cpArg.contains(absoluteEntry),
+          () -> "already-absolute entry must pass through verbatim; got: " + cpArg);
+      var hostCwd = Path.of("").toAbsolutePath();
+      assertTrue(
+          cpArg.contains(hostCwd.resolve(relativeEntry).toString()),
+          () -> "relative entry must be resolved against host cwd; got: " + cpArg);
+    } finally {
+      System.setProperty("java.class.path", originalCp);
+    }
+  }
+
   @Test
   void buildLaunchCommandRespectsConfigMaxHeap() {
     var config = JvmSandboxConfig.newBuilder().withMaxHeapMb(1234).build();

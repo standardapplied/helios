@@ -4,6 +4,106 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.5.2] — 2026-05-24 — visibility of subprocess-spawn failures + relative-classpath fix
+
+Two cooperating fixes, both surfaced by client reports against the same code
+path (`JShellExecutionProvider` → `JvmSandbox`). Test-first; the production
+change followed RED reproductions in every case.
+
+### Fixed — `JvmSandbox` resolves relative classpath entries against host cwd
+
+Client report: a host running as `java -jar target/cron.jar` died with
+`ClassNotFoundException: ai.singlr.repl.sandbox.JvmSandboxBootstrap` inside
+the sandbox subprocess, then waited the full 30-second RPC accept timeout
+for a connection that would never come.
+
+Root cause: `System.getProperty("java.class.path")` returns the bare relative
+path `"target/cron.jar"` when the host is launched with `-jar`. {@link
+JvmSandbox} previously passed that string verbatim to the subprocess as
+`-cp`, but the subprocess `cd`s to a private `/tmp/helios-sandbox-cwd-*`
+where the relative path no longer resolves.
+
+Fix: new package-private {@code JvmSandbox.resolveClasspathForSubprocess}
+walks every {@code path.separator}-delimited entry. Absolute entries pass
+through verbatim; relative entries are joined against the host JVM's
+{@code Path.of("").toAbsolutePath()} and normalised. The subprocess receives
+fully-qualified paths it can resolve from any working directory.
+
+Manifest {@code Class-Path:} entries from jar-manifest dependencies (the
+{@code libs/*.jar} pattern Maven produces alongside an executable jar)
+continue to work because those entries are resolved by the JDK relative to
+the jar's own location, not the JVM cwd — and the jar is now reachable via
+its absolute path.
+
+Coverage: {@code JvmSandboxTest#buildLaunchCommandResolvesRelativeClasspathEntriesToAbsolute}
+and {@code #buildLaunchCommandLeavesAbsoluteClasspathEntriesUnchanged} pin
+the contract via a {@code System.setProperty("java.class.path", "target/cron.jar")}
+fixture that exactly reproduces the cron deployment scenario.
+
+### Fixed — `SessionStartOutcome.Refuse` carries the underlying `Throwable`
+
+Client report: when `JShellExecutionProvider` caught a subprocess-spawn
+failure it forwarded only {@code e.getMessage()} into the refuse string,
+discarding the cause chain. {@code IOException("No such file or directory:
+target/cron.jar")} was buried inside {@code ReplException("Failed to start
+JVM sandbox subprocess", ...)} and the deployer saw only the outer wrapper.
+No way to distinguish missing binary from permission denied from disk full.
+
+Fix, three layers:
+
+1. **{@code SessionStartOutcome.Refuse}** gains a {@code Throwable cause}
+   field plus a {@code refuse(String reason, Throwable cause)} factory.
+   The original {@code refuse(String)} factory is preserved for
+   policy-driven refusals (pool saturation, auth failure) that carry no
+   underlying exception.
+
+2. **{@code SerializedError}** gains a recursive {@code cause} field; the
+   {@code of(Throwable)} factory walks {@code Throwable.getCause()}
+   building a fully-serialised chain (bounded at depth 16 to defend
+   against cyclic references). {@code withoutStackTrace()} strips frames
+   recursively across the chain.
+
+3. **{@code ResultMessage.ErrorProviderUnavailable}** gains a
+   {@code SerializedError cause} field (nullable). {@code
+   AgentSessionImpl.markRefused} plumbs the cause through from
+   {@code Refuse#cause()} via {@code SerializedError.of(throwable)} so
+   the typed chain reaches the deployer's terminal callback.
+
+End-to-end test
+{@code AgentSessionImplTest#providerRefuseWithCauseSurfacesFullSerializedErrorChain}
+proves the round-trip: a {@code Refuse} carrying a 3-deep cause chain
+({@code IllegalStateException} ← {@code RuntimeException} ← {@code
+IOException}) produces an {@code ErrorProviderUnavailable} where
+{@code err.causeOpt().get().cause().cause()} returns the {@code
+IOException}'s class name and original message.
+
+### Breaking — record components added
+
+The following record components are new; direct canonical-constructor
+callers need updating:
+
+- {@code SerializedError(kind, message, stackTrace)} →
+  {@code SerializedError(kind, message, stackTrace, cause)}
+- {@code SessionStartOutcome.Refuse(reason)} →
+  {@code Refuse(reason, cause)}
+- {@code ResultMessage.ErrorProviderUnavailable(sessionId, providerName,
+  reason, usage, cost, duration)} →
+  {@code ErrorProviderUnavailable(sessionId, providerName, reason, cause,
+  usage, cost, duration)}
+
+Builder/factory callers ({@code SessionStartOutcome.refuse(String)},
+{@code SerializedError.of(...)}) are unchanged — the new field defaults to
+{@code null} in all factories.
+
+### Test count
+
+`helios-session`: 1173 → 1190 (+17 covering the cause-chain serialisation,
+the new {@code Refuse} factory, and the end-to-end plumbing test).
+`helios-repl`: 815 → 818 (+3 covering the classpath resolver, the absolute-
+classpath pass-through, and the enriched {@code
+onSessionStartRefusesWhenSandboxFactoryThrows} that asserts the full
+3-deep cause chain reaches {@code Refuse#cause()}). Coverage gates green.
+
 ## [2.5.1] — 2026-05-24 — code-quality cleanup in 2.5.0's session-loop changes
 
 Style-only follow-up — no behaviour change. A self-audit after 2.5.0 found three

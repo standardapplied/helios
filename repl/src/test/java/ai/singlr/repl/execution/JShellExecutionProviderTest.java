@@ -7,6 +7,7 @@ package ai.singlr.repl.execution;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -231,11 +232,13 @@ final class JShellExecutionProviderTest {
 
   @Test
   void onSessionStartRefusesWhenSandboxFactoryThrows() {
+    var rootCause = new java.io.IOException("Cannot run program 'java': No such file or directory");
+    var thrown = new RuntimeException("sandbox init failed", rootCause);
     var failingConfig =
         ReplConfig.newBuilder()
             .withSandboxFactory(
                 registry -> {
-                  throw new RuntimeException("sandbox init failed");
+                  throw thrown;
                 })
             .build();
     try (var provider =
@@ -244,8 +247,31 @@ final class JShellExecutionProviderTest {
             .withShutdownHook(false)
             .build()) {
       var outcome = provider.onSessionStart(ctx("doomed"));
-      assertInstanceOf(SessionStartOutcome.Refuse.class, outcome);
-      assertTrue(((SessionStartOutcome.Refuse) outcome).reason().contains("failed to spawn"));
+      var refuse = assertInstanceOf(SessionStartOutcome.Refuse.class, outcome);
+      assertTrue(refuse.reason().contains("failed to spawn"));
+      // The motivating bug for 2.5.2: the underlying throwable must reach the deployer with its
+      // full cause chain intact. Without this, "ProcessBuilder.start() threw IOException: <real
+      // reason>" is collapsed into the wrapper's getMessage() and the deployer can't tell missing
+      // binary from permission denied from disk full.
+      //
+      // ReplSession.create wraps the sandbox-factory failure in a ReplException, so the chain
+      // visible to the deployer is: ReplException("Failed to create session") ←
+      // RuntimeException("sandbox init failed") ← IOException("Cannot run program 'java': ...").
+      // All three messages are reachable, which is exactly the contract we want — operators see
+      // the full diagnostic path, not just the outermost wrapper.
+      assertNotNull(refuse.cause(), "underlying throwable must be preserved");
+      assertEquals(
+          "ai.singlr.repl.ReplException",
+          refuse.cause().getClass().getName(),
+          "ReplSession wraps sandbox failures, so the immediate cause is ReplException");
+      assertSame(
+          thrown,
+          refuse.cause().getCause(),
+          "the original RuntimeException is the next link in the chain");
+      assertSame(
+          rootCause,
+          refuse.cause().getCause().getCause(),
+          "the root IOException remains reachable at the bottom of the chain");
       // Provider state must be clean — no live sessions, no leaked permits.
       assertEquals(0, provider.liveSessionCount());
     }

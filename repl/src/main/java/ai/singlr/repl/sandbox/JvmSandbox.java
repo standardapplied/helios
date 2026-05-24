@@ -35,6 +35,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 /**
  * JVM subprocess sandbox. Launches a child JVM process that reads JSON-RPC execute requests on
@@ -576,7 +577,9 @@ public final class JvmSandbox implements Sandbox {
       }
     }
 
-    var classpath = System.getProperty("java.class.path");
+    var classpath =
+        resolveClasspathForSubprocess(
+            System.getProperty("java.class.path"), Path.of("").toAbsolutePath());
     if (!Strings.isBlank(classpath)) {
       command.add("-cp");
       command.add(classpath);
@@ -602,6 +605,48 @@ public final class JvmSandbox implements Sandbox {
       command.add("--sandbox-policy=" + SandboxPolicySerialization.encode(config.sandboxPolicy()));
     }
     return command;
+  }
+
+  /**
+   * Resolve every entry in a {@code path.separator}-delimited classpath against the supplied host
+   * cwd, returning entries as absolute paths. Absolute entries pass through verbatim; relative
+   * entries are joined to {@code hostCwd} and normalised.
+   *
+   * <p>The subprocess sandbox switches its own working directory (to {@link
+   * JvmSandboxConfig#workingDirectory()} when set, otherwise to a private {@code
+   * /tmp/helios-sandbox-cwd-*}). Any relative entry in the host JVM's {@code java.class.path}
+   * therefore cannot be resolved by the subprocess. This bites callers running as {@code java -jar
+   * target/app.jar}: the JDK puts {@code "target/app.jar"} in {@code java.class.path}, the
+   * subprocess can't find it from its new cwd, and dies with {@code ClassNotFoundException:
+   * ai.singlr.repl.sandbox.JvmSandboxBootstrap}. The host then waits the full RPC accept timeout
+   * for a connection that will never come.
+   *
+   * <p>Normalising to absolute paths against the host cwd reproduces the resolution the host JVM
+   * already performed when it loaded its own classpath. Jars whose manifests carry a relative
+   * {@code Class-Path:} continue to work because those entries are resolved relative to the jar's
+   * location, not the JVM cwd.
+   *
+   * @param rawClasspath the raw {@code java.class.path} string; null or blank yields the input
+   *     unchanged so the existing caller can branch on blank
+   * @param hostCwd the host JVM's current working directory; non-null and must be absolute
+   * @return the classpath with every entry resolved to an absolute path
+   */
+  static String resolveClasspathForSubprocess(String rawClasspath, Path hostCwd) {
+    if (Strings.isBlank(rawClasspath)) {
+      return rawClasspath;
+    }
+    var sep = System.getProperty("path.separator");
+    var entries = rawClasspath.split(Pattern.quote(sep));
+    var resolved = new ArrayList<String>(entries.length);
+    for (var entry : entries) {
+      if (entry.isEmpty()) {
+        resolved.add(entry);
+        continue;
+      }
+      var p = Path.of(entry);
+      resolved.add(p.isAbsolute() ? entry : hostCwd.resolve(p).normalize().toString());
+    }
+    return String.join(sep, resolved);
   }
 
   static boolean shouldPropagateJvmArg(String arg) {

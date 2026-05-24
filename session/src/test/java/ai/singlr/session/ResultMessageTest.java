@@ -218,7 +218,7 @@ final class ResultMessageTest {
   void errorProviderUnavailableConstructsAndExposesFields() {
     var r =
         new ResultMessage.ErrorProviderUnavailable(
-            SID, "JShellExecutionProvider", "pool saturated", USAGE, COST, DUR);
+            SID, "JShellExecutionProvider", "pool saturated", null, USAGE, COST, DUR);
     assertEquals("JShellExecutionProvider", r.providerName());
     assertEquals("pool saturated", r.reason());
     assertEquals(SID, r.sessionId());
@@ -229,7 +229,8 @@ final class ResultMessageTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ResultMessage.ErrorProviderUnavailable(SID, null, "x", USAGE, COST, DUR));
+            () ->
+                new ResultMessage.ErrorProviderUnavailable(SID, null, "x", null, USAGE, COST, DUR));
     assertEquals("providerName must not be null", ex.getMessage());
   }
 
@@ -238,7 +239,8 @@ final class ResultMessageTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new ResultMessage.ErrorProviderUnavailable(SID, "  ", "x", USAGE, COST, DUR));
+            () ->
+                new ResultMessage.ErrorProviderUnavailable(SID, "  ", "x", null, USAGE, COST, DUR));
     assertEquals("providerName must not be blank", ex.getMessage());
   }
 
@@ -247,7 +249,8 @@ final class ResultMessageTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ResultMessage.ErrorProviderUnavailable(SID, "P", null, USAGE, COST, DUR));
+            () ->
+                new ResultMessage.ErrorProviderUnavailable(SID, "P", null, null, USAGE, COST, DUR));
     assertEquals("reason must not be null", ex.getMessage());
   }
 
@@ -256,7 +259,8 @@ final class ResultMessageTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new ResultMessage.ErrorProviderUnavailable(SID, "P", " ", USAGE, COST, DUR));
+            () ->
+                new ResultMessage.ErrorProviderUnavailable(SID, "P", " ", null, USAGE, COST, DUR));
     assertEquals("reason must not be blank", ex.getMessage());
   }
 
@@ -305,7 +309,7 @@ final class ResultMessageTest {
             new ResultMessage.ErrorDuringExecution(
                 SID, SerializedError.of("kind", "msg"), USAGE, COST, DUR),
             new ResultMessage.ErrorProviderUnavailable(
-                SID, "TestProvider", "pool saturated", USAGE, COST, DUR),
+                SID, "TestProvider", "pool saturated", null, USAGE, COST, DUR),
             new ResultMessage.Refusal(SID, "no", USAGE, COST, DUR),
             new ResultMessage.Cancelled(SID, "stop", USAGE, COST, DUR));
     for (var r : all) {

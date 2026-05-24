@@ -567,8 +567,52 @@ final class AgentSessionImplTest {
       var err = assertInstanceOf(ResultMessage.ErrorProviderUnavailable.class, terminal);
       assertTrue(err.reason().contains("auth failed"));
       assertTrue(err.reason().contains("RuntimeException"));
+      // The thrown RuntimeException is preserved as the typed cause so deployers can inspect its
+      // class, message, and stack trace without parsing the reason string.
+      assertTrue(err.causeOpt().isPresent(), "thrown exception must be captured as cause");
+      assertEquals(RuntimeException.class.getName(), err.causeOpt().orElseThrow().kind());
+      assertEquals("auth failed", err.causeOpt().orElseThrow().message());
     }
     assertFalse(provider.endSeen.get());
+  }
+
+  /**
+   * The motivating bug for 2.5.2: when a provider's {@code onSessionStart} returns a {@link
+   * SessionStartOutcome#refuse(String, Throwable) refuse-with-cause}, the resulting {@link
+   * ResultMessage.ErrorProviderUnavailable} must carry the full {@link SerializedError} cause chain
+   * so deployers can drill into the root cause (e.g. the original {@code IOException} from {@code
+   * ProcessBuilder.start()}) instead of seeing only the outer wrapper's message.
+   */
+  @Test
+  void providerRefuseWithCauseSurfacesFullSerializedErrorChain() throws Exception {
+    var rootCause = new java.io.IOException("Cannot run program 'java': No such file or directory");
+    var midWrapper = new RuntimeException("Failed to start JVM sandbox subprocess", rootCause);
+    var provider = new LifecycleProvider();
+    provider.startOutcome = SessionStartOutcome.refuse("failed to spawn sandbox", midWrapper);
+
+    try (var s =
+        AgentSession.create(
+            SessionOptions.newBuilder()
+                .withModel(textOnceModel("unused", FinishReason.STOP))
+                .withSessionId(SID)
+                .withClock(CLOCK)
+                .withExecutionProvider(provider)
+                .build())) {
+      var terminal = s.result().get(2, TimeUnit.SECONDS);
+      var err = assertInstanceOf(ResultMessage.ErrorProviderUnavailable.class, terminal);
+      assertEquals("failed to spawn sandbox", err.reason());
+
+      var cause = err.causeOpt().orElseThrow(() -> new AssertionError("cause must be present"));
+      assertEquals(RuntimeException.class.getName(), cause.kind());
+      assertEquals("Failed to start JVM sandbox subprocess", cause.message());
+
+      var rootSerialised = cause.causeOpt().orElseThrow(() -> new AssertionError("root cause"));
+      assertEquals(java.io.IOException.class.getName(), rootSerialised.kind());
+      assertEquals(
+          "Cannot run program 'java': No such file or directory",
+          rootSerialised.message(),
+          "the original IOException's message must reach the deployer untouched");
+    }
   }
 
   @Test
