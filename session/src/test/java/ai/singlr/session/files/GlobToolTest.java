@@ -23,6 +23,46 @@ import org.junit.jupiter.api.io.TempDir;
 final class GlobToolTest {
 
   @Test
+  void recursivePatternMatchesRootFiles(@TempDir Path tmp) throws IOException {
+    // Regression: raw JDK glob '**/*.md' requires at least one separator, so 'intro.md' at the
+    // root doesn't match. Every other glob system agents have seen (rg, fd, gitignore) treats
+    // '**/*.md' as recursive-including-root, and so do we via GlobMatchers.compile().
+    Files.writeString(tmp.resolve("intro.md"), "# Intro\n", StandardCharsets.UTF_8);
+    Files.writeString(tmp.resolve("guide.md"), "# Guide\n", StandardCharsets.UTF_8);
+    var nested = tmp.resolve("nested");
+    Files.createDirectory(nested);
+    Files.writeString(nested.resolve("deep.md"), "# Deep\n", StandardCharsets.UTF_8);
+    Files.writeString(tmp.resolve("config.yaml"), "key: value\n", StandardCharsets.UTF_8);
+
+    var result =
+        GlobTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "**/*.md"));
+
+    assertTrue(result.success(), result.output());
+    var out = result.output();
+    assertTrue(out.contains("intro.md"), "root-level intro.md must match '**/*.md': " + out);
+    assertTrue(out.contains("guide.md"), "root-level guide.md must match '**/*.md': " + out);
+    assertTrue(out.contains("deep.md"), "nested deep.md must match '**/*.md': " + out);
+    assertFalse(out.contains("config.yaml"), "yaml must not match '**/*.md': " + out);
+  }
+
+  @Test
+  void nonRecursivePatternMatchesOnlyRoot(@TempDir Path tmp) throws IOException {
+    // Boundary: a bare '*.md' must NOT match nested files. Pins the semantics so a future
+    // "be more helpful" extension doesn't accidentally make every pattern recursive.
+    Files.writeString(tmp.resolve("intro.md"), "# Intro\n", StandardCharsets.UTF_8);
+    var nested = tmp.resolve("nested");
+    Files.createDirectory(nested);
+    Files.writeString(nested.resolve("deep.md"), "# Deep\n", StandardCharsets.UTF_8);
+
+    var result = GlobTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "*.md"));
+
+    assertTrue(result.success(), result.output());
+    var out = result.output();
+    assertTrue(out.contains("intro.md"), "root intro.md must match bare '*.md': " + out);
+    assertFalse(out.contains("deep.md"), "nested deep.md must NOT match bare '*.md': " + out);
+  }
+
+  @Test
   void matchesGlobPattern(@TempDir Path tmp) throws IOException {
     Files.createDirectories(tmp.resolve("src/main"));
     Files.writeString(tmp.resolve("src/main/Foo.java"), "x", StandardCharsets.UTF_8);

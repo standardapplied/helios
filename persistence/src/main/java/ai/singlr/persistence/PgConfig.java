@@ -29,9 +29,9 @@ import java.util.regex.Pattern;
  *     debugging. Deployers who want trace-side redaction without wrapping the journal themselves
  *     can pass {@code registry.redactor()} from their session-level {@link
  *     ai.singlr.core.common.SecretRegistry}. Source-level redaction (via {@code CommandGrant},
- *     {@code FilesystemKnowledge}, {@code JShellExecutionProvider}) remains the recommended primary
- *     mitigation; this hook is ergonomic sugar for deployers who need defense-in-depth at the
- *     persistence boundary
+ *     {@code ReadTool} / {@code GrepTool} wired with a {@code Redactor}, {@code
+ *     JShellExecutionProvider}) remains the recommended primary mitigation; this hook is ergonomic
+ *     sugar for deployers who need defense-in-depth at the persistence boundary
  */
 public record PgConfig(DbClient dbClient, String schema, String agentId, Redactor redactor) {
 

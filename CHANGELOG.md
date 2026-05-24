@@ -4,6 +4,122 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.4.0] — 2026-05-23 — workspace file tools redact; `kb_*` family removed
+
+A consolidation cut driven by a library-user observation: Helios shipped two
+parallel filesystem-tool families — `Read` / `Grep` / `Glob` rooted at the
+session's workspace, and `kb_read` / `kb_grep` / `kb_glob` from
+`FilesystemKnowledge` rooted at a curated corpus. Same primitive operations,
+different names, the agent had to disambiguate from descriptions. Claude Code
+has one such family, not two. So 2.4.0 folds the substantive feature
+(`SecretRegistry`-backed redaction) into the v2 workspace tools and removes
+the duplicate surface.
+
+### Fixed — `GlobTool` + `GrepTool` use Unix `**/` semantics
+
+Forward-port of the 2.3.2 fix that was applied to the (now-removed)
+`FilesystemKnowledge.compileGlob` but never to the v2 workspace tools.
+
+Java NIO's default `getPathMatcher("glob:**/*.md")` requires `**` to
+match at least one separator, so `'**/*.md'` against root-level
+`intro.md` silently returns zero hits. Every other glob system agents
+have seen (ripgrep, fd, gitignore, Python pathlib, Go filepath/match)
+treats `'**/*.md'` as recursive-including-root, and the tool
+descriptions advertised by `Glob` / `Grep` use `'**/*.java'` as the
+example — so the model reaches for the pattern it can't use.
+
+New `session.files.GlobMatchers.compile(FileSystem, String)` helper:
+for any pattern starting with `'**/'`, also try the pattern with that
+prefix stripped; a file matches if either form accepts it. Used by
+`GlobTool` and by `GrepTool`'s optional `include` glob filter.
+Semantics preserved for non-`'**/'`-leading patterns.
+
+Caught by the rewritten `WorkspaceReadOnlyRedactionAgentSession*`
+integration tests on first run against both Gemini and Anthropic —
+exactly the live-API smoke the pre-PR checklist exists for.
+
+### Added — `Redactor` overloads on `ReadTool` and `GrepTool`
+
+`ReadTool.binding(workspace, tracker, Redactor)` pipes text-path output
+through the supplied redactor before returning it to the model; the
+existing 2-arg overload (`binding(workspace, tracker)`) is unchanged and
+delegates with `null` for "no redaction".
+
+`GrepTool.binding(workspace, Redactor)` redacts the `content` portion of
+each `path:line:content` match; the path prefix is left alone (it is
+structural information the model needs to navigate, not secret material).
+The existing 1-arg overload (`binding(workspace)`) is unchanged.
+
+`GlobTool` gets no `Redactor` overload by design — its output is paths
+only, and paths are not treated as secret material.
+
+This is the same contract `FilesystemKnowledge` provided to its `kb_*`
+tools: any registered secret a `CommandGrant` (or any other source) wrote
+to a file is scrubbed when the workspace `Read` or `Grep` tool later
+returns a buffer containing it. Wire by passing
+`registry.redactor()` from your session-level `SecretRegistry`.
+
+### Removed — `core.knowledge` package (`FilesystemKnowledge`, `PathJail`, `kb_*` tools)
+
+```
+core/src/main/java/ai/singlr/core/knowledge/FilesystemKnowledge.java   (deleted)
+core/src/main/java/ai/singlr/core/knowledge/PathJail.java              (deleted)
+core/src/main/java/module-info.java   exports ai.singlr.core.knowledge  (removed)
+```
+
+`FilesystemKnowledge` predated the v2 session-level file tools (commit
+`629a648`, 2026-05-04) and shipped before `ReadTool` / `GrepTool` /
+`GlobTool` landed in v2 (commit `3bb1cd6`). After v2, it was vestigial:
+same primitive, parallel tests, parallel namespace. The only delta was
+its output redactor — now ported to the workspace tools above.
+
+**Migration.** Deployers using `FilesystemKnowledge` to expose a curated
+corpus to an agent rewire as:
+
+```java
+// Before:
+var kb = FilesystemKnowledge.builder(corpus).withSecretRegistry(registry).build();
+agentTools.addAll(kb.tools());
+
+// After:
+var workspace = WorkspaceRoot.of(corpus);
+var tracker   = InMemoryFileTracker.create();
+var redactor  = registry.redactor();
+var bindings  = List.of(
+    ReadTool.binding(workspace, tracker, redactor),
+    GrepTool.binding(workspace, redactor),
+    GlobTool.binding(workspace));
+```
+
+Tool names visible to the model change from `kb_read` / `kb_grep` /
+`kb_glob` to `Read` / `Grep` / `Glob`; prompts that reference the old
+names by name need updating. Path-jail and resource-cap behaviour is
+preserved (the v2 tools have always had `WorkspaceRoot` enforcement and
+their own per-file / per-line / per-output caps).
+
+`PathJail` in `core.knowledge` had no external callers — the v2
+`WorkspaceRoot` (in `session.files`) provides the equivalent jail.
+
+### Doc + javadoc sweep
+
+- `README.md`: removed the dedicated "FilesystemKnowledge — curated
+  corpus, no vector DB" section; folded the redaction story into the
+  workspace-file-tools section.
+- `repl/SandboxPolicy.java` javadoc: removed `{@link
+  ai.singlr.core.knowledge.FilesystemKnowledge}` reference; points at
+  session-level `Read` / `Grep` / `Glob` tools as the example.
+- `persistence/PgConfig.java` javadoc: source-level redaction list now
+  names `ReadTool` / `GrepTool` (wired with a `Redactor`) instead of
+  `FilesystemKnowledge`.
+
+### Test count
+
+`helios-session` + `helios-core` unit tests: +5 (Redactor overload
+coverage). `examples/session-demo` integration tests: net zero (the two
+`FilesystemKnowledgeAgentSessionIntegrationTest` files were rewritten as
+`WorkspaceReadOnlyRedactionAgentSessionIntegrationTest` against the v2
+tools — same three scenarios per provider).
+
 ## [2.3.3] — 2026-05-23 — outputSchema + tools fix; session-loop schema self-correction
 
 Three cooperating fixes for the Light Grid bug report (2026-05-22): an

@@ -108,7 +108,7 @@ public final class GlobTool {
       if (!Files.isDirectory(root)) {
         return ToolResult.failure("Glob: not a directory: " + workspace.relativize(root));
       }
-      var matcher = root.getFileSystem().getPathMatcher("glob:" + pattern);
+      var matcher = GlobMatchers.compile(root.getFileSystem(), pattern);
       var hits = new ArrayList<Match>();
       Files.walkFileTree(
           root,

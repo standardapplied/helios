@@ -4,6 +4,7 @@
  */
 package ai.singlr.session.files;
 
+import ai.singlr.core.common.Redactor;
 import ai.singlr.core.model.InlineFile;
 import ai.singlr.core.tool.ParameterType;
 import ai.singlr.core.tool.Tool;
@@ -130,7 +131,9 @@ public final class ReadTool {
   private ReadTool() {}
 
   /**
-   * Build a tool binding bound to the given workspace + tracker.
+   * Build a tool binding bound to the given workspace + tracker, with no secret redaction.
+   * Equivalent to {@link #binding(WorkspaceRoot, FileTracker, Redactor) binding(workspace, tracker,
+   * null)}.
    *
    * @param workspace the path-jail workspace; non-null
    * @param tracker per-session read/write ledger; non-null
@@ -138,6 +141,29 @@ public final class ReadTool {
    * @throws NullPointerException if either argument is null
    */
   public static ToolBinding binding(WorkspaceRoot workspace, FileTracker tracker) {
+    return binding(workspace, tracker, null);
+  }
+
+  /**
+   * Build a tool binding bound to the given workspace + tracker, piping text-path output through
+   * the supplied {@link Redactor} before returning it to the model. Use this overload when wiring
+   * the tool against a corpus that may contain registered secrets (the "curated knowledge corpus"
+   * pattern) — pass {@code registry.redactor()} where {@code registry} is the same {@link
+   * ai.singlr.core.common.SecretRegistry} you handed to {@code CommandGrant}, so a token written by
+   * one tool is scrubbed when another reads it back.
+   *
+   * <p>Redaction applies to text-body output only. Error messages, attachment notes, and truncation
+   * markers (which may contain workspace-relative paths) are not redacted — paths are structural
+   * information the model needs to navigate, not secret material.
+   *
+   * @param workspace the path-jail workspace; non-null
+   * @param tracker per-session read/write ledger; non-null
+   * @param redactor applied to text-body output before it reaches the model; null = no redaction
+   * @return a ready-to-register binding
+   * @throws NullPointerException if {@code workspace} or {@code tracker} is null
+   */
+  public static ToolBinding binding(
+      WorkspaceRoot workspace, FileTracker tracker, Redactor redactor) {
     Objects.requireNonNull(workspace, "workspace must not be null");
     Objects.requireNonNull(tracker, "tracker must not be null");
     var tool =
@@ -173,7 +199,7 @@ public final class ReadTool {
                         .withRequired(false)
                         .build()))
             .withIdempotent(true)
-            .withExecutor((args, ctx) -> execute(ctx, workspace, tracker, args))
+            .withExecutor((args, ctx) -> execute(ctx, workspace, tracker, redactor, args))
             .build();
     return ToolBinding.newBuilder(tool)
         .withCategory(ToolCategory.READ)
@@ -183,7 +209,11 @@ public final class ReadTool {
   }
 
   private static ToolResult execute(
-      ToolContext ctx, WorkspaceRoot workspace, FileTracker tracker, Map<String, Object> args) {
+      ToolContext ctx,
+      WorkspaceRoot workspace,
+      FileTracker tracker,
+      Redactor redactor,
+      Map<String, Object> args) {
     ctx.cancellation().throwIfCancelled();
     var pathArg = ToolArgs.stringArg(args, "path");
     if (pathArg.isEmpty()) {
@@ -232,7 +262,7 @@ public final class ReadTool {
       if (limit < 1) {
         return ToolResult.failure("Read: 'limit' must be >= 1, got " + limit);
       }
-      return readTextStreaming(resolved, offset, limit);
+      return readTextStreaming(resolved, offset, limit, redactor);
     }
     return ToolResult.failure(
         "Read: refusing to decode binary file as text (detected MIME "
@@ -247,7 +277,7 @@ public final class ReadTool {
    * #MAX_OUTPUT_BYTES}; either cap appends a truncation marker that teaches the model the next
    * move. The remainder of the file is never read once a cap fires.
    */
-  private static ToolResult readTextStreaming(Path file, int offset, int limit) {
+  private static ToolResult readTextStreaming(Path file, int offset, int limit, Redactor redactor) {
     var out = new StringBuilder();
     int linesEmitted = 0;
     long currentLine = 0;
@@ -306,7 +336,8 @@ public final class ReadTool {
           .append(MAX_LINE_BYTES)
           .append(" bytes and was truncated mid-line.]\n");
     }
-    return ToolResult.success(out.toString());
+    var text = out.toString();
+    return ToolResult.success(redactor == null ? text : redactor.redact(text).text());
   }
 
   /**

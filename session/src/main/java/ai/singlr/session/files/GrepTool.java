@@ -4,6 +4,7 @@
  */
 package ai.singlr.session.files;
 
+import ai.singlr.core.common.Redactor;
 import ai.singlr.core.common.Strings;
 import ai.singlr.core.tool.ParameterType;
 import ai.singlr.core.tool.Tool;
@@ -63,13 +64,35 @@ public final class GrepTool {
   private GrepTool() {}
 
   /**
-   * Build a tool binding bound to the given workspace.
+   * Build a tool binding bound to the given workspace, with no secret redaction. Equivalent to
+   * {@link #binding(WorkspaceRoot, Redactor) binding(workspace, null)}.
    *
    * @param workspace the path-jail workspace; non-null
    * @return a ready-to-register binding
    * @throws NullPointerException if {@code workspace} is null
    */
   public static ToolBinding binding(WorkspaceRoot workspace) {
+    return binding(workspace, null);
+  }
+
+  /**
+   * Build a tool binding bound to the given workspace, piping the matched line content through the
+   * supplied {@link Redactor} before returning it to the model. Use this overload when the searched
+   * tree may contain registered secrets (the "curated knowledge corpus" pattern) — pass {@code
+   * registry.redactor()} where {@code registry} is the same {@link
+   * ai.singlr.core.common.SecretRegistry} you handed to other tools, so a token written by one tool
+   * is scrubbed when grep returns a line containing it.
+   *
+   * <p>Redaction is applied to the {@code content} portion of each {@code path:line:content} match
+   * only. Path prefixes are not redacted — they are structural information the model needs to
+   * navigate, not secret material.
+   *
+   * @param workspace the path-jail workspace; non-null
+   * @param redactor applied to each match's content; null = no redaction
+   * @return a ready-to-register binding
+   * @throws NullPointerException if {@code workspace} is null
+   */
+  public static ToolBinding binding(WorkspaceRoot workspace, Redactor redactor) {
     Objects.requireNonNull(workspace, "workspace must not be null");
     var tool =
         Tool.newBuilder()
@@ -102,7 +125,7 @@ public final class GrepTool {
                         .withRequired(false)
                         .build()))
             .withIdempotent(true)
-            .withExecutor((args, ctx) -> execute(ctx, workspace, args))
+            .withExecutor((args, ctx) -> execute(ctx, workspace, redactor, args))
             .build();
     return ToolBinding.newBuilder(tool)
         .withCategory(ToolCategory.SEARCH)
@@ -111,7 +134,7 @@ public final class GrepTool {
   }
 
   private static ToolResult execute(
-      ToolContext ctx, WorkspaceRoot workspace, Map<String, Object> args) {
+      ToolContext ctx, WorkspaceRoot workspace, Redactor redactor, Map<String, Object> args) {
     var rawPattern = ToolArgs.stringArg(args, "pattern");
     if (Strings.isBlank(rawPattern)) {
       return ToolResult.failure("Grep: missing required 'pattern' argument");
@@ -130,7 +153,7 @@ public final class GrepTool {
         return ToolResult.failure("Grep: not a directory: " + workspace.relativize(root));
       }
       var includeMatcher =
-          includeArg.isEmpty() ? null : root.getFileSystem().getPathMatcher("glob:" + includeArg);
+          includeArg.isEmpty() ? null : GlobMatchers.compile(root.getFileSystem(), includeArg);
       var out = new StringBuilder();
       var matchCount = new int[] {0};
       Files.walkFileTree(
@@ -172,11 +195,12 @@ public final class GrepTool {
                   while ((line = reader.readLine()) != null) {
                     lineNum++;
                     if (regex.matcher(line).find()) {
+                      var emittedLine = redactor == null ? line : redactor.redact(line).text();
                       out.append(relPath)
                           .append(':')
                           .append(lineNum)
                           .append(':')
-                          .append(line)
+                          .append(emittedLine)
                           .append('\n');
                       matchCount[0]++;
                       if (matchCount[0] >= MAX_MATCHES) {

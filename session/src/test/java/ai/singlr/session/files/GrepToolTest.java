@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.core.common.SecretRegistry;
 import ai.singlr.session.tools.ToolCategory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -160,7 +161,57 @@ final class GrepToolTest {
   }
 
   @Test
+  void includeGlobRecursivePatternMatchesRootFiles(@TempDir Path tmp) throws IOException {
+    // Same regression as GlobTool: '**/*.md' must match root-level intro.md, not silently skip it.
+    Files.writeString(tmp.resolve("intro.md"), "needle\n", StandardCharsets.UTF_8);
+    Files.writeString(tmp.resolve("config.yaml"), "needle\n", StandardCharsets.UTF_8);
+
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "needle", "include", "**/*.md"));
+
+    assertTrue(result.success(), result.output());
+    var out = result.output();
+    assertTrue(out.contains("intro.md:1:needle"), "root .md must match include='**/*.md': " + out);
+    assertFalse(out.contains("config.yaml"), "yaml must be filtered out: " + out);
+  }
+
+  @Test
   void rejectsNullWorkspace() {
     assertThrows(NullPointerException.class, () -> GrepTool.binding(null));
+    assertThrows(NullPointerException.class, () -> GrepTool.binding(null, null));
+  }
+
+  @Test
+  void redactorOverloadScrubsMatchContentButLeavesPath(@TempDir Path tmp) throws IOException {
+    Files.writeString(
+        tmp.resolve("config.txt"),
+        "user=alice\napi_key=ghp_supersecrettoken_xyz\n",
+        StandardCharsets.UTF_8);
+    var registry = new SecretRegistry();
+    registry.register("GH_TOKEN", "ghp_supersecrettoken_xyz");
+
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp), registry.redactor())
+            .tool()
+            .execute(Map.of("pattern", "api_key"));
+
+    assertTrue(result.success(), result.output());
+    var out = result.output();
+    assertFalse(out.contains("ghp_supersecrettoken_xyz"), "secret leaked: " + out);
+    assertTrue(out.contains("<redacted:GH_TOKEN>"), "marker missing: " + out);
+    assertTrue(out.contains("config.txt:2:"), "path prefix should remain: " + out);
+  }
+
+  @Test
+  void redactorNullEquivalentToOneArgBinding(@TempDir Path tmp) throws IOException {
+    Files.writeString(tmp.resolve("a.txt"), "hello\n", StandardCharsets.UTF_8);
+    var withNull =
+        GrepTool.binding(WorkspaceRoot.of(tmp), null).tool().execute(Map.of("pattern", "hello"));
+    var oneArg = GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "hello"));
+    assertTrue(withNull.success());
+    assertTrue(oneArg.success());
+    assertEquals(oneArg.output(), withNull.output());
   }
 }

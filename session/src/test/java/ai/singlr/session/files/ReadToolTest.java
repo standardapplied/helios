@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.core.common.SecretRegistry;
 import ai.singlr.session.tools.ToolCategory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -725,6 +726,63 @@ final class ReadToolTest {
     assertFalse(
         result.output().contains("[truncated"),
         "reading exactly limit lines should NOT emit a truncation marker: " + result.output());
+  }
+
+  @Test
+  void redactorOverloadScrubsSecretsFromTextBody(@TempDir Path tmp) throws IOException {
+    var file = tmp.resolve("config.txt");
+    Files.writeString(
+        file, "user=alice\napi_key=ghp_supersecrettoken_xyz\nhost=prod\n", StandardCharsets.UTF_8);
+    var registry = new SecretRegistry();
+    registry.register("GH_TOKEN", "ghp_supersecrettoken_xyz");
+
+    var result =
+        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create(), registry.redactor())
+            .tool()
+            .execute(Map.of("path", "config.txt"));
+
+    assertTrue(result.success(), result.output());
+    var out = result.output();
+    assertFalse(out.contains("ghp_supersecrettoken_xyz"), "secret leaked: " + out);
+    assertTrue(out.contains("<redacted:GH_TOKEN>"), "marker missing: " + out);
+    assertTrue(out.contains("alice"), "non-secret content lost: " + out);
+    assertTrue(out.contains("prod"), "non-secret content lost: " + out);
+  }
+
+  @Test
+  void redactorOverloadNullEquivalentToTwoArgBinding(@TempDir Path tmp) throws IOException {
+    var file = tmp.resolve("plain.txt");
+    Files.writeString(file, "one\ntwo\n", StandardCharsets.UTF_8);
+
+    var withNull =
+        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create(), null)
+            .tool()
+            .execute(Map.of("path", "plain.txt"));
+    var twoArg =
+        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+            .tool()
+            .execute(Map.of("path", "plain.txt"));
+
+    assertTrue(withNull.success());
+    assertTrue(twoArg.success());
+    assertEquals(twoArg.output(), withNull.output());
+  }
+
+  @Test
+  void redactorEmptyRegistryIsNoOp(@TempDir Path tmp) throws IOException {
+    var file = tmp.resolve("plain.txt");
+    Files.writeString(file, "ghp_supersecrettoken_xyz\n", StandardCharsets.UTF_8);
+    var registry = new SecretRegistry();
+
+    var result =
+        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create(), registry.redactor())
+            .tool()
+            .execute(Map.of("path", "plain.txt"));
+
+    assertTrue(result.success(), result.output());
+    assertTrue(
+        result.output().contains("ghp_supersecrettoken_xyz"),
+        "empty registry must not redact: " + result.output());
   }
 
   @Test

@@ -62,9 +62,9 @@ import java.util.Set;
  *     and the purely-string methods ({@code getName}, {@code getPath}, {@code getAbsolutePath},
  *     etc.) stay callable because they don't reach the filesystem.
  *     <p>This is the right flag to set whenever the snippet's filesystem access should funnel
- *     through host-owned tools (e.g. {@link ai.singlr.core.knowledge.FilesystemKnowledge}) rather
- *     than raw {@code Files.readAllBytes} — set this flag, then expose the curated path-jail
- *     surface as host tools. Combine with {@link
+ *     through host-owned tools (e.g. the session's {@code Read} / {@code Grep} / {@code Glob} tools
+ *     rooted at a curated {@code WorkspaceRoot}) rather than raw {@code Files.readAllBytes} — set
+ *     this flag, then expose the curated path-jail surface as host tools. Combine with {@link
  *     ai.singlr.repl.sandbox.JvmSandboxConfig#workingDirectory()} for defense-in-depth on
  *     relative-path resolution.
  * @param onViolation how the verifier reports a violation. {@link ViolationAction#THROW} is the
