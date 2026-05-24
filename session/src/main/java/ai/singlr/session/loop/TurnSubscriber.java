@@ -8,15 +8,22 @@ import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.ModelChunk;
 import ai.singlr.core.model.Response.Usage;
 import ai.singlr.core.model.ToolCall;
+import ai.singlr.core.runtime.CancellationToken;
 import ai.singlr.session.QueryEvent;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -41,6 +48,9 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   private final SessionState state;
   private final EventEmitter emitter;
   private final Clock clock;
+  private final ScheduledExecutorService scheduler;
+  private final Duration idleTimeout;
+  private final long idleTimeoutMillis;
   private final StringBuilder content = new StringBuilder();
   private final List<ToolCall> toolCalls = new CopyOnWriteArrayList<>();
   private final CountDownLatch done = new CountDownLatch(1);
@@ -49,20 +59,31 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   private final AtomicReference<Usage> usage = new AtomicReference<>(Usage.of(0, 0));
   private final AtomicReference<Map<String, String>> metadata = new AtomicReference<>(Map.of());
   private final AtomicReference<Throwable> error = new AtomicReference<>();
+  private final AtomicReference<ScheduledFuture<?>> idleTimer = new AtomicReference<>();
 
-  TurnSubscriber(SessionState state, EventEmitter emitter, Clock clock) {
+  TurnSubscriber(
+      SessionState state,
+      EventEmitter emitter,
+      Clock clock,
+      ScheduledExecutorService scheduler,
+      Duration idleTimeout) {
     this.state = state;
     this.emitter = emitter;
     this.clock = clock;
+    this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
+    this.idleTimeout = Objects.requireNonNull(idleTimeout, "idleTimeout must not be null");
+    this.idleTimeoutMillis = idleTimeout.toMillis();
   }
 
   @Override
   public void onSubscribe(Flow.Subscription subscription) {
+    armIdleTimer();
     subscription.request(Long.MAX_VALUE);
   }
 
   @Override
   public void onNext(ModelChunk chunk) {
+    armIdleTimer();
     switch (chunk) {
       case ModelChunk.TextDelta(String text) -> handleTextDelta(text);
       case ModelChunk.ThinkingDelta(String text) -> handleThinkingDelta(text);
@@ -72,6 +93,45 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       case ModelChunk.ToolUseStart ignored -> {}
       case ModelChunk.ToolUseDelta ignored -> {}
     }
+  }
+
+  /**
+   * Cancel any pending idle-deadline task and arm a fresh one. Called on subscribe and on every
+   * inbound chunk; a stream that emits no chunk for {@code idleTimeout} fires {@link
+   * #fireIdleTimeout()} which surfaces the stall to the runner as a turn-ending error.
+   */
+  private void armIdleTimer() {
+    var prior = idleTimer.getAndSet(null);
+    if (prior != null) {
+      prior.cancel(false);
+    }
+    if (done.getCount() == 0L) {
+      // The terminal signal already fired (race with the scheduler firing or the producer's
+      // own onComplete/onError). Don't re-arm.
+      return;
+    }
+    var fresh = scheduler.schedule(this::fireIdleTimeout, idleTimeoutMillis, TimeUnit.MILLISECONDS);
+    if (!idleTimer.compareAndSet(null, fresh)) {
+      fresh.cancel(false);
+    }
+  }
+
+  private void cancelIdleTimer() {
+    var t = idleTimer.getAndSet(null);
+    if (t != null) {
+      t.cancel(false);
+    }
+  }
+
+  private void fireIdleTimeout() {
+    error.compareAndSet(
+        null,
+        new java.util.concurrent.TimeoutException(
+            "model stream emitted no chunk for "
+                + idleTimeout
+                + " (streamIdleTimeout); treating as stalled"));
+    finishReason.set(FinishReason.ERROR);
+    done.countDown();
   }
 
   private void handleTextDelta(String text) {
@@ -96,6 +156,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
   @Override
   public void onError(Throwable t) {
+    cancelIdleTimer();
     error.set(t);
     finishReason.set(FinishReason.ERROR);
     done.countDown();
@@ -103,17 +164,40 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
   @Override
   public void onComplete() {
+    cancelIdleTimer();
     done.countDown();
   }
 
-  void awaitDone() {
+  /**
+   * Block until the producer's terminal signal fires, the session's {@link CancellationToken} is
+   * cancelled, or the calling thread is interrupted. Without the cancellation hook a provider
+   * stream that never delivers {@code onComplete} / {@code onError} (silent socket, hung proxy)
+   * would pin this thread indefinitely — defeating {@link
+   * ai.singlr.session.SessionLimits#maxWallClock()} which is only re-checked at turn boundaries.
+   *
+   * <p>The cancellation callback is removed in {@code finally} so a long-lived session token does
+   * not accumulate one stale registration per turn (see the {@code CancellationToken.onCancel}
+   * cleanup contract).
+   */
+  void awaitDone(CancellationToken cancellation) {
+    var registration = cancellation.onCancel(this::cancelFromToken);
     try {
       done.await();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       error.compareAndSet(null, e);
       finishReason.set(FinishReason.ERROR);
+    } finally {
+      registration.remove();
+      cancelIdleTimer();
     }
+  }
+
+  private void cancelFromToken() {
+    error.compareAndSet(
+        null, new CancellationException("session cancelled while waiting for model stream"));
+    finishReason.set(FinishReason.ERROR);
+    done.countDown();
   }
 
   TurnOutcome toOutcome() {

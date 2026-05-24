@@ -19,10 +19,15 @@ import java.util.Optional;
  * <p>Called by the agent loop after every turn. The classifier inspects, in priority order:
  *
  * <ol>
- *   <li>Cancellation — the session's {@link ai.singlr.core.runtime.CancellationToken
- *       CancellationToken} is signalled.
+ *   <li>Wall-clock ceiling — elapsed time exceeds {@code limits.maxWallClock()}. Checked
+ *       <i>before</i> the cancellation branch because the wall-clock deadline scheduler implements
+ *       itself by cancelling the session token; without this ordering the resulting terminal would
+ *       be {@link ResultMessage.Cancelled} instead of the more informative {@link
+ *       ResultMessage.ErrorMaxWallClock}.
  *   <li>Budget exhaustion — accumulated cost exceeds {@code limits.maxBudgetMicroUsd()}.
- *   <li>Wall-clock ceiling — elapsed time exceeds {@code limits.maxWallClock()}.
+ *   <li>Cancellation — the session's {@link ai.singlr.core.runtime.CancellationToken
+ *       CancellationToken} is signalled by a path other than wall-clock expiry (explicit {@code
+ *       close()}, host-initiated cancel).
  *   <li>Turn ceiling — current turn index has reached {@code limits.maxTurns()}.
  *   <li>Refusal — the provider reported {@link FinishReason#CONTENT_FILTER}.
  *   <li>Provider error — the provider reported {@link FinishReason#ERROR}.
@@ -72,14 +77,10 @@ public final class StopClassifier {
     Objects.requireNonNull(finishReason, "finishReason must not be null");
     Objects.requireNonNull(assistantContent, "assistantContent must not be null");
 
-    if (state.cancellation().isCancelled()) {
+    if (state.elapsed().compareTo(limits.maxWallClock()) > 0) {
       return Optional.of(
-          new ResultMessage.Cancelled(
-              state.sessionId(),
-              state.cancellation().reason().orElseThrow(),
-              state.usage(),
-              state.cost(),
-              state.elapsed()));
+          new ResultMessage.ErrorMaxWallClock(
+              state.sessionId(), state.usage(), state.cost(), state.elapsed()));
     }
 
     if (limits.maxBudgetMicroUsd().isPresent()
@@ -93,10 +94,14 @@ public final class StopClassifier {
               state.elapsed()));
     }
 
-    if (state.elapsed().compareTo(limits.maxWallClock()) > 0) {
+    if (state.cancellation().isCancelled()) {
       return Optional.of(
-          new ResultMessage.ErrorMaxWallClock(
-              state.sessionId(), state.usage(), state.cost(), state.elapsed()));
+          new ResultMessage.Cancelled(
+              state.sessionId(),
+              state.cancellation().reason().orElseThrow(),
+              state.usage(),
+              state.cost(),
+              state.elapsed()));
     }
 
     if (state.currentTurnIndex() >= limits.maxTurns()) {

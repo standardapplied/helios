@@ -4,6 +4,87 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.5.0] — 2026-05-24 — hung-session bugfix: wall-clock hard deadline + per-chunk stream-idle timeout
+
+A client stack trace surfaced a Helios session pinned at `AgentSession.runBlocking` →
+`CompletableFuture.join()` for 494 s despite a 2-minute wall-clock cap. Two cooperating defects:
+
+1. **`maxWallClock` was only re-checked between turns.** A turn whose model stream
+   delivered no terminal signal (silent socket, hung edge / proxy / load balancer)
+   blocked the loop indefinitely in `TurnSubscriber.awaitDone()`. The wall-clock
+   check in `StopClassifier` never got a chance to run.
+2. **No per-chunk idle ceiling on the streaming subscriber.** Even with a working
+   wall-clock deadline, a session whose stream stalls for 50 minutes burns the entire
+   wall-clock budget waiting for chunks that never come — useful work stops long
+   before termination.
+
+2.5.0 closes both, test-first. Two RED regression tests
+(`AgentSessionWallClockTest`, `AgentSessionStreamIdleTest`) reproduced the hangs
+deterministically before any production change landed.
+
+### Fixed — `maxWallClock` is now a hard deadline
+
+`AgentSessionImpl` owns a session-scoped daemon `ScheduledExecutorService` that
+arms a one-shot task at session start. When `maxWallClock` elapses the task
+calls `state.cancellation().cancel("maxWallClock exceeded after Nms")`.
+
+`TurnSubscriber.awaitDone(CancellationToken)` registers an `onCancel` callback
+that counts down the latch, releasing the runner thread without waiting for the
+provider's `onComplete` / `onError`. The cancellation registration is removed
+in `finally` so the long-lived session token doesn't accumulate stale callbacks
+across turns (the documented `CancellationToken.onCancel` cleanup contract).
+
+`StopClassifier` priority order is now wall-clock → budget → cancellation →
+turns. Without the reorder the wall-clock-triggered cancellation would surface
+as `ResultMessage.Cancelled` instead of the more informative `ErrorMaxWallClock`.
+Explicit `close()` and host-initiated cancels still produce `Cancelled` —
+exercised in tests; the priority shift only changes the wall-clock-derived case.
+
+### Added — `SessionLimits.streamIdleTimeout`
+
+New per-chunk idle ceiling on the model stream, default **60 s**. Every
+`onSubscribe` and `onNext` resets a scheduled task armed against the shared
+session scheduler; if no chunk arrives for `streamIdleTimeout` the subscriber
+synthesises an `onError(TimeoutException)`, the turn ends with
+`FinishReason.ERROR`, and `StopClassifier` produces
+`ResultMessage.ErrorDuringExecution`.
+
+Wire via `SessionLimits.newBuilder().withStreamIdleTimeout(Duration.ofSeconds(15))`.
+The shared per-session scheduler is reused; tests get a process-wide daemon
+default via the 9-arg `TurnRunner` convenience constructor.
+
+This is a compatible breaking change for direct constructors of `SessionLimits`
+(the record gains a sixth component) and a binary-compatible additive change to
+the Builder. Deployers using the Builder need no code changes; the new field
+defaults to 60 s.
+
+### Wired
+
+- `AgentSessionImpl` constructs a `helios-deadline-<sessionId>` daemon
+  scheduler in its constructor; passes it to `TurnRunner` and shuts it down in
+  `closeRuntime()` after the publisher executor drains.
+- `TurnRunner` exposes a 9-arg back-compat constructor (uses a lazily-created
+  process-wide daemon scheduler) and a 10-arg constructor for production use.
+- `TurnSubscriber` constructor signature gains `(ScheduledExecutorService,
+  Duration)`. Package-private — no public surface change.
+
+### Tests
+
+- `AgentSessionWallClockTest` (2 tests, ~1.07 s): zero-chunk silent stream
+  surfaces `ErrorMaxWallClock` within 500 ms of the configured deadline.
+  Pre-fix: hung indefinitely.
+- `AgentSessionStreamIdleTest` (2 tests, ~0.67 s): zero-chunk and mid-stream
+  stall cases both surface `ErrorDuringExecution` within `streamIdleTimeout`
+  while leaving `maxWallClock` (10 s) untouched as the trigger.
+- `StopClassifierTest.wallClockExceededTakesPriorityOverCancellation` pins the
+  priority reorder.
+- `SessionLimitsTest` gains coverage for the new builder method, the canonical
+  constructor's positivity / null validation, and the updated defaults
+  assertion.
+
+Total `helios-session`: 1163 → 1170 tests; coverage gate (95 % inst / 90 %
+branch) green.
+
 ## [2.4.0] — 2026-05-23 — workspace file tools redact; `kb_*` family removed
 
 A consolidation cut driven by a library-user observation: Helios shipped two

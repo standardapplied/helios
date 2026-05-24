@@ -25,12 +25,14 @@ final class SessionLimitsTest {
             OptionalLong.of(12_500_000L),
             Duration.ofMinutes(30),
             Duration.ofSeconds(45),
-            32_000L);
+            32_000L,
+            Duration.ofSeconds(30));
     assertEquals(50, l.maxTurns());
     assertEquals(OptionalLong.of(12_500_000L), l.maxBudgetMicroUsd());
     assertEquals(Duration.ofMinutes(30), l.maxWallClock());
     assertEquals(Duration.ofSeconds(45), l.toolTimeoutDefault());
     assertEquals(32_000L, l.maxContextTokens());
+    assertEquals(Duration.ofSeconds(30), l.streamIdleTimeout());
   }
 
   @Test
@@ -41,6 +43,7 @@ final class SessionLimitsTest {
     assertEquals(Duration.ofHours(1), d.maxWallClock());
     assertEquals(Duration.ofMinutes(2), d.toolTimeoutDefault());
     assertEquals(180_000L, d.maxContextTokens());
+    assertEquals(Duration.ofSeconds(60), d.streamIdleTimeout());
   }
 
   @Test
@@ -239,7 +242,12 @@ final class SessionLimitsTest {
       Duration toolTimeoutDefault,
       long maxContextTokens) {
     return new SessionLimits(
-        maxTurns, maxBudgetMicroUsd, maxWallClock, toolTimeoutDefault, maxContextTokens);
+        maxTurns,
+        maxBudgetMicroUsd,
+        maxWallClock,
+        toolTimeoutDefault,
+        maxContextTokens,
+        Duration.ofSeconds(60));
   }
 
   private static Duration oneHour() {
@@ -248,5 +256,40 @@ final class SessionLimitsTest {
 
   private static Duration twoMin() {
     return Duration.ofMinutes(2);
+  }
+
+  // ── streamIdleTimeout ─────────────────────────────────────────────────────
+
+  @Test
+  void streamIdleTimeoutZeroRejected() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new SessionLimits(
+                    100, OptionalLong.empty(), oneHour(), twoMin(), 1_000L, Duration.ZERO));
+    assertEquals("streamIdleTimeout must be strictly positive, got PT0S", ex.getMessage());
+  }
+
+  @Test
+  void streamIdleTimeoutNegativeRejected() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SessionLimits(
+                100, OptionalLong.empty(), oneHour(), twoMin(), 1_000L, Duration.ofSeconds(-1)));
+  }
+
+  @Test
+  void streamIdleTimeoutNullRejected() {
+    assertThrows(
+        NullPointerException.class,
+        () -> new SessionLimits(100, OptionalLong.empty(), oneHour(), twoMin(), 1_000L, null));
+  }
+
+  @Test
+  void builderWithStreamIdleTimeout() {
+    var l = SessionLimits.newBuilder().withStreamIdleTimeout(Duration.ofSeconds(15)).build();
+    assertEquals(Duration.ofSeconds(15), l.streamIdleTimeout());
   }
 }

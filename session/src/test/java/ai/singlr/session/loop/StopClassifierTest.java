@@ -36,6 +36,10 @@ final class StopClassifierTest {
   }
 
   private static SessionState stateAtElapsed(Duration elapsed) {
+    return stateAtElapsed(elapsed, new CancellationToken());
+  }
+
+  private static SessionState stateAtElapsed(Duration elapsed, CancellationToken cancellation) {
     var t0 = Instant.parse("2026-05-14T19:00:00Z");
     var movingClock =
         new Clock() {
@@ -56,7 +60,7 @@ final class StopClassifierTest {
             return calls++ == 0 ? t0 : t0.plus(elapsed);
           }
         };
-    return new SessionState(SID, new CancellationToken(), movingClock);
+    return new SessionState(SID, cancellation, movingClock);
   }
 
   private static SessionLimits defaults() {
@@ -93,7 +97,7 @@ final class StopClassifierTest {
         () -> classifier.classify(state(), defaults(), FinishReason.STOP, null, false));
   }
 
-  // ── cancellation wins over everything ─────────────────────────────────────
+  // ── cancellation ──────────────────────────────────────────────────────────
 
   @Test
   void cancellationProducesCancelled() {
@@ -103,6 +107,18 @@ final class StopClassifierTest {
     var c = assertInstanceOf(ResultMessage.Cancelled.class, result.orElseThrow());
     assertEquals("user-stop", c.reason());
     assertEquals(SID, c.sessionId());
+  }
+
+  @Test
+  void wallClockExceededTakesPriorityOverCancellation() {
+    // The wall-clock deadline scheduler in AgentSessionImpl implements itself by cancelling the
+    // session token; without the priority ordering the resulting terminal would be Cancelled
+    // instead of the more informative ErrorMaxWallClock. Pins the ordering.
+    var token = new CancellationToken();
+    token.cancel("maxWallClock exceeded after 500ms");
+    var s = stateAtElapsed(Duration.ofHours(2), token);
+    var result = classifier.classify(s, defaults(), FinishReason.STOP, "ignored", false);
+    assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, result.orElseThrow());
   }
 
   // ── budget ────────────────────────────────────────────────────────────────

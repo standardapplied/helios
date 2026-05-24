@@ -83,6 +83,29 @@ public final class TurnRunner {
   private final EventEmitter emitter;
   private final CostCalculator costCalculator;
   private final OutputSchema<?> outputSchema;
+  private final java.util.concurrent.ScheduledExecutorService scheduler;
+
+  /**
+   * Lazily-initialised process-wide daemon scheduler used by the 9-arg convenience constructor.
+   * Production callers ({@link ai.singlr.session.AgentSessionImpl}) construct a session-scoped
+   * scheduler and pass it via the 10-arg constructor so resource lifetime is bounded; this default
+   * exists only so test fixtures don't have to wire one. Daemon threads never block JVM exit.
+   */
+  private static volatile java.util.concurrent.ScheduledExecutorService DEFAULT_SCHEDULER;
+
+  private static synchronized java.util.concurrent.ScheduledExecutorService
+      sharedDefaultScheduler() {
+    if (DEFAULT_SCHEDULER == null) {
+      DEFAULT_SCHEDULER =
+          java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
+              r -> {
+                var t = new Thread(r, "helios-turnrunner-default-scheduler");
+                t.setDaemon(true);
+                return t;
+              });
+    }
+    return DEFAULT_SCHEDULER;
+  }
 
   /**
    * Build a turn runner.
@@ -121,6 +144,54 @@ public final class TurnRunner {
       Clock clock,
       CostCalculator costCalculator,
       OutputSchema<?> outputSchema) {
+    this(
+        model,
+        hooks,
+        toolDispatch,
+        steeringQueue,
+        eventSink,
+        hookContextFactory,
+        clock,
+        costCalculator,
+        outputSchema,
+        sharedDefaultScheduler());
+  }
+
+  /**
+   * Same as {@link #TurnRunner(Model, HookRegistry, ToolDispatch, SteeringQueue, Consumer,
+   * Function, Clock, CostCalculator, OutputSchema)} but supplies an explicit scheduler. Production
+   * callers ({@link ai.singlr.session.AgentSessionImpl}) pass a session-scoped scheduler that is
+   * shut down with the session; test fixtures use the convenience 9-arg overload that defaults to a
+   * process-wide daemon scheduler.
+   *
+   * @param model the model providing {@link Model#chatStream(List, List,
+   *     ai.singlr.core.runtime.CancellationToken)}; non-null
+   * @param hooks priority-sorted hook registry; non-null
+   * @param toolDispatch dispatcher for tool calls the model emits; non-null
+   * @param steeringQueue per-session inbox into which Inject-outcome hooks enqueue synthetic
+   *     messages; non-null
+   * @param eventSink consumer for {@link QueryEvent}s emitted during the turn; non-null
+   * @param hookContextFactory builds a per-fire {@link HookContext} from the session state;
+   *     non-null
+   * @param clock clock supplying event timestamps; non-null
+   * @param costCalculator converts per-turn {@link Usage} into a {@link
+   *     ai.singlr.core.common.CostEstimate}; non-null
+   * @param outputSchema the schema the model's text output must conform to, or {@code null} when
+   *     the session has no structured-output constraint
+   * @param scheduler shared per-session scheduler used by {@link TurnSubscriber} to enforce the
+   *     per-chunk {@code streamIdleTimeout}; non-null
+   */
+  public TurnRunner(
+      Model model,
+      HookRegistry hooks,
+      ToolDispatch toolDispatch,
+      SteeringQueue steeringQueue,
+      Consumer<QueryEvent> eventSink,
+      Function<SessionState, HookContext> hookContextFactory,
+      Clock clock,
+      CostCalculator costCalculator,
+      OutputSchema<?> outputSchema,
+      java.util.concurrent.ScheduledExecutorService scheduler) {
     this.model = Objects.requireNonNull(model, "model must not be null");
     this.hooks = Objects.requireNonNull(hooks, "hooks must not be null");
     this.toolDispatch = Objects.requireNonNull(toolDispatch, "toolDispatch must not be null");
@@ -130,6 +201,7 @@ public final class TurnRunner {
     this.clock = Objects.requireNonNull(clock, "clock must not be null");
     this.costCalculator = Objects.requireNonNull(costCalculator, "costCalculator must not be null");
     this.outputSchema = outputSchema;
+    this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
     this.emitter = new EventEmitter(eventSink, hooks, hookContextFactory, clock);
   }
 
@@ -160,7 +232,8 @@ public final class TurnRunner {
     var visibleTools =
         toolDispatch.registry().visible(visibilityCtx).stream().map(ToolBinding::tool).toList();
 
-    var subscriber = new TurnSubscriber(state, emitter, clock);
+    var subscriber =
+        new TurnSubscriber(state, emitter, clock, scheduler, limits.streamIdleTimeout());
     try {
       var publisher =
           outputSchema != null
@@ -171,7 +244,7 @@ public final class TurnRunner {
     } catch (Throwable t) {
       subscriber.onError(t);
     }
-    subscriber.awaitDone();
+    subscriber.awaitDone(state.cancellation());
 
     var schemaRecovery = trySelfCorrectSchema(state, subscriber);
     if (schemaRecovery != null) {

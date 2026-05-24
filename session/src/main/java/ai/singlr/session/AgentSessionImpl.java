@@ -39,6 +39,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.SubmissionPublisher;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -83,6 +85,8 @@ public final class AgentSessionImpl implements AgentSession {
   private final SessionLimits limits;
   private final SubmissionPublisher<QueryEvent> publisher;
   private final ExecutorService publisherExecutor;
+  private final ScheduledExecutorService deadlineScheduler;
+  private volatile ScheduledFuture<?> wallClockDeadline;
   private final AgentLoop loop;
   private final CompletableFuture<ResultMessage> resultFuture = new CompletableFuture<>();
   private final AtomicBoolean started = new AtomicBoolean(false);
@@ -111,6 +115,13 @@ public final class AgentSessionImpl implements AgentSession {
     this.steeringQueue = new SteeringQueue(concurrency.maxQueuedUserMessages());
     this.publisherExecutor = Executors.newVirtualThreadPerTaskExecutor();
     this.publisher = new SubmissionPublisher<>(publisherExecutor, PUBLISHER_BUFFER);
+    this.deadlineScheduler =
+        Executors.newSingleThreadScheduledExecutor(
+            r -> {
+              var t = new Thread(r, "helios-deadline-" + sessionId);
+              t.setDaemon(true);
+              return t;
+            });
     var sessionGateway = new SessionQuestionGateway();
     var combinedTools = withBuiltins(options.tools(), options, sessionGateway);
     var toolDispatch = new ToolDispatch(sessionContext, combinedTools, concurrency);
@@ -139,7 +150,8 @@ public final class AgentSessionImpl implements AgentSession {
             contextFactory,
             clock,
             options.costCalculator(),
-            options.outputSchema().orElse(null));
+            options.outputSchema().orElse(null),
+            deadlineScheduler);
     this.loop =
         new AgentLoop(
             turnRunner,
@@ -351,6 +363,11 @@ public final class AgentSessionImpl implements AgentSession {
       publisherExecutor.shutdownNow();
       Thread.currentThread().interrupt();
     }
+    var deadline = wallClockDeadline;
+    if (deadline != null) {
+      deadline.cancel(false);
+    }
+    deadlineScheduler.shutdownNow();
   }
 
   /** Package-private accessor for tests that need to assert executor shutdown. */
@@ -465,8 +482,31 @@ public final class AgentSessionImpl implements AgentSession {
 
   private void startIfNeeded() {
     if (started.compareAndSet(false, true)) {
+      scheduleWallClockDeadline();
       Thread.ofVirtual().name("helios-agent-loop-" + sessionId).start(this::runLoop);
     }
+  }
+
+  /**
+   * Arm a one-shot task that cancels the session's {@link CancellationToken} when {@code
+   * limits.maxWallClock()} elapses. Without this, {@code maxWallClock} is only checked at turn
+   * boundaries by {@link StopClassifier}, so a turn whose model stream never delivers {@code
+   * onComplete} / {@code onError} (silent socket, hung edge / proxy / load balancer) blocks the
+   * loop indefinitely. The wall-clock cancellation flips the token; {@link
+   * ai.singlr.session.loop.TurnSubscriber#awaitDone(CancellationToken)} observes it and unblocks;
+   * the loop proceeds to its next iteration, where {@link StopClassifier} sees {@code
+   * state.elapsed() > maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}.
+   *
+   * <p>The future is captured so {@link #close()} can cancel it before shutdown; the scheduler
+   * itself is owned by this session and drained by {@link #closeRuntime()}.
+   */
+  private void scheduleWallClockDeadline() {
+    var millis = limits.maxWallClock().toMillis();
+    wallClockDeadline =
+        deadlineScheduler.schedule(
+            () -> state.cancellation().cancel("maxWallClock exceeded after " + millis + "ms"),
+            millis,
+            TimeUnit.MILLISECONDS);
   }
 
   /**
