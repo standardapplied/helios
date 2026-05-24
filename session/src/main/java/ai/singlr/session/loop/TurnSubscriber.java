@@ -24,6 +24,7 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -99,6 +100,12 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * Cancel any pending idle-deadline task and arm a fresh one. Called on subscribe and on every
    * inbound chunk; a stream that emits no chunk for {@code idleTimeout} fires {@link
    * #fireIdleTimeout()} which surfaces the stall to the runner as a turn-ending error.
+   *
+   * <p>Two race-safety guards: after detaching the prior task we check {@link CountDownLatch}
+   * before scheduling a fresh one — if a terminal signal already fired we skip re-arming — and the
+   * post-schedule {@code compareAndSet} cancels the fresh task on the rare path where a concurrent
+   * arm beat us to slot it. Either guard losing leaks neither a scheduler task nor a missed
+   * deadline.
    */
   private void armIdleTimer() {
     var prior = idleTimer.getAndSet(null);
@@ -106,8 +113,6 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       prior.cancel(false);
     }
     if (done.getCount() == 0L) {
-      // The terminal signal already fired (race with the scheduler firing or the producer's
-      // own onComplete/onError). Don't re-arm.
       return;
     }
     var fresh = scheduler.schedule(this::fireIdleTimeout, idleTimeoutMillis, TimeUnit.MILLISECONDS);
@@ -126,7 +131,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   private void fireIdleTimeout() {
     error.compareAndSet(
         null,
-        new java.util.concurrent.TimeoutException(
+        new TimeoutException(
             "model stream emitted no chunk for "
                 + idleTimeout
                 + " (streamIdleTimeout); treating as stalled"));

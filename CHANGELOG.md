@@ -4,6 +4,59 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.5.1] — 2026-05-24 — code-quality cleanup in 2.5.0's session-loop changes
+
+Style-only follow-up — no behaviour change. A self-audit after 2.5.0 found three
+regressions against Helios's coding standards (`feedback_consistent_code_style`,
+the no-inline-comments rule in `CLAUDE.md`, and the 100 %-coverage-on-new-code
+quality bar). 2.5.1 closes them.
+
+### Fixed — inline FQDNs replaced with proper imports
+
+`session/src/main/java/ai/singlr/session/loop/TurnRunner.java` had five inline
+uses of `java.util.concurrent.ScheduledExecutorService` and
+`java.util.concurrent.Executors` (field type, static field, factory return
+type, constructor body, 10-arg constructor parameter). All now imported at the
+top of the file alongside the other `java.util.concurrent.*` imports.
+
+`session/src/main/java/ai/singlr/session/loop/TurnSubscriber.java#fireIdleTimeout`
+had one inline `new java.util.concurrent.TimeoutException(...)`. Now imported.
+
+Both files now consistent with the existing convention pinned in
+`feedback_consistent_code_style.md`: imports at the top, no inline FQNs.
+
+### Fixed — race-condition comment moved into method javadoc
+
+`TurnSubscriber#armIdleTimer` carried two `//` lines inside the method body
+explaining the post-terminal re-arm guard. Helios's no-inline-comments rule
+(`CLAUDE.md`) allows comments for "subtle invariants" but prefers method-level
+javadoc; the explanation now sits above the method as documentation rather than
+inside as commentary. The body is now noise-free.
+
+### Added — `TurnSubscriberRaceTest` covers post-terminal re-arm guard
+
+New 3-test file (`session/src/test/java/ai/singlr/session/loop/TurnSubscriberRaceTest.java`)
+pins the race-safety guards in `armIdleTimer` that the end-to-end
+`AgentSessionStreamIdleTest` couldn't reach deterministically:
+
+- `onNextAfterOnCompleteDoesNotReArmIdleTimer` — a post-`onComplete` chunk
+  (Reactive Streams forbids it but real provider publishers have been seen to
+  do it) must drop on the floor without scheduling a new task.
+- `onNextAfterOnErrorDoesNotReArmIdleTimer` — same shape, after `onError`.
+- `awaitDoneClearsIdleTimerAfterTerminal` — confirms no scheduled task
+  outlives the turn via a `CountingScheduler` decorator that asserts on
+  outstanding futures.
+
+`armIdleTimer` branch coverage rose from 66 % → 83 % (instruction 87 % → 89 %).
+The remaining gap is the genuine CAS-fail race between two concurrent
+re-arms — same defensive-concurrent-fallback class as the JaCoCo gaps
+documented in earlier releases (`PathJail`-style IOException catches). Pinning
+that would require an injected synchronization barrier; not worth the test
+fragility.
+
+Total `helios-session`: 1170 → 1173 tests, coverage gate (95 % inst / 90 %
+branch) green.
+
 ## [2.5.0] — 2026-05-24 — hung-session bugfix: wall-clock hard deadline + per-chunk stream-idle timeout
 
 A client stack trace surfaced a Helios session pinned at `AgentSession.runBlocking` →

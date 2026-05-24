@@ -32,6 +32,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -83,7 +85,7 @@ public final class TurnRunner {
   private final EventEmitter emitter;
   private final CostCalculator costCalculator;
   private final OutputSchema<?> outputSchema;
-  private final java.util.concurrent.ScheduledExecutorService scheduler;
+  private final ScheduledExecutorService scheduler;
 
   /**
    * Lazily-initialised process-wide daemon scheduler used by the 9-arg convenience constructor.
@@ -91,13 +93,12 @@ public final class TurnRunner {
    * scheduler and pass it via the 10-arg constructor so resource lifetime is bounded; this default
    * exists only so test fixtures don't have to wire one. Daemon threads never block JVM exit.
    */
-  private static volatile java.util.concurrent.ScheduledExecutorService DEFAULT_SCHEDULER;
+  private static volatile ScheduledExecutorService DEFAULT_SCHEDULER;
 
-  private static synchronized java.util.concurrent.ScheduledExecutorService
-      sharedDefaultScheduler() {
+  private static synchronized ScheduledExecutorService sharedDefaultScheduler() {
     if (DEFAULT_SCHEDULER == null) {
       DEFAULT_SCHEDULER =
-          java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
+          Executors.newSingleThreadScheduledExecutor(
               r -> {
                 var t = new Thread(r, "helios-turnrunner-default-scheduler");
                 t.setDaemon(true);
@@ -191,7 +192,7 @@ public final class TurnRunner {
       Clock clock,
       CostCalculator costCalculator,
       OutputSchema<?> outputSchema,
-      java.util.concurrent.ScheduledExecutorService scheduler) {
+      ScheduledExecutorService scheduler) {
     this.model = Objects.requireNonNull(model, "model must not be null");
     this.hooks = Objects.requireNonNull(hooks, "hooks must not be null");
     this.toolDispatch = Objects.requireNonNull(toolDispatch, "toolDispatch must not be null");
