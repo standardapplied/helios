@@ -25,6 +25,8 @@ public sealed interface Hook
         PreModelTurnHook,
         PostModelTurnHook,
         PreStopHook,
+        PreCompactHook,
+        PostCompactHook,
         OnUserMessageHook,
         OnStreamEventHook {
 

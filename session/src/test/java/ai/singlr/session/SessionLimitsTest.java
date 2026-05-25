@@ -44,7 +44,7 @@ final class SessionLimitsTest {
     assertTrue(d.maxBudgetMicroUsd().isEmpty());
     assertEquals(Duration.ofHours(1), d.maxWallClock());
     assertEquals(Duration.ofMinutes(2), d.toolTimeoutDefault());
-    assertEquals(180_000L, d.maxContextTokens());
+    assertEquals(0L, d.maxContextTokens());
     assertEquals(Duration.ofSeconds(60), d.streamIdleTimeout());
     assertEquals(StreamRetryPolicy.defaults(), d.streamRetryPolicy());
   }
@@ -169,12 +169,9 @@ final class SessionLimitsTest {
   // ── maxContextTokens ──────────────────────────────────────────────────────
 
   @Test
-  void maxContextTokensZeroRejected() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> newLimits(1, OptionalLong.empty(), oneHour(), twoMin(), 0L));
-    assertEquals("maxContextTokens must be positive, got 0", ex.getMessage());
+  void maxContextTokensZeroAccepted() {
+    var l = newLimits(1, OptionalLong.empty(), oneHour(), twoMin(), 0L);
+    assertEquals(0L, l.maxContextTokens());
   }
 
   @Test
@@ -183,7 +180,7 @@ final class SessionLimitsTest {
         assertThrows(
             IllegalArgumentException.class,
             () -> newLimits(1, OptionalLong.empty(), oneHour(), twoMin(), -5L));
-    assertEquals("maxContextTokens must be positive, got -5", ex.getMessage());
+    assertEquals("maxContextTokens must be non-negative, got -5", ex.getMessage());
   }
 
   // ── Builder ───────────────────────────────────────────────────────────────

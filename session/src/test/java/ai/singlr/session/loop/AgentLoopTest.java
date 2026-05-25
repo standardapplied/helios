@@ -33,6 +33,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -658,7 +659,7 @@ final class AgentLoopTest {
   }
 
   @Test
-  void contextWatermarkDoesNotFireWhenMaxContextTokensIsZero() {
+  void contextWatermarkDoesNotFireWhenWellBelowThreshold() {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
     var sentinel = new AtomicInteger(0);
@@ -667,10 +668,8 @@ final class AgentLoopTest {
           sentinel.incrementAndGet();
           return 1_000_000L;
         };
-    // SessionLimits validates maxContextTokens > 0; build defaults then exercise the
-    // defensive guard via a sentinel ≤ 0 by passing maxContextTokens = Long.MAX_VALUE
-    // — combined with the sentinel counter we only verify the threshold math, not the
-    // <= 0 guard (covered separately in the watermark-zero scenario below).
+    // Set the explicit cap so high that 1M counted tokens is a negligible fraction —
+    // verifies the threshold math, not the auto-resolution path (covered separately).
     var limits = SessionLimits.newBuilder().withMaxContextTokens(Long.MAX_VALUE).build();
     buildLoopWithCounter(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, counter)
         .run(freshState(), limits);
@@ -960,7 +959,9 @@ final class AgentLoopTest {
     ContextCompactor reporting =
         (history, state) ->
             new CompactionResult(
-                history.subList(history.size() - 1, history.size()), Usage.of(200, 40));
+                history.subList(history.size() - 1, history.size()),
+                Usage.of(200, 40),
+                "summary-model");
     var state = freshState();
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, reporting)
         .run(state, limits);
@@ -984,5 +985,591 @@ final class AgentLoopTest {
     // Only the model turn's 1+1 contributes; compactor reports zero usage.
     assertEquals(1, state.usage().inputTokens());
     assertEquals(1, state.usage().outputTokens());
+  }
+
+  // ── effectiveMaxContextTokens resolver (P0-2c, model-aware default) ──────
+
+  /**
+   * Factory that returns a Model whose documented {@link Model#contextWindow()} is the supplied
+   * value, so tests can exercise the auto-resolution paths without depending on a real provider.
+   */
+  private static Model modelWithContextWindow(int contextWindow) {
+    return new Model() {
+      @Override
+      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+        return Response.newBuilder()
+            .withContent("ok")
+            .withFinishReason(FinishReason.STOP)
+            .withUsage(Usage.of(1, 1))
+            .build();
+      }
+
+      @Override
+      public String id() {
+        return "ctx-window-test";
+      }
+
+      @Override
+      public String provider() {
+        return "test";
+      }
+
+      @Override
+      public int contextWindow() {
+        return contextWindow;
+      }
+    };
+  }
+
+  @Test
+  void effectiveMaxContextTokensUsesModelWindowWhenSentinelLimit() {
+    var loop =
+        buildLoopWith(
+            modelWithContextWindow(1_000_000),
+            new SteeringQueue(8),
+            TokenCounter.charBased(),
+            ContextCompactor.disabled());
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(0L).build();
+    // 1M - 20K output reservation = 980_000.
+    assertEquals(980_000L, loop.effectiveMaxContextTokens(limits));
+  }
+
+  @Test
+  void effectiveMaxContextTokensClampsToUserCapWhenCapSmaller() {
+    var loop =
+        buildLoopWith(
+            modelWithContextWindow(1_000_000),
+            new SteeringQueue(8),
+            TokenCounter.charBased(),
+            ContextCompactor.disabled());
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(50_000L).build();
+    assertEquals(50_000L, loop.effectiveMaxContextTokens(limits));
+  }
+
+  @Test
+  void effectiveMaxContextTokensClampsToModelWhenUserCapBigger() {
+    var loop =
+        buildLoopWith(
+            modelWithContextWindow(200_000),
+            new SteeringQueue(8),
+            TokenCounter.charBased(),
+            ContextCompactor.disabled());
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(1_000_000L).build();
+    // 200K - 20K reservation = 180_000.
+    assertEquals(180_000L, loop.effectiveMaxContextTokens(limits));
+  }
+
+  @Test
+  void effectiveMaxContextTokensFallsBackTo180KWhenBothUnknown() {
+    var loop =
+        buildLoopWith(
+            modelWithContextWindow(0),
+            new SteeringQueue(8),
+            TokenCounter.charBased(),
+            ContextCompactor.disabled());
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(0L).build();
+    assertEquals(
+        AgentLoop.AUTO_FALLBACK_MAX_CONTEXT_TOKENS, loop.effectiveMaxContextTokens(limits));
+  }
+
+  @Test
+  void effectiveMaxContextTokensUsesUserCapWhenModelUnknown() {
+    var loop =
+        buildLoopWith(
+            modelWithContextWindow(0),
+            new SteeringQueue(8),
+            TokenCounter.charBased(),
+            ContextCompactor.disabled());
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(75_000L).build();
+    assertEquals(75_000L, loop.effectiveMaxContextTokens(limits));
+  }
+
+  @Test
+  void watermarkFiresUsingResolvedWindowWhenSentinelLimit() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("hi"));
+    // Model with 100K context window → effective = 80K after 20K reservation.
+    // Counter reports 70K tokens (>= 0.85 * 80K = 68K) → ContextWarning fires.
+    TokenCounter near85pct = msgs -> 70_000L;
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(0L).build();
+    buildLoopWith(modelWithContextWindow(100_000), queue, near85pct, ContextCompactor.disabled())
+        .run(freshState(), limits);
+    assertTrue(
+        events.stream().anyMatch(e -> e instanceof QueryEvent.ContextWarning),
+        "ContextWarning must fire once tokens cross 0.85 of the model-derived window");
+  }
+
+  // ── compaction cost attribution (P0-2c) ──────────────────────────────────
+
+  // ── watermark is cumulative across turns, not per-turn ───────────────────
+
+  @Test
+  void contextWatermarkUsesCumulativeHistoryNotSingleMessageSize() {
+    // Counter reports a fixed per-message size. With size 50 and a ceiling of 100, the watermark
+    // SHOULD trip only when the history has accumulated ≥ 2 messages — exactly what a cumulative
+    // implementation does. A buggy per-turn-only implementation would never trip, because no
+    // single message reaches 85% of 100. The first turn appends a user message AND an assistant
+    // reply, so the post-turn check sees a 2-message history (100 tokens total, 100% utilisation).
+    final var perMessageTokens = 50L;
+    TokenCounter cumulative = msgs -> perMessageTokens * msgs.size();
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("first"));
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    buildLoopWith(
+            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
+            queue,
+            cumulative,
+            ContextCompactor.disabled())
+        .run(freshState(), limits);
+    assertTrue(
+        events.stream().anyMatch(e -> e instanceof QueryEvent.ContextWarning),
+        "watermark must measure cumulative history — a 2-message history of 50 tokens each"
+            + " crosses the 0.85 × 100 threshold even though no single message does. If this"
+            + " test regresses, the watermark has flipped to per-turn semantics.");
+  }
+
+  @Test
+  void compactionCostPricedAgainstCompactorModelNotMainLoop() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("hi"));
+    // Stateful counter: first call (pre-turn) sits below 0.85; subsequent calls (post-turn)
+    // cross the 0.95 watermark exactly once so the compactor fires deterministically.
+    var watermarkCalls = new AtomicInteger(0);
+    TokenCounter staged = msgs -> watermarkCalls.getAndIncrement() == 0 ? 50L : 96L * msgs.size();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    // Two-rate price table: main is 10× more expensive than summary.
+    var pricing =
+        java.util.Map.of(
+            "test",
+                new CostCalculator.Pricing(100_000_000L, 100_000_000L, 100_000_000L, 100_000_000L),
+            "summary-model",
+                new CostCalculator.Pricing(10_000_000L, 10_000_000L, 10_000_000L, 10_000_000L));
+    var calculator = CostCalculator.staticTable(pricing);
+    ContextCompactor reporting =
+        (history, state) ->
+            new CompactionResult(
+                history.subList(history.size() - 1, history.size()),
+                Usage.of(1_000_000, 100_000),
+                "summary-model");
+    var model = fixedModel("ok", FinishReason.STOP, Usage.of(0, 0));
+    var runner =
+        new TurnRunner(
+            model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, calculator, null);
+    var loop =
+        new AgentLoop(
+            runner,
+            new StopClassifier(),
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            staged,
+            reporting);
+    var state = freshState();
+    loop.run(state, limits);
+    // 1_000_000 input × (10_000_000 μUSD / 1M tokens) + 100_000 output × (10/M) = 11_000_000 μUSD.
+    // The pre-fix code priced at the main rate (100/M) → 110_000_000 μUSD. The order-of-magnitude
+    // assertion isolates the routing fix from the exact firing count.
+    var cost = state.cost().microUsd();
+    assertTrue(cost > 0L, "compaction usage must accumulate cost");
+    assertTrue(
+        cost < 50_000_000L,
+        () -> "compaction should be priced at summary rate (~11M μUSD), got " + cost);
+  }
+
+  @Test
+  void contextCompactorReturningDifferentInstanceSameSizeIsTreatedAsNoShrink() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("hi"));
+    TokenCounter loud = msgs -> 96L;
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    // Different list reference but same size — must still be treated as no-op so the loop
+    // doesn't fire ContextEdited or PostCompactHook.
+    ContextCompactor sameSize =
+        (history, state) -> new CompactionResult(new ArrayList<>(history), Usage.of(0, 0), "");
+    var result =
+        buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, sameSize)
+            .run(freshState(), limits);
+    assertInstanceOf(ResultMessage.Success.class, result);
+    assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited));
+  }
+
+  @Test
+  void contextCompactorReturningNullIsTreatedAsNoOp() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("hi"));
+    TokenCounter loud = msgs -> 96L;
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    ContextCompactor nullReturning = (history, state) -> null;
+    var result =
+        buildLoopWith(
+                fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, nullReturning)
+            .run(freshState(), limits);
+    // Loop completes cleanly — a compactor that returned null must be treated as a no-op.
+    assertInstanceOf(ResultMessage.Success.class, result);
+    assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited));
+  }
+
+  // ── PreCompact / PostCompact hooks ───────────────────────────────────────
+
+  private AgentLoop buildLoopWithHooks(
+      Model model,
+      SteeringQueue queue,
+      TokenCounter counter,
+      ContextCompactor compactor,
+      ai.singlr.session.hooks.HookRegistry hookRegistry) {
+    var runner =
+        new TurnRunner(
+            model,
+            hookRegistry,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            CostCalculator.ZERO,
+            null);
+    return new AgentLoop(
+        runner,
+        new StopClassifier(),
+        hookRegistry,
+        dispatch,
+        queue,
+        events::add,
+        CTX_FACTORY,
+        CLOCK,
+        counter,
+        compactor);
+  }
+
+  @Test
+  void preCompactHookCanMutateHistoryHandedToCompactor() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("original"));
+    TokenCounter trigger = msgs -> 96L * msgs.size();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    var compactorSawHistory = new java.util.concurrent.atomic.AtomicReference<List<Message>>();
+    ContextCompactor capturing =
+        (history, state) -> {
+          compactorSawHistory.set(history);
+          return CompactionResult.noOp(history);
+        };
+    var replacement = List.<Message>of(Message.user("rewritten by hook"));
+    ai.singlr.session.hooks.PreCompactHook mutator =
+        (history, ctx) ->
+            ai.singlr.session.hooks.HookOutcome.mutate(Map.of("history", replacement));
+    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(mutator));
+    buildLoopWithHooks(
+            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
+            queue,
+            trigger,
+            capturing,
+            hookRegistry)
+        .run(freshState(), limits);
+    var observed = compactorSawHistory.get();
+    assertEquals(1, observed.size(), "compactor must receive the rewritten history");
+    assertEquals("rewritten by hook", observed.get(0).content());
+    assertTrue(
+        events.stream()
+            .anyMatch(
+                e ->
+                    e instanceof QueryEvent.HookFired hf
+                        && "PreCompactHook".equals(hf.phase())
+                        && "MutateInput".equals(hf.outcomeKind())),
+        "HookFired{PreCompactHook, MutateInput} must be emitted");
+  }
+
+  @Test
+  void preCompactHookMutateInputWithMissingHistoryKeyIsNoOp() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("original-user-msg"));
+    TokenCounter trigger = msgs -> 96L * msgs.size();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    // Capture every history handed to the compactor so we can verify none was rewritten by the
+    // misbehaving hook (bogus key under MutateInput must fall back to the genuine history).
+    var observedHistories = new ArrayList<List<Message>>();
+    ContextCompactor capturing =
+        (history, state) -> {
+          observedHistories.add(history);
+          return CompactionResult.noOp(history);
+        };
+    ai.singlr.session.hooks.PreCompactHook misbehaving =
+        (history, ctx) ->
+            ai.singlr.session.hooks.HookOutcome.mutate(Map.of("not-history", "ignored"));
+    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(misbehaving));
+    buildLoopWithHooks(
+            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
+            queue,
+            trigger,
+            capturing,
+            hookRegistry)
+        .run(freshState(), limits);
+    assertTrue(!observedHistories.isEmpty(), "compactor must have been invoked at least once");
+    for (var observed : observedHistories) {
+      for (var m : observed) {
+        var content = m.content();
+        assertTrue(
+            content != null && (content.startsWith("original-user-msg") || "ok".equals(content)),
+            () ->
+                "compactor must only see genuine session messages — got '"
+                    + content
+                    + "'. The bogus 'not-history' key must NOT have rewritten the history.");
+      }
+    }
+  }
+
+  @Test
+  void postCompactHookFiresWithBeforeAfterPayloadOnSuccessfulShrink() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("hi"));
+    queue.offer(UserMessage.text("hi2"));
+    TokenCounter trigger = msgs -> 96L * msgs.size();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    // Real shrink: return single-message list from the supplied history.
+    ContextCompactor shrinking =
+        (history, state) ->
+            new CompactionResult(
+                List.of(Message.user("[Earlier context summary]\nthe gist")), Usage.of(0, 0), "");
+    var payloadSeen =
+        new java.util.concurrent.atomic.AtomicReference<
+            ai.singlr.session.hooks.CompactionPayload>();
+    ai.singlr.session.hooks.PostCompactHook observer =
+        (payload, ctx) -> {
+          payloadSeen.set(payload);
+          return ai.singlr.session.hooks.HookOutcome.cont();
+        };
+    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(observer));
+    buildLoopWithHooks(
+            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
+            queue,
+            trigger,
+            shrinking,
+            hookRegistry)
+        .run(freshState(), limits);
+    var payload = payloadSeen.get();
+    assertTrue(payload != null, "PostCompactHook must fire on a real shrink");
+    assertTrue(payload.removedBlocks() > 0, "payload must report removed-block count");
+    assertEquals("the gist", payload.summary());
+  }
+
+  @Test
+  void postCompactHookNotFiredOnNoOpCompaction() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("hi"));
+    TokenCounter trigger = msgs -> 96L * msgs.size();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    ContextCompactor noOp = (history, state) -> CompactionResult.noOp(history);
+    var fired = new AtomicInteger(0);
+    ai.singlr.session.hooks.PostCompactHook observer =
+        (payload, ctx) -> {
+          fired.incrementAndGet();
+          return ai.singlr.session.hooks.HookOutcome.cont();
+        };
+    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(observer));
+    buildLoopWithHooks(
+            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)), queue, trigger, noOp, hookRegistry)
+        .run(freshState(), limits);
+    assertEquals(0, fired.get(), "PostCompactHook must not fire when compactor returned no shrink");
+  }
+
+  @Test
+  void preCompactHookMutateInputWithEmptyHistoryListIsAccepted() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("u"));
+    TokenCounter trigger = msgs -> 96L * Math.max(msgs.size(), 1);
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    var observed = new ArrayList<List<Message>>();
+    ContextCompactor capturing =
+        (history, state) -> {
+          observed.add(history);
+          return CompactionResult.noOp(history);
+        };
+    // Empty list under 'history' is a valid MutateInput — the helper should return List.of(),
+    // exercising the for-loop's zero-iteration path in messageListField.
+    ai.singlr.session.hooks.PreCompactHook empty =
+        (history, ctx) -> ai.singlr.session.hooks.HookOutcome.mutate(Map.of("history", List.of()));
+    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(empty));
+    buildLoopWithHooks(
+            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
+            queue,
+            trigger,
+            capturing,
+            hookRegistry)
+        .run(freshState(), limits);
+    assertTrue(!observed.isEmpty());
+    assertTrue(
+        observed.get(0).isEmpty(),
+        "compactor must receive the empty history when the hook supplies an empty list");
+  }
+
+  @Test
+  void preCompactHookMutateInputHistoryNotAListFallsBack() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("u"));
+    TokenCounter trigger = msgs -> 96L * msgs.size();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    var observed = new ArrayList<List<Message>>();
+    ContextCompactor capturing =
+        (history, state) -> {
+          observed.add(history);
+          return CompactionResult.noOp(history);
+        };
+    // 'history' key maps to a String — not a List — so the helper returns null and the loop falls
+    // back to the original history.
+    ai.singlr.session.hooks.PreCompactHook bogus =
+        (history, ctx) ->
+            ai.singlr.session.hooks.HookOutcome.mutate(Map.of("history", "not a list"));
+    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(bogus));
+    buildLoopWithHooks(
+            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
+            queue,
+            trigger,
+            capturing,
+            hookRegistry)
+        .run(freshState(), limits);
+    assertTrue(!observed.isEmpty());
+  }
+
+  @Test
+  void preCompactHookMutateInputHistoryWithNonMessageElementsFallsBack() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("original"));
+    TokenCounter trigger = msgs -> 96L * msgs.size();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    var observedHistories = new ArrayList<List<Message>>();
+    ContextCompactor capturing =
+        (history, state) -> {
+          observedHistories.add(history);
+          return CompactionResult.noOp(history);
+        };
+    // History key contains a List but elements are not Message — fall back to original history.
+    ai.singlr.session.hooks.PreCompactHook bogus =
+        (history, ctx) ->
+            ai.singlr.session.hooks.HookOutcome.mutate(
+                Map.of("history", List.of("not a message", 42)));
+    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(bogus));
+    buildLoopWithHooks(
+            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
+            queue,
+            trigger,
+            capturing,
+            hookRegistry)
+        .run(freshState(), limits);
+    assertTrue(!observedHistories.isEmpty());
+    for (var observed : observedHistories) {
+      for (var m : observed) {
+        assertTrue(
+            m != null && m.content() != null,
+            "compactor must only see real Message records, not the bogus non-Message list");
+      }
+    }
+  }
+
+  @Test
+  void preCompactHookUnsupportedOutcomesFallBackToContinue() {
+    // Block / Stop / Inject are not honored at this phase; assert each is logged + treated as
+    // Continue so the compactor still runs against the unmodified history.
+    var outcomes =
+        List.of(
+            ai.singlr.session.hooks.HookOutcome.block("nope"),
+            ai.singlr.session.hooks.HookOutcome.stop("would-stop"),
+            ai.singlr.session.hooks.HookOutcome.inject("would-inject"));
+    for (var outcome : outcomes) {
+      var queue = new SteeringQueue(8);
+      queue.offer(UserMessage.text("hi"));
+      TokenCounter trigger = msgs -> 96L * msgs.size();
+      var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+      var compactorInvoked = new AtomicInteger(0);
+      ContextCompactor capturing =
+          (history, state) -> {
+            compactorInvoked.incrementAndGet();
+            return CompactionResult.noOp(history);
+          };
+      ai.singlr.session.hooks.PreCompactHook hook = (history, ctx) -> outcome;
+      var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(hook));
+      buildLoopWithHooks(
+              fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
+              queue,
+              trigger,
+              capturing,
+              hookRegistry)
+          .run(freshState(), limits);
+      assertTrue(
+          compactorInvoked.get() >= 1,
+          () ->
+              "compactor must still run when PreCompactHook returned unsupported outcome: "
+                  + outcome.getClass().getSimpleName());
+    }
+  }
+
+  @Test
+  void postCompactHookUnsupportedOutcomesFallBackToContinue() {
+    // Mutate / Block / Inject must NOT short-circuit the loop. ContextEdited still fires and the
+    // session terminates normally.
+    var outcomes =
+        List.of(
+            ai.singlr.session.hooks.HookOutcome.mutate(Map.of("ignored", "value")),
+            ai.singlr.session.hooks.HookOutcome.block("nope"),
+            ai.singlr.session.hooks.HookOutcome.inject("would-inject"));
+    for (var outcome : outcomes) {
+      var queue = new SteeringQueue(8);
+      queue.offer(UserMessage.text("hi"));
+      queue.offer(UserMessage.text("hi2"));
+      TokenCounter trigger = msgs -> 96L * msgs.size();
+      var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+      ContextCompactor shrinking =
+          (history, state) ->
+              new CompactionResult(
+                  List.of(Message.user("[Earlier context summary]\nshort")), Usage.of(0, 0), "");
+      ai.singlr.session.hooks.PostCompactHook hook = (payload, ctx) -> outcome;
+      var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(hook));
+      var freshEventBuffer = new ArrayList<QueryEvent>(events);
+      freshEventBuffer.clear();
+      events.clear();
+      buildLoopWithHooks(
+              fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
+              queue,
+              trigger,
+              shrinking,
+              hookRegistry)
+          .run(freshState(), limits);
+      assertTrue(
+          events.stream().anyMatch(e -> e instanceof QueryEvent.ContextEdited),
+          () ->
+              "ContextEdited must still fire when PostCompactHook returned unsupported outcome: "
+                  + outcome.getClass().getSimpleName());
+    }
+  }
+
+  @Test
+  void postCompactHookStopTerminatesSession() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("hi"));
+    queue.offer(UserMessage.text("hi2"));
+    TokenCounter trigger = msgs -> 96L * msgs.size();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    ContextCompactor shrinking =
+        (history, state) ->
+            new CompactionResult(
+                List.of(Message.user("[Earlier context summary]\nshort")), Usage.of(0, 0), "");
+    ai.singlr.session.hooks.PostCompactHook stopper =
+        (payload, ctx) -> ai.singlr.session.hooks.HookOutcome.stop("post-compact veto");
+    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(stopper));
+    var state = freshState();
+    var result =
+        buildLoopWithHooks(
+                fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
+                queue,
+                trigger,
+                shrinking,
+                hookRegistry)
+            .run(state, limits);
+    var success = assertInstanceOf(ResultMessage.Success.class, result);
+    assertEquals("post-compact veto", success.result());
+    assertTrue(
+        events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited),
+        "ContextEdited must not fire when PostCompactHook returned Stop");
   }
 }

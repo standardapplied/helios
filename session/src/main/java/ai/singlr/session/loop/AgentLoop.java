@@ -16,6 +16,7 @@ import ai.singlr.session.SerializedError;
 import ai.singlr.session.SessionLimits;
 import ai.singlr.session.SteeringQueue;
 import ai.singlr.session.UserMessage;
+import ai.singlr.session.hooks.CompactionPayload;
 import ai.singlr.session.hooks.HookContext;
 import ai.singlr.session.hooks.HookOutcome;
 import ai.singlr.session.hooks.HookRegistry;
@@ -73,6 +74,13 @@ public final class AgentLoop {
    * QueryEvent.ContextWarning} fires for the first time. Sticky for the rest of the session until a
    * successful compaction clears the flag. 0.85 gives library users (and the compactor) ~15% of the
    * window to react before the model errors out.
+   *
+   * <p>The denominator is the configured {@code maxContextTokens} (or its model-aware resolution
+   * when the caller left it at the auto sentinel). The numerator is the {@link
+   * ai.singlr.core.context.TokenCounter}'s estimate of <em>total tokens across every message
+   * currently in the conversation history</em> — cumulative across all turns since the session
+   * started, never the size of a single turn. The watermark check runs both before and after every
+   * turn so the trigger fires as soon as the cumulative history crosses the threshold.
    */
   static final double CONTEXT_WARNING_WATERMARK = 0.85;
 
@@ -80,8 +88,30 @@ public final class AgentLoop {
    * Watermark fraction of {@link SessionLimits#maxContextTokens()} at which the loop invokes the
    * configured {@link ContextCompactor}. 0.95 keeps a 5% safety margin against the underlying
    * context window; below the warning watermark we'd compact too eagerly.
+   *
+   * <p>Same denominator and numerator as {@link #CONTEXT_WARNING_WATERMARK} — cumulative across the
+   * full conversation history, not per-turn.
    */
   static final double CONTEXT_COMPACT_WATERMARK = 0.95;
+
+  /**
+   * Output-token headroom subtracted from {@link Model#contextWindow()} when {@link
+   * SessionLimits#maxContextTokens()} is left in its sentinel "auto" state. Mirrors Claude Code's
+   * {@code nAK = 20000} output reservation — leaves enough budget for the next response after a
+   * full-context input, so the watermark check trips before the provider rejects an oversized
+   * request. Library users that need a tighter or looser headroom set an explicit {@link
+   * SessionLimits.Builder#withMaxContextTokens(long)} cap.
+   */
+  static final long AUTO_RESERVED_OUTPUT_TOKENS = 20_000L;
+
+  /**
+   * Backstop window used when both {@link SessionLimits#maxContextTokens()} is in its "auto"
+   * sentinel AND the provider does not report a {@link Model#contextWindow()}. Matches the
+   * pre-2.5.6 hardcoded default. Sized for Sonnet-class models — narrow enough not to fail a
+   * conservatively-built session, wide enough that simple multi-turn workflows don't compact
+   * prematurely.
+   */
+  static final long AUTO_FALLBACK_MAX_CONTEXT_TOKENS = 180_000L;
 
   private final TurnRunner turnRunner;
   private final StopClassifier classifier;
@@ -187,6 +217,9 @@ public final class AgentLoop {
         return terminateWithExistingTerminal(state);
       }
       checkContextWatermark(state, limits);
+      if (state.isTerminal()) {
+        return terminateWithExistingTerminal(state);
+      }
       var terminal =
           classifier.classify(
               state,
@@ -375,10 +408,7 @@ public final class AgentLoop {
    * so a future re-climb fires the watermark again.
    */
   private void checkContextWatermark(SessionState state, SessionLimits limits) {
-    var maxTokens = limits.maxContextTokens();
-    if (maxTokens <= 0) {
-      return;
-    }
+    var maxTokens = effectiveMaxContextTokens(limits);
     var tokens = tokenCounter.count(state.historySnapshot());
     var usagePct = (double) tokens / (double) maxTokens;
     if (usagePct >= CONTEXT_WARNING_WATERMARK && state.tryFireContextWarning()) {
@@ -393,15 +423,53 @@ public final class AgentLoop {
   }
 
   /**
+   * Resolve the effective context-token ceiling for this session by reconciling the user-supplied
+   * {@link SessionLimits#maxContextTokens()} cap with the model's documented {@link
+   * Model#contextWindow()}. Mirrors Claude Code's {@code wc()} resolver:
+   *
+   * <ul>
+   *   <li>Both known → take the smaller (user cap never permits more than the model actually
+   *       supports).
+   *   <li>User cap only → honour it as-is. Trusting the deployer is the contract.
+   *   <li>Model window only → use {@code window - AUTO_RESERVED_OUTPUT_TOKENS}, leaving headroom
+   *       for the next response.
+   *   <li>Neither known → fall back to {@link #AUTO_FALLBACK_MAX_CONTEXT_TOKENS}. Last-resort path
+   *       for providers that don't yet implement {@code contextWindow()}.
+   * </ul>
+   *
+   * <p>Sentinel: {@code limits.maxContextTokens() == 0} signals "auto, resolve from model". This is
+   * the default — library users that want a hard cap call {@link
+   * SessionLimits.Builder#withMaxContextTokens(long)}.
+   */
+  long effectiveMaxContextTokens(SessionLimits limits) {
+    var userCap = limits.maxContextTokens();
+    var modelWindow = (long) turnRunner.modelContextWindow();
+    var modelEffective =
+        modelWindow > AUTO_RESERVED_OUTPUT_TOKENS ? modelWindow - AUTO_RESERVED_OUTPUT_TOKENS : 0L;
+    if (userCap > 0L && modelEffective > 0L) {
+      return Math.min(userCap, modelEffective);
+    }
+    if (userCap > 0L) {
+      return userCap;
+    }
+    if (modelEffective > 0L) {
+      return modelEffective;
+    }
+    return AUTO_FALLBACK_MAX_CONTEXT_TOKENS;
+  }
+
+  /**
    * Invoke the configured {@link ContextCompactor}, swap in the returned history, accumulate any
-   * usage reported by the compactor (e.g. summary call spend) through the {@link
-   * TurnRunner#accumulateUsageAndCost} helper, and emit {@link QueryEvent.ContextEdited} when the
-   * compactor actually shrank the history. A returned identity (same instance) or no-shrink result
-   * is treated as a no-op — the compactor opted out for this turn and the warning flag stays set. A
+   * usage reported by the compactor (e.g. summary call spend) — priced against the compactor's own
+   * {@link CompactionResult#modelId()} so a cheap summary model isn't billed at the main loop's
+   * rate — fire {@link ai.singlr.session.hooks.PreCompactHook} before the compactor runs and {@link
+   * ai.singlr.session.hooks.PostCompactHook} after a successful shrink, and emit {@link
+   * QueryEvent.ContextEdited} last. A returned identity (same instance) or no-shrink result is
+   * treated as a no-op — the compactor opted out for this turn and the warning flag stays set. A
    * throwing compactor is swallowed; the loop continues.
    */
   private void runCompactor(SessionState state, long maxTokens, long tokensBefore) {
-    var historyBefore = state.historySnapshot();
+    var historyBefore = applyPreCompactHook(state, state.historySnapshot());
     CompactionResult result;
     try {
       result = contextCompactor.compact(historyBefore, state);
@@ -414,7 +482,7 @@ public final class AgentLoop {
     }
     var compactionUsage = result.usage();
     if (compactionUsage.inputTokens() > 0 || compactionUsage.outputTokens() > 0) {
-      turnRunner.accumulateUsageAndCost(state, compactionUsage);
+      turnRunner.accumulateUsageAndCost(state, result.modelId(), compactionUsage);
     }
     var historyAfter = result.history();
     if (historyAfter == historyBefore || historyAfter.size() >= historyBefore.size()) {
@@ -424,6 +492,12 @@ public final class AgentLoop {
     var tokensAfter = tokenCounter.count(state.historySnapshot());
     var removedBlocks = historyBefore.size() - historyAfter.size();
     state.resetContextWarningFlag();
+    var payload =
+        new CompactionPayload(
+            historyBefore, historyAfter, tokensBefore, tokensAfter, removedBlocks);
+    if (firePostCompactAndCheckStop(state, payload)) {
+      return;
+    }
     emitter.emit(
         state,
         new QueryEvent.ContextEdited(
@@ -433,6 +507,97 @@ public final class AgentLoop {
             removedBlocks,
             tokensBefore,
             tokensAfter));
+  }
+
+  /**
+   * Fire {@link ai.singlr.session.hooks.PreCompactHook} and return the history the compactor should
+   * operate on. {@link HookOutcome.MutateInput} carrying a {@code "history"} key swaps in the
+   * rewritten history; other non-Continue outcomes are logged and treated as Continue.
+   */
+  private List<Message> applyPreCompactHook(SessionState state, List<Message> historyBefore) {
+    var ctx = hookContextFactory.apply(state);
+    var decision = hooks.firePreCompact(historyBefore, ctx);
+    var hookName = decision.firingHookOptional().map(h -> h.name()).orElse(null);
+    return switch (decision.outcome()) {
+      case HookOutcome.Continue ignored -> historyBefore;
+      case HookOutcome.MutateInput m -> applyPreCompactMutate(state, hookName, m, historyBefore);
+      case HookOutcome.Block b -> logUnsupportedPreCompact(hookName, "Block", historyBefore);
+      case HookOutcome.Stop s -> logUnsupportedPreCompact(hookName, "Stop", historyBefore);
+      case HookOutcome.Inject inj -> logUnsupportedPreCompact(hookName, "Inject", historyBefore);
+    };
+  }
+
+  private List<Message> applyPreCompactMutate(
+      SessionState state,
+      String hookName,
+      HookOutcome.MutateInput mutate,
+      List<Message> historyBefore) {
+    var replacement = messageListField(mutate.newInput(), "history");
+    if (replacement == null) {
+      LOGGER.log(
+          Level.WARNING,
+          "PreCompactHook ''{0}'' MutateInput missing 'history' key; using original history",
+          hookName);
+      return historyBefore;
+    }
+    emitter.emitHookFired(state, hookName, "PreCompactHook", "MutateInput");
+    return replacement;
+  }
+
+  private static List<Message> logUnsupportedPreCompact(
+      String hookName, String outcomeKind, List<Message> fallback) {
+    LOGGER.log(
+        Level.WARNING,
+        "PreCompactHook ''{0}'' {1} is not honored at this phase; using original history",
+        new Object[] {hookName, outcomeKind});
+    return fallback;
+  }
+
+  /**
+   * Fire {@link ai.singlr.session.hooks.PostCompactHook}. Returns {@code true} when the hook
+   * elected {@link HookOutcome.Stop} so the caller skips the {@link QueryEvent.ContextEdited}
+   * emission and lets the loop terminate. Other outcomes (including the unsupported Mutate / Block
+   * / Inject) are logged and treated as Continue.
+   */
+  private boolean firePostCompactAndCheckStop(SessionState state, CompactionPayload payload) {
+    var ctx = hookContextFactory.apply(state);
+    var decision = hooks.firePostCompact(payload, ctx);
+    var hookName = decision.firingHookOptional().map(h -> h.name()).orElse(null);
+    return switch (decision.outcome()) {
+      case HookOutcome.Continue ignored -> false;
+      case HookOutcome.Stop s -> applyPostCompactStop(state, hookName, s);
+      case HookOutcome.MutateInput m -> logUnsupportedPostCompact(hookName, "MutateInput");
+      case HookOutcome.Block b -> logUnsupportedPostCompact(hookName, "Block");
+      case HookOutcome.Inject inj -> logUnsupportedPostCompact(hookName, "Inject");
+    };
+  }
+
+  private boolean applyPostCompactStop(SessionState state, String hookName, HookOutcome.Stop stop) {
+    emitter.emitHookFired(state, hookName, "PostCompactHook", "Stop");
+    state.setTerminal(successFor(state, stop.result()));
+    return true;
+  }
+
+  private static boolean logUnsupportedPostCompact(String hookName, String outcomeKind) {
+    LOGGER.log(
+        Level.WARNING,
+        "PostCompactHook ''{0}'' {1} is not honored at this phase",
+        new Object[] {hookName, outcomeKind});
+    return false;
+  }
+
+  private static List<Message> messageListField(Map<String, Object> map, String key) {
+    if (!(map.get(key) instanceof List<?> list)) {
+      return null;
+    }
+    var out = new ArrayList<Message>(list.size());
+    for (var element : list) {
+      if (!(element instanceof Message m)) {
+        return null;
+      }
+      out.add(m);
+    }
+    return List.copyOf(out);
   }
 
   private ResultMessage emptyHistoryError(SessionState state) {

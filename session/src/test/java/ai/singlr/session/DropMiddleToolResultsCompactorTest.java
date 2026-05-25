@@ -488,6 +488,10 @@ final class DropMiddleToolResultsCompactorTest {
     var out = compactor.compact(chain(10), freshState());
     assertEquals(150, out.usage().inputTokens());
     assertEquals(25, out.usage().outputTokens());
+    assertEquals(
+        "summary",
+        out.modelId(),
+        "CompactionResult must carry the summary model id so the loop prices spend at its rate");
   }
 
   @Test
@@ -555,17 +559,31 @@ final class DropMiddleToolResultsCompactorTest {
   }
 
   @Test
-  void compactionResultNoOpHasZeroUsage() {
+  void compactionResultNoOpHasZeroUsageAndBlankModelId() {
     var history = chain(5);
     var result = CompactionResult.noOp(history);
     assertSame(history, result.history());
     assertEquals(0, result.usage().inputTokens());
     assertEquals(0, result.usage().outputTokens());
+    assertEquals("", result.modelId(), "noOp uses an empty modelId — no spend to attribute");
   }
 
   @Test
   void compactionResultRejectsNullArgs() {
-    assertThrows(NullPointerException.class, () -> new CompactionResult(null, Usage.of(0, 0)));
-    assertThrows(NullPointerException.class, () -> new CompactionResult(List.of(), null));
+    assertThrows(NullPointerException.class, () -> new CompactionResult(null, Usage.of(0, 0), ""));
+    assertThrows(NullPointerException.class, () -> new CompactionResult(List.of(), null, ""));
+    assertThrows(
+        NullPointerException.class, () -> new CompactionResult(List.of(), Usage.of(0, 0), null));
+  }
+
+  @Test
+  void compactionResultRejectsUsageWithoutModelId() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new CompactionResult(List.of(), Usage.of(10, 5), ""));
+    assertTrue(
+        ex.getMessage().startsWith("modelId must be non-blank when usage reports any tokens"),
+        ex.getMessage());
   }
 }

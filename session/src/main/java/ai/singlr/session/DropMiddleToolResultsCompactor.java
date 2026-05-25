@@ -76,7 +76,15 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
           + "conversation. Produce a concise (under 200 words) summary that preserves: (1) the "
           + "user's goal, (2) key facts the agent has discovered, (3) any open questions or "
           + "decisions made. Omit redundant tool-call/result chatter. Plain text only.";
-  private static final String SUMMARY_PREFIX = "[Earlier context summary]\n";
+
+  /**
+   * Marker prepended to the synthesised summary user-message so downstream consumers — most notably
+   * {@link ai.singlr.session.hooks.CompactionPayload#summary() CompactionPayload.summary()} and the
+   * next-turn model itself — can recognise that the row stands in for a compacted-away middle.
+   * Public to give the {@code PostCompactHook} payload one source of truth for the marker rather
+   * than relying on a duplicated string literal.
+   */
+  public static final String SUMMARY_PREFIX = "[Earlier context summary]\n";
 
   private final Model summaryModel;
   private final int headPreserved;
@@ -197,7 +205,7 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
     newHistory.addAll(head);
     newHistory.add(summaryMessage);
     newHistory.addAll(tail);
-    return new CompactionResult(List.copyOf(newHistory), usage);
+    return new CompactionResult(List.copyOf(newHistory), usage, summaryModel.id());
   }
 
   /**

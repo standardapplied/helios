@@ -290,19 +290,48 @@ public final class TurnRunner {
 
   /**
    * Accumulate {@code usage} into the session totals and apply the configured {@link
-   * CostCalculator} against {@link Model#id()} to update accumulated cost. Exposed to the {@link
-   * AgentLoop} so {@code ContextCompactor}-reported {@code Usage} (e.g. summary call spend) flows
-   * through the same cost gate as a normal model turn.
+   * CostCalculator} against {@link Model#id()} to update accumulated cost.
    *
    * @param state the session state; non-null
    * @param usage the usage to accumulate; non-null. {@link Usage#of(int, int) Usage.of(0, 0)} is a
    *     legal no-op
    */
   void accumulateUsageAndCost(SessionState state, Usage usage) {
+    accumulateUsageAndCost(state, model.id(), usage);
+  }
+
+  /**
+   * Accumulate {@code usage} into the session totals and price the spend against {@code modelId}
+   * (not the main session model) through the configured {@link CostCalculator}. Exposed to the
+   * {@link AgentLoop} so {@code ContextCompactor}-reported summary-call spend can be priced at the
+   * compactor's own model rate — without this, a cheap Haiku compactor wired against an Opus 4.7
+   * main loop would have its tokens priced at Opus rates.
+   *
+   * @param state the session state; non-null
+   * @param modelId the model identifier to price {@code usage} against; non-null. A blank value
+   *     falls back to {@link Model#id()} of the session's main model — appropriate when {@code
+   *     usage} carries zero tokens (no-op accumulation)
+   * @param usage the usage to accumulate; non-null. {@link Usage#of(int, int) Usage.of(0, 0)} is a
+   *     legal no-op
+   */
+  void accumulateUsageAndCost(SessionState state, String modelId, Usage usage) {
     Objects.requireNonNull(state, "state must not be null");
+    Objects.requireNonNull(modelId, "modelId must not be null");
     Objects.requireNonNull(usage, "usage must not be null");
     state.accumulateUsage(usage);
-    state.accumulateCost(costCalculator.cost(model.id(), usage));
+    var effectiveId = modelId.isBlank() ? model.id() : modelId;
+    state.accumulateCost(costCalculator.cost(effectiveId, usage));
+  }
+
+  /**
+   * Returns the session main model's documented context-window size in tokens. Exposed to the
+   * {@link AgentLoop} so the watermark check can resolve an effective {@code maxContextTokens}
+   * limit from the model when the caller didn't set an explicit cap. Returns {@code 0} when the
+   * provider does not report a window — the loop falls back to {@link
+   * SessionLimits#maxContextTokens()} in that case.
+   */
+  int modelContextWindow() {
+    return model.contextWindow();
   }
 
   private TurnOutcome finalOutcomeAfterTerminate(SessionState state) {

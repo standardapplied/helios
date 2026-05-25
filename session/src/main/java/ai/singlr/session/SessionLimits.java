@@ -29,8 +29,13 @@ import java.util.OptionalLong;
  *       this window.
  *   <li>{@code toolTimeoutDefault}: 2 minutes — slow enough for compile-and-run flows, fast enough
  *       that a wedged tool doesn't burn the wall-clock budget.
- *   <li>{@code maxContextTokens}: 180_000 — soft trigger for compaction; the loop reads this to
- *       decide when to compact, not to hard-fail.
+ *   <li>{@code maxContextTokens}: {@code 0} — sentinel meaning "auto, resolve from {@code
+ *       Model.contextWindow()}". The agent loop picks an effective ceiling by reading the
+ *       provider's documented window and subtracting a small output-token reservation; library
+ *       users override with an explicit cap via {@link Builder#withMaxContextTokens(long)} when
+ *       they want to compact earlier (or use a tighter cost ceiling). Any positive value is treated
+ *       as a hard cap and clamped against the model's actual window to avoid requesting more
+ *       context than the provider supports.
  *   <li>{@code streamIdleTimeout}: 60 seconds — if a provider stream emits no chunk for this long,
  *       the turn fails with {@link ai.singlr.core.model.FinishReason#ERROR}, surfaced as {@link
  *       ResultMessage.ErrorDuringExecution} with a {@code stream-idle-timeout} error code. Guards
@@ -56,7 +61,12 @@ import java.util.OptionalLong;
  *     strictly positive
  * @param toolTimeoutDefault default per-tool execution timeout; must be non-null and strictly
  *     positive
- * @param maxContextTokens soft trigger for context compaction in tokens; must be positive
+ * @param maxContextTokens soft trigger for context compaction, measured as the {@link
+ *     ai.singlr.core.context.TokenCounter}'s estimate of the <em>total tokens across every message
+ *     in the conversation history so far</em> — cumulative, never per-turn. Must be non-negative.
+ *     {@code 0} signals "auto" — the agent loop resolves an effective ceiling from {@link
+ *     ai.singlr.core.model.Model#contextWindow()}. Any positive value is an explicit cap clamped
+ *     against the model's actual window
  * @param streamIdleTimeout per-chunk idle ceiling on a model stream; must be non-null and strictly
  *     positive
  * @param streamRetryPolicy how the loop retries a turn that failed with {@link
@@ -77,7 +87,7 @@ public record SessionLimits(
           OptionalLong.empty(),
           Duration.ofHours(1),
           Duration.ofMinutes(2),
-          180_000L,
+          0L,
           Duration.ofSeconds(60),
           StreamRetryPolicy.defaults());
 
@@ -106,9 +116,9 @@ public record SessionLimits(
       throw new IllegalArgumentException(
           "toolTimeoutDefault must be strictly positive, got " + toolTimeoutDefault);
     }
-    if (maxContextTokens <= 0) {
+    if (maxContextTokens < 0) {
       throw new IllegalArgumentException(
-          "maxContextTokens must be positive, got " + maxContextTokens);
+          "maxContextTokens must be non-negative, got " + maxContextTokens);
     }
     Objects.requireNonNull(streamIdleTimeout, "streamIdleTimeout must not be null");
     if (streamIdleTimeout.isZero() || streamIdleTimeout.isNegative()) {
@@ -222,7 +232,17 @@ public record SessionLimits(
       return this;
     }
 
-    /** Set the soft context-compaction trigger in tokens. */
+    /**
+     * Set the soft context-compaction trigger in tokens.
+     *
+     * <p>{@code 0} signals "auto" — the agent loop derives an effective ceiling from {@link
+     * ai.singlr.core.model.Model#contextWindow()} at run time, subtracting a small output-token
+     * reservation for the next response. Any positive value is an explicit cap and the loop uses
+     * the smaller of the cap and the model's actual window.
+     *
+     * @param maxContextTokens non-negative token ceiling; {@code 0} means auto
+     * @return this builder
+     */
     public Builder withMaxContextTokens(long maxContextTokens) {
       this.maxContextTokens = maxContextTokens;
       return this;

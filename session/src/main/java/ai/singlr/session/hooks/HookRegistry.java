@@ -47,6 +47,8 @@ public final class HookRegistry {
   private final List<PreModelTurnHook> preModelTurn;
   private final List<PostModelTurnHook> postModelTurn;
   private final List<PreStopHook> preStop;
+  private final List<PreCompactHook> preCompact;
+  private final List<PostCompactHook> postCompact;
   private final List<OnUserMessageHook> onUserMessage;
   private final List<OnStreamEventHook> onStreamEvent;
   private final Map<Class<? extends Hook>, List<? extends Hook>> hooksByPhase;
@@ -68,6 +70,8 @@ public final class HookRegistry {
     this.preModelTurn = sortByPriority(hooks, PreModelTurnHook.class);
     this.postModelTurn = sortByPriority(hooks, PostModelTurnHook.class);
     this.preStop = sortByPriority(hooks, PreStopHook.class);
+    this.preCompact = sortByPriority(hooks, PreCompactHook.class);
+    this.postCompact = sortByPriority(hooks, PostCompactHook.class);
     this.onUserMessage = sortByPriority(hooks, OnUserMessageHook.class);
     this.onStreamEvent = sortByPriority(hooks, OnStreamEventHook.class);
     var byPhase = new HashMap<Class<? extends Hook>, List<? extends Hook>>();
@@ -76,6 +80,8 @@ public final class HookRegistry {
     byPhase.put(PreModelTurnHook.class, preModelTurn);
     byPhase.put(PostModelTurnHook.class, postModelTurn);
     byPhase.put(PreStopHook.class, preStop);
+    byPhase.put(PreCompactHook.class, preCompact);
+    byPhase.put(PostCompactHook.class, postCompact);
     byPhase.put(OnUserMessageHook.class, onUserMessage);
     byPhase.put(OnStreamEventHook.class, onStreamEvent);
     this.hooksByPhase = Map.copyOf(byPhase);
@@ -177,6 +183,33 @@ public final class HookRegistry {
     Objects.requireNonNull(stopResponse, "stopResponse must not be null");
     Objects.requireNonNull(ctx, "ctx must not be null");
     return fireDeciding(preStop, hook -> hook.beforeStop(stopResponse, ctx));
+  }
+
+  /**
+   * Fire every registered {@link PreCompactHook}.
+   *
+   * @param history the history about to be passed to the configured {@code ContextCompactor};
+   *     non-null
+   * @param ctx the per-invocation context; non-null
+   * @return the first decisive decision, or {@link HookDecision#proceed()}
+   */
+  public HookDecision firePreCompact(List<Message> history, HookContext ctx) {
+    Objects.requireNonNull(history, "history must not be null");
+    Objects.requireNonNull(ctx, "ctx must not be null");
+    return fireDeciding(preCompact, hook -> hook.beforeCompact(history, ctx));
+  }
+
+  /**
+   * Fire every registered {@link PostCompactHook}.
+   *
+   * @param payload the before/after compaction snapshot; non-null
+   * @param ctx the per-invocation context; non-null
+   * @return the first decisive decision, or {@link HookDecision#proceed()}
+   */
+  public HookDecision firePostCompact(CompactionPayload payload, HookContext ctx) {
+    Objects.requireNonNull(payload, "payload must not be null");
+    Objects.requireNonNull(ctx, "ctx must not be null");
+    return fireDeciding(postCompact, hook -> hook.afterCompact(payload, ctx));
   }
 
   /**
