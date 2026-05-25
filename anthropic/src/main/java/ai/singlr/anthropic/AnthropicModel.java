@@ -28,6 +28,7 @@ import ai.singlr.core.model.StreamEvent;
 import ai.singlr.core.model.ThinkingLevel;
 import ai.singlr.core.model.ToolCall;
 import ai.singlr.core.model.ToolChoice;
+import ai.singlr.core.model.TransientStreamException;
 import ai.singlr.core.schema.OutputSchema;
 import ai.singlr.core.schema.StructuredContentParser;
 import ai.singlr.core.tool.Tool;
@@ -288,21 +289,61 @@ public class AnthropicModel implements Model {
         : text;
   }
 
+  /**
+   * Drive {@link #openStream(MessagesRequest)} and {@link #drainToResponse(StreamingIterator)},
+   * promoting transport-layer failures to the typed signals the session loop's retry policy
+   * understands.
+   *
+   * <p>Mapping:
+   *
+   * <ul>
+   *   <li>{@link TransientStreamException} from {@link #drainToResponse} (mid-stream socket drop
+   *       after a 200 response) — propagated unchanged so the loop retries.
+   *   <li>{@link AnthropicException} from {@link #openStream} (non-200 response parsed and wrapped
+   *       with status code) — propagated unchanged so non-stream protocol errors keep their
+   *       existing error path.
+   *   <li>{@link IOException} from {@link #openStream} (connect-time failure: DNS, TCP reset,
+   *       half-closed pre-handshake) — promoted to {@link TransientStreamException} so the loop
+   *       retries. Matches {@link AnthropicException#isRetryable()} which classifies {@code status
+   *       == 0} network errors as retryable.
+   *   <li>{@link InterruptedException} — wrapped as a non-retryable {@link AnthropicException} so
+   *       the caller can clean up rather than spinning on retries.
+   * </ul>
+   */
   private Response<Void> streamAndDrain(MessagesRequest request) {
     try (var iterator = openStream(request)) {
       return drainToResponse(iterator);
-    } catch (AnthropicException e) {
+    } catch (AnthropicException | TransientStreamException e) {
       throw e;
     } catch (IOException e) {
-      throw new AnthropicException("Failed to communicate with Anthropic API", e);
+      throw new TransientStreamException(
+          "Failed to communicate with Anthropic API", e, PROVIDER_NAME);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new AnthropicException("Request interrupted", e);
     }
   }
 
+  /**
+   * Drain the SSE iterator into a final {@link Response}, mapping {@link StreamEvent.Error} events
+   * into provider exceptions.
+   *
+   * <p>Routing:
+   *
+   * <ul>
+   *   <li>Cause is {@link AnthropicException} — rethrown verbatim (HTTP-side failures parsed from a
+   *       non-200 response retain their status code).
+   *   <li>Cause is {@link IOException} (typed signal that the SSE socket dropped mid-stream after a
+   *       200 response) — promoted to {@link TransientStreamException} so the agent loop's bounded
+   *       retry can re-issue the turn; the {@link IOException} is preserved as {@link
+   *       Throwable#getCause()} so the session terminal can walk the chain.
+   *   <li>Cause is anything else, or {@code null} (the API-side {@code event: error} path carries
+   *       {@code null}) — rewrapped in {@link AnthropicException} with the original cause for
+   *       backwards compatibility with non-stream error paths.
+   * </ul>
+   */
   @SuppressWarnings("unchecked")
-  private static Response<Void> drainToResponse(StreamingIterator iterator) {
+  private Response<Void> drainToResponse(StreamingIterator iterator) {
     while (iterator.hasNext()) {
       var event = iterator.next();
       if (event instanceof StreamEvent.Done(var response)) {
@@ -311,6 +352,9 @@ public class AnthropicModel implements Model {
       if (event instanceof StreamEvent.Error(String message, Exception cause)) {
         if (cause instanceof AnthropicException ae) {
           throw ae;
+        }
+        if (cause instanceof IOException) {
+          throw new TransientStreamException(message, cause, PROVIDER_NAME);
         }
         throw new AnthropicException(message, cause);
       }

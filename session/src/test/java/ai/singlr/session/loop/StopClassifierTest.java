@@ -12,13 +12,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.core.common.CostEstimate;
 import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.Response.Usage;
+import ai.singlr.core.model.TransientStreamException;
 import ai.singlr.core.runtime.CancellationToken;
 import ai.singlr.session.ResultMessage;
 import ai.singlr.session.SessionLimits;
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 final class StopClassifierTest {
@@ -26,6 +29,20 @@ final class StopClassifierTest {
   private static final String SID = "sess-1";
 
   private final StopClassifier classifier = new StopClassifier();
+
+  /**
+   * Convenience overload mirroring the pre-2.5.5 5-arg shape — no stream error, single attempt. The
+   * test body stays focused on the assertion it actually cares about instead of repeating {@code
+   * null, 1} on every call.
+   */
+  private Optional<ResultMessage> classifyNoError(
+      SessionState state,
+      SessionLimits limits,
+      FinishReason finishReason,
+      String content,
+      boolean hasPendingMessages) {
+    return classifier.classify(state, limits, finishReason, content, null, 1, hasPendingMessages);
+  }
 
   private static SessionState state() {
     return state(new CancellationToken());
@@ -73,28 +90,27 @@ final class StopClassifierTest {
   void rejectsNullState() {
     assertThrows(
         NullPointerException.class,
-        () -> classifier.classify(null, defaults(), FinishReason.STOP, "x", false));
+        () -> classifyNoError(null, defaults(), FinishReason.STOP, "x", false));
   }
 
   @Test
   void rejectsNullLimits() {
     assertThrows(
         NullPointerException.class,
-        () -> classifier.classify(state(), null, FinishReason.STOP, "x", false));
+        () -> classifyNoError(state(), null, FinishReason.STOP, "x", false));
   }
 
   @Test
   void rejectsNullFinishReason() {
     assertThrows(
-        NullPointerException.class,
-        () -> classifier.classify(state(), defaults(), null, "x", false));
+        NullPointerException.class, () -> classifyNoError(state(), defaults(), null, "x", false));
   }
 
   @Test
   void rejectsNullAssistantContent() {
     assertThrows(
         NullPointerException.class,
-        () -> classifier.classify(state(), defaults(), FinishReason.STOP, null, false));
+        () -> classifyNoError(state(), defaults(), FinishReason.STOP, null, false));
   }
 
   // ── cancellation ──────────────────────────────────────────────────────────
@@ -103,7 +119,7 @@ final class StopClassifierTest {
   void cancellationProducesCancelled() {
     var token = new CancellationToken();
     token.cancel("user-stop");
-    var result = classifier.classify(state(token), defaults(), FinishReason.STOP, "ignored", false);
+    var result = classifyNoError(state(token), defaults(), FinishReason.STOP, "ignored", false);
     var c = assertInstanceOf(ResultMessage.Cancelled.class, result.orElseThrow());
     assertEquals("user-stop", c.reason());
     assertEquals(SID, c.sessionId());
@@ -117,7 +133,7 @@ final class StopClassifierTest {
     var token = new CancellationToken();
     token.cancel("maxWallClock exceeded after 500ms");
     var s = stateAtElapsed(Duration.ofHours(2), token);
-    var result = classifier.classify(s, defaults(), FinishReason.STOP, "ignored", false);
+    var result = classifyNoError(s, defaults(), FinishReason.STOP, "ignored", false);
     assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, result.orElseThrow());
   }
 
@@ -128,7 +144,7 @@ final class StopClassifierTest {
     var s = state();
     s.accumulateCost(CostEstimate.ofMicroUsd(1_500_000L));
     var limits = SessionLimits.newBuilder().withMaxBudgetMicroUsd(1_000_000L).build();
-    var result = classifier.classify(s, limits, FinishReason.STOP, "x", false);
+    var result = classifyNoError(s, limits, FinishReason.STOP, "x", false);
     var b = assertInstanceOf(ResultMessage.ErrorMaxBudgetUsd.class, result.orElseThrow());
     assertEquals(1_500_000L, b.microUsdSpent());
   }
@@ -138,7 +154,7 @@ final class StopClassifierTest {
     var s = state();
     s.accumulateCost(CostEstimate.ofMicroUsd(1_000_000L));
     var limits = SessionLimits.newBuilder().withMaxBudgetMicroUsd(1_000_000L).build();
-    var result = classifier.classify(s, limits, FinishReason.STOP, "done", false);
+    var result = classifyNoError(s, limits, FinishReason.STOP, "done", false);
     assertInstanceOf(ResultMessage.Success.class, result.orElseThrow());
   }
 
@@ -146,7 +162,7 @@ final class StopClassifierTest {
   void budgetAbsentDoesNotTrigger() {
     var s = state();
     s.accumulateCost(CostEstimate.ofMicroUsd(999_999_000_000L));
-    var result = classifier.classify(s, defaults(), FinishReason.STOP, "x", false);
+    var result = classifyNoError(s, defaults(), FinishReason.STOP, "x", false);
     assertInstanceOf(ResultMessage.Success.class, result.orElseThrow());
   }
 
@@ -155,14 +171,14 @@ final class StopClassifierTest {
   @Test
   void wallClockExceededProducesErrorMaxWallClock() {
     var s = stateAtElapsed(Duration.ofHours(2));
-    var result = classifier.classify(s, defaults(), FinishReason.STOP, "x", false);
+    var result = classifyNoError(s, defaults(), FinishReason.STOP, "x", false);
     assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, result.orElseThrow());
   }
 
   @Test
   void wallClockExactDoesNotTrigger() {
     var s = stateAtElapsed(Duration.ofHours(1));
-    var result = classifier.classify(s, defaults(), FinishReason.STOP, "x", false);
+    var result = classifyNoError(s, defaults(), FinishReason.STOP, "x", false);
     assertInstanceOf(ResultMessage.Success.class, result.orElseThrow());
   }
 
@@ -174,7 +190,7 @@ final class StopClassifierTest {
     var limits = SessionLimits.newBuilder().withMaxTurns(2).build();
     s.beginTurn();
     s.beginTurn(); // index now 2 == maxTurns
-    var result = classifier.classify(s, limits, FinishReason.TOOL_CALLS, "x", false);
+    var result = classifyNoError(s, limits, FinishReason.TOOL_CALLS, "x", false);
     var t = assertInstanceOf(ResultMessage.ErrorMaxTurns.class, result.orElseThrow());
     assertEquals(2, t.turnsUsed());
   }
@@ -184,22 +200,21 @@ final class StopClassifierTest {
   @Test
   void contentFilterProducesRefusal() {
     var result =
-        classifier.classify(state(), defaults(), FinishReason.CONTENT_FILTER, "I cannot", false);
+        classifyNoError(state(), defaults(), FinishReason.CONTENT_FILTER, "I cannot", false);
     var r = assertInstanceOf(ResultMessage.Refusal.class, result.orElseThrow());
     assertEquals("I cannot", r.refusalText());
   }
 
   @Test
   void contentFilterWithBlankContentUsesPlaceholderRefusalText() {
-    var result = classifier.classify(state(), defaults(), FinishReason.CONTENT_FILTER, "", false);
+    var result = classifyNoError(state(), defaults(), FinishReason.CONTENT_FILTER, "", false);
     var r = assertInstanceOf(ResultMessage.Refusal.class, result.orElseThrow());
     assertEquals("[refused without text]", r.refusalText());
   }
 
   @Test
   void errorProducesErrorDuringExecution() {
-    var result =
-        classifier.classify(state(), defaults(), FinishReason.ERROR, "rate limited", false);
+    var result = classifyNoError(state(), defaults(), FinishReason.ERROR, "rate limited", false);
     var e = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result.orElseThrow());
     assertEquals("ProviderError", e.error().kind());
     assertEquals("rate limited", e.error().message());
@@ -207,28 +222,27 @@ final class StopClassifierTest {
 
   @Test
   void errorWithBlankContentUsesPlaceholderMessage() {
-    var result = classifier.classify(state(), defaults(), FinishReason.ERROR, "  ", false);
+    var result = classifyNoError(state(), defaults(), FinishReason.ERROR, "  ", false);
     var e = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result.orElseThrow());
     assertEquals("provider reported ERROR", e.error().message());
   }
 
   @Test
   void stopWithNoPendingMessagesProducesSuccess() {
-    var result = classifier.classify(state(), defaults(), FinishReason.STOP, "all done", false);
+    var result = classifyNoError(state(), defaults(), FinishReason.STOP, "all done", false);
     var s = assertInstanceOf(ResultMessage.Success.class, result.orElseThrow());
     assertEquals("all done", s.result());
   }
 
   @Test
   void stopWithPendingMessagesContinues() {
-    var result = classifier.classify(state(), defaults(), FinishReason.STOP, "intermediate", true);
+    var result = classifyNoError(state(), defaults(), FinishReason.STOP, "intermediate", true);
     assertTrue(result.isEmpty());
   }
 
   @Test
   void toolCallsContinues() {
-    assertTrue(
-        classifier.classify(state(), defaults(), FinishReason.TOOL_CALLS, "", false).isEmpty());
+    assertTrue(classifyNoError(state(), defaults(), FinishReason.TOOL_CALLS, "", false).isEmpty());
   }
 
   @Test
@@ -238,8 +252,7 @@ final class StopClassifierTest {
     // and the loop iterates until maxTurns burns out (~100 turns of wasted budget). Classifying as
     // terminal at the first LENGTH avoids the burn and surfaces a meaningful error to the caller.
     var terminal =
-        classifier
-            .classify(state(), defaults(), FinishReason.LENGTH, "partial output", false)
+        classifyNoError(state(), defaults(), FinishReason.LENGTH, "partial output", false)
             .orElseThrow();
     var err = (ResultMessage.ErrorDuringExecution) terminal;
     assertEquals("max-tokens", err.error().kind());
@@ -254,7 +267,7 @@ final class StopClassifierTest {
     // The model can hit LENGTH before producing any text (e.g. truncation mid-tool-call). The
     // terminal still carries an informative error kind so callers don't have to disambiguate.
     var terminal =
-        classifier.classify(state(), defaults(), FinishReason.LENGTH, "", false).orElseThrow();
+        classifyNoError(state(), defaults(), FinishReason.LENGTH, "", false).orElseThrow();
     assertTrue(terminal instanceof ResultMessage.ErrorDuringExecution);
   }
 
@@ -263,9 +276,68 @@ final class StopClassifierTest {
     var s = state();
     s.accumulateUsage(Usage.of(20, 10));
     s.accumulateCost(CostEstimate.ofMicroUsd(420_000L));
-    var result = classifier.classify(s, defaults(), FinishReason.STOP, "ok", false).orElseThrow();
+    var result = classifyNoError(s, defaults(), FinishReason.STOP, "ok", false).orElseThrow();
     assertEquals(20, result.usage().inputTokens());
     assertEquals(10, result.usage().outputTokens());
     assertEquals(420_000L, result.cost().microUsd());
+  }
+
+  // ── streamAttempts validation ─────────────────────────────────────────────
+
+  @Test
+  void rejectsNonPositiveStreamAttempts() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> classifier.classify(state(), defaults(), FinishReason.STOP, "x", null, 0, false));
+    assertTrue(ex.getMessage().contains("streamAttempts"));
+  }
+
+  // ── ERROR branch: TransientStreamException → ErrorTransientStream ─────────
+
+  @Test
+  void transientStreamExceptionProducesErrorTransientStreamWithProviderAndAttempts() {
+    var ioe = new IOException("Connection reset by peer");
+    var tse = new TransientStreamException("Stream read error", ioe, "anthropic");
+    var terminal =
+        classifier
+            .classify(state(), defaults(), FinishReason.ERROR, "", tse, 3, false)
+            .orElseThrow();
+    var ets = assertInstanceOf(ResultMessage.ErrorTransientStream.class, terminal);
+    assertEquals("anthropic", ets.providerName());
+    assertEquals(3, ets.attemptsMade());
+    assertEquals(TransientStreamException.class.getName(), ets.error().kind());
+    assertEquals(IOException.class.getName(), ets.error().cause().kind());
+    assertTrue(ets.error().cause().message().contains("Connection reset"));
+  }
+
+  // ── ERROR branch: arbitrary throwable preserves the cause chain ───────────
+
+  @Test
+  void nonTransientThrowableProducesErrorDuringExecutionWithFullCauseChain() {
+    var inner = new IllegalStateException("inner");
+    var outer = new RuntimeException("outer", inner);
+    var terminal =
+        classifier
+            .classify(state(), defaults(), FinishReason.ERROR, "", outer, 1, false)
+            .orElseThrow();
+    var err = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, terminal);
+    assertEquals(RuntimeException.class.getName(), err.error().kind());
+    assertEquals("outer", err.error().message());
+    assertEquals(IllegalStateException.class.getName(), err.error().cause().kind());
+    assertEquals("inner", err.error().cause().message());
+  }
+
+  // ── ERROR branch: null throwable retains the legacy assistant-content path ─
+
+  @Test
+  void nullThrowableInErrorBranchFallsBackToAssistantContentMessage() {
+    var terminal =
+        classifier
+            .classify(state(), defaults(), FinishReason.ERROR, "rate limited", null, 1, false)
+            .orElseThrow();
+    var err = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, terminal);
+    assertEquals("ProviderError", err.error().kind());
+    assertEquals("rate limited", err.error().message());
   }
 }

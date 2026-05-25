@@ -12,10 +12,11 @@ import java.util.OptionalLong;
 /**
  * Per-session ceilings the agent loop enforces.
  *
- * <p>Six orthogonal limits — turns, dollars, wall-clock, per-tool timeout, context tokens,
- * stream-idle timeout — each mapping to a distinct termination path in {@link ResultMessage}.
- * Limits are immutable for the lifetime of a session; runtime mutation would let a long-running
- * session escape the contract its caller saw at construction.
+ * <p>Seven orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, context tokens,
+ * stream-idle timeout, stream-retry policy — each mapping to a distinct termination path or
+ * recovery behaviour in {@link ResultMessage}. Limits are immutable for the lifetime of a session;
+ * runtime mutation would let a long-running session escape the contract its caller saw at
+ * construction.
  *
  * <p>Defaults track Helios production values:
  *
@@ -34,8 +35,14 @@ import java.util.OptionalLong;
  *       the turn fails with {@link ai.singlr.core.model.FinishReason#ERROR}, surfaced as {@link
  *       ResultMessage.ErrorDuringExecution} with a {@code stream-idle-timeout} error code. Guards
  *       against silent-socket / hung-edge stalls that {@code maxWallClock} would otherwise catch
- *       only at the end of the wall-clock budget. Composes with future model-call retry — a turn
- *       that idle-times-out is a natural retry candidate.
+ *       only at the end of the wall-clock budget. Composes with stream retry — a turn that
+ *       idle-times-out becomes a retry candidate when the provider classifies the failure as
+ *       transient.
+ *   <li>{@code streamRetryPolicy}: 3 attempts, 1 s/4 s/16 s exponential back-off capped at 30 s,
+ *       ±25% jitter (see {@link StreamRetryPolicy#defaults()}). The loop retries a turn that failed
+ *       with {@link ai.singlr.core.model.TransientStreamException}; on exhaustion the session
+ *       terminates as {@link ResultMessage.ErrorTransientStream}. Use {@link
+ *       StreamRetryPolicy#disabled()} for fail-fast behaviour.
  * </ul>
  *
  * <p>Currency is integer micro-USD (Stripe-style fixed-precision). See {@link CostEstimate} for the
@@ -52,6 +59,8 @@ import java.util.OptionalLong;
  * @param maxContextTokens soft trigger for context compaction in tokens; must be positive
  * @param streamIdleTimeout per-chunk idle ceiling on a model stream; must be non-null and strictly
  *     positive
+ * @param streamRetryPolicy how the loop retries a turn that failed with {@link
+ *     ai.singlr.core.model.TransientStreamException}; non-null
  */
 public record SessionLimits(
     int maxTurns,
@@ -59,7 +68,8 @@ public record SessionLimits(
     Duration maxWallClock,
     Duration toolTimeoutDefault,
     long maxContextTokens,
-    Duration streamIdleTimeout) {
+    Duration streamIdleTimeout,
+    StreamRetryPolicy streamRetryPolicy) {
 
   private static final SessionLimits DEFAULTS =
       new SessionLimits(
@@ -68,13 +78,13 @@ public record SessionLimits(
           Duration.ofHours(1),
           Duration.ofMinutes(2),
           180_000L,
-          Duration.ofSeconds(60));
+          Duration.ofSeconds(60),
+          StreamRetryPolicy.defaults());
 
   /**
    * Canonical constructor.
    *
-   * @throws NullPointerException if {@code maxBudgetMicroUsd}, {@code maxWallClock}, or {@code
-   *     toolTimeoutDefault} is null
+   * @throws NullPointerException if any non-numeric argument is null
    * @throws IllegalArgumentException if any numeric value violates its positivity contract
    */
   public SessionLimits {
@@ -105,6 +115,7 @@ public record SessionLimits(
       throw new IllegalArgumentException(
           "streamIdleTimeout must be strictly positive, got " + streamIdleTimeout);
     }
+    Objects.requireNonNull(streamRetryPolicy, "streamRetryPolicy must not be null");
   }
 
   /**
@@ -139,7 +150,8 @@ public record SessionLimits(
         .withMaxWallClock(maxWallClock)
         .withToolTimeoutDefault(toolTimeoutDefault)
         .withMaxContextTokens(maxContextTokens)
-        .withStreamIdleTimeout(streamIdleTimeout);
+        .withStreamIdleTimeout(streamIdleTimeout)
+        .withStreamRetryPolicy(streamRetryPolicy);
   }
 
   /** Mutable builder for {@link SessionLimits}. */
@@ -151,6 +163,7 @@ public record SessionLimits(
     private Duration toolTimeoutDefault = DEFAULTS.toolTimeoutDefault;
     private long maxContextTokens = DEFAULTS.maxContextTokens;
     private Duration streamIdleTimeout = DEFAULTS.streamIdleTimeout;
+    private StreamRetryPolicy streamRetryPolicy = DEFAULTS.streamRetryPolicy;
 
     private Builder() {}
 
@@ -226,6 +239,20 @@ public record SessionLimits(
     }
 
     /**
+     * Set the stream-retry policy. The loop applies this policy when a turn fails with {@link
+     * ai.singlr.core.model.TransientStreamException}. Pass {@link StreamRetryPolicy#disabled()} to
+     * opt out of retry entirely; the loop will then terminate on the first transient failure via
+     * {@link ResultMessage.ErrorTransientStream}.
+     *
+     * @param streamRetryPolicy the policy; non-null
+     * @return this builder
+     */
+    public Builder withStreamRetryPolicy(StreamRetryPolicy streamRetryPolicy) {
+      this.streamRetryPolicy = streamRetryPolicy;
+      return this;
+    }
+
+    /**
      * Build the immutable record.
      *
      * @return the limits
@@ -237,7 +264,8 @@ public record SessionLimits(
           maxWallClock,
           toolTimeoutDefault,
           maxContextTokens,
-          streamIdleTimeout);
+          streamIdleTimeout,
+          streamRetryPolicy);
     }
   }
 }

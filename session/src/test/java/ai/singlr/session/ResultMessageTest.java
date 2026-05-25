@@ -186,6 +186,80 @@ final class ResultMessageTest {
     assertEquals("error must not be null", ex.getMessage());
   }
 
+  // ── Subtype: ErrorTransientStream ─────────────────────────────────────────
+
+  @Test
+  void errorTransientStreamConstructsAndExposesFields() {
+    var err = SerializedError.of("kind", "msg");
+    var r = new ResultMessage.ErrorTransientStream(SID, "anthropic", 3, err, USAGE, COST, DUR);
+    assertEquals("anthropic", r.providerName());
+    assertEquals(3, r.attemptsMade());
+    assertSame(err, r.error());
+  }
+
+  @Test
+  void errorTransientStreamRejectsNullProviderName() {
+    var err = SerializedError.of("kind", "msg");
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new ResultMessage.ErrorTransientStream(SID, null, 1, err, USAGE, COST, DUR));
+    assertEquals("providerName must not be null", ex.getMessage());
+  }
+
+  @Test
+  void errorTransientStreamRejectsBlankProviderName() {
+    var err = SerializedError.of("kind", "msg");
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new ResultMessage.ErrorTransientStream(SID, "  ", 1, err, USAGE, COST, DUR));
+    assertEquals("providerName must not be blank", ex.getMessage());
+  }
+
+  @Test
+  void errorTransientStreamRejectsZeroAttempts() {
+    var err = SerializedError.of("kind", "msg");
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new ResultMessage.ErrorTransientStream(SID, "anthropic", 0, err, USAGE, COST, DUR));
+    assertEquals("attemptsMade must be >= 1, got 0", ex.getMessage());
+  }
+
+  @Test
+  void errorTransientStreamRejectsNullError() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new ResultMessage.ErrorTransientStream(
+                    SID, "anthropic", 1, null, USAGE, COST, DUR));
+    assertEquals("error must not be null", ex.getMessage());
+  }
+
+  @Test
+  void errorTransientStreamWithoutStackTracesStripsFrames() {
+    var carrying = SerializedError.of(new IllegalStateException("internal detail"));
+    assertTrue(carrying.stackTrace().size() > 0, "test precondition");
+    var terminal =
+        new ResultMessage.ErrorTransientStream(SID, "anthropic", 2, carrying, USAGE, COST, DUR);
+    var redacted = terminal.withoutStackTraces();
+    var ets = (ResultMessage.ErrorTransientStream) redacted;
+    assertEquals("anthropic", ets.providerName());
+    assertEquals(2, ets.attemptsMade());
+    assertEquals(List.of(), ets.error().stackTrace());
+  }
+
+  @Test
+  void errorTransientStreamWithoutStackTracesIsNoOpWhenAlreadyClean() {
+    var clean = SerializedError.of("kind", "msg");
+    var terminal =
+        new ResultMessage.ErrorTransientStream(SID, "anthropic", 1, clean, USAGE, COST, DUR);
+    assertSame(terminal, terminal.withoutStackTraces());
+  }
+
   // ── Subtype: Refusal ───────────────────────────────────────────────────────
 
   @Test
@@ -293,9 +367,9 @@ final class ResultMessageTest {
   // ── Sealed-hierarchy contract ─────────────────────────────────────────────
 
   @Test
-  void sealedInterfaceHasExactlySevenPermittedSubclasses() {
+  void sealedInterfaceHasExactlyEightPermittedSubclasses() {
     var permits = ResultMessage.class.getPermittedSubclasses();
-    assertEquals(8, permits.length);
+    assertEquals(9, permits.length);
   }
 
   @Test
@@ -308,6 +382,8 @@ final class ResultMessageTest {
             new ResultMessage.ErrorMaxWallClock(SID, USAGE, COST, DUR),
             new ResultMessage.ErrorDuringExecution(
                 SID, SerializedError.of("kind", "msg"), USAGE, COST, DUR),
+            new ResultMessage.ErrorTransientStream(
+                SID, "anthropic", 3, SerializedError.of("kind", "msg"), USAGE, COST, DUR),
             new ResultMessage.ErrorProviderUnavailable(
                 SID, "TestProvider", "pool saturated", null, USAGE, COST, DUR),
             new ResultMessage.Refusal(SID, "no", USAGE, COST, DUR),
@@ -320,6 +396,7 @@ final class ResultMessageTest {
             case ResultMessage.ErrorMaxBudgetUsd e -> "max-budget";
             case ResultMessage.ErrorMaxWallClock e -> "max-wall";
             case ResultMessage.ErrorDuringExecution e -> "exec-error";
+            case ResultMessage.ErrorTransientStream e -> "transient-stream";
             case ResultMessage.ErrorProviderUnavailable e -> "provider-unavailable";
             case ResultMessage.Refusal e -> "refusal";
             case ResultMessage.Cancelled e -> "cancelled";

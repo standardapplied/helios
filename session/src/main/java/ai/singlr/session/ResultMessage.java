@@ -14,13 +14,13 @@ import java.util.Optional;
 /**
  * Terminal result of an agent session.
  *
- * <p>Sealed: every termination path produces exactly one of the seven subtypes below. Callers
+ * <p>Sealed: every termination path produces exactly one of the eight subtypes below. Callers
  * branch on the subtype via {@code switch} pattern matching; they never parse assistant text to
  * discover whether the session succeeded.
  *
  * <p>Every subtype carries the same four common fields ({@code sessionId}, {@code usage}, {@code
  * cost}, {@code duration}) plus subtype-specific detail. Common-field validation lives in {@link
- * #validateCommon(String, Usage, CostEstimate, Duration)} so the seven record bodies stay tight and
+ * #validateCommon(String, Usage, CostEstimate, Duration)} so the eight record bodies stay tight and
  * the validation contract is testable in one place.
  */
 public sealed interface ResultMessage
@@ -29,6 +29,7 @@ public sealed interface ResultMessage
         ResultMessage.ErrorMaxBudgetUsd,
         ResultMessage.ErrorMaxWallClock,
         ResultMessage.ErrorDuringExecution,
+        ResultMessage.ErrorTransientStream,
         ResultMessage.ErrorProviderUnavailable,
         ResultMessage.Refusal,
         ResultMessage.Cancelled {
@@ -200,6 +201,64 @@ public sealed interface ResultMessage
       return redacted == error
           ? this
           : new ErrorDuringExecution(sessionId, redacted, usage, cost, duration);
+    }
+  }
+
+  /**
+   * The session terminated because a model stream was interrupted by a recoverable transport
+   * failure (socket reset, half-closed connection, idle-read timeout on a provider-classified
+   * retryable status such as 408 / 429 / 5xx) and the configured {@link
+   * ai.singlr.session.SessionLimits#streamRetryPolicy() streamRetryPolicy} budget was exhausted
+   * without recovery.
+   *
+   * <p>Distinguished from {@link ErrorDuringExecution} so callers can pattern-match the failure
+   * mode and decide independently whether to surface a "retry your request later" message, retry
+   * the entire session, or surface the failure as opaque. The {@link #error} field carries the
+   * originating throwable's full cause chain (kind = throwable class name, message, stack trace,
+   * recursive {@code cause()}) via {@link SerializedError#of(Throwable)}, so deployers can
+   * distinguish a TCP reset from an idle timeout from a half-closed framing error without string-
+   * matching the {@code message} field.
+   *
+   * @param sessionId the session's id
+   * @param providerName the provider's short identifier carried from {@link
+   *     ai.singlr.core.model.TransientStreamException#providerName()}; non-blank
+   * @param attemptsMade total number of stream attempts the loop made — always {@code >= 1}; equals
+   *     {@code 1 + retriesConsumed}. A value of {@code 1} means retry was disabled
+   * @param error the serialised throwable that caused the final attempt to fail, with cause chain
+   *     intact
+   * @param usage accumulated token usage (sums every attempt's billed tokens)
+   * @param cost accumulated cost (sums every attempt's spend)
+   * @param duration elapsed wall clock
+   */
+  record ErrorTransientStream(
+      String sessionId,
+      String providerName,
+      int attemptsMade,
+      SerializedError error,
+      Usage usage,
+      CostEstimate cost,
+      Duration duration)
+      implements ResultMessage {
+
+    public ErrorTransientStream {
+      validateCommon(sessionId, usage, cost, duration);
+      Objects.requireNonNull(providerName, "providerName must not be null");
+      if (Strings.isBlank(providerName)) {
+        throw new IllegalArgumentException("providerName must not be blank");
+      }
+      if (attemptsMade < 1) {
+        throw new IllegalArgumentException("attemptsMade must be >= 1, got " + attemptsMade);
+      }
+      Objects.requireNonNull(error, "error must not be null");
+    }
+
+    @Override
+    public ResultMessage withoutStackTraces() {
+      var redacted = error.withoutStackTrace();
+      return redacted == error
+          ? this
+          : new ErrorTransientStream(
+              sessionId, providerName, attemptsMade, redacted, usage, cost, duration);
     }
   }
 

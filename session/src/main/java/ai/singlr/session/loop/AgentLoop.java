@@ -193,6 +193,8 @@ public final class AgentLoop {
               limits,
               outcome.finishReason(),
               outcome.assistantContent(),
+              outcome.streamError(),
+              outcome.streamAttempts(),
               steeringQueue.size() > 0);
       if (terminal.isPresent()) {
         var resolved = handlePreStop(state, terminal.orElseThrow(), outcome);

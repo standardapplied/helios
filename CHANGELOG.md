@@ -4,6 +4,84 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.5.5] — 2026-05-25 — Transient-stream retry: bounded re-issue, typed terminal, cause-chain preservation
+
+Fixes the Light Grid bug report (2026-05-25) where a mid-stream `IOException`
+on Anthropic Sonnet 4.6 — typically a TCP reset 100+ seconds into a long
+structured-output emit — aborted a 25-turn, $0.40+ matchmaking run with the
+opaque `ProviderError: Stream read error` terminal and no underlying cause
+visible to the application.
+
+Three layered fixes; all three asks in the report addressed.
+
+### Added — cause-chain propagation
+
+`StopClassifier`'s `FinishReason.ERROR` branch used to collapse the failure
+to `SerializedError.of("ProviderError", outerMessage)`, discarding the
+throwable. It now routes via `SerializedError.of(throwable)` so the kind
+(`java.io.IOException`), the originating message
+(`"Connection reset by peer"`), the stack trace, and any recursive cause
+chain reach the application via `error.cause()`. Same change applies to
+every non-transient throwable that escapes a turn — not just streams.
+
+`TurnSubscriber.toOutcome(int)` carries the throwable through unchanged
+instead of extracting only `getMessage()`.
+
+### Added — bounded automatic retry
+
+New `SessionLimits.streamRetryPolicy` field (defaults: 3 attempts, 1s/4s
+exponential back-off capped at 30s, ±25% jitter; `StreamRetryPolicy.disabled()`
+opts out). `TurnRunner.runStreamWithRetry` orchestrates the retry around
+`model.chatStream`; cancellation-aware `CountDownLatch` back-off so
+wall-clock / explicit-cancel terminations abort cleanly without burning the
+remaining attempts.
+
+### Added — distinct terminal subtype
+
+New permitted sibling `ResultMessage.ErrorTransientStream(providerName,
+attemptsMade, error, …)` — surfaced when the retry budget is exhausted.
+Callers `switch` on the subtype instead of string-matching on
+`ErrorDuringExecution.error().message()`. Anthropic SSE has no event-id
+resumption — the retries are full re-issues from the same history snapshot.
+
+New observable `QueryEvent.TurnRetried(attemptNumber, backoff, providerName,
+error)` fires between attempts so UIs can surface "retrying…" affordances.
+
+### Added — typed provider signal
+
+New `ai.singlr.core.model.TransientStreamException` carries provider name +
+cause chain. Providers throw this for recoverable transport failures
+(mid-stream IOException, connect-time IOException). Loop pattern-matches on
+the type without coupling to provider-specific exception classes.
+
+### Changed — Anthropic mapping
+
+`AnthropicModel.drainToResponse` now promotes `StreamEvent.Error` with an
+`IOException` cause to `TransientStreamException` instead of the old opaque
+`AnthropicException("Stream read error", ioe)`. `streamAndDrain` also
+promotes connect-time `IOException`s (matches `AnthropicException.isRetryable`
+which already classified `status==0` network errors as retryable).
+Non-`IOException` causes (Jackson parse errors, contract violations) keep
+the `AnthropicException` path and do not retry.
+
+### Breaking — sealed-interface permits
+
+- `ResultMessage` permits 8 subtypes now (was 7) — exhaustive `switch`
+  consumers need an `ErrorTransientStream` case (compiler-flagged).
+- `QueryEvent` permits 16 subtypes now (was 15) — same shape for
+  `TurnRetried`.
+
+### Tests
+
+- 6 session-level repros (cause chain, bounded retry, recovery on
+  intermediate success, distinct subtype, retry-disabled,
+  cancellation-during-backoff)
+- 4 anthropic-level repros (StreamingIterator cause preservation, real
+  ServerSocket mid-stream RST, non-`IOException` stays `AnthropicException`)
+- 12 `StreamRetryPolicy` tests, 6 `TransientStreamException` tests
+- `ErrorTransientStream` + `TurnRetried` validation + `StopClassifier`
+  routing + `SessionLimits.streamRetryPolicy` plumbing
+
 ## [2.5.4] — 2026-05-24 — OpenAI: model-aware `xhigh` dispatch (gpt-5.4 / gpt-5.5)
 
 Fix-forward for 2.5.3's OpenAI handling of `ThinkingLevel.XHIGH` and `MAX`.

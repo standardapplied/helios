@@ -26,13 +26,15 @@ final class SessionLimitsTest {
             Duration.ofMinutes(30),
             Duration.ofSeconds(45),
             32_000L,
-            Duration.ofSeconds(30));
+            Duration.ofSeconds(30),
+            StreamRetryPolicy.defaults());
     assertEquals(50, l.maxTurns());
     assertEquals(OptionalLong.of(12_500_000L), l.maxBudgetMicroUsd());
     assertEquals(Duration.ofMinutes(30), l.maxWallClock());
     assertEquals(Duration.ofSeconds(45), l.toolTimeoutDefault());
     assertEquals(32_000L, l.maxContextTokens());
     assertEquals(Duration.ofSeconds(30), l.streamIdleTimeout());
+    assertEquals(StreamRetryPolicy.defaults(), l.streamRetryPolicy());
   }
 
   @Test
@@ -44,6 +46,7 @@ final class SessionLimitsTest {
     assertEquals(Duration.ofMinutes(2), d.toolTimeoutDefault());
     assertEquals(180_000L, d.maxContextTokens());
     assertEquals(Duration.ofSeconds(60), d.streamIdleTimeout());
+    assertEquals(StreamRetryPolicy.defaults(), d.streamRetryPolicy());
   }
 
   @Test
@@ -247,7 +250,8 @@ final class SessionLimitsTest {
         maxWallClock,
         toolTimeoutDefault,
         maxContextTokens,
-        Duration.ofSeconds(60));
+        Duration.ofSeconds(60),
+        StreamRetryPolicy.defaults());
   }
 
   private static Duration oneHour() {
@@ -267,7 +271,13 @@ final class SessionLimitsTest {
             IllegalArgumentException.class,
             () ->
                 new SessionLimits(
-                    100, OptionalLong.empty(), oneHour(), twoMin(), 1_000L, Duration.ZERO));
+                    100,
+                    OptionalLong.empty(),
+                    oneHour(),
+                    twoMin(),
+                    1_000L,
+                    Duration.ZERO,
+                    StreamRetryPolicy.defaults()));
     assertEquals("streamIdleTimeout must be strictly positive, got PT0S", ex.getMessage());
   }
 
@@ -277,19 +287,66 @@ final class SessionLimitsTest {
         IllegalArgumentException.class,
         () ->
             new SessionLimits(
-                100, OptionalLong.empty(), oneHour(), twoMin(), 1_000L, Duration.ofSeconds(-1)));
+                100,
+                OptionalLong.empty(),
+                oneHour(),
+                twoMin(),
+                1_000L,
+                Duration.ofSeconds(-1),
+                StreamRetryPolicy.defaults()));
   }
 
   @Test
   void streamIdleTimeoutNullRejected() {
     assertThrows(
         NullPointerException.class,
-        () -> new SessionLimits(100, OptionalLong.empty(), oneHour(), twoMin(), 1_000L, null));
+        () ->
+            new SessionLimits(
+                100,
+                OptionalLong.empty(),
+                oneHour(),
+                twoMin(),
+                1_000L,
+                null,
+                StreamRetryPolicy.defaults()));
   }
 
   @Test
   void builderWithStreamIdleTimeout() {
     var l = SessionLimits.newBuilder().withStreamIdleTimeout(Duration.ofSeconds(15)).build();
     assertEquals(Duration.ofSeconds(15), l.streamIdleTimeout());
+  }
+
+  // ── streamRetryPolicy ─────────────────────────────────────────────────────
+
+  @Test
+  void streamRetryPolicyNullRejected() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new SessionLimits(
+                    100,
+                    OptionalLong.empty(),
+                    oneHour(),
+                    twoMin(),
+                    1_000L,
+                    Duration.ofSeconds(60),
+                    null));
+    assertEquals("streamRetryPolicy must not be null", ex.getMessage());
+  }
+
+  @Test
+  void builderWithStreamRetryPolicy() {
+    var disabled = StreamRetryPolicy.disabled();
+    var l = SessionLimits.newBuilder().withStreamRetryPolicy(disabled).build();
+    assertEquals(disabled, l.streamRetryPolicy());
+  }
+
+  @Test
+  void toBuilderPreservesStreamRetryPolicyOverride() {
+    var disabled = StreamRetryPolicy.disabled();
+    var original = SessionLimits.newBuilder().withStreamRetryPolicy(disabled).build();
+    assertEquals(disabled, original.toBuilder().build().streamRetryPolicy());
   }
 }

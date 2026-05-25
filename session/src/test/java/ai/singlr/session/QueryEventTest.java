@@ -276,6 +276,84 @@ final class QueryEventTest {
     assertEquals("reason must not be null", ex.getMessage());
   }
 
+  // ── TurnRetried ───────────────────────────────────────────────────────────
+
+  @Test
+  void turnRetriedConstructsAndExposesFields() {
+    var err = SerializedError.of("kind", "msg");
+    var e = new QueryEvent.TurnRetried(SID, TURN, TS, 2, Duration.ofMillis(750), "anthropic", err);
+    assertEquals(2, e.attemptNumber());
+    assertEquals(Duration.ofMillis(750), e.backoff());
+    assertEquals("anthropic", e.providerName());
+    assertSame(err, e.error());
+  }
+
+  @Test
+  void turnRetriedRejectsNonPositiveAttemptNumber() {
+    var err = SerializedError.of("kind", "msg");
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new QueryEvent.TurnRetried(SID, TURN, TS, 0, Duration.ofMillis(1), "p", err));
+    assertEquals("attemptNumber must be >= 1, got 0", ex.getMessage());
+  }
+
+  @Test
+  void turnRetriedRejectsNullBackoff() {
+    var err = SerializedError.of("kind", "msg");
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new QueryEvent.TurnRetried(SID, TURN, TS, 1, null, "p", err));
+    assertEquals("backoff must not be null", ex.getMessage());
+  }
+
+  @Test
+  void turnRetriedRejectsNegativeBackoff() {
+    var err = SerializedError.of("kind", "msg");
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new QueryEvent.TurnRetried(SID, TURN, TS, 1, Duration.ofMillis(-1), "p", err));
+    assertTrue(ex.getMessage().startsWith("backoff must not be negative"));
+  }
+
+  @Test
+  void turnRetriedAcceptsZeroBackoff() {
+    var err = SerializedError.of("kind", "msg");
+    var e = new QueryEvent.TurnRetried(SID, TURN, TS, 1, Duration.ZERO, "p", err);
+    assertEquals(Duration.ZERO, e.backoff());
+  }
+
+  @Test
+  void turnRetriedRejectsNullProviderName() {
+    var err = SerializedError.of("kind", "msg");
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new QueryEvent.TurnRetried(SID, TURN, TS, 1, Duration.ZERO, null, err));
+    assertEquals("providerName must not be null", ex.getMessage());
+  }
+
+  @Test
+  void turnRetriedRejectsBlankProviderName() {
+    var err = SerializedError.of("kind", "msg");
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new QueryEvent.TurnRetried(SID, TURN, TS, 1, Duration.ZERO, "  ", err));
+    assertEquals("providerName must not be blank", ex.getMessage());
+  }
+
+  @Test
+  void turnRetriedRejectsNullError() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new QueryEvent.TurnRetried(SID, TURN, TS, 1, Duration.ZERO, "p", null));
+    assertEquals("error must not be null", ex.getMessage());
+  }
+
   // ── LoopEnded ─────────────────────────────────────────────────────────────
 
   @Test
@@ -314,9 +392,9 @@ final class QueryEventTest {
   // ── Sealed-hierarchy contract ─────────────────────────────────────────────
 
   @Test
-  void sealedInterfaceHasFifteenPermittedSubclasses() {
+  void sealedInterfaceHasSixteenPermittedSubclasses() {
     var permits = QueryEvent.class.getPermittedSubclasses();
-    assertEquals(15, permits.length);
+    assertEquals(16, permits.length);
   }
 
   @Test
@@ -333,6 +411,14 @@ final class QueryEventTest {
             new QueryEvent.ContextWarning(SID, TURN, TS, 0.5),
             new QueryEvent.ContextEdited(SID, TURN, TS, 1, 100L, 50L),
             new QueryEvent.TurnEnded(SID, TURN, TS, StopReason.END_TURN),
+            new QueryEvent.TurnRetried(
+                SID,
+                TURN,
+                TS,
+                1,
+                Duration.ofMillis(100),
+                "anthropic",
+                SerializedError.of("k", "m")),
             new QueryEvent.LoopEnded(SID, TURN, TS, result),
             new QueryEvent.Error(SID, TURN, TS, SerializedError.of("k", "m")));
     for (var e : all) {
@@ -351,6 +437,7 @@ final class QueryEventTest {
             case QueryEvent.HookFired h -> "hook-fired";
             case QueryEvent.QuestionAsked q -> "question-asked";
             case QueryEvent.TurnEnded te -> "turn-end";
+            case QueryEvent.TurnRetried tr -> "turn-retried";
             case QueryEvent.LoopEnded le -> "loop-end";
             case QueryEvent.Error err -> "error";
           };

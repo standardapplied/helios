@@ -12,11 +12,15 @@ import ai.singlr.core.model.ModelChunk;
 import ai.singlr.core.model.Response;
 import ai.singlr.core.model.Response.Usage;
 import ai.singlr.core.model.ToolCall;
+import ai.singlr.core.model.TransientStreamException;
+import ai.singlr.core.runtime.CancellationToken;
 import ai.singlr.core.schema.OutputSchema;
 import ai.singlr.core.schema.StructuredOutputParseException;
+import ai.singlr.core.tool.Tool;
 import ai.singlr.core.tool.ToolResult;
 import ai.singlr.session.QueryEvent;
 import ai.singlr.session.ResultMessage;
+import ai.singlr.session.SerializedError;
 import ai.singlr.session.SessionLimits;
 import ai.singlr.session.SteeringQueue;
 import ai.singlr.session.StopReason;
@@ -28,12 +32,15 @@ import ai.singlr.session.hooks.HookRegistry;
 import ai.singlr.session.tools.ToolBinding;
 import ai.singlr.session.tools.ToolVisibilityContext;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -233,26 +240,16 @@ public final class TurnRunner {
     var visibleTools =
         toolDispatch.registry().visible(visibilityCtx).stream().map(ToolBinding::tool).toList();
 
-    var subscriber =
-        new TurnSubscriber(state, emitter, clock, scheduler, limits.streamIdleTimeout());
-    try {
-      var publisher =
-          outputSchema != null
-              ? model.chatStream(
-                  state.historySnapshot(), visibleTools, outputSchema, state.cancellation())
-              : model.chatStream(state.historySnapshot(), visibleTools, state.cancellation());
-      publisher.subscribe(subscriber);
-    } catch (Throwable t) {
-      subscriber.onError(t);
-    }
-    subscriber.awaitDone(state.cancellation());
+    var streamAttempt = runStreamWithRetry(state, limits, visibleTools);
+    var subscriber = streamAttempt.subscriber();
+    var attemptsMade = streamAttempt.attemptsMade();
 
     var schemaRecovery = trySelfCorrectSchema(state, subscriber);
     if (schemaRecovery != null) {
       return schemaRecovery;
     }
 
-    var streamOutcome = subscriber.toOutcome();
+    var streamOutcome = subscriber.toOutcome(attemptsMade);
     var toolCalls = subscriber.toolCalls();
 
     if (!toolCalls.isEmpty()) {
@@ -365,6 +362,106 @@ public final class TurnRunner {
             clock.instant(),
             mapFinishReasonToStopReason(outcome.finishReason())));
     return outcome;
+  }
+
+  /**
+   * Outcome of the inner stream-retry loop: the final subscriber (whose recorded error, if any, the
+   * caller inspects) and the total attempts made.
+   */
+  private record StreamAttemptResult(TurnSubscriber subscriber, int attemptsMade) {}
+
+  /**
+   * Run {@code model.chatStream(...)} with bounded retry on {@link TransientStreamException},
+   * governed by {@link SessionLimits#streamRetryPolicy()}. Each failed attempt emits a {@link
+   * QueryEvent.TurnRetried} carrying the next back-off delay; the back-off sleep honours the
+   * session's {@link CancellationToken} so wall-clock / explicit-cancel terminations abort cleanly
+   * without burning the full delay. Returns the final subscriber and the total attempt count; the
+   * caller maps a still-failing transient subscriber error to {@link
+   * ResultMessage.ErrorTransientStream} via {@link StopClassifier}.
+   *
+   * <p>Non-transient throwables ({@link StructuredOutputParseException}, {@code
+   * java.util.concurrent.TimeoutException} from the stream-idle watchdog, or any other unchecked
+   * exception escaping the subscribe call) end the loop immediately — only the type guard on {@code
+   * TransientStreamException} triggers a retry.
+   */
+  private StreamAttemptResult runStreamWithRetry(
+      SessionState state, SessionLimits limits, List<Tool> visibleTools) {
+    var policy = limits.streamRetryPolicy();
+    TurnSubscriber subscriber = null;
+    int attempt = 0;
+    while (true) {
+      attempt++;
+      subscriber = new TurnSubscriber(state, emitter, clock, scheduler, limits.streamIdleTimeout());
+      try {
+        var publisher =
+            outputSchema != null
+                ? model.chatStream(
+                    state.historySnapshot(), visibleTools, outputSchema, state.cancellation())
+                : model.chatStream(state.historySnapshot(), visibleTools, state.cancellation());
+        publisher.subscribe(subscriber);
+      } catch (Throwable t) {
+        subscriber.onError(t);
+      }
+      subscriber.awaitDone(state.cancellation());
+
+      var err = subscriber.error();
+      if (!(err instanceof TransientStreamException transientErr)) {
+        return new StreamAttemptResult(subscriber, attempt);
+      }
+      if (attempt >= policy.maxAttempts() || state.cancellation().isCancelled()) {
+        return new StreamAttemptResult(subscriber, attempt);
+      }
+      var backoff = policy.nextDelay(attempt);
+      emitter.emit(
+          state,
+          new QueryEvent.TurnRetried(
+              state.sessionId(),
+              state.currentTurnIndex(),
+              clock.instant(),
+              attempt,
+              backoff,
+              transientErr.providerName(),
+              SerializedError.of(transientErr)));
+      if (!sleepHonouringCancellation(backoff, state.cancellation())) {
+        return new StreamAttemptResult(subscriber, attempt);
+      }
+    }
+  }
+
+  /**
+   * Sleep for {@code delay}, returning early when {@code cancellation} fires. Returns {@code true}
+   * when the full delay elapsed (or {@code delay} was zero); {@code false} when the sleep was cut
+   * short by cancellation or thread interruption.
+   *
+   * <p>Implementation: a one-shot {@link CountDownLatch} the cancellation callback counts down;
+   * {@code latch.await(timeout)} returns {@code true} when the latch counted down (cancelled) and
+   * {@code false} when the timeout elapsed (slept the full duration). The callback registration is
+   * removed in {@code finally} so a long-lived session token does not accumulate dead callbacks
+   * across many retries.
+   *
+   * <p>{@code delay} is contractually non-null and non-negative — callers pass {@link
+   * StreamRetryPolicy#nextDelay(int)} which is itself bounded by {@link
+   * ai.singlr.core.fault.Backoff}'s validation. Zero short-circuits the latch path; the caller's
+   * subsequent retry attempt re-checks cancellation before issuing the next request.
+   */
+  private static boolean sleepHonouringCancellation(Duration delay, CancellationToken token) {
+    if (token.isCancelled()) {
+      return false;
+    }
+    if (delay.isZero()) {
+      return true;
+    }
+    var latch = new CountDownLatch(1);
+    var registration = token.onCancel(latch::countDown);
+    try {
+      boolean cancelledDuringSleep = latch.await(delay.toMillis(), TimeUnit.MILLISECONDS);
+      return !cancelledDuringSleep;
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      return false;
+    } finally {
+      registration.remove();
+    }
   }
 
   /**

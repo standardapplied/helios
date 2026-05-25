@@ -8,6 +8,7 @@ import ai.singlr.core.common.Strings;
 import ai.singlr.core.model.ToolCall;
 import ai.singlr.session.ask.AskUserQuestionRequest;
 import ai.singlr.session.ask.AskUserQuestionResponse;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -43,6 +44,7 @@ public sealed interface QueryEvent
         QueryEvent.HookFired,
         QueryEvent.QuestionAsked,
         QueryEvent.TurnEnded,
+        QueryEvent.TurnRetried,
         QueryEvent.LoopEnded,
         QueryEvent.Error {
 
@@ -253,6 +255,55 @@ public sealed interface QueryEvent
     public TurnEnded {
       validateCommon(sessionId, turnIndex, timestamp);
       Objects.requireNonNull(reason, "reason must not be null");
+    }
+  }
+
+  /**
+   * A model-stream attempt failed with a recoverable transport error ({@link
+   * ai.singlr.core.model.TransientStreamException}) and the agent loop is about to retry the turn.
+   * Fires after each failed attempt, before the configured back-off delay; the next attempt is the
+   * {@code attemptNumber + 1}-th overall. Subscribers can use this to surface "retrying…" UI
+   * affordances and to correlate per-attempt token usage in their own ledgers.
+   *
+   * <p>Does <em>not</em> fire on the final exhausted attempt — that one terminates the session via
+   * {@link ResultMessage.ErrorTransientStream} which is surfaced through the subsequent {@link
+   * LoopEnded} event.
+   *
+   * @param sessionId the session id
+   * @param turnIndex the turn index that is being retried
+   * @param timestamp the event timestamp (captured before the back-off sleep begins)
+   * @param attemptNumber the 1-based attempt number that just failed; the next attempt is {@code
+   *     attemptNumber + 1}
+   * @param backoff the wall-clock delay the loop will wait before issuing the next attempt;
+   *     non-null and non-negative
+   * @param providerName the provider's short identifier carried from {@link
+   *     ai.singlr.core.model.TransientStreamException#providerName()}; non-blank
+   * @param error the serialised throwable that caused this attempt to fail, with cause chain intact
+   */
+  record TurnRetried(
+      String sessionId,
+      long turnIndex,
+      Instant timestamp,
+      int attemptNumber,
+      Duration backoff,
+      String providerName,
+      SerializedError error)
+      implements QueryEvent {
+
+    public TurnRetried {
+      validateCommon(sessionId, turnIndex, timestamp);
+      if (attemptNumber < 1) {
+        throw new IllegalArgumentException("attemptNumber must be >= 1, got " + attemptNumber);
+      }
+      Objects.requireNonNull(backoff, "backoff must not be null");
+      if (backoff.isNegative()) {
+        throw new IllegalArgumentException("backoff must not be negative, got " + backoff);
+      }
+      Objects.requireNonNull(providerName, "providerName must not be null");
+      if (Strings.isBlank(providerName)) {
+        throw new IllegalArgumentException("providerName must not be blank");
+      }
+      Objects.requireNonNull(error, "error must not be null");
     }
   }
 

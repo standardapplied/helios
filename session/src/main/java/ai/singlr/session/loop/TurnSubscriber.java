@@ -206,12 +206,30 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   }
 
   TurnOutcome toOutcome() {
+    return toOutcome(1);
+  }
+
+  /**
+   * Build the turn outcome with an explicit {@code streamAttempts} count. Used by {@link
+   * TurnRunner} when retrying a {@link ai.singlr.core.model.TransientStreamException}; the count
+   * surfaces on {@link ai.singlr.session.ResultMessage.ErrorTransientStream} when the retry budget
+   * is exhausted.
+   *
+   * <p>The throwable recorded by {@link #onError(Throwable)} is carried through unchanged so
+   * downstream consumers ({@link StopClassifier}, observability listeners) can walk the full cause
+   * chain instead of seeing only the wrapper's {@code getMessage()}.
+   *
+   * @param streamAttempts the attempt count to record on the outcome; must be {@code >= 1}
+   * @return a {@link TurnOutcome} populated from the current accumulator state
+   */
+  TurnOutcome toOutcome(int streamAttempts) {
     var err = error.get();
     var assistantContent =
         err != null
             ? (err.getMessage() == null ? err.getClass().getSimpleName() : err.getMessage())
             : content.toString();
-    return new TurnOutcome(finishReason.get(), assistantContent, usage.get(), metadata.get());
+    return new TurnOutcome(
+        finishReason.get(), assistantContent, usage.get(), metadata.get(), err, streamAttempts);
   }
 
   List<ToolCall> toolCalls() {
