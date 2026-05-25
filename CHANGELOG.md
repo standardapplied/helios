@@ -4,6 +4,56 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.5.4] — 2026-05-24 — OpenAI: model-aware `xhigh` dispatch (gpt-5.4 / gpt-5.5)
+
+Fix-forward for 2.5.3's OpenAI handling of `ThinkingLevel.XHIGH` and `MAX`.
+The 2.5.3 cut clamped both to `"high"` uniformly across every OpenAI model;
+the OpenAI developer docs (verified 2026-05-24) document the `"xhigh"` tier
+as a first-class accepted value on `reasoning.effort` for both `gpt-5.4` and
+`gpt-5.5`, so blanket-clamping silently downgrades callers' reasoning on the
+two flagship models.
+
+### Fixed — gpt-5.4 / gpt-5.5 receive `reasoning.effort="xhigh"`
+
+`OpenAIModelId` gains a `supportsXhighEffort()` flag:
+
+| Model | `supportsXhighEffort` | Source |
+|---|---|---|
+| `gpt-5.5` | true | developer docs gpt-5.5 model page |
+| `gpt-5.4` | true | developer docs gpt-5.4 model page |
+| `gpt-5.4-mini` | false | OpenAI has not published the per-variant tier matrix; conservative until confirmed |
+| `gpt-5.4-nano` | false | same |
+| `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano` | false | non-reasoning families |
+| `gpt-4o`, `gpt-4o-mini` | false | non-reasoning |
+| `o3`, `o4-mini` | false | older o-series; documented to accept low/medium/high only |
+
+`OpenAIModel.buildReasoningConfig` now dispatches per-model:
+
+- `XHIGH` and `MAX` → `"xhigh"` on `supportsXhighEffort=true` models
+  (`gpt-5.4`, `gpt-5.5`)
+- `XHIGH` and `MAX` → `"high"` on every other model (conservative clamp;
+  flip the flag in `OpenAIModelId` when OpenAI confirms wider support for
+  the mini/nano variants)
+
+Anthropic's `MAX` has no native OpenAI equivalent at any tier — clamping it
+to OpenAI's highest (`"xhigh"` or `"high"` depending on model) is the right
+call: the caller asked for the maximum reasoning available and gets exactly
+that, no silent stop at `"high"` when a stronger tier exists.
+
+### Tests
+
+`OpenAIModelTest` gains five tests (test-first; RED confirmed 3 of 5 failing
+against the 2.5.3 dispatch before the fix):
+
+- `gpt55XhighMapsToXhighWireString`
+- `gpt54XhighMapsToXhighWireString`
+- `gpt55MaxClampsToXhighWireString` — MAX climbs to xhigh on xhigh-capable
+  models, not stops at high
+- `o3XhighClampsToHighWireString` — undocumented support → conservative
+- `o4MiniMaxClampsToHighWireString`
+
+233 OpenAI unit tests green.
+
 ## [2.5.3] — 2026-05-24 — adaptive thinking on Opus 4.7: `xhigh`, `max`, and the `display` field
 
 The Opus 4.7 adaptive-thinking surface gained two effort tiers (`xhigh`, `max`)

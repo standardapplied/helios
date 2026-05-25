@@ -477,15 +477,20 @@ public class OpenAIModel implements Model {
       return null;
     }
 
-    // OpenAI Responses API exposes low / medium / high only — XHIGH and MAX are Anthropic-only
-    // effort tiers that clamp to high here. Callers targeting XHIGH/MAX on an OpenAI model get
-    // OpenAI's highest reasoning tier rather than a request error.
+    // Model-aware effort dispatch. gpt-5.4 and gpt-5.5 accept the "xhigh" wire string per
+    // OpenAI's published model pages; XHIGH lands there directly and MAX (no native equivalent
+    // anywhere in the OpenAI surface) clamps up to xhigh on those models. Older reasoning models
+    // (o3, o4-mini) and undocumented variants clamp both XHIGH and MAX to "high" — see
+    // OpenAIModelId#supportsXhighEffort for the per-model matrix and the conservative-default
+    // rationale.
+    var topTier = modelId.supportsXhighEffort() ? "xhigh" : "high";
     var effort =
         switch (config.thinkingLevel()) {
           case NONE -> null;
           case MINIMAL, LOW -> "low";
           case MEDIUM -> "medium";
-          case HIGH, XHIGH, MAX -> "high";
+          case HIGH -> "high";
+          case XHIGH, MAX -> topTier;
         };
 
     return ResponsesRequest.ReasoningConfig.of(effort);

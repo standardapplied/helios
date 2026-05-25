@@ -508,6 +508,92 @@ class OpenAIModelTest {
   }
 
   @Test
+  void gpt55XhighMapsToXhighWireString() {
+    // Per OpenAI's deployment-checklist + gpt-5.5 model page, gpt-5.5 reasoning.effort accepts
+    // none/low/medium/high/xhigh. Helios's XHIGH must round-trip to the literal "xhigh", not
+    // clamp to "high".
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.XHIGH)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_5_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals(
+        "xhigh",
+        request.reasoning().effort(),
+        "gpt-5.5 must receive the literal 'xhigh' wire string");
+  }
+
+  @Test
+  void gpt54XhighMapsToXhighWireString() {
+    // gpt-5.4 model page documents the same five-tier set as gpt-5.5.
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.XHIGH)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_5_4, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals("xhigh", request.reasoning().effort());
+  }
+
+  @Test
+  void gpt55MaxClampsToXhighWireString() {
+    // OpenAI has no native "max" tier — Helios's MAX maps to OpenAI's highest available, which
+    // is xhigh on gpt-5.5. Distinct from "high" so callers get the strongest reasoning OpenAI
+    // exposes.
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.MAX)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_5_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals(
+        "xhigh",
+        request.reasoning().effort(),
+        "MAX must clamp to OpenAI's highest tier (xhigh on gpt-5.5), not stop at 'high'");
+  }
+
+  @Test
+  void o3XhighClampsToHighWireString() {
+    // o-series reasoning models (o3, o4-mini) are not documented to accept "xhigh" — only
+    // low/medium/high are confirmed via OpenAI's docs. Helios clamps XHIGH/MAX to "high" here
+    // until OpenAI publishes wider support. Conservative dispatch keeps requests valid.
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.XHIGH)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.O3, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals("high", request.reasoning().effort());
+  }
+
+  @Test
+  void o4MiniMaxClampsToHighWireString() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.MAX)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.O4_MINI, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals("high", request.reasoning().effort());
+  }
+
+  @Test
   void buildRequestReasoningNoneOmitsConfig() {
     var config =
         ModelConfig.newBuilder()
