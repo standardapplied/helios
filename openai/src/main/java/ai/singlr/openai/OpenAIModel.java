@@ -477,12 +477,15 @@ public class OpenAIModel implements Model {
       return null;
     }
 
+    // OpenAI Responses API exposes low / medium / high only — XHIGH and MAX are Anthropic-only
+    // effort tiers that clamp to high here. Callers targeting XHIGH/MAX on an OpenAI model get
+    // OpenAI's highest reasoning tier rather than a request error.
     var effort =
         switch (config.thinkingLevel()) {
           case NONE -> null;
           case MINIMAL, LOW -> "low";
           case MEDIUM -> "medium";
-          case HIGH -> "high";
+          case HIGH, XHIGH, MAX -> "high";
         };
 
     return ResponsesRequest.ReasoningConfig.of(effort);

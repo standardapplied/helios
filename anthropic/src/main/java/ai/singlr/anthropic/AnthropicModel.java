@@ -640,10 +640,24 @@ public class AnthropicModel implements Model {
             case MINIMAL, LOW -> OutputConfig.LOW;
             case MEDIUM -> OutputConfig.MEDIUM;
             case HIGH -> OutputConfig.HIGH;
+            case XHIGH -> OutputConfig.XHIGH;
+            case MAX -> OutputConfig.MAX;
           };
       return new ThinkingSpec(ThinkingConfig.adaptive(), effort);
     }
 
+    if (config.thinkingLevel() == ThinkingLevel.XHIGH) {
+      throw new IllegalArgumentException(
+          "ThinkingLevel.XHIGH requires Opus 4.7 (claude-opus-4-7); model "
+              + modelId.id()
+              + " uses the legacy enabled+budget_tokens shape which has no 'xhigh' equivalent.");
+    }
+    if (config.thinkingLevel() == ThinkingLevel.MAX) {
+      throw new IllegalArgumentException(
+          "ThinkingLevel.MAX requires an adaptive-capable model (Opus 4.7); model "
+              + modelId.id()
+              + " uses the legacy enabled+budget_tokens shape which has no 'max' equivalent.");
+    }
     var budgetTokens =
         switch (config.thinkingLevel()) {
           case NONE -> 0;
@@ -651,6 +665,8 @@ public class AnthropicModel implements Model {
           case LOW -> 4096;
           case MEDIUM -> 10000;
           case HIGH -> 32000;
+          case XHIGH, MAX ->
+              throw new IllegalStateException("XHIGH/MAX handled above; unreachable");
         };
     return new ThinkingSpec(ThinkingConfig.enabled(budgetTokens), null);
   }

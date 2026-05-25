@@ -27,4 +27,16 @@ public record OutputConfig(String effort) {
 
   /** Effort {@code high}. Maps from {@link ai.singlr.core.model.ThinkingLevel} HIGH. */
   public static final OutputConfig HIGH = new OutputConfig("high");
+
+  /**
+   * Effort {@code xhigh} — extra-deep reasoning with extended exploration. Opus 4.7 only on the
+   * native wire. Maps from {@link ai.singlr.core.model.ThinkingLevel#XHIGH}.
+   */
+  public static final OutputConfig XHIGH = new OutputConfig("xhigh");
+
+  /**
+   * Effort {@code max} — unbounded reasoning. Available on every adaptive-capable model (Opus 4.7,
+   * Opus 4.6, Sonnet 4.6). Maps from {@link ai.singlr.core.model.ThinkingLevel#MAX}.
+   */
+  public static final OutputConfig MAX = new OutputConfig("max");
 }

@@ -18,6 +18,8 @@ class ThinkingLevelTest {
     assertEquals(ThinkingLevel.LOW, ThinkingLevel.valueOf("LOW"));
     assertEquals(ThinkingLevel.MEDIUM, ThinkingLevel.valueOf("MEDIUM"));
     assertEquals(ThinkingLevel.HIGH, ThinkingLevel.valueOf("HIGH"));
-    assertEquals(5, ThinkingLevel.values().length);
+    assertEquals(ThinkingLevel.XHIGH, ThinkingLevel.valueOf("XHIGH"));
+    assertEquals(ThinkingLevel.MAX, ThinkingLevel.valueOf("MAX"));
+    assertEquals(7, ThinkingLevel.values().length);
   }
 }

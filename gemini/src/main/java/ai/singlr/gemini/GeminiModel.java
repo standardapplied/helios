@@ -435,12 +435,15 @@ public class GeminiModel implements Model {
       builder.withSeed(config.seed());
     }
     if (config.thinkingLevel() != null && config.thinkingLevel() != ThinkingLevel.NONE) {
+      // Gemini exposes low / medium / high only — XHIGH and MAX are Anthropic-only effort tiers
+      // that clamp to high here. Callers who target XHIGH/MAX on a Gemini model get Gemini's
+      // highest reasoning tier rather than a request error; document this as expected clamping.
       var thinkingLevel =
           switch (config.thinkingLevel()) {
             case NONE -> "none";
             case MINIMAL, LOW -> "low";
             case MEDIUM -> "medium";
-            case HIGH -> "high";
+            case HIGH, XHIGH, MAX -> "high";
           };
       builder.withThinkingLevel(thinkingLevel);
     }

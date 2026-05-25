@@ -4,6 +4,84 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.5.3] — 2026-05-24 — adaptive thinking on Opus 4.7: `xhigh`, `max`, and the `display` field
+
+The Opus 4.7 adaptive-thinking surface gained two effort tiers (`xhigh`, `max`)
+and a `display` knob that flipped its silent default to `omitted` — the latter
+would have zeroed out Helios's `ModelChunk.ThinkingDelta` event stream for
+every existing caller. 2.5.3 closes both gaps, test-first, and documents the
+per-provider clamping behaviour for Gemini and OpenAI.
+
+### Added — `ThinkingLevel.XHIGH` and `ThinkingLevel.MAX`
+
+Two new tiers appended to the provider-agnostic `ThinkingLevel` enum:
+
+- **`XHIGH`** — extra-deep reasoning with extended exploration. Anthropic
+  Opus 4.7 only on the native wire; other providers clamp to `HIGH`.
+- **`MAX`** — unbounded reasoning ("always thinks with no constraints on
+  thinking depth"). Anthropic adaptive-capable models on the native wire;
+  other providers clamp to `HIGH`.
+
+Per-provider dispatch:
+
+| Provider | Model | XHIGH | MAX |
+|---|---|---|---|
+| Anthropic | Opus 4.7 (adaptive) | `output_config.effort="xhigh"` | `output_config.effort="max"` |
+| Anthropic | Opus 4.6 / Sonnet 4.6 (legacy enabled+budget_tokens) | `IllegalArgumentException` at request build — no wire equivalent | `IllegalArgumentException` |
+| Gemini | all | clamps to `"high"` | clamps to `"high"` |
+| OpenAI | Responses API | clamps to `"high"` | clamps to `"high"` |
+
+The legacy-path rejection is explicit rather than silent — callers who target
+XHIGH/MAX on a 4.6-class model see the exception at build time naming the
+required model (`Opus 4.7`) instead of receiving an undocumented downgrade.
+
+### Added — `display` field on `ThinkingConfig` + `ThinkingConfig.adaptiveOmitted()`
+
+`thinking.display` joins the request as a third record component (nullable;
+omitted from wire when null). Helios pins `display="summarized"` by default
+for adaptive requests via `ThinkingConfig.adaptive()` — Anthropic's silent
+default on Opus 4.7 became `"omitted"`, which would empty the `thinking`
+field on every response and silently break `ModelChunk.ThinkingDelta` event
+emission for every existing Helios caller.
+
+Callers who want the time-to-first-text-token win of omitted-mode opt in
+explicitly via `ThinkingConfig.adaptiveOmitted()`. The encrypted `signature`
+field is identical in both modes, so multi-turn conversations work in either.
+
+### Wired
+
+- `AnthropicModel.buildThinkingSpec` — switch arms for XHIGH/MAX on adaptive;
+  typed `IllegalArgumentException` on legacy path for both new tiers.
+- `GeminiModel.buildRequest` — `HIGH, XHIGH, MAX` collapse to `"high"`.
+- `OpenAIModel.buildReasoningConfig` — same collapse.
+- `OutputConfig.XHIGH` and `OutputConfig.MAX` constants alongside the existing
+  `LOW`/`MEDIUM`/`HIGH`.
+
+### Tests
+
+- `AnthropicModelTest` gains five tests: XHIGH wire string, MAX wire string,
+  adaptive default `display="summarized"`, Opus 4.6 rejects XHIGH with typed
+  exception, Opus 4.6 rejects MAX.
+- `SerializationTest.serializeAdaptiveThinkingShape` updated to assert the
+  new `display="summarized"` baseline; new
+  `serializeAdaptiveOmittedThinkingShape` covers the opt-in omitted path
+  paired with XHIGH effort.
+- `ThinkingLevelTest` updated to 7 values; explicit `valueOf` assertions for
+  XHIGH and MAX.
+
+### Breaking — record components added
+
+- `ThinkingConfig(type, budgetTokens)` → `ThinkingConfig(type, budgetTokens,
+  display)`. Canonical-constructor callers need updating; factory callers
+  (`ThinkingConfig.enabled(int)`, `.adaptive()`, `.disabled()`) are
+  source-compatible — the new field defaults to null in factories.
+
+### Verify
+
+201 anthropic + 228 openai + (gemini) unit tests green. Coverage gates on
+session+runtime+core unaffected. javadoc:jar across the 9 published modules
+clean.
+
 ## [2.5.2] — 2026-05-24 — visibility of subprocess-spawn failures + relative-classpath fix
 
 Two cooperating fixes, both surfaced by client reports against the same code

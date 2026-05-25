@@ -77,6 +77,8 @@ class SerializationTest {
   @Test
   void serializeAdaptiveThinkingShape() throws Exception {
     // Opus 4.7+: thinking.type=adaptive WITHOUT budget_tokens, output_config.effort sibling.
+    // display=summarized is pinned by ThinkingConfig.adaptive() so callers continue to receive
+    // ThinkingDelta events — Anthropic's own default flipped to "omitted" on Opus 4.7.
     var request =
         MessagesRequest.newBuilder()
             .withModel("claude-opus-4-7")
@@ -87,14 +89,35 @@ class SerializationTest {
             .build();
     var json = objectMapper.writeValueAsString(request);
     assertTrue(
-        json.contains("\"thinking\":{\"type\":\"adaptive\"}"),
-        "adaptive shape (no budget_tokens), got:\n" + json);
+        json.contains("\"thinking\":{\"type\":\"adaptive\",\"display\":\"summarized\"}"),
+        "adaptive shape with explicit summarized display, got:\n" + json);
     assertTrue(
         json.contains("\"output_config\":{\"effort\":\"medium\"}"),
         "output_config sibling carries effort, got:\n" + json);
     assertFalse(
         json.contains("budget_tokens"),
         "adaptive shape must NOT include budget_tokens — Opus 4.7 rejects it");
+  }
+
+  @Test
+  void serializeAdaptiveOmittedThinkingShape() throws Exception {
+    // Opt-in latency win: callers using ThinkingConfig.adaptiveOmitted() trade summary visibility
+    // for skipping the summary-streaming phase entirely. Verify the wire string is "omitted".
+    var request =
+        MessagesRequest.newBuilder()
+            .withModel("claude-opus-4-7")
+            .withMaxTokens(4096)
+            .withMessages(List.of(MessagesRequest.MessageEntry.user("Hello")))
+            .withThinking(ThinkingConfig.adaptiveOmitted())
+            .withOutputConfig(OutputConfig.XHIGH)
+            .build();
+    var json = objectMapper.writeValueAsString(request);
+    assertTrue(
+        json.contains("\"thinking\":{\"type\":\"adaptive\",\"display\":\"omitted\"}"),
+        "adaptive omitted shape, got:\n" + json);
+    assertTrue(
+        json.contains("\"output_config\":{\"effort\":\"xhigh\"}"),
+        "xhigh effort wire string, got:\n" + json);
   }
 
   @Test

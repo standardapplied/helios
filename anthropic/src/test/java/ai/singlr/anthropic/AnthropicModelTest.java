@@ -320,6 +320,107 @@ class AnthropicModelTest {
   }
 
   @Test
+  void opus47AdaptiveMapsXhighToWireString() {
+    // XHIGH is the second-highest effort tier per Anthropic's adaptive-thinking docs and is
+    // available on Opus 4.7 only. The doc specifies the literal wire string "xhigh".
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.XHIGH)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals("adaptive", request.thinking().type());
+    assertEquals(
+        "xhigh",
+        request.outputConfig().effort(),
+        "XHIGH must produce the literal 'xhigh' wire string Anthropic's API expects");
+  }
+
+  @Test
+  void opus47AdaptiveMapsMaxToWireString() {
+    // MAX is the unbounded effort tier — "always thinks with no constraints on thinking depth".
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.MAX)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals("adaptive", request.thinking().type());
+    assertEquals("max", request.outputConfig().effort());
+  }
+
+  @Test
+  void opus47AdaptiveDefaultsDisplayToSummarized() {
+    // Anthropic's docs say `thinking.display` silently defaults to "omitted" on Opus 4.7, which
+    // would zero out our ModelChunk.ThinkingDelta event stream — silently breaking every caller
+    // that watches AssistantThinking events. Helios pins the default to "summarized" so the event
+    // contract is preserved; callers who want the omitted-mode latency win opt in explicitly.
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.HIGH)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals(
+        "summarized",
+        request.thinking().display(),
+        "Opus 4.7 adaptive default must be summarized so ThinkingDelta events keep flowing");
+  }
+
+  @Test
+  void opus46RejectsXhighEffort() {
+    // XHIGH is Opus 4.7-only per Anthropic's docs. On older models we refuse at build time
+    // rather than silently downgrade or wait for the API's 400 — typed exceptions belong at the
+    // caller-controlled layer.
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.XHIGH)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> model.buildRequest(List.of(Message.user("Hi")), List.of(), null));
+    assertTrue(
+        ex.getMessage().toLowerCase(java.util.Locale.ROOT).contains("xhigh"),
+        () -> "exception must name the rejected effort: " + ex.getMessage());
+    assertTrue(
+        ex.getMessage().contains("Opus 4.7") || ex.getMessage().contains("opus-4-7"),
+        () -> "exception must name the supported model: " + ex.getMessage());
+  }
+
+  @Test
+  void opus46RejectsMaxEffort() {
+    // MAX has no equivalent in legacy enabled+budget_tokens. Reject rather than silently degrade
+    // to HIGH (a 32k budget) — callers who asked for MAX deserve to know it isn't honoured.
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.MAX)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> model.buildRequest(List.of(Message.user("Hi")), List.of(), null));
+    assertTrue(
+        ex.getMessage().toLowerCase(java.util.Locale.ROOT).contains("max"),
+        () -> "exception must name the rejected effort: " + ex.getMessage());
+  }
+
+  @Test
   void opus46KeepsLegacyEnabledShape() {
     // Older models still use enabled+budget_tokens. Don't break them with the adaptive change.
     var config =
