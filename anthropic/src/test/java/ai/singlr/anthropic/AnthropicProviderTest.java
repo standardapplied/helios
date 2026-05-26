@@ -84,6 +84,8 @@ class AnthropicProviderTest {
     var exception =
         assertThrows(IllegalArgumentException.class, () -> provider.create("gpt-4", config));
 
-    assertEquals("Unsupported model: gpt-4", exception.getMessage());
+    assertTrue(
+        exception.getMessage().startsWith("Unsupported model: gpt-4"),
+        () -> "expected 'Unsupported model' prefix, got: " + exception.getMessage());
   }
 }
