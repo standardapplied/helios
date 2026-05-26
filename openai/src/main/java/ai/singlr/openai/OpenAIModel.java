@@ -68,13 +68,22 @@ public class OpenAIModel implements Model {
 
   static final String REASONING_KEY = "openai.reasoning";
 
-  private final OpenAIModelId modelId;
+  private final String wireModelId;
+  private final OpenAIModelId knownModel;
   private final ModelConfig config;
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
 
   OpenAIModel(OpenAIModelId modelId, ModelConfig config) {
-    if (modelId == null) {
+    this(modelId != null ? modelId.id() : null, modelId, config);
+  }
+
+  OpenAIModel(String wireModelId, ModelConfig config) {
+    this(wireModelId, OpenAIModelId.fromId(wireModelId), config);
+  }
+
+  private OpenAIModel(String wireModelId, OpenAIModelId knownModel, ModelConfig config) {
+    if (Strings.isBlank(wireModelId)) {
       throw new IllegalArgumentException("modelId is required");
     }
     if (config == null) {
@@ -85,7 +94,8 @@ public class OpenAIModel implements Model {
       throw new IllegalArgumentException(
           "config with valid apiKey is required (or set baseUrl + auth header)");
     }
-    this.modelId = modelId;
+    this.wireModelId = wireModelId;
+    this.knownModel = knownModel;
     this.config = config;
     this.httpClient = HttpClientFactory.create(config);
     this.objectMapper =
@@ -94,7 +104,7 @@ public class OpenAIModel implements Model {
 
   @Override
   public String id() {
-    return modelId.id();
+    return wireModelId;
   }
 
   @Override
@@ -104,12 +114,12 @@ public class OpenAIModel implements Model {
 
   @Override
   public int contextWindow() {
-    return modelId.contextWindow();
+    return knownModel != null ? knownModel.contextWindow() : 0;
   }
 
   @Override
   public int maxOutputTokens() {
-    return modelId.maxOutputTokens();
+    return knownModel != null ? knownModel.maxOutputTokens() : 0;
   }
 
   @Override
@@ -291,7 +301,7 @@ public class OpenAIModel implements Model {
 
     var builder =
         ResponsesRequest.newBuilder()
-            .withModel(modelId.id())
+            .withModel(wireModelId)
             .withInput(inputItems)
             .withInstructions(instructions)
             .withStream(true)
@@ -300,9 +310,7 @@ public class OpenAIModel implements Model {
             .withTemperature(temperature)
             .withTopP(config.topP())
             .withMaxOutputTokens(
-                config.maxOutputTokens() != null
-                    ? config.maxOutputTokens()
-                    : modelId.maxOutputTokens())
+                config.maxOutputTokens() != null ? config.maxOutputTokens() : maxOutputTokens())
             .withStop(config.stopSequences())
             .withReasoning(reasoningConfig);
 
@@ -483,7 +491,7 @@ public class OpenAIModel implements Model {
     // (o3, o4-mini) and undocumented variants clamp both XHIGH and MAX to "high" — see
     // OpenAIModelId#supportsXhighEffort for the per-model matrix and the conservative-default
     // rationale.
-    var topTier = modelId.supportsXhighEffort() ? "xhigh" : "high";
+    var topTier = knownModel != null && knownModel.supportsXhighEffort() ? "xhigh" : "high";
     var effort =
         switch (config.thinkingLevel()) {
           case NONE -> null;

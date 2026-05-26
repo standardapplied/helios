@@ -56,7 +56,8 @@ class OpenAIModelTest {
   @Test
   void constructorRequiresModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    assertThrows(IllegalArgumentException.class, () -> new OpenAIModel(null, config));
+    assertThrows(
+        IllegalArgumentException.class, () -> new OpenAIModel((OpenAIModelId) null, config));
   }
 
   @Test
