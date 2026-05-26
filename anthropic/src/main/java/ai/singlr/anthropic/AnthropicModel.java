@@ -85,36 +85,31 @@ public class AnthropicModel implements Model {
    */
   static final String THINKING_BLOCKS_KEY = "anthropic.thinkingBlocks";
 
-  private final AnthropicModelId modelId;
+  private final String wireModelId;
+  private final AnthropicModelId knownModel;
   private final ModelConfig config;
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
   private final CachePolicy cachePolicy;
 
-  /**
-   * Build a model with short-lived (5-minute) prompt caching enabled — the right default for agent
-   * loops where successive turns happen within seconds of each other. Cache breakpoints are placed
-   * on the system prompt, the last tool definition, and the last block of the latest message (the
-   * canonical agent-loop pattern). See {@link #AnthropicModel(AnthropicModelId, ModelConfig,
-   * CachePolicy)} for {@link CachePolicy#longLived() 1-hour TTL} or {@link CachePolicy#disabled()
-   * opt-out}.
-   */
   AnthropicModel(AnthropicModelId modelId, ModelConfig config) {
     this(modelId, config, CachePolicy.shortLived());
   }
 
-  /**
-   * Build a model with explicit prompt-caching policy.
-   *
-   * @param modelId the model identifier; non-null
-   * @param config the model configuration; non-null, must carry an apiKey or override headers
-   * @param cachePolicy {@link CachePolicy#shortLived()} (5m default), {@link
-   *     CachePolicy#longLived()} (1h), or {@link CachePolicy#disabled()}; non-null
-   * @throws IllegalArgumentException if {@code modelId} / {@code config} / {@code cachePolicy} is
-   *     null or the config lacks both an {@code apiKey} and a non-blank {@code baseUrl}
-   */
   AnthropicModel(AnthropicModelId modelId, ModelConfig config, CachePolicy cachePolicy) {
-    if (modelId == null) {
+    this(modelId != null ? modelId.id() : null, modelId, config, cachePolicy);
+  }
+
+  AnthropicModel(String wireModelId, ModelConfig config) {
+    this(wireModelId, AnthropicModelId.fromId(wireModelId), config, CachePolicy.shortLived());
+  }
+
+  private AnthropicModel(
+      String wireModelId,
+      AnthropicModelId knownModel,
+      ModelConfig config,
+      CachePolicy cachePolicy) {
+    if (Strings.isBlank(wireModelId)) {
       throw new IllegalArgumentException("modelId is required");
     }
     if (config == null) {
@@ -128,7 +123,8 @@ public class AnthropicModel implements Model {
       throw new IllegalArgumentException(
           "config with valid apiKey is required (or set baseUrl + auth header)");
     }
-    this.modelId = modelId;
+    this.wireModelId = wireModelId;
+    this.knownModel = knownModel;
     this.config = config;
     this.cachePolicy = cachePolicy;
     this.httpClient = HttpClientFactory.create(config);
@@ -157,7 +153,7 @@ public class AnthropicModel implements Model {
 
   @Override
   public String id() {
-    return modelId.id();
+    return wireModelId;
   }
 
   @Override
@@ -167,12 +163,12 @@ public class AnthropicModel implements Model {
 
   @Override
   public int contextWindow() {
-    return modelId.contextWindow();
+    return knownModel != null ? knownModel.contextWindow() : 0;
   }
 
   @Override
   public int maxOutputTokens() {
-    return modelId.maxOutputTokens();
+    return knownModel != null ? knownModel.maxOutputTokens() : 0;
   }
 
   @Override
@@ -416,8 +412,7 @@ public class AnthropicModel implements Model {
     var toolChoiceConfig = buildToolChoice(tools);
     var thinkingSpec = buildThinkingSpec();
 
-    int maxTokens =
-        config.maxOutputTokens() != null ? config.maxOutputTokens() : modelId.maxOutputTokens();
+    int maxTokens = config.maxOutputTokens() != null ? config.maxOutputTokens() : maxOutputTokens();
     if (thinkingSpec.thinking() != null && thinkingSpec.thinking().budgetTokens() != null) {
       maxTokens = Math.max(maxTokens, thinkingSpec.thinking().budgetTokens() + 1024);
     }
@@ -431,7 +426,7 @@ public class AnthropicModel implements Model {
 
     var builder =
         MessagesRequest.newBuilder()
-            .withModel(modelId.id())
+            .withModel(wireModelId)
             .withMaxTokens(maxTokens)
             .withMessages(apiMessages)
             .withStream(true)
@@ -677,7 +672,7 @@ public class AnthropicModel implements Model {
       return new ThinkingSpec(null, null);
     }
 
-    if (modelId.usesAdaptiveThinking()) {
+    if (knownModel != null && knownModel.usesAdaptiveThinking()) {
       var effort =
           switch (config.thinkingLevel()) {
             case NONE -> null;
@@ -693,13 +688,13 @@ public class AnthropicModel implements Model {
     if (config.thinkingLevel() == ThinkingLevel.XHIGH) {
       throw new IllegalArgumentException(
           "ThinkingLevel.XHIGH requires Opus 4.7 (claude-opus-4-7); model "
-              + modelId.id()
+              + wireModelId
               + " uses the legacy enabled+budget_tokens shape which has no 'xhigh' equivalent.");
     }
     if (config.thinkingLevel() == ThinkingLevel.MAX) {
       throw new IllegalArgumentException(
           "ThinkingLevel.MAX requires an adaptive-capable model (Opus 4.7); model "
-              + modelId.id()
+              + wireModelId
               + " uses the legacy enabled+budget_tokens shape which has no 'max' equivalent.");
     }
     var budgetTokens =

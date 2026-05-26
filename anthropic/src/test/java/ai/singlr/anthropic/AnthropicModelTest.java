@@ -37,7 +37,8 @@ class AnthropicModelTest {
   @Test
   void constructorRequiresModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    assertThrows(IllegalArgumentException.class, () -> new AnthropicModel(null, config));
+    assertThrows(
+        IllegalArgumentException.class, () -> new AnthropicModel((AnthropicModelId) null, config));
   }
 
   @Test

@@ -5,14 +5,20 @@
 
 package ai.singlr.anthropic;
 
+import ai.singlr.core.common.Strings;
 import ai.singlr.core.model.Model;
 import ai.singlr.core.model.ModelConfig;
 import ai.singlr.core.model.ModelProvider;
 
 /**
- * ModelProvider implementation for Anthropic's Claude API.
+ * ModelProvider implementation for Anthropic's Messages API.
  *
- * <p>Supports Claude Opus 4.6 and Sonnet 4.6 models through the Messages API.
+ * <p>Supports canonical Claude models (Opus 4.7, Opus 4.6, Sonnet 4.6) out of the box. When {@link
+ * ModelConfig#baseUrl()} is set — pointing at Bedrock, Vertex AI, or a compatible proxy — any
+ * non-blank {@code modelId} is accepted and passed verbatim as the {@code model} field in the
+ * request body. Context-window and max-output-tokens metadata default to {@code 0} ("unknown") for
+ * unrecognised ids; callers can override output tokens via {@link
+ * ModelConfig.Builder#withMaxOutputTokens(Integer)}.
  */
 public class AnthropicProvider implements ModelProvider {
 
@@ -25,11 +31,17 @@ public class AnthropicProvider implements ModelProvider {
 
   @Override
   public Model create(String modelId, ModelConfig config) {
-    var anthropicModel = AnthropicModelId.fromId(modelId);
-    if (anthropicModel == null) {
-      throw new IllegalArgumentException("Unsupported model: " + modelId);
+    var known = AnthropicModelId.fromId(modelId);
+    if (known != null) {
+      return new AnthropicModel(known, config);
     }
-    return new AnthropicModel(anthropicModel, config);
+    if (!Strings.isBlank(config.baseUrl())) {
+      return new AnthropicModel(modelId, config);
+    }
+    throw new IllegalArgumentException(
+        "Unsupported model: "
+            + modelId
+            + ". Set ModelConfig.baseUrl for custom endpoints (Bedrock, Vertex, proxy).");
   }
 
   @Override
