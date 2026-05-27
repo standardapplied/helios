@@ -1102,6 +1102,137 @@ class StreamingIteratorTest {
   }
 
   @org.junit.jupiter.api.Test
+  void incompleteInteractionSetsLengthFinishReason() {
+    var incomplete =
+        "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"id\":\"int_xyz\",\"status\":\"incomplete\","
+            + "\"usage\":{\"total_input_tokens\":10,\"total_output_tokens\":5,"
+            + "\"total_tokens\":15}}}\n\n";
+    try (var iterator = createIterator(incomplete, Duration.ofSeconds(5))) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      assertEquals(1, events.size());
+      var done = (StreamEvent.Done) events.getFirst();
+      assertEquals(FinishReason.LENGTH, done.response().finishReason());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void budgetExceededInteractionSetsErrorFinishReason() {
+    var exceeded =
+        "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"id\":\"int_xyz\",\"status\":\"budget_exceeded\","
+            + "\"usage\":{\"total_input_tokens\":10,\"total_output_tokens\":5,"
+            + "\"total_tokens\":15}}}\n\n";
+    try (var iterator = createIterator(exceeded, Duration.ofSeconds(5))) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      assertEquals(1, events.size());
+      var done = (StreamEvent.Done) events.getFirst();
+      assertEquals(FinishReason.ERROR, done.response().finishReason());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void sseErrorEventSurfacesAsStreamErrorWithStatusCode() {
+    var errorEvent =
+        "data: {\"event_type\":\"error\","
+            + "\"error\":{\"code\":500,\"message\":\"Internal server error\"}}\n\n";
+    try (var iterator = createIterator(errorEvent, Duration.ofSeconds(5))) {
+      assertTrue(iterator.hasNext());
+      var event = iterator.next();
+      assertInstanceOf(StreamEvent.Error.class, event);
+      var error = (StreamEvent.Error) event;
+      assertTrue(error.message().contains("Internal server error"));
+      assertInstanceOf(GeminiException.class, error.cause());
+      var ge = (GeminiException) error.cause();
+      assertEquals(500, ge.statusCode());
+      assertTrue(ge.isRetryable(), "5xx errors must be retryable");
+      assertFalse(iterator.hasNext());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void sseErrorEvent429IsRetryable() {
+    var errorEvent =
+        "data: {\"event_type\":\"error\","
+            + "\"error\":{\"code\":429,\"message\":\"Rate limit exceeded\"}}\n\n";
+    try (var iterator = createIterator(errorEvent, Duration.ofSeconds(5))) {
+      var event = iterator.next();
+      assertInstanceOf(StreamEvent.Error.class, event);
+      var ge = (GeminiException) ((StreamEvent.Error) event).cause();
+      assertEquals(429, ge.statusCode());
+      assertTrue(ge.isRetryable());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void sseErrorEvent400IsNotRetryable() {
+    var errorEvent =
+        "data: {\"event_type\":\"error\","
+            + "\"error\":{\"code\":400,\"message\":\"Bad request\"}}\n\n";
+    try (var iterator = createIterator(errorEvent, Duration.ofSeconds(5))) {
+      var event = iterator.next();
+      assertInstanceOf(StreamEvent.Error.class, event);
+      var ge = (GeminiException) ((StreamEvent.Error) event).cause();
+      assertEquals(400, ge.statusCode());
+      assertFalse(ge.isRetryable(), "4xx client errors must not be retryable");
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void sseErrorEventWithoutPayloadSurfacesGenericMessage() {
+    var errorEvent = "data: {\"event_type\":\"error\"}\n\n";
+    try (var iterator = createIterator(errorEvent, Duration.ofSeconds(5))) {
+      assertTrue(iterator.hasNext());
+      var event = iterator.next();
+      assertInstanceOf(StreamEvent.Error.class, event);
+      var error = (StreamEvent.Error) event;
+      assertEquals("API error", error.message());
+      var ge = (GeminiException) error.cause();
+      assertEquals(0, ge.statusCode());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void statusUpdateEventCapturesInteractionId() {
+    var statusUpdate =
+        "data: {\"event_type\":\"interaction.status_update\","
+            + "\"interaction_id\":\"int_status\",\"status\":\"requires_action\"}\n\n";
+    var sse = INTERACTION_CREATED + statusUpdate;
+    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getFirst();
+      assertEquals(
+          "int_status",
+          done.response().metadata().get(GeminiModel.INTERACTION_ID_KEY),
+          "status_update must capture interaction_id");
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void statusUpdateFailedSetsErrorFinishReason() {
+    var statusUpdate =
+        "data: {\"event_type\":\"interaction.status_update\","
+            + "\"interaction_id\":\"int_f\",\"status\":\"failed\"}\n\n";
+    try (var iterator = createIterator(statusUpdate, Duration.ofSeconds(5))) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getFirst();
+      assertEquals(FinishReason.ERROR, done.response().finishReason());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
   void googleSearchStepsDoNotBreakParsing() {
     var searchCall = stepStart(0, "{\"type\":\"google_search_call\",\"id\":\"gs_1\"}");
     var searchResult = stepStart(1, "{\"type\":\"google_search_result\",\"call_id\":\"gs_1\"}");

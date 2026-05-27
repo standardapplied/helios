@@ -242,7 +242,7 @@ public class GeminiModel implements Model {
     throw new GeminiException("Stream ended without completion event");
   }
 
-  private InteractionRequest buildRequest(
+  InteractionRequest buildRequest(
       List<Message> messages, List<Tool> tools, ResponseFormat responseFormat) {
 
     List<ToolDefinition> toolDefinitions = null;
@@ -276,11 +276,13 @@ public class GeminiModel implements Model {
 
     var continuation = findContinuationPoint(messages);
     if (continuation != null) {
+      var systemInstruction = extractSystemInstruction(messages);
       var continuationSteps = buildContinuationSteps(messages, continuation.startIndex);
       return InteractionRequest.newBuilder()
           .withModel(modelId.id())
           .withInput(continuationSteps)
           .withPreviousInteractionId(continuation.interactionId)
+          .withSystemInstruction(systemInstruction)
           .withTools(toolDefinitions)
           .withGenerationConfig(generationConfig)
           .withResponseFormat(responseFormat)
@@ -338,6 +340,16 @@ public class GeminiModel implements Model {
     if (mimeType.startsWith("audio/")) return "audio";
     if (mimeType.startsWith("video/")) return "video";
     return "document";
+  }
+
+  static String extractSystemInstruction(List<Message> messages) {
+    String instruction = null;
+    for (var message : messages) {
+      if (message.role() == Role.SYSTEM) {
+        instruction = message.content();
+      }
+    }
+    return instruction;
   }
 
   record ConvertedMessages(List<Step> steps, String systemInstruction) {}
@@ -414,13 +426,14 @@ public class GeminiModel implements Model {
       builder.withSeed(config.seed());
     }
     if (config.thinkingLevel() != null && config.thinkingLevel() != ThinkingLevel.NONE) {
-      // Gemini exposes low / medium / high only — XHIGH and MAX are Anthropic-only effort tiers
-      // that clamp to high here. Callers who target XHIGH/MAX on a Gemini model get Gemini's
-      // highest reasoning tier rather than a request error; document this as expected clamping.
+      // Gemini exposes minimal / low / medium / high — XHIGH and MAX are Anthropic-only effort
+      // tiers that clamp to high here. Callers who target XHIGH/MAX on a Gemini model get
+      // Gemini's highest reasoning tier rather than a request error.
       var thinkingLevel =
           switch (config.thinkingLevel()) {
             case NONE -> "none";
-            case MINIMAL, LOW -> "low";
+            case MINIMAL -> "minimal";
+            case LOW -> "low";
             case MEDIUM -> "medium";
             case HIGH, XHIGH, MAX -> "high";
           };
@@ -624,8 +637,16 @@ public class GeminiModel implements Model {
       try {
         var event = objectMapper.readValue(json, StreamingEvent.class);
 
+        if (event.hasTypeError()) {
+          return handleErrorEvent(event);
+        }
         if (event.hasTypeInteractionCreated() || event.hasTypeInteractionCompleted()) {
           return handleInteractionEnvelope(event);
+        }
+        if (event.hasTypeInteractionStatusUpdate()
+            || event.hasTypeInteractionInProgress()
+            || event.hasTypeInteractionRequiresAction()) {
+          return handleStatusUpdate(event);
         }
         if (event.hasTypeStepStart()) {
           return handleStepStart(event);
@@ -640,6 +661,34 @@ public class GeminiModel implements Model {
       } catch (Exception e) {
         return new StreamEvent.Error("Failed to parse stream event", e);
       }
+    }
+
+    private StreamEvent handleErrorEvent(StreamingEvent event) {
+      var message = "API error";
+      int statusCode = 0;
+      if (event.error() != null) {
+        var msg = event.error().get("message");
+        if (msg != null) {
+          message = "API error: " + msg;
+        }
+        if (event.error().get("code") instanceof Number n) {
+          statusCode = n.intValue();
+        }
+      }
+      done = true;
+      var exception =
+          statusCode > 0 ? new GeminiException(message, statusCode) : new GeminiException(message);
+      return new StreamEvent.Error(message, exception);
+    }
+
+    private StreamEvent handleStatusUpdate(StreamingEvent event) {
+      if (event.interactionId() != null) {
+        interactionId = event.interactionId();
+      }
+      if (event.status() != null) {
+        terminalStatus = event.status();
+      }
+      return null;
     }
 
     private StreamEvent handleInteractionEnvelope(StreamingEvent event) {
@@ -823,8 +872,10 @@ public class GeminiModel implements Model {
       var finishReason = FinishReason.STOP;
       if (!toolCalls.isEmpty()) {
         finishReason = FinishReason.TOOL_CALLS;
-      } else if ("failed".equals(terminalStatus)) {
+      } else if ("failed".equals(terminalStatus) || "budget_exceeded".equals(terminalStatus)) {
         finishReason = FinishReason.ERROR;
+      } else if ("incomplete".equals(terminalStatus)) {
+        finishReason = FinishReason.LENGTH;
       }
 
       Response.Usage usage = null;

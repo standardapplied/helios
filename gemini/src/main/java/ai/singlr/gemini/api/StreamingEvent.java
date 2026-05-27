@@ -7,6 +7,7 @@ package ai.singlr.gemini.api;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.Map;
 
 /**
  * A streaming event from the Interactions API SSE stream ({@code Api-Revision: 2026-05-20}).
@@ -22,6 +23,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *   <tr><td>{@code interaction.in_progress}</td><td>{@link #interactionId()}</td></tr>
  *   <tr><td>{@code interaction.requires_action}</td><td>{@link #interactionId()}</td></tr>
  *   <tr><td>{@code interaction.completed}</td><td>{@link #interaction()}</td></tr>
+ *   <tr><td>{@code error}</td><td>{@link #error()} ({@code code} + {@code message})</td></tr>
  *   <tr><td>{@code step.start}</td><td>{@link #index()}, {@link #step()}</td></tr>
  *   <tr><td>{@code step.delta}</td>
  *       <td>{@link #index()}, {@link #delta()} or {@link #argumentsDelta()}</td></tr>
@@ -37,6 +39,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *     interaction.completed}
  * @param interactionId the interaction id on status-update events
  * @param status step status on {@code step.stop} (e.g. {@code done})
+ * @param error error payload on {@code error} events ({@code code} + {@code message})
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record StreamingEvent(
@@ -47,7 +50,12 @@ public record StreamingEvent(
     @JsonProperty("arguments_delta") String argumentsDelta,
     InteractionResponse interaction,
     @JsonProperty("interaction_id") String interactionId,
-    String status) {
+    String status,
+    Map<String, Object> error) {
+
+  public boolean hasTypeError() {
+    return "error".equals(eventType);
+  }
 
   public boolean hasTypeInteractionCreated() {
     return "interaction.created".equals(eventType);

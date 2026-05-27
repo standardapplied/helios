@@ -655,6 +655,167 @@ class GeminiModelTest {
   }
 
   @Test
+  void buildRequestContinuationIncludesSystemInstruction() {
+    var model = createModel();
+    var metadata = Map.of(GeminiModel.INTERACTION_ID_KEY, "int-abc");
+    var toolCalls =
+        List.of(
+            ToolCall.newBuilder()
+                .withId("c1")
+                .withName("search")
+                .withArguments(Map.of("q", "test"))
+                .build());
+    var messages =
+        List.of(
+            Message.system("You are a helpful assistant"),
+            Message.user("Search for X"),
+            Message.assistant(null, toolCalls, metadata),
+            Message.tool("c1", "search", "found it"));
+
+    var request = model.buildRequest(messages, null, null);
+
+    assertNotNull(request.previousInteractionId(), "continuation must use previous_interaction_id");
+    assertEquals("int-abc", request.previousInteractionId());
+    assertEquals(
+        "You are a helpful assistant",
+        request.systemInstruction(),
+        "system instruction must be included on continuation requests");
+  }
+
+  @Test
+  void buildRequestThinkingLevelMinimalMapsToMinimal() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.MINIMAL)
+            .build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var messages = List.of(Message.user("Hello"));
+
+    var request = model.buildRequest(messages, null, null);
+
+    assertEquals("minimal", request.generationConfig().thinkingLevel());
+  }
+
+  @Test
+  void buildRequestThinkingLevelLowMapsToLow() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.LOW)
+            .build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var messages = List.of(Message.user("Hello"));
+
+    var request = model.buildRequest(messages, null, null);
+
+    assertEquals("low", request.generationConfig().thinkingLevel());
+  }
+
+  @Test
+  void buildRequestThinkingLevelHighMapsToHigh() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.HIGH)
+            .build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var messages = List.of(Message.user("Hello"));
+
+    var request = model.buildRequest(messages, null, null);
+
+    assertEquals("high", request.generationConfig().thinkingLevel());
+  }
+
+  @Test
+  void buildRequestThinkingLevelMediumMapsToMedium() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.MEDIUM)
+            .build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
+
+    assertEquals("medium", request.generationConfig().thinkingLevel());
+  }
+
+  @Test
+  void buildRequestThinkingLevelXhighClampsToHigh() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.XHIGH)
+            .build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
+
+    assertEquals("high", request.generationConfig().thinkingLevel());
+  }
+
+  @Test
+  void buildRequestThinkingLevelMaxClampsToHigh() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.MAX)
+            .build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
+
+    assertEquals("high", request.generationConfig().thinkingLevel());
+  }
+
+  @Test
+  void buildRequestThinkingLevelNoneOmitsField() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.NONE)
+            .build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var messages = List.of(Message.user("Hello"));
+
+    var request = model.buildRequest(messages, null, null);
+
+    assertNull(request.generationConfig().thinkingLevel());
+  }
+
+  @Test
+  void extractSystemInstructionFindsSystemMessage() {
+    var messages = List.of(Message.system("Be helpful"), Message.user("Hi"));
+    assertEquals("Be helpful", GeminiModel.extractSystemInstruction(messages));
+  }
+
+  @Test
+  void extractSystemInstructionReturnsNullWhenAbsent() {
+    var messages = List.of(Message.user("Hi"));
+    assertNull(GeminiModel.extractSystemInstruction(messages));
+  }
+
+  @Test
+  void extractSystemInstructionTakesLastSystemMessage() {
+    var messages = List.of(Message.system("First"), Message.user("Hi"), Message.system("Second"));
+    assertEquals("Second", GeminiModel.extractSystemInstruction(messages));
+  }
+
+  @Test
+  void buildRequestContinuationWithoutSystemMessageOmitsIt() {
+    var model = createModel();
+    var metadata = Map.of(GeminiModel.INTERACTION_ID_KEY, "int-abc");
+    var messages =
+        List.of(
+            Message.user("Search for X"),
+            Message.assistant("ok", List.of(), metadata),
+            Message.user("Follow-up"));
+
+    var request = model.buildRequest(messages, null, null);
+
+    assertNotNull(request.previousInteractionId());
+    assertNull(request.systemInstruction());
+  }
+
+  @Test
   void closeReleasesHttpClientResources() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);

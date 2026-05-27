@@ -982,6 +982,15 @@ class SerializationTest {
             "{\"event_type\":\"step.stop\",\"index\":0,\"status\":\"done\"}", StreamingEvent.class);
     assertTrue(stop.hasTypeStepStop());
     assertEquals("done", stop.status());
+
+    var error =
+        objectMapper.readValue(
+            "{\"event_type\":\"error\",\"error\":{\"code\":500,\"message\":\"Internal error\"}}",
+            StreamingEvent.class);
+    assertTrue(error.hasTypeError());
+    assertNotNull(error.error());
+    assertEquals(500, error.error().get("code"));
+    assertEquals("Internal error", error.error().get("message"));
   }
 
   @Test
