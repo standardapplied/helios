@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.core.common.HttpClientFactory;
 import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.InlineFile;
 import ai.singlr.core.model.Message;
@@ -47,6 +48,8 @@ import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 class OpenAIModelTest {
+
+  private static final int MAX_ERROR_BODY_BYTES = 64 * 1024;
 
   private static OpenAIModel createModel() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
@@ -1023,9 +1026,12 @@ class OpenAIModelTest {
   @Test
   void parseStructuredContentInvalidJsonThrows() {
     var model = createModel();
-    assertThrows(
-        OpenAIException.class,
-        () -> model.parseStructuredContent("not json at all", OutputSchema.of(TestPerson.class)));
+    var ex =
+        assertThrows(
+            StructuredOutputParseException.class,
+            () ->
+                model.parseStructuredContent("not json at all", OutputSchema.of(TestPerson.class)));
+    assertTrue(ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")));
   }
 
   @Test
@@ -1041,11 +1047,13 @@ class OpenAIModelTest {
   @Test
   void parseStructuredContentMarkdownWrappedInvalidThrows() {
     var model = createModel();
-    assertThrows(
-        OpenAIException.class,
-        () ->
-            model.parseStructuredContent(
-                "```json\nnot valid\n```", OutputSchema.of(TestPerson.class)));
+    var ex =
+        assertThrows(
+            StructuredOutputParseException.class,
+            () ->
+                model.parseStructuredContent(
+                    "```json\nnot valid\n```", OutputSchema.of(TestPerson.class)));
+    assertTrue(ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")));
   }
 
   @Test
@@ -1373,12 +1381,13 @@ class OpenAIModelTest {
 
   @Test
   void readBoundedErrorBodyCapsAtLimitAndMarksTruncation() throws Exception {
-    var oversized = new byte[OpenAIModel.MAX_ERROR_BODY_BYTES + 1024];
+    var oversized = new byte[MAX_ERROR_BODY_BYTES + 1024];
     java.util.Arrays.fill(oversized, (byte) 'x');
-    var result = OpenAIModel.readBoundedErrorBody(new java.io.ByteArrayInputStream(oversized));
+    var result =
+        HttpClientFactory.readBoundedErrorBody(new java.io.ByteArrayInputStream(oversized));
     assertTrue(result.contains("[truncated"));
     assertTrue(
-        result.length() <= OpenAIModel.MAX_ERROR_BODY_BYTES + 100,
+        result.length() <= MAX_ERROR_BODY_BYTES + 100,
         "result must be capped at MAX_ERROR_BODY_BYTES + a short truncation marker");
   }
 
@@ -1386,7 +1395,7 @@ class OpenAIModelTest {
   void readBoundedErrorBodyReturnsExactBytesWhenUnderLimit() throws Exception {
     var msg = "compact error payload";
     var result =
-        OpenAIModel.readBoundedErrorBody(
+        HttpClientFactory.readBoundedErrorBody(
             new java.io.ByteArrayInputStream(
                 msg.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     assertEquals(msg, result);

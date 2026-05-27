@@ -148,7 +148,7 @@ public class AnthropicModel implements Model {
    * @return {@code true} for short-lived or long-lived policies; {@code false} for disabled
    */
   public boolean promptCachingEnabled() {
-    return cachePolicy.isEnabled();
+    return cachePolicy.enabled();
   }
 
   @Override
@@ -173,15 +173,7 @@ public class AnthropicModel implements Model {
 
   @Override
   public void close() {
-    httpClient.shutdown();
-    try {
-      if (!httpClient.awaitTermination(Duration.ofSeconds(5))) {
-        httpClient.shutdownNow();
-      }
-    } catch (InterruptedException e) {
-      httpClient.shutdownNow();
-      Thread.currentThread().interrupt();
-    }
+    HttpClientFactory.shutdownGracefully(httpClient);
   }
 
   @Override
@@ -235,19 +227,19 @@ public class AnthropicModel implements Model {
   }
 
   <T> T parseStructuredContent(String content, OutputSchema<T> schema) {
-    return StructuredContentParser.parse(content, schema, jsonAdapter, AnthropicException::new);
+    return StructuredContentParser.parse(content, schema, jsonAdapter);
   }
 
   @SuppressWarnings({"unchecked", "rawtypes"})
   private final StructuredContentParser.JsonAdapter jsonAdapter =
       new StructuredContentParser.JsonAdapter() {
         @Override
-        public java.util.Map<String, Object> toMap(String json) throws Exception {
-          return objectMapper.readValue(json, java.util.Map.class);
+        public Map<String, Object> toMap(String json) throws Exception {
+          return objectMapper.readValue(json, Map.class);
         }
 
         @Override
-        public <T> T fromMap(java.util.Map<String, Object> map, Class<T> type) {
+        public <T> T fromMap(Map<String, Object> map, Class<T> type) {
           return objectMapper.convertValue(map, type);
         }
       };
@@ -259,30 +251,13 @@ public class AnthropicModel implements Model {
     var httpResponse = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
     if (httpResponse.statusCode() != 200) {
       try (var body = httpResponse.body()) {
-        var errorBody = readBoundedErrorBody(body);
+        var errorBody = HttpClientFactory.readBoundedErrorBody(body);
         throw new AnthropicException(
             "API error (status " + httpResponse.statusCode() + "): " + errorBody,
             httpResponse.statusCode());
       }
     }
     return new StreamingIterator(httpResponse, objectMapper, config.streamIdleTimeout());
-  }
-
-  /** Max bytes of an HTTP error body read into the exception message. */
-  static final int MAX_ERROR_BODY_BYTES = 64 * 1024;
-
-  /**
-   * Read the error body up to {@link #MAX_ERROR_BODY_BYTES}, appending a truncation marker if the
-   * server pushed more. Misconfigured proxies and gateways can return multi-megabyte HTML error
-   * pages; {@code readAllBytes()} would buffer the lot before the caller sees anything.
-   */
-  static String readBoundedErrorBody(InputStream body) throws IOException {
-    var capped = body.readNBytes(MAX_ERROR_BODY_BYTES);
-    var truncated = body.read() != -1;
-    var text = new String(capped, StandardCharsets.UTF_8);
-    return truncated
-        ? text + "\n[truncated: error body exceeded " + MAX_ERROR_BODY_BYTES + " bytes]"
-        : text;
   }
 
   /**
@@ -437,7 +412,7 @@ public class AnthropicModel implements Model {
             .withThinking(thinkingSpec.thinking())
             .withOutputConfig(thinkingSpec.outputConfig());
 
-    if (cachePolicy.isEnabled()) {
+    if (cachePolicy.enabled()) {
       var breakpoint = cachePolicy.breakpoint();
       applySystemWithCache(builder, systemInstruction, breakpoint);
       builder.withTools(withCachedTail(toolDefs, breakpoint));
@@ -780,8 +755,8 @@ public class AnthropicModel implements Model {
     // Per-content-block thinking accumulators keyed by block index. Each thinking block in a
     // multi-block message carries its own Anthropic signature; concatenating them into a single
     // buffer (the prior shape) yields a signature the API rejects on the next turn.
-    private final java.util.LinkedHashMap<Integer, ThinkingAccumulator> thinkingAccumulators =
-        new java.util.LinkedHashMap<>();
+    private final LinkedHashMap<Integer, ThinkingAccumulator> thinkingAccumulators =
+        new LinkedHashMap<>();
     private StreamEvent nextEvent = null;
     private boolean done = false;
     private int inputTokens = 0;

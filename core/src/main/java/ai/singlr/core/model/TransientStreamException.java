@@ -13,11 +13,11 @@ import java.util.Objects;
  * failure — a socket reset mid-SSE, a half-closed connection, an idle-read timeout that the
  * provider itself classifies as retryable (HTTP 408 / 429 / 5xx / network-error 0).
  *
- * <p>Distinguished from generic provider exceptions ({@code AnthropicException}, {@code
- * GeminiException}, {@code OpenAIException}) so the session loop can pattern-match on the type and
- * apply a bounded retry without coupling to provider-specific class hierarchies. Non- transient
- * failures — schema validation, malformed responses, 4xx other than 408/429, tool-call shape errors
- * — must continue to surface as their existing provider exceptions and terminate the run normally.
+ * <p>Distinguished from generic {@link ProviderException} subclasses so the session loop can
+ * pattern-match on the type and apply a bounded retry without coupling to provider-specific class
+ * hierarchies. Non-transient failures — schema validation, malformed responses, 4xx other than
+ * 408/429, tool-call shape errors — must continue to surface as their existing provider exceptions
+ * and terminate the run normally.
  *
  * <p>The originating low-level throwable (e.g. {@code java.io.IOException("Connection reset by
  * peer")}) is preserved via {@link #getCause()} so the session terminal can walk the chain through

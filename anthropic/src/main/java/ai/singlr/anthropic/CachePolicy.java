@@ -82,11 +82,11 @@ public sealed interface CachePolicy
    * @return {@code true} for {@link ShortLived} and {@link LongLived}; {@code false} for {@link
    *     Disabled}
    */
-  boolean isEnabled();
+  boolean enabled();
 
   /**
    * The {@link CacheControl} breakpoint to attach to each cacheable slot (system, last tool, last
-   * message) when this policy is enabled. Returns {@code null} when {@link #isEnabled()} is {@code
+   * message) when this policy is enabled. Returns {@code null} when {@link #enabled()} is {@code
    * false} so callers can skip annotation entirely.
    *
    * @return the breakpoint, or {@code null} when caching is disabled
@@ -99,7 +99,7 @@ public sealed interface CachePolicy
     static final Disabled INSTANCE = new Disabled();
 
     @Override
-    public boolean isEnabled() {
+    public boolean enabled() {
       return false;
     }
 
@@ -115,7 +115,7 @@ public sealed interface CachePolicy
     static final ShortLived INSTANCE = new ShortLived();
 
     @Override
-    public boolean isEnabled() {
+    public boolean enabled() {
       return true;
     }
 
@@ -131,7 +131,7 @@ public sealed interface CachePolicy
     static final LongLived INSTANCE = new LongLived();
 
     @Override
-    public boolean isEnabled() {
+    public boolean enabled() {
       return true;
     }
 

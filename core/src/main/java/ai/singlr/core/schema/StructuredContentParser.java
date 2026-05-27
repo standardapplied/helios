@@ -6,8 +6,8 @@
 package ai.singlr.core.schema;
 
 import ai.singlr.core.common.Strings;
+import java.util.List;
 import java.util.Map;
-import java.util.function.BiFunction;
 
 /**
  * Shared structured-output parser. Three providers (Anthropic, Gemini, OpenAI) used to duplicate
@@ -23,9 +23,10 @@ import java.util.function.BiFunction;
  *       StructuredOutputParseException} carrying the field-level diff.
  *   <li>Type-coerce the map into the schema's output class. For provenanced schemas use {@link
  *       OutputSchema#reconstructProvenanced(Map, java.util.function.Function)}.
- *   <li>On JSON-syntax failure retry once after stripping markdown fences. If that also fails, wrap
- *       via the caller-supplied {@code exceptionFactory} (so each provider keeps its own exception
- *       type at the call boundary).
+ *   <li>On JSON-syntax failure retry once after stripping markdown fences. If that also fails,
+ *       throw {@link StructuredOutputParseException} so the session loop's self-correction
+ *       mechanism can inject a correction message and retry, same as for schema-validation
+ *       failures.
  * </ol>
  *
  * <p>Core has no Jackson dependency; providers wire their {@code ObjectMapper}-equivalent via
@@ -60,25 +61,19 @@ public final class StructuredContentParser {
   }
 
   /**
-   * Parse {@code content} against {@code schema} using the supplied {@code adapter}. The {@code
-   * exceptionFactory} produces the provider-specific exception thrown on JSON-syntax or
-   * type-coercion failure; schema mismatches always surface as {@link
-   * StructuredOutputParseException} regardless of the factory.
+   * Parse {@code content} against {@code schema} using the supplied {@code adapter}. All parse
+   * failures — both schema-validation mismatches and JSON-syntax errors — surface as {@link
+   * StructuredOutputParseException} so the session loop's self-correction mechanism can handle them
+   * uniformly.
    *
    * @param <T> the typed output
    * @param content the raw model response — may be {@code null}/blank to indicate "no structured
    *     output produced"
    * @param schema the output schema describing the expected shape
    * @param adapter provider-supplied JSON adapter
-   * @param exceptionFactory builds the provider's wrapping exception; receives {@code (message,
-   *     cause)} and must return a {@link RuntimeException}
    * @return the typed output, or {@code null} when {@code content} was null/blank
    */
-  public static <T> T parse(
-      String content,
-      OutputSchema<T> schema,
-      JsonAdapter adapter,
-      BiFunction<String, Exception, RuntimeException> exceptionFactory) {
+  public static <T> T parse(String content, OutputSchema<T> schema, JsonAdapter adapter) {
     if (Strings.isBlank(content)) {
       return null;
     }
@@ -108,7 +103,8 @@ public final class StructuredContentParser {
           // fall through to terminal failure
         }
       }
-      throw exceptionFactory.apply("Failed to parse structured output: " + content, firstAttempt);
+      throw new StructuredOutputParseException(
+          List.of("JSON syntax error: " + firstAttempt.getMessage()), content);
     }
   }
 

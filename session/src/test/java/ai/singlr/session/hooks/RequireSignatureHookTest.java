@@ -100,14 +100,13 @@ final class RequireSignatureHookTest {
   @Test
   void requiringToolNameRejectsBlank() {
     var ex =
-        assertThrows(
-            IllegalArgumentException.class, () -> RequireSignatureHook.requiringToolName(""));
+        assertThrows(IllegalArgumentException.class, () -> RequireSignatureHook.withToolName(""));
     assertEquals("toolName must not be blank", ex.getMessage());
   }
 
   @Test
   void requiringToolNameBlocksStopUntilCalled() {
-    var hook = RequireSignatureHook.requiringToolName("Search");
+    var hook = RequireSignatureHook.withToolName("Search");
     assertInstanceOf(HookOutcome.Inject.class, hook.beforeStop(stopResponse(), ctx()));
     hook.afterTool(call("Search"), ToolResult.success("hits"), ctx());
     assertInstanceOf(HookOutcome.Continue.class, hook.beforeStop(stopResponse(), ctx()));
@@ -115,7 +114,7 @@ final class RequireSignatureHookTest {
 
   @Test
   void unrelatedToolDoesNotSatisfy() {
-    var hook = RequireSignatureHook.requiringToolName("Search");
+    var hook = RequireSignatureHook.withToolName("Search");
     hook.afterTool(call("Other"), ToolResult.success("x"), ctx());
     assertInstanceOf(HookOutcome.Inject.class, hook.beforeStop(stopResponse(), ctx()));
   }
@@ -132,20 +131,14 @@ final class RequireSignatureHookTest {
   @Test
   void builderAccumulatesMultipleSignatures() {
     var hook =
-        RequireSignatureHook.newBuilder()
-            .requiringToolName("Search")
-            .requiringToolName("Submit")
-            .build();
+        RequireSignatureHook.newBuilder().withToolName("Search").withToolName("Submit").build();
     assertEquals(2, hook.signatures().size());
   }
 
   @Test
   void multipleSignaturesAllMustBeMet() {
     var hook =
-        RequireSignatureHook.newBuilder()
-            .requiringToolName("Search")
-            .requiringToolName("Submit")
-            .build();
+        RequireSignatureHook.newBuilder().withToolName("Search").withToolName("Submit").build();
     hook.afterTool(call("Search"), ToolResult.success("x"), ctx());
     var halfwayDecision = hook.beforeStop(stopResponse(), ctx());
     assertInstanceOf(HookOutcome.Inject.class, halfwayDecision);
@@ -157,10 +150,7 @@ final class RequireSignatureHookTest {
   @Test
   void injectMessageListsEveryUnmetSignature() {
     var hook =
-        RequireSignatureHook.newBuilder()
-            .requiringToolName("Search")
-            .requiringToolName("Submit")
-            .build();
+        RequireSignatureHook.newBuilder().withToolName("Search").withToolName("Submit").build();
     var decision = hook.beforeStop(stopResponse(), ctx());
     var msg = ((HookOutcome.Inject) decision).userMessage();
     assertTrue(msg.contains("Search"));
@@ -172,7 +162,7 @@ final class RequireSignatureHookTest {
   void customPredicateRequirementHonored() {
     var hook =
         RequireSignatureHook.newBuilder()
-            .requiring(
+            .withSignature(
                 "submitWithFlag",
                 "Submit with debug=true",
                 c -> c.name().equals("Submit") && Boolean.TRUE.equals(c.arguments().get("debug")))
@@ -188,7 +178,7 @@ final class RequireSignatureHookTest {
   @Test
   void requiringSignatureRejectsNull() {
     var b = RequireSignatureHook.newBuilder();
-    var ex = assertThrows(NullPointerException.class, () -> b.requiring(null));
+    var ex = assertThrows(NullPointerException.class, () -> b.withSignature(null));
     assertEquals("signature must not be null", ex.getMessage());
   }
 
@@ -196,7 +186,7 @@ final class RequireSignatureHookTest {
 
   @Test
   void observedSnapshotIsImmutableCopy() {
-    var hook = RequireSignatureHook.requiringToolName("Search");
+    var hook = RequireSignatureHook.withToolName("Search");
     hook.afterTool(call("Search"), ToolResult.success("x"), ctx());
     var snap = hook.observed();
     assertEquals(java.util.Set.of("Search"), snap);
@@ -207,13 +197,13 @@ final class RequireSignatureHookTest {
 
   @Test
   void hookCarriesItsClassName() {
-    var hook = RequireSignatureHook.requiringToolName("Search");
+    var hook = RequireSignatureHook.withToolName("Search");
     assertEquals("RequireSignatureHook", hook.name());
   }
 
   @Test
   void hookFiresAtBothPostToolAndPreStopPhases() {
-    var hook = RequireSignatureHook.requiringToolName("X");
+    var hook = RequireSignatureHook.withToolName("X");
     assertInstanceOf(PostToolUseHook.class, hook);
     assertInstanceOf(PreStopHook.class, hook);
   }

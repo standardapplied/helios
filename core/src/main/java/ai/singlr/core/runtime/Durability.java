@@ -162,7 +162,7 @@ public record Durability(
     public Builder withIdempotentToolsOverride(Map<String, Boolean> overrides) {
       Objects.requireNonNull(overrides, "overrides; pass Map.of() to clear");
       for (var entry : overrides.entrySet()) {
-        if (entry.getKey() == null || entry.getKey().isBlank()) {
+        if (Strings.isBlank(entry.getKey())) {
           throw new IllegalArgumentException("overrides keys must not be blank");
         }
         if (entry.getValue() == null) {

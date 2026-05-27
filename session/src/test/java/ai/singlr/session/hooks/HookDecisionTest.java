@@ -31,7 +31,7 @@ final class HookDecisionTest {
   @Test
   void proceedSingletonIsContinue() {
     var d = HookDecision.proceed();
-    assertTrue(d.isContinue());
+    assertTrue(d.shouldContinue());
     assertInstanceOf(HookOutcome.Continue.class, d.outcome());
     assertTrue(d.firingHookOptional().isEmpty());
   }
@@ -44,7 +44,7 @@ final class HookDecisionTest {
   @Test
   void ofWrapsHookAndOutcome() {
     var d = HookDecision.of(NAMED_HOOK, HookOutcome.block("nope"));
-    assertFalse(d.isContinue());
+    assertFalse(d.shouldContinue());
     assertInstanceOf(HookOutcome.Block.class, d.outcome());
     assertEquals(NAMED_HOOK, d.firingHookOptional().orElseThrow());
     assertEquals("myHook", d.firingHook().name());
@@ -88,6 +88,6 @@ final class HookDecisionTest {
   @Test
   void constructorAllowsContinueWithoutHook() {
     var d = new HookDecision(null, HookOutcome.cont());
-    assertTrue(d.isContinue());
+    assertTrue(d.shouldContinue());
   }
 }

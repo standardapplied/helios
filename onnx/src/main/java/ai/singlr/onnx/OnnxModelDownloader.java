@@ -1,7 +1,11 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/*
+ * Copyright (c) 2026 Singular
+ * SPDX-License-Identifier: MIT
+ */
 
 package ai.singlr.onnx;
 
+import ai.singlr.core.common.Strings;
 import ai.singlr.core.embedding.EmbeddingConfig;
 import java.io.IOException;
 import java.io.InputStream;
@@ -9,6 +13,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -63,7 +68,7 @@ final class OnnxModelDownloader implements AutoCloseable {
     var rootFilesToDownload = new ArrayList<String>();
     var hasOnnxModel = false;
 
-    if (subfolder != null && !subfolder.isEmpty()) {
+    if (!Strings.isBlank(subfolder)) {
       var subfolderFiles = fetchFileList(modelName, "main/" + subfolder);
       for (var currFile : subfolderFiles) {
         if (isSelectedOnnxFile(currFile)) {
@@ -119,7 +124,7 @@ final class OnnxModelDownloader implements AutoCloseable {
     if (!Files.exists(marker)) {
       try {
         Files.createFile(marker);
-      } catch (java.nio.file.FileAlreadyExistsException ignored) {
+      } catch (FileAlreadyExistsException ignored) {
         // A concurrent downloader for the same model won the race. Both downloaded the same
         // content; the marker is a flag, not state, so either creator is fine.
       }
@@ -234,7 +239,7 @@ final class OnnxModelDownloader implements AutoCloseable {
   }
 
   private String stripSubfolderPrefix(String filePath, String subfolder) {
-    if (subfolder != null && !subfolder.isEmpty() && filePath.startsWith(subfolder + "/")) {
+    if (!Strings.isBlank(subfolder) && filePath.startsWith(subfolder + "/")) {
       return filePath.substring(subfolder.length() + 1);
     }
     return filePath;

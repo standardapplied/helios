@@ -23,7 +23,7 @@ final class StreamRetryPolicyTest {
     assertEquals(3, p.maxAttempts());
     assertNotNull(p.backoff());
     assertEquals(0.25, p.jitter(), 0.0);
-    assertTrue(p.isEnabled());
+    assertTrue(p.enabled());
   }
 
   @Test
@@ -35,7 +35,7 @@ final class StreamRetryPolicyTest {
   void disabledHasSingleAttemptAndZeroBackoff() {
     var p = StreamRetryPolicy.disabled();
     assertEquals(1, p.maxAttempts());
-    assertFalse(p.isEnabled());
+    assertFalse(p.enabled());
     assertEquals(Duration.ZERO, p.nextDelay(1));
   }
 
@@ -99,7 +99,7 @@ final class StreamRetryPolicyTest {
 
   @Test
   void enabledSingleAttemptIsDisabled() {
-    assertFalse(new StreamRetryPolicy(1, Backoff.fixed(Duration.ZERO), 0.0).isEnabled());
-    assertTrue(new StreamRetryPolicy(2, Backoff.fixed(Duration.ZERO), 0.0).isEnabled());
+    assertFalse(new StreamRetryPolicy(1, Backoff.fixed(Duration.ZERO), 0.0).enabled());
+    assertTrue(new StreamRetryPolicy(2, Backoff.fixed(Duration.ZERO), 0.0).enabled());
   }
 }

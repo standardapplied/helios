@@ -175,7 +175,7 @@ public record Response<T>(
     }
 
     public Builder<T> withMetadata(Map<String, String> metadata) {
-      this.metadata = metadata != null ? metadata : Map.of();
+      this.metadata = metadata != null ? Map.copyOf(metadata) : Map.of();
       return this;
     }
 

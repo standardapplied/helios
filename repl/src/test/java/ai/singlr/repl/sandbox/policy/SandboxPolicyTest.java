@@ -19,7 +19,7 @@ class SandboxPolicyTest {
   @Test
   void permissiveDeniesNothing() {
     var p = SandboxPolicy.permissive();
-    assertTrue(p.isPermissive());
+    assertTrue(p.enforcesNothing());
     assertEquals(Set.of(), p.allowedPackages());
     assertEquals(Set.of(), p.deniedClasses());
     assertEquals(Set.of(), p.deniedPackages());
@@ -31,7 +31,7 @@ class SandboxPolicyTest {
 
   @Test
   void builderDefaultsMatchPermissive() {
-    assertTrue(SandboxPolicy.newBuilder().build().isPermissive());
+    assertTrue(SandboxPolicy.newBuilder().build().enforcesNothing());
   }
 
   @Test
@@ -53,7 +53,7 @@ class SandboxPolicyTest {
     assertTrue(p.denyNativeAccess());
     assertTrue(p.denyDynamicClassDefinition());
     assertEquals(ViolationAction.THROW, p.onViolation());
-    assertFalse(p.isPermissive());
+    assertFalse(p.enforcesNothing());
   }
 
   @Test
@@ -86,43 +86,43 @@ class SandboxPolicyTest {
             .withDenyNativeAccess(false)
             .withDenyDynamicClassDefinition(false)
             .build();
-    assertTrue(p.isPermissive());
+    assertTrue(p.enforcesNothing());
   }
 
   @Test
   void isPermissiveFalseWhenAnyAllowedPackageSet() {
     var p = SandboxPolicy.newBuilder().withAllowedPackages("java.lang").build();
-    assertFalse(p.isPermissive());
+    assertFalse(p.enforcesNothing());
   }
 
   @Test
   void isPermissiveFalseWhenAnyDenyClassSet() {
     var p = SandboxPolicy.newBuilder().withDeniedClasses("X").build();
-    assertFalse(p.isPermissive());
+    assertFalse(p.enforcesNothing());
   }
 
   @Test
   void isPermissiveFalseWhenAnyDenyPackageSet() {
     var p = SandboxPolicy.newBuilder().withDeniedPackages("x.y").build();
-    assertFalse(p.isPermissive());
+    assertFalse(p.enforcesNothing());
   }
 
   @Test
   void isPermissiveFalseWhenReflectionDenied() {
     var p = SandboxPolicy.newBuilder().withDenyReflection(true).build();
-    assertFalse(p.isPermissive());
+    assertFalse(p.enforcesNothing());
   }
 
   @Test
   void isPermissiveFalseWhenNativeDenied() {
     var p = SandboxPolicy.newBuilder().withDenyNativeAccess(true).build();
-    assertFalse(p.isPermissive());
+    assertFalse(p.enforcesNothing());
   }
 
   @Test
   void isPermissiveFalseWhenDynamicClassDefDenied() {
     var p = SandboxPolicy.newBuilder().withDenyDynamicClassDefinition(true).build();
-    assertFalse(p.isPermissive());
+    assertFalse(p.enforcesNothing());
   }
 
   @Test

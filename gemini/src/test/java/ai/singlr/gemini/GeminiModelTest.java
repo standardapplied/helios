@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.core.common.HttpClientFactory;
 import ai.singlr.core.model.InlineFile;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.ModelConfig;
@@ -33,6 +34,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class GeminiModelTest {
+
+  private static final int MAX_ERROR_BODY_BYTES = 64 * 1024;
 
   @Test
   void thoughtSignatureDelimiterIsRecordSeparator() {
@@ -731,26 +734,27 @@ class GeminiModelTest {
   }
 
   @Test
-  void parseStructuredContentSyntaxErrorStillThrowsGeminiException() {
+  void parseStructuredContentSyntaxErrorThrowsStructuredOutputParseException() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     var ex =
         assertThrows(
-            GeminiException.class,
+            StructuredOutputParseException.class,
             () ->
                 model.parseStructuredContent(
                     "{\"name\":\"Alice\",unterminated", OutputSchema.of(TestPerson.class)));
-    assertTrue(ex.getMessage().contains("Failed to parse structured output"));
+    assertTrue(ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")));
   }
 
   @Test
   void readBoundedErrorBodyCapsAtLimitAndMarksTruncation() throws Exception {
-    var oversized = new byte[GeminiModel.MAX_ERROR_BODY_BYTES + 1024];
+    var oversized = new byte[MAX_ERROR_BODY_BYTES + 1024];
     java.util.Arrays.fill(oversized, (byte) 'x');
-    var result = GeminiModel.readBoundedErrorBody(new java.io.ByteArrayInputStream(oversized));
+    var result =
+        HttpClientFactory.readBoundedErrorBody(new java.io.ByteArrayInputStream(oversized));
     assertTrue(result.contains("[truncated"));
     assertTrue(
-        result.length() <= GeminiModel.MAX_ERROR_BODY_BYTES + 100,
+        result.length() <= MAX_ERROR_BODY_BYTES + 100,
         "result must be capped at MAX_ERROR_BODY_BYTES + a short truncation marker");
   }
 
@@ -758,7 +762,7 @@ class GeminiModelTest {
   void readBoundedErrorBodyReturnsExactBytesWhenUnderLimit() throws Exception {
     var msg = "compact error payload";
     var result =
-        GeminiModel.readBoundedErrorBody(
+        HttpClientFactory.readBoundedErrorBody(
             new java.io.ByteArrayInputStream(
                 msg.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     assertEquals(msg, result);

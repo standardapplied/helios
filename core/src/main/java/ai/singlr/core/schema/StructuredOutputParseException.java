@@ -9,16 +9,16 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Thrown by providers when a model's structured-output response is syntactically valid JSON but
- * does not conform to the configured {@link OutputSchema}. Carries a field-level diff produced by
- * {@link SchemaValidator}, so the agent loop can surface specific corrections to the model rather
- * than re-rolling the dice against an opaque "parse failed" message.
+ * Thrown when a model's structured-output response fails to parse — either because the JSON is
+ * syntactically invalid or because it does not conform to the configured {@link OutputSchema}.
+ * Carries error messages (field-level diffs from {@link SchemaValidator} for schema mismatches, or
+ * the JSON parse error message for syntax failures), so the agent loop can surface specific
+ * corrections to the model.
  *
- * <p>Distinguished from generic provider exceptions ({@code AnthropicException}, {@code
- * GeminiException}, {@code OpenAIException}) so the session loop can pattern-match on it: when this
- * exception type bubbles out of a structured-output {@code chat(...)} call, the loop injects {@link
- * #correctionMessage()} as a USER turn and continues iterating instead of failing terminally. Other
- * parse failures (malformed JSON, Jackson type-coercion errors) still terminate the run as before.
+ * <p>Distinguished from generic {@link ai.singlr.core.model.ProviderException} subclasses so the
+ * session loop can pattern-match on it: when this exception type bubbles out of a structured-output
+ * {@code chat(...)} call, the loop injects {@link #correctionMessage()} as a USER turn and
+ * continues iterating instead of failing terminally.
  *
  * <p>The {@link #rawContent()} field preserves the model's original output for log-side debugging;
  * it is intentionally <em>not</em> echoed back to the model on retry, since the model has the same

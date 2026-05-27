@@ -4,6 +4,111 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.5.8] — 2026-05-26 — Structured-output self-correction for JSON-syntax errors, provider DRY extraction, convention sweep
+
+### Fixed — JSON-syntax errors now self-correct (all providers)
+
+`StructuredContentParser.parse()` previously wrapped JSON-syntax failures via
+the caller-supplied `exceptionFactory`, producing provider-specific exceptions
+(`AnthropicException`, `GeminiException`, `OpenAIException`). The session
+loop's `TurnRunner.trySelfCorrectSchema` only pattern-matches
+`StructuredOutputParseException`, so JSON-syntax errors terminated the session
+instead of triggering the correction-and-retry path. The parser now throws
+`StructuredOutputParseException` for all parse failures — both schema-validation
+mismatches and JSON-syntax errors. The unused `exceptionFactory` parameter was
+removed from the `parse()` signature.
+
+### Fixed — Gemini + OpenAI: `IOException` now triggers stream retry
+
+`GeminiModel.streamAndDrain` and `drainToResponse` (and the OpenAI equivalents)
+wrapped `IOException` as `GeminiException`/`OpenAIException` instead of
+`TransientStreamException`. DNS failures, TCP resets, and mid-stream socket
+drops against Gemini and OpenAI were silently non-retryable. Both providers now
+match Anthropic's pattern: connect-time and mid-stream `IOException`s promote
+to `TransientStreamException` so the session loop's bounded retry fires.
+
+### Fixed — Gemini + OpenAI: `isRetryable()` now includes status 529
+
+Copy-paste drift from 2.5.5: `GeminiException` and `OpenAIException` omitted
+`statusCode == 529` (Cloudflare "site overloaded") from `isRetryable()` while
+`AnthropicException` included it. The fix is structural — see the new
+`ProviderException` base class below.
+
+### Added — `ProviderException` base class in core
+
+New `ai.singlr.core.model.ProviderException` carries the shared `statusCode()`,
+`isClientError()`, `isServerError()`, `isRetryable()` logic. All three provider
+exceptions now extend it with constructor-only subclasses. Eliminates three
+copy-pasted implementations and prevents future drift.
+
+### Added — `HttpClientFactory.readBoundedErrorBody` + `shutdownGracefully`
+
+Two shared utilities extracted from identical implementations across all three
+provider Model classes. `readBoundedErrorBody(InputStream)` caps error body
+reads at 64 KB with a truncation marker. `shutdownGracefully(HttpClient)`
+executes the 5-second shutdown/awaitTermination/shutdownNow pattern.
+
+### Changed — defensive copies in `Message` and `Response`
+
+`Message.assistant(content, toolCalls, metadata)` and its overloads now wrap
+`toolCalls` in `List.copyOf()` and `metadata` in `Map.copyOf()`.
+`Message.Builder.withMetadata()` and `Response.Builder.withMetadata()` apply
+`Map.copyOf()`.
+
+### Changed — `is*()` methods renamed on records (Jackson 3.x safety)
+
+Jackson 3.x treats `is<Name>()` on records as a boolean getter for property
+`<name>`. Renamed to avoid phantom serialization properties:
+
+| Record | Old | New |
+|--------|-----|-----|
+| `CachePolicy.Disabled/ShortLived/LongLived` | `isEnabled()` | `enabled()` |
+| `StreamRetryPolicy` | `isEnabled()` | `enabled()` |
+| `HookDecision` | `isContinue()` | `shouldContinue()` |
+| `ToolBinding` | `isVisible(ctx)` | `visible(ctx)` |
+| `SandboxPolicy` | `isPermissive()` | `enforcesNothing()` |
+
+### Changed — `RequireSignatureHook` builder naming
+
+Builder methods renamed to follow the `with` prefix convention:
+`requiring(Signature)` → `withSignature(Signature)`,
+`requiringToolName(String)` → `withToolName(String)`.
+Static factory also renamed: `RequireSignatureHook.requiringToolName(String)`
+→ `RequireSignatureHook.withToolName(String)`.
+
+### Changed — `Strings.isBlank()` / `Strings.isEmpty()` consistency
+
+Replaced inline `s == null || s.isBlank()` patterns with `Strings.isBlank(s)`
+in `Durability`, `TurnRunner`, and `OnnxModelDownloader`.
+
+### Changed — inline FQNs replaced with imports
+
+`JvmSandbox.java` (14 FQNs → 8 imports), `OnnxModelDownloader.java` (1),
+`AnthropicModel.java` (4).
+
+### Changed — ONNX copyright headers
+
+12 files (6 main + 6 test) updated from single-line to multi-line format
+matching the rest of the codebase.
+
+### Breaking — API
+
+- `StructuredContentParser.parse()` no longer accepts an `exceptionFactory`
+  parameter (4th arg removed). All three provider `parseStructuredContent`
+  methods updated.
+- `CachePolicy.isEnabled()` → `enabled()`.
+- `StreamRetryPolicy.isEnabled()` → `enabled()`.
+- `HookDecision.isContinue()` → `shouldContinue()`.
+- `ToolBinding.isVisible(ctx)` → `visible(ctx)`.
+- `SandboxPolicy.isPermissive()` → `enforcesNothing()`.
+- `RequireSignatureHook.requiringToolName(String)` → `withToolName(String)`.
+- `RequireSignatureHook.Builder.requiring(…)` → `withSignature(…)`.
+- `RequireSignatureHook.Builder.requiringToolName(…)` → `withToolName(…)`.
+- `AnthropicException`, `GeminiException`, `OpenAIException` now extend
+  `ProviderException` instead of `RuntimeException` directly. Existing
+  `catch (AnthropicException e)` blocks still work; new
+  `catch (ProviderException e)` catches any provider.
+
 ## [2.5.5] — 2026-05-25 — Transient-stream retry: bounded re-issue, typed terminal, cause-chain preservation
 
 Fixes the Light Grid bug report (2026-05-25) where a mid-stream `IOException`

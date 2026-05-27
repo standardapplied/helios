@@ -118,7 +118,7 @@ final class HookRegistryTest {
   @Test
   void firePreToolUseEmptyReturnsContinue() {
     var decision = HookRegistry.empty().firePreToolUse(CALL, ctx());
-    assertTrue(decision.isContinue());
+    assertTrue(decision.shouldContinue());
     assertInstanceOf(HookOutcome.Continue.class, decision.outcome());
     assertTrue(decision.firingHookOptional().isEmpty());
   }

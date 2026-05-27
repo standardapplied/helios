@@ -7,8 +7,10 @@ package ai.singlr.core.common;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.model.ModelConfig;
+import java.io.ByteArrayInputStream;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
@@ -60,5 +62,28 @@ class HttpClientFactoryTest {
     var client = HttpClientFactory.create();
 
     assertEquals(HttpClient.Redirect.NORMAL, client.followRedirects());
+  }
+
+  @Test
+  void readBoundedErrorBodyCapsAtLimitAndMarksTruncation() throws Exception {
+    var oversized = new byte[64 * 1024 + 1024];
+    java.util.Arrays.fill(oversized, (byte) 'x');
+    var result = HttpClientFactory.readBoundedErrorBody(new ByteArrayInputStream(oversized));
+    assertTrue(result.contains("[truncated:"));
+    assertTrue(result.length() <= 64 * 1024 + 100);
+  }
+
+  @Test
+  void readBoundedErrorBodyReturnsExactBytesWhenUnderLimit() throws Exception {
+    assertEquals(
+        "hello",
+        HttpClientFactory.readBoundedErrorBody(new ByteArrayInputStream("hello".getBytes())));
+  }
+
+  @Test
+  void shutdownGracefullyClosesClient() {
+    var client = HttpClientFactory.create();
+    HttpClientFactory.shutdownGracefully(client);
+    assertTrue(client.isTerminated());
   }
 }

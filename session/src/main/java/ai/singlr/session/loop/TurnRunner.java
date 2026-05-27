@@ -5,6 +5,7 @@
 package ai.singlr.session.loop;
 
 import ai.singlr.core.common.CostCalculator;
+import ai.singlr.core.common.Strings;
 import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Model;
@@ -339,10 +340,10 @@ public final class TurnRunner {
   }
 
   /**
-   * Schema-mismatch self-correction. When the model emitted parseable JSON that didn't match the
-   * session's configured {@link OutputSchema}, the provider raises {@link
-   * StructuredOutputParseException} (the only recoverable parse signal — syntactic JSON errors and
-   * provider IO errors still terminate via {@link FinishReason#ERROR}).
+   * Structured-output self-correction. When the model emits JSON that either doesn't match the
+   * session's configured {@link OutputSchema} or is syntactically invalid, the parser raises {@link
+   * StructuredOutputParseException}. Provider IO errors still terminate via {@link
+   * FinishReason#ERROR}.
    *
    * <p>Recovery: append the model's wrong attempt to history as an assistant message so the model
    * sees its own response through conversation context on the retry, then enqueue {@link
@@ -364,7 +365,7 @@ public final class TurnRunner {
       return null;
     }
     var wrongAttempt = parseFailure.rawContent();
-    if (wrongAttempt == null || wrongAttempt.isEmpty()) {
+    if (Strings.isEmpty(wrongAttempt)) {
       // Real streaming providers may surface text deltas before the error fires; the subscriber
       // has accumulated them even when the exception itself didn't carry rawContent.
       wrongAttempt = subscriber.accumulatedContent();

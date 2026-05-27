@@ -92,8 +92,8 @@ final class ToolBindingTest {
   @Test
   void builderDefaultVisibilityIsAlwaysTrue() {
     var binding = ToolBinding.newBuilder(dummyTool("Read")).withCategory(ToolCategory.READ).build();
-    assertTrue(binding.isVisible(new ToolVisibilityContext("sess", 0)));
-    assertTrue(binding.isVisible(new ToolVisibilityContext("other", 99)));
+    assertTrue(binding.visible(new ToolVisibilityContext("sess", 0)));
+    assertTrue(binding.visible(new ToolVisibilityContext("other", 99)));
   }
 
   @Test
@@ -115,8 +115,8 @@ final class ToolBindingTest {
             .withCategory(ToolCategory.CONTROL)
             .withVisibility(ctx -> ctx.turnIndex() < 5)
             .build();
-    assertTrue(binding.isVisible(new ToolVisibilityContext("s", 4)));
-    assertFalse(binding.isVisible(new ToolVisibilityContext("s", 5)));
+    assertTrue(binding.visible(new ToolVisibilityContext("s", 4)));
+    assertFalse(binding.visible(new ToolVisibilityContext("s", 5)));
   }
 
   @Test
@@ -185,7 +185,7 @@ final class ToolBindingTest {
   @Test
   void isVisibleRejectsNullCtx() {
     var binding = ToolBinding.newBuilder(dummyTool("t")).withCategory(ToolCategory.READ).build();
-    var ex = assertThrows(NullPointerException.class, () -> binding.isVisible(null));
+    var ex = assertThrows(NullPointerException.class, () -> binding.visible(null));
     assertEquals("ctx must not be null", ex.getMessage());
   }
 

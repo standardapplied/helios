@@ -102,9 +102,9 @@ public final class ToolRegistry {
   }
 
   /**
-   * Bindings whose {@link ToolBinding#isVisible(ToolVisibilityContext) visibility predicate}
-   * returns true for the given context. The agent loop uses this to compute the per-turn tool list
-   * it advertises to the model.
+   * Bindings whose {@link ToolBinding#visible(ToolVisibilityContext) visibility predicate} returns
+   * true for the given context. The agent loop uses this to compute the per-turn tool list it
+   * advertises to the model.
    *
    * @param ctx the visibility context; non-null
    * @return immutable list of visible bindings in registration order
@@ -112,7 +112,7 @@ public final class ToolRegistry {
    */
   public List<ToolBinding> visible(ToolVisibilityContext ctx) {
     Objects.requireNonNull(ctx, "ctx must not be null");
-    return bindings.stream().filter(b -> b.isVisible(ctx)).toList();
+    return bindings.stream().filter(b -> b.visible(ctx)).toList();
   }
 
   /**

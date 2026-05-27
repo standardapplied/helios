@@ -27,7 +27,7 @@ class JvmSandboxConfigTest {
     assertEquals(256, config.maxHeapMb());
     assertEquals(Duration.ofSeconds(60), config.callTimeout());
     assertNotNull(config.sandboxPolicy());
-    assertTrue(config.sandboxPolicy().isPermissive());
+    assertTrue(config.sandboxPolicy().enforcesNothing());
     assertNotNull(config.subprocessModules());
     assertTrue(config.subprocessModules() instanceof SubprocessModules.Unrestricted);
   }
@@ -179,7 +179,7 @@ class JvmSandboxConfigTest {
     assertEquals(JvmSandboxConfig.DEFAULT_EXECUTION_TIMEOUT, config.executionTimeout());
     assertEquals(JvmSandboxConfig.DEFAULT_MAX_HEAP_MB, config.maxHeapMb());
     assertEquals(JvmSandboxConfig.DEFAULT_CALL_TIMEOUT, config.callTimeout());
-    assertTrue(config.sandboxPolicy().isPermissive());
+    assertTrue(config.sandboxPolicy().enforcesNothing());
     assertTrue(config.subprocessModules() instanceof SubprocessModules.Unrestricted);
     org.junit.jupiter.api.Assertions.assertNull(
         config.workingDirectory(),

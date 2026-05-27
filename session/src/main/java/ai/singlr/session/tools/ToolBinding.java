@@ -77,7 +77,7 @@ public record ToolBinding(
    * @return {@code true} if the tool should appear in the model's tool list
    * @throws NullPointerException if {@code ctx} is null
    */
-  public boolean isVisible(ToolVisibilityContext ctx) {
+  public boolean visible(ToolVisibilityContext ctx) {
     Objects.requireNonNull(ctx, "ctx must not be null");
     return visibility.test(ctx);
   }

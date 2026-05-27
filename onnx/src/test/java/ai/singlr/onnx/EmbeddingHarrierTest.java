@@ -1,4 +1,7 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/*
+ * Copyright (c) 2026 Singular
+ * SPDX-License-Identifier: MIT
+ */
 
 package ai.singlr.onnx;
 

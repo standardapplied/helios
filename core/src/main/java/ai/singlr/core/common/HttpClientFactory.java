@@ -6,11 +6,14 @@
 package ai.singlr.core.common;
 
 import ai.singlr.core.model.ModelConfig;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 /**
- * Factory for creating configured HttpClient instances.
+ * Factory and shared utilities for {@link HttpClient} instances used by provider modules.
  *
  * <p>Creates HttpClient instances with connection timeout from ModelConfig. Response timeout is
  * applied per-request via HttpRequest.Builder.timeout().
@@ -46,5 +49,44 @@ public final class HttpClientFactory {
    */
   public static HttpClient create() {
     return create(null);
+  }
+
+  private static final int MAX_ERROR_BODY_BYTES = 64 * 1024;
+
+  /**
+   * Read an HTTP error body up to 64 KB, appending a truncation marker if the server pushed more.
+   * Misconfigured proxies and gateways can return multi-megabyte HTML error pages; {@code
+   * readAllBytes()} would buffer the lot before the caller sees anything.
+   *
+   * @param body the response body stream; non-null
+   * @return the error body text, possibly truncated
+   * @throws IOException if reading fails
+   */
+  public static String readBoundedErrorBody(InputStream body) throws IOException {
+    var capped = body.readNBytes(MAX_ERROR_BODY_BYTES);
+    var truncated = body.read() != -1;
+    var text = new String(capped, StandardCharsets.UTF_8);
+    return truncated
+        ? text + "\n[truncated: error body exceeded " + MAX_ERROR_BODY_BYTES + " bytes]"
+        : text;
+  }
+
+  /**
+   * Shut down an {@link HttpClient} with a 5-second grace period. Calls {@code shutdown()}, waits
+   * up to 5 seconds for in-flight requests, then forces with {@code shutdownNow()} if the timeout
+   * expires.
+   *
+   * @param client the client to shut down; non-null
+   */
+  public static void shutdownGracefully(HttpClient client) {
+    client.shutdown();
+    try {
+      if (!client.awaitTermination(Duration.ofSeconds(5))) {
+        client.shutdownNow();
+      }
+    } catch (InterruptedException e) {
+      client.shutdownNow();
+      Thread.currentThread().interrupt();
+    }
   }
 }

@@ -71,12 +71,12 @@ class SandboxPolicyArgvTest {
   @Test
   void parseSandboxPolicyArgReturnsPermissiveWhenAbsent() {
     var parsed = JvmSandboxBootstrap.parseSandboxPolicyArg(new String[] {"--rpc-socket=/x"});
-    assertTrue(parsed.isPermissive());
+    assertTrue(parsed.enforcesNothing());
   }
 
   @Test
   void parseSandboxPolicyArgWithEmptyArgsReturnsPermissive() {
-    assertTrue(JvmSandboxBootstrap.parseSandboxPolicyArg(new String[0]).isPermissive());
+    assertTrue(JvmSandboxBootstrap.parseSandboxPolicyArg(new String[0]).enforcesNothing());
   }
 
   @Test

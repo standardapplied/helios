@@ -22,7 +22,8 @@ import java.util.function.Predicate;
  *
  * <p>The replacement for v1's {@code RequiredPredictSignature} / {@code SignatureMatchers}
  * machinery: instead of a global flag set by the RLM harness, the agent loop's hook system carries
- * the requirement, and any preset can stack additional signatures via {@link Builder#requiring}.
+ * the requirement, and any preset can stack additional signatures via {@link
+ * Builder#withSignature}.
  *
  * <p>Outcome on unmet requirements: {@link HookOutcome.Inject Inject} with a corrective user
  * message that lists every missing signature's {@link Signature#description() description}. {@code
@@ -101,7 +102,7 @@ public final class RequireSignatureHook implements PostToolUseHook, PreStopHook 
    * @throws NullPointerException if {@code toolName} is null
    * @throws IllegalArgumentException if {@code toolName} is blank
    */
-  public static RequireSignatureHook requiringToolName(String toolName) {
+  public static RequireSignatureHook withToolName(String toolName) {
     return new RequireSignatureHook(List.of(Signature.ofToolName(toolName)));
   }
 
@@ -191,7 +192,7 @@ public final class RequireSignatureHook implements PostToolUseHook, PreStopHook 
      * @return this builder
      * @throws NullPointerException if {@code signature} is null
      */
-    public Builder requiring(Signature signature) {
+    public Builder withSignature(Signature signature) {
       Objects.requireNonNull(signature, "signature must not be null");
       signatures.add(signature);
       return this;
@@ -203,8 +204,8 @@ public final class RequireSignatureHook implements PostToolUseHook, PreStopHook 
      * @param toolName the tool to require; non-blank
      * @return this builder
      */
-    public Builder requiringToolName(String toolName) {
-      return requiring(Signature.ofToolName(toolName));
+    public Builder withToolName(String toolName) {
+      return withSignature(Signature.ofToolName(toolName));
     }
 
     /**
@@ -215,8 +216,8 @@ public final class RequireSignatureHook implements PostToolUseHook, PreStopHook 
      * @param matches predicate over a tool call
      * @return this builder
      */
-    public Builder requiring(String name, String description, Predicate<ToolCall> matches) {
-      return requiring(new Signature(name, description, matches));
+    public Builder withSignature(String name, String description, Predicate<ToolCall> matches) {
+      return withSignature(new Signature(name, description, matches));
     }
 
     /**

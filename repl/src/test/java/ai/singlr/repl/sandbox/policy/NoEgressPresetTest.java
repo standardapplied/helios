@@ -27,7 +27,7 @@ class NoEgressPresetTest {
   @Test
   void noEgressIsNotPermissive() {
     var p = SandboxPolicy.noEgress();
-    assertFalse(p.isPermissive());
+    assertFalse(p.enforcesNothing());
   }
 
   @Test

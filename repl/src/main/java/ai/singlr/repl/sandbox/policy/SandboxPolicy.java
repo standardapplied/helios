@@ -193,7 +193,7 @@ public record SandboxPolicy(
    * policy across process boundaries: an entirely permissive policy is the bootstrap's own default,
    * so no argv flag needs to travel.
    */
-  public boolean isPermissive() {
+  public boolean enforcesNothing() {
     return allowedPackages.isEmpty()
         && deniedClasses.isEmpty()
         && deniedPackages.isEmpty()

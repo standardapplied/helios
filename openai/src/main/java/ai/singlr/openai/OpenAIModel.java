@@ -17,6 +17,7 @@ import ai.singlr.core.model.StreamEvent;
 import ai.singlr.core.model.ThinkingLevel;
 import ai.singlr.core.model.ToolCall;
 import ai.singlr.core.model.ToolChoice;
+import ai.singlr.core.model.TransientStreamException;
 import ai.singlr.core.schema.OutputSchema;
 import ai.singlr.core.schema.StructuredContentParser;
 import ai.singlr.core.tool.Tool;
@@ -124,15 +125,7 @@ public class OpenAIModel implements Model {
 
   @Override
   public void close() {
-    httpClient.shutdown();
-    try {
-      if (!httpClient.awaitTermination(Duration.ofSeconds(5))) {
-        httpClient.shutdownNow();
-      }
-    } catch (InterruptedException e) {
-      httpClient.shutdownNow();
-      Thread.currentThread().interrupt();
-    }
+    HttpClientFactory.shutdownGracefully(httpClient);
   }
 
   @Override
@@ -185,7 +178,7 @@ public class OpenAIModel implements Model {
   }
 
   <T> T parseStructuredContent(String content, OutputSchema<T> schema) {
-    return StructuredContentParser.parse(content, schema, jsonAdapter, OpenAIException::new);
+    return StructuredContentParser.parse(content, schema, jsonAdapter);
   }
 
   @SuppressWarnings({"unchecked", "rawtypes"})
@@ -209,7 +202,7 @@ public class OpenAIModel implements Model {
     var httpResponse = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
     if (httpResponse.statusCode() != 200) {
       try (var body = httpResponse.body()) {
-        var errorBody = readBoundedErrorBody(body);
+        var errorBody = HttpClientFactory.readBoundedErrorBody(body);
         throw new OpenAIException(
             "API error (status " + httpResponse.statusCode() + "): " + errorBody,
             httpResponse.statusCode());
@@ -218,30 +211,13 @@ public class OpenAIModel implements Model {
     return new StreamingIterator(httpResponse, objectMapper, config.streamIdleTimeout());
   }
 
-  /** Max bytes of an HTTP error body read into the exception message. */
-  static final int MAX_ERROR_BODY_BYTES = 64 * 1024;
-
-  /**
-   * Read the error body up to {@link #MAX_ERROR_BODY_BYTES}, appending a truncation marker if the
-   * server pushed more. Misconfigured proxies and gateways can return multi-megabyte HTML error
-   * pages; {@code readAllBytes()} would buffer the lot before the caller sees anything.
-   */
-  static String readBoundedErrorBody(InputStream body) throws IOException {
-    var capped = body.readNBytes(MAX_ERROR_BODY_BYTES);
-    var truncated = body.read() != -1;
-    var text = new String(capped, StandardCharsets.UTF_8);
-    return truncated
-        ? text + "\n[truncated: error body exceeded " + MAX_ERROR_BODY_BYTES + " bytes]"
-        : text;
-  }
-
   private Response<Void> streamAndDrain(ResponsesRequest request) {
     try (var iterator = openStream(request)) {
       return drainToResponse(iterator);
-    } catch (OpenAIException e) {
+    } catch (OpenAIException | TransientStreamException e) {
       throw e;
     } catch (IOException e) {
-      throw new OpenAIException("Failed to communicate with OpenAI API", e);
+      throw new TransientStreamException("Failed to communicate with OpenAI API", e, PROVIDER_NAME);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new OpenAIException("Request interrupted", e);
@@ -258,6 +234,9 @@ public class OpenAIModel implements Model {
       if (event instanceof StreamEvent.Error(String message, Exception cause)) {
         if (cause instanceof OpenAIException oe) {
           throw oe;
+        }
+        if (cause instanceof IOException) {
+          throw new TransientStreamException(message, cause, PROVIDER_NAME);
         }
         throw new OpenAIException(message, cause);
       }

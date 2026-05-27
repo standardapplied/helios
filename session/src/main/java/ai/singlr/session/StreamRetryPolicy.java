@@ -86,7 +86,7 @@ public record StreamRetryPolicy(int maxAttempts, Backoff backoff, double jitter)
    *
    * @return {@code true} when more than one attempt may be made
    */
-  public boolean isEnabled() {
+  public boolean enabled() {
     return maxAttempts > 1;
   }
 

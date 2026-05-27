@@ -12,7 +12,7 @@ package ai.singlr.repl.sandbox.policy;
  * thread.
  *
  * <p>{@link #forPolicy(SandboxPolicy)} returns {@link #NO_OP} when the policy is {@link
- * SandboxPolicy#isPermissive() permissive} (no scanning needed) and a {@link
+ * SandboxPolicy#enforcesNothing() permissive} (no scanning needed) and a {@link
  * PolicyBytecodeVerifier} otherwise — the real scanner built on the JDK Classfile API. See {@link
  * PolicyBytecodeVerifier} for the rule semantics and the set of instruction families scanned.
  */
@@ -32,21 +32,21 @@ public interface BytecodeVerifier {
 
   /**
    * A verifier that accepts every byte sequence. Returned by {@link #forPolicy(SandboxPolicy)} when
-   * the policy is {@link SandboxPolicy#isPermissive() permissive} — there is nothing to scan for,
-   * so the load path skips the Classfile parse entirely.
+   * the policy is {@link SandboxPolicy#enforcesNothing() permissive} — there is nothing to scan
+   * for, so the load path skips the Classfile parse entirely.
    */
   BytecodeVerifier NO_OP = (internalName, bytecodes) -> {};
 
   /**
    * Build a verifier for the given policy. Returns {@link #NO_OP} for {@link
-   * SandboxPolicy#isPermissive() permissive} policies (no rules → no scanning needed) and a {@link
-   * PolicyBytecodeVerifier} otherwise.
+   * SandboxPolicy#enforcesNothing() permissive} policies (no rules → no scanning needed) and a
+   * {@link PolicyBytecodeVerifier} otherwise.
    */
   static BytecodeVerifier forPolicy(SandboxPolicy policy) {
     if (policy == null) {
       throw new IllegalArgumentException("policy must not be null");
     }
-    if (policy.isPermissive()) {
+    if (policy.enforcesNothing()) {
       return NO_OP;
     }
     return new PolicyBytecodeVerifier(policy);

@@ -74,7 +74,7 @@ public record HookDecision(Hook firingHook, HookOutcome outcome) {
    *
    * @return {@code true} when no hook decided anything
    */
-  public boolean isContinue() {
+  public boolean shouldContinue() {
     return outcome instanceof HookOutcome.Continue;
   }
 

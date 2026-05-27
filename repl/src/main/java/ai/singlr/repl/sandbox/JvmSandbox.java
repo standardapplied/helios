@@ -21,14 +21,22 @@ import java.nio.channels.Channels;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitOption;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -336,7 +344,7 @@ public final class JvmSandbox implements Sandbox {
               try {
                 return listener.accept();
               } catch (IOException e) {
-                throw new java.util.concurrent.CompletionException(e);
+                throw new CompletionException(e);
               }
             },
             r -> Thread.ofVirtual().name("helios-sandbox-rpc-accept").start(r));
@@ -455,41 +463,40 @@ public final class JvmSandbox implements Sandbox {
    * reap it.
    */
   static void deleteEphemeralCwdQuietly(Path dir) {
-    if (!Files.exists(dir, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+    if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
       return;
     }
     try {
       Files.walkFileTree(
           dir,
-          java.util.EnumSet.noneOf(java.nio.file.FileVisitOption.class),
+          EnumSet.noneOf(FileVisitOption.class),
           Integer.MAX_VALUE,
-          new java.nio.file.SimpleFileVisitor<Path>() {
+          new SimpleFileVisitor<Path>() {
             @Override
-            public java.nio.file.FileVisitResult visitFile(
-                Path file, java.nio.file.attribute.BasicFileAttributes attrs) {
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
               try {
                 Files.deleteIfExists(file);
               } catch (IOException ignored) {
                 // best-effort
               }
-              return java.nio.file.FileVisitResult.CONTINUE;
+              return FileVisitResult.CONTINUE;
             }
 
             @Override
-            public java.nio.file.FileVisitResult visitFileFailed(Path file, IOException exc) {
+            public FileVisitResult visitFileFailed(Path file, IOException exc) {
               // Unreadable entries (broken symlink target permissions, racing deletes) are
               // logged at FINE elsewhere; treat as already-gone for the cleanup walk.
-              return java.nio.file.FileVisitResult.CONTINUE;
+              return FileVisitResult.CONTINUE;
             }
 
             @Override
-            public java.nio.file.FileVisitResult postVisitDirectory(Path d, IOException exc) {
+            public FileVisitResult postVisitDirectory(Path d, IOException exc) {
               try {
                 Files.deleteIfExists(d);
               } catch (IOException ignored) {
                 // best-effort
               }
-              return java.nio.file.FileVisitResult.CONTINUE;
+              return FileVisitResult.CONTINUE;
             }
           });
     } catch (IOException ignored) {
@@ -601,7 +608,7 @@ public final class JvmSandbox implements Sandbox {
     if (rpcSocketPath != null) {
       command.add("--rpc-socket=" + rpcSocketPath);
     }
-    if (!config.sandboxPolicy().isPermissive()) {
+    if (!config.sandboxPolicy().enforcesNothing()) {
       command.add("--sandbox-policy=" + SandboxPolicySerialization.encode(config.sandboxPolicy()));
     }
     return command;
@@ -691,7 +698,7 @@ public final class JvmSandbox implements Sandbox {
     }
     var timeout = request.timeout() != null ? request.timeout() : config.executionTimeout();
     try {
-      var params = new java.util.LinkedHashMap<String, Object>();
+      var params = new LinkedHashMap<String, Object>();
       params.put("code", request.code());
       params.put("language", request.language());
       params.put("timeoutMs", timeout.toMillis());
@@ -820,7 +827,7 @@ public final class JvmSandbox implements Sandbox {
       var submitted = map.get("submitted");
       Map<String, String> bindings = Map.of();
       if (map.get("bindings") instanceof Map<?, ?> raw) {
-        var b = new java.util.LinkedHashMap<String, String>();
+        var b = new LinkedHashMap<String, String>();
         for (var entry : raw.entrySet()) {
           if (entry.getKey() instanceof String key) {
             b.put(key, String.valueOf(entry.getValue()));

@@ -5,52 +5,24 @@
 
 package ai.singlr.anthropic;
 
-/** Exception thrown when Anthropic API operations fail. */
-public class AnthropicException extends RuntimeException {
+import ai.singlr.core.model.ProviderException;
 
-  private final int statusCode;
+/** Exception thrown when Anthropic API operations fail. */
+public class AnthropicException extends ProviderException {
 
   public AnthropicException(String message) {
     super(message);
-    this.statusCode = 0;
   }
 
   public AnthropicException(String message, Throwable cause) {
     super(message, cause);
-    this.statusCode = 0;
   }
 
   public AnthropicException(String message, int statusCode) {
-    super(message);
-    this.statusCode = statusCode;
+    super(message, statusCode);
   }
 
   public AnthropicException(String message, int statusCode, Throwable cause) {
-    super(message, cause);
-    this.statusCode = statusCode;
-  }
-
-  public int statusCode() {
-    return statusCode;
-  }
-
-  public boolean isClientError() {
-    return statusCode >= 400 && statusCode < 500;
-  }
-
-  public boolean isServerError() {
-    return statusCode >= 500;
-  }
-
-  /**
-   * Whether this error is retryable. Network errors (status 0), request timeouts (408), rate limits
-   * (429), overloaded (529), and server errors (5xx) are considered retryable.
-   */
-  public boolean isRetryable() {
-    return statusCode == 0
-        || statusCode == 408
-        || statusCode == 429
-        || statusCode == 529
-        || statusCode >= 500;
+    super(message, statusCode, cause);
   }
 }

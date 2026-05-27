@@ -73,7 +73,7 @@ class SandboxPolicySerializationTest {
   void roundtripPermissivePolicy() {
     var encoded = SandboxPolicySerialization.encode(SandboxPolicy.permissive());
     var decoded = SandboxPolicySerialization.decode(encoded);
-    assertTrue(decoded.isPermissive());
+    assertTrue(decoded.enforcesNothing());
   }
 
   @Test

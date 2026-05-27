@@ -19,15 +19,14 @@ import ai.singlr.session.hooks.RequireSignatureHook;
  * at least one call to the {@link ExecuteTool#NAME Execute} tool has happened in this session). The
  * spec calls this the "CodeAct must actually execute code" invariant.
  *
- * <p>Mechanically a thin wrapper around {@link RequireSignatureHook#requiringToolName} so the
- * preset surface stays declarative (the spec writes {@code new RequireExecuteCodeHook()} as a
- * no-arg constructor). The delegated hook does the observe-and-check work; this class forwards both
- * phase contracts to it.
+ * <p>Mechanically a thin wrapper around {@link RequireSignatureHook#withToolName} so the preset
+ * surface stays declarative (the spec writes {@code new RequireExecuteCodeHook()} as a no-arg
+ * constructor). The delegated hook does the observe-and-check work; this class forwards both phase
+ * contracts to it.
  */
 public final class RequireExecuteCodeHook implements PostToolUseHook, PreStopHook {
 
-  private final RequireSignatureHook delegate =
-      RequireSignatureHook.requiringToolName(ExecuteTool.NAME);
+  private final RequireSignatureHook delegate = RequireSignatureHook.withToolName(ExecuteTool.NAME);
 
   /** Construct a fresh hook. Pre-bound to the {@code Execute} tool — no configuration needed. */
   public RequireExecuteCodeHook() {}

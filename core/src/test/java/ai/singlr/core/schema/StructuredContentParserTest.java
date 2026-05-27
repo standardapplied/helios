@@ -61,17 +61,14 @@ class StructuredContentParserTest {
 
   @Test
   void nullContentReturnsNull() {
-    var result =
-        StructuredContentParser.parse(
-            null, OutputSchema.of(Bag.class), throwingAdapter(), RuntimeException::new);
+    var result = StructuredContentParser.parse(null, OutputSchema.of(Bag.class), throwingAdapter());
     assertNull(result);
   }
 
   @Test
   void blankContentReturnsNull() {
     var result =
-        StructuredContentParser.parse(
-            "   ", OutputSchema.of(Bag.class), throwingAdapter(), RuntimeException::new);
+        StructuredContentParser.parse("   ", OutputSchema.of(Bag.class), throwingAdapter());
     assertNull(result);
   }
 
@@ -82,9 +79,7 @@ class StructuredContentParserTest {
     var content = "{\"name\":\"alpha\",\"count\":7}";
     var adapter = adapterFor(content, new LinkedHashMap<>(Map.of("name", "alpha", "count", 7)));
 
-    var result =
-        StructuredContentParser.parse(
-            content, OutputSchema.of(Bag.class), adapter, RuntimeException::new);
+    var result = StructuredContentParser.parse(content, OutputSchema.of(Bag.class), adapter);
 
     assertEquals(new Bag("alpha", 7), result);
   }
@@ -100,9 +95,7 @@ class StructuredContentParserTest {
     var ex =
         assertThrows(
             StructuredOutputParseException.class,
-            () ->
-                StructuredContentParser.parse(
-                    content, OutputSchema.of(Bag.class), adapter, RuntimeException::new));
+            () -> StructuredContentParser.parse(content, OutputSchema.of(Bag.class), adapter));
     assertTrue(ex.errors().stream().anyMatch(e -> e.contains("count")));
   }
 
@@ -118,45 +111,52 @@ class StructuredContentParserTest {
             rawInner, new LinkedHashMap<>(Map.of("name", "beta", "count", 42)));
     var adapter = new MockAdapter(fixtures);
 
-    var result =
-        StructuredContentParser.parse(
-            wrapped, OutputSchema.of(Bag.class), adapter, RuntimeException::new);
+    var result = StructuredContentParser.parse(wrapped, OutputSchema.of(Bag.class), adapter);
 
     assertEquals(new Bag("beta", 42), result);
   }
 
   @Test
-  void unwrappedJsonSyntaxErrorThrowsProviderException() {
-    // The adapter throws on the trimmed content and there's no markdown wrapper to strip — the
-    // exception factory should fire.
+  void unwrappedJsonSyntaxErrorThrowsStructuredOutputParseException() {
     var content = "not-json";
     var ex =
         assertThrows(
-            RuntimeException.class,
+            StructuredOutputParseException.class,
             () ->
                 StructuredContentParser.parse(
-                    content,
-                    OutputSchema.of(Bag.class),
-                    throwingAdapter(),
-                    (msg, cause) -> new RuntimeException("provider wrap: " + msg, cause)));
-    assertTrue(ex.getMessage().startsWith("provider wrap: Failed to parse structured output: "));
-    assertTrue(ex.getMessage().contains(content));
+                    content, OutputSchema.of(Bag.class), throwingAdapter()));
+    assertTrue(
+        ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")),
+        "Expected JSON syntax error in errors(), got: " + ex.errors());
+    assertEquals(content, ex.rawContent());
   }
 
   @Test
-  void wrappedJsonStillSyntacticallyInvalidThrowsProviderException() {
-    // After stripping the fences the inner is still unparseable — provider exception fires.
+  void wrappedJsonStillSyntacticallyInvalidThrowsStructuredOutputParseException() {
     var content = "```json\nnot-json\n```";
     var ex =
         assertThrows(
-            RuntimeException.class,
+            StructuredOutputParseException.class,
             () ->
                 StructuredContentParser.parse(
-                    content,
-                    OutputSchema.of(Bag.class),
-                    throwingAdapter(),
-                    (msg, cause) -> new RuntimeException("wrap: " + msg, cause)));
-    assertTrue(ex.getMessage().startsWith("wrap: Failed to parse structured output:"));
+                    content, OutputSchema.of(Bag.class), throwingAdapter()));
+    assertTrue(
+        ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")),
+        "Expected JSON syntax error in errors(), got: " + ex.errors());
+  }
+
+  @Test
+  void jsonSyntaxErrorCorrectionMessageMentionsError() {
+    var malformed = "{\"name\":\"alpha\",\"count\":}";
+    var ex =
+        assertThrows(
+            StructuredOutputParseException.class,
+            () ->
+                StructuredContentParser.parse(
+                    malformed, OutputSchema.of(Bag.class), throwingAdapter()));
+    var correction = ex.correctionMessage();
+    assertTrue(correction.contains("JSON syntax error"), "correction should mention syntax error");
+    assertEquals(malformed, ex.rawContent(), "rawContent should preserve the original content");
   }
 
   @Test
@@ -171,9 +171,7 @@ class StructuredContentParserTest {
 
     assertThrows(
         StructuredOutputParseException.class,
-        () ->
-            StructuredContentParser.parse(
-                wrapped, OutputSchema.of(Bag.class), adapter, RuntimeException::new));
+        () -> StructuredContentParser.parse(wrapped, OutputSchema.of(Bag.class), adapter));
   }
 
   // --- stripMarkdownWrapper standalone -------------------------------------------------------
@@ -244,7 +242,7 @@ class StructuredContentParserTest {
     @SuppressWarnings({"rawtypes", "unchecked"})
     var result =
         (ai.singlr.core.common.Provenanced<Bag>)
-            StructuredContentParser.parse(content, schema, adapter, RuntimeException::new);
+            StructuredContentParser.parse(content, schema, adapter);
 
     assertEquals(new Bag("Alice", 5), result.output());
     assertEquals(2, result.provenance().size());
@@ -285,8 +283,7 @@ class StructuredContentParserTest {
 
     var ex =
         assertThrows(
-            RuntimeException.class,
-            () -> StructuredContentParser.parse(content, schema, adapter, RuntimeException::new));
+            RuntimeException.class, () -> StructuredContentParser.parse(content, schema, adapter));
     var cause = unwrapCause(ex);
     assertNotNull(cause);
     assertTrue(
@@ -366,7 +363,7 @@ class StructuredContentParserTest {
     fixture.put("count", 1);
     var adapter = new MockAdapter(Map.of(bagJson, fixture));
     var schema = OutputSchema.of(Bag.class);
-    var bag = StructuredContentParser.parse(content, schema, adapter, RuntimeException::new);
+    var bag = StructuredContentParser.parse(content, schema, adapter);
     assertNotNull(bag);
     assertEquals("x", bag.name());
     assertEquals(1, bag.count());

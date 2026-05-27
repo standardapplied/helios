@@ -181,11 +181,7 @@ public interface AgentSession extends AutoCloseable {
               + terminal.getClass().getSimpleName()
               + "; cannot parse a typed result from a non-Success terminal");
     }
-    return StructuredContentParser.parse(
-        success.result(),
-        schema,
-        JacksonJsonAdapter.SHARED,
-        (msg, cause) -> new IllegalStateException(msg, cause));
+    return StructuredContentParser.parse(success.result(), schema, JacksonJsonAdapter.SHARED);
   }
 
   /**

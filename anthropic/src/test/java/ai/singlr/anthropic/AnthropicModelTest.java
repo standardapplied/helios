@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.anthropic.api.ContentBlock;
 import ai.singlr.anthropic.api.MessagesRequest;
+import ai.singlr.core.common.HttpClientFactory;
 import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.InlineFile;
 import ai.singlr.core.model.Message;
@@ -33,6 +34,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class AnthropicModelTest {
+
+  private static final int MAX_ERROR_BODY_BYTES = 64 * 1024;
 
   @Test
   void constructorRequiresModelId() {
@@ -877,27 +880,27 @@ class AnthropicModelTest {
   }
 
   @Test
-  void parseStructuredContentSyntaxErrorStillThrowsAnthropicException() {
+  void parseStructuredContentSyntaxErrorThrowsStructuredOutputParseException() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
-    // Genuinely malformed JSON — schema validation never gets a chance, Jackson rejects at parse.
     var ex =
         assertThrows(
-            AnthropicException.class,
+            StructuredOutputParseException.class,
             () ->
                 model.parseStructuredContent(
                     "{\"name\":\"Alice\",unterminated", OutputSchema.of(TestPerson.class)));
-    assertTrue(ex.getMessage().contains("Failed to parse structured output"));
+    assertTrue(ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")));
   }
 
   @Test
   void readBoundedErrorBodyCapsAtLimitAndMarksTruncation() throws Exception {
-    var oversized = new byte[AnthropicModel.MAX_ERROR_BODY_BYTES + 1024];
+    var oversized = new byte[MAX_ERROR_BODY_BYTES + 1024];
     java.util.Arrays.fill(oversized, (byte) 'x');
-    var result = AnthropicModel.readBoundedErrorBody(new java.io.ByteArrayInputStream(oversized));
+    var result =
+        HttpClientFactory.readBoundedErrorBody(new java.io.ByteArrayInputStream(oversized));
     assertTrue(result.contains("[truncated"));
     assertTrue(
-        result.length() <= AnthropicModel.MAX_ERROR_BODY_BYTES + 100,
+        result.length() <= MAX_ERROR_BODY_BYTES + 100,
         "result must be capped at MAX_ERROR_BODY_BYTES + a short truncation marker");
   }
 
@@ -905,7 +908,7 @@ class AnthropicModelTest {
   void readBoundedErrorBodyReturnsExactBytesWhenUnderLimit() throws Exception {
     var msg = "compact error payload";
     var result =
-        AnthropicModel.readBoundedErrorBody(
+        HttpClientFactory.readBoundedErrorBody(
             new java.io.ByteArrayInputStream(
                 msg.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     assertEquals(msg, result);

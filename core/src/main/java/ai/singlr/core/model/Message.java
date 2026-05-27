@@ -57,11 +57,13 @@ public record Message(
   }
 
   public static Message assistant(List<ToolCall> toolCalls) {
-    return new Message(Role.ASSISTANT, null, toolCalls, null, null, Map.of(), List.of());
+    return new Message(
+        Role.ASSISTANT, null, List.copyOf(toolCalls), null, null, Map.of(), List.of());
   }
 
   public static Message assistant(String content, List<ToolCall> toolCalls) {
-    return new Message(Role.ASSISTANT, content, toolCalls, null, null, Map.of(), List.of());
+    return new Message(
+        Role.ASSISTANT, content, List.copyOf(toolCalls), null, null, Map.of(), List.of());
   }
 
   public static Message assistant(
@@ -69,10 +71,10 @@ public record Message(
     return new Message(
         Role.ASSISTANT,
         content,
-        toolCalls,
+        List.copyOf(toolCalls),
         null,
         null,
-        metadata != null ? metadata : Map.of(),
+        metadata != null ? Map.copyOf(metadata) : Map.of(),
         List.of());
   }
 
@@ -135,7 +137,7 @@ public record Message(
     }
 
     public Builder withMetadata(Map<String, String> metadata) {
-      this.metadata = metadata != null ? metadata : Map.of();
+      this.metadata = metadata != null ? Map.copyOf(metadata) : Map.of();
       return this;
     }
 
