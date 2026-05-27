@@ -4,6 +4,47 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.6.1] — 2026-05-27 — Gemini continuation + streaming robustness
+
+### Fixed — System instruction dropped on continuation requests (critical)
+
+The Gemini provider's continuation path (`previous_interaction_id`) did not
+re-send `system_instruction`. After the first tool-use turn the model operated
+without its system prompt — no role, no behavioral constraints, no tool-use
+guidance. This was the root cause of degraded Gemini 3.5 Flash performance in
+multi-turn agentic workflows reported by library users. The fix extracts the
+system instruction from the message history and includes it on every
+continuation request.
+
+### Fixed — `incomplete` and `budget_exceeded` interaction statuses
+
+The Interactions API returns `incomplete` when the model hits
+`max_output_tokens` and `budget_exceeded` when the token budget is exhausted.
+Both were previously treated as `STOP` (successful completion), causing
+truncated outputs to be silently accepted. `incomplete` now maps to
+`FinishReason.LENGTH`; `budget_exceeded` maps to `FinishReason.ERROR`.
+
+### Fixed — SSE `error` events silently ignored
+
+Mid-stream API errors (content safety, rate limiting, internal errors) sent as
+`event_type: "error"` SSE events were silently dropped by `parseStreamEvent`.
+The provider now surfaces them as `StreamEvent.Error` with the HTTP status code
+propagated to `GeminiException` for correct retry classification (429/5xx
+retryable, 4xx not).
+
+### Fixed — `interaction.status_update` SSE events not handled
+
+The legacy unified `interaction.status_update` event (which the deployed server
+still emits instead of the doc-promised `in_progress`/`requires_action` split)
+was silently dropped. The provider now captures `interactionId` and
+`terminalStatus` from these events as defense-in-depth.
+
+### Fixed — `ThinkingLevel.MINIMAL` mapped to `"low"` instead of `"minimal"`
+
+The Gemini API distinguishes `minimal` (disabled for most queries) from `low`
+(minimizes latency but still reasons). Both `MINIMAL` and `LOW` were previously
+mapped to `"low"`. `MINIMAL` now correctly maps to `"minimal"`.
+
 ## [2.6.0] — 2026-05-26 — Type-safe hook outcomes
 
 ### Breaking — `HookOutcome.MutateInput` replaced with four typed variants
