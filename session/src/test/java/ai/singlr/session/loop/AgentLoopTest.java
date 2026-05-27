@@ -815,18 +815,17 @@ final class AgentLoopTest {
     assertTrue(edits >= 2, "compactor must run on every re-climb (got " + edits + ")");
   }
 
-  // ── PreModelTurnHook.MutateInput (BYO compactor as a hook) ────────────────
+  // ── PreModelTurnHook.MutateHistory (BYO compactor as a hook) ──────────────
 
   @Test
-  void preModelTurnMutateInputReplacesHistory() {
+  void preModelTurnMutateHistoryReplacesHistory() {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("first"));
     queue.offer(UserMessage.text("second"));
     queue.offer(UserMessage.text("third"));
     var replacement = List.of(Message.system("compacted system"), Message.user("merged turn"));
     ai.singlr.session.hooks.PreModelTurnHook trimmer =
-        (history, ctx) ->
-            ai.singlr.session.hooks.HookOutcome.mutate(java.util.Map.of("history", replacement));
+        (history, ctx) -> ai.singlr.session.hooks.HookOutcome.mutateHistory(replacement);
     var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(trimmer));
     var runner =
         new TurnRunner(
@@ -857,51 +856,15 @@ final class AgentLoopTest {
     assertEquals(replacement.size() + 1, history.size(), "history rewritten; assistant appended");
     assertEquals("compacted system", history.get(0).content());
     assertEquals("merged turn", history.get(1).content());
-    // HookFired with MutateInput outcomeKind tagged as PreModelTurnHook
     var fired =
         events.stream()
             .filter(e -> e instanceof QueryEvent.HookFired)
             .map(e -> (QueryEvent.HookFired) e)
             .anyMatch(
-                h -> h.phase().equals("PreModelTurnHook") && h.outcomeKind().equals("MutateInput"));
-    assertTrue(fired, "HookFired with MutateInput must be emitted");
-  }
-
-  @Test
-  void preModelTurnMutateInputWithMissingHistoryKeyIsNoOp() {
-    var queue = new SteeringQueue(8);
-    queue.offer(UserMessage.text("hi"));
-    ai.singlr.session.hooks.PreModelTurnHook misbehaving =
-        (history, ctx) ->
-            ai.singlr.session.hooks.HookOutcome.mutate(java.util.Map.of("not-history", "ignored"));
-    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(misbehaving));
-    var runner =
-        new TurnRunner(
-            fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)),
-            hookRegistry,
-            dispatch,
-            queue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
-            CostCalculator.ZERO,
-            null);
-    var loop =
-        new AgentLoop(
-            runner,
-            new StopClassifier(),
-            hookRegistry,
-            dispatch,
-            queue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
-            TokenCounter.charBased(),
-            ContextCompactor.disabled());
-    var state = freshState();
-    loop.run(state, SessionLimits.defaults());
-    // History keeps the single user message + assistant response — no rewrite occurred.
-    assertEquals("hi", state.historySnapshot().get(0).content());
+                h ->
+                    h.phase().equals("PreModelTurnHook")
+                        && h.outcomeKind().equals("MutateHistory"));
+    assertTrue(fired, "HookFired with MutateHistory must be emitted");
   }
 
   // ── pre-turn watermark check (P0-3) ──────────────────────────────────────
@@ -1258,8 +1221,7 @@ final class AgentLoopTest {
         };
     var replacement = List.<Message>of(Message.user("rewritten by hook"));
     ai.singlr.session.hooks.PreCompactHook mutator =
-        (history, ctx) ->
-            ai.singlr.session.hooks.HookOutcome.mutate(Map.of("history", replacement));
+        (history, ctx) -> ai.singlr.session.hooks.HookOutcome.mutateHistory(replacement);
     var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(mutator));
     buildLoopWithHooks(
             fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
@@ -1277,47 +1239,8 @@ final class AgentLoopTest {
                 e ->
                     e instanceof QueryEvent.HookFired hf
                         && "PreCompactHook".equals(hf.phase())
-                        && "MutateInput".equals(hf.outcomeKind())),
-        "HookFired{PreCompactHook, MutateInput} must be emitted");
-  }
-
-  @Test
-  void preCompactHookMutateInputWithMissingHistoryKeyIsNoOp() {
-    var queue = new SteeringQueue(8);
-    queue.offer(UserMessage.text("original-user-msg"));
-    TokenCounter trigger = msgs -> 96L * msgs.size();
-    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
-    // Capture every history handed to the compactor so we can verify none was rewritten by the
-    // misbehaving hook (bogus key under MutateInput must fall back to the genuine history).
-    var observedHistories = new ArrayList<List<Message>>();
-    ContextCompactor capturing =
-        (history, state) -> {
-          observedHistories.add(history);
-          return CompactionResult.noOp(history);
-        };
-    ai.singlr.session.hooks.PreCompactHook misbehaving =
-        (history, ctx) ->
-            ai.singlr.session.hooks.HookOutcome.mutate(Map.of("not-history", "ignored"));
-    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(misbehaving));
-    buildLoopWithHooks(
-            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
-            queue,
-            trigger,
-            capturing,
-            hookRegistry)
-        .run(freshState(), limits);
-    assertTrue(!observedHistories.isEmpty(), "compactor must have been invoked at least once");
-    for (var observed : observedHistories) {
-      for (var m : observed) {
-        var content = m.content();
-        assertTrue(
-            content != null && (content.startsWith("original-user-msg") || "ok".equals(content)),
-            () ->
-                "compactor must only see genuine session messages — got '"
-                    + content
-                    + "'. The bogus 'not-history' key must NOT have rewritten the history.");
-      }
-    }
+                        && "MutateHistory".equals(hf.outcomeKind())),
+        "HookFired{PreCompactHook, MutateHistory} must be emitted");
   }
 
   @Test
@@ -1375,7 +1298,7 @@ final class AgentLoopTest {
   }
 
   @Test
-  void preCompactHookMutateInputWithEmptyHistoryListIsAccepted() {
+  void preCompactHookMutateHistoryWithEmptyListIsAccepted() {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("u"));
     TokenCounter trigger = msgs -> 96L * Math.max(msgs.size(), 1);
@@ -1386,10 +1309,8 @@ final class AgentLoopTest {
           observed.add(history);
           return CompactionResult.noOp(history);
         };
-    // Empty list under 'history' is a valid MutateInput — the helper should return List.of(),
-    // exercising the for-loop's zero-iteration path in messageListField.
     ai.singlr.session.hooks.PreCompactHook empty =
-        (history, ctx) -> ai.singlr.session.hooks.HookOutcome.mutate(Map.of("history", List.of()));
+        (history, ctx) -> ai.singlr.session.hooks.HookOutcome.mutateHistory(List.of());
     var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(empty));
     buildLoopWithHooks(
             fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
@@ -1402,69 +1323,6 @@ final class AgentLoopTest {
     assertTrue(
         observed.get(0).isEmpty(),
         "compactor must receive the empty history when the hook supplies an empty list");
-  }
-
-  @Test
-  void preCompactHookMutateInputHistoryNotAListFallsBack() {
-    var queue = new SteeringQueue(8);
-    queue.offer(UserMessage.text("u"));
-    TokenCounter trigger = msgs -> 96L * msgs.size();
-    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
-    var observed = new ArrayList<List<Message>>();
-    ContextCompactor capturing =
-        (history, state) -> {
-          observed.add(history);
-          return CompactionResult.noOp(history);
-        };
-    // 'history' key maps to a String — not a List — so the helper returns null and the loop falls
-    // back to the original history.
-    ai.singlr.session.hooks.PreCompactHook bogus =
-        (history, ctx) ->
-            ai.singlr.session.hooks.HookOutcome.mutate(Map.of("history", "not a list"));
-    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(bogus));
-    buildLoopWithHooks(
-            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
-            queue,
-            trigger,
-            capturing,
-            hookRegistry)
-        .run(freshState(), limits);
-    assertTrue(!observed.isEmpty());
-  }
-
-  @Test
-  void preCompactHookMutateInputHistoryWithNonMessageElementsFallsBack() {
-    var queue = new SteeringQueue(8);
-    queue.offer(UserMessage.text("original"));
-    TokenCounter trigger = msgs -> 96L * msgs.size();
-    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
-    var observedHistories = new ArrayList<List<Message>>();
-    ContextCompactor capturing =
-        (history, state) -> {
-          observedHistories.add(history);
-          return CompactionResult.noOp(history);
-        };
-    // History key contains a List but elements are not Message — fall back to original history.
-    ai.singlr.session.hooks.PreCompactHook bogus =
-        (history, ctx) ->
-            ai.singlr.session.hooks.HookOutcome.mutate(
-                Map.of("history", List.of("not a message", 42)));
-    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(bogus));
-    buildLoopWithHooks(
-            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
-            queue,
-            trigger,
-            capturing,
-            hookRegistry)
-        .run(freshState(), limits);
-    assertTrue(!observedHistories.isEmpty());
-    for (var observed : observedHistories) {
-      for (var m : observed) {
-        assertTrue(
-            m != null && m.content() != null,
-            "compactor must only see real Message records, not the bogus non-Message list");
-      }
-    }
   }
 
   @Test
@@ -1510,7 +1368,7 @@ final class AgentLoopTest {
     // session terminates normally.
     var outcomes =
         List.of(
-            ai.singlr.session.hooks.HookOutcome.mutate(Map.of("ignored", "value")),
+            ai.singlr.session.hooks.HookOutcome.mutateArgs(Map.of("ignored", "value")),
             ai.singlr.session.hooks.HookOutcome.block("nope"),
             ai.singlr.session.hooks.HookOutcome.inject("would-inject"));
     for (var outcome : outcomes) {

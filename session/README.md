@@ -163,9 +163,10 @@ answers via `session.answer(questionId, response)`. `SessionPresets.workspace(..
 
 ## Hooks
 
-Seven phase-specific hook surfaces — `OnUserMessageHook`, `PreModelTurnHook`,
-`PostModelTurnHook`, `PreToolUseHook`, `PostToolUseHook`, `PreStopHook`, `OnStreamEventHook` —
-each returning a `HookOutcome` (`Continue` / `MutateInput` / `Block` / `Inject` / `Stop`).
+Nine phase-specific hook surfaces — `OnUserMessageHook`, `PreModelTurnHook`,
+`PostModelTurnHook`, `PreToolUseHook`, `PostToolUseHook`, `PreStopHook`, `PreCompactHook`,
+`PostCompactHook`, `OnStreamEventHook` — each returning a `HookOutcome` (`Continue` /
+`MutateArgs` / `MutateHistory` / `MutateText` / `MutateResult` / `Block` / `Inject` / `Stop`).
 Example: deny a tool call from a hook regardless of policy.
 
 ```java
@@ -242,8 +243,8 @@ var session3 = AgentSession.create(
 ```
 
 For ad-hoc, hook-driven rewrites (no `ContextCompactor` subclass), register a
-`PreModelTurnHook` that returns `HookOutcome.mutate(Map.of("history", rewrittenHistory))`.
-The loop swaps the history and emits `HookFired` with `outcomeKind=MutateInput`.
+`PreModelTurnHook` that returns `HookOutcome.mutateHistory(rewrittenHistory)`.
+The loop swaps the history and emits `HookFired` with `outcomeKind=MutateHistory`.
 
 `SessionOptions.Builder.withTokenCounter(...)` swaps the estimator — wire a provider-specific
 tokenizer (Anthropic's, OpenAI's tiktoken, etc.) when the char-based default is too rough.

@@ -11,9 +11,9 @@ import ai.singlr.session.UserMessage;
  * routers, and "drop empty messages" filters live here.
  *
  * <p>Outcome semantics (spec §9.3): {@link HookOutcome.Continue} proceeds; {@link
- * HookOutcome.MutateInput} replaces the message text (key {@code "text"} in the map); {@link
- * HookOutcome.Block} drops the message; {@link HookOutcome.Stop} terminates the session. {@link
- * HookOutcome.Inject} is not meaningful here (the loop is already handling a user message).
+ * HookOutcome.MutateText} replaces the message text; {@link HookOutcome.Block} drops the message;
+ * {@link HookOutcome.Stop} terminates the session. {@link HookOutcome.Inject} is not meaningful
+ * here (the loop is already handling a user message).
  */
 @FunctionalInterface
 public non-sealed interface OnUserMessageHook extends Hook {

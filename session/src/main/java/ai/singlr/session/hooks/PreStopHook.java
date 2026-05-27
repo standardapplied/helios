@@ -12,8 +12,8 @@ import ai.singlr.core.model.Response;
  *
  * <p>Outcome semantics (spec §9.3): {@link HookOutcome.Continue} confirms the stop; {@link
  * HookOutcome.Inject} treats the response as not-terminal and queues a synthetic user message for
- * the next turn; {@link HookOutcome.Stop} confirms termination with a custom result string. {@link
- * HookOutcome.MutateInput} and {@link HookOutcome.Block} are not meaningful at this phase.
+ * the next turn; {@link HookOutcome.Stop} confirms termination with a custom result string.
+ * Mutation variants and {@link HookOutcome.Block} are not meaningful at this phase.
  *
  * <p>This is the canonical hook surface for "devil's advocate" patterns: a {@code PreStopHook}
  * calls {@code ctx.model().chat(...)} with the draft answer + a critique prompt and returns {@link

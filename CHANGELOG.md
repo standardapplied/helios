@@ -4,6 +4,48 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.6.0] — 2026-05-26 — Type-safe hook outcomes
+
+### Breaking — `HookOutcome.MutateInput` replaced with four typed variants
+
+The stringly-typed `MutateInput(Map<String, Object>)` that carried different
+payload shapes at different hook phases has been replaced with four
+compile-time-safe records:
+
+| Record | Payload | Hook phases |
+|--------|---------|-------------|
+| `MutateArgs(Map<String, Object>)` | Tool arguments | `PreToolUseHook` |
+| `MutateHistory(List<Message>)` | Conversation history | `PreModelTurnHook`, `PreCompactHook` |
+| `MutateText(String)` | User-message text | `OnUserMessageHook` |
+| `MutateResult(String)` | Tool-result output | `PostToolUseHook` |
+
+**Migration:**
+
+| Before (2.5.x) | After (2.6.0) |
+|-----------------|---------------|
+| `HookOutcome.mutate(Map.of("history", list))` | `HookOutcome.mutateHistory(list)` |
+| `HookOutcome.mutate(Map.of("text", s))` | `HookOutcome.mutateText(s)` |
+| `HookOutcome.mutate(Map.of("output", s))` | `HookOutcome.mutateResult(s)` |
+| `HookOutcome.mutate(argsMap)` (at PreToolUse) | `HookOutcome.mutateArgs(argsMap)` |
+
+Returning a mutation variant at a phase where it is not meaningful is harmless
+— the loop treats it as `Continue`.
+
+### Removed — internal casting helpers
+
+`TurnRunner.extractHistory()`, `TurnRunner.stringField()`,
+`AgentLoop.stringField()`, and `AgentLoop.messageListField()` — the defensive
+`instanceof` casting code that fished values out of the untyped map — are
+deleted. The typed record accessors (`m.history()`, `m.text()`, `m.output()`,
+`m.args()`) provide the payload directly.
+
+### Fixed — `PreModelTurnHook` Javadoc
+
+The Javadoc incorrectly stated that `MutateInput` was "not meaningful" at
+`PreModelTurn`. In fact, `TurnRunner.handleTurnLevel` handled it for the
+BYO-compactor-as-hook path. The corrected Javadoc documents `MutateHistory` as
+a meaningful outcome at this phase.
+
 ## [2.5.8] — 2026-05-26 — Structured-output self-correction for JSON-syntax errors, provider DRY extraction, convention sweep
 
 ### Fixed — JSON-syntax errors now self-correct (all providers)

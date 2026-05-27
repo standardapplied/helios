@@ -13,7 +13,7 @@ import java.util.Objects;
  * Singleton {@link ContextCompactor} that never compacts. The loop bypasses the 0.95 trigger when
  * this is configured, so long sessions overflow naturally with whatever the provider returns —
  * usually {@code ErrorDuringExecution}. Use when you want fail-loud behavior or when you've
- * delegated all compaction to a {@code PreModelTurnHook} returning {@code MutateInput}.
+ * delegated all compaction to a {@code PreModelTurnHook} returning {@code MutateHistory}.
  */
 final class DisabledContextCompactor implements ContextCompactor {
 

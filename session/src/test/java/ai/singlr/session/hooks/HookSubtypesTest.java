@@ -162,10 +162,10 @@ final class HookSubtypesTest {
 
   @Test
   void onUserMessageInvokes() {
-    OnUserMessageHook hook = (msg, ctx) -> HookOutcome.mutate(Map.of("text", "rewritten"));
+    OnUserMessageHook hook = (msg, ctx) -> HookOutcome.mutateText("rewritten");
     var outcome = hook.onUserMessage(UserMessage.text("hi"), CTX);
-    var m = assertInstanceOf(HookOutcome.MutateInput.class, outcome);
-    assertEquals("rewritten", m.newInput().get("text"));
+    var m = assertInstanceOf(HookOutcome.MutateText.class, outcome);
+    assertEquals("rewritten", m.text());
   }
 
   @Test

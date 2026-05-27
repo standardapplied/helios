@@ -215,7 +215,7 @@ final class HookIntegrationTest {
 
   @Test
   void onUserMessageMutateRewritesText() {
-    OnUserMessageHook rewriter = (msg, ctx) -> HookOutcome.mutate(Map.of("text", "REDACTED"));
+    OnUserMessageHook rewriter = (msg, ctx) -> HookOutcome.mutateText("REDACTED");
     var hooks = new HookRegistry(List.of(rewriter));
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("PII data"));
@@ -427,7 +427,7 @@ final class HookIntegrationTest {
 
   @Test
   void preToolUseMutateRewritesArgsAndEmitsToolMutated() {
-    PreToolUseHook rewriter = (call, ctx) -> HookOutcome.mutate(Map.of("v", "mutated"));
+    PreToolUseHook rewriter = (call, ctx) -> HookOutcome.mutateArgs(Map.of("v", "mutated"));
     var hooks = new HookRegistry(List.of(rewriter));
     var tools = new ToolRegistry(List.of(echoBinding()));
     var queue = new SteeringQueue(8);
@@ -484,8 +484,7 @@ final class HookIntegrationTest {
 
   @Test
   void postToolUseMutateRewritesResultOutput() {
-    PostToolUseHook rewriter =
-        (call, result, ctx) -> HookOutcome.mutate(Map.of("output", "REWRITTEN"));
+    PostToolUseHook rewriter = (call, result, ctx) -> HookOutcome.mutateResult("REWRITTEN");
     var hooks = new HookRegistry(List.of(rewriter));
     var tools = new ToolRegistry(List.of(echoBinding()));
     var queue = new SteeringQueue(8);

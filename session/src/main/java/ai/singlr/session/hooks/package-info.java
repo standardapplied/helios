@@ -14,9 +14,10 @@
  * {@link ai.singlr.session.hooks.PreToolUseHook}, {@link ai.singlr.session.hooks.PostToolUseHook},
  * {@link ai.singlr.session.hooks.PreStopHook}, {@link ai.singlr.session.hooks.OnStreamEventHook} —
  * each describing a place in the loop where the model's intent is decided. Hooks return a {@link
- * ai.singlr.session.hooks.HookOutcome} (sealed {@code Continue} / {@code MutateInput} / {@code
- * Block} / {@code Inject} / {@code Stop}); not every outcome is meaningful at every phase, and the
- * phase Javadoc documents what each one does.
+ * ai.singlr.session.hooks.HookOutcome} (sealed {@code Continue} / {@code MutateArgs} / {@code
+ * MutateHistory} / {@code MutateText} / {@code MutateResult} / {@code Block} / {@code Inject} /
+ * {@code Stop}); not every outcome is meaningful at every phase, and the phase Javadoc documents
+ * what each one does.
  *
  * <p>{@link ai.singlr.session.hooks.HookRegistry} is the priority-sorted, type-fanned dispatcher
  * the loop calls. {@link ai.singlr.session.hooks.HookDecision} pairs the firing hook (for

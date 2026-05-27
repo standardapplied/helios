@@ -34,7 +34,6 @@ import ai.singlr.session.tools.ToolBinding;
 import ai.singlr.session.tools.ToolVisibilityContext;
 import java.time.Clock;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -62,14 +61,14 @@ import java.util.logging.Logger;
  *       loop continues); {@code Stop} terminates the session with the given result.
  *   <li><b>PostModelTurn</b>: {@code Continue} proceeds; {@code Inject} queues a synthetic user
  *       message (loop continues); {@code Stop} terminates.
- *   <li><b>PreToolUse</b>: {@code Continue} dispatches; {@code MutateInput} emits {@link
+ *   <li><b>PreToolUse</b>: {@code Continue} dispatches; {@code MutateArgs} emits {@link
  *       QueryEvent.ToolMutated} and dispatches with the replacement args; {@code Block} emits
  *       {@link QueryEvent.ToolBlocked} and substitutes a synthetic failure {@link ToolResult};
  *       {@code Inject} queues a synthetic user message and substitutes a synthetic failure {@code
  *       ToolResult}; {@code Stop} terminates.
- *   <li><b>PostToolUse</b>: {@code Continue} proceeds; {@code MutateInput} rewrites the tool result
- *       content (key {@code "output"}); {@code Inject} queues a synthetic user message; {@code
- *       Stop} terminates.
+ *   <li><b>PostToolUse</b>: {@code Continue} proceeds; {@code MutateResult} rewrites the tool
+ *       result content (key {@code "output"}); {@code Inject} queues a synthetic user message;
+ *       {@code Stop} terminates.
  * </ul>
  *
  * <p>{@link QueryEvent.HookFired} fires for every non-{@code Continue} outcome.
@@ -527,9 +526,9 @@ public final class TurnRunner {
    * Apply a turn-level hook outcome (PreModelTurn / PostModelTurn). Updates state for terminal /
    * injected outcomes and tells the caller whether to keep going.
    *
-   * <p>{@code MutateInput} at PreModelTurn carries the "history" key (a {@code List<Message>}) and
-   * rewrites the conversation history wholesale — the BYO-compactor-as-hook path. At PostModelTurn,
-   * {@code MutateInput} is not meaningful and is treated as Continue.
+   * <p>{@link HookOutcome.MutateHistory} at PreModelTurn rewrites the conversation history
+   * wholesale — the BYO-compactor-as-hook path. At PostModelTurn, mutation variants are not
+   * meaningful and are treated as Continue.
    */
   private TurnLevelDecision handleTurnLevel(
       SessionState state, HookDecision decision, TurnPhase phase) {
@@ -550,19 +549,15 @@ public final class TurnRunner {
             ? TurnLevelDecision.SKIP_MODEL
             : TurnLevelDecision.CONTINUE;
       }
-      case HookOutcome.MutateInput m -> {
+      case HookOutcome.MutateHistory m -> {
         if (phase == TurnPhase.PRE_MODEL_TURN) {
-          var replacement = extractHistory(m.newInput());
-          if (replacement != null) {
-            state.replaceHistory(replacement);
-            state.resetContextWarningFlag();
-            emitter.emitHookFired(state, hookName, phase.phaseName(), "MutateInput");
-          }
+          state.replaceHistory(m.history());
+          state.resetContextWarningFlag();
+          emitter.emitHookFired(state, hookName, phase.phaseName(), "MutateHistory");
         }
         return TurnLevelDecision.CONTINUE;
       }
-      case HookOutcome.Block b -> {
-        // Block not meaningful at turn level; treated as Continue.
+      default -> {
         return TurnLevelDecision.CONTINUE;
       }
     }
@@ -584,27 +579,6 @@ public final class TurnRunner {
   }
 
   /**
-   * Pull a {@code List<Message>} out of a {@code MutateInput} payload under the "history" key.
-   * Returns null when the key is absent, the value is the wrong type, or any element is not a
-   * {@link Message} — the loop then treats the outcome as a no-op Continue rather than rewriting
-   * the history with a malformed payload.
-   */
-  private static List<Message> extractHistory(Map<String, Object> newInput) {
-    var raw = newInput.get("history");
-    if (!(raw instanceof List<?> list)) {
-      return null;
-    }
-    var copy = new ArrayList<Message>(list.size());
-    for (var element : list) {
-      if (!(element instanceof Message message)) {
-        return null;
-      }
-      copy.add(message);
-    }
-    return List.copyOf(copy);
-  }
-
-  /**
    * Dispatch each tool call serially, firing PreToolUse and PostToolUse around each. Returns {@code
    * true} if a hook terminated the session mid-dispatch.
    */
@@ -622,8 +596,8 @@ public final class TurnRunner {
               new QueryEvent.ToolUse(
                   state.sessionId(), state.currentTurnIndex(), clock.instant(), call));
         }
-        case HookOutcome.MutateInput m -> {
-          emitter.emitHookFired(state, preHookName, "PreToolUseHook", "MutateInput");
+        case HookOutcome.MutateArgs m -> {
+          emitter.emitHookFired(state, preHookName, "PreToolUseHook", "MutateArgs");
           emitter.emit(
               state,
               new QueryEvent.ToolMutated(
@@ -633,8 +607,8 @@ public final class TurnRunner {
                   call,
                   preHookName == null ? "PreToolUseHook" : preHookName,
                   call.arguments(),
-                  m.newInput()));
-          preCall = new ToolCall(call.id(), call.name(), m.newInput());
+                  m.args()));
+          preCall = new ToolCall(call.id(), call.name(), m.args());
           emitter.emit(
               state,
               new QueryEvent.ToolUse(
@@ -663,6 +637,12 @@ public final class TurnRunner {
           state.setTerminal(successFor(state, s.result()));
           return true;
         }
+        default -> {
+          emitter.emit(
+              state,
+              new QueryEvent.ToolUse(
+                  state.sessionId(), state.currentTurnIndex(), clock.instant(), call));
+        }
       }
 
       if (result == null) {
@@ -684,16 +664,13 @@ public final class TurnRunner {
       var postHookName = postDecision.firingHookOptional().map(h -> h.name()).orElse(null);
       switch (postDecision.outcome()) {
         case HookOutcome.Continue ignored -> {}
-        case HookOutcome.MutateInput m -> {
-          emitter.emitHookFired(state, postHookName, "PostToolUseHook", "MutateInput");
-          var newOutput = stringField(m.newInput(), "output");
-          if (newOutput != null) {
-            result = ToolResult.success(newOutput);
-            emitter.emit(
-                state,
-                new QueryEvent.ToolResult(
-                    state.sessionId(), state.currentTurnIndex(), clock.instant(), preCall, result));
-          }
+        case HookOutcome.MutateResult m -> {
+          emitter.emitHookFired(state, postHookName, "PostToolUseHook", "MutateResult");
+          result = ToolResult.success(m.output());
+          emitter.emit(
+              state,
+              new QueryEvent.ToolResult(
+                  state.sessionId(), state.currentTurnIndex(), clock.instant(), preCall, result));
         }
         case HookOutcome.Inject inj -> {
           emitter.emitHookFired(state, postHookName, "PostToolUseHook", "Inject");
@@ -705,8 +682,8 @@ public final class TurnRunner {
           state.setTerminal(successFor(state, s.result()));
           return true;
         }
-        case HookOutcome.Block b -> {
-          // Block not meaningful at PostToolUse; treat as Continue.
+        default -> {
+          // Block, MutateArgs, MutateHistory, MutateText not meaningful at PostToolUse.
         }
       }
       appendToolResultWithAttachments(state, preCall, result);
@@ -737,11 +714,6 @@ public final class TurnRunner {
               + " attachment(s) for inspection]";
       state.appendMessage(Message.user(text, result.attachments()));
     }
-  }
-
-  private static String stringField(Map<String, Object> map, String key) {
-    var v = map.get(key);
-    return v instanceof String s ? s : null;
   }
 
   private HookContext ctx(SessionState state) {

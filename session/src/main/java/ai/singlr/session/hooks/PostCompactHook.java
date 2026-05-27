@@ -16,7 +16,9 @@ package ai.singlr.session.hooks;
  *   <li>{@link HookOutcome.Stop Stop} — terminate the session before {@code ContextEdited} fires.
  *       Use case: the compaction violated a domain invariant (e.g. summary text mentions a redacted
  *       secret) and the session must not continue with the truncated history.
- *   <li>{@link HookOutcome.MutateInput MutateInput}, {@link HookOutcome.Block Block}, {@link
+ *   <li>Mutation variants ({@link HookOutcome.MutateArgs MutateArgs}, {@link
+ *       HookOutcome.MutateHistory MutateHistory}, {@link HookOutcome.MutateText MutateText}, {@link
+ *       HookOutcome.MutateResult MutateResult}), {@link HookOutcome.Block Block}, {@link
  *       HookOutcome.Inject Inject} — not meaningful at this phase (the compaction has already
  *       landed). Returning any of these is logged at {@code WARNING} and treated as {@link
  *       HookOutcome.Continue Continue}.

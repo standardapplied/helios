@@ -169,7 +169,7 @@ The agent loop estimates context fill through a pluggable `TokenCounter` (defaul
 
 The default `DropMiddleToolResultsCompactor` preserves the system prompt + opening turn and the most recent trajectory, summarising the middle via one model call. It walks slice boundaries to keep `tool_call`/`tool_result` pairs together (providers reject histories where these split). The summary call runs on a virtual thread under a configurable timeout (default 60s) and reports its `Usage` so spend gates through `SessionLimits.maxBudgetMicroUsd`.
 
-Override head/tail policy via the Builder, swap the whole compactor through `SessionOptions.Builder.withContextCompactor(...)`, opt out with `ContextCompactor.disabled()`, or do ad-hoc rewrites by returning `HookOutcome.mutate(Map.of("history", rewritten))` from a `PreModelTurnHook`. See [`session/README.md`](session/README.md#context-compaction) for the full surface.
+Override head/tail policy via the Builder, swap the whole compactor through `SessionOptions.Builder.withContextCompactor(...)`, opt out with `ContextCompactor.disabled()`, or do ad-hoc rewrites by returning `HookOutcome.mutateHistory(rewritten)` from a `PreModelTurnHook`. See [`session/README.md`](session/README.md#context-compaction) for the full surface.
 
 ## Resource Lifecycle
 

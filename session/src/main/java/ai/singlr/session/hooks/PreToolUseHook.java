@@ -11,10 +11,10 @@ import ai.singlr.core.model.ToolCall;
  * mutations live here.
  *
  * <p>Outcome semantics (spec §9.3): {@link HookOutcome.Continue} proceeds; {@link
- * HookOutcome.MutateInput} runs the tool with replacement args; {@link HookOutcome.Block} refuses
- * the call and emits a {@code ToolBlocked} event; {@link HookOutcome.Inject} skips the tool and
- * injects a synthetic user message before the next turn; {@link HookOutcome.Stop} terminates the
- * session.
+ * HookOutcome.MutateArgs} runs the tool with replacement arguments; {@link HookOutcome.Block}
+ * refuses the call and emits a {@code ToolBlocked} event; {@link HookOutcome.Inject} skips the tool
+ * and injects a synthetic user message before the next turn; {@link HookOutcome.Stop} terminates
+ * the session.
  */
 @FunctionalInterface
 public non-sealed interface PreToolUseHook extends Hook {

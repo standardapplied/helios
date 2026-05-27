@@ -11,8 +11,9 @@ import ai.singlr.core.model.Response;
  *
  * <p>Outcome semantics (spec §9.3): {@link HookOutcome.Continue} proceeds; {@link
  * HookOutcome.Inject} queues a synthetic user message before the next turn; {@link
- * HookOutcome.Stop} terminates the session. {@link HookOutcome.MutateInput} and {@link
- * HookOutcome.Block} are not meaningful at this phase.
+ * HookOutcome.Stop} terminates the session. Mutation variants ({@link HookOutcome.MutateArgs},
+ * {@link HookOutcome.MutateHistory}, {@link HookOutcome.MutateText}, {@link
+ * HookOutcome.MutateResult}) and {@link HookOutcome.Block} are not meaningful at this phase.
  */
 @FunctionalInterface
 public non-sealed interface PostModelTurnHook extends Hook {

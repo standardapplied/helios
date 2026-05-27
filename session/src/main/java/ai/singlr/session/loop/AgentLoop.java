@@ -24,7 +24,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -40,8 +39,8 @@ import java.util.logging.Logger;
  * <ol>
  *   <li>Drain the {@link SteeringQueue}. Each pending {@link UserMessage} fires {@link
  *       HookRegistry#fireOnUserMessage on-user-message hooks} — outcomes can drop the message
- *       ({@link HookOutcome.Block Block}), rewrite its text ({@link HookOutcome.MutateInput
- *       MutateInput}), or terminate the session ({@link HookOutcome.Stop Stop}). Surviving messages
+ *       ({@link HookOutcome.Block Block}), rewrite its text ({@link HookOutcome.MutateText
+ *       MutateText}), or terminate the session ({@link HookOutcome.Stop Stop}). Surviving messages
  *       emit {@link QueryEvent.UserMessageReceived} and compose into a single user-role message
  *       appended to history.
  *   <li>If history is still empty (no message has ever been observed and the queue was empty),
@@ -257,11 +256,10 @@ public final class AgentLoop {
               new QueryEvent.UserMessageReceived(
                   state.sessionId(), state.currentTurnIndex(), clock.instant(), msg));
         }
-        case HookOutcome.MutateInput m -> {
-          var newText = stringField(m.newInput(), "text");
-          var replacement = newText == null ? msg : UserMessage.text(newText);
+        case HookOutcome.MutateText m -> {
+          var replacement = UserMessage.text(m.text());
           accepted.add(replacement);
-          emitter.emitHookFired(state, hookName, "OnUserMessageHook", "MutateInput");
+          emitter.emitHookFired(state, hookName, "OnUserMessageHook", "MutateText");
           emitter.emit(
               state,
               new QueryEvent.UserMessageReceived(
@@ -285,9 +283,9 @@ public final class AgentLoop {
           state.setTerminal(successFor(state, s.result()));
           return;
         }
-        case HookOutcome.Inject ignored -> {
-          // Inject doesn't have a "this message replaced with another" semantic for
-          // OnUserMessage — fall back to treating like Continue.
+        default -> {
+          // Inject and other mutation variants (MutateArgs, MutateHistory, MutateResult)
+          // are not meaningful at OnUserMessage — fall back to treating like Continue.
           accepted.add(msg);
           emitter.emit(
               state,
@@ -315,11 +313,6 @@ public final class AgentLoop {
     return attachments;
   }
 
-  private static String stringField(Map<String, Object> map, String key) {
-    var v = map.get(key);
-    return v instanceof String s ? s : null;
-  }
-
   private static String composeContent(List<UserMessage> messages) {
     if (messages.size() == 1) {
       return messages.get(0).text();
@@ -337,8 +330,9 @@ public final class AgentLoop {
 
   /**
    * Apply pre-stop hooks to the classifier's terminal verdict. Inject reverses the stop and queues
-   * a synthetic message; Stop overrides the result text; Continue/MutateInput/Block confirm the
-   * stop unchanged. Returns the resolved terminal, or empty when the hooks declined to stop.
+   * a synthetic message; Stop overrides the result text; Continue/Block confirm the stop unchanged;
+   * mutation variants are not meaningful and treated as Continue. Returns the resolved terminal, or
+   * empty when the hooks declined to stop.
    */
   private Optional<ResultMessage> handlePreStop(
       SessionState state, ResultMessage classifierVerdict, TurnOutcome outcome) {
@@ -372,9 +366,8 @@ public final class AgentLoop {
         }
         yield Optional.empty();
       }
-      // MutateInput / Block are not meaningful at PreStop — treat as Continue.
-      case HookOutcome.MutateInput m -> Optional.of(classifierVerdict);
-      case HookOutcome.Block b -> Optional.of(classifierVerdict);
+      // Mutation variants / Block are not meaningful at PreStop — treat as Continue.
+      default -> Optional.of(classifierVerdict);
     };
   }
 
@@ -511,8 +504,8 @@ public final class AgentLoop {
 
   /**
    * Fire {@link ai.singlr.session.hooks.PreCompactHook} and return the history the compactor should
-   * operate on. {@link HookOutcome.MutateInput} carrying a {@code "history"} key swaps in the
-   * rewritten history; other non-Continue outcomes are logged and treated as Continue.
+   * operate on. {@link HookOutcome.MutateHistory} swaps in the rewritten history; other
+   * non-Continue outcomes are logged and treated as Continue.
    */
   private List<Message> applyPreCompactHook(SessionState state, List<Message> historyBefore) {
     var ctx = hookContextFactory.apply(state);
@@ -520,28 +513,17 @@ public final class AgentLoop {
     var hookName = decision.firingHookOptional().map(h -> h.name()).orElse(null);
     return switch (decision.outcome()) {
       case HookOutcome.Continue ignored -> historyBefore;
-      case HookOutcome.MutateInput m -> applyPreCompactMutate(state, hookName, m, historyBefore);
-      case HookOutcome.Block b -> logUnsupportedPreCompact(hookName, "Block", historyBefore);
-      case HookOutcome.Stop s -> logUnsupportedPreCompact(hookName, "Stop", historyBefore);
-      case HookOutcome.Inject inj -> logUnsupportedPreCompact(hookName, "Inject", historyBefore);
+      case HookOutcome.MutateHistory m -> applyPreCompactMutate(state, hookName, m);
+      default ->
+          logUnsupportedPreCompact(
+              hookName, decision.outcome().getClass().getSimpleName(), historyBefore);
     };
   }
 
   private List<Message> applyPreCompactMutate(
-      SessionState state,
-      String hookName,
-      HookOutcome.MutateInput mutate,
-      List<Message> historyBefore) {
-    var replacement = messageListField(mutate.newInput(), "history");
-    if (replacement == null) {
-      LOGGER.log(
-          Level.WARNING,
-          "PreCompactHook ''{0}'' MutateInput missing 'history' key; using original history",
-          hookName);
-      return historyBefore;
-    }
-    emitter.emitHookFired(state, hookName, "PreCompactHook", "MutateInput");
-    return replacement;
+      SessionState state, String hookName, HookOutcome.MutateHistory mutate) {
+    emitter.emitHookFired(state, hookName, "PreCompactHook", "MutateHistory");
+    return mutate.history();
   }
 
   private static List<Message> logUnsupportedPreCompact(
@@ -566,9 +548,7 @@ public final class AgentLoop {
     return switch (decision.outcome()) {
       case HookOutcome.Continue ignored -> false;
       case HookOutcome.Stop s -> applyPostCompactStop(state, hookName, s);
-      case HookOutcome.MutateInput m -> logUnsupportedPostCompact(hookName, "MutateInput");
-      case HookOutcome.Block b -> logUnsupportedPostCompact(hookName, "Block");
-      case HookOutcome.Inject inj -> logUnsupportedPostCompact(hookName, "Inject");
+      default -> logUnsupportedPostCompact(hookName, decision.outcome().getClass().getSimpleName());
     };
   }
 
@@ -584,20 +564,6 @@ public final class AgentLoop {
         "PostCompactHook ''{0}'' {1} is not honored at this phase",
         new Object[] {hookName, outcomeKind});
     return false;
-  }
-
-  private static List<Message> messageListField(Map<String, Object> map, String key) {
-    if (!(map.get(key) instanceof List<?> list)) {
-      return null;
-    }
-    var out = new ArrayList<Message>(list.size());
-    for (var element : list) {
-      if (!(element instanceof Message m)) {
-        return null;
-      }
-      out.add(m);
-    }
-    return List.copyOf(out);
   }
 
   private ResultMessage emptyHistoryError(SessionState state) {

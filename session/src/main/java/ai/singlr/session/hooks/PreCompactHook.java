@@ -17,11 +17,10 @@ import java.util.List;
  * <ul>
  *   <li>{@link HookOutcome.Continue Continue} — the compactor runs against the unmodified history
  *       (the default and the only meaningful "do nothing" answer).
- *   <li>{@link HookOutcome.MutateInput MutateInput} — carries the rewritten history under the key
- *       {@code "history"} (a {@code List<Message>}). The compactor receives this in place of the
- *       loop's current snapshot. Use case: drop oversize tool-result rows before the summary model
- *       sees them, or hand off a curated subset that's already been filtered by an external
- *       relevance scorer.
+ *   <li>{@link HookOutcome.MutateHistory MutateHistory} — carries the rewritten history (a {@code
+ *       List<Message>}). The compactor receives this in place of the loop's current snapshot. Use
+ *       case: drop oversize tool-result rows before the summary model sees them, or hand off a
+ *       curated subset that's already been filtered by an external relevance scorer.
  *   <li>{@link HookOutcome.Block Block}, {@link HookOutcome.Inject Inject}, {@link HookOutcome.Stop
  *       Stop} — not meaningful at this phase. Returning any of these is logged at {@code WARNING}
  *       and treated as {@link HookOutcome.Continue Continue}; the compactor still runs against the

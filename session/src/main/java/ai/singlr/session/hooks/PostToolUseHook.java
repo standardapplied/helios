@@ -12,10 +12,9 @@ import ai.singlr.core.tool.ToolResult;
  * call {@code validate_X} after every {@code propose_X}" patterns live here.
  *
  * <p>Outcome semantics (spec §9.3): {@link HookOutcome.Continue} proceeds; {@link
- * HookOutcome.MutateInput} rewrites the result (the loop treats the {@code newInput} map as the
- * replacement result envelope); {@link HookOutcome.Inject} queues a synthetic user message before
- * the next turn; {@link HookOutcome.Stop} terminates the session. {@link HookOutcome.Block} is not
- * meaningful at this phase.
+ * HookOutcome.MutateResult} rewrites the tool result output; {@link HookOutcome.Inject} queues a
+ * synthetic user message before the next turn; {@link HookOutcome.Stop} terminates the session.
+ * {@link HookOutcome.Block} is not meaningful at this phase.
  */
 @FunctionalInterface
 public non-sealed interface PostToolUseHook extends Hook {

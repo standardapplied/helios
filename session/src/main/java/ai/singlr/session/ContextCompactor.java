@@ -35,9 +35,8 @@ import java.util.List;
  *   <li><b>BYO compactor</b> — pass a custom {@code ContextCompactor} to {@code
  *       SessionOptions.Builder.withContextCompactor(...)}.
  *   <li><b>BYO hook</b> — register a {@code PreModelTurnHook} returning {@code
- *       HookOutcome.MutateInput} carrying the rewritten history under the key {@code "history"}.
- *       Lets the user trim without implementing the full SPI; e.g. a "drop tool-result rows older
- *       than turn N" policy.
+ *       HookOutcome.MutateHistory} carrying the rewritten history. Lets the user trim without
+ *       implementing the full SPI; e.g. a "drop tool-result rows older than turn N" policy.
  * </ol>
  *
  * <h2>Thread-safety</h2>

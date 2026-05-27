@@ -5,32 +5,40 @@
 package ai.singlr.session.hooks;
 
 import ai.singlr.core.common.Strings;
+import ai.singlr.core.model.Message;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /**
  * Outcome returned by a {@link Hook} for the non-observe phases (every phase except {@link
- * OnStreamEventHook}). Five subtypes carry the five interpretations the agent loop applies.
+ * OnStreamEventHook}). Eight subtypes carry the interpretations the agent loop applies.
  *
  * <p>Semantics depend on phase — see the table in spec §9.3 for the full matrix. Short version:
  *
  * <ul>
  *   <li>{@link Continue} — let the loop proceed.
- *   <li>{@link MutateInput} — rewrite the input the loop was about to use (tool args or user
- *       message text). Not applicable to every phase.
- *   <li>{@link Block} — refuse the action, emit a blocked event. Currently used by {@code
- *       PreToolUseHook} and {@code OnUserMessageHook}; spec §9.3 marks it n/a for other phases.
- *   <li>{@link Inject} — inject a synthetic user message before the next turn instead of proceeding
- *       with the current action.
+ *   <li>{@link MutateArgs} — replace tool arguments ({@link PreToolUseHook}).
+ *   <li>{@link MutateHistory} — replace conversation history ({@link PreModelTurnHook}, {@link
+ *       PreCompactHook}).
+ *   <li>{@link MutateText} — replace user-message text ({@link OnUserMessageHook}).
+ *   <li>{@link MutateResult} — replace tool-result output ({@link PostToolUseHook}).
+ *   <li>{@link Block} — refuse the action, emit a blocked event ({@link PreToolUseHook}, {@link
+ *       OnUserMessageHook}).
+ *   <li>{@link Inject} — inject a synthetic user message before the next turn.
  *   <li>{@link Stop} — terminate the session with the given result string.
  * </ul>
  *
- * <p>The {@link #cont()} / {@link #mutate(Map)} / {@link #block(String)} / {@link #inject(String)}
- * / {@link #stop(String)} factories are the ergonomic surface for hook authors.
+ * <p>Returning a mutation variant at a phase where it is not meaningful is harmless — the loop
+ * treats it as {@link Continue}. The typed variants exist so hook authors cannot misspell a key or
+ * pass the wrong payload type; the compiler catches the mistake.
  */
 public sealed interface HookOutcome
     permits HookOutcome.Continue,
-        HookOutcome.MutateInput,
+        HookOutcome.MutateArgs,
+        HookOutcome.MutateHistory,
+        HookOutcome.MutateText,
+        HookOutcome.MutateResult,
         HookOutcome.Block,
         HookOutcome.Inject,
         HookOutcome.Stop {
@@ -45,15 +53,48 @@ public sealed interface HookOutcome
   }
 
   /**
-   * Mutation outcome carrying a fresh input map. Used by {@code PreToolUseHook} to rewrite tool
-   * arguments and {@code OnUserMessageHook} to rewrite user-message text (key {@code "text"}).
+   * Replace tool arguments at {@link PreToolUseHook}.
    *
-   * @param newInput the replacement input; non-null
-   * @return a fresh {@link MutateInput}
-   * @throws NullPointerException if {@code newInput} is null
+   * @param args the replacement arguments; non-null
+   * @return a fresh {@link MutateArgs}
+   * @throws NullPointerException if {@code args} is null
    */
-  static HookOutcome mutate(Map<String, Object> newInput) {
-    return new MutateInput(newInput);
+  static HookOutcome mutateArgs(Map<String, Object> args) {
+    return new MutateArgs(args);
+  }
+
+  /**
+   * Replace conversation history at {@link PreModelTurnHook} or {@link PreCompactHook}.
+   *
+   * @param history the replacement history; non-null (may be empty)
+   * @return a fresh {@link MutateHistory}
+   * @throws NullPointerException if {@code history} is null
+   */
+  static HookOutcome mutateHistory(List<Message> history) {
+    return new MutateHistory(history);
+  }
+
+  /**
+   * Replace user-message text at {@link OnUserMessageHook}.
+   *
+   * @param text the replacement text; non-blank
+   * @return a fresh {@link MutateText}
+   * @throws NullPointerException if {@code text} is null
+   * @throws IllegalArgumentException if {@code text} is blank
+   */
+  static HookOutcome mutateText(String text) {
+    return new MutateText(text);
+  }
+
+  /**
+   * Replace tool-result output at {@link PostToolUseHook}.
+   *
+   * @param output the replacement output; non-null (may be empty)
+   * @return a fresh {@link MutateResult}
+   * @throws NullPointerException if {@code output} is null
+   */
+  static HookOutcome mutateResult(String output) {
+    return new MutateResult(output);
   }
 
   /**
@@ -99,20 +140,55 @@ public sealed interface HookOutcome
   }
 
   /**
-   * Rewrite the input the loop was about to use.
+   * Replace tool arguments at {@link PreToolUseHook}.
    *
-   * @param newInput the replacement input; non-null
+   * @param args the replacement arguments; non-null, defensively copied
    */
-  record MutateInput(Map<String, Object> newInput) implements HookOutcome {
+  record MutateArgs(Map<String, Object> args) implements HookOutcome {
 
-    /**
-     * Canonical constructor; defensively copies {@code newInput}.
-     *
-     * @throws NullPointerException if {@code newInput} is null
-     */
-    public MutateInput {
-      Objects.requireNonNull(newInput, "newInput must not be null");
-      newInput = Map.copyOf(newInput);
+    public MutateArgs {
+      Objects.requireNonNull(args, "args must not be null");
+      args = Map.copyOf(args);
+    }
+  }
+
+  /**
+   * Replace conversation history at {@link PreModelTurnHook} or {@link PreCompactHook}.
+   *
+   * @param history the replacement history; non-null, defensively copied (may be empty)
+   */
+  record MutateHistory(List<Message> history) implements HookOutcome {
+
+    public MutateHistory {
+      Objects.requireNonNull(history, "history must not be null");
+      history = List.copyOf(history);
+    }
+  }
+
+  /**
+   * Replace user-message text at {@link OnUserMessageHook}.
+   *
+   * @param text the replacement text; non-blank
+   */
+  record MutateText(String text) implements HookOutcome {
+
+    public MutateText {
+      Objects.requireNonNull(text, "text must not be null");
+      if (Strings.isBlank(text)) {
+        throw new IllegalArgumentException("text must not be blank");
+      }
+    }
+  }
+
+  /**
+   * Replace tool-result output at {@link PostToolUseHook}.
+   *
+   * @param output the replacement output; non-null (may be empty — empty tool results are valid)
+   */
+  record MutateResult(String output) implements HookOutcome {
+
+    public MutateResult {
+      Objects.requireNonNull(output, "output must not be null");
     }
   }
 
@@ -123,12 +199,6 @@ public sealed interface HookOutcome
    */
   record Block(String reason) implements HookOutcome {
 
-    /**
-     * Canonical constructor.
-     *
-     * @throws NullPointerException if {@code reason} is null
-     * @throws IllegalArgumentException if {@code reason} is blank
-     */
     public Block {
       Objects.requireNonNull(reason, "reason must not be null");
       if (Strings.isBlank(reason)) {
@@ -144,12 +214,6 @@ public sealed interface HookOutcome
    */
   record Inject(String userMessage) implements HookOutcome {
 
-    /**
-     * Canonical constructor.
-     *
-     * @throws NullPointerException if {@code userMessage} is null
-     * @throws IllegalArgumentException if {@code userMessage} is blank
-     */
     public Inject {
       Objects.requireNonNull(userMessage, "userMessage must not be null");
       if (Strings.isBlank(userMessage)) {
@@ -165,12 +229,6 @@ public sealed interface HookOutcome
    */
   record Stop(String result) implements HookOutcome {
 
-    /**
-     * Canonical constructor.
-     *
-     * @throws NullPointerException if {@code result} is null
-     * @throws IllegalArgumentException if {@code result} is blank
-     */
     public Stop {
       Objects.requireNonNull(result, "result must not be null");
       if (Strings.isBlank(result)) {

@@ -134,8 +134,8 @@ public final class SessionState {
 
   /**
    * Replace the entire history with the given list. Used by context compaction and by a {@code
-   * PreModelTurnHook} returning {@code MutateInput} carrying a fresh history. The supplied list is
-   * defensively copied so subsequent caller mutations don't leak in.
+   * PreModelTurnHook} returning {@code MutateHistory} carrying a fresh history. The supplied list
+   * is defensively copied so subsequent caller mutations don't leak in.
    *
    * @param newHistory the replacement history; non-null. Contents are defensively copied
    * @throws NullPointerException if {@code newHistory} or any element is null
