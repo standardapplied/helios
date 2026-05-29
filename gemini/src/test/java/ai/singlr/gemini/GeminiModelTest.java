@@ -103,6 +103,21 @@ class GeminiModelTest {
   }
 
   @Test
+  void contextWindowReturnsModelValueByDefault() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    assertEquals(GeminiModelId.GEMINI_3_FLASH_PREVIEW.contextWindow(), model.contextWindow());
+  }
+
+  @Test
+  void contextWindowConfigOverrideWins() {
+    var config =
+        ModelConfig.newBuilder().withApiKey("test-key").withContextWindow(2_000_000).build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    assertEquals(2_000_000, model.contextWindow());
+  }
+
+  @Test
   void interactionsContentTypeImage() {
     assertEquals("image", GeminiModel.interactionsContentType("image/png"));
     assertEquals("image", GeminiModel.interactionsContentType("image/jpeg"));

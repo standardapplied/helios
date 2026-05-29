@@ -25,6 +25,12 @@ import java.util.Map;
  * @param temperature controls randomness (0.0 = deterministic, 2.0 = very random)
  * @param topP nucleus sampling threshold (0.0-1.0)
  * @param maxOutputTokens maximum tokens to generate
+ * @param contextWindow the model's total context-window size in tokens, or {@code null} to defer to
+ *     the provider's known value for the model id ({@code 0}/"unknown" for an unrecognized id).
+ *     Lets callers declare the window for a model the provider does not yet enumerate, so session
+ *     compaction sizes against the real window instead of falling back to a conservative backstop.
+ *     Not sent on the wire — purely informational metadata surfaced via {@code
+ *     Model.contextWindow()}
  * @param stopSequences sequences that stop generation
  * @param seed random seed for reproducibility
  * @param toolChoice controls how the model uses tools
@@ -55,6 +61,7 @@ public record ModelConfig(
     Double temperature,
     Double topP,
     Integer maxOutputTokens,
+    Integer contextWindow,
     List<String> stopSequences,
     Long seed,
     ToolChoice toolChoice,
@@ -86,6 +93,7 @@ public record ModelConfig(
     sb.append(", temperature=").append(temperature);
     sb.append(", topP=").append(topP);
     sb.append(", maxOutputTokens=").append(maxOutputTokens);
+    sb.append(", contextWindow=").append(contextWindow);
     sb.append(", stopSequences=").append(stopSequences);
     sb.append(", seed=").append(seed);
     sb.append(", toolChoice=").append(toolChoice);
@@ -170,6 +178,7 @@ public record ModelConfig(
     private Double temperature;
     private Double topP;
     private Integer maxOutputTokens;
+    private Integer contextWindow;
     private List<String> stopSequences;
     private Long seed;
     private ToolChoice toolChoice;
@@ -189,6 +198,7 @@ public record ModelConfig(
       this.temperature = config.temperature;
       this.topP = config.topP;
       this.maxOutputTokens = config.maxOutputTokens;
+      this.contextWindow = config.contextWindow;
       this.stopSequences = config.stopSequences;
       this.seed = config.seed;
       this.toolChoice = config.toolChoice;
@@ -231,6 +241,17 @@ public record ModelConfig(
 
     public Builder withMaxOutputTokens(Integer maxOutputTokens) {
       this.maxOutputTokens = maxOutputTokens;
+      return this;
+    }
+
+    /**
+     * Declare the model's total context-window size in tokens. {@code null} (default) defers to the
+     * provider's known value for the model id. Set this for a model the provider does not yet
+     * enumerate so session compaction sizes against the real window instead of a conservative
+     * backstop. See {@link ModelConfig#contextWindow()}.
+     */
+    public Builder withContextWindow(Integer contextWindow) {
+      this.contextWindow = contextWindow;
       return this;
     }
 
@@ -304,6 +325,7 @@ public record ModelConfig(
           temperature,
           topP,
           maxOutputTokens,
+          contextWindow,
           stopSequences,
           seed,
           toolChoice,

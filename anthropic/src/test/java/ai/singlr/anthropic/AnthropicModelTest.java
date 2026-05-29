@@ -89,6 +89,27 @@ class AnthropicModelTest {
   }
 
   @Test
+  void contextWindowConfigOverrideWinsOverKnownModel() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").withContextWindow(250_000).build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    assertEquals(250_000, model.contextWindow());
+  }
+
+  @Test
+  void unknownClaudeModelContextWindowFromConfig() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").withContextWindow(750_000).build();
+    var model = new AnthropicModel("claude-some-future-model", config);
+    assertEquals(750_000, model.contextWindow());
+  }
+
+  @Test
+  void unknownClaudeModelContextWindowDefaultsToZeroWhenUnset() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
+    var model = new AnthropicModel("claude-some-future-model", config);
+    assertEquals(0, model.contextWindow());
+  }
+
+  @Test
   void userMessageWithImageAttachmentEmitsImageBlock() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
@@ -251,6 +272,67 @@ class AnthropicModelTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     assertEquals(AnthropicModelId.CLAUDE_OPUS_4_7.maxOutputTokens(), model.maxOutputTokens());
+  }
+
+  @Test
+  void opus48UsesAdaptiveThinkingShape() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.HIGH)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_8, config);
+
+    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+
+    assertEquals("adaptive", request.thinking().type());
+    assertNull(request.thinking().budgetTokens());
+    assertEquals("high", request.outputConfig().effort());
+    assertEquals(32_000, model.maxOutputTokens());
+  }
+
+  @Test
+  void unknownClaudeModelDefaultsMaxOutputTokens() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
+    var model = new AnthropicModel("claude-some-future-model", config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals(AnthropicModel.DEFAULT_MAX_OUTPUT_TOKENS, model.maxOutputTokens());
+    assertEquals(AnthropicModel.DEFAULT_MAX_OUTPUT_TOKENS, request.maxTokens());
+  }
+
+  @Test
+  void unknownClaudeModelDefaultsToAdaptiveThinking() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.MEDIUM)
+            .build();
+    var model = new AnthropicModel("claude-some-future-model", config);
+
+    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+
+    assertEquals("adaptive", request.thinking().type());
+    assertNull(
+        request.thinking().budgetTokens(),
+        "unknown Claude models default to the adaptive shape, not legacy budget_tokens");
+    assertEquals("medium", request.outputConfig().effort());
+  }
+
+  @Test
+  void unknownClaudeModelHonoursAdaptiveOnlyThinkingLevels() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.MAX)
+            .build();
+    var model = new AnthropicModel("claude-some-future-model", config);
+
+    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+
+    assertEquals("adaptive", request.thinking().type());
+    assertEquals("max", request.outputConfig().effort());
   }
 
   @Test

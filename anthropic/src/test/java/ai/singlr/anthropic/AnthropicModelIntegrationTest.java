@@ -206,6 +206,21 @@ class AnthropicModelIntegrationTest {
   }
 
   @Test
+  void opus48ChatWithAdaptiveThinking() {
+    // Validates the claude-opus-4-8 wire id is live and the adaptive thinking shape is accepted.
+    var config =
+        ModelConfig.newBuilder().withApiKey(apiKey).withThinkingLevel(ThinkingLevel.MEDIUM).build();
+    var opus48 = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_8, config);
+
+    var response = opus48.chat(List.of(Message.user("What is 2+2? Think briefly.")));
+
+    assertNotNull(response, "Opus 4.8 with thinking=MEDIUM must return a response (not 400)");
+    assertNotNull(response.content());
+    assertFalse(response.content().isBlank());
+    assertTrue(response.content().contains("4"));
+  }
+
+  @Test
   void fullToolRoundTrip() {
     var searchPeople =
         Tool.newBuilder()

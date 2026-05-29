@@ -104,6 +104,13 @@ class OpenAIModelTest {
   }
 
   @Test
+  void contextWindowConfigOverrideWins() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").withContextWindow(64_000).build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
+    assertEquals(64_000, model.contextWindow());
+  }
+
+  @Test
   void buildRequestExtractsSystemMessage() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);

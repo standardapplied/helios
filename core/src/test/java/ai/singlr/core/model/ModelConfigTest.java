@@ -116,9 +116,25 @@ class ModelConfigTest {
     assertNull(config.temperature());
     assertNull(config.topP());
     assertNull(config.maxOutputTokens());
+    assertNull(config.contextWindow());
     assertNull(config.stopSequences());
     assertNull(config.seed());
     assertNull(config.toolChoice());
+  }
+
+  @Test
+  void builderWithContextWindow() {
+    var config = ModelConfig.newBuilder().withApiKey("key").withContextWindow(500_000).build();
+
+    assertEquals(500_000, config.contextWindow());
+  }
+
+  @Test
+  void copyBuilderPreservesContextWindow() {
+    var original = ModelConfig.newBuilder().withApiKey("key").withContextWindow(500_000).build();
+    var copy = ModelConfig.newBuilder(original).withTemperature(0.5).build();
+
+    assertEquals(500_000, copy.contextWindow());
   }
 
   @Test

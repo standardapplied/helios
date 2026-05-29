@@ -37,9 +37,10 @@ class AnthropicProviderTest {
   }
 
   @Test
-  void doesNotSupportUnsupportedModels() {
-    assertFalse(provider.supports("claude-2.1"));
-    assertFalse(provider.supports("claude-future-model"));
+  void supportsUnrecognisedClaudeIdsByPrefix() {
+    assertTrue(provider.supports("claude-opus-4-8"));
+    assertTrue(provider.supports("claude-future-model"));
+    assertTrue(provider.supports("claude-2.1"));
   }
 
   @Test
@@ -78,6 +79,26 @@ class AnthropicProviderTest {
   }
 
   @Test
+  void createAcceptsUnrecognisedClaudeIdAgainstDefaultEndpoint() {
+    var config = ModelConfig.of("test-api-key");
+
+    var model = provider.create("claude-opus-4-8", config);
+
+    assertNotNull(model);
+    assertInstanceOf(AnthropicModel.class, model);
+    assertEquals("claude-opus-4-8", model.id());
+  }
+
+  @Test
+  void createPassesUnknownClaudeIdVerbatim() {
+    var config = ModelConfig.of("test-api-key");
+
+    var model = provider.create("claude-some-unreleased-model", config);
+
+    assertEquals("claude-some-unreleased-model", model.id());
+  }
+
+  @Test
   void createThrowsForUnsupportedModel() {
     var config = ModelConfig.of("test-api-key");
 
@@ -87,5 +108,18 @@ class AnthropicProviderTest {
     assertTrue(
         exception.getMessage().startsWith("Unsupported model: gpt-4"),
         () -> "expected 'Unsupported model' prefix, got: " + exception.getMessage());
+  }
+
+  @Test
+  void createAcceptsNonClaudeIdWhenBaseUrlSet() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-api-key")
+            .withBaseUrl("https://proxy.example/v1")
+            .build();
+
+    var model = provider.create("some-proxy-model", config);
+
+    assertEquals("some-proxy-model", model.id());
   }
 }

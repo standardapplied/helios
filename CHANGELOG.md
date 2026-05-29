@@ -4,6 +4,41 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+### Added — Claude Opus 4.8
+
+`AnthropicModelId.CLAUDE_OPUS_4_8` (`claude-opus-4-8`, 1M context, 32K output,
+adaptive thinking) joins the curated model set.
+
+### Changed — Unrecognised Claude model IDs are accepted against the default endpoint
+
+`AnthropicProvider` no longer requires a model ID to be a known enum constant.
+Any ID starting with `claude` (`AnthropicModelId.CLAUDE_ID_PREFIX`) is now
+accepted against the default Anthropic endpoint and passed verbatim as the wire
+`model`, so a newly-released Claude can be used before this framework ships an
+enum entry for it. Previously such IDs threw unless `ModelConfig.baseUrl` was
+set. For an unrecognised ID with no curated metadata, the provider defaults to
+the **adaptive** thinking shape and a **32,000**-token output ceiling
+(`AnthropicModel.DEFAULT_MAX_OUTPUT_TOKENS`); both are overridable via
+`ModelConfig.Builder.withMaxOutputTokens(...)`. `supports(modelId)` matches the
+`claude` prefix as well as exact enum membership; non-Claude IDs (e.g. `gpt-5`)
+still require `baseUrl` and otherwise throw. `AnthropicModelId.isSupported(...)`
+remains strict enum membership — use `hasClaudePrefix(...)` for the family check.
+
+### Added — `ModelConfig.withContextWindow(Integer)`
+
+New optional config knob (defaults to `null`) letting callers declare a model's
+total context-window size when the provider does not enumerate the model id. All
+three providers honour it with the precedence **config override → known model
+metadata → `0`/"unknown"** (`AnthropicModel`, `OpenAIModel`, `GeminiModel`). It
+is **not** sent on the wire — purely the metadata surfaced via
+`Model.contextWindow()`, which the session loop reads to size compaction. Without
+it, an unrecognized model reports `0` and the loop falls back to
+`SessionLimits.maxContextTokens` (or the 180k auto-backstop); set it so
+compaction sizes against the model's real window instead. Adding the
+`contextWindow` record component is a source-compatible change for Builder
+callers; direct canonical-constructor callers (none in-tree) must add the new
+positional argument.
+
 ## [2.6.1] — 2026-05-27 — Gemini continuation + streaming robustness
 
 ### Fixed — System instruction dropped on continuation requests (critical)

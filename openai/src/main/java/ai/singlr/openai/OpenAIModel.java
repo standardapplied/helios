@@ -115,6 +115,9 @@ public class OpenAIModel implements Model {
 
   @Override
   public int contextWindow() {
+    if (config.contextWindow() != null) {
+      return config.contextWindow();
+    }
     return knownModel != null ? knownModel.contextWindow() : 0;
   }
 

@@ -113,7 +113,7 @@ public class GeminiModel implements Model {
 
   @Override
   public int contextWindow() {
-    return modelId.contextWindow();
+    return config.contextWindow() != null ? config.contextWindow() : modelId.contextWindow();
   }
 
   @Override

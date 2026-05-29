@@ -73,6 +73,14 @@ public class AnthropicModel implements Model {
   static final String DEFAULT_BASE_URL = "https://api.anthropic.com/v1/messages";
   private static final String API_VERSION = "2023-06-01";
 
+  /**
+   * Output-token ceiling assumed for a Claude model ID this build does not recognise (one not in
+   * {@link AnthropicModelId}). Matches the current Opus ceiling — a sane non-zero default so an
+   * unrecognised model's requests aren't rejected for {@code max_tokens=0}. Callers override via
+   * {@link ModelConfig.Builder#withMaxOutputTokens(Integer)}.
+   */
+  static final int DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
+
   static final String THINKING_KEY = "anthropic.thinking";
   static final String THINKING_SIGNATURE_KEY = "anthropic.thinkingSignature";
 
@@ -87,6 +95,7 @@ public class AnthropicModel implements Model {
 
   private final String wireModelId;
   private final AnthropicModelId knownModel;
+  private final boolean usesAdaptiveThinking;
   private final ModelConfig config;
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
@@ -125,6 +134,9 @@ public class AnthropicModel implements Model {
     }
     this.wireModelId = wireModelId;
     this.knownModel = knownModel;
+    // Unrecognised Claude IDs default to the adaptive thinking shape: new releases adopt it, and
+    // it is where the family is converging. Known models keep their recorded shape.
+    this.usesAdaptiveThinking = knownModel == null || knownModel.usesAdaptiveThinking();
     this.config = config;
     this.cachePolicy = cachePolicy;
     this.httpClient = HttpClientFactory.create(config);
@@ -163,12 +175,15 @@ public class AnthropicModel implements Model {
 
   @Override
   public int contextWindow() {
+    if (config.contextWindow() != null) {
+      return config.contextWindow();
+    }
     return knownModel != null ? knownModel.contextWindow() : 0;
   }
 
   @Override
   public int maxOutputTokens() {
-    return knownModel != null ? knownModel.maxOutputTokens() : 0;
+    return knownModel != null ? knownModel.maxOutputTokens() : DEFAULT_MAX_OUTPUT_TOKENS;
   }
 
   @Override
@@ -636,8 +651,9 @@ public class AnthropicModel implements Model {
 
   /**
    * Translate {@link ThinkingLevel} into the Anthropic API request shape, dispatching by model.
-   * Opus 4.7+ uses {@code thinking.type=adaptive} + {@code output_config.effort=...}; legacy Opus
-   * 4.6 / Sonnet 4.6 uses {@code thinking.type=enabled} + {@code budget_tokens=...}.
+   * Opus 4.7+ and any unrecognised Claude ID use {@code thinking.type=adaptive} + {@code
+   * output_config.effort=...}; legacy Opus 4.6 / Sonnet 4.6 use {@code thinking.type=enabled} +
+   * {@code budget_tokens=...}.
    *
    * @return both the {@link ThinkingConfig} and any sibling {@link OutputConfig} that must ride on
    *     the request; either may be {@code null} when thinking is disabled
@@ -647,7 +663,7 @@ public class AnthropicModel implements Model {
       return new ThinkingSpec(null, null);
     }
 
-    if (knownModel != null && knownModel.usesAdaptiveThinking()) {
+    if (usesAdaptiveThinking) {
       var effort =
           switch (config.thinkingLevel()) {
             case NONE -> null;
@@ -662,13 +678,13 @@ public class AnthropicModel implements Model {
 
     if (config.thinkingLevel() == ThinkingLevel.XHIGH) {
       throw new IllegalArgumentException(
-          "ThinkingLevel.XHIGH requires Opus 4.7 (claude-opus-4-7); model "
+          "ThinkingLevel.XHIGH requires an adaptive-capable model (Opus 4.7+); model "
               + wireModelId
               + " uses the legacy enabled+budget_tokens shape which has no 'xhigh' equivalent.");
     }
     if (config.thinkingLevel() == ThinkingLevel.MAX) {
       throw new IllegalArgumentException(
-          "ThinkingLevel.MAX requires an adaptive-capable model (Opus 4.7); model "
+          "ThinkingLevel.MAX requires an adaptive-capable model (Opus 4.7+); model "
               + wireModelId
               + " uses the legacy enabled+budget_tokens shape which has no 'max' equivalent.");
     }
