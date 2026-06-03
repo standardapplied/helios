@@ -4,6 +4,79 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.6.3] — 2026-06-03 — Annotation model v2
+
+### Changed — Annotation model v2 (structured, queryable, facet-aware)
+
+`ai.singlr.core.trace.Annotation` is now a structured note that can carry a
+consumer's full evaluative context, replacing the thin single-`targetId` record.
+This is a **breaking** change with no compatibility shim — the framework's only
+consumers are internal, so the column and signature renames are clean.
+
+**Model.** The new record is:
+
+```
+Annotation(
+  UUID id, UUID subjectId, String facet, String label, AuthorKind authorKind,
+  String authorId, Integer rating, String comment, Map<String,Object> metadata,
+  OffsetDateTime createdAt, OffsetDateTime updatedAt)
+```
+
+- `targetId` → `subjectId` — still a real Helios trace or span id (opaque domain
+  ids were deliberately rejected; an annotation always targets something Helios
+  observed).
+- `facet` (nullable) — a named sub-coordinate *within* a subject, so one author
+  can hold several judgments about one subject (e.g. one rating per evaluation
+  dimension) without synthesizing target ids.
+- `authorKind` — new `ai.singlr.core.trace.AuthorKind` enum (`HUMAN | MODEL |
+  SYSTEM`), replacing stringly-typed author prefixes. Required.
+- `metadata` — first-class `Map<String,Object>` persisted to a `jsonb` column by
+  `upsertAnnotation`; always a non-null immutable map (empty when unset),
+  tolerant of null values.
+- `updatedAt` — new; advanced on every upsert while `createdAt` is preserved.
+
+**Idempotency.** The upsert key is now `(subjectId, facet, label, authorId)`,
+enforced by a partial unique index. Null facets coalesce (`COALESCE(facet, '')`)
+so a null-facet judgment still dedupes; author-less annotations continue to
+insert without deduping, exactly as before. One author may now hold the same
+`(subject, facet)` under several distinct labels.
+
+**Store API (`PgTraceStore`).** `upsertAnnotation(Annotation)` persists the full
+record including `metadata`. `findAnnotations(UUID)` is replaced by
+`findAnnotationsBySubject(UUID)`, `findAnnotationsBySubjects(List<UUID>)` (batch),
+and `listAnnotations(Paginate, scimFilter)` (SCIM filter over the first-class
+columns `subject_id`, `facet`, `label`, `author_kind`, `rating`). Filtering over
+`metadata` keys is not yet supported.
+
+**DDL delta for `helios_annotations`:**
+
+```sql
+ALTER TABLE helios_annotations RENAME COLUMN target_id TO subject_id;
+ALTER TABLE helios_annotations
+    ADD COLUMN facet       VARCHAR(255),
+    ADD COLUMN author_kind VARCHAR(32)  NOT NULL DEFAULT 'HUMAN',
+    ADD COLUMN metadata    JSONB        NOT NULL DEFAULT '{}',
+    ADD COLUMN updated_at  TIMESTAMPTZ;
+UPDATE helios_annotations SET updated_at = created_at WHERE updated_at IS NULL;
+ALTER TABLE helios_annotations
+    ALTER COLUMN updated_at SET NOT NULL,
+    ALTER COLUMN author_kind DROP DEFAULT;
+
+DROP INDEX IF EXISTS idx_helios_annotations_target;
+DROP INDEX IF EXISTS idx_helios_annotations_target_author;
+CREATE INDEX idx_helios_annotations_subject
+    ON helios_annotations(subject_id);
+CREATE UNIQUE INDEX idx_helios_annotations_subject_facet_label_author
+    ON helios_annotations(subject_id, COALESCE(facet, ''), label, author_id)
+    WHERE author_id IS NOT NULL;
+```
+
+Deployers that already ran a consumer-side `metadata jsonb` column keep it and
+skip that `ADD COLUMN`. Any trace-feedback trigger that referenced
+`NEW.target_id` must be repointed to `NEW.subject_id`.
+
+## [2.6.2] — 2026-05-29 — Claude Opus 4.8 + bring-your-own model config
+
 ### Added — Claude Opus 4.8
 
 `AnthropicModelId.CLAUDE_OPUS_4_8` (`claude-opus-4-8`, 1M context, 32K output,

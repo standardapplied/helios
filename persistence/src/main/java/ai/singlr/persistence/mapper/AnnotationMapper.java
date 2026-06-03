@@ -6,6 +6,7 @@
 package ai.singlr.persistence.mapper;
 
 import ai.singlr.core.trace.Annotation;
+import ai.singlr.core.trace.AuthorKind;
 import io.helidon.dbclient.DbRow;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -24,12 +25,16 @@ public final class AnnotationMapper {
 
     return Annotation.newBuilder()
         .withId(row.column("id").get(UUID.class))
-        .withTargetId(row.column("target_id").get(UUID.class))
+        .withSubjectId(row.column("subject_id").get(UUID.class))
+        .withFacet(row.column("facet").getString())
         .withLabel(row.column("label").getString())
+        .withAuthorKind(AuthorKind.valueOf(row.column("author_kind").getString()))
+        .withAuthorId(row.column("author_id").getString())
         .withRating(rating)
         .withComment(row.column("comment").getString())
+        .withMetadata(JsonbMapper.fromJsonbObject(row.column("metadata").getString()))
         .withCreatedAt(row.column("created_at").get(OffsetDateTime.class))
-        .withAuthorId(row.column("author_id").getString())
+        .withUpdatedAt(row.column("updated_at").get(OffsetDateTime.class))
         .build();
   }
 

@@ -137,10 +137,10 @@ final class PgTestSupport {
             BEGIN
               IF NEW.rating > 0 THEN
                 UPDATE helios_traces SET thumbs_up_count = thumbs_up_count + 1
-                  WHERE id = NEW.target_id;
+                  WHERE id = NEW.subject_id;
               ELSIF NEW.rating < 0 THEN
                 UPDATE helios_traces SET thumbs_down_count = thumbs_down_count + 1
-                  WHERE id = NEW.target_id;
+                  WHERE id = NEW.subject_id;
               END IF;
               RETURN NEW;
             END;

@@ -74,19 +74,24 @@ CREATE INDEX IF NOT EXISTS idx_helios_spans_trace_id
 
 CREATE TABLE IF NOT EXISTS helios_annotations (
     id          UUID            PRIMARY KEY,
-    target_id   UUID            NOT NULL,
+    subject_id  UUID            NOT NULL,
+    facet       VARCHAR(255),
     label       VARCHAR(255)    NOT NULL,
+    author_kind VARCHAR(32)     NOT NULL,
+    author_id   VARCHAR(255),
     rating      SMALLINT,
     comment     TEXT,
+    metadata    JSONB           NOT NULL DEFAULT '{}',
     created_at  TIMESTAMPTZ     NOT NULL,
-    author_id   VARCHAR(255)
+    updated_at  TIMESTAMPTZ     NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_helios_annotations_target
-    ON helios_annotations(target_id);
+CREATE INDEX IF NOT EXISTS idx_helios_annotations_subject
+    ON helios_annotations(subject_id);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_helios_annotations_target_author
-    ON helios_annotations(target_id, author_id) WHERE author_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_helios_annotations_subject_facet_label_author
+    ON helios_annotations(subject_id, COALESCE(facet, ''), label, author_id)
+    WHERE author_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS helios_archive (
     id          UUID            PRIMARY KEY,
