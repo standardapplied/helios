@@ -265,6 +265,7 @@ public final class TurnRunner {
           Message.assistant(streamOutcome.assistantContent(), List.of(), streamOutcome.metadata()));
     }
     accumulateUsageAndCost(state, streamOutcome.usage());
+    state.accumulateCitations(subscriber.citations());
 
     // PostModelTurn
     var response =
@@ -273,6 +274,7 @@ public final class TurnRunner {
             .withFinishReason(streamOutcome.finishReason())
             .withUsage(streamOutcome.usage())
             .withToolCalls(toolCalls)
+            .withCitations(subscriber.citations())
             .build();
     var postDecision = hooks.firePostModelTurn(response, ctx(state));
     var postResolved = handleTurnLevel(state, postDecision, TurnPhase.POST_MODEL_TURN);
@@ -722,7 +724,7 @@ public final class TurnRunner {
 
   private ResultMessage successFor(SessionState state, String text) {
     return new ResultMessage.Success(
-        state.sessionId(), text, state.usage(), state.cost(), state.elapsed());
+        state.sessionId(), text, state.usage(), state.cost(), state.elapsed(), state.citations());
   }
 
   private static StopReason mapFinishReasonToStopReason(FinishReason r) {

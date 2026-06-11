@@ -6,8 +6,10 @@ package ai.singlr.session;
 
 import ai.singlr.core.common.CostEstimate;
 import ai.singlr.core.common.Strings;
+import ai.singlr.core.model.Citation;
 import ai.singlr.core.model.Response.Usage;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -63,6 +65,19 @@ public sealed interface ResultMessage
   Duration duration();
 
   /**
+   * Grounding citations accumulated across the session (e.g. Google Search / web grounding),
+   * deduplicated and in document order. Carried only by {@link Success} — the provenance of a
+   * delivered answer; every other terminal returns an empty list. Mirrors the per-turn {@link
+   * QueryEvent.AssistantCitations} events on the streaming surface.
+   *
+   * @return the citations; non-null, immutable, empty when the run did no grounding or did not
+   *     succeed
+   */
+  default List<Citation> citations() {
+    return List.of();
+  }
+
+  /**
    * Return a redacted copy with any carried {@link SerializedError} stripped of stack-trace frames.
    * Returns {@code this} unchanged when the terminal carries no error or the carried error is
    * already free of frames. Used at trust boundaries (HTTP responses, SSE serialisation) so
@@ -104,13 +119,29 @@ public sealed interface ResultMessage
    * @param usage accumulated token usage
    * @param cost accumulated cost
    * @param duration elapsed wall clock
+   * @param citations grounding citations accumulated across the run; non-null, defensively copied,
+   *     may be empty
    */
-  record Success(String sessionId, String result, Usage usage, CostEstimate cost, Duration duration)
+  record Success(
+      String sessionId,
+      String result,
+      Usage usage,
+      CostEstimate cost,
+      Duration duration,
+      List<Citation> citations)
       implements ResultMessage {
 
     public Success {
       validateCommon(sessionId, usage, cost, duration);
       Objects.requireNonNull(result, "result must not be null");
+      Objects.requireNonNull(citations, "citations must not be null");
+      citations = List.copyOf(citations);
+    }
+
+    /** Convenience for a success with no grounding citations. */
+    public Success(
+        String sessionId, String result, Usage usage, CostEstimate cost, Duration duration) {
+      this(sessionId, result, usage, cost, duration, List.of());
     }
   }
 

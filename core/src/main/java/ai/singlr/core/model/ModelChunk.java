@@ -5,6 +5,7 @@
 package ai.singlr.core.model;
 
 import ai.singlr.core.model.Response.Usage;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -121,7 +122,9 @@ public sealed interface ModelChunk
    * end_turn}, {@code tool_use}, {@code max_tokens}, {@code stop_sequence}, …); {@code usage}
    * carries the accumulated token counts at message end; {@code metadata} carries provider-specific
    * round-trip data (Gemini thought signatures, Anthropic citation pointers, etc.) that must be
-   * preserved when the assistant message is replayed on a follow-up turn.
+   * preserved when the assistant message is replayed on a follow-up turn; {@code citations} carries
+   * the grounding citations the provider harvested for this message (e.g. Google Search / web
+   * grounding), empty when the turn did no grounding.
    *
    * <p>This is the terminal chunk for a single model message. A successful turn ends with exactly
    * one {@code MessageStop}; the publisher then signals {@code onComplete()}.
@@ -130,8 +133,11 @@ public sealed interface ModelChunk
    * @param usage final usage at message end; non-null
    * @param metadata provider-specific assistant-message metadata; non-null, defensively copied, may
    *     be empty
+   * @param citations grounding citations harvested for this message; non-null, defensively copied,
+   *     may be empty
    */
-  record MessageStop(String stopReason, Usage usage, java.util.Map<String, String> metadata)
+  record MessageStop(
+      String stopReason, Usage usage, Map<String, String> metadata, List<Citation> citations)
       implements ModelChunk {
 
     public MessageStop {
@@ -141,12 +147,19 @@ public sealed interface ModelChunk
       }
       Objects.requireNonNull(usage, "usage must not be null");
       Objects.requireNonNull(metadata, "metadata must not be null");
+      Objects.requireNonNull(citations, "citations must not be null");
       metadata = Map.copyOf(metadata);
+      citations = List.copyOf(citations);
     }
 
-    /** Back-compat convenience for callers that don't supply metadata. */
+    /** Convenience for callers that supply metadata but no grounding citations. */
+    public MessageStop(String stopReason, Usage usage, Map<String, String> metadata) {
+      this(stopReason, usage, metadata, List.of());
+    }
+
+    /** Back-compat convenience for callers that don't supply metadata or citations. */
     public MessageStop(String stopReason, Usage usage) {
-      this(stopReason, usage, Map.of());
+      this(stopReason, usage, Map.of(), List.of());
     }
   }
 

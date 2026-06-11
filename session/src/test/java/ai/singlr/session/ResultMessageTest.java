@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.common.CostEstimate;
+import ai.singlr.core.model.Citation;
 import ai.singlr.core.model.Response.Usage;
 import java.time.Duration;
 import java.util.List;
@@ -32,6 +33,37 @@ final class ResultMessageTest {
     assertSame(USAGE, r.usage());
     assertSame(COST, r.cost());
     assertEquals(DUR, r.duration());
+  }
+
+  @Test
+  void successConvenienceConstructorDefaultsCitationsToEmpty() {
+    assertTrue(new ResultMessage.Success(SID, "answer", USAGE, COST, DUR).citations().isEmpty());
+  }
+
+  @Test
+  void successCarriesAndDefensivelyCopiesCitations() {
+    var cite = Citation.of("https://src", "snippet");
+    var mutable = new java.util.ArrayList<Citation>();
+    mutable.add(cite);
+    var r = new ResultMessage.Success(SID, "answer", USAGE, COST, DUR, mutable);
+    mutable.add(Citation.of("https://b", "y"));
+    assertEquals(List.of(cite), r.citations());
+    assertThrows(UnsupportedOperationException.class, () -> r.citations().add(cite));
+  }
+
+  @Test
+  void successRejectsNullCitations() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new ResultMessage.Success(SID, "answer", USAGE, COST, DUR, null));
+    assertEquals("citations must not be null", ex.getMessage());
+  }
+
+  @Test
+  void nonSuccessTerminalsExposeEmptyCitationsByDefault() {
+    ResultMessage maxTurns = new ResultMessage.ErrorMaxTurns(SID, 3, USAGE, COST, DUR);
+    assertTrue(maxTurns.citations().isEmpty());
   }
 
   @Test

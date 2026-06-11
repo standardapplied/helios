@@ -122,6 +122,39 @@ final class ChatStreamPublisherTest {
   }
 
   @Test
+  void responseCitationsForwardOntoMessageStop() {
+    var cite = Citation.of("https://vertexaisearch.example/redirect/abc", "snippet");
+    Model grounded =
+        new Model() {
+          @Override
+          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+            return Response.newBuilder()
+                .withContent("grounded answer")
+                .withFinishReason(FinishReason.STOP)
+                .withUsage(Response.Usage.of(5, 3))
+                .withCitations(List.of(cite))
+                .build();
+          }
+
+          @Override
+          public String id() {
+            return "test";
+          }
+
+          @Override
+          public String provider() {
+            return "test";
+          }
+        };
+    var sub = new CapturingSubscriber();
+    grounded.chatStream(List.of(), List.of(), new CancellationToken()).subscribe(sub);
+
+    var stop =
+        assertInstanceOf(ModelChunk.MessageStop.class, sub.chunks.get(sub.chunks.size() - 1));
+    assertEquals(List.of(cite), stop.citations());
+  }
+
+  @Test
   void emptyContentEmitsOnlyMessageStop() {
     var sub = new CapturingSubscriber();
     textOnly("").chatStream(List.of(), List.of(), new CancellationToken()).subscribe(sub);

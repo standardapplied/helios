@@ -146,7 +146,8 @@ public final class StopClassifier {
                       assistantContent,
                       state.usage(),
                       state.cost(),
-                      state.elapsed()));
+                      state.elapsed(),
+                      state.citations()));
       case LENGTH ->
           Optional.of(
               new ResultMessage.ErrorDuringExecution(

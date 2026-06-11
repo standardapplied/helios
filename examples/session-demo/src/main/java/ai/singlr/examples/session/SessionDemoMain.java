@@ -229,6 +229,12 @@ public final class SessionDemoMain {
     public void onNext(QueryEvent ev) {
       switch (ev) {
         case QueryEvent.AssistantText t -> System.out.print(t.text());
+        case QueryEvent.AssistantCitations c ->
+            System.out.println(
+                "\n[citations] "
+                    + c.citations().stream()
+                        .map(cit -> cit.title() != null ? cit.title() : cit.sourceId())
+                        .toList());
         case QueryEvent.ToolUse u ->
             System.out.println(
                 "\n[tool] " + u.call().name() + " " + truncate(u.call().arguments().toString()));

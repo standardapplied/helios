@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.common.CostEstimate;
+import ai.singlr.core.model.Citation;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Response.Usage;
 import ai.singlr.core.runtime.CancellationToken;
@@ -19,6 +20,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -167,6 +169,62 @@ final class SessionStateTest {
     var state = build();
     var ex = assertThrows(NullPointerException.class, () -> state.accumulateCost(null));
     assertEquals("delta must not be null", ex.getMessage());
+  }
+
+  @Test
+  void citationsStartEmpty() {
+    assertTrue(build().citations().isEmpty());
+  }
+
+  @Test
+  void accumulateCitationsAppendsInOrderAcrossTurns() {
+    var state = build();
+    var a = Citation.of("https://a", "x");
+    var b = Citation.of("https://b", "y");
+    var c = Citation.of("https://c", "z");
+    state.accumulateCitations(List.of(a, b));
+    state.accumulateCitations(List.of(c));
+    assertEquals(List.of(a, b, c), state.citations());
+  }
+
+  @Test
+  void accumulateCitationsSuppressesExactDuplicates() {
+    var state = build();
+    var a = Citation.of("https://a", "x");
+    var b = Citation.of("https://b", "y");
+    state.accumulateCitations(List.of(a, b));
+    state.accumulateCitations(List.of(a, Citation.of("https://b", "y")));
+    assertEquals(List.of(a, b), state.citations());
+  }
+
+  @Test
+  void accumulateCitationsEmptyDeltaIsNoOp() {
+    var state = build();
+    state.accumulateCitations(List.of());
+    assertTrue(state.citations().isEmpty());
+  }
+
+  @Test
+  void citationsSnapshotIsImmutable() {
+    var state = build();
+    state.accumulateCitations(List.of(Citation.of("https://a", "x")));
+    assertThrows(
+        UnsupportedOperationException.class,
+        () -> state.citations().add(Citation.of("https://b", "y")));
+  }
+
+  @Test
+  void accumulateCitationsRejectsNullDelta() {
+    var ex = assertThrows(NullPointerException.class, () -> build().accumulateCitations(null));
+    assertEquals("delta must not be null", ex.getMessage());
+  }
+
+  @Test
+  void accumulateCitationsRejectsNullElement() {
+    var withNull = new java.util.ArrayList<Citation>();
+    withNull.add(null);
+    var ex = assertThrows(NullPointerException.class, () -> build().accumulateCitations(withNull));
+    assertEquals("delta must not contain null", ex.getMessage());
   }
 
   @Test

@@ -6,6 +6,7 @@ package ai.singlr.session.loop;
 
 import ai.singlr.core.common.CostEstimate;
 import ai.singlr.core.common.Strings;
+import ai.singlr.core.model.Citation;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Response.Usage;
 import ai.singlr.core.runtime.CancellationToken;
@@ -49,6 +50,7 @@ public final class SessionState {
   private final AtomicLong turnIndex = new AtomicLong(0);
   private final AtomicReference<Usage> usage = new AtomicReference<>(Usage.of(0, 0));
   private final AtomicReference<CostEstimate> cost = new AtomicReference<>(CostEstimate.zero());
+  private final AtomicReference<List<Citation>> citations = new AtomicReference<>(List.of());
   private final AtomicReference<Optional<ResultMessage>> terminal =
       new AtomicReference<>(Optional.empty());
   private final AtomicBoolean contextWarningFired = new AtomicBoolean(false);
@@ -195,6 +197,45 @@ public final class SessionState {
    */
   public CostEstimate cost() {
     return cost.get();
+  }
+
+  /**
+   * Append a turn's grounding citations to the running list, preserving document order and
+   * suppressing exact duplicates (a citation already present by value is not re-added). Empty
+   * deltas are a no-op. The running list is what {@link ResultMessage.Success#citations()} reports.
+   *
+   * @param delta the turn's citations to accumulate; non-null, may be empty
+   * @throws NullPointerException if {@code delta} or any element is null
+   */
+  public void accumulateCitations(List<Citation> delta) {
+    Objects.requireNonNull(delta, "delta must not be null");
+    if (delta.isEmpty()) {
+      return;
+    }
+    for (var c : delta) {
+      Objects.requireNonNull(c, "delta must not contain null");
+    }
+    citations.updateAndGet(
+        prev -> {
+          var merged = new ArrayList<Citation>(prev.size() + delta.size());
+          merged.addAll(prev);
+          for (var c : delta) {
+            if (!merged.contains(c)) {
+              merged.add(c);
+            }
+          }
+          return List.copyOf(merged);
+        });
+  }
+
+  /**
+   * The grounding citations accumulated across every model turn in this session, in document order
+   * with exact duplicates suppressed.
+   *
+   * @return the running citations; non-null, immutable, may be empty
+   */
+  public List<Citation> citations() {
+    return citations.get();
   }
 
   /**

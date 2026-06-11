@@ -5,11 +5,13 @@
 package ai.singlr.session;
 
 import ai.singlr.core.common.Strings;
+import ai.singlr.core.model.Citation;
 import ai.singlr.core.model.ToolCall;
 import ai.singlr.session.ask.AskUserQuestionRequest;
 import ai.singlr.session.ask.AskUserQuestionResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -24,8 +26,9 @@ import java.util.Objects;
  * {@code timestamp}) plus subtype-specific detail. Common-field validation lives in {@link
  * #validateCommon(String, long, Instant)} so the record bodies stay tight.
  *
- * <p>The 15 subtypes cover every observable lifecycle event the agent loop emits — assistant
- * output, user input, context lifecycle, tool dispatch, hook activity, and terminal results.
+ * <p>The 17 subtypes cover every observable lifecycle event the agent loop emits — assistant output
+ * (text, thinking, grounding citations), user input, context lifecycle, tool dispatch, hook
+ * activity, and terminal results.
  *
  * <p>Adding a subtype is a breaking change for {@code switch} consumers that lack a {@code default}
  * branch — by design, so the compiler flags consumers that need updating.
@@ -33,6 +36,7 @@ import java.util.Objects;
 public sealed interface QueryEvent
     permits QueryEvent.AssistantText,
         QueryEvent.AssistantThinking,
+        QueryEvent.AssistantCitations,
         QueryEvent.UserMessageReceived,
         QueryEvent.MessageBlocked,
         QueryEvent.ContextWarning,
@@ -125,6 +129,32 @@ public sealed interface QueryEvent
       validateCommon(sessionId, turnIndex, timestamp);
       Objects.requireNonNull(text, "text must not be null");
       Objects.requireNonNull(signature, "signature must not be null");
+    }
+  }
+
+  /**
+   * The assistant turn produced grounding citations (e.g. Google Search / web grounding). Fires
+   * once per turn, at message stop, only when the turn surfaced at least one citation; turns that
+   * did no grounding emit no event. The {@code citations} are this turn's citations as harvested by
+   * the provider — the session's running, deduplicated total is reported separately on {@link
+   * ResultMessage.Success#citations()} at termination.
+   *
+   * @param sessionId the session id
+   * @param turnIndex the turn index that produced the citations
+   * @param timestamp the event timestamp
+   * @param citations the turn's grounding citations; non-null, non-empty, defensively copied
+   */
+  record AssistantCitations(
+      String sessionId, long turnIndex, Instant timestamp, List<Citation> citations)
+      implements QueryEvent {
+
+    public AssistantCitations {
+      validateCommon(sessionId, turnIndex, timestamp);
+      Objects.requireNonNull(citations, "citations must not be null");
+      if (citations.isEmpty()) {
+        throw new IllegalArgumentException("citations must not be empty");
+      }
+      citations = List.copyOf(citations);
     }
   }
 

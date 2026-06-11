@@ -4,6 +4,32 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+### Added — grounding citations surfaced on the session path
+
+Grounding citations (`ai.singlr.core.model.Citation`) the model harvests (e.g. Google
+Search / web grounding) now flow all the way through the agent session, on **both**
+surfaces:
+
+- **Streaming:** new `QueryEvent.AssistantCitations(sessionId, turnIndex, timestamp,
+  List<Citation>)` — fires once per turn at message stop, only when the turn produced
+  citations. This is the 17th `QueryEvent` subtype (a deliberate breaking change for
+  `switch` consumers without a `default` branch).
+- **Terminal:** `ResultMessage.citations()` (interface default `List.of()`) is carried
+  by `ResultMessage.Success`, reporting the run's citations accumulated across turns,
+  deduplicated and in document order. A 6-arg canonical `Success` constructor adds the
+  citations component; the prior 5-arg form remains as a convenience defaulting to empty,
+  so existing construction sites are unaffected.
+
+Plumbing: `ModelChunk.MessageStop` gains a `List<Citation> citations` component (4-arg
+canonical; the 2-arg and 3-arg convenience constructors are retained), and the default
+`Model.chatStream` adapter forwards `Response.citations()` onto it — no provider changes
+required, since all providers already harvest citations into `Response`. The HTTP
+`GET /sessions/{id}/result` JSON gains an additive `citations` array on `Success`.
+
+Note for `AgentSession.runBlocking(message, schema)` users (e.g. enrichment agents): the
+typed convenience returns only the parsed value; read citations from the streaming
+`AssistantCitations` events or the `ResultMessage.Success` terminal.
+
 ## [2.6.4] — 2026-06-10 — Grounded streaming + structured output fix (Gemini)
 
 ### Fixed — grounded streaming + structured output crash (Gemini)

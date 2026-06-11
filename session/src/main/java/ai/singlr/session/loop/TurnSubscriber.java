@@ -4,6 +4,7 @@
  */
 package ai.singlr.session.loop;
 
+import ai.singlr.core.model.Citation;
 import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.ModelChunk;
 import ai.singlr.core.model.Response.Usage;
@@ -59,6 +60,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       new AtomicReference<>(FinishReason.STOP);
   private final AtomicReference<Usage> usage = new AtomicReference<>(Usage.of(0, 0));
   private final AtomicReference<Map<String, String>> metadata = new AtomicReference<>(Map.of());
+  private final AtomicReference<List<Citation>> citations = new AtomicReference<>(List.of());
   private final AtomicReference<Throwable> error = new AtomicReference<>();
   private final AtomicReference<ScheduledFuture<?>> idleTimer = new AtomicReference<>();
 
@@ -157,6 +159,14 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     finishReason.set(parseFinishReason(chunk.stopReason()));
     usage.set(chunk.usage());
     metadata.set(chunk.metadata());
+    var turnCitations = chunk.citations();
+    citations.set(turnCitations);
+    if (!turnCitations.isEmpty()) {
+      emitter.emit(
+          state,
+          new QueryEvent.AssistantCitations(
+              state.sessionId(), state.currentTurnIndex(), now(), turnCitations));
+    }
   }
 
   @Override
@@ -234,6 +244,17 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
   List<ToolCall> toolCalls() {
     return new ArrayList<>(toolCalls);
+  }
+
+  /**
+   * The grounding citations carried on this turn's {@link ModelChunk.MessageStop}, or an empty list
+   * when the turn did no grounding. Read by {@link TurnRunner} after {@link
+   * #awaitDone(CancellationToken)} to accumulate into the session totals.
+   *
+   * @return the turn's citations; never null, immutable, may be empty
+   */
+  List<Citation> citations() {
+    return citations.get();
   }
 
   /**

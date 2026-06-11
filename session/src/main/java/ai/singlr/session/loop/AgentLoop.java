@@ -373,7 +373,7 @@ public final class AgentLoop {
 
   private ResultMessage successFor(SessionState state, String text) {
     return new ResultMessage.Success(
-        state.sessionId(), text, state.usage(), state.cost(), state.elapsed());
+        state.sessionId(), text, state.usage(), state.cost(), state.elapsed(), state.citations());
   }
 
   private ResultMessage terminate(SessionState state, ResultMessage result) {

@@ -132,6 +132,30 @@ final class JacksonReaderWriterTest {
   }
 
   @Test
+  void successResultSerializesGroundingCitationsOntoTheWire() {
+    var success =
+        new ai.singlr.session.ResultMessage.Success(
+            "sess-1",
+            "Canberra is the capital.",
+            ai.singlr.core.model.Response.Usage.of(1, 1),
+            ai.singlr.core.common.CostEstimate.zero(),
+            java.time.Duration.ZERO,
+            List.of(
+                ai.singlr.core.model.Citation.newBuilder()
+                    .withSourceId("https://en.wikipedia.org/x")
+                    .withTitle("wikipedia.org")
+                    .build()));
+    var writer = new JacksonWriter<Object>(mapper);
+    var headers = WritableHeaders.create();
+    var out = new ByteArrayOutputStream();
+    writer.write(new GenericType<Object>() {}, success, out, headers);
+    var json = out.toString(StandardCharsets.UTF_8);
+    assertTrue(
+        json.contains("\"citations\""), "Success JSON must carry a citations array: " + json);
+    assertTrue(json.contains("https://en.wikipedia.org/x"), json);
+  }
+
+  @Test
   void writerWrapsSerializationFailures() {
     var writer = new JacksonWriter<Object>(mapper);
     var headers = WritableHeaders.create();

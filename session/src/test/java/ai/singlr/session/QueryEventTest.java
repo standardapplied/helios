@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.common.CostEstimate;
+import ai.singlr.core.model.Citation;
 import ai.singlr.core.model.Response.Usage;
 import java.time.Duration;
 import java.time.Instant;
@@ -392,9 +393,38 @@ final class QueryEventTest {
   // ── Sealed-hierarchy contract ─────────────────────────────────────────────
 
   @Test
-  void sealedInterfaceHasSixteenPermittedSubclasses() {
+  void sealedInterfaceHasSeventeenPermittedSubclasses() {
     var permits = QueryEvent.class.getPermittedSubclasses();
-    assertEquals(16, permits.length);
+    assertEquals(17, permits.length);
+  }
+
+  @Test
+  void assistantCitationsCarriesAndCopiesCitations() {
+    var cite = Citation.of("https://src", "snippet");
+    var mutable = new java.util.ArrayList<Citation>();
+    mutable.add(cite);
+    var ev = new QueryEvent.AssistantCitations(SID, TURN, TS, mutable);
+    mutable.add(Citation.of("https://b", "y"));
+    assertEquals(List.of(cite), ev.citations());
+    assertThrows(UnsupportedOperationException.class, () -> ev.citations().add(cite));
+  }
+
+  @Test
+  void assistantCitationsRejectsNull() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new QueryEvent.AssistantCitations(SID, TURN, TS, null));
+    assertEquals("citations must not be null", ex.getMessage());
+  }
+
+  @Test
+  void assistantCitationsRejectsEmpty() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new QueryEvent.AssistantCitations(SID, TURN, TS, List.of()));
+    assertEquals("citations must not be empty", ex.getMessage());
   }
 
   @Test
@@ -405,6 +435,8 @@ final class QueryEventTest {
         List.of(
             new QueryEvent.AssistantText(SID, TURN, TS, "t"),
             new QueryEvent.AssistantThinking(SID, TURN, TS, "th", "sig"),
+            new QueryEvent.AssistantCitations(
+                SID, TURN, TS, List.of(Citation.of("https://src", "snippet"))),
             new QueryEvent.UserMessageReceived(SID, TURN, TS, UserMessage.text("hi")),
             new QueryEvent.MessageBlocked(
                 SID, TURN, TS, UserMessage.text("nope"), "MyHook", "policy violation"),
@@ -426,6 +458,7 @@ final class QueryEventTest {
           switch (e) {
             case QueryEvent.AssistantText t -> "text";
             case QueryEvent.AssistantThinking t -> "thinking";
+            case QueryEvent.AssistantCitations c -> "citations";
             case QueryEvent.UserMessageReceived u -> "user";
             case QueryEvent.MessageBlocked b -> "msg-blocked";
             case QueryEvent.ContextWarning w -> "ctx-warn";
