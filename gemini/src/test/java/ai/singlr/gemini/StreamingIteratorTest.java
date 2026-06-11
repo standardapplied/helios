@@ -782,6 +782,46 @@ class StreamingIteratorTest {
   }
 
   @org.junit.jupiter.api.Test
+  void groundedStructuredOutputHarvestsTextAnnotationDeltaCitations() {
+    // Live-wire shape (Api-Revision 2026-05-20): on a grounded *structured-output* turn the
+    // model_output text is JSON, and grounding citations arrive as a SEPARATE delta with
+    // type "text_annotation_delta" (annotations, no text). The type-agnostic harvest branch must
+    // fold them into Response.citations() — i.e. structured mode is NOT citation-free, contrary to
+    // a naive trivial-query probe.
+    var jsonText =
+        stepDelta(0, "{\"type\":\"text\",\"text\":\"{\\\"answer\\\":\\\"Canberra\\\"}\"}");
+    var annotationDelta =
+        stepDelta(
+            0,
+            "{\"type\":\"text_annotation_delta\",\"annotations\":["
+                + "{\"type\":\"url_citation\",\"url\":"
+                + "\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc\","
+                + "\"title\":\"wikipedia.org\",\"start_index\":0,\"end_index\":20},"
+                + "{\"type\":\"url_citation\",\"url\":"
+                + "\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz\","
+                + "\"title\":\"britannica.com\",\"start_index\":0,\"end_index\":20}]}");
+    var sse =
+        MODEL_OUTPUT_START + jsonText + annotationDelta + MODEL_OUTPUT_STOP + INTERACTION_COMPLETED;
+    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      assertFalse(events.stream().anyMatch(e -> e instanceof StreamEvent.Error));
+      var done = (StreamEvent.Done) events.getLast();
+      assertEquals("{\"answer\":\"Canberra\"}", done.response().content());
+      assertEquals(
+          2,
+          done.response().citations().size(),
+          "structured-mode text_annotation_delta citations must be harvested");
+      assertEquals("wikipedia.org", done.response().citations().getFirst().title());
+      // The annotation-only delta must not masquerade as model text.
+      var textDeltas = events.stream().filter(e -> e instanceof StreamEvent.TextDelta).count();
+      assertEquals(1, textDeltas);
+    }
+  }
+
+  @org.junit.jupiter.api.Test
   void interactionCompletedWithoutInteractionFieldIsTolerated() {
     var emptyEnvelope = "data: {\"event_type\":\"interaction.completed\"}\n\n";
     try (var iterator = createIterator(emptyEnvelope, Duration.ofSeconds(5))) {

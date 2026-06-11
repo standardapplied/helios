@@ -30,13 +30,15 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
  * structured output could surface. No test combined {@code googleSearch(true)} with {@code
  * OutputSchema}, which is why it shipped broken.
  *
- * <p><strong>Citation behaviour, confirmed against the live wire.</strong> Gemini attaches {@code
- * url_citation} annotations to natural-language prose spans (with character offsets). A grounded
- * <em>structured-output</em> turn returns pure JSON with no prose to annotate, so it surfaces no
- * citations even though the search executed — the empty {@link Response#citations()} there is
- * correct API behaviour, not a defect. Grounded <em>prose</em> does surface citations, which {@link
- * #groundedProseSurfacesCitations()} verifies through the same {@code streamAndDrain} path that
- * {@code EnrichmentAgent} reads via {@link Response#citations()}.
+ * <p><strong>Citation behaviour, confirmed against the live wire.</strong> Grounded structured
+ * output <em>does</em> surface {@code url_citation} grounding citations — they arrive as a separate
+ * {@code text_annotation_delta} streaming delta (annotations, no text), which the type-agnostic
+ * harvest branch folds into {@link Response#citations()}. A substantive query returns dozens of
+ * citations with real source domains; a trivial single-fact query may return zero because the model
+ * chooses not to cite (model discretion, not a mode limitation). The deterministic regression lock
+ * for structured-mode harvest lives in {@code StreamingIteratorTest}; here {@link
+ * #groundedProseSurfacesCitations()} verifies citations end-to-end through the same {@code
+ * streamAndDrain} path that {@code EnrichmentAgent} reads via {@link Response#citations()}.
  */
 @EnabledIfEnvironmentVariable(named = "GEMINI_API_KEY", matches = ".+")
 class GeminiGroundedStructuredOutputIntegrationTest {

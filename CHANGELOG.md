@@ -33,13 +33,17 @@ is re-serialized to its compact JSON string form. The `google_search_call` step 
 also fully modeled: `Step` gains a typed `search_type` field plus
 `Step.googleSearchCall(...)` / `Step.googleSearchResult(...)` factories.
 
-**Citations on grounded turns (clarified, not a defect).** Gemini attaches
-`url_citation` annotations to natural-language **prose** spans. A grounded
-**structured-output** turn returns pure JSON with no prose to annotate, so it
-surfaces no citations even though the search executed — an empty
-`Response.citations()` there is correct. Grounded **prose** does surface citations
-through the existing `streamAndDrain` harvest path. Both are now covered by
-`GeminiGroundedStructuredOutputIntegrationTest`.
+**Citations on grounded turns (verified).** Grounded structured output surfaces
+`url_citation` grounding citations: they arrive as a separate `text_annotation_delta`
+streaming delta (annotations, no text), which the existing type-agnostic
+`harvestCitations` branch folds into `Response.citations()`. Confirmed
+deterministically by replaying live wire through `StreamingIterator` — substantive
+grounded structured queries harvested dozens of citations with real source domains.
+(A trivial single-fact query may legitimately return zero citations because the
+model chooses not to cite, which is model discretion, not a mode limitation.)
+`GeminiGroundedStructuredOutputIntegrationTest` covers parse-without-crash and
+prose citations end-to-end; `StreamingIteratorTest` locks in structured-mode
+citation harvest deterministically.
 
 ## [2.6.3] — 2026-06-03 — Annotation model v2
 
