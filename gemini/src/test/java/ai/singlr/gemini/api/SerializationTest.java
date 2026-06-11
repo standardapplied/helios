@@ -890,23 +890,12 @@ class SerializationTest {
     assertFalse(fc.hasTypeModelOutput());
     assertFalse(fc.hasTypeGoogleSearchCall());
 
-    var search =
-        new Step("google_search_call", null, null, "sig", "gs_1", null, Map.of(), null, null, null);
+    var search = Step.googleSearchCall("gs_1", Map.of(), "web_search", "sig");
     assertTrue(search.hasTypeGoogleSearchCall());
     assertFalse(search.hasTypeFunctionCall());
+    assertEquals("web_search", search.searchType());
 
-    var result =
-        new Step(
-            "google_search_result",
-            null,
-            null,
-            "sig",
-            null,
-            null,
-            null,
-            "gs_1",
-            Map.of("a", "b"),
-            null);
+    var result = Step.googleSearchResult("gs_1", Map.of("a", "b"), "sig");
     assertTrue(result.hasTypeGoogleSearchResult());
     assertFalse(result.hasTypeGoogleSearchCall());
   }
@@ -991,6 +980,52 @@ class SerializationTest {
     assertNotNull(error.error());
     assertEquals(500, error.error().get("code"));
     assertEquals("Internal error", error.error().get("message"));
+  }
+
+  @Test
+  void contentItemArgumentsPreservePartialJsonStringFragment() throws Exception {
+    // The arguments_delta streaming variant ships partial, individually-invalid JSON fragments
+    // that the loop accumulates into a buffer. RawArgumentsDeserializer must return them verbatim
+    // and must NOT try to parse them as JSON.
+    var item =
+        objectMapper.readValue(
+            "{\"type\":\"arguments_delta\",\"arguments\":\"{\\\"city\\\":\\\"\"}",
+            ContentItem.class);
+    assertEquals("{\"city\":\"", item.arguments());
+  }
+
+  @Test
+  void contentItemArgumentsNormalizeObjectToCompactJsonString() throws Exception {
+    // The google_search_call step packs a complete arguments OBJECT into the step.delta union
+    // slot. RawArgumentsDeserializer re-serialises it to a compact JSON string so it never lands
+    // in the bare String component as a raw object (the grounded-streaming crash).
+    var item =
+        objectMapper.readValue(
+            "{\"type\":\"google_search_call\",\"arguments\":{\"queries\":[\"helios\"]}}",
+            ContentItem.class);
+    assertEquals("{\"queries\":[\"helios\"]}", item.arguments());
+  }
+
+  @Test
+  void contentItemArgumentsTolerateNull() throws Exception {
+    var item = objectMapper.readValue("{\"type\":\"text\",\"text\":\"hi\"}", ContentItem.class);
+    assertNull(item.arguments());
+
+    var explicitNull =
+        objectMapper.readValue("{\"type\":\"text\",\"arguments\":null}", ContentItem.class);
+    assertNull(explicitNull.arguments());
+  }
+
+  @Test
+  void stepGoogleSearchCallRoundTripsSearchType() throws Exception {
+    var step =
+        objectMapper.readValue(
+            "{\"type\":\"google_search_call\",\"id\":\"gsc_1\","
+                + "\"arguments\":{\"queries\":[\"x\"]},\"search_type\":\"web_search\"}",
+            Step.class);
+    assertTrue(step.hasTypeGoogleSearchCall());
+    assertEquals("web_search", step.searchType());
+    assertEquals(List.of("x"), step.arguments().get("queries"));
   }
 
   @Test

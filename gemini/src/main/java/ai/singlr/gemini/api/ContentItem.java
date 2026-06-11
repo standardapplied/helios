@@ -8,6 +8,7 @@ package ai.singlr.gemini.api;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 /**
  * A {@code Content} union member from the Interactions API ({@code Api-Revision: 2026-05-20}).
@@ -31,10 +32,14 @@ import java.util.List;
  * @param signature byte signature for the {@code thought_signature} streaming delta
  * @param annotations grounding citations attached to a {@code text} item; populated on the response
  *     side for {@code model_output} text content
- * @param arguments raw partial-JSON argument fragment for the {@code arguments_delta} streaming
- *     delta variant; the live wire ships this as a JSON-encoded string nested inside the {@code
- *     step.delta.delta} object alongside {@code type="arguments_delta"} — the documented top-level
- *     {@code arguments_delta} field on {@code step.delta} never materialised
+ * @param arguments raw argument carrier on a {@code step.delta} delta, normalized to a {@code
+ *     String} by {@link RawArgumentsDeserializer}. Two wire shapes land here: a partial JSON
+ *     <em>string</em> fragment on the {@code arguments_delta} variant of a streamed {@code
+ *     function_call} (the live wire nests it inside {@code step.delta.delta} alongside {@code
+ *     type="arguments_delta"} — the documented top-level {@code arguments_delta} field never
+ *     materialised), accumulated into a buffer and parsed once the step completes; and a complete
+ *     JSON <em>object</em> on a {@code google_search_call} delta, re-serialized to its compact JSON
+ *     string form
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ContentItem(
@@ -45,7 +50,7 @@ public record ContentItem(
     String uri,
     String signature,
     List<OutputAnnotation> annotations,
-    String arguments) {
+    @JsonDeserialize(using = RawArgumentsDeserializer.class) String arguments) {
 
   public static ContentItem text(String text) {
     return new ContentItem("text", text, null, null, null, null, null, null);

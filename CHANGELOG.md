@@ -4,6 +4,43 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## [Unreleased]
 
+## [2.6.4] — 2026-06-10 — Grounded streaming + structured output fix (Gemini)
+
+### Fixed — grounded streaming + structured output crash (Gemini)
+
+`GeminiModel.chat(messages, OutputSchema)` with `ModelConfig.withGoogleSearch(true)`
+threw `GeminiException: Failed to parse stream event` →
+`MismatchedInputException: Cannot deserialize value of type java.lang.String from
+Object value` on every grounded turn, killing the stream before any structured
+output could surface.
+
+**Root cause.** A grounded turn emits a `google_search_call` step on the
+`step.delta` surface whose `arguments` ship as a **JSON object** (confirmed on the
+live wire, `Api-Revision: 2026-05-20`:
+`{"type":"google_search_call","arguments":{"queries":[...]},"search_type":"web_search"}`).
+The streaming delta carrier `ContentItem.arguments` was a bare `String` with no
+deserializer, so the object could not be bound. (`Step.arguments` already tolerated
+object-or-string via `ArgumentsDeserializer`, which is why the non-streaming
+`step.start` shape never hit this.)
+
+**Fix.** New `RawArgumentsDeserializer` on `ContentItem.arguments` normalizes both
+wire shapes the field actually carries to a `String`: a partial JSON **string**
+fragment on the `arguments_delta` variant of a streamed `function_call` is returned
+verbatim (it is accumulated into a buffer and parsed only when the step completes,
+so it must not be parsed early — this is why `ArgumentsDeserializer`'s parse-to-`Map`
+could not be reused), and a complete JSON **object** on a `google_search_call` delta
+is re-serialized to its compact JSON string form. The `google_search_call` step is
+also fully modeled: `Step` gains a typed `search_type` field plus
+`Step.googleSearchCall(...)` / `Step.googleSearchResult(...)` factories.
+
+**Citations on grounded turns (clarified, not a defect).** Gemini attaches
+`url_citation` annotations to natural-language **prose** spans. A grounded
+**structured-output** turn returns pure JSON with no prose to annotate, so it
+surfaces no citations even though the search executed — an empty
+`Response.citations()` there is correct. Grounded **prose** does surface citations
+through the existing `streamAndDrain` harvest path. Both are now covered by
+`GeminiGroundedStructuredOutputIntegrationTest`.
+
 ## [2.6.3] — 2026-06-03 — Annotation model v2
 
 ### Changed — Annotation model v2 (structured, queryable, facet-aware)

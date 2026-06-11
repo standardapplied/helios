@@ -24,8 +24,8 @@ import tools.jackson.databind.annotation.JsonDeserialize;
  *       optional {@link #signature()}.
  *   <li>{@code function_result} — carries {@link #callId()}, optional {@link #name()}, {@link
  *       #result()}, and optional {@link #errorFlag()}.
- *   <li>{@code google_search_call} — carries {@link #id()}, {@link #arguments()}, optional {@link
- *       #signature()}.
+ *   <li>{@code google_search_call} — carries {@link #id()}, {@link #arguments()}, {@link
+ *       #searchType()}, optional {@link #signature()}.
  *   <li>{@code google_search_result} — carries {@link #callId()}, {@link #result()}, optional
  *       {@link #signature()}.
  * </ul>
@@ -46,6 +46,8 @@ import tools.jackson.databind.annotation.JsonDeserialize;
  *     {@code isError}) so the record accessor does not collide with Jackson's {@code is*()}
  *     boolean-getter auto-detection, which would otherwise synthesise a parallel virtual property
  *     {@code error}
+ * @param searchType the grounding search modality on a {@code google_search_call} step (e.g. {@code
+ *     web_search}); wire-encoded as {@code search_type}, {@code null} on every other step type
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record Step(
@@ -58,14 +60,15 @@ public record Step(
     @JsonDeserialize(using = ArgumentsDeserializer.class) Map<String, Object> arguments,
     @JsonProperty("call_id") String callId,
     Object result,
-    @JsonProperty("is_error") Boolean errorFlag) {
+    @JsonProperty("is_error") Boolean errorFlag,
+    @JsonProperty("search_type") String searchType) {
 
   public static Step userInput(String text) {
     return userInput(List.of(ContentItem.text(text)));
   }
 
   public static Step userInput(List<ContentItem> content) {
-    return new Step("user_input", content, null, null, null, null, null, null, null, null);
+    return new Step("user_input", content, null, null, null, null, null, null, null, null, null);
   }
 
   public static Step modelOutput(String text) {
@@ -73,15 +76,15 @@ public record Step(
   }
 
   public static Step modelOutput(List<ContentItem> content) {
-    return new Step("model_output", content, null, null, null, null, null, null, null, null);
+    return new Step("model_output", content, null, null, null, null, null, null, null, null, null);
   }
 
   public static Step thought(String signature) {
-    return new Step("thought", null, null, signature, null, null, null, null, null, null);
+    return new Step("thought", null, null, signature, null, null, null, null, null, null, null);
   }
 
   public static Step thought(String signature, List<ContentItem> summary) {
-    return new Step("thought", null, summary, signature, null, null, null, null, null, null);
+    return new Step("thought", null, summary, signature, null, null, null, null, null, null, null);
   }
 
   public static Step functionCall(String id, String name, Map<String, Object> arguments) {
@@ -95,6 +98,7 @@ public record Step(
         arguments == null ? Map.of() : arguments,
         null,
         null,
+        null,
         null);
   }
 
@@ -104,7 +108,38 @@ public record Step(
 
   public static Step functionResult(String callId, String name, Object result, Boolean errorFlag) {
     return new Step(
-        "function_result", null, null, null, null, name, null, callId, result, errorFlag);
+        "function_result", null, null, null, null, name, null, callId, result, errorFlag, null);
+  }
+
+  public static Step googleSearchCall(
+      String id, Map<String, Object> arguments, String searchType, String signature) {
+    return new Step(
+        "google_search_call",
+        null,
+        null,
+        signature,
+        id,
+        null,
+        arguments == null ? Map.of() : arguments,
+        null,
+        null,
+        null,
+        searchType);
+  }
+
+  public static Step googleSearchResult(String callId, Object result, String signature) {
+    return new Step(
+        "google_search_result",
+        null,
+        null,
+        signature,
+        null,
+        null,
+        null,
+        callId,
+        result,
+        null,
+        null);
   }
 
   public boolean hasTypeUserInput() {

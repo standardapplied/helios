@@ -718,6 +718,70 @@ class StreamingIteratorTest {
   }
 
   @org.junit.jupiter.api.Test
+  void groundedSearchCallDeltaDoesNotAbortStream() {
+    // Regression: the google_search_call step arrives in the step.delta union slot with
+    // `arguments` as a JSON OBJECT. Before the fix this landed in ContentItem.arguments (a bare
+    // String) and aborted the whole stream with "Failed to parse stream event", so the trailing
+    // model_output text — and its grounding citations — never surfaced.
+    var searchCallDelta =
+        stepDelta(
+            1,
+            "{\"type\":\"google_search_call\",\"id\":\"gsc_1\",\"signature\":\"sig==\","
+                + "\"arguments\":{\"queries\":[\"helios framework\"]},"
+                + "\"search_type\":\"web_search\"}");
+    var annotated =
+        stepDelta(
+            0,
+            "{\"type\":\"text\",\"text\":\"World\",\"annotations\":["
+                + "{\"type\":\"url_citation\",\"url\":"
+                + "\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc\","
+                + "\"title\":\"wikipedia.org\",\"start_index\":0,\"end_index\":5}]}");
+    var sse =
+        MODEL_OUTPUT_START
+            + searchCallDelta
+            + HELLO_DELTA
+            + annotated
+            + MODEL_OUTPUT_STOP
+            + INTERACTION_COMPLETED;
+    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      assertFalse(
+          events.stream().anyMatch(e -> e instanceof StreamEvent.Error),
+          "grounded search-call delta must not abort the stream");
+      var done = (StreamEvent.Done) events.getLast();
+      assertEquals("HelloWorld", done.response().content());
+      assertTrue(done.response().hasCitations(), "citations must survive the grounded turn");
+      assertEquals("wikipedia.org", done.response().citations().getFirst().title());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void groundedSearchCallStepStartIsToleratedAndIgnored() {
+    // The same search-call step can instead arrive on step.start, where Step.arguments already
+    // tolerates the object. It carries no model-visible output and must be silently absorbed.
+    var sse =
+        stepStart(
+                1,
+                "{\"type\":\"google_search_call\",\"id\":\"gsc_1\","
+                    + "\"arguments\":{\"queries\":[\"x\"]},\"search_type\":\"web_search\"}")
+            + stepStop(1)
+            + TEXT_FLOW;
+    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      assertFalse(events.stream().anyMatch(e -> e instanceof StreamEvent.Error));
+      var done = (StreamEvent.Done) events.getLast();
+      assertEquals("Hello", done.response().content());
+      assertEquals(FinishReason.STOP, done.response().finishReason());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
   void interactionCompletedWithoutInteractionFieldIsTolerated() {
     var emptyEnvelope = "data: {\"event_type\":\"interaction.completed\"}\n\n";
     try (var iterator = createIterator(emptyEnvelope, Duration.ofSeconds(5))) {
