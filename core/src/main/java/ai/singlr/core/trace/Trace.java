@@ -5,7 +5,9 @@
 
 package ai.singlr.core.trace;
 
+import ai.singlr.core.common.CostEstimate;
 import ai.singlr.core.common.Ids;
+import ai.singlr.core.model.Response.Usage;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -33,6 +35,8 @@ import java.util.UUID;
  * @param promptName prompt registry name
  * @param promptVersion prompt registry version
  * @param totalTokens aggregated token count from model calls
+ * @param usage rolled-up token usage summed across spans that recorded one, or null if none did
+ * @param cost rolled-up cost summed across spans that recorded one, or null if none did
  * @param thumbsUpCount denormalized positive feedback count (DB-managed)
  * @param thumbsDownCount denormalized negative feedback count (DB-managed)
  * @param groupId comparison/evaluation batch grouping
@@ -55,6 +59,8 @@ public record Trace(
     String promptName,
     Integer promptVersion,
     int totalTokens,
+    Usage usage,
+    CostEstimate cost,
     int thumbsUpCount,
     int thumbsDownCount,
     String groupId,
@@ -92,6 +98,8 @@ public record Trace(
     private String promptName;
     private Integer promptVersion;
     private int totalTokens;
+    private Usage usage;
+    private CostEstimate cost;
     private int thumbsUpCount;
     private int thumbsDownCount;
     private String groupId;
@@ -116,6 +124,8 @@ public record Trace(
       this.promptName = trace.promptName;
       this.promptVersion = trace.promptVersion;
       this.totalTokens = trace.totalTokens;
+      this.usage = trace.usage;
+      this.cost = trace.cost;
       this.thumbsUpCount = trace.thumbsUpCount;
       this.thumbsDownCount = trace.thumbsDownCount;
       this.groupId = trace.groupId;
@@ -212,6 +222,16 @@ public record Trace(
       return this;
     }
 
+    public Builder withUsage(Usage usage) {
+      this.usage = usage;
+      return this;
+    }
+
+    public Builder withCost(CostEstimate cost) {
+      this.cost = cost;
+      return this;
+    }
+
     public Builder withThumbsUpCount(int thumbsUpCount) {
       this.thumbsUpCount = thumbsUpCount;
       return this;
@@ -263,6 +283,8 @@ public record Trace(
           promptName,
           promptVersion,
           totalTokens,
+          usage,
+          cost,
           thumbsUpCount,
           thumbsDownCount,
           groupId,

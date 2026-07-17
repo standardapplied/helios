@@ -5,7 +5,9 @@
 
 package ai.singlr.core.trace;
 
+import ai.singlr.core.common.CostEstimate;
 import ai.singlr.core.common.Ids;
+import ai.singlr.core.model.Response.Usage;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -26,6 +28,8 @@ import java.util.UUID;
  * @param error error message, or null if the span succeeded
  * @param children child spans nested within this span
  * @param attributes key-value metadata
+ * @param usage per-call token usage for model-call spans, or null if not recorded
+ * @param cost per-call cost estimate for model-call spans, or null if not recorded
  */
 public record Span(
     UUID id,
@@ -36,7 +40,9 @@ public record Span(
     Duration duration,
     String error,
     List<Span> children,
-    Map<String, String> attributes) {
+    Map<String, String> attributes,
+    Usage usage,
+    CostEstimate cost) {
 
   /**
    * Whether the span completed without an error attached.
@@ -67,6 +73,8 @@ public record Span(
     private String error;
     private List<Span> children = new ArrayList<>();
     private Map<String, String> attributes = new LinkedHashMap<>();
+    private Usage usage;
+    private CostEstimate cost;
 
     private Builder() {}
 
@@ -80,6 +88,8 @@ public record Span(
       this.error = span.error;
       this.children = new ArrayList<>(span.children);
       this.attributes = new LinkedHashMap<>(span.attributes);
+      this.usage = span.usage;
+      this.cost = span.cost;
     }
 
     public Builder withId(UUID id) {
@@ -137,6 +147,16 @@ public record Span(
       return this;
     }
 
+    public Builder withUsage(Usage usage) {
+      this.usage = usage;
+      return this;
+    }
+
+    public Builder withCost(CostEstimate cost) {
+      this.cost = cost;
+      return this;
+    }
+
     /**
      * Builds the Span. Auto-generates id and startTime if not set. Computes duration from startTime
      * and endTime if duration not explicitly set.
@@ -160,7 +180,9 @@ public record Span(
           duration,
           error,
           List.copyOf(children),
-          Map.copyOf(attributes));
+          Map.copyOf(attributes),
+          usage,
+          cost);
     }
   }
 }

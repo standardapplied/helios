@@ -12,7 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.core.common.CostEstimate;
 import ai.singlr.core.common.Paginate;
+import ai.singlr.core.model.Response.Usage;
 import ai.singlr.core.trace.Annotation;
 import ai.singlr.core.trace.AuthorKind;
 import ai.singlr.core.trace.Span;
@@ -56,6 +58,67 @@ class PgTraceStoreTest {
     assertTrue(found.success());
     assertTrue(found.spans().isEmpty());
     assertTrue(found.attributes().isEmpty());
+  }
+
+  @Test
+  void usageAndCostRoundTripOnSpansAndTrace() {
+    var span =
+        Span.newBuilder()
+            .withName("model.chat")
+            .withKind(SpanKind.MODEL_CALL)
+            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
+            .withEndTime(OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(2))
+            .withUsage(Usage.of(100, 50, 20, 10))
+            .withCost(CostEstimate.ofMicroUsd(1_250L))
+            .build();
+
+    var trace =
+        Trace.newBuilder()
+            .withName("agent-run")
+            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
+            .withEndTime(OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(3))
+            .withSpan(span)
+            .withTotalTokens(180)
+            .withUsage(Usage.of(100, 50, 20, 10))
+            .withCost(CostEstimate.ofMicroUsd(1_250L))
+            .build();
+
+    store.store(trace);
+    var found = store.findById(trace.id());
+
+    assertEquals(Usage.of(100, 50, 20, 10), found.usage());
+    assertEquals(CostEstimate.ofMicroUsd(1_250L), found.cost());
+    assertEquals(180, found.totalTokens());
+    var foundSpan = found.spans().getFirst();
+    assertEquals(Usage.of(100, 50, 20, 10), foundSpan.usage());
+    assertEquals(CostEstimate.ofMicroUsd(1_250L), foundSpan.cost());
+  }
+
+  @Test
+  void usageAndCostAbsentStayNull() {
+    var span =
+        Span.newBuilder()
+            .withName("tool.search")
+            .withKind(SpanKind.TOOL_EXECUTION)
+            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
+            .withEndTime(OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(1))
+            .build();
+
+    var trace =
+        Trace.newBuilder()
+            .withName("agent-run")
+            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
+            .withEndTime(OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(2))
+            .withSpan(span)
+            .build();
+
+    store.store(trace);
+    var found = store.findById(trace.id());
+
+    assertNull(found.usage());
+    assertNull(found.cost());
+    assertNull(found.spans().getFirst().usage());
+    assertNull(found.spans().getFirst().cost());
   }
 
   @Test

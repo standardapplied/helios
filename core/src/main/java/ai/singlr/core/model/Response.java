@@ -7,6 +7,7 @@ package ai.singlr.core.model;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Response from the model.
@@ -109,6 +110,26 @@ public record Response<T>(
      */
     public static Usage of(int input, int output) {
       return new Usage(input, output, 0, 0, input + output);
+    }
+
+    /**
+     * Sum this usage with another, component-wise. All five components are added independently —
+     * including {@code totalTokens} — so a provider-reported total that covers token classes the
+     * four canonical counts don't model is preserved through accumulation rather than recomputed
+     * away.
+     *
+     * @param other the usage to add; non-null
+     * @return a usage record with every component summed
+     * @throws ArithmeticException on overflow of any component
+     */
+    public Usage plus(Usage other) {
+      Objects.requireNonNull(other, "other must not be null");
+      return new Usage(
+          Math.addExact(inputTokens, other.inputTokens),
+          Math.addExact(outputTokens, other.outputTokens),
+          Math.addExact(cacheCreationInputTokens, other.cacheCreationInputTokens),
+          Math.addExact(cacheReadInputTokens, other.cacheReadInputTokens),
+          Math.addExact(totalTokens, other.totalTokens));
     }
 
     /**

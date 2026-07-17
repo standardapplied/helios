@@ -5,8 +5,10 @@
 
 package ai.singlr.core.trace;
 
+import ai.singlr.core.common.CostEstimate;
 import ai.singlr.core.common.Ids;
 import ai.singlr.core.events.EventSink;
+import ai.singlr.core.model.Response.Usage;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -200,7 +202,9 @@ public final class TraceBuilder implements SpanContainer {
     ended = true;
     var endTime = Ids.now();
     var duration = Duration.between(startTime, endTime);
-    var totalTokens = computeTotalTokens();
+    var usage = rollUpUsage(completedSpans);
+    var cost = rollUpCost(completedSpans);
+    var totalTokens = usage != null ? usage.totalTokens() : computeTotalTokens();
     return new Trace(
         id,
         name,
@@ -218,10 +222,40 @@ public final class TraceBuilder implements SpanContainer {
         promptName,
         promptVersion,
         totalTokens,
+        usage,
+        cost,
         0,
         0,
         groupId,
         labels);
+  }
+
+  private static Usage rollUpUsage(List<Span> spans) {
+    Usage total = null;
+    for (var span : spans) {
+      if (span.usage() != null) {
+        total = total == null ? span.usage() : total.plus(span.usage());
+      }
+      var childTotal = rollUpUsage(span.children());
+      if (childTotal != null) {
+        total = total == null ? childTotal : total.plus(childTotal);
+      }
+    }
+    return total;
+  }
+
+  private static CostEstimate rollUpCost(List<Span> spans) {
+    CostEstimate total = null;
+    for (var span : spans) {
+      if (span.cost() != null) {
+        total = total == null ? span.cost() : total.plus(span.cost());
+      }
+      var childTotal = rollUpCost(span.children());
+      if (childTotal != null) {
+        total = total == null ? childTotal : total.plus(childTotal);
+      }
+    }
+    return total;
   }
 
   private int computeTotalTokens() {

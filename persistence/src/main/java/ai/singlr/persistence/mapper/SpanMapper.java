@@ -32,6 +32,8 @@ public final class SpanMapper {
         .withEndTime(row.column("end_time").get(OffsetDateTime.class))
         .withError(row.column("error").getString())
         .withAttributes(attributes)
+        .withUsage(UsageMapper.usage(row))
+        .withCost(UsageMapper.cost(row))
         .build();
   }
 

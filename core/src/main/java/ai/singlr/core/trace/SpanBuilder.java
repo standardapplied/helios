@@ -5,9 +5,11 @@
 
 package ai.singlr.core.trace;
 
+import ai.singlr.core.common.CostEstimate;
 import ai.singlr.core.common.Ids;
 import ai.singlr.core.events.EventSink;
 import ai.singlr.core.events.HeliosEvent;
+import ai.singlr.core.model.Response.Usage;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -49,6 +51,8 @@ public final class SpanBuilder implements SpanContainer {
   private final Map<String, String> attributes = new LinkedHashMap<>();
   private final List<SpanBuilder> openChildren = new ArrayList<>();
   private final List<Span> completedChildren = new ArrayList<>();
+  private Usage usage;
+  private CostEstimate cost;
   private Span result;
 
   SpanBuilder(
@@ -96,6 +100,32 @@ public final class SpanBuilder implements SpanContainer {
   public SpanBuilder attribute(String key, String value) {
     requireOpen();
     attributes.put(key, value);
+    return this;
+  }
+
+  /**
+   * Records the token usage of the model call this span represents.
+   *
+   * @param usage the per-call token usage
+   * @return this builder for chaining
+   * @throws IllegalStateException if this span has already ended
+   */
+  public SpanBuilder usage(Usage usage) {
+    requireOpen();
+    this.usage = usage;
+    return this;
+  }
+
+  /**
+   * Records the cost of the model call this span represents.
+   *
+   * @param cost the per-call cost estimate
+   * @return this builder for chaining
+   * @throws IllegalStateException if this span has already ended
+   */
+  public SpanBuilder cost(CostEstimate cost) {
+    requireOpen();
+    this.cost = cost;
     return this;
   }
 
@@ -162,7 +192,9 @@ public final class SpanBuilder implements SpanContainer {
             duration,
             error,
             List.copyOf(completedChildren),
-            Map.copyOf(attributes));
+            Map.copyOf(attributes),
+            usage,
+            cost);
     fireSpanClosed(result);
     return result;
   }

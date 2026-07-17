@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.core.common.CostEstimate;
+import ai.singlr.core.model.Response.Usage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -263,6 +265,85 @@ class TraceBuilderTest {
     var trace = TraceBuilder.start("agent-run").end();
 
     assertEquals(0, trace.totalTokens());
+  }
+
+  @Test
+  void rollsUpUsageAndCostAcrossSpans() {
+    var builder = TraceBuilder.start("agent-run");
+    builder
+        .span("model.chat", SpanKind.MODEL_CALL)
+        .usage(Usage.of(100, 50, 20, 10))
+        .cost(CostEstimate.ofMicroUsd(1_000L))
+        .end();
+    builder
+        .span("model.chat", SpanKind.MODEL_CALL)
+        .usage(Usage.of(80, 30, 0, 40))
+        .cost(CostEstimate.ofMicroUsd(500L))
+        .end();
+
+    var trace = builder.end();
+
+    assertEquals(Usage.of(180, 80, 20, 50), trace.usage());
+    assertEquals(CostEstimate.ofMicroUsd(1_500L), trace.cost());
+    assertEquals(330, trace.totalTokens());
+  }
+
+  @Test
+  void rollupIncludesNestedSpans() {
+    var builder = TraceBuilder.start("agent-run");
+    var toolSpan = builder.span("tool.search", SpanKind.TOOL_EXECUTION);
+    toolSpan
+        .span("inner.chat", SpanKind.MODEL_CALL)
+        .usage(Usage.of(10, 5))
+        .cost(CostEstimate.ofMicroUsd(7L))
+        .end();
+    toolSpan.end();
+    builder.span("model.chat", SpanKind.MODEL_CALL).usage(Usage.of(20, 15)).end();
+
+    var trace = builder.end();
+
+    assertEquals(Usage.of(30, 20, 0, 0), trace.usage());
+    assertEquals(CostEstimate.ofMicroUsd(7L), trace.cost());
+    assertEquals(50, trace.totalTokens());
+  }
+
+  @Test
+  void usageAndCostNullWhenNoSpanCarriesThem() {
+    var builder = TraceBuilder.start("agent-run");
+    var span = builder.span("model.chat", SpanKind.MODEL_CALL);
+    span.attribute("inputTokens", "100").attribute("outputTokens", "50");
+    span.end();
+
+    var trace = builder.end();
+
+    assertNull(trace.usage());
+    assertNull(trace.cost());
+    assertEquals(150, trace.totalTokens(), "legacy attribute fallback still totals tokens");
+  }
+
+  @Test
+  void typedUsageWinsOverAttributesForTotalTokens() {
+    var builder = TraceBuilder.start("agent-run");
+    var span = builder.span("model.chat", SpanKind.MODEL_CALL);
+    span.attribute("inputTokens", "999").attribute("outputTokens", "999");
+    span.usage(Usage.of(10, 5));
+    span.end();
+
+    var trace = builder.end();
+
+    assertEquals(Usage.of(10, 5), trace.usage());
+    assertEquals(15, trace.totalTokens());
+  }
+
+  @Test
+  void costRollsUpWithoutUsage() {
+    var builder = TraceBuilder.start("agent-run");
+    builder.span("model.chat", SpanKind.MODEL_CALL).cost(CostEstimate.ofMicroUsd(42L)).end();
+
+    var trace = builder.end();
+
+    assertNull(trace.usage());
+    assertEquals(CostEstimate.ofMicroUsd(42L), trace.cost());
   }
 
   @Test

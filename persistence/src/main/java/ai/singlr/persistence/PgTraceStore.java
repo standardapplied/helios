@@ -87,6 +87,11 @@ public class PgTraceStore implements EventSink {
           trace.promptName(),
           trace.promptVersion(),
           trace.totalTokens(),
+          trace.usage() != null ? trace.usage().inputTokens() : null,
+          trace.usage() != null ? trace.usage().outputTokens() : null,
+          trace.usage() != null ? trace.usage().cacheCreationInputTokens() : null,
+          trace.usage() != null ? trace.usage().cacheReadInputTokens() : null,
+          trace.cost() != null ? trace.cost().microUsd() : null,
           trace.groupId(),
           JsonbMapper.listToJsonb(trace.labels()));
 
@@ -343,7 +348,12 @@ public class PgTraceStore implements EventSink {
           span.startTime(),
           span.endTime(),
           config.redact(span.error()),
-          JsonbMapper.toJsonb(config.redactValues(span.attributes())));
+          JsonbMapper.toJsonb(config.redactValues(span.attributes())),
+          span.usage() != null ? span.usage().inputTokens() : null,
+          span.usage() != null ? span.usage().outputTokens() : null,
+          span.usage() != null ? span.usage().cacheCreationInputTokens() : null,
+          span.usage() != null ? span.usage().cacheReadInputTokens() : null,
+          span.cost() != null ? span.cost().microUsd() : null);
 
       for (var child : span.children()) {
         queue.add(new SpanWithParent(child, span.id()));
