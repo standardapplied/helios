@@ -29,6 +29,12 @@ public final class PromptSql {
       VALUES (CAST(? AS UUID), ?, ?, ?, ?, CAST(? AS TEXT[]), ?)
       """;
 
+  public static final String ACTIVATE =
+      """
+      UPDATE %s.helios_prompts SET active = TRUE
+      WHERE name = ? AND version = ?
+      """;
+
   public static final String RESOLVE_ACTIVE =
       """
       SELECT id, name, content, version, active, variables, created_at

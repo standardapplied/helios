@@ -199,6 +199,89 @@ class InMemoryPromptRegistryTest {
   }
 
   @Test
+  void registerDraftDoesNotChangeActiveVersion() {
+    var registry = new InMemoryPromptRegistry();
+
+    var v1 = registry.register("prompt", "live");
+    var draft = registry.registerDraft("prompt", "candidate");
+
+    assertEquals(2, draft.version());
+    assertFalse(draft.active());
+    assertEquals(v1.id(), registry.resolve("prompt").id());
+    assertEquals("candidate", registry.resolve("prompt", 2).content());
+  }
+
+  @Test
+  void registerDraftAsFirstVersionLeavesNoActive() {
+    var registry = new InMemoryPromptRegistry();
+
+    var draft = registry.registerDraft("prompt", "candidate");
+
+    assertEquals(1, draft.version());
+    assertFalse(draft.active());
+    assertNull(registry.resolve("prompt"));
+  }
+
+  @Test
+  void activatePromotesDraft() {
+    var registry = new InMemoryPromptRegistry();
+
+    registry.register("prompt", "live");
+    registry.registerDraft("prompt", "candidate");
+
+    var activated = registry.activate("prompt", 2);
+
+    assertTrue(activated.active());
+    assertEquals(2, activated.version());
+    assertEquals("candidate", registry.resolve("prompt").content());
+    assertFalse(registry.resolve("prompt", 1).active());
+  }
+
+  @Test
+  void activateOlderVersionRollsBack() {
+    var registry = new InMemoryPromptRegistry();
+
+    registry.register("prompt", "v1");
+    registry.register("prompt", "v2");
+
+    var rolledBack = registry.activate("prompt", 1);
+
+    assertTrue(rolledBack.active());
+    assertEquals("v1", registry.resolve("prompt").content());
+    assertFalse(registry.resolve("prompt", 2).active());
+  }
+
+  @Test
+  void activateAlreadyActiveVersionIsIdempotent() {
+    var registry = new InMemoryPromptRegistry();
+
+    registry.register("prompt", "v1");
+
+    var activated = registry.activate("prompt", 1);
+
+    assertTrue(activated.active());
+    assertEquals("v1", registry.resolve("prompt").content());
+  }
+
+  @Test
+  void activateUnknownNameOrVersionThrows() {
+    var registry = new InMemoryPromptRegistry();
+
+    registry.register("prompt", "v1");
+
+    assertThrows(IllegalArgumentException.class, () -> registry.activate("nonexistent", 1));
+    assertThrows(IllegalArgumentException.class, () -> registry.activate("prompt", 2));
+  }
+
+  @Test
+  void registerDraftValidatesLikeRegister() {
+    var registry = new InMemoryPromptRegistry();
+
+    assertThrows(IllegalArgumentException.class, () -> registry.registerDraft("", "content"));
+    assertThrows(IllegalArgumentException.class, () -> registry.registerDraft("name", null));
+  }
+
+  @Test
   void concurrentRegistration() throws Exception {
     var registry = new InMemoryPromptRegistry();
     var threadCount = 8;
