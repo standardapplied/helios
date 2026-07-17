@@ -2,7 +2,71 @@
 
 All notable changes to Helios are documented here. Versions follow [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [2.7.0] — 2026-07-17 — Eval-readiness: usage/cost telemetry, prompt drafts, rollups, scripted Model
+
+Four features driven by consumer gap analysis (prompt management, tracing, and evals for
+production readiness), plus the grounding-citations work that was pending release.
+
+### Added — per-call Usage + cost on spans, rolled up on traces
+
+`Span` and `Trace` gain typed nullable `usage` (`Response.Usage`, four disjoint token
+classes) and `cost` (`CostEstimate`) components. `SpanBuilder.usage(...)`/`.cost(...)`
+record them per model call; `TraceBuilder` rolls both up recursively across the span tree
+at trace completion. `Trace.totalTokens` now derives from the rolled-up usage when
+present, falling back to the legacy `inputTokens`/`outputTokens` attribute parse
+otherwise. Stored traces can now answer "tokens/cost by prompt version", "cache hit
+rate", and "cost per eval group". `Usage.plus(Usage)` sums all five components
+(provider-reported totals survive accumulation); `SessionState.accumulateUsage` reuses
+it.
+
+**DDL delta** (additive, both tables):
+
+```sql
+ALTER TABLE helios_traces ADD COLUMN input_tokens INT,
+  ADD COLUMN output_tokens INT, ADD COLUMN cache_creation_tokens INT,
+  ADD COLUMN cache_read_tokens INT, ADD COLUMN cost_micro_usd BIGINT;
+ALTER TABLE helios_spans ADD COLUMN input_tokens INT,
+  ADD COLUMN output_tokens INT, ADD COLUMN cache_creation_tokens INT,
+  ADD COLUMN cache_read_tokens INT, ADD COLUMN cost_micro_usd BIGINT;
+```
+
+Null columns mean "no usage recorded", distinct from a recorded zero.
+
+### Added — draft prompt versions with explicit activation
+
+`PromptRegistry.registerDraft(name, content)` creates the next version inactive — the
+current active version stays live — and `activate(name, version)` promotes any version
+(also the rollback path), throwing on unknown name/version. This makes
+candidate-vs-baseline prompt evaluation race-free against a shared database: register a
+draft, pin it in the eval runner via `resolve(name, version)`, and promote only when it
+clears the threshold. Both new methods are implemented by `InMemoryPromptRegistry` and
+`PgPromptRegistry`; external `PromptRegistry` implementors must add them.
+`InMemoryPromptRegistry.resolve(name)` now returns the *active* version rather than the
+newest (observable only once drafts exist).
+
+### Added — first-class trace rollups: `PgTraceStore.summarize`
+
+`summarize(TraceRollupKey, TraceFilter)` aggregates stored traces per group — run/error
+counts, duration p50/p95, the four token-class sums, cost, thumbs up/down — grouped by
+`GROUP_ID`, `PROMPT` (name+version), `NAME`, or `MODEL_ID`, with optional equality and
+`start_time` window filters (`TraceFilter`, all bind-parameterized). Eval summaries and
+dashboards no longer need hand-rolled SQL against Helios's private schema. Traces with a
+null grouping dimension are excluded from that rollup.
+
+### Added — `helios-testing` module with `ScriptedModel`
+
+New artifact `ai.singlr:helios-testing` (JPMS `ai.singlr.testing`) for deterministic CI
+evals without a live provider. `ScriptedModel.newBuilder().thenText(...).thenToolCalls(...)`
+replays a fixed turn script through the real `Model` contract: optional per-turn `Usage`,
+structured-output calls parsed through the real `StructuredContentParser` path (tool-call
+turns skip parse, matching provider behavior), fail-fast on script exhaustion, and full
+per-call message capture via `calls()`.
+
+### Note — optimizer events
+
+`HeliosEvent.OptimizerCandidateProposed/Scored` remain declared-but-unemitted SPI. No
+prompt optimizer ships in 2.7.0; consumers building candidate-vs-baseline loops should do
+so product-side on `registerDraft`/`activate`/`resolve(name, version)` + eval groups.
 
 ### Added — grounding citations surfaced on the session path
 
