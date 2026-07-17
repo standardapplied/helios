@@ -13,12 +13,17 @@ import ai.singlr.core.events.HeliosEvent;
 import ai.singlr.core.trace.Annotation;
 import ai.singlr.core.trace.Span;
 import ai.singlr.core.trace.Trace;
+import ai.singlr.core.trace.TraceFilter;
+import ai.singlr.core.trace.TraceRollup;
+import ai.singlr.core.trace.TraceRollupKey;
 import ai.singlr.persistence.mapper.AnnotationMapper;
 import ai.singlr.persistence.mapper.JsonbMapper;
 import ai.singlr.persistence.mapper.SpanMapper;
 import ai.singlr.persistence.mapper.TraceMapper;
+import ai.singlr.persistence.mapper.TraceRollupMapper;
 import ai.singlr.persistence.sql.AnnotationSql;
 import ai.singlr.persistence.sql.SpanSql;
+import ai.singlr.persistence.sql.TraceRollupSql;
 import ai.singlr.persistence.sql.TraceSql;
 import ai.singlr.scimsql.ScimEngine;
 import io.helidon.dbclient.DbClient;
@@ -183,6 +188,30 @@ public class PgTraceStore implements EventSink {
       return PaginatedList.<Trace>newBuilder().withItems(items).withPaginate(paginate).build();
     } catch (Exception e) {
       throw new PgException("Failed to list traces", e);
+    }
+  }
+
+  /**
+   * Aggregates stored traces grouped by the given key: run and error counts, duration percentiles,
+   * token and cost sums, and feedback counts per group. Traces with a null value for a grouping
+   * dimension are excluded — a trace without a {@code groupId} belongs to no eval group.
+   *
+   * @param key the grouping dimension; non-null
+   * @param filter equality/time-window constraints; non-null, {@link TraceFilter#none()} for all
+   * @return one rollup per group, ordered by the grouping dimension values
+   */
+  public List<TraceRollup> summarize(TraceRollupKey key, TraceFilter filter) {
+    Objects.requireNonNull(key, "key");
+    Objects.requireNonNull(filter, "filter");
+    var query = TraceRollupSql.build(key, filter);
+    try {
+      return dbClient
+          .execute()
+          .query(config.qualify(query.sql()), query.params().toArray())
+          .map(row -> TraceRollupMapper.map(row, key))
+          .toList();
+    } catch (Exception e) {
+      throw new PgException("Failed to summarize traces by " + key, e);
     }
   }
 
