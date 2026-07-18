@@ -13,11 +13,19 @@ import java.util.List;
 /**
  * Builds the parameterized aggregation query behind {@code PgTraceStore.summarize}. Filter values
  * always travel as positional bind parameters — never concatenated into the SQL — and the schema
- * stays a {@code %s} placeholder for {@code PgConfig.qualify}.
+ * stays a {@code %s} placeholder for {@code PgConfig.qualify}. The key-to-column mapping lives only
+ * here; {@code TraceRollupMapper} reads dimensions through {@link #dimensions(TraceRollupKey)} so
+ * query and mapper cannot drift.
  */
 public final class TraceRollupSql {
 
   private TraceRollupSql() {}
+
+  /**
+   * One grouping dimension: the {@code helios_traces} column it groups by and the camelCase key
+   * under which its value appears in {@code TraceRollup.key()}.
+   */
+  public record Dimension(String column, String mapKey) {}
 
   /**
    * A rollup query ready for execution: SQL with {@code %s} schema placeholder and the positional
@@ -29,16 +37,16 @@ public final class TraceRollupSql {
     }
   }
 
+  private static final String DURATION_PERCENTILES =
+      "percentile_cont(ARRAY[0.5, 0.95]) WITHIN GROUP (ORDER BY "
+          + "CAST(EXTRACT(EPOCH FROM (end_time - start_time)) * 1000 AS DOUBLE PRECISION))";
+
   private static final String AGGREGATES =
       """
       COUNT(*) AS run_count,
       COUNT(error) AS error_count,
-      CAST(COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY
-          CAST(EXTRACT(EPOCH FROM (end_time - start_time)) * 1000 AS DOUBLE PRECISION)), 0)
-          AS BIGINT) AS duration_p50_millis,
-      CAST(COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY
-          CAST(EXTRACT(EPOCH FROM (end_time - start_time)) * 1000 AS DOUBLE PRECISION)), 0)
-          AS BIGINT) AS duration_p95_millis,
+      CAST(COALESCE((%1$s)[1], 0) AS BIGINT) AS duration_p50_millis,
+      CAST(COALESCE((%1$s)[2], 0) AS BIGINT) AS duration_p95_millis,
       CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT) AS input_tokens,
       CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT) AS output_tokens,
       CAST(COALESCE(SUM(cache_creation_tokens), 0) AS BIGINT) AS cache_creation_tokens,
@@ -47,20 +55,24 @@ public final class TraceRollupSql {
       CAST(COALESCE(SUM(cost_micro_usd), 0) AS BIGINT) AS cost_micro_usd,
       CAST(COALESCE(SUM(thumbs_up_count), 0) AS BIGINT) AS thumbs_up_count,
       CAST(COALESCE(SUM(thumbs_down_count), 0) AS BIGINT) AS thumbs_down_count
-      """;
+      """
+          .formatted(DURATION_PERCENTILES);
 
   /**
-   * The dimension columns for a rollup key, in key-map order.
+   * The grouping dimensions for a rollup key, in key-map order.
    *
    * @param key the grouping dimension
-   * @return the {@code helios_traces} column names to group by
+   * @return column + map-key pairs to group by
    */
-  public static List<String> dimensionColumns(TraceRollupKey key) {
+  public static List<Dimension> dimensions(TraceRollupKey key) {
     return switch (key) {
-      case GROUP_ID -> List.of("group_id");
-      case PROMPT -> List.of("prompt_name", "prompt_version");
-      case NAME -> List.of("name");
-      case MODEL_ID -> List.of("model_id");
+      case GROUP_ID -> List.of(new Dimension("group_id", "groupId"));
+      case PROMPT ->
+          List.of(
+              new Dimension("prompt_name", "promptName"),
+              new Dimension("prompt_version", "promptVersion"));
+      case NAME -> List.of(new Dimension("name", "name"));
+      case MODEL_ID -> List.of(new Dimension("model_id", "modelId"));
     };
   }
 
@@ -72,10 +84,11 @@ public final class TraceRollupSql {
    * @return the SQL and its positional bind parameters
    */
   public static RollupQuery build(TraceRollupKey key, TraceFilter filter) {
-    var dims = String.join(", ", dimensionColumns(key));
+    var columns = dimensions(key).stream().map(Dimension::column).toList();
+    var dims = String.join(", ", columns);
     var where = new StringBuilder();
     var params = new ArrayList<Object>();
-    for (var column : dimensionColumns(key)) {
+    for (var column : columns) {
       and(where).append(column).append(" IS NOT NULL");
     }
     if (filter.name() != null) {

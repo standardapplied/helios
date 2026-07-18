@@ -107,6 +107,7 @@ final class PgTestSupport {
               "helios_sessions",
               "helios_archive",
               "helios_core_blocks",
+              "helios_spans",
               "helios_traces",
               "helios_annotations",
               "helios_prompts")) {

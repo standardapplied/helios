@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS helios_prompts (
 CREATE INDEX IF NOT EXISTS idx_helios_prompts_name
     ON helios_prompts (name);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_helios_prompts_single_active
+    ON helios_prompts (name) WHERE active;
+
 CREATE TABLE IF NOT EXISTS helios_traces (
     id                UUID            PRIMARY KEY,
     name              VARCHAR(255)    NOT NULL,

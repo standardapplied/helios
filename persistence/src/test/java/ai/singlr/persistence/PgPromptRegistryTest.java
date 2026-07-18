@@ -238,6 +238,28 @@ class PgPromptRegistryTest {
   }
 
   @Test
+  void databaseRejectsSecondActiveRowForSameName() {
+    registry.register("prompt", "live");
+
+    assertThrows(
+        Exception.class,
+        () ->
+            PgTestSupport.dbClient()
+                .execute()
+                .dml(
+                    """
+                    INSERT INTO helios_prompts (id, name, content, version, active, variables,
+                        created_at)
+                    VALUES (CAST(? AS UUID), 'prompt', 'rogue', 2, TRUE, '{}', now())
+                    """,
+                    ai.singlr.core.common.Ids.newId().toString()));
+
+    var stillActive = registry.resolve("prompt");
+    assertEquals("live", stillActive.content());
+    assertEquals(1, stillActive.version());
+  }
+
+  @Test
   void registerDraftValidatesLikeRegister() {
     assertThrows(IllegalArgumentException.class, () -> registry.registerDraft("", "content"));
     assertThrows(IllegalArgumentException.class, () -> registry.registerDraft("name", null));

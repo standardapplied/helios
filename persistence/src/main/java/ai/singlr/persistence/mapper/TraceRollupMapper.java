@@ -7,11 +7,14 @@ package ai.singlr.persistence.mapper;
 
 import ai.singlr.core.trace.TraceRollup;
 import ai.singlr.core.trace.TraceRollupKey;
+import ai.singlr.persistence.sql.TraceRollupSql;
 import io.helidon.dbclient.DbRow;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
-/** Maps Helidon {@link DbRow} results of a rollup query to {@link TraceRollup} records. */
+/**
+ * Maps Helidon {@link DbRow} results of a rollup query to {@link TraceRollup} records. Dimension
+ * columns and key names come from {@link TraceRollupSql#dimensions(TraceRollupKey)} — the single
+ * definition the query builder also uses.
+ */
 public final class TraceRollupMapper {
 
   private TraceRollupMapper() {}
@@ -24,33 +27,24 @@ public final class TraceRollupMapper {
    * @return the mapped rollup
    */
   public static TraceRollup map(DbRow row, TraceRollupKey key) {
-    return new TraceRollup(
-        keyValues(row, key),
-        row.column("run_count").getLong(),
-        row.column("error_count").getLong(),
-        row.column("duration_p50_millis").getLong(),
-        row.column("duration_p95_millis").getLong(),
-        row.column("input_tokens").getLong(),
-        row.column("output_tokens").getLong(),
-        row.column("cache_creation_tokens").getLong(),
-        row.column("cache_read_tokens").getLong(),
-        row.column("total_tokens").getLong(),
-        row.column("cost_micro_usd").getLong(),
-        row.column("thumbs_up_count").getLong(),
-        row.column("thumbs_down_count").getLong());
-  }
-
-  private static Map<String, String> keyValues(DbRow row, TraceRollupKey key) {
-    var values = new LinkedHashMap<String, String>();
-    switch (key) {
-      case GROUP_ID -> values.put("groupId", row.column("group_id").getString());
-      case PROMPT -> {
-        values.put("promptName", row.column("prompt_name").getString());
-        values.put("promptVersion", String.valueOf(row.column("prompt_version").getInt()));
-      }
-      case NAME -> values.put("name", row.column("name").getString());
-      case MODEL_ID -> values.put("modelId", row.column("model_id").getString());
+    var builder = TraceRollup.newBuilder();
+    for (var dimension : TraceRollupSql.dimensions(key)) {
+      builder.withKeyValue(
+          dimension.mapKey(), String.valueOf(row.column(dimension.column()).get(Object.class)));
     }
-    return values;
+    return builder
+        .withRunCount(row.column("run_count").getLong())
+        .withErrorCount(row.column("error_count").getLong())
+        .withDurationP50Millis(row.column("duration_p50_millis").getLong())
+        .withDurationP95Millis(row.column("duration_p95_millis").getLong())
+        .withInputTokens(row.column("input_tokens").getLong())
+        .withOutputTokens(row.column("output_tokens").getLong())
+        .withCacheCreationTokens(row.column("cache_creation_tokens").getLong())
+        .withCacheReadTokens(row.column("cache_read_tokens").getLong())
+        .withTotalTokens(row.column("total_tokens").getLong())
+        .withCostMicroUsd(row.column("cost_micro_usd").getLong())
+        .withThumbsUpCount(row.column("thumbs_up_count").getLong())
+        .withThumbsDownCount(row.column("thumbs_down_count").getLong())
+        .build();
   }
 }

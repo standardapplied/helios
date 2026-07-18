@@ -16,6 +16,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BinaryOperator;
+import java.util.function.Function;
 
 /**
  * Mutable builder for constructing traces during agent execution.
@@ -202,9 +204,9 @@ public final class TraceBuilder implements SpanContainer {
     ended = true;
     var endTime = Ids.now();
     var duration = Duration.between(startTime, endTime);
-    var usage = rollUpUsage(completedSpans);
-    var cost = rollUpCost(completedSpans);
-    var totalTokens = usage != null ? usage.totalTokens() : computeTotalTokens();
+    var usage = rollUp(completedSpans, Span::usage, Usage::plus);
+    var cost = rollUp(completedSpans, Span::cost, CostEstimate::plus);
+    var totalTokens = computeTotalTokens(completedSpans);
     return new Trace(
         id,
         name,
@@ -230,41 +232,37 @@ public final class TraceBuilder implements SpanContainer {
         labels);
   }
 
-  private static Usage rollUpUsage(List<Span> spans) {
-    Usage total = null;
+  private static <T> T rollUp(List<Span> spans, Function<Span, T> value, BinaryOperator<T> sum) {
+    T total = null;
+    for (var span : spans) {
+      var own = value.apply(span);
+      if (own != null) {
+        total = total == null ? own : sum.apply(total, own);
+      }
+      var fromChildren = rollUp(span.children(), value, sum);
+      if (fromChildren != null) {
+        total = total == null ? fromChildren : sum.apply(total, fromChildren);
+      }
+    }
+    return total;
+  }
+
+  /**
+   * Sums tokens per span, recursively: a span's typed {@link Span#usage()} wins when present;
+   * otherwise the legacy {@code inputTokens}/{@code outputTokens} attributes count for model-call
+   * spans. Per-span resolution keeps partially migrated instrumentation (some spans typed, some
+   * attribute-based) summing every span instead of dropping the legacy ones.
+   */
+  private static int computeTotalTokens(List<Span> spans) {
+    int total = 0;
     for (var span : spans) {
       if (span.usage() != null) {
-        total = total == null ? span.usage() : total.plus(span.usage());
-      }
-      var childTotal = rollUpUsage(span.children());
-      if (childTotal != null) {
-        total = total == null ? childTotal : total.plus(childTotal);
-      }
-    }
-    return total;
-  }
-
-  private static CostEstimate rollUpCost(List<Span> spans) {
-    CostEstimate total = null;
-    for (var span : spans) {
-      if (span.cost() != null) {
-        total = total == null ? span.cost() : total.plus(span.cost());
-      }
-      var childTotal = rollUpCost(span.children());
-      if (childTotal != null) {
-        total = total == null ? childTotal : total.plus(childTotal);
-      }
-    }
-    return total;
-  }
-
-  private int computeTotalTokens() {
-    int total = 0;
-    for (var span : completedSpans) {
-      if (span.kind() == SpanKind.MODEL_CALL) {
+        total += span.usage().totalTokens();
+      } else if (span.kind() == SpanKind.MODEL_CALL) {
         total += parseTokenAttribute(span.attributes().get("inputTokens"));
         total += parseTokenAttribute(span.attributes().get("outputTokens"));
       }
+      total += computeTotalTokens(span.children());
     }
     return total;
   }

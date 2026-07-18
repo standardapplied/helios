@@ -51,7 +51,13 @@ public class InMemoryPromptRegistry implements PromptRegistry {
     if (versions == null) {
       return null;
     }
-    return versions.stream().filter(Prompt::active).findFirst().orElse(null);
+    for (var i = versions.size() - 1; i >= 0; i--) {
+      var prompt = versions.get(i);
+      if (prompt.active()) {
+        return prompt;
+      }
+    }
+    return null;
   }
 
   @Override

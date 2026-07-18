@@ -336,6 +336,34 @@ class TraceBuilderTest {
   }
 
   @Test
+  void mixedTypedAndAttributeSpansBothCountTowardTotalTokens() {
+    var builder = TraceBuilder.start("agent-run");
+    builder.span("model.chat", SpanKind.MODEL_CALL).usage(Usage.of(10, 5)).end();
+    var legacy = builder.span("model.chat", SpanKind.MODEL_CALL);
+    legacy.attribute("inputTokens", "100").attribute("outputTokens", "50");
+    legacy.end();
+
+    var trace = builder.end();
+
+    assertEquals(Usage.of(10, 5), trace.usage());
+    assertEquals(165, trace.totalTokens(), "typed and legacy spans both count");
+  }
+
+  @Test
+  void nestedLegacyAttributeSpansCountTowardTotalTokens() {
+    var builder = TraceBuilder.start("agent-run");
+    var turnSpan = builder.span("turn", SpanKind.AGENT);
+    var nested = turnSpan.span("model.chat", SpanKind.MODEL_CALL);
+    nested.attribute("inputTokens", "100").attribute("outputTokens", "50");
+    nested.end();
+    turnSpan.end();
+
+    var trace = builder.end();
+
+    assertEquals(150, trace.totalTokens(), "attribute tokens on nested spans are counted");
+  }
+
+  @Test
   void costRollsUpWithoutUsage() {
     var builder = TraceBuilder.start("agent-run");
     builder.span("model.chat", SpanKind.MODEL_CALL).cost(CostEstimate.ofMicroUsd(42L)).end();

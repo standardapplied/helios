@@ -2,22 +2,43 @@
 
 All notable changes to Helios are documented here. Versions follow [SemVer](https://semver.org/).
 
-## [2.7.0] — 2026-07-17 — Eval-readiness: usage/cost telemetry, prompt drafts, rollups, scripted Model
+## [2.7.0] — 2026-07-18 — Eval-readiness: usage/cost telemetry, prompt drafts, rollups, scripted Model
 
 Four features driven by consumer gap analysis (prompt management, tracing, and evals for
 production readiness), plus the grounding-citations work that was pending release.
+
+### Breaking
+
+- **`Trace` and `Span` canonical record constructors changed arity** (both gain `usage` +
+  `cost` components). Code constructing either positionally must add the two arguments;
+  builder call sites are unaffected. Persisted rows and the `Trace.Builder`/`Span.Builder`
+  APIs remain compatible.
+- **`PromptRegistry` gains two abstract methods** (`registerDraft`, `activate`). External
+  implementations must add them. They are deliberately not defaults — a registry that
+  silently cannot draft/activate would defeat the safe-iteration contract.
+- **`QueryEvent.AssistantCitations`** is a new 17th `QueryEvent` subtype (breaks
+  exhaustive `switch` consumers without a `default` branch) — see the citations entry
+  below.
+- **Session usage accumulation now fails fast on overflow.** `SessionState` accumulates
+  per-turn usage via the new `Usage.plus`, which uses `Math.addExact`; a session whose
+  cumulative token counters exceed `Integer.MAX_VALUE` now terminates with an error
+  instead of silently wrapping negative (which corrupted budget math).
 
 ### Added — per-call Usage + cost on spans, rolled up on traces
 
 `Span` and `Trace` gain typed nullable `usage` (`Response.Usage`, four disjoint token
 classes) and `cost` (`CostEstimate`) components. `SpanBuilder.usage(...)`/`.cost(...)`
 record them per model call; `TraceBuilder` rolls both up recursively across the span tree
-at trace completion. `Trace.totalTokens` now derives from the rolled-up usage when
-present, falling back to the legacy `inputTokens`/`outputTokens` attribute parse
-otherwise. Stored traces can now answer "tokens/cost by prompt version", "cache hit
-rate", and "cost per eval group". `Usage.plus(Usage)` sums all five components
-(provider-reported totals survive accumulation); `SessionState.accumulateUsage` reuses
-it.
+at trace completion. `Trace.totalTokens` resolves per span, recursively: a span's typed
+usage wins when present, otherwise the legacy `inputTokens`/`outputTokens` attributes
+count for model-call spans — partially migrated instrumentation sums every span instead
+of dropping the legacy ones (this also fixes a pre-2.7 gap where attribute tokens on
+*nested* spans were never counted). Stored traces can now answer "tokens/cost by prompt
+version", "cache hit rate", and "cost per eval group". `Usage.plus(Usage)` sums all five
+components (provider-reported totals survive accumulation); `SessionState.accumulateUsage`
+reuses it. Persistence stores the four token classes; a reconstructed `Usage`'s total is
+their sum (the trace-level `total_tokens` column preserves the original trace total
+independently).
 
 **DDL delta** (additive, both tables):
 
@@ -43,6 +64,19 @@ clears the threshold. Both new methods are implemented by `InMemoryPromptRegistr
 `PgPromptRegistry`; external `PromptRegistry` implementors must add them.
 `InMemoryPromptRegistry.resolve(name)` now returns the *active* version rather than the
 newest (observable only once drafts exist).
+
+The "at most one active version per name" invariant is now database-enforced via a
+partial unique index, closing a race where concurrent `register` + `activate` could
+commit two active rows under READ COMMITTED (the loser now fails loudly and retries):
+
+```sql
+-- Deduplicate first if a historical race left multiple active rows per name:
+--   UPDATE helios_prompts p SET active = FALSE
+--   WHERE active AND version < (SELECT MAX(version) FROM helios_prompts q
+--                               WHERE q.name = p.name AND q.active);
+CREATE UNIQUE INDEX idx_helios_prompts_single_active
+    ON helios_prompts (name) WHERE active;
+```
 
 ### Added — first-class trace rollups: `PgTraceStore.summarize`
 

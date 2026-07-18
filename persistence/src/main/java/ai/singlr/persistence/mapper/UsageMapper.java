@@ -22,6 +22,11 @@ public final class UsageMapper {
   /**
    * Reads the four token-class columns into a {@link Usage}, or {@code null} when none of them was
    * recorded. A row with any non-null class treats the absent classes as zero.
+   *
+   * <p>Only the four classes are persisted, so the reconstructed {@code totalTokens} is their sum.
+   * A provider-reported total covering token classes outside the four (possible via the canonical
+   * {@code Usage} constructor) is not round-tripped; the trace-level {@code total_tokens} column
+   * preserves the trace's original total independently.
    */
   public static Usage usage(DbRow row) {
     var input = intOrNull(row, "input_tokens");
