@@ -24,7 +24,7 @@ jobs:
           gpg-passphrase: GPG_PASSPHRASE
 
       - name: Deploy to Maven Central
-        run: mvn clean deploy -Prelease --batch-mode -pl core,session,runtime,gemini,anthropic,openai,onnx,persistence,repl
+        run: mvn clean deploy -Prelease --batch-mode -pl core,session,runtime,gemini,anthropic,openai,onnx,persistence,repl,testing
         env:
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
