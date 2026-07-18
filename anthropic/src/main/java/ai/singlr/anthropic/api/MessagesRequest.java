@@ -52,13 +52,15 @@ public record MessagesRequest(
   }
 
   /**
-   * Copy of this request with a different message list — used by pause_turn continuation, which
-   * re-sends the identical request plus the paused assistant content appended.
+   * The pause_turn continuation shape: this request with the paused assistant content appended to
+   * the conversation and {@code tool_choice} cleared — the API rejects a forced tool choice when
+   * the final message is an assistant message, and any forced choice was already honoured by the
+   * paused segment.
    *
-   * @param messages the replacement conversation; non-null
-   * @return a copy sharing every other field
+   * @param messages the conversation including the trailing paused assistant entry; non-null
+   * @return a copy sharing every other field, with {@code tool_choice} null
    */
-  public MessagesRequest withMessages(List<MessageEntry> messages) {
+  public MessagesRequest continuationWith(List<MessageEntry> messages) {
     return new MessagesRequest(
         model,
         maxTokens,
@@ -66,7 +68,7 @@ public record MessagesRequest(
         system,
         stream,
         tools,
-        toolChoice,
+        null,
         temperature,
         topP,
         stopSequences,

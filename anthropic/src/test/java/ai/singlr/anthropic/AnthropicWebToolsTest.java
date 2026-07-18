@@ -297,7 +297,7 @@ class AnthropicWebToolsTest {
       """;
 
   @Test
-  void pauseTurnContinuesAutomaticallyAndMergesSegments() {
+  void pauseTurnContinuesAutomaticallyAndMergesSegments() throws Exception {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
     var m = model(config);
     var initial = m.buildRequest(List.of(Message.user("research this")), List.of(), null);
@@ -323,6 +323,141 @@ class AnthropicWebToolsTest {
     var echoed = continuation.messages().getLast();
     assertEquals("assistant", echoed.role());
     assertInstanceOf(List.class, echoed.content(), "continuation echoes the paused raw content");
+
+    var mergedRaw = response.metadata().get(AnthropicModel.RAW_CONTENT_KEY);
+    assertNotNull(mergedRaw);
+    @SuppressWarnings("unchecked")
+    var mergedBlocks = (List<Map<String, Object>>) objectMapper.readValue(mergedRaw, List.class);
+    assertEquals(
+        "server_tool_use", mergedBlocks.getFirst().get("type"), "paused segment blocks retained");
+    assertEquals("text", mergedBlocks.getLast().get("type"), "final segment blocks merged in");
+    assertEquals("Done.", mergedBlocks.getLast().get("text"));
+  }
+
+  @Test
+  void pauseBeforeAnyServerBlockIsStillResumable() {
+    var pausedTextOnly =
+        """
+        event: message_start
+        data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1}}}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Starting."}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":0}
+
+        event: message_delta
+        data: {"type":"message_delta","delta":{"stop_reason":"pause_turn","stop_sequence":null},"usage":{"output_tokens":2}}
+
+        event: message_stop
+        data: {"type":"message_stop"}
+
+        """;
+    var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
+    var m = model(config);
+    var initial = m.buildRequest(List.of(Message.user("go")), List.of(), null);
+    var segments = new ArrayList<>(List.of(pausedTextOnly, FINAL_SEGMENT_SSE));
+
+    var response = m.drainWithContinuation(initial, request -> iterator(segments.removeFirst()));
+
+    assertEquals("Starting.Done.", response.content());
+    assertEquals("end_turn", response.metadata().get(AnthropicModel.STOP_REASON_KEY));
+  }
+
+  @Test
+  void continuationClearsForcedToolChoice() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("k")
+            .withWebSearch(true)
+            .withToolChoice(new ai.singlr.core.model.ToolChoice.Any())
+            .build();
+    var m = model(config);
+    var initial = m.buildRequest(List.of(Message.user("go")), List.of(), null);
+    assertNotNull(initial.toolChoice(), "precondition: forced tool choice rides the base request");
+
+    var openedRequests = new ArrayList<MessagesRequest>();
+    var segments = new ArrayList<>(List.of(PAUSED_SEGMENT_SSE, FINAL_SEGMENT_SSE));
+    m.drainWithContinuation(
+        initial,
+        request -> {
+          openedRequests.add(request);
+          return iterator(segments.removeFirst());
+        });
+
+    assertNull(
+        openedRequests.get(1).toolChoice(),
+        "forced tool_choice with a trailing assistant message is rejected by the API");
+  }
+
+  @Test
+  void refusalFinishSurvivesEarlierToolCalls() {
+    var refusalAfterToolUse =
+        """
+        event: message_start
+        data: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":1}}}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"lookup"}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":0}
+
+        event: message_delta
+        data: {"type":"message_delta","delta":{"stop_reason":"refusal","stop_sequence":null},"usage":{"output_tokens":2}}
+
+        event: message_stop
+        data: {"type":"message_stop"}
+
+        """;
+    var done = drainDone(refusalAfterToolUse);
+
+    assertEquals(
+        ai.singlr.core.model.FinishReason.REFUSAL,
+        done.response().finishReason(),
+        "a provider refusal must not be reclassified as TOOL_CALLS");
+  }
+
+  @Test
+  void cacheBreakpointStaysOffServerToolEntries() throws Exception {
+    var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
+    var m = model(config);
+    var clientTool =
+        ai.singlr.core.tool.Tool.newBuilder()
+            .withName("lookup")
+            .withDescription("Look something up")
+            .withExecutor((args, ctx) -> ai.singlr.core.tool.ToolResult.success("ok"))
+            .build();
+
+    var request = m.buildRequest(List.of(Message.user("Hi")), List.of(clientTool), null);
+
+    assertNotNull(request.tools().getFirst().cacheControl(), "client tail carries the breakpoint");
+    assertNull(
+        request.tools().getLast().cacheControl(), "server entries stay the documented shape");
+  }
+
+  @Test
+  void clientToolNameCollidingWithServerToolFailsFast() {
+    var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
+    var collider =
+        ai.singlr.core.tool.Tool.newBuilder()
+            .withName("web_search")
+            .withDescription("clashes")
+            .withExecutor((args, ctx) -> ai.singlr.core.tool.ToolResult.success("ok"))
+            .build();
+
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> model(config).buildRequest(List.of(Message.user("Hi")), List.of(collider), null));
+    assertTrue(ex.getMessage().contains("web_search"));
   }
 
   @Test
@@ -353,10 +488,9 @@ class AnthropicWebToolsTest {
     }
   }
 
-  private AnthropicModel.StreamingIterator iterator(String sse) {
+  private AnthropicStreamingIterator iterator(String sse) {
     var in = new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8));
-    return new AnthropicModel.StreamingIterator(
-        fakeResponse(in), objectMapper, Duration.ofSeconds(5));
+    return new AnthropicStreamingIterator(fakeResponse(in), objectMapper, Duration.ofSeconds(5));
   }
 
   private static HttpResponse<InputStream> fakeResponse(InputStream body) {

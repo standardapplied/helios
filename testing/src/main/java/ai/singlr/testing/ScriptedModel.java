@@ -33,7 +33,8 @@ import tools.jackson.databind.json.JsonMapper;
  */
 public final class ScriptedModel implements Model {
 
-  private record Turn(String text, List<ToolCall> toolCalls, Usage usage) {}
+  private record Turn(
+      String text, List<ToolCall> toolCalls, Usage usage, FinishReason finishReason) {}
 
   private final String id;
   private final List<Turn> turns;
@@ -71,7 +72,7 @@ public final class ScriptedModel implements Model {
     return Response.newBuilder()
         .withContent(turn.text())
         .withToolCalls(turn.toolCalls())
-        .withFinishReason(turn.toolCalls().isEmpty() ? FinishReason.STOP : FinishReason.TOOL_CALLS)
+        .withFinishReason(turn.finishReason())
         .withUsage(turn.usage())
         .build();
   }
@@ -85,12 +86,13 @@ public final class ScriptedModel implements Model {
         Response.newBuilder(outputSchema.type())
             .withContent(turn.text())
             .withToolCalls(turn.toolCalls())
-            .withUsage(turn.usage());
-    if (!turn.toolCalls().isEmpty()) {
-      return builder.withFinishReason(FinishReason.TOOL_CALLS).build();
+            .withUsage(turn.usage())
+            .withFinishReason(turn.finishReason());
+    if (!turn.toolCalls().isEmpty() || turn.finishReason() == FinishReason.REFUSAL) {
+      return builder.build();
     }
     var parsed = StructuredContentParser.parse(turn.text(), outputSchema, JSON_ADAPTER);
-    return builder.withParsed(parsed).withFinishReason(FinishReason.STOP).build();
+    return builder.withParsed(parsed).build();
   }
 
   /**
@@ -156,7 +158,21 @@ public final class ScriptedModel implements Model {
     public Builder thenText(String text, Usage usage) {
       Objects.requireNonNull(text, "text must not be null");
       Objects.requireNonNull(usage, "usage must not be null");
-      turns.add(new Turn(text, List.of(), usage));
+      turns.add(new Turn(text, List.of(), usage, FinishReason.STOP));
+      return this;
+    }
+
+    /**
+     * Scripts a provider-safety refusal turn ({@link FinishReason#REFUSAL}) so agent tests can
+     * exercise refusal handling deterministically — e.g. asserting the session surfaces {@code
+     * ResultMessage.Refusal}.
+     *
+     * @param text the refusal text the provider surfaced; may be empty for pre-output declines
+     * @return this builder for chaining
+     */
+    public Builder thenRefusal(String text) {
+      Objects.requireNonNull(text, "text must not be null");
+      turns.add(new Turn(text, List.of(), Usage.of(0, 0), FinishReason.REFUSAL));
       return this;
     }
 
@@ -182,7 +198,7 @@ public final class ScriptedModel implements Model {
       if (toolCalls == null || toolCalls.length == 0) {
         throw new IllegalArgumentException("thenToolCalls requires at least one tool call");
       }
-      turns.add(new Turn(null, List.of(toolCalls), usage));
+      turns.add(new Turn(null, List.of(toolCalls), usage, FinishReason.TOOL_CALLS));
       return this;
     }
 

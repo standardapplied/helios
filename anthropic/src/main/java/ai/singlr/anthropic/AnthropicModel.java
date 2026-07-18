@@ -5,10 +5,8 @@
 
 package ai.singlr.anthropic;
 
-import ai.singlr.anthropic.api.ApiStreamEvent;
 import ai.singlr.anthropic.api.CacheControl;
 import ai.singlr.anthropic.api.ContentBlock;
-import ai.singlr.anthropic.api.ContentDelta;
 import ai.singlr.anthropic.api.MessagesRequest;
 import ai.singlr.anthropic.api.OutputConfig;
 import ai.singlr.anthropic.api.SystemContent;
@@ -17,7 +15,6 @@ import ai.singlr.anthropic.api.ToolChoiceConfig;
 import ai.singlr.anthropic.api.ToolDefinition;
 import ai.singlr.core.common.HttpClientFactory;
 import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Citation;
 import ai.singlr.core.model.CloseableIterator;
 import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.Message;
@@ -33,31 +30,18 @@ import ai.singlr.core.model.TransientStreamException;
 import ai.singlr.core.schema.OutputSchema;
 import ai.singlr.core.schema.StructuredContentParser;
 import ai.singlr.core.tool.Tool;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
-import java.util.TreeSet;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -135,7 +119,7 @@ public class AnthropicModel implements Model {
   }
 
   AnthropicModel(String wireModelId, ModelConfig config) {
-    this(wireModelId, AnthropicModelId.fromId(wireModelId), config, CachePolicy.shortLived());
+    this(wireModelId, AnthropicModelId.fromWireId(wireModelId), config, CachePolicy.shortLived());
   }
 
   private AnthropicModel(
@@ -294,7 +278,7 @@ public class AnthropicModel implements Model {
   private final class PauseContinuingIterator implements CloseableIterator<StreamEvent> {
 
     private final MessagesRequest baseRequest;
-    private StreamingIterator current;
+    private AnthropicStreamingIterator current;
     private Response<Void> mergedSoFar;
     private int continuations;
 
@@ -350,7 +334,7 @@ public class AnthropicModel implements Model {
     }
   }
 
-  private StreamingIterator openStream(MessagesRequest request)
+  private AnthropicStreamingIterator openStream(MessagesRequest request)
       throws IOException, InterruptedException {
     var jsonBody = serializeRequest(request);
     var httpRequest = buildHttpRequest(jsonBody);
@@ -363,13 +347,13 @@ public class AnthropicModel implements Model {
             httpResponse.statusCode());
       }
     }
-    return new StreamingIterator(httpResponse, objectMapper, config.streamIdleTimeout());
+    return new AnthropicStreamingIterator(httpResponse, objectMapper, config.streamIdleTimeout());
   }
 
   /**
-   * Drive {@link #openStream(MessagesRequest)} and {@link #drainToResponse(StreamingIterator)},
-   * promoting transport-layer failures to the typed signals the session loop's retry policy
-   * understands.
+   * Drive {@link #openStream(MessagesRequest)} and {@link
+   * #drainToResponse(AnthropicStreamingIterator)}, promoting transport-layer failures to the typed
+   * signals the session loop's retry policy understands.
    *
    * <p>Mapping:
    *
@@ -396,7 +380,8 @@ public class AnthropicModel implements Model {
    * production this is {@link #openStream(MessagesRequest)}; tests substitute canned iterators.
    */
   interface StreamOpener {
-    StreamingIterator open(MessagesRequest request) throws IOException, InterruptedException;
+    AnthropicStreamingIterator open(MessagesRequest request)
+        throws IOException, InterruptedException;
   }
 
   /**
@@ -454,7 +439,7 @@ public class AnthropicModel implements Model {
     }
     var messages = new ArrayList<>(base.messages());
     messages.add(new MessagesRequest.MessageEntry("assistant", blocks));
-    return base.withMessages(messages);
+    return base.continuationWith(messages);
   }
 
   /**
@@ -497,14 +482,17 @@ public class AnthropicModel implements Model {
     }
 
     var metadata = new HashMap<String, String>(second.metadata());
-    var mergedRaw =
-        mergeRawContent(first.metadata().get(RAW_CONTENT_KEY), metadata.get(RAW_CONTENT_KEY));
+    var mergedRaw = mergeRawContent(first, second);
     if (mergedRaw != null) {
       metadata.put(RAW_CONTENT_KEY, mergedRaw);
     }
+    mergeThinkingMetadata(first.metadata(), metadata);
 
+    // Only promote a STOP into TOOL_CALLS — the defensive override for streams whose final stop
+    // reason lags behind an emitted tool_use block. REFUSAL / LENGTH / ERROR from the final
+    // segment must survive the merge so the session loop routes them correctly.
     var finishReason = second.finishReason();
-    if (!toolCalls.isEmpty() && finishReason != FinishReason.TOOL_CALLS) {
+    if (!toolCalls.isEmpty() && finishReason == FinishReason.STOP) {
       finishReason = FinishReason.TOOL_CALLS;
     }
 
@@ -519,20 +507,89 @@ public class AnthropicModel implements Model {
         .build();
   }
 
-  @SuppressWarnings("unchecked")
-  private String mergeRawContent(String firstRaw, String secondRaw) {
-    if (firstRaw == null || firstRaw.isEmpty()) {
-      return secondRaw;
-    }
-    if (secondRaw == null || secondRaw.isEmpty()) {
-      return firstRaw;
+  /**
+   * Merge the two segments' content-block arrays for the verbatim echo. A segment without {@link
+   * #RAW_CONTENT_KEY} (e.g. a text-only continuation that used no server tools) is reconstructed
+   * from its response — signed thinking blocks, text, and client tool_use — so the merged echo
+   * carries the <em>entire</em> assistant turn, not just the paused prefix.
+   */
+  private String mergeRawContent(Response<Void> first, Response<Void> second) {
+    var combined = new ArrayList<Object>(rawBlocksOf(first));
+    combined.addAll(rawBlocksOf(second));
+    if (combined.isEmpty()) {
+      return null;
     }
     try {
-      var combined = new ArrayList<Object>(objectMapper.readValue(firstRaw, List.class));
-      combined.addAll(objectMapper.readValue(secondRaw, List.class));
       return objectMapper.writeValueAsString(combined);
     } catch (Exception e) {
       throw new AnthropicException("Failed to merge paused-turn content arrays", e);
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private List<Object> rawBlocksOf(Response<Void> segment) {
+    var raw = segment.metadata().get(RAW_CONTENT_KEY);
+    if (raw != null && !raw.isEmpty()) {
+      try {
+        return (List<Object>) objectMapper.readValue(raw, List.class);
+      } catch (Exception e) {
+        throw new AnthropicException("Failed to decode segment content array", e);
+      }
+    }
+    var blocks = new ArrayList<Object>();
+    for (var tb : decodeThinkingBlocks(segment.metadata())) {
+      var block = new LinkedHashMap<String, Object>();
+      block.put("type", "thinking");
+      block.put("thinking", tb.text());
+      block.put("signature", tb.signature());
+      blocks.add(block);
+    }
+    if (segment.content() != null && !segment.content().isEmpty()) {
+      var block = new LinkedHashMap<String, Object>();
+      block.put("type", "text");
+      block.put("text", segment.content());
+      blocks.add(block);
+    }
+    for (var tc : segment.toolCalls()) {
+      var block = new LinkedHashMap<String, Object>();
+      block.put("type", "tool_use");
+      block.put("id", tc.id());
+      block.put("name", tc.name());
+      block.put("input", tc.arguments());
+      blocks.add(block);
+    }
+    return blocks;
+  }
+
+  /**
+   * Fold the first segment's thinking metadata into the merged map (which is seeded from the second
+   * segment): {@link #THINKING_BLOCKS_KEY} arrays concatenate in segment order, and the legacy
+   * single-block keys survive only when the combined turn has exactly one thinking block.
+   */
+  @SuppressWarnings("unchecked")
+  private void mergeThinkingMetadata(Map<String, String> firstMeta, Map<String, String> merged) {
+    var firstBlocks = decodeThinkingBlocks(firstMeta);
+    if (firstBlocks.isEmpty()) {
+      return;
+    }
+    var combined = new ArrayList<ThinkingBlock>(firstBlocks);
+    combined.addAll(
+        decodeThinkingBlocks(merged.containsKey(THINKING_BLOCKS_KEY) ? merged : Map.of()));
+    try {
+      var arr = new ArrayList<Map<String, String>>(combined.size());
+      for (var tb : combined) {
+        arr.add(Map.of("text", tb.text(), "signature", tb.signature()));
+      }
+      merged.put(THINKING_BLOCKS_KEY, objectMapper.writeValueAsString(arr));
+    } catch (Exception e) {
+      throw new AnthropicException("Failed to merge thinking metadata", e);
+    }
+    if (combined.size() == 1) {
+      merged.put(THINKING_KEY, combined.getFirst().text());
+      merged.put(THINKING_SIGNATURE_KEY, combined.getFirst().signature());
+    } else {
+      merged.remove(THINKING_KEY);
+      merged.remove(THINKING_SIGNATURE_KEY);
     }
   }
 
@@ -555,7 +612,7 @@ public class AnthropicModel implements Model {
    * </ul>
    */
   @SuppressWarnings("unchecked")
-  private Response<Void> drainToResponse(StreamingIterator iterator) {
+  private Response<Void> drainToResponse(AnthropicStreamingIterator iterator) {
     while (iterator.hasNext()) {
       var event = iterator.next();
       if (event instanceof StreamEvent.Done(var response)) {
@@ -617,25 +674,31 @@ public class AnthropicModel implements Model {
       systemInstruction = appendSystemText(systemInstruction, instruction);
     }
 
-    List<ToolDefinition> toolDefs = null;
+    List<ToolDefinition> clientToolDefs = null;
     if (tools != null && !tools.isEmpty()) {
-      toolDefs =
-          new ArrayList<>(
-              tools.stream()
-                  .map(
-                      t ->
-                          new ToolDefinition(t.name(), t.description(), t.parametersAsJsonSchema()))
-                  .toList());
+      clientToolDefs =
+          tools.stream()
+              .map(t -> new ToolDefinition(t.name(), t.description(), t.parametersAsJsonSchema()))
+              .toList();
     }
-    if (config.webSearch() || config.webFetch()) {
-      if (toolDefs == null) {
-        toolDefs = new ArrayList<>();
-      }
-      if (config.webSearch()) {
-        toolDefs.add(ToolDefinition.webSearch());
-      }
-      if (config.webFetch()) {
-        toolDefs.add(ToolDefinition.webFetch());
+    var serverToolDefs = new ArrayList<ToolDefinition>();
+    if (config.webSearch()) {
+      serverToolDefs.add(ToolDefinition.webSearch());
+    }
+    if (config.webFetch()) {
+      serverToolDefs.add(ToolDefinition.webFetch());
+    }
+    if (clientToolDefs != null && !serverToolDefs.isEmpty()) {
+      for (var server : serverToolDefs) {
+        for (var client : clientToolDefs) {
+          if (server.name().equals(client.name())) {
+            throw new IllegalArgumentException(
+                "Client tool name '"
+                    + client.name()
+                    + "' collides with the enabled Anthropic server tool of the same name;"
+                    + " rename the client tool or disable the toggle");
+          }
+        }
       }
     }
 
@@ -676,14 +739,30 @@ public class AnthropicModel implements Model {
     if (cachePolicy.enabled()) {
       var breakpoint = cachePolicy.breakpoint();
       applySystemWithCache(builder, systemInstruction, breakpoint);
-      builder.withTools(withCachedTail(toolDefs, breakpoint));
+      // The tools breakpoint anchors to the last CLIENT tool; server-tool entries keep the exact
+      // documented {type, name} shape and follow after. The system breakpoint still covers the
+      // whole tools+system prefix, so nothing is lost when there are no client tools.
+      builder.withTools(concatTools(withCachedTail(clientToolDefs, breakpoint), serverToolDefs));
       annotateLastMessageForCaching(apiMessages, breakpoint);
     } else {
       builder.withSystem(systemInstruction);
-      builder.withTools(toolDefs);
+      builder.withTools(concatTools(clientToolDefs, serverToolDefs));
     }
 
     return builder.build();
+  }
+
+  private static List<ToolDefinition> concatTools(
+      List<ToolDefinition> clientTools, List<ToolDefinition> serverTools) {
+    if (serverTools == null || serverTools.isEmpty()) {
+      return clientTools;
+    }
+    var combined = new ArrayList<ToolDefinition>();
+    if (clientTools != null) {
+      combined.addAll(clientTools);
+    }
+    combined.addAll(serverTools);
+    return List.copyOf(combined);
   }
 
   /**
@@ -817,19 +896,25 @@ public class AnthropicModel implements Model {
     return MessagesRequest.MessageEntry.user(blocks);
   }
 
+  /** Shared mapper for static decode paths — Jackson 3 mappers are immutable and thread-safe. */
+  private static final ObjectMapper SHARED_MAPPER = JsonMapper.builder().build();
+
   @SuppressWarnings("unchecked")
   static MessagesRequest.MessageEntry convertAssistantMessage(Message message) {
     var rawContent = message.metadata() != null ? message.metadata().get(RAW_CONTENT_KEY) : null;
     if (rawContent != null && !rawContent.isEmpty()) {
       try {
-        var blocks = (List<Object>) JsonMapper.builder().build().readValue(rawContent, List.class);
+        var blocks = (List<Object>) SHARED_MAPPER.readValue(rawContent, List.class);
         return new MessagesRequest.MessageEntry("assistant", blocks);
-      } catch (Exception ignored) {
-        // Undecodable raw content falls back to the reconstructed shape below; the API may reject
-        // the echo, but that is a louder failure than silently dropping the whole message.
+      } catch (Exception e) {
+        throw new AnthropicException(
+            "Corrupted server-tool content on assistant message; refusing to echo a truncated"
+                + " turn (the API would reject or mis-read it)",
+            e);
       }
     }
-    var thinkingBlocks = decodeThinkingBlocks(message);
+    var thinkingBlocks =
+        decodeThinkingBlocks(message.metadata() == null ? Map.of() : message.metadata());
     if (!message.hasToolCalls() && thinkingBlocks.isEmpty()) {
       return MessagesRequest.MessageEntry.assistant(
           message.content() != null ? message.content() : "");
@@ -857,16 +942,15 @@ public class AnthropicModel implements Model {
    * {@link #THINKING_KEY} / {@link #THINKING_SIGNATURE_KEY} pair. Returns an empty list when no
    * thinking signature is present.
    */
-  static List<ThinkingBlock> decodeThinkingBlocks(Message message) {
-    if (message.metadata() == null) {
+  static List<ThinkingBlock> decodeThinkingBlocks(Map<String, String> metadata) {
+    if (metadata == null) {
       return List.of();
     }
-    var encoded = message.metadata().get(THINKING_BLOCKS_KEY);
+    var encoded = metadata.get(THINKING_BLOCKS_KEY);
     if (encoded != null && !encoded.isEmpty()) {
       try {
-        var mapper = JsonMapper.builder().build();
         @SuppressWarnings("unchecked")
-        var raw = (List<Map<String, Object>>) mapper.readValue(encoded, List.class);
+        var raw = (List<Map<String, Object>>) SHARED_MAPPER.readValue(encoded, List.class);
         var out = new ArrayList<ThinkingBlock>(raw.size());
         for (var entry : raw) {
           var text = entry.get("text") == null ? "" : entry.get("text").toString();
@@ -880,9 +964,9 @@ public class AnthropicModel implements Model {
         // Fall through to legacy single-block path.
       }
     }
-    var signature = message.metadata().get(THINKING_SIGNATURE_KEY);
+    var signature = metadata.get(THINKING_SIGNATURE_KEY);
     if (signature != null && !signature.isEmpty()) {
-      var text = message.metadata().getOrDefault(THINKING_KEY, "");
+      var text = metadata.getOrDefault(THINKING_KEY, "");
       return List.of(new ThinkingBlock(text, signature));
     }
     return List.of();
@@ -1029,520 +1113,5 @@ public class AnthropicModel implements Model {
       case "refusal" -> FinishReason.REFUSAL;
       default -> FinishReason.STOP;
     };
-  }
-
-  static class StreamingIterator implements CloseableIterator<StreamEvent> {
-    private final InputStream rawStream;
-    private final BufferedReader reader;
-    private final ObjectMapper objectMapper;
-    private final Duration streamIdleTimeout;
-    private final ExecutorService readExecutor;
-    private final StringBuilder contentBuilder = new StringBuilder();
-    private final List<ToolCall> toolCalls = new ArrayList<>();
-    private final Map<Integer, ToolCallAccumulator> toolCallAccumulators = new HashMap<>();
-    private final TreeMap<Integer, StringBuilder> textAccumulators = new TreeMap<>();
-    private final TreeMap<Integer, List<Map<String, Object>>> citationAccumulators =
-        new TreeMap<>();
-    private final TreeMap<Integer, Map<String, Object>> serverBlocks = new TreeMap<>();
-    private final Map<Integer, StringBuilder> serverToolInputAccumulators = new HashMap<>();
-    private final TreeMap<Integer, ToolCall> completedClientToolBlocks = new TreeMap<>();
-    private final List<Citation> citations = new ArrayList<>();
-    private boolean sawServerToolBlocks = false;
-    // Per-content-block thinking accumulators keyed by block index. Each thinking block in a
-    // multi-block message carries its own Anthropic signature; concatenating them into a single
-    // buffer (the prior shape) yields a signature the API rejects on the next turn.
-    private final LinkedHashMap<Integer, ThinkingAccumulator> thinkingAccumulators =
-        new LinkedHashMap<>();
-    private StreamEvent nextEvent = null;
-    private boolean done = false;
-    private int inputTokens = 0;
-    private int outputTokens = 0;
-    private int cacheCreationInputTokens = 0;
-    private int cacheReadInputTokens = 0;
-    private String stopReason = null;
-
-    StreamingIterator(
-        HttpResponse<InputStream> response, ObjectMapper objectMapper, Duration streamIdleTimeout) {
-      this.rawStream = response.body();
-      this.reader =
-          new BufferedReader(new InputStreamReader(this.rawStream, StandardCharsets.UTF_8));
-      this.objectMapper = objectMapper;
-      this.streamIdleTimeout = streamIdleTimeout;
-      this.readExecutor = Executors.newVirtualThreadPerTaskExecutor();
-    }
-
-    @Override
-    public boolean hasNext() {
-      if (done) {
-        return false;
-      }
-      if (nextEvent != null) {
-        return true;
-      }
-      nextEvent = readNextEvent();
-      return nextEvent != null;
-    }
-
-    @Override
-    public StreamEvent next() {
-      if (nextEvent == null) {
-        nextEvent = readNextEvent();
-      }
-      var event = nextEvent;
-      nextEvent = null;
-      return event;
-    }
-
-    private String readLineWithTimeout() throws IOException {
-      Future<String> future = readExecutor.submit((Callable<String>) () -> reader.readLine());
-      try {
-        return future.get(streamIdleTimeout.toMillis(), TimeUnit.MILLISECONDS);
-      } catch (TimeoutException e) {
-        future.cancel(true);
-        throw new AnthropicException(
-            "Stream idle timeout: no data received for " + streamIdleTimeout.toSeconds() + "s");
-      } catch (ExecutionException e) {
-        if (e.getCause() instanceof IOException ioe) {
-          throw ioe;
-        }
-        throw new IOException("Stream read failed", e.getCause());
-      } catch (InterruptedException e) {
-        future.cancel(true);
-        Thread.currentThread().interrupt();
-        throw new IOException("Stream read interrupted", e);
-      }
-    }
-
-    private StreamEvent readNextEvent() {
-      try {
-        String line;
-        while ((line = readLineWithTimeout()) != null) {
-          if (line.startsWith("data: ")) {
-            var json = line.substring(6).trim();
-            if (json.isEmpty() || json.equals("[DONE]")) {
-              continue;
-            }
-            var event = parseStreamEvent(json);
-            if (event != null) {
-              return event;
-            }
-          }
-        }
-        done = true;
-        close();
-        return buildDoneEvent();
-      } catch (AnthropicException e) {
-        done = true;
-        close();
-        return new StreamEvent.Error(e.getMessage(), e);
-      } catch (IOException e) {
-        done = true;
-        close();
-        return new StreamEvent.Error("Stream read error", e);
-      }
-    }
-
-    private StreamEvent parseStreamEvent(String json) {
-      try {
-        var event = objectMapper.readValue(json, ApiStreamEvent.class);
-
-        if (event.hasTypeMessageStart()) {
-          if (event.message() != null && event.message().usage() != null) {
-            var usage = event.message().usage();
-            if (usage.inputTokens() != null) {
-              inputTokens = usage.inputTokens();
-            }
-            // Cache tokens are first reported on message_start (initial accounting of cache
-            // writes/reads triggered by this turn's prefix). message_delta later carries the
-            // running output_tokens; cache counts do not change after start.
-            if (usage.cacheCreationInputTokens() != null) {
-              cacheCreationInputTokens = usage.cacheCreationInputTokens();
-            }
-            if (usage.cacheReadInputTokens() != null) {
-              cacheReadInputTokens = usage.cacheReadInputTokens();
-            }
-          }
-          return null;
-        }
-
-        if (event.hasTypeContentBlockStart()) {
-          var block = event.contentBlock();
-          var index = event.index();
-          if (block != null && index != null) {
-            if (block.hasTypeToolUse()) {
-              toolCallAccumulators.put(
-                  index, new ToolCallAccumulator(block.id(), block.name(), new StringBuilder()));
-            } else if (block.hasTypeThinking()) {
-              thinkingAccumulators.put(
-                  index, new ThinkingAccumulator(new StringBuilder(), new StringBuilder()));
-            } else if (block.hasTypeText()) {
-              textAccumulators.put(
-                  index, new StringBuilder(block.text() == null ? "" : block.text()));
-            } else if ("server_tool_use".equals(block.type())) {
-              sawServerToolBlocks = true;
-              var raw = new LinkedHashMap<String, Object>();
-              raw.put("type", "server_tool_use");
-              raw.put("id", block.id());
-              raw.put("name", block.name());
-              serverBlocks.put(index, raw);
-              serverToolInputAccumulators.put(index, new StringBuilder());
-            } else if ("web_search_tool_result".equals(block.type())
-                || "web_fetch_tool_result".equals(block.type())) {
-              sawServerToolBlocks = true;
-              captureRawServerBlock(index, json);
-            }
-          }
-          return null;
-        }
-
-        if (event.hasTypeContentBlockDelta() && event.delta() != null) {
-          return handleContentBlockDelta(event.index(), event.delta());
-        }
-
-        if (event.hasTypeContentBlockStop()) {
-          return handleContentBlockStop(event.index());
-        }
-
-        if (event.hasTypeMessageDelta()) {
-          if (event.delta() != null && event.delta().stopReason() != null) {
-            stopReason = event.delta().stopReason();
-          }
-          if (event.usage() != null && event.usage().outputTokens() != null) {
-            outputTokens = event.usage().outputTokens();
-          }
-          return null;
-        }
-
-        if (event.hasTypeMessageStop()) {
-          done = true;
-          close();
-          return buildDoneEvent();
-        }
-
-        if (event.hasTypeError()) {
-          return new StreamEvent.Error("API stream error: " + json, null);
-        }
-
-        return null;
-      } catch (Exception e) {
-        return new StreamEvent.Error("Failed to parse stream event", e);
-      }
-    }
-
-    private StreamEvent handleContentBlockDelta(Integer index, ContentDelta delta) {
-      if (delta.hasTypeTextDelta() && delta.text() != null) {
-        contentBuilder.append(delta.text());
-        if (index != null) {
-          textAccumulators.computeIfAbsent(index, i -> new StringBuilder()).append(delta.text());
-        }
-        return new StreamEvent.TextDelta(delta.text());
-      }
-
-      if (delta.hasTypeInputJsonDelta() && delta.partialJson() != null && index != null) {
-        var serverInput = serverToolInputAccumulators.get(index);
-        if (serverInput != null) {
-          serverInput.append(delta.partialJson());
-          return null;
-        }
-        var accumulator = toolCallAccumulators.get(index);
-        if (accumulator != null) {
-          accumulator.jsonBuilder().append(delta.partialJson());
-        }
-        return null;
-      }
-
-      if (delta.hasTypeCitationsDelta() && delta.citation() != null && index != null) {
-        citationAccumulators.computeIfAbsent(index, i -> new ArrayList<>()).add(delta.citation());
-        harvestCitation(delta.citation());
-        return null;
-      }
-
-      if (delta.hasTypeThinkingDelta() && delta.thinking() != null && index != null) {
-        // Anthropic may emit thinking_delta events before the corresponding content_block_start
-        // (rare but seen in practice). Lazily create the accumulator so we never lose a delta.
-        thinkingAccumulators
-            .computeIfAbsent(
-                index, i -> new ThinkingAccumulator(new StringBuilder(), new StringBuilder()))
-            .text()
-            .append(delta.thinking());
-        // Surface each delta as a token-level event so live UIs can render the model's reasoning
-        // as it arrives, not only as the aggregated terminal block.
-        return new StreamEvent.ThinkingDelta(delta.thinking());
-      }
-
-      if (delta.hasTypeSignatureDelta() && delta.signature() != null && index != null) {
-        thinkingAccumulators
-            .computeIfAbsent(
-                index, i -> new ThinkingAccumulator(new StringBuilder(), new StringBuilder()))
-            .signature()
-            .append(delta.signature());
-        return null;
-      }
-
-      return null;
-    }
-
-    @SuppressWarnings("unchecked")
-    private StreamEvent handleContentBlockStop(Integer index) {
-      if (index == null) {
-        return null;
-      }
-      var serverInput = serverToolInputAccumulators.remove(index);
-      if (serverInput != null) {
-        var jsonStr = serverInput.toString();
-        Map<String, Object> input = Map.of();
-        if (!jsonStr.isEmpty()) {
-          try {
-            input = objectMapper.readValue(jsonStr, Map.class);
-          } catch (Exception e) {
-            input = Map.of("_raw", jsonStr);
-          }
-        }
-        var raw = serverBlocks.get(index);
-        if (raw != null) {
-          raw.put("input", input);
-        }
-        return null;
-      }
-      // Thinking block closing: surface the terminal aggregation so consumers can capture the
-      // full reasoning text plus replay signature (used for prefix-cache reuse on subsequent
-      // turns). We keep the accumulator in place — buildDoneEvent reads it for Response.thinking.
-      var thinking = thinkingAccumulators.get(index);
-      if (thinking != null) {
-        var fullText = thinking.text().toString();
-        var signature = thinking.signature().length() == 0 ? null : thinking.signature().toString();
-        if (Strings.isBlank(fullText)) {
-          return null;
-        }
-        return new StreamEvent.ThinkingComplete(fullText, signature);
-      }
-      var accumulator = toolCallAccumulators.remove(index);
-      if (accumulator == null) {
-        return null;
-      }
-
-      var jsonStr = accumulator.jsonBuilder().toString();
-      Map<String, Object> arguments = Map.of();
-      if (!jsonStr.isEmpty()) {
-        try {
-          arguments = objectMapper.readValue(jsonStr, Map.class);
-        } catch (Exception e) {
-          arguments = Map.of("_raw", jsonStr);
-        }
-      }
-
-      var tc =
-          ToolCall.newBuilder()
-              .withId(accumulator.id())
-              .withName(accumulator.name())
-              .withArguments(arguments)
-              .build();
-      toolCalls.add(tc);
-      completedClientToolBlocks.put(index, tc);
-      return new StreamEvent.ToolCallComplete(tc);
-    }
-
-    /**
-     * Re-parse the raw SSE data line generically and capture the {@code content_block} node
-     * verbatim. The typed {@link ContentBlock} record silently drops fields it does not model (e.g.
-     * {@code encrypted_content}), which would corrupt the mandatory verbatim echo of server-tool
-     * result blocks on later turns.
-     */
-    @SuppressWarnings("unchecked")
-    private void captureRawServerBlock(Integer index, String json) {
-      try {
-        var eventMap = (Map<String, Object>) objectMapper.readValue(json, Map.class);
-        var blockMap = (Map<String, Object>) eventMap.get("content_block");
-        if (blockMap != null) {
-          serverBlocks.put(index, blockMap);
-        }
-      } catch (Exception ignored) {
-        // Capture failure leaves the block out of RAW_CONTENT; a later echo or pause resume then
-        // fails loudly at the API rather than silently sending corrupted content.
-      }
-    }
-
-    private void harvestCitation(Map<String, Object> citation) {
-      var url = citation.get("url");
-      var title = citation.get("title");
-      var citedText = citation.get("cited_text");
-      if (url == null && citedText == null) {
-        return;
-      }
-      citations.add(
-          Citation.newBuilder()
-              .withSourceId(url != null ? url.toString() : null)
-              .withTitle(title != null ? title.toString() : null)
-              .withContent(citedText != null ? citedText.toString() : null)
-              .build());
-    }
-
-    private StreamEvent buildDoneEvent() {
-      var content = contentBuilder.toString();
-      var calls = toolCalls.isEmpty() ? List.<ToolCall>of() : List.copyOf(toolCalls);
-
-      var finishReason = mapStopReason(stopReason);
-      if (!calls.isEmpty() && finishReason != FinishReason.TOOL_CALLS) {
-        finishReason = FinishReason.TOOL_CALLS;
-      }
-
-      Response.Usage usage = null;
-      if (inputTokens > 0
-          || outputTokens > 0
-          || cacheCreationInputTokens > 0
-          || cacheReadInputTokens > 0) {
-        usage =
-            Response.Usage.of(
-                inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens);
-      }
-
-      // Collect every thinking block in arrival order. The LinkedHashMap iteration order matches
-      // the Anthropic content-block index sequence, which the API expects on the next turn.
-      var thinkingBlocks = new ArrayList<ThinkingBlock>(thinkingAccumulators.size());
-      var combinedThinking = new StringBuilder();
-      for (var acc : thinkingAccumulators.values()) {
-        var sigStr = acc.signature().toString();
-        if (sigStr.isEmpty()) {
-          continue; // Signature-less thinking blocks cannot round-trip; skip.
-        }
-        var textStr = acc.text().toString();
-        thinkingBlocks.add(new ThinkingBlock(textStr, sigStr));
-        if (!combinedThinking.isEmpty()) {
-          combinedThinking.append("\n\n");
-        }
-        combinedThinking.append(textStr);
-      }
-      String thinking = combinedThinking.isEmpty() ? null : combinedThinking.toString();
-
-      var metadata = new HashMap<String, String>();
-      if (!thinkingBlocks.isEmpty()) {
-        try {
-          var arr = new ArrayList<Map<String, String>>(thinkingBlocks.size());
-          for (var tb : thinkingBlocks) {
-            arr.add(Map.of("text", tb.text(), "signature", tb.signature()));
-          }
-          metadata.put(THINKING_BLOCKS_KEY, objectMapper.writeValueAsString(arr));
-        } catch (Exception ignored) {
-          // Encoding failure is non-fatal; the legacy single-block keys below are the fallback.
-        }
-        // Legacy single-block keys — preserved when exactly one thinking block was seen, so older
-        // consumers (and tests) continue to observe the same metadata shape.
-        if (thinkingBlocks.size() == 1) {
-          metadata.put(THINKING_KEY, thinkingBlocks.getFirst().text());
-          metadata.put(THINKING_SIGNATURE_KEY, thinkingBlocks.getFirst().signature());
-        }
-      }
-      if (stopReason != null) {
-        metadata.put(STOP_REASON_KEY, stopReason);
-      }
-      if (sawServerToolBlocks) {
-        var rawContent = assembleRawContent();
-        if (rawContent != null) {
-          metadata.put(RAW_CONTENT_KEY, rawContent);
-        }
-      }
-
-      var response =
-          Response.newBuilder()
-              .withContent(content)
-              .withToolCalls(calls)
-              .withFinishReason(finishReason)
-              .withUsage(usage)
-              .withThinking(thinking)
-              .withCitations(citations.isEmpty() ? List.of() : List.copyOf(citations))
-              .withMetadata(metadata.isEmpty() ? Map.of() : Map.copyOf(metadata))
-              .build();
-
-      return new StreamEvent.Done(response);
-    }
-
-    /**
-     * Rebuild the assistant turn's content-block array in original stream-index order for the
-     * verbatim echo the API requires after server-tool turns. Server blocks are the raw captured
-     * JSON; text, thinking, and client tool_use blocks are reconstructed from their accumulators.
-     * Returns {@code null} when serialization fails — the metadata key is then absent and a later
-     * echo or resume fails loudly at the API instead of sending corrupted content.
-     */
-    private String assembleRawContent() {
-      var indices = new TreeSet<Integer>();
-      indices.addAll(textAccumulators.keySet());
-      indices.addAll(thinkingAccumulators.keySet());
-      indices.addAll(serverBlocks.keySet());
-      indices.addAll(completedClientToolBlocks.keySet());
-
-      var blocks = new ArrayList<Map<String, Object>>();
-      for (var index : indices) {
-        var server = serverBlocks.get(index);
-        if (server != null) {
-          blocks.add(server);
-          continue;
-        }
-        var text = textAccumulators.get(index);
-        if (text != null) {
-          if (text.isEmpty()) {
-            continue;
-          }
-          var block = new LinkedHashMap<String, Object>();
-          block.put("type", "text");
-          block.put("text", text.toString());
-          var blockCitations = citationAccumulators.get(index);
-          if (blockCitations != null && !blockCitations.isEmpty()) {
-            block.put("citations", blockCitations);
-          }
-          blocks.add(block);
-          continue;
-        }
-        var thinkingAcc = thinkingAccumulators.get(index);
-        if (thinkingAcc != null) {
-          var signature = thinkingAcc.signature().toString();
-          if (signature.isEmpty()) {
-            continue;
-          }
-          var block = new LinkedHashMap<String, Object>();
-          block.put("type", "thinking");
-          block.put("thinking", thinkingAcc.text().toString());
-          block.put("signature", signature);
-          blocks.add(block);
-          continue;
-        }
-        var toolCall = completedClientToolBlocks.get(index);
-        if (toolCall != null) {
-          var block = new LinkedHashMap<String, Object>();
-          block.put("type", "tool_use");
-          block.put("id", toolCall.id());
-          block.put("name", toolCall.name());
-          block.put("input", toolCall.arguments());
-          blocks.add(block);
-        }
-      }
-      try {
-        return objectMapper.writeValueAsString(blocks);
-      } catch (Exception e) {
-        return null;
-      }
-    }
-
-    @Override
-    public void close() {
-      done = true;
-      readExecutor.shutdownNow();
-      try {
-        rawStream.close();
-      } catch (IOException ignored) {
-      }
-      try {
-        reader.close();
-      } catch (IOException ignored) {
-      }
-    }
-
-    private record ToolCallAccumulator(String id, String name, StringBuilder jsonBuilder) {}
-
-    /**
-     * Per-content-block thinking accumulator. {@code text} buffers thinking deltas; {@code
-     * signature} buffers signature deltas. Each thinking block in a multi-block message gets its
-     * own pair so the Anthropic-issued signature stays attached to the matching text.
-     */
-    private record ThinkingAccumulator(StringBuilder text, StringBuilder signature) {}
   }
 }

@@ -96,6 +96,17 @@ class ScriptedModelTest {
   }
 
   @Test
+  void refusalTurnCarriesRefusalFinishReason() {
+    var model = ScriptedModel.newBuilder().thenRefusal("I can't help with that.").build();
+
+    var response = model.chat(List.of(Message.user("do the thing")));
+
+    assertEquals(FinishReason.REFUSAL, response.finishReason());
+    assertEquals("I can't help with that.", response.content());
+    assertTrue(response.toolCalls().isEmpty());
+  }
+
+  @Test
   void exhaustedScriptFailsFast() {
     var model = ScriptedModel.newBuilder().thenText("only").build();
     model.chat(List.of(Message.user("one")));

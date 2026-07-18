@@ -154,6 +154,31 @@ public enum AnthropicModelId {
   }
 
   /**
+   * Resolves a wire model ID to curated metadata, accepting dated snapshot variants: an exact match
+   * wins, otherwise an ID of the form {@code <enum-id>-<suffix>} (e.g. {@code
+   * claude-sonnet-4-6-20251114}) resolves to its family so legacy snapshots keep legacy request
+   * semantics instead of falling into the adaptive default for unknown IDs.
+   *
+   * @param id the wire model identifier
+   * @return the matching family, or null when no enum id is an exact or dated-prefix match
+   */
+  public static AnthropicModelId fromWireId(String id) {
+    var exact = fromId(id);
+    if (exact != null) {
+      return exact;
+    }
+    if (Strings.isBlank(id)) {
+      return null;
+    }
+    for (var model : values()) {
+      if (id.startsWith(model.id + "-")) {
+        return model;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Checks whether the given model ID is a known enum constant carrying curated metadata.
    *
    * <p>This is strict enum membership, distinct from {@link #hasClaudePrefix(String)}: a freshly

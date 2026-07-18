@@ -322,8 +322,7 @@ class StreamingIteratorTest {
     var pipedOut = new PipedOutputStream(pipedIn);
 
     try (var iterator =
-        new AnthropicModel.StreamingIterator(
-            fakeResponse(pipedIn), objectMapper, SHORT_IDLE_TIMEOUT)) {
+        new AnthropicStreamingIterator(fakeResponse(pipedIn), objectMapper, SHORT_IDLE_TIMEOUT)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
@@ -469,7 +468,7 @@ class StreamingIteratorTest {
           }
         };
     try (var iterator =
-        new AnthropicModel.StreamingIterator(
+        new AnthropicStreamingIterator(
             fakeResponse(failingStream), objectMapper, Duration.ofSeconds(5))) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
@@ -489,7 +488,7 @@ class StreamingIteratorTest {
           }
         };
     try (var iterator =
-        new AnthropicModel.StreamingIterator(
+        new AnthropicStreamingIterator(
             fakeResponse(failingStream), objectMapper, Duration.ofSeconds(5))) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
@@ -508,7 +507,7 @@ class StreamingIteratorTest {
         new Thread(
             () -> {
               try (var iterator =
-                  new AnthropicModel.StreamingIterator(
+                  new AnthropicStreamingIterator(
                       fakeResponse(pipedIn), objectMapper, Duration.ofSeconds(30))) {
                 while (iterator.hasNext()) {
                   events.add(iterator.next());
@@ -524,10 +523,9 @@ class StreamingIteratorTest {
     pipedOut.close();
   }
 
-  private AnthropicModel.StreamingIterator createIterator(String sseData, Duration idleTimeout) {
+  private AnthropicStreamingIterator createIterator(String sseData, Duration idleTimeout) {
     var inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8));
-    return new AnthropicModel.StreamingIterator(
-        fakeResponse(inputStream), objectMapper, idleTimeout);
+    return new AnthropicStreamingIterator(fakeResponse(inputStream), objectMapper, idleTimeout);
   }
 
   private static HttpResponse<InputStream> fakeResponse(InputStream body) {

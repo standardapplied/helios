@@ -919,6 +919,24 @@ class AnthropicModelTest {
   }
 
   @Test
+  void datedLegacySnapshotResolvesToFamilyShape() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .withTemperature(0.2)
+            .build();
+    var model = new AnthropicModel("claude-sonnet-4-6-20251114", config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals(
+        0.2,
+        request.temperature(),
+        "dated snapshots of legacy models keep the family's LEGACY_BUDGET semantics");
+  }
+
+  @Test
   void legacyModelKeepsSamplingParamsWhenThinkingOff() {
     var config =
         ModelConfig.newBuilder()
@@ -1136,7 +1154,7 @@ class AnthropicModelTest {
                     AnthropicModel.THINKING_SIGNATURE_KEY, "sig-1"))
             .build();
 
-    var blocks = AnthropicModel.decodeThinkingBlocks(msg);
+    var blocks = AnthropicModel.decodeThinkingBlocks(msg.metadata());
 
     assertEquals(1, blocks.size());
     assertEquals("I am thinking", blocks.getFirst().text());
@@ -1155,7 +1173,7 @@ class AnthropicModelTest {
             .withMetadata(Map.of(AnthropicModel.THINKING_BLOCKS_KEY, json))
             .build();
 
-    var blocks = AnthropicModel.decodeThinkingBlocks(msg);
+    var blocks = AnthropicModel.decodeThinkingBlocks(msg.metadata());
 
     assertEquals(2, blocks.size());
     assertEquals("first thought", blocks.get(0).text());
@@ -1178,7 +1196,7 @@ class AnthropicModelTest {
                     AnthropicModel.THINKING_SIGNATURE_KEY, "old-sig"))
             .build();
 
-    var blocks = AnthropicModel.decodeThinkingBlocks(msg);
+    var blocks = AnthropicModel.decodeThinkingBlocks(msg.metadata());
 
     assertEquals(1, blocks.size());
     assertEquals("new format", blocks.getFirst().text());
@@ -1198,7 +1216,7 @@ class AnthropicModelTest {
                     AnthropicModel.THINKING_SIGNATURE_KEY, "legacy-sig"))
             .build();
 
-    var blocks = AnthropicModel.decodeThinkingBlocks(msg);
+    var blocks = AnthropicModel.decodeThinkingBlocks(msg.metadata());
 
     assertEquals(1, blocks.size());
     assertEquals("legacy text", blocks.getFirst().text());
@@ -1209,7 +1227,7 @@ class AnthropicModelTest {
   void decodeThinkingBlocksReturnsEmptyWhenNoMetadata() {
     var msg =
         Message.newBuilder().withRole(ai.singlr.core.model.Role.ASSISTANT).withContent("r").build();
-    assertTrue(AnthropicModel.decodeThinkingBlocks(msg).isEmpty());
+    assertTrue(AnthropicModel.decodeThinkingBlocks(msg.metadata()).isEmpty());
   }
 
   @Test
@@ -1737,9 +1755,9 @@ class AnthropicModelTest {
   }
 
   /**
-   * Drive a {@link AnthropicModel.StreamingIterator} against a canned SSE body and return its
-   * terminal {@code Done} event. Local to this test file so we don't bleed implementation-detail
-   * helpers across test classes.
+   * Drive a {@link AnthropicStreamingIterator} against a canned SSE body and return its terminal
+   * {@code Done} event. Local to this test file so we don't bleed implementation-detail helpers
+   * across test classes.
    */
   private static ai.singlr.core.model.StreamEvent.Done drainSseFixture(String sseBody)
       throws Exception {
@@ -1789,7 +1807,7 @@ class AnthropicModelTest {
           }
         };
     try (var iterator =
-        new AnthropicModel.StreamingIterator(
+        new AnthropicStreamingIterator(
             response,
             tools.jackson.databind.json.JsonMapper.builder().build(),
             java.time.Duration.ofSeconds(5))) {

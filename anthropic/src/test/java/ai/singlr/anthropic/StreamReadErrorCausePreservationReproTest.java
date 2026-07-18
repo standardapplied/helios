@@ -49,7 +49,7 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>Three layers exercised here:
  *
  * <ol>
- *   <li>{@link AnthropicModel.StreamingIterator} preserves the {@code IOException} as {@link
+ *   <li>{@link AnthropicStreamingIterator} preserves the {@code IOException} as {@link
  *       StreamEvent.Error#cause()} after a partial SSE prefix has been delivered.
  *   <li>{@link AnthropicModel#chat(List, List)} promotes the iterator's {@code
  *       StreamEvent.Error(IOException)} to a {@link TransientStreamException} (instead of the old
@@ -82,7 +82,8 @@ class StreamReadErrorCausePreservationReproTest {
   private final tools.jackson.databind.ObjectMapper objectMapper =
       JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
 
-  // ── Layer 1 — StreamingIterator preserves IOException cause ─────────────────────────────
+  // ── Layer 1 — AnthropicStreamingIterator preserves IOException cause
+  // ─────────────────────────────
 
   @org.junit.jupiter.api.Test
   void streamingIteratorPreservesIoExceptionAsCauseAfterPartialDelivery() {
@@ -99,7 +100,7 @@ class StreamReadErrorCausePreservationReproTest {
             });
 
     try (var iterator =
-        new AnthropicModel.StreamingIterator(
+        new AnthropicStreamingIterator(
             fakeResponse(failingStream), objectMapper, Duration.ofSeconds(5))) {
       assertTrue(iterator.hasNext());
       assertInstanceOf(StreamEvent.TextDelta.class, iterator.next());
@@ -123,8 +124,7 @@ class StreamReadErrorCausePreservationReproTest {
     InputStream stream = new ByteArrayInputStream(apiErrorJson.getBytes(StandardCharsets.UTF_8));
 
     try (var iterator =
-        new AnthropicModel.StreamingIterator(
-            fakeResponse(stream), objectMapper, Duration.ofSeconds(5))) {
+        new AnthropicStreamingIterator(fakeResponse(stream), objectMapper, Duration.ofSeconds(5))) {
       assertTrue(iterator.hasNext());
       var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().startsWith("API stream error:"));
@@ -227,8 +227,7 @@ class StreamReadErrorCausePreservationReproTest {
     InputStream stream = new ByteArrayInputStream(malformed.getBytes(StandardCharsets.UTF_8));
 
     try (var iterator =
-        new AnthropicModel.StreamingIterator(
-            fakeResponse(stream), objectMapper, Duration.ofSeconds(5))) {
+        new AnthropicStreamingIterator(fakeResponse(stream), objectMapper, Duration.ofSeconds(5))) {
       assertTrue(iterator.hasNext());
       var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().contains("Failed to parse"));
