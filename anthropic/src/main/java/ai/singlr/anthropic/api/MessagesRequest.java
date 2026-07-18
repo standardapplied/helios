@@ -52,6 +52,29 @@ public record MessagesRequest(
   }
 
   /**
+   * Copy of this request with a different message list — used by pause_turn continuation, which
+   * re-sends the identical request plus the paused assistant content appended.
+   *
+   * @param messages the replacement conversation; non-null
+   * @return a copy sharing every other field
+   */
+  public MessagesRequest withMessages(List<MessageEntry> messages) {
+    return new MessagesRequest(
+        model,
+        maxTokens,
+        List.copyOf(messages),
+        system,
+        stream,
+        tools,
+        toolChoice,
+        temperature,
+        topP,
+        stopSequences,
+        thinking,
+        outputConfig);
+  }
+
+  /**
    * Diagnostic accessor that returns the system prompt as flat text regardless of which wire shape
    * ({@link String} or {@code List<SystemContent>}) the request carries. Concatenates {@code text}
    * fields of every {@link SystemContent} block in the array shape; returns {@code null} when no
