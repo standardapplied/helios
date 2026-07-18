@@ -86,6 +86,41 @@ class AnthropicModelIdTest {
   }
 
   @Test
+  void fable5AndSonnet5AreSupported() {
+    assertEquals("claude-fable-5", AnthropicModelId.CLAUDE_FABLE_5.id());
+    assertEquals(1_000_000, AnthropicModelId.CLAUDE_FABLE_5.contextWindow());
+    assertEquals("claude-sonnet-5", AnthropicModelId.CLAUDE_SONNET_5.id());
+    assertEquals(1_000_000, AnthropicModelId.CLAUDE_SONNET_5.contextWindow());
+  }
+
+  @Test
+  void thinkingShapesPerModel() {
+    assertEquals(
+        AnthropicModelId.ThinkingShape.ALWAYS_ON, AnthropicModelId.CLAUDE_FABLE_5.thinkingShape());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON,
+        AnthropicModelId.CLAUDE_SONNET_5.thinkingShape());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.ADAPTIVE, AnthropicModelId.CLAUDE_OPUS_4_8.thinkingShape());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.ADAPTIVE, AnthropicModelId.CLAUDE_OPUS_4_7.thinkingShape());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.LEGACY_BUDGET,
+        AnthropicModelId.CLAUDE_OPUS_4_6.thinkingShape());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.LEGACY_BUDGET,
+        AnthropicModelId.CLAUDE_SONNET_4_6.thinkingShape());
+  }
+
+  @Test
+  @SuppressWarnings("deprecation")
+  void deprecatedAdaptiveFlagDerivesFromShape() {
+    assertTrue(AnthropicModelId.CLAUDE_FABLE_5.usesAdaptiveThinking());
+    assertTrue(AnthropicModelId.CLAUDE_OPUS_4_8.usesAdaptiveThinking());
+    assertFalse(AnthropicModelId.CLAUDE_SONNET_4_6.usesAdaptiveThinking());
+  }
+
+  @Test
   void isSupportedReturnsFalseForUnknownModels() {
     assertFalse(AnthropicModelId.isSupported("unknown-model"));
     assertFalse(AnthropicModelId.isSupported(null));

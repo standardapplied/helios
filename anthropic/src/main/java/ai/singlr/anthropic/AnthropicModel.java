@@ -95,7 +95,7 @@ public class AnthropicModel implements Model {
 
   private final String wireModelId;
   private final AnthropicModelId knownModel;
-  private final boolean usesAdaptiveThinking;
+  private final AnthropicModelId.ThinkingShape thinkingShape;
   private final ModelConfig config;
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
@@ -136,7 +136,8 @@ public class AnthropicModel implements Model {
     this.knownModel = knownModel;
     // Unrecognised Claude IDs default to the adaptive thinking shape: new releases adopt it, and
     // it is where the family is converging. Known models keep their recorded shape.
-    this.usesAdaptiveThinking = knownModel == null || knownModel.usesAdaptiveThinking();
+    this.thinkingShape =
+        knownModel != null ? knownModel.thinkingShape() : AnthropicModelId.ThinkingShape.ADAPTIVE;
     this.config = config;
     this.cachePolicy = cachePolicy;
     this.httpClient = HttpClientFactory.create(config);
@@ -407,10 +408,16 @@ public class AnthropicModel implements Model {
       maxTokens = Math.max(maxTokens, thinkingSpec.thinking().budgetTokens() + 1024);
     }
 
-    // Both shapes (legacy enabled and adaptive) override temperature when thinking is on —
-    // Anthropic's API rejects temperature alongside any active thinking config.
+    // Adaptive-family models (Opus 4.7+, Sonnet 5, Fable 5) reject temperature/top_p outright
+    // with a 400, thinking on or off — never send them. Legacy models accept sampling params but
+    // reject temperature alongside an active thinking config.
     Double temperature = config.temperature();
-    if (thinkingSpec.thinking() != null && !"disabled".equals(thinkingSpec.thinking().type())) {
+    Double topP = config.topP();
+    if (thinkingShape != AnthropicModelId.ThinkingShape.LEGACY_BUDGET) {
+      temperature = null;
+      topP = null;
+    } else if (thinkingSpec.thinking() != null
+        && !"disabled".equals(thinkingSpec.thinking().type())) {
       temperature = null;
     }
 
@@ -422,7 +429,7 @@ public class AnthropicModel implements Model {
             .withStream(true)
             .withToolChoice(toolChoiceConfig)
             .withTemperature(temperature)
-            .withTopP(config.topP())
+            .withTopP(topP)
             .withStopSequences(config.stopSequences())
             .withThinking(thinkingSpec.thinking())
             .withOutputConfig(thinkingSpec.outputConfig());
@@ -650,20 +657,26 @@ public class AnthropicModel implements Model {
   }
 
   /**
-   * Translate {@link ThinkingLevel} into the Anthropic API request shape, dispatching by model.
-   * Opus 4.7+ and any unrecognised Claude ID use {@code thinking.type=adaptive} + {@code
-   * output_config.effort=...}; legacy Opus 4.6 / Sonnet 4.6 use {@code thinking.type=enabled} +
-   * {@code budget_tokens=...}.
+   * Translate {@link ThinkingLevel} into the Anthropic API request shape, dispatching by {@link
+   * AnthropicModelId.ThinkingShape}. Adaptive-family models use {@code thinking.type=adaptive} +
+   * {@code output_config.effort=...} — except Fable 5 ({@code ALWAYS_ON}), which rejects any
+   * explicit thinking config, so the field is omitted and only the effort sibling rides. {@code
+   * ThinkingLevel.NONE} omits the field on shapes where omission means "off", sends an explicit
+   * {@code disabled} on Sonnet 5 (where omission means adaptive-on), and omits on Fable 5 (which
+   * always thinks — there is no off). Legacy Opus 4.6 / Sonnet 4.6 use {@code
+   * thinking.type=enabled} + {@code budget_tokens=...}.
    *
    * @return both the {@link ThinkingConfig} and any sibling {@link OutputConfig} that must ride on
-   *     the request; either may be {@code null} when thinking is disabled
+   *     the request; either may be {@code null}
    */
   private ThinkingSpec buildThinkingSpec() {
     if (config.thinkingLevel() == null || config.thinkingLevel() == ThinkingLevel.NONE) {
-      return new ThinkingSpec(null, null);
+      return thinkingShape == AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON
+          ? new ThinkingSpec(ThinkingConfig.disabled(), null)
+          : new ThinkingSpec(null, null);
     }
 
-    if (usesAdaptiveThinking) {
+    if (thinkingShape != AnthropicModelId.ThinkingShape.LEGACY_BUDGET) {
       var effort =
           switch (config.thinkingLevel()) {
             case NONE -> null;
@@ -673,7 +686,11 @@ public class AnthropicModel implements Model {
             case XHIGH -> OutputConfig.XHIGH;
             case MAX -> OutputConfig.MAX;
           };
-      return new ThinkingSpec(ThinkingConfig.adaptive(), effort);
+      var thinking =
+          thinkingShape == AnthropicModelId.ThinkingShape.ALWAYS_ON
+              ? null
+              : ThinkingConfig.adaptive();
+      return new ThinkingSpec(thinking, effort);
     }
 
     if (config.thinkingLevel() == ThinkingLevel.XHIGH) {
@@ -754,7 +771,8 @@ public class AnthropicModel implements Model {
     return switch (stopReason) {
       case "end_turn", "stop_sequence" -> FinishReason.STOP;
       case "tool_use" -> FinishReason.TOOL_CALLS;
-      case "max_tokens" -> FinishReason.LENGTH;
+      case "max_tokens", "model_context_window_exceeded" -> FinishReason.LENGTH;
+      case "refusal" -> FinishReason.REFUSAL;
       default -> FinishReason.STOP;
     };
   }
