@@ -127,7 +127,7 @@ public final class StopClassifier {
     }
 
     return switch (finishReason) {
-      case CONTENT_FILTER ->
+      case CONTENT_FILTER, REFUSAL ->
           Optional.of(
               new ResultMessage.Refusal(
                   state.sessionId(),

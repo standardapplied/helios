@@ -34,8 +34,12 @@ import java.util.Map;
  * @param stopSequences sequences that stop generation
  * @param seed random seed for reproducibility
  * @param toolChoice controls how the model uses tools
- * @param googleSearch whether to enable Google Search grounding
- * @param urlContext whether to enable URL context (fetches web content from URLs in messages)
+ * @param webSearch whether to enable provider-native web search (Gemini: Google Search grounding;
+ *     Anthropic: the {@code web_search} server tool). Providers or models without web search
+ *     support reject this at model construction with {@link IllegalArgumentException}
+ * @param webFetch whether to enable provider-native URL fetching (Gemini: URL context; Anthropic:
+ *     the {@code web_fetch} server tool). Providers or models without web fetch support reject this
+ *     at model construction with {@link IllegalArgumentException}
  * @param streamIdleTimeout maximum time to wait for next SSE data line during streaming. Default
  *     120s — high enough for reasoning models that pause for tens of seconds during extended
  *     thinking before emitting tokens. Override via the builder for chat-only workloads where
@@ -65,14 +69,34 @@ public record ModelConfig(
     List<String> stopSequences,
     Long seed,
     ToolChoice toolChoice,
-    boolean googleSearch,
-    boolean urlContext,
+    boolean webSearch,
+    boolean webFetch,
     Duration streamIdleTimeout,
     String baseUrl,
     Map<String, String> headers) {
 
   public ModelConfig {
     headers = headers == null ? Map.of() : Map.copyOf(headers);
+  }
+
+  /**
+   * Legacy alias for {@link #webSearch()}.
+   *
+   * @deprecated use {@link #webSearch()}; the toggle is provider-neutral since 2.8.0
+   */
+  @Deprecated(since = "2.8.0")
+  public boolean googleSearch() {
+    return webSearch;
+  }
+
+  /**
+   * Legacy alias for {@link #webFetch()}.
+   *
+   * @deprecated use {@link #webFetch()}; the toggle is provider-neutral since 2.8.0
+   */
+  @Deprecated(since = "2.8.0")
+  public boolean urlContext() {
+    return webFetch;
   }
 
   /**
@@ -97,8 +121,8 @@ public record ModelConfig(
     sb.append(", stopSequences=").append(stopSequences);
     sb.append(", seed=").append(seed);
     sb.append(", toolChoice=").append(toolChoice);
-    sb.append(", googleSearch=").append(googleSearch);
-    sb.append(", urlContext=").append(urlContext);
+    sb.append(", webSearch=").append(webSearch);
+    sb.append(", webFetch=").append(webFetch);
     sb.append(", streamIdleTimeout=").append(streamIdleTimeout);
     sb.append(", baseUrl=").append(baseUrl);
     sb.append(", headers={");
@@ -182,8 +206,8 @@ public record ModelConfig(
     private List<String> stopSequences;
     private Long seed;
     private ToolChoice toolChoice;
-    private boolean googleSearch;
-    private boolean urlContext;
+    private boolean webSearch;
+    private boolean webFetch;
     private Duration streamIdleTimeout = DEFAULT_STREAM_IDLE_TIMEOUT;
     private String baseUrl;
     private LinkedHashMap<String, String> headers = new LinkedHashMap<>();
@@ -202,8 +226,8 @@ public record ModelConfig(
       this.stopSequences = config.stopSequences;
       this.seed = config.seed;
       this.toolChoice = config.toolChoice;
-      this.googleSearch = config.googleSearch;
-      this.urlContext = config.urlContext;
+      this.webSearch = config.webSearch;
+      this.webFetch = config.webFetch;
       this.streamIdleTimeout = config.streamIdleTimeout;
       this.baseUrl = config.baseUrl;
       this.headers = new LinkedHashMap<>(config.headers);
@@ -270,14 +294,43 @@ public record ModelConfig(
       return this;
     }
 
-    public Builder withGoogleSearch(boolean googleSearch) {
-      this.googleSearch = googleSearch;
+    /**
+     * Enable provider-native web search. Gemini maps this to Google Search grounding; Anthropic to
+     * the {@code web_search} server tool. Providers without web search support fail fast at model
+     * construction.
+     */
+    public Builder withWebSearch(boolean webSearch) {
+      this.webSearch = webSearch;
       return this;
     }
 
-    public Builder withUrlContext(boolean urlContext) {
-      this.urlContext = urlContext;
+    /**
+     * Enable provider-native URL fetching. Gemini maps this to URL context; Anthropic to the {@code
+     * web_fetch} server tool. Providers without web fetch support fail fast at model construction.
+     */
+    public Builder withWebFetch(boolean webFetch) {
+      this.webFetch = webFetch;
       return this;
+    }
+
+    /**
+     * Legacy alias for {@link #withWebSearch(boolean)}.
+     *
+     * @deprecated use {@link #withWebSearch(boolean)}; the toggle is provider-neutral since 2.8.0
+     */
+    @Deprecated(since = "2.8.0")
+    public Builder withGoogleSearch(boolean googleSearch) {
+      return withWebSearch(googleSearch);
+    }
+
+    /**
+     * Legacy alias for {@link #withWebFetch(boolean)}.
+     *
+     * @deprecated use {@link #withWebFetch(boolean)}; the toggle is provider-neutral since 2.8.0
+     */
+    @Deprecated(since = "2.8.0")
+    public Builder withUrlContext(boolean urlContext) {
+      return withWebFetch(urlContext);
     }
 
     public Builder withStreamIdleTimeout(Duration streamIdleTimeout) {
@@ -329,8 +382,8 @@ public record ModelConfig(
           stopSequences,
           seed,
           toolChoice,
-          googleSearch,
-          urlContext,
+          webSearch,
+          webFetch,
           streamIdleTimeout,
           baseUrl,
           Map.copyOf(headers));
