@@ -52,6 +52,31 @@ public record MessagesRequest(
   }
 
   /**
+   * The pause_turn continuation shape: this request with the paused assistant content appended to
+   * the conversation and {@code tool_choice} cleared — the API rejects a forced tool choice when
+   * the final message is an assistant message, and any forced choice was already honoured by the
+   * paused segment.
+   *
+   * @param messages the conversation including the trailing paused assistant entry; non-null
+   * @return a copy sharing every other field, with {@code tool_choice} null
+   */
+  public MessagesRequest continuationWith(List<MessageEntry> messages) {
+    return new MessagesRequest(
+        model,
+        maxTokens,
+        List.copyOf(messages),
+        system,
+        stream,
+        tools,
+        null,
+        temperature,
+        topP,
+        stopSequences,
+        thinking,
+        outputConfig);
+  }
+
+  /**
    * Diagnostic accessor that returns the system prompt as flat text regardless of which wire shape
    * ({@link String} or {@code List<SystemContent>}) the request carries. Concatenates {@code text}
    * fields of every {@link SystemContent} block in the array shape; returns {@code null} when no

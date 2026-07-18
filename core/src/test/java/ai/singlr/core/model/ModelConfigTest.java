@@ -138,47 +138,68 @@ class ModelConfigTest {
   }
 
   @Test
-  void googleSearchDefaultsFalse() {
+  void webSearchAndWebFetchDefaultFalse() {
     var config = ModelConfig.of("key");
 
-    assertFalse(config.googleSearch());
+    assertFalse(config.webSearch());
+    assertFalse(config.webFetch());
   }
 
   @Test
-  void builderWithGoogleSearch() {
+  void builderWithWebSearchAndWebFetch() {
+    var config =
+        ModelConfig.newBuilder().withApiKey("key").withWebSearch(true).withWebFetch(true).build();
+
+    assertTrue(config.webSearch());
+    assertTrue(config.webFetch());
+  }
+
+  @Test
+  void copyBuilderPreservesWebSearchAndWebFetch() {
+    var original =
+        ModelConfig.newBuilder().withApiKey("key").withWebSearch(true).withWebFetch(true).build();
+    var copy = ModelConfig.newBuilder(original).withTemperature(0.5).build();
+
+    assertTrue(copy.webSearch());
+    assertTrue(copy.webFetch());
+  }
+
+  @Test
+  @SuppressWarnings("deprecation")
+  void deprecatedGoogleSearchAliasesWebSearch() {
     var config = ModelConfig.newBuilder().withApiKey("key").withGoogleSearch(true).build();
 
+    assertTrue(config.webSearch());
     assertTrue(config.googleSearch());
   }
 
   @Test
-  void copyBuilderPreservesGoogleSearch() {
-    var original = ModelConfig.newBuilder().withApiKey("key").withGoogleSearch(true).build();
-    var copy = ModelConfig.newBuilder(original).withTemperature(0.5).build();
-
-    assertTrue(copy.googleSearch());
-  }
-
-  @Test
-  void urlContextDefaultsFalse() {
-    var config = ModelConfig.of("key");
-
-    assertFalse(config.urlContext());
-  }
-
-  @Test
-  void builderWithUrlContext() {
+  @SuppressWarnings("deprecation")
+  void deprecatedUrlContextAliasesWebFetch() {
     var config = ModelConfig.newBuilder().withApiKey("key").withUrlContext(true).build();
 
+    assertTrue(config.webFetch());
     assertTrue(config.urlContext());
   }
 
   @Test
-  void copyBuilderPreservesUrlContext() {
-    var original = ModelConfig.newBuilder().withApiKey("key").withUrlContext(true).build();
-    var copy = ModelConfig.newBuilder(original).withTemperature(0.5).build();
+  void promptCacheKeyDefaultsNullAndRoundTrips() {
+    assertNull(ModelConfig.of("key").promptCacheKey());
 
-    assertTrue(copy.urlContext());
+    var config =
+        ModelConfig.newBuilder().withApiKey("key").withPromptCacheKey("tenant:acme").build();
+    assertEquals("tenant:acme", config.promptCacheKey());
+
+    var copy = ModelConfig.newBuilder(config).withTemperature(0.1).build();
+    assertEquals("tenant:acme", copy.promptCacheKey());
+  }
+
+  @Test
+  void toStringShowsWebToggles() {
+    var config = ModelConfig.newBuilder().withApiKey("key").withWebSearch(true).build();
+
+    assertTrue(config.toString().contains("webSearch=true"));
+    assertTrue(config.toString().contains("webFetch=false"));
   }
 
   @Test

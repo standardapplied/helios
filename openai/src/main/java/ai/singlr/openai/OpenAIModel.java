@@ -95,6 +95,16 @@ public class OpenAIModel implements Model {
       throw new IllegalArgumentException(
           "config with valid apiKey is required (or set baseUrl + auth header)");
     }
+    if (config.webSearch()) {
+      throw new IllegalArgumentException(
+          "ModelConfig.webSearch is not supported by helios-openai; disable it or use a provider"
+              + " with native web search (Anthropic, Gemini)");
+    }
+    if (config.webFetch()) {
+      throw new IllegalArgumentException(
+          "ModelConfig.webFetch is not supported by helios-openai; disable it or use a provider"
+              + " with native web fetch (Anthropic, Gemini)");
+    }
     this.wireModelId = wireModelId;
     this.knownModel = knownModel;
     this.config = config;
@@ -294,7 +304,8 @@ public class OpenAIModel implements Model {
             .withMaxOutputTokens(
                 config.maxOutputTokens() != null ? config.maxOutputTokens() : maxOutputTokens())
             .withStop(config.stopSequences())
-            .withReasoning(reasoningConfig);
+            .withReasoning(reasoningConfig)
+            .withPromptCacheKey(config.promptCacheKey());
 
     if (outputSchema != null) {
       var hasOpenMap = hasOpenMapShape(outputSchema);
@@ -462,25 +473,37 @@ public class OpenAIModel implements Model {
     };
   }
 
+  /**
+   * Model-aware effort dispatch driven by {@link OpenAIModelId.EffortSupport}. FULL models (gpt-5.6
+   * family) accept the whole none..max range, so {@code ThinkingLevel.NONE} maps to an explicit
+   * {@code "none"} (omitting the config would run the model's default medium reasoning) and {@code
+   * MAX} maps to {@code "max"}. EXTENDED models (gpt-5.4/5.5) top out at {@code xhigh}; STANDARD
+   * models clamp everything above {@code high} down so requests stay valid.
+   */
   private ResponsesRequest.ReasoningConfig buildReasoningConfig() {
-    if (config.thinkingLevel() == null || config.thinkingLevel() == ThinkingLevel.NONE) {
-      return null;
+    var support =
+        knownModel != null ? knownModel.effortSupport() : OpenAIModelId.EffortSupport.STANDARD;
+    var level = config.thinkingLevel() == null ? ThinkingLevel.NONE : config.thinkingLevel();
+
+    if (level == ThinkingLevel.NONE) {
+      return support == OpenAIModelId.EffortSupport.FULL
+          ? ResponsesRequest.ReasoningConfig.of("none")
+          : null;
     }
 
-    // Model-aware effort dispatch. gpt-5.4 and gpt-5.5 accept the "xhigh" wire string per
-    // OpenAI's published model pages; XHIGH lands there directly and MAX (no native equivalent
-    // anywhere in the OpenAI surface) clamps up to xhigh on those models. Older reasoning models
-    // (o3, o4-mini) and undocumented variants clamp both XHIGH and MAX to "high" — see
-    // OpenAIModelId#supportsXhighEffort for the per-model matrix and the conservative-default
-    // rationale.
-    var topTier = knownModel != null && knownModel.supportsXhighEffort() ? "xhigh" : "high";
     var effort =
-        switch (config.thinkingLevel()) {
-          case NONE -> null;
+        switch (level) {
+          case NONE -> throw new IllegalStateException("NONE handled above; unreachable");
           case MINIMAL, LOW -> "low";
           case MEDIUM -> "medium";
           case HIGH -> "high";
-          case XHIGH, MAX -> topTier;
+          case XHIGH -> support == OpenAIModelId.EffortSupport.STANDARD ? "high" : "xhigh";
+          case MAX ->
+              switch (support) {
+                case STANDARD -> "high";
+                case EXTENDED -> "xhigh";
+                case FULL -> "max";
+              };
         };
 
     return ResponsesRequest.ReasoningConfig.of(effort);
@@ -542,6 +565,7 @@ public class OpenAIModel implements Model {
     private int inputTokens = 0;
     private int outputTokens = 0;
     private int cachedInputTokens = 0;
+    private int cacheWriteTokens = 0;
     private String responseStatus = null;
 
     StreamingIterator(
@@ -697,6 +721,7 @@ public class OpenAIModel implements Model {
                 outputTokens = usage.outputTokens();
               }
               cachedInputTokens = usage.cachedTokensOrZero();
+              cacheWriteTokens = usage.cacheWriteTokensOrZero();
             }
           }
           done = true;
@@ -745,15 +770,15 @@ public class OpenAIModel implements Model {
       }
 
       Response.Usage usage = null;
-      if (inputTokens > 0 || outputTokens > 0 || cachedInputTokens > 0) {
-        // OpenAI's wire shape reports input_tokens as TOTAL (cached + uncached) and
-        // input_tokens_details.cached_tokens as a SUBSET. The Helios canonical shape is disjoint
-        // — every token in exactly one class — so we subtract here. Bounded by zero in case the
-        // server ever reports a cached subset > total (would indicate a server-side accounting
-        // bug; we'd rather under-report uncached than synthesize a negative count).
-        var uncachedInput = Math.max(0, inputTokens - cachedInputTokens);
-        // OpenAI does not premium cache writes, so cacheCreationInputTokens stays zero.
-        usage = Response.Usage.of(uncachedInput, outputTokens, 0, cachedInputTokens);
+      if (inputTokens > 0 || outputTokens > 0 || cachedInputTokens > 0 || cacheWriteTokens > 0) {
+        // OpenAI's wire shape reports input_tokens as TOTAL and input_tokens_details.cached_tokens
+        // / cache_write_tokens as SUBSETS. The Helios canonical shape is disjoint — every token in
+        // exactly one class — so we subtract both here. Bounded by zero in case the server ever
+        // reports subsets exceeding the total (would indicate a server-side accounting bug; we'd
+        // rather under-report uncached than synthesize a negative count). cache_write_tokens is
+        // populated on gpt-5.6+ where writes bill at a premium; zero elsewhere.
+        var uncachedInput = Math.max(0, inputTokens - cachedInputTokens - cacheWriteTokens);
+        usage = Response.Usage.of(uncachedInput, outputTokens, cacheWriteTokens, cachedInputTokens);
       }
 
       String thinking = reasoningBuilder.isEmpty() ? null : reasoningBuilder.toString();

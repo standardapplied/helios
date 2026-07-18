@@ -145,6 +145,33 @@ class OpenAIModelIdTest {
   }
 
   @Test
+  void gpt56FamilyIsSupported() {
+    assertEquals("gpt-5.6", OpenAIModelId.GPT_5_6.id());
+    assertEquals(1_050_000, OpenAIModelId.GPT_5_6.contextWindow());
+    assertEquals(128_000, OpenAIModelId.GPT_5_6.maxOutputTokens());
+    assertEquals("gpt-5.6-terra", OpenAIModelId.GPT_5_6_TERRA.id());
+    assertEquals("gpt-5.6-luna", OpenAIModelId.GPT_5_6_LUNA.id());
+  }
+
+  @Test
+  void effortSupportTiers() {
+    assertEquals(OpenAIModelId.EffortSupport.FULL, OpenAIModelId.GPT_5_6.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.FULL, OpenAIModelId.GPT_5_6_TERRA.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.EXTENDED, OpenAIModelId.GPT_5_5.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.EXTENDED, OpenAIModelId.GPT_5_4.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.STANDARD, OpenAIModelId.O3.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.STANDARD, OpenAIModelId.GPT_4O.effortSupport());
+  }
+
+  @Test
+  @SuppressWarnings("deprecation")
+  void deprecatedXhighFlagDerivesFromEffortSupport() {
+    assertTrue(OpenAIModelId.GPT_5_6.supportsXhighEffort());
+    assertTrue(OpenAIModelId.GPT_5_5.supportsXhighEffort());
+    assertFalse(OpenAIModelId.O3.supportsXhighEffort());
+  }
+
+  @Test
   void allModelsHaveIds() {
     for (var model : OpenAIModelId.values()) {
       assertNotNull(model.id());

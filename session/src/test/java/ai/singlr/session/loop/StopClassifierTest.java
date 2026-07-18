@@ -213,6 +213,21 @@ final class StopClassifierTest {
   }
 
   @Test
+  void refusalProducesRefusal() {
+    var result =
+        classifyNoError(state(), defaults(), FinishReason.REFUSAL, "declined by policy", false);
+    var r = assertInstanceOf(ResultMessage.Refusal.class, result.orElseThrow());
+    assertEquals("declined by policy", r.refusalText());
+  }
+
+  @Test
+  void refusalWithBlankContentUsesPlaceholderRefusalText() {
+    var result = classifyNoError(state(), defaults(), FinishReason.REFUSAL, "", false);
+    var r = assertInstanceOf(ResultMessage.Refusal.class, result.orElseThrow());
+    assertEquals("[refused without text]", r.refusalText());
+  }
+
+  @Test
   void errorProducesErrorDuringExecution() {
     var result = classifyNoError(state(), defaults(), FinishReason.ERROR, "rate limited", false);
     var e = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result.orElseThrow());

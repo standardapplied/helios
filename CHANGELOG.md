@@ -2,6 +2,81 @@
 
 All notable changes to Helios are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [2.8.0] — 2026-07-18 — Current-generation models: Fable 5, Sonnet 5, GPT 5.6; web tools; caching
+
+### Breaking
+
+- **`ModelConfig` canonical constructor changed**: `googleSearch`/`urlContext` become the
+  provider-neutral `webSearch`/`webFetch`, and a new `promptCacheKey` component is added.
+  Deprecated accessor and builder aliases (`googleSearch()`, `urlContext()`,
+  `withGoogleSearch`, `withUrlContext`) keep existing callers compiling; builders are
+  unaffected otherwise.
+- **`FinishReason` gains `REFUSAL`** (provider safety decline, e.g. Claude Fable 5's
+  `stop_reason: "refusal"`) — exhaustive `switch` consumers must add a branch. The
+  session loop classifies it to the existing `ResultMessage.Refusal` terminal.
+- **`AnthropicModelId.usesAdaptiveThinking()` and `OpenAIModelId.supportsXhighEffort()`
+  are deprecated**, replaced by `thinkingShape()` (four-way enum) and `effortSupport()`
+  (three-tier enum); both constructors changed accordingly.
+- **`ContentBlock.content` (anthropic wire record) widened `String` → `Object`** to carry
+  server-tool result arrays.
+
+### Added — provider-neutral web search / web fetch
+
+`ModelConfig.withWebSearch(true)` / `withWebFetch(true)`:
+
+- **Gemini** maps them to Google Search grounding and URL context (exactly the old
+  `googleSearch`/`urlContext` behavior).
+- **Anthropic** emits the `web_search_20260318` / `web_fetch_20260318` server tools
+  (dynamic filtering; supported by every model in the enum). Results stream through the
+  normal event flow; web citations land on `Response.citations()`; the turn's full
+  content-block array — including `encrypted_content` — is preserved in message metadata
+  (`anthropic.rawContent`) and echoed verbatim on later turns as the API requires.
+  `pause_turn` is continued automatically inside `AnthropicModel` (blocking and streaming
+  paths, bounded at 8 resumes) so consumers never observe the pause.
+- **OpenAI** fails fast at model construction — helios-openai has no native web-tool
+  support yet.
+
+### Added — current-generation model catalogs
+
+- **Anthropic**: `claude-fable-5` and `claude-sonnet-5`. The `usesAdaptiveThinking`
+  boolean becomes `ThinkingShape` (`LEGACY_BUDGET` / `ADAPTIVE` / `ADAPTIVE_DEFAULT_ON` /
+  `ALWAYS_ON`): Fable 5 always thinks (the `thinking` field is always omitted; any
+  explicit config 400s; depth rides `output_config.effort`), Sonnet 5 runs adaptive when
+  the field is omitted so `ThinkingLevel.NONE` sends an explicit `disabled`.
+  Adaptive-family models (Opus 4.7+, Sonnet 5, Fable 5) never send `temperature`/`top_p`
+  — also fixes a latent 400 when temperature was set with thinking off. Stop-reason
+  mapping gains `refusal` → `REFUSAL` and `model_context_window_exceeded` → `LENGTH`; the
+  raw stop reason rides `Response.metadata` under `anthropic.stopReason`.
+- **OpenAI**: `gpt-5.6`, `gpt-5.6-terra`, `gpt-5.6-luna` (1,050,000-token context, 128K
+  output). `EffortSupport` tiers replace the xhigh boolean: `ThinkingLevel.MAX` now maps
+  to the real `"max"` on the gpt-5.6 family and `NONE` maps to the explicit `"none"`
+  effort there (omitting `reasoning` would run the model's default medium reasoning).
+
+### Added — OpenAI prompt-cache accounting
+
+`ModelConfig.withPromptCacheKey(...)` rides requests as `prompt_cache_key` (required for
+improved cache matching on gpt-5.6+; choose per-tenant/per-agent keys grouping shared
+prefixes). Usage parsing reads the new `input_tokens_details.cache_write_tokens` subset
+into `Usage.cacheCreationInputTokens`, keeping the canonical shape disjoint — existing
+`CostCalculator.Pricing` cache-write rates now apply to OpenAI's newly billed (1.25×)
+cache writes on gpt-5.6+ with no cost-model changes.
+
+### Added — refusal scripting + dated-snapshot resolution
+
+`ScriptedModel.thenRefusal(text)` scripts a `FinishReason.REFUSAL` turn so refusal
+handling is testable in deterministic CI evals. `AnthropicModelId.fromWireId` resolves
+dated snapshot IDs (e.g. `claude-sonnet-4-6-20251114`) to their family so legacy
+snapshots keep legacy request semantics; truly unknown Claude IDs still default to the
+adaptive shape (which also means sampling parameters are not sent for them — pin a
+family ID or use a known model if a custom gateway needs `temperature`).
+
+### Unchanged, verified against current provider docs
+
+Anthropic prompt caching (`CachePolicy` 5m/1h/off with system/tools/message breakpoints)
+and adaptive thinking + effort mapping (`low`…`max`, `display: "summarized"` pinned)
+already match the current API surface. OpenAI automatic-cache reads were already
+accounted disjointly.
+
 ## [2.7.0] — 2026-07-18 — Eval-readiness: usage/cost telemetry, prompt drafts, rollups, scripted Model
 
 Four features driven by consumer gap analysis (prompt management, tracing, and evals for

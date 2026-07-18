@@ -17,47 +17,78 @@ public enum OpenAIModelId {
   // operators can override per-call via ModelConfig.Builder.withMaxOutputTokens. Reasoning models
   // (o3, o4-mini) carry higher caps because their output includes reasoning tokens.
   //
-  // supportsXhighEffort: gpt-5.4 and gpt-5.5 model pages explicitly document `xhigh` as an
-  // accepted value for `reasoning.effort`. The mini/nano variants share their parent's reasoning
-  // family but OpenAI has not published the per-variant value matrix; left false (conservative
-  // clamp to "high") until OpenAI documents otherwise. o-series reasoning models (o3, o4-mini)
-  // pre-date the xhigh tier and are documented to accept low/medium/high only.
-  GPT_5_5("gpt-5.5", 1_050_000, 128_000, true),
-  GPT_5_4("gpt-5.4", 1_050_000, 128_000, true),
-  GPT_5_4_MINI("gpt-5.4-mini", 400_000, 128_000, false),
-  GPT_5_4_NANO("gpt-5.4-nano", 400_000, 128_000, false),
-  GPT_4_1("gpt-4.1", 1_000_000, 32_000, false),
-  GPT_4_1_MINI("gpt-4.1-mini", 1_000_000, 32_000, false),
-  GPT_4_1_NANO("gpt-4.1-nano", 1_000_000, 16_000, false),
-  GPT_4O("gpt-4o", 128_000, 16_384, false),
-  GPT_4O_MINI("gpt-4o-mini", 128_000, 16_384, false),
-  O3("o3", 200_000, 100_000, false),
-  O4_MINI("o4-mini", 200_000, 100_000, false);
+  // EffortSupport per model: the gpt-5.6 family documents the full none..max reasoning.effort
+  // range (latest-model guide, 2026-07-18); gpt-5.4 and gpt-5.5 document low..xhigh; mini/nano
+  // variants and o-series models are documented for low..high only, so higher tiers clamp.
+  // gpt-5.6-terra and gpt-5.6-luna share the gpt-5.6 family limits per the latest-model guide;
+  // adjust when OpenAI publishes per-variant pages.
+  GPT_5_6("gpt-5.6", 1_050_000, 128_000, EffortSupport.FULL),
+  GPT_5_6_TERRA("gpt-5.6-terra", 1_050_000, 128_000, EffortSupport.FULL),
+  GPT_5_6_LUNA("gpt-5.6-luna", 1_050_000, 128_000, EffortSupport.FULL),
+  GPT_5_5("gpt-5.5", 1_050_000, 128_000, EffortSupport.EXTENDED),
+  GPT_5_4("gpt-5.4", 1_050_000, 128_000, EffortSupport.EXTENDED),
+  GPT_5_4_MINI("gpt-5.4-mini", 400_000, 128_000, EffortSupport.STANDARD),
+  GPT_5_4_NANO("gpt-5.4-nano", 400_000, 128_000, EffortSupport.STANDARD),
+  GPT_4_1("gpt-4.1", 1_000_000, 32_000, EffortSupport.STANDARD),
+  GPT_4_1_MINI("gpt-4.1-mini", 1_000_000, 32_000, EffortSupport.STANDARD),
+  GPT_4_1_NANO("gpt-4.1-nano", 1_000_000, 16_000, EffortSupport.STANDARD),
+  GPT_4O("gpt-4o", 128_000, 16_384, EffortSupport.STANDARD),
+  GPT_4O_MINI("gpt-4o-mini", 128_000, 16_384, EffortSupport.STANDARD),
+  O3("o3", 200_000, 100_000, EffortSupport.STANDARD),
+  O4_MINI("o4-mini", 200_000, 100_000, EffortSupport.STANDARD);
+
+  /**
+   * The {@code reasoning.effort} value range a model accepts on the Responses API. Wider tiers are
+   * supersets: {@link #FULL} accepts everything {@link #EXTENDED} does plus {@code none} and {@code
+   * max}.
+   */
+  public enum EffortSupport {
+    /** {@code low} / {@code medium} / {@code high} only; higher Helios tiers clamp to high. */
+    STANDARD,
+
+    /** Adds {@code xhigh}; {@code ThinkingLevel.MAX} clamps to xhigh. */
+    EXTENDED,
+
+    /**
+     * Full range {@code none} / {@code low} / {@code medium} / {@code high} / {@code xhigh} /
+     * {@code max} (gpt-5.6 family).
+     */
+    FULL
+  }
 
   private final String id;
   private final int contextWindow;
   private final int maxOutputTokens;
-  private final boolean supportsXhighEffort;
+  private final EffortSupport effortSupport;
 
-  OpenAIModelId(String id, int contextWindow, int maxOutputTokens, boolean supportsXhighEffort) {
+  OpenAIModelId(String id, int contextWindow, int maxOutputTokens, EffortSupport effortSupport) {
     this.id = id;
     this.contextWindow = contextWindow;
     this.maxOutputTokens = maxOutputTokens;
-    this.supportsXhighEffort = supportsXhighEffort;
+    this.effortSupport = effortSupport;
   }
 
   /**
-   * Whether this model accepts the {@code "xhigh"} value on the {@code reasoning.effort} parameter
-   * of the Responses API. Confirmed against the gpt-5.4 and gpt-5.5 model pages on OpenAI's
-   * developer docs (2026-05-24). Models without confirmed support clamp {@link
-   * ai.singlr.core.model.ThinkingLevel#XHIGH} and {@link ai.singlr.core.model.ThinkingLevel#MAX} to
-   * {@code "high"} so requests stay valid; flip this flag to {@code true} when OpenAI publishes
-   * wider per-model support.
+   * The {@code reasoning.effort} range this model accepts. Drives the {@code ThinkingLevel} → wire
+   * mapping in {@code OpenAIModel}: tiers above the model's ceiling clamp down so requests stay
+   * valid.
    *
-   * @return true when {@code reasoning.effort=xhigh} is a valid request value for this model
+   * @return the effort-support tier
    */
+  public EffortSupport effortSupport() {
+    return effortSupport;
+  }
+
+  /**
+   * Whether this model accepts {@code reasoning.effort=xhigh}.
+   *
+   * @return true for {@link EffortSupport#EXTENDED} and {@link EffortSupport#FULL} models
+   * @deprecated use {@link #effortSupport()}; the boolean cannot express the gpt-5.6 family's
+   *     {@code none}/{@code max} support
+   */
+  @Deprecated(since = "2.8.0")
   public boolean supportsXhighEffort() {
-    return supportsXhighEffort;
+    return effortSupport != EffortSupport.STANDARD;
   }
 
   /**

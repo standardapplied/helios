@@ -23,7 +23,9 @@ import java.util.Map;
  * @param name tool name (for type "tool_use")
  * @param input tool arguments (for type "tool_use")
  * @param toolUseId the tool_use ID this result responds to (for type "tool_result")
- * @param content result content (for type "tool_result")
+ * @param content result content — a {@link String} for client tool results, or the raw list shape
+ *     for server-tool result blocks parsed from responses (for type "tool_result" and server-tool
+ *     result types)
  * @param thinking thinking text (for type "thinking")
  * @param signature cryptographic signature for thinking round-trip (for type "thinking")
  * @param source nested source object (for "image" / "document" blocks) carrying the base64-encoded
@@ -38,7 +40,7 @@ public record ContentBlock(
     String name,
     Map<String, Object> input,
     @JsonProperty("tool_use_id") String toolUseId,
-    String content,
+    Object content,
     String thinking,
     String signature,
     Source source,

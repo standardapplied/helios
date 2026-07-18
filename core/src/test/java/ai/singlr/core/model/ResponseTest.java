@@ -158,8 +158,9 @@ class ResponseTest {
     assertEquals(FinishReason.TOOL_CALLS, FinishReason.valueOf("TOOL_CALLS"));
     assertEquals(FinishReason.LENGTH, FinishReason.valueOf("LENGTH"));
     assertEquals(FinishReason.CONTENT_FILTER, FinishReason.valueOf("CONTENT_FILTER"));
+    assertEquals(FinishReason.REFUSAL, FinishReason.valueOf("REFUSAL"));
     assertEquals(FinishReason.ERROR, FinishReason.valueOf("ERROR"));
-    assertEquals(5, FinishReason.values().length);
+    assertEquals(6, FinishReason.values().length);
   }
 
   @Test

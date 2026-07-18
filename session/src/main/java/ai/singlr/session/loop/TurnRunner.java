@@ -732,7 +732,7 @@ public final class TurnRunner {
       case STOP -> StopReason.END_TURN;
       case TOOL_CALLS -> StopReason.TOOL_USE;
       case LENGTH -> StopReason.MAX_TOKENS;
-      case CONTENT_FILTER -> StopReason.REFUSAL;
+      case CONTENT_FILTER, REFUSAL -> StopReason.REFUSAL;
       case ERROR -> StopReason.ERROR;
     };
   }

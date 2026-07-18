@@ -810,6 +810,150 @@ class AnthropicModelTest {
   }
 
   @Test
+  void mapStopReasonRefusal() {
+    assertEquals(FinishReason.REFUSAL, AnthropicModel.mapStopReason("refusal"));
+  }
+
+  @Test
+  void mapStopReasonContextWindowExceeded() {
+    assertEquals(
+        FinishReason.LENGTH, AnthropicModel.mapStopReason("model_context_window_exceeded"));
+  }
+
+  // ── Fable 5 / Sonnet 5 request shapes ─────────────────────────────────────
+
+  @Test
+  void fable5ThinkingLevelYieldsEffortWithoutThinkingField() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.HIGH)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_FABLE_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+
+    assertNull(request.thinking(), "Fable 5 rejects any explicit thinking config — omit the field");
+    assertNotNull(request.outputConfig());
+    assertEquals("high", request.outputConfig().effort());
+  }
+
+  @Test
+  void fable5NoneOmitsThinkingEntirely() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_FABLE_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Quick")), List.of(), null);
+
+    assertNull(request.thinking(), "thinking cannot be disabled on Fable 5 — omit the field");
+    assertNull(request.outputConfig());
+  }
+
+  @Test
+  void sonnet5UsesAdaptiveShape() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.XHIGH)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+
+    assertEquals("adaptive", request.thinking().type());
+    assertNull(request.thinking().budgetTokens());
+    assertEquals("xhigh", request.outputConfig().effort());
+  }
+
+  @Test
+  void sonnet5NoneSendsExplicitDisabled() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Quick")), List.of(), null);
+
+    assertNotNull(
+        request.thinking(),
+        "Sonnet 5 runs adaptive thinking when the field is omitted — NONE must send disabled");
+    assertEquals("disabled", request.thinking().type());
+    assertNull(request.outputConfig());
+  }
+
+  // ── sampling-parameter guard on adaptive-capable models ───────────────────
+
+  @Test
+  void adaptiveModelsNeverSendSamplingParamsEvenWithThinkingOff() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .withTemperature(0.7)
+            .withTopP(0.9)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_8, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertNull(request.temperature(), "Opus 4.7+ rejects temperature with a 400 — never send it");
+    assertNull(request.topP(), "Opus 4.7+ rejects top_p with a 400 — never send it");
+  }
+
+  @Test
+  void fable5NeverSendsSamplingParams() {
+    var config =
+        ModelConfig.newBuilder().withApiKey("test-key").withTemperature(0.3).withTopP(0.8).build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_FABLE_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertNull(request.temperature());
+    assertNull(request.topP());
+  }
+
+  @Test
+  void datedLegacySnapshotResolvesToFamilyShape() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .withTemperature(0.2)
+            .build();
+    var model = new AnthropicModel("claude-sonnet-4-6-20251114", config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals(
+        0.2,
+        request.temperature(),
+        "dated snapshots of legacy models keep the family's LEGACY_BUDGET semantics");
+  }
+
+  @Test
+  void legacyModelKeepsSamplingParamsWhenThinkingOff() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .withTemperature(0.7)
+            .withTopP(0.9)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals(0.7, request.temperature());
+    assertEquals(0.9, request.topP());
+  }
+
+  @Test
   void buildRequestNoToolsReturnsNullToolDefs() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
@@ -1010,7 +1154,7 @@ class AnthropicModelTest {
                     AnthropicModel.THINKING_SIGNATURE_KEY, "sig-1"))
             .build();
 
-    var blocks = AnthropicModel.decodeThinkingBlocks(msg);
+    var blocks = AnthropicModel.decodeThinkingBlocks(msg.metadata());
 
     assertEquals(1, blocks.size());
     assertEquals("I am thinking", blocks.getFirst().text());
@@ -1029,7 +1173,7 @@ class AnthropicModelTest {
             .withMetadata(Map.of(AnthropicModel.THINKING_BLOCKS_KEY, json))
             .build();
 
-    var blocks = AnthropicModel.decodeThinkingBlocks(msg);
+    var blocks = AnthropicModel.decodeThinkingBlocks(msg.metadata());
 
     assertEquals(2, blocks.size());
     assertEquals("first thought", blocks.get(0).text());
@@ -1052,7 +1196,7 @@ class AnthropicModelTest {
                     AnthropicModel.THINKING_SIGNATURE_KEY, "old-sig"))
             .build();
 
-    var blocks = AnthropicModel.decodeThinkingBlocks(msg);
+    var blocks = AnthropicModel.decodeThinkingBlocks(msg.metadata());
 
     assertEquals(1, blocks.size());
     assertEquals("new format", blocks.getFirst().text());
@@ -1072,7 +1216,7 @@ class AnthropicModelTest {
                     AnthropicModel.THINKING_SIGNATURE_KEY, "legacy-sig"))
             .build();
 
-    var blocks = AnthropicModel.decodeThinkingBlocks(msg);
+    var blocks = AnthropicModel.decodeThinkingBlocks(msg.metadata());
 
     assertEquals(1, blocks.size());
     assertEquals("legacy text", blocks.getFirst().text());
@@ -1083,7 +1227,7 @@ class AnthropicModelTest {
   void decodeThinkingBlocksReturnsEmptyWhenNoMetadata() {
     var msg =
         Message.newBuilder().withRole(ai.singlr.core.model.Role.ASSISTANT).withContent("r").build();
-    assertTrue(AnthropicModel.decodeThinkingBlocks(msg).isEmpty());
+    assertTrue(AnthropicModel.decodeThinkingBlocks(msg.metadata()).isEmpty());
   }
 
   @Test
@@ -1611,9 +1755,9 @@ class AnthropicModelTest {
   }
 
   /**
-   * Drive a {@link AnthropicModel.StreamingIterator} against a canned SSE body and return its
-   * terminal {@code Done} event. Local to this test file so we don't bleed implementation-detail
-   * helpers across test classes.
+   * Drive a {@link AnthropicStreamingIterator} against a canned SSE body and return its terminal
+   * {@code Done} event. Local to this test file so we don't bleed implementation-detail helpers
+   * across test classes.
    */
   private static ai.singlr.core.model.StreamEvent.Done drainSseFixture(String sseBody)
       throws Exception {
@@ -1663,7 +1807,7 @@ class AnthropicModelTest {
           }
         };
     try (var iterator =
-        new AnthropicModel.StreamingIterator(
+        new AnthropicStreamingIterator(
             response,
             tools.jackson.databind.json.JsonMapper.builder().build(),
             java.time.Duration.ofSeconds(5))) {

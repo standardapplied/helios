@@ -519,6 +519,104 @@ class OpenAIModelTest {
   }
 
   @Test
+  void gpt56MaxMapsToMaxWireString() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.MAX)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_5_6, config);
+
+    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+
+    assertEquals("max", request.reasoning().effort());
+  }
+
+  @Test
+  void gpt55MaxClampsToXhigh() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.MAX)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_5_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+
+    assertEquals("xhigh", request.reasoning().effort());
+  }
+
+  @Test
+  void gpt56NoneMapsToExplicitNoneEffort() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_5_6, config);
+
+    var request = model.buildRequest(List.of(Message.user("Quick")), List.of(), null);
+
+    assertNotNull(request.reasoning());
+    assertEquals("none", request.reasoning().effort());
+  }
+
+  @Test
+  void noneOmitsReasoningOnModelsWithoutExplicitNone() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_5_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Quick")), List.of(), null);
+
+    assertNull(request.reasoning());
+  }
+
+  @Test
+  void promptCacheKeyRidesOnRequest() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withPromptCacheKey("tenant:acme:support-v1")
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_5_6, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals("tenant:acme:support-v1", request.promptCacheKey());
+  }
+
+  @Test
+  void promptCacheKeyAbsentByDefault() {
+    var request = createModel().buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertNull(request.promptCacheKey());
+  }
+
+  @Test
+  void webSearchFailsFastAtConstruction() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").withWebSearch(true).build();
+
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> new OpenAIModel(OpenAIModelId.GPT_5_6, config));
+    assertTrue(ex.getMessage().contains("webSearch"));
+  }
+
+  @Test
+  void webFetchFailsFastAtConstruction() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").withWebFetch(true).build();
+
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> new OpenAIModel(OpenAIModelId.GPT_5_6, config));
+    assertTrue(ex.getMessage().contains("webFetch"));
+  }
+
+  @Test
   void gpt55XhighMapsToXhighWireString() {
     // Per OpenAI's deployment-checklist + gpt-5.5 model page, gpt-5.5 reasoning.effort accepts
     // none/low/medium/high/xhigh. Helios's XHIGH must round-trip to the literal "xhigh", not

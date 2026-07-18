@@ -681,6 +681,32 @@ class SerializationTest {
   }
 
   @Test
+  void apiUsageDeserializesCacheWriteTokens() throws Exception {
+    var usage =
+        objectMapper.readValue(
+            "{\"input_tokens\":3000,\"output_tokens\":150,\"total_tokens\":3150,"
+                + "\"input_tokens_details\":{\"cached_tokens\":1920,\"cache_write_tokens\":1000}}",
+            ApiUsage.class);
+    assertEquals(1920, usage.cachedTokensOrZero());
+    assertEquals(1000, usage.cacheWriteTokensOrZero());
+  }
+
+  @Test
+  void apiUsageCacheWriteTokensOrZeroHandlesAbsence() throws Exception {
+    var missingDetails =
+        objectMapper.readValue(
+            "{\"input_tokens\":25,\"output_tokens\":15,\"total_tokens\":40}", ApiUsage.class);
+    assertEquals(0, missingDetails.cacheWriteTokensOrZero());
+
+    var detailsWithoutWrites =
+        objectMapper.readValue(
+            "{\"input_tokens\":25,\"output_tokens\":15,\"total_tokens\":40,"
+                + "\"input_tokens_details\":{\"cached_tokens\":10}}",
+            ApiUsage.class);
+    assertEquals(0, detailsWithoutWrites.cacheWriteTokensOrZero());
+  }
+
+  @Test
   void apiUsageCachedTokensOrZeroHandlesMissingDetails() throws Exception {
     var usage =
         objectMapper.readValue(
