@@ -2,6 +2,22 @@
 
 All notable changes to Helios are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [2.8.1] — 2026-07-18 — Release-hygiene patch
+
+Identical library code to 2.8.0. Cut because the 2.8.0 release pipeline produced two
+Central Portal deployments (a failed status-poll left a stale pending deployment that was
+published alongside the retry) — **consume 2.8.1, not 2.8.0**. Pipeline hardening so this
+cannot recur:
+
+- The release workflow refuses to deploy a version that already exists on Maven Central
+  and serializes runs under a concurrency group — one version can only ever produce one
+  publishable deployment after a successful publish.
+- Central Portal deployments are now named `helios-<version>` instead of the generic
+  "Deployment", so a pending duplicate is visible before anyone clicks Publish.
+- (From the 2.8.0 pipeline fixes, restated: `central-publishing-maven-plugin` 0.7.0 →
+  0.11.0 for the Portal's new `warnings` response field; `helios-testing` added to the
+  published modules.)
+
 ## [2.8.0] — 2026-07-18 — Current-generation models: Fable 5, Sonnet 5, GPT 5.6; web tools; caching
 
 ### Breaking

@@ -6,6 +6,10 @@ on:
       - 'release/**'
   workflow_dispatch:
 
+concurrency:
+  group: maven-central-release
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -22,6 +26,20 @@ jobs:
           server-password: MAVEN_CENTRAL_PASSWORD
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           gpg-passphrase: GPG_PASSPHRASE
+
+      - name: Resolve project version
+        id: version
+        run: echo "version=$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout)" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to deploy an already-published version
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          URL="https://repo.maven.apache.org/maven2/ai/singlr/helios-core/${V}/helios-core-${V}.pom"
+          if curl -sfI "$URL" > /dev/null; then
+            echo "::error::helios ${V} is already published to Maven Central — bump the version instead of re-releasing. Refusing to create a duplicate deployment."
+            exit 1
+          fi
+          echo "helios ${V} is not on Maven Central yet; proceeding."
 
       - name: Deploy to Maven Central
         run: mvn clean deploy -Prelease --batch-mode -pl core,session,runtime,gemini,anthropic,openai,onnx,persistence,repl,testing
