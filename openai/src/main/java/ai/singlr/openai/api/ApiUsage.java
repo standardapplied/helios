@@ -62,14 +62,33 @@ public record ApiUsage(
   }
 
   /**
-   * Per-class breakdown of {@link ApiUsage#inputTokens}. Currently OpenAI only surfaces {@code
-   * cached_tokens}, but the object is modeled separately so future provider additions (e.g.
-   * audio-token breakdowns on multimodal models) don't break consumers.
+   * Return the cache-write-tokens count or zero when absent. OpenAI surfaces {@code
+   * cache_write_tokens} on gpt-5.6+ models only (cache writes bill at 1.25× base input there);
+   * earlier models and proxies omit it entirely.
+   *
+   * @return tokens written to the prompt cache; non-negative
+   */
+  public int cacheWriteTokensOrZero() {
+    if (inputTokensDetails == null || inputTokensDetails.cacheWriteTokens() == null) {
+      return 0;
+    }
+    return inputTokensDetails.cacheWriteTokens();
+  }
+
+  /**
+   * Per-class breakdown of {@link ApiUsage#inputTokens}. OpenAI surfaces {@code cached_tokens}
+   * everywhere and {@code cache_write_tokens} on gpt-5.6+; the object is modeled separately so
+   * future provider additions (e.g. audio-token breakdowns on multimodal models) don't break
+   * consumers.
    *
    * @param cachedTokens portion of {@code input_tokens} served from the prompt cache
+   * @param cacheWriteTokens portion of {@code input_tokens} written to the prompt cache (gpt-5.6+;
+   *     billed at a write premium there)
    */
   @JsonInclude(JsonInclude.Include.NON_NULL)
-  public record InputTokensDetails(@JsonProperty("cached_tokens") Integer cachedTokens) {}
+  public record InputTokensDetails(
+      @JsonProperty("cached_tokens") Integer cachedTokens,
+      @JsonProperty("cache_write_tokens") Integer cacheWriteTokens) {}
 
   /**
    * Per-class breakdown of {@link ApiUsage#outputTokens}. OpenAI's Responses API uses this to

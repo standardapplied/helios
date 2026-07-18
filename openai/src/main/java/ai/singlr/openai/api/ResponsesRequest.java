@@ -24,6 +24,9 @@ import java.util.List;
  * @param stop stop sequences
  * @param text text format configuration for structured output
  * @param reasoning reasoning configuration for thinking models
+ * @param promptCacheKey stable cache-routing key; groups requests sharing a long common prefix so
+ *     they land on machines holding the cached prefix (required for improved cache matching on
+ *     gpt-5.6+)
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ResponsesRequest(
@@ -38,7 +41,8 @@ public record ResponsesRequest(
     @JsonProperty("max_output_tokens") Integer maxOutputTokens,
     List<String> stop,
     TextConfig text,
-    ReasoningConfig reasoning) {
+    ReasoningConfig reasoning,
+    @JsonProperty("prompt_cache_key") String promptCacheKey) {
 
   public static Builder newBuilder() {
     return new Builder();
@@ -80,6 +84,7 @@ public record ResponsesRequest(
     private List<String> stop;
     private TextConfig text;
     private ReasoningConfig reasoning;
+    private String promptCacheKey;
 
     private Builder() {}
 
@@ -143,6 +148,11 @@ public record ResponsesRequest(
       return this;
     }
 
+    public Builder withPromptCacheKey(String promptCacheKey) {
+      this.promptCacheKey = promptCacheKey;
+      return this;
+    }
+
     public ResponsesRequest build() {
       return new ResponsesRequest(
           model,
@@ -156,7 +166,8 @@ public record ResponsesRequest(
           maxOutputTokens,
           stop,
           text,
-          reasoning);
+          reasoning,
+          promptCacheKey);
     }
   }
 }

@@ -40,6 +40,11 @@ import java.util.Map;
  * @param webFetch whether to enable provider-native URL fetching (Gemini: URL context; Anthropic:
  *     the {@code web_fetch} server tool). Providers or models without web fetch support reject this
  *     at model construction with {@link IllegalArgumentException}
+ * @param promptCacheKey stable cache-routing key sent to providers whose prompt cache benefits from
+ *     one (OpenAI {@code prompt_cache_key} — required for improved cache matching on GPT 5.6+).
+ *     Choose a key that groups requests sharing a long common prefix (e.g. per tenant or per
+ *     agent). Providers without the concept ignore it. Not a secret, but avoid embedding end-user
+ *     PII — it travels on every request
  * @param streamIdleTimeout maximum time to wait for next SSE data line during streaming. Default
  *     120s — high enough for reasoning models that pause for tens of seconds during extended
  *     thinking before emitting tokens. Override via the builder for chat-only workloads where
@@ -71,6 +76,7 @@ public record ModelConfig(
     ToolChoice toolChoice,
     boolean webSearch,
     boolean webFetch,
+    String promptCacheKey,
     Duration streamIdleTimeout,
     String baseUrl,
     Map<String, String> headers) {
@@ -123,6 +129,7 @@ public record ModelConfig(
     sb.append(", toolChoice=").append(toolChoice);
     sb.append(", webSearch=").append(webSearch);
     sb.append(", webFetch=").append(webFetch);
+    sb.append(", promptCacheKey=").append(promptCacheKey);
     sb.append(", streamIdleTimeout=").append(streamIdleTimeout);
     sb.append(", baseUrl=").append(baseUrl);
     sb.append(", headers={");
@@ -208,6 +215,7 @@ public record ModelConfig(
     private ToolChoice toolChoice;
     private boolean webSearch;
     private boolean webFetch;
+    private String promptCacheKey;
     private Duration streamIdleTimeout = DEFAULT_STREAM_IDLE_TIMEOUT;
     private String baseUrl;
     private LinkedHashMap<String, String> headers = new LinkedHashMap<>();
@@ -228,6 +236,7 @@ public record ModelConfig(
       this.toolChoice = config.toolChoice;
       this.webSearch = config.webSearch;
       this.webFetch = config.webFetch;
+      this.promptCacheKey = config.promptCacheKey;
       this.streamIdleTimeout = config.streamIdleTimeout;
       this.baseUrl = config.baseUrl;
       this.headers = new LinkedHashMap<>(config.headers);
@@ -314,6 +323,15 @@ public record ModelConfig(
     }
 
     /**
+     * Stable cache-routing key for providers whose prompt cache benefits from one (OpenAI {@code
+     * prompt_cache_key}). See {@link ModelConfig#promptCacheKey()}.
+     */
+    public Builder withPromptCacheKey(String promptCacheKey) {
+      this.promptCacheKey = promptCacheKey;
+      return this;
+    }
+
+    /**
      * Legacy alias for {@link #withWebSearch(boolean)}.
      *
      * @deprecated use {@link #withWebSearch(boolean)}; the toggle is provider-neutral since 2.8.0
@@ -384,6 +402,7 @@ public record ModelConfig(
           toolChoice,
           webSearch,
           webFetch,
+          promptCacheKey,
           streamIdleTimeout,
           baseUrl,
           Map.copyOf(headers));

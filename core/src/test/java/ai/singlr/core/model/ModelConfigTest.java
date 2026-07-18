@@ -183,6 +183,18 @@ class ModelConfigTest {
   }
 
   @Test
+  void promptCacheKeyDefaultsNullAndRoundTrips() {
+    assertNull(ModelConfig.of("key").promptCacheKey());
+
+    var config =
+        ModelConfig.newBuilder().withApiKey("key").withPromptCacheKey("tenant:acme").build();
+    assertEquals("tenant:acme", config.promptCacheKey());
+
+    var copy = ModelConfig.newBuilder(config).withTemperature(0.1).build();
+    assertEquals("tenant:acme", copy.promptCacheKey());
+  }
+
+  @Test
   void toStringShowsWebToggles() {
     var config = ModelConfig.newBuilder().withApiKey("key").withWebSearch(true).build();
 
