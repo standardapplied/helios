@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS helios_prompts (
 CREATE INDEX IF NOT EXISTS idx_helios_prompts_name
     ON helios_prompts (name);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_helios_prompts_single_active
+    ON helios_prompts (name) WHERE active;
+
 CREATE TABLE IF NOT EXISTS helios_traces (
     id                UUID            PRIMARY KEY,
     name              VARCHAR(255)    NOT NULL,
@@ -27,6 +30,11 @@ CREATE TABLE IF NOT EXISTS helios_traces (
     prompt_name       VARCHAR(255),
     prompt_version    INT,
     total_tokens      INT             NOT NULL DEFAULT 0,
+    input_tokens      INT,
+    output_tokens     INT,
+    cache_creation_tokens INT,
+    cache_read_tokens INT,
+    cost_micro_usd    BIGINT,
     thumbs_up_count   INT             NOT NULL DEFAULT 0,
     thumbs_down_count INT             NOT NULL DEFAULT 0,
     group_id          VARCHAR(255),
@@ -64,6 +72,11 @@ CREATE TABLE IF NOT EXISTS helios_spans (
     end_time    TIMESTAMPTZ,
     error       TEXT,
     attributes  JSONB           NOT NULL DEFAULT '{}',
+    input_tokens INT,
+    output_tokens INT,
+    cache_creation_tokens INT,
+    cache_read_tokens INT,
+    cost_micro_usd BIGINT,
     CONSTRAINT fk_spans_parent FOREIGN KEY (trace_id, parent_id)
         REFERENCES helios_spans(trace_id, id) ON DELETE CASCADE,
     CONSTRAINT uq_spans_trace_id UNIQUE (trace_id, id)

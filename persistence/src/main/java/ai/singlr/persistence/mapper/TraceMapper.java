@@ -52,6 +52,8 @@ public final class TraceMapper {
         .withPromptName(row.column("prompt_name").getString())
         .withPromptVersion(promptVersion)
         .withTotalTokens(totalTokens)
+        .withUsage(UsageMapper.usage(row))
+        .withCost(UsageMapper.cost(row))
         .withThumbsUpCount(thumbsUpCount)
         .withThumbsDownCount(thumbsDownCount)
         .withGroupId(row.column("group_id").getString())

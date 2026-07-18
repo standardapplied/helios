@@ -5,20 +5,27 @@
 
 package ai.singlr.persistence;
 
+import ai.singlr.core.common.CostEstimate;
 import ai.singlr.core.common.Paginate;
 import ai.singlr.core.common.PaginatedList;
 import ai.singlr.core.common.Strings;
 import ai.singlr.core.events.EventSink;
 import ai.singlr.core.events.HeliosEvent;
+import ai.singlr.core.model.Response;
 import ai.singlr.core.trace.Annotation;
 import ai.singlr.core.trace.Span;
 import ai.singlr.core.trace.Trace;
+import ai.singlr.core.trace.TraceFilter;
+import ai.singlr.core.trace.TraceRollup;
+import ai.singlr.core.trace.TraceRollupKey;
 import ai.singlr.persistence.mapper.AnnotationMapper;
 import ai.singlr.persistence.mapper.JsonbMapper;
 import ai.singlr.persistence.mapper.SpanMapper;
 import ai.singlr.persistence.mapper.TraceMapper;
+import ai.singlr.persistence.mapper.TraceRollupMapper;
 import ai.singlr.persistence.sql.AnnotationSql;
 import ai.singlr.persistence.sql.SpanSql;
+import ai.singlr.persistence.sql.TraceRollupSql;
 import ai.singlr.persistence.sql.TraceSql;
 import ai.singlr.scimsql.ScimEngine;
 import io.helidon.dbclient.DbClient;
@@ -71,24 +78,25 @@ public class PgTraceStore implements EventSink {
   public void store(Trace trace) {
     var tx = dbClient.transaction();
     try {
-      tx.dml(
-          config.qualify(TraceSql.INSERT),
-          trace.id().toString(),
-          trace.name(),
-          trace.startTime(),
-          trace.endTime(),
-          config.redact(trace.error()),
-          JsonbMapper.toJsonb(config.redactValues(trace.attributes())),
-          config.redact(trace.inputText()),
-          config.redact(trace.outputText()),
-          trace.userId(),
-          trace.sessionId() != null ? trace.sessionId().toString() : null,
-          trace.modelId(),
-          trace.promptName(),
-          trace.promptVersion(),
-          trace.totalTokens(),
-          trace.groupId(),
-          JsonbMapper.listToJsonb(trace.labels()));
+      var params = new ArrayList<Object>();
+      params.add(trace.id().toString());
+      params.add(trace.name());
+      params.add(trace.startTime());
+      params.add(trace.endTime());
+      params.add(config.redact(trace.error()));
+      params.add(JsonbMapper.toJsonb(config.redactValues(trace.attributes())));
+      params.add(config.redact(trace.inputText()));
+      params.add(config.redact(trace.outputText()));
+      params.add(trace.userId());
+      params.add(trace.sessionId() != null ? trace.sessionId().toString() : null);
+      params.add(trace.modelId());
+      params.add(trace.promptName());
+      params.add(trace.promptVersion());
+      params.add(trace.totalTokens());
+      addUsageCostParams(params, trace.usage(), trace.cost());
+      params.add(trace.groupId());
+      params.add(JsonbMapper.listToJsonb(trace.labels()));
+      tx.dml(config.qualify(TraceSql.INSERT), params.toArray());
 
       insertSpansBfs(tx, trace.id(), trace.spans());
 
@@ -178,6 +186,30 @@ public class PgTraceStore implements EventSink {
       return PaginatedList.<Trace>newBuilder().withItems(items).withPaginate(paginate).build();
     } catch (Exception e) {
       throw new PgException("Failed to list traces", e);
+    }
+  }
+
+  /**
+   * Aggregates stored traces grouped by the given key: run and error counts, duration percentiles,
+   * token and cost sums, and feedback counts per group. Traces with a null value for a grouping
+   * dimension are excluded — a trace without a {@code groupId} belongs to no eval group.
+   *
+   * @param key the grouping dimension; non-null
+   * @param filter equality/time-window constraints; non-null, {@link TraceFilter#none()} for all
+   * @return one rollup per group, ordered by the grouping dimension values
+   */
+  public List<TraceRollup> summarize(TraceRollupKey key, TraceFilter filter) {
+    Objects.requireNonNull(key, "key");
+    Objects.requireNonNull(filter, "filter");
+    var query = TraceRollupSql.build(key, filter);
+    try {
+      return dbClient
+          .execute()
+          .query(config.qualify(query.sql()), query.params().toArray())
+          .map(row -> TraceRollupMapper.map(row, key))
+          .toList();
+    } catch (Exception e) {
+      throw new PgException("Failed to summarize traces by " + key, e);
     }
   }
 
@@ -296,6 +328,20 @@ public class PgTraceStore implements EventSink {
     }
   }
 
+  /**
+   * Appends the five usage/cost bind values in column order ({@code input_tokens, output_tokens,
+   * cache_creation_tokens, cache_read_tokens, cost_micro_usd}) — the single write-side counterpart
+   * of {@code UsageMapper}. Null usage/cost bind all-null columns, meaning "not recorded".
+   */
+  private static void addUsageCostParams(
+      List<Object> params, Response.Usage usage, CostEstimate cost) {
+    params.add(usage != null ? usage.inputTokens() : null);
+    params.add(usage != null ? usage.outputTokens() : null);
+    params.add(usage != null ? usage.cacheCreationInputTokens() : null);
+    params.add(usage != null ? usage.cacheReadInputTokens() : null);
+    params.add(cost != null ? cost.microUsd() : null);
+  }
+
   private static Object[] annotationParams(Annotation annotation) {
     return new Object[] {
       annotation.id().toString(),
@@ -333,17 +379,18 @@ public class PgTraceStore implements EventSink {
       var span = entry.span();
       var parentId = entry.parentId();
 
-      tx.dml(
-          config.qualify(SpanSql.INSERT),
-          span.id().toString(),
-          traceId.toString(),
-          parentId != null ? parentId.toString() : null,
-          span.name(),
-          span.kind().name(),
-          span.startTime(),
-          span.endTime(),
-          config.redact(span.error()),
-          JsonbMapper.toJsonb(config.redactValues(span.attributes())));
+      var params = new ArrayList<Object>();
+      params.add(span.id().toString());
+      params.add(traceId.toString());
+      params.add(parentId != null ? parentId.toString() : null);
+      params.add(span.name());
+      params.add(span.kind().name());
+      params.add(span.startTime());
+      params.add(span.endTime());
+      params.add(config.redact(span.error()));
+      params.add(JsonbMapper.toJsonb(config.redactValues(span.attributes())));
+      addUsageCostParams(params, span.usage(), span.cost());
+      tx.dml(config.qualify(SpanSql.INSERT), params.toArray());
 
       for (var child : span.children()) {
         queue.add(new SpanWithParent(child, span.id()));

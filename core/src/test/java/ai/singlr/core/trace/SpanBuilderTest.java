@@ -12,10 +12,44 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.core.common.CostEstimate;
+import ai.singlr.core.model.Response.Usage;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class SpanBuilderTest {
+
+  @Test
+  void spanCarriesUsageAndCost() {
+    var trace = TraceBuilder.start("test");
+    var span =
+        trace
+            .span("model.chat", SpanKind.MODEL_CALL)
+            .usage(Usage.of(100, 50, 20, 10))
+            .cost(CostEstimate.ofMicroUsd(1_250L))
+            .end();
+
+    assertEquals(Usage.of(100, 50, 20, 10), span.usage());
+    assertEquals(CostEstimate.ofMicroUsd(1_250L), span.cost());
+  }
+
+  @Test
+  void usageAndCostDefaultToNull() {
+    var span = TraceBuilder.start("test").span("tool.search", SpanKind.TOOL_EXECUTION).end();
+
+    assertNull(span.usage());
+    assertNull(span.cost());
+  }
+
+  @Test
+  void usageAfterEndThrows() {
+    var trace = TraceBuilder.start("test");
+    var spanBuilder = trace.span("model.chat", SpanKind.MODEL_CALL);
+    spanBuilder.end();
+
+    assertThrows(IllegalStateException.class, () -> spanBuilder.usage(Usage.of(1, 1)));
+    assertThrows(IllegalStateException.class, () -> spanBuilder.cost(CostEstimate.zero()));
+  }
 
   @Test
   void createAndEndSpan() {

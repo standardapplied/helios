@@ -10,9 +10,10 @@
         <version>2.7.0</version>
     </parent>
 
-    <artifactId>helios-repl</artifactId>
-    <name>helios-repl</name>
-    <description>Sandboxed code execution for RLM patterns</description>
+    <artifactId>helios-testing</artifactId>
+    <name>helios-testing</name>
+    <description>Deterministic test doubles for Helios consumers — scripted Model for CI evals</description>
+    <packaging>jar</packaging>
 
     <dependencies>
         <dependency>
@@ -20,25 +21,16 @@
             <artifactId>helios-core</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
-            <groupId>ai.singlr</groupId>
-            <artifactId>helios-session</artifactId>
-            <version>${project.version}</version>
-        </dependency>
+
         <dependency>
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>${jackson-tools-version}</version>
         </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.h2database</groupId>
-            <artifactId>h2</artifactId>
-            <version>2.3.232</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -112,6 +112,29 @@ class ResponseTest {
   }
 
   @Test
+  void usagePlusSumsClassWise() {
+    var sum = Response.Usage.of(100, 50, 20, 10).plus(Response.Usage.of(1, 2, 3, 4));
+
+    assertEquals(Response.Usage.of(101, 52, 23, 14), sum);
+  }
+
+  @Test
+  void usagePlusPreservesExplicitTotal() {
+    var explicit = new Response.Usage(2, 3, 0, 0, 99);
+
+    var sum = explicit.plus(Response.Usage.of(1, 1));
+
+    assertEquals(101, sum.totalTokens(), "provider-reported total carries through accumulation");
+  }
+
+  @Test
+  void usagePlusRejectsOverflow() {
+    var huge = Response.Usage.of(Integer.MAX_VALUE - 1, 0);
+
+    assertThrows(ArithmeticException.class, () -> huge.plus(Response.Usage.of(2, 0)));
+  }
+
+  @Test
   void usageOfWithCacheTokensRejectsOverflow() {
     // input + output + cacheCreation + cacheRead would exceed Integer.MAX_VALUE.
     var huge = Integer.MAX_VALUE - 10;

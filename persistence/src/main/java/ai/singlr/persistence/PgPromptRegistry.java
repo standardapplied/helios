@@ -32,6 +32,44 @@ public class PgPromptRegistry implements PromptRegistry {
 
   @Override
   public Prompt register(String name, String content) {
+    return insertVersion(name, content, true);
+  }
+
+  @Override
+  public Prompt registerDraft(String name, String content) {
+    return insertVersion(name, content, false);
+  }
+
+  @Override
+  public Prompt activate(String name, int version) {
+    var tx = dbClient.transaction();
+    try {
+      tx.dml(config.qualify(PromptSql.DEACTIVATE), name);
+      var activatedRows = tx.dml(config.qualify(PromptSql.ACTIVATE), name, version);
+      if (activatedRows == 0) {
+        tx.rollback();
+        throw new IllegalArgumentException("No prompt found: " + name + " v" + version);
+      }
+      var prompt =
+          tx.query(config.qualify(PromptSql.RESOLVE_VERSION), name, version)
+              .findFirst()
+              .map(PromptMapper::map)
+              .orElseThrow();
+      tx.commit();
+      return prompt;
+    } catch (IllegalArgumentException e) {
+      throw e;
+    } catch (Exception e) {
+      try {
+        tx.rollback();
+      } catch (Exception rollbackEx) {
+        e.addSuppressed(rollbackEx);
+      }
+      throw new PgException("Failed to activate prompt: " + name + " v" + version, e);
+    }
+  }
+
+  private Prompt insertVersion(String name, String content, boolean active) {
     if (Strings.isBlank(name)) {
       throw new IllegalArgumentException("Prompt name must not be blank");
     }
@@ -49,7 +87,9 @@ public class PgPromptRegistry implements PromptRegistry {
       var versionRow = tx.query(config.qualify(PromptSql.NEXT_VERSION), name).findFirst();
       int nextVersion = versionRow.map(r -> r.column("next_version").getInt()).orElse(1);
 
-      tx.dml(config.qualify(PromptSql.DEACTIVATE), name);
+      if (active) {
+        tx.dml(config.qualify(PromptSql.DEACTIVATE), name);
+      }
 
       tx.dml(
           config.qualify(PromptSql.INSERT),
@@ -57,13 +97,13 @@ public class PgPromptRegistry implements PromptRegistry {
           name,
           content,
           nextVersion,
-          true,
+          active,
           variablesLiteral,
           createdAt);
 
       tx.commit();
 
-      return new Prompt(id, name, content, nextVersion, true, variables, createdAt);
+      return new Prompt(id, name, content, nextVersion, active, variables, createdAt);
     } catch (Exception e) {
       try {
         tx.rollback();

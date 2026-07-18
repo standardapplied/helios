@@ -160,14 +160,7 @@ public final class SessionState {
    */
   public void accumulateUsage(Usage delta) {
     Objects.requireNonNull(delta, "delta must not be null");
-    usage.updateAndGet(
-        prev ->
-            new Usage(
-                prev.inputTokens() + delta.inputTokens(),
-                prev.outputTokens() + delta.outputTokens(),
-                prev.cacheCreationInputTokens() + delta.cacheCreationInputTokens(),
-                prev.cacheReadInputTokens() + delta.cacheReadInputTokens(),
-                prev.totalTokens() + delta.totalTokens()));
+    usage.updateAndGet(prev -> prev.plus(delta));
   }
 
   /**

@@ -193,6 +193,79 @@ class PgPromptRegistryTest {
   }
 
   @Test
+  void registerDraftDoesNotChangeActiveVersion() {
+    var v1 = registry.register("prompt", "live");
+    var draft = registry.registerDraft("prompt", "candidate {name}");
+
+    assertEquals(2, draft.version());
+    assertFalse(draft.active());
+    assertEquals(Set.of("name"), draft.variables());
+    assertEquals(v1.id(), registry.resolve("prompt").id());
+    assertEquals("candidate {name}", registry.resolve("prompt", 2).content());
+  }
+
+  @Test
+  void registerDraftAsFirstVersionLeavesNoActive() {
+    var draft = registry.registerDraft("prompt", "candidate");
+
+    assertEquals(1, draft.version());
+    assertFalse(draft.active());
+    assertNull(registry.resolve("prompt"));
+  }
+
+  @Test
+  void activatePromotesDraftAndRollsBack() {
+    registry.register("prompt", "v1");
+    registry.registerDraft("prompt", "v2");
+
+    var promoted = registry.activate("prompt", 2);
+    assertTrue(promoted.active());
+    assertEquals("v2", registry.resolve("prompt").content());
+    assertFalse(registry.resolve("prompt", 1).active());
+
+    var rolledBack = registry.activate("prompt", 1);
+    assertTrue(rolledBack.active());
+    assertEquals("v1", registry.resolve("prompt").content());
+    assertFalse(registry.resolve("prompt", 2).active());
+  }
+
+  @Test
+  void activateUnknownNameOrVersionThrows() {
+    registry.register("prompt", "v1");
+
+    assertThrows(IllegalArgumentException.class, () -> registry.activate("nonexistent", 1));
+    assertThrows(IllegalArgumentException.class, () -> registry.activate("prompt", 99));
+  }
+
+  @Test
+  void databaseRejectsSecondActiveRowForSameName() {
+    registry.register("prompt", "live");
+
+    assertThrows(
+        Exception.class,
+        () ->
+            PgTestSupport.dbClient()
+                .execute()
+                .dml(
+                    """
+                    INSERT INTO helios_prompts (id, name, content, version, active, variables,
+                        created_at)
+                    VALUES (CAST(? AS UUID), 'prompt', 'rogue', 2, TRUE, '{}', now())
+                    """,
+                    ai.singlr.core.common.Ids.newId().toString()));
+
+    var stillActive = registry.resolve("prompt");
+    assertEquals("live", stillActive.content());
+    assertEquals(1, stillActive.version());
+  }
+
+  @Test
+  void registerDraftValidatesLikeRegister() {
+    assertThrows(IllegalArgumentException.class, () -> registry.registerDraft("", "content"));
+    assertThrows(IllegalArgumentException.class, () -> registry.registerDraft("name", null));
+  }
+
+  @Test
   void concurrentRegistration() throws Exception {
     var threadCount = 8;
     var promptsPerThread = 50;

@@ -5,8 +5,10 @@
 
 package ai.singlr.core.trace;
 
+import ai.singlr.core.common.CostEstimate;
 import ai.singlr.core.common.Ids;
 import ai.singlr.core.events.EventSink;
+import ai.singlr.core.model.Response.Usage;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -14,6 +16,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BinaryOperator;
+import java.util.function.Function;
 
 /**
  * Mutable builder for constructing traces during agent execution.
@@ -200,7 +204,9 @@ public final class TraceBuilder implements SpanContainer {
     ended = true;
     var endTime = Ids.now();
     var duration = Duration.between(startTime, endTime);
-    var totalTokens = computeTotalTokens();
+    var usage = rollUp(completedSpans, Span::usage, Usage::plus);
+    var cost = rollUp(completedSpans, Span::cost, CostEstimate::plus);
+    var totalTokens = computeTotalTokens(completedSpans);
     return new Trace(
         id,
         name,
@@ -218,19 +224,45 @@ public final class TraceBuilder implements SpanContainer {
         promptName,
         promptVersion,
         totalTokens,
+        usage,
+        cost,
         0,
         0,
         groupId,
         labels);
   }
 
-  private int computeTotalTokens() {
+  private static <T> T rollUp(List<Span> spans, Function<Span, T> value, BinaryOperator<T> sum) {
+    T total = null;
+    for (var span : spans) {
+      var own = value.apply(span);
+      if (own != null) {
+        total = total == null ? own : sum.apply(total, own);
+      }
+      var fromChildren = rollUp(span.children(), value, sum);
+      if (fromChildren != null) {
+        total = total == null ? fromChildren : sum.apply(total, fromChildren);
+      }
+    }
+    return total;
+  }
+
+  /**
+   * Sums tokens per span, recursively: a span's typed {@link Span#usage()} wins when present;
+   * otherwise the legacy {@code inputTokens}/{@code outputTokens} attributes count for model-call
+   * spans. Per-span resolution keeps partially migrated instrumentation (some spans typed, some
+   * attribute-based) summing every span instead of dropping the legacy ones.
+   */
+  private static int computeTotalTokens(List<Span> spans) {
     int total = 0;
-    for (var span : completedSpans) {
-      if (span.kind() == SpanKind.MODEL_CALL) {
+    for (var span : spans) {
+      if (span.usage() != null) {
+        total += span.usage().totalTokens();
+      } else if (span.kind() == SpanKind.MODEL_CALL) {
         total += parseTokenAttribute(span.attributes().get("inputTokens"));
         total += parseTokenAttribute(span.attributes().get("outputTokens"));
       }
+      total += computeTotalTokens(span.children());
     }
     return total;
   }
