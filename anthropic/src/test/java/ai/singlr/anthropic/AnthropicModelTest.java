@@ -820,8 +820,6 @@ class AnthropicModelTest {
         FinishReason.LENGTH, AnthropicModel.mapStopReason("model_context_window_exceeded"));
   }
 
-  // ── Fable 5 / Sonnet 5 request shapes ─────────────────────────────────────
-
   @Test
   void fable5ThinkingLevelYieldsEffortWithoutThinkingField() {
     var config =
@@ -885,6 +883,52 @@ class AnthropicModelTest {
         "Sonnet 5 runs adaptive thinking when the field is omitted — NONE must send disabled");
     assertEquals("disabled", request.thinking().type());
     assertNull(request.outputConfig());
+  }
+
+  @Test
+  void opus5NoneDisablesThinkingAndUsesCurrentOutputLimit() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Quick")), List.of(), null);
+
+    assertEquals("disabled", request.thinking().type());
+    assertEquals(128_000, request.maxTokens());
+  }
+
+  @Test
+  void opus5MaxUsesAdaptiveThinkingAndMaxEffort() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.MAX)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+
+    assertEquals("adaptive", request.thinking().type());
+    assertEquals("max", request.outputConfig().effort());
+  }
+
+  @Test
+  void mythos5AlwaysOnThinkingUsesEffortWithoutThinkingField() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.MAX)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_MYTHOS_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+
+    assertNull(request.thinking());
+    assertEquals("max", request.outputConfig().effort());
+    assertEquals(128_000, request.maxTokens());
   }
 
   // ── sampling-parameter guard on adaptive-capable models ───────────────────

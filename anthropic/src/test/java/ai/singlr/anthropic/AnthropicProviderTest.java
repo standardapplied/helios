@@ -26,6 +26,8 @@ class AnthropicProviderTest {
 
   @Test
   void supportsSupportedModels() {
+    assertTrue(provider.supports(AnthropicModelId.CLAUDE_OPUS_5.id()));
+    assertTrue(provider.supports(AnthropicModelId.CLAUDE_MYTHOS_5.id()));
     assertTrue(provider.supports(AnthropicModelId.CLAUDE_OPUS_4_6.id()));
     assertTrue(provider.supports(AnthropicModelId.CLAUDE_SONNET_4_6.id()));
   }
