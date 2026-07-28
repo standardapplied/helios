@@ -167,18 +167,39 @@ final class CostCalculatorTest {
   }
 
   @Test
-  void pricingAnthropicCachingFactoryAppliesPublishedRatios() {
-    var p = Pricing.anthropicCaching(15.0, 75.0);
+  void pricingAnthropicCachingFiveMinuteFactoryAppliesPublishedRatios() {
+    var p = Pricing.anthropicCaching5m(15.0, 75.0);
     assertEquals(15_000_000L, p.inputMicroUsdPerMillion());
     assertEquals(75_000_000L, p.outputMicroUsdPerMillion());
     assertEquals(
         18_750_000L,
         p.cacheWriteMicroUsdPerMillion(),
-        "Anthropic cache writes bill at 1.25x base input");
+        "Anthropic 5-minute cache writes bill at 1.25x base input");
     assertEquals(
         1_500_000L,
         p.cacheReadMicroUsdPerMillion(),
         "Anthropic cache reads bill at 0.10x base input");
+  }
+
+  @Test
+  void pricingAnthropicCachingOneHourFactoryAppliesPublishedRatios() {
+    var p = Pricing.anthropicCaching1h(15.0, 75.0);
+    assertEquals(15_000_000L, p.inputMicroUsdPerMillion());
+    assertEquals(75_000_000L, p.outputMicroUsdPerMillion());
+    assertEquals(
+        30_000_000L,
+        p.cacheWriteMicroUsdPerMillion(),
+        "Anthropic 1-hour cache writes bill at 2x base input");
+    assertEquals(
+        1_500_000L,
+        p.cacheReadMicroUsdPerMillion(),
+        "Anthropic cache reads bill at 0.10x base input");
+  }
+
+  @Test
+  void pricingAnthropicCachingFactoryRemainsFiveMinuteAlias() {
+    var p = Pricing.anthropicCaching(15.0, 75.0);
+    assertEquals(Pricing.anthropicCaching5m(15.0, 75.0), p);
   }
 
   @Test

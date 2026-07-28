@@ -61,12 +61,54 @@ class AnthropicProviderTest {
   void createModelReturnsAnthropicModel() {
     var config = ModelConfig.of("test-api-key");
 
-    var model = provider.create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
+    AnthropicModel model = provider.create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
 
     assertNotNull(model);
-    assertInstanceOf(AnthropicModel.class, model);
     assertEquals(AnthropicModelId.CLAUDE_SONNET_4_6.id(), model.id());
     assertEquals("anthropic", model.provider());
+    assertInstanceOf(CachePolicy.ShortLived.class, model.cachePolicy());
+  }
+
+  @Test
+  void createModelAcceptsExplicitCachePolicy() {
+    var config = ModelConfig.of("test-api-key");
+
+    AnthropicModel model =
+        provider.create(AnthropicModelId.CLAUDE_OPUS_5.id(), config, CachePolicy.longLived());
+
+    assertInstanceOf(CachePolicy.LongLived.class, model.cachePolicy());
+  }
+
+  @Test
+  void createModelCanDisablePromptCaching() {
+    var config = ModelConfig.of("test-api-key");
+
+    AnthropicModel model =
+        provider.create(AnthropicModelId.CLAUDE_OPUS_5.id(), config, CachePolicy.disabled());
+
+    assertFalse(model.promptCachingEnabled());
+  }
+
+  @Test
+  void createUnknownClaudeModelAcceptsExplicitCachePolicy() {
+    var config = ModelConfig.of("test-api-key");
+
+    AnthropicModel model = provider.create("claude-future-model", config, CachePolicy.longLived());
+
+    assertEquals("claude-future-model", model.id());
+    assertInstanceOf(CachePolicy.LongLived.class, model.cachePolicy());
+  }
+
+  @Test
+  void createModelRejectsNullCachePolicy() {
+    var config = ModelConfig.of("test-api-key");
+
+    var exception =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> provider.create(AnthropicModelId.CLAUDE_OPUS_5.id(), config, (CachePolicy) null));
+
+    assertEquals("cachePolicy is required", exception.getMessage());
   }
 
   @Test

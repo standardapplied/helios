@@ -8,7 +8,9 @@ package ai.singlr.anthropic;
 import ai.singlr.anthropic.api.CacheControl;
 
 /**
- * Anthropic prompt-caching policy for an {@link AnthropicModel} instance.
+ * Anthropic prompt-caching policy for an {@link AnthropicModel} instance. Supply a policy through
+ * {@link AnthropicProvider#create(String, ai.singlr.core.model.ModelConfig, CachePolicy)}; the
+ * two-argument provider factory uses {@link #shortLived()}.
  *
  * <p>Sealed: three concrete shapes covering every supported TTL plus an opt-out. New TTLs that
  * Anthropic introduces require adding a new permitted subtype, which is a deliberate breaking

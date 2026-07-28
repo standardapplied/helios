@@ -122,6 +122,10 @@ public class AnthropicModel implements Model {
     this(wireModelId, AnthropicModelId.fromWireId(wireModelId), config, CachePolicy.shortLived());
   }
 
+  AnthropicModel(String wireModelId, ModelConfig config, CachePolicy cachePolicy) {
+    this(wireModelId, AnthropicModelId.fromWireId(wireModelId), config, cachePolicy);
+  }
+
   private AnthropicModel(
       String wireModelId,
       AnthropicModelId knownModel,

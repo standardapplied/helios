@@ -6,7 +6,6 @@
 package ai.singlr.anthropic;
 
 import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Model;
 import ai.singlr.core.model.ModelConfig;
 import ai.singlr.core.model.ModelProvider;
 
@@ -21,6 +20,9 @@ import ai.singlr.core.model.ModelProvider;
  * ModelConfig#baseUrl()} is set — pointing at Bedrock, Vertex AI, or a compatible proxy — any
  * non-blank {@code modelId} is accepted regardless of prefix. Callers can always override output
  * tokens via {@link ModelConfig.Builder#withMaxOutputTokens(Integer)}.
+ *
+ * <p>Managed five-minute prompt caching is enabled by default. Use {@link #create(String,
+ * ModelConfig, CachePolicy)} to select the one-hour cache or disable prompt caching.
  */
 public class AnthropicProvider implements ModelProvider {
 
@@ -32,13 +34,27 @@ public class AnthropicProvider implements ModelProvider {
   }
 
   @Override
-  public Model create(String modelId, ModelConfig config) {
+  public AnthropicModel create(String modelId, ModelConfig config) {
+    return create(modelId, config, CachePolicy.shortLived());
+  }
+
+  /**
+   * Create an Anthropic model with an explicit prompt-caching policy.
+   *
+   * @param modelId the model identifier
+   * @param config provider configuration
+   * @param cachePolicy short-lived (5m), long-lived (1h), or disabled
+   * @return a configured Anthropic model
+   * @throws IllegalArgumentException if the model is unsupported or any required argument is
+   *     invalid
+   */
+  public AnthropicModel create(String modelId, ModelConfig config, CachePolicy cachePolicy) {
     var known = AnthropicModelId.fromId(modelId);
     if (known != null) {
-      return new AnthropicModel(known, config);
+      return new AnthropicModel(known, config, cachePolicy);
     }
     if (AnthropicModelId.hasClaudePrefix(modelId) || !Strings.isBlank(config.baseUrl())) {
-      return new AnthropicModel(modelId, config);
+      return new AnthropicModel(modelId, config, cachePolicy);
     }
     throw new IllegalArgumentException(
         "Unsupported model: "

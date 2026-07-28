@@ -2,6 +2,15 @@
 
 All notable changes to Helios are documented here. Versions follow [SemVer](https://semver.org/).
 
+## Unreleased
+
+- Refresh the current OpenAI, Gemini, and Anthropic model catalogs.
+- Expose Anthropic's existing `CachePolicy` through
+  `AnthropicProvider.create(modelId, config, cachePolicy)`. Managed five-minute caching remains the
+  default; callers can now select the one-hour TTL or disable caching.
+- Add `CostCalculator.Pricing.anthropicCaching5m(...)` and
+  `anthropicCaching1h(...)` so cache writes use the correct 1.25× or 2× rate.
+
 ## [2.8.1] — 2026-07-18 — Release-hygiene patch
 
 Identical library code to 2.8.0. Cut because the 2.8.0 release pipeline produced two
