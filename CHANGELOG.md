@@ -4,12 +4,31 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
-- Refresh the current OpenAI, Gemini, and Anthropic model catalogs.
-- Expose Anthropic's existing `CachePolicy` through
-  `AnthropicProvider.create(modelId, config, cachePolicy)`. Managed five-minute caching remains the
-  default; callers can now select the one-hour TTL or disable caching.
-- Add `CostCalculator.Pricing.anthropicCaching5m(...)` and
-  `anthropicCaching1h(...)` so cache writes use the correct 1.25× or 2× rate.
+## [2.9.0] — 2026-07-28 — Current model catalogs and configurable Anthropic caching
+
+No breaking changes.
+
+### Added
+
+- OpenAI: canonical `gpt-5.6-sol` support while retaining the documented `gpt-5.6`
+  alias.
+- Gemini: stable `gemini-3.6-flash` and `gemini-3.5-flash-lite` support. Image-generation
+  models remain outside Helios's text-model catalog.
+- Anthropic: Claude Opus 5 and limited-access Mythos 5 with their documented thinking
+  behavior.
+- `AnthropicProvider.create(modelId, config, cachePolicy)` exposes the existing
+  `CachePolicy` through the provider API. Managed five-minute prompt caching remains the
+  default; callers can select the one-hour TTL or disable caching.
+- `CostCalculator.Pricing.anthropicCaching5m(...)` and
+  `anthropicCaching1h(...)` apply Anthropic's TTL-specific 1.25× and 2× cache-write rates.
+  The existing `anthropicCaching(...)` factory remains a five-minute alias.
+
+### Corrected
+
+- Claude Fable 5 and Sonnet 5 maximum-output metadata now reflects their 128K-token
+  output limit.
+- Prompt-cache documentation now reflects that Anthropic rejects requests with more
+  than four cache breakpoints rather than silently ignoring the extras.
 
 ## [2.8.1] — 2026-07-18 — Release-hygiene patch
 
