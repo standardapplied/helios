@@ -50,6 +50,11 @@ class OpenAIProviderTest {
   }
 
   @Test
+  void supportsGpt56Sol() {
+    assertTrue(provider.supports("gpt-5.6-sol"));
+  }
+
+  @Test
   void supportsO3() {
     assertTrue(provider.supports("o3"));
   }

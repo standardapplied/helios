@@ -16,6 +16,8 @@ class AnthropicModelIdTest {
 
   @Test
   void enumHasCorrectId() {
+    assertEquals("claude-opus-5", AnthropicModelId.CLAUDE_OPUS_5.id());
+    assertEquals("claude-mythos-5", AnthropicModelId.CLAUDE_MYTHOS_5.id());
     assertEquals("claude-opus-4-8", AnthropicModelId.CLAUDE_OPUS_4_8.id());
     assertEquals("claude-opus-4-7", AnthropicModelId.CLAUDE_OPUS_4_7.id());
     assertEquals("claude-opus-4-6", AnthropicModelId.CLAUDE_OPUS_4_6.id());
@@ -30,6 +32,8 @@ class AnthropicModelIdTest {
 
   @Test
   void contextWindowValues() {
+    assertEquals(1_000_000, AnthropicModelId.CLAUDE_OPUS_5.contextWindow());
+    assertEquals(1_000_000, AnthropicModelId.CLAUDE_MYTHOS_5.contextWindow());
     assertEquals(1_000_000, AnthropicModelId.CLAUDE_OPUS_4_8.contextWindow());
     assertEquals(1_000_000, AnthropicModelId.CLAUDE_OPUS_4_7.contextWindow());
     assertEquals(1_000_000, AnthropicModelId.CLAUDE_OPUS_4_6.contextWindow());
@@ -38,6 +42,8 @@ class AnthropicModelIdTest {
 
   @Test
   void fromIdReturnsCorrectModel() {
+    assertEquals(AnthropicModelId.CLAUDE_OPUS_5, AnthropicModelId.fromId("claude-opus-5"));
+    assertEquals(AnthropicModelId.CLAUDE_MYTHOS_5, AnthropicModelId.fromId("claude-mythos-5"));
     assertEquals(AnthropicModelId.CLAUDE_OPUS_4_8, AnthropicModelId.fromId("claude-opus-4-8"));
     assertEquals(AnthropicModelId.CLAUDE_OPUS_4_7, AnthropicModelId.fromId("claude-opus-4-7"));
     assertEquals(AnthropicModelId.CLAUDE_OPUS_4_6, AnthropicModelId.fromId("claude-opus-4-6"));
@@ -79,6 +85,8 @@ class AnthropicModelIdTest {
 
   @Test
   void isSupportedReturnsTrueForKnownModels() {
+    assertTrue(AnthropicModelId.isSupported("claude-opus-5"));
+    assertTrue(AnthropicModelId.isSupported("claude-mythos-5"));
     assertTrue(AnthropicModelId.isSupported("claude-opus-4-8"));
     assertTrue(AnthropicModelId.isSupported("claude-opus-4-7"));
     assertTrue(AnthropicModelId.isSupported("claude-opus-4-6"));
@@ -89,14 +97,32 @@ class AnthropicModelIdTest {
   void fable5AndSonnet5AreSupported() {
     assertEquals("claude-fable-5", AnthropicModelId.CLAUDE_FABLE_5.id());
     assertEquals(1_000_000, AnthropicModelId.CLAUDE_FABLE_5.contextWindow());
+    assertEquals(128_000, AnthropicModelId.CLAUDE_FABLE_5.maxOutputTokens());
     assertEquals("claude-sonnet-5", AnthropicModelId.CLAUDE_SONNET_5.id());
     assertEquals(1_000_000, AnthropicModelId.CLAUDE_SONNET_5.contextWindow());
+    assertEquals(128_000, AnthropicModelId.CLAUDE_SONNET_5.maxOutputTokens());
+  }
+
+  @Test
+  void opus5AndMythos5MetadataMatchesCurrentModels() {
+    assertEquals(128_000, AnthropicModelId.CLAUDE_OPUS_5.maxOutputTokens());
+    assertEquals(128_000, AnthropicModelId.CLAUDE_MYTHOS_5.maxOutputTokens());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON,
+        AnthropicModelId.CLAUDE_OPUS_5.thinkingShape());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.ALWAYS_ON, AnthropicModelId.CLAUDE_MYTHOS_5.thinkingShape());
   }
 
   @Test
   void thinkingShapesPerModel() {
     assertEquals(
         AnthropicModelId.ThinkingShape.ALWAYS_ON, AnthropicModelId.CLAUDE_FABLE_5.thinkingShape());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.ALWAYS_ON, AnthropicModelId.CLAUDE_MYTHOS_5.thinkingShape());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON,
+        AnthropicModelId.CLAUDE_OPUS_5.thinkingShape());
     assertEquals(
         AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON,
         AnthropicModelId.CLAUDE_SONNET_5.thinkingShape());

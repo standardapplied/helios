@@ -93,8 +93,15 @@ public interface CostCalculator {
 
     private static final long TOKENS_PER_MILLION = 1_000_000L;
 
-    /** Anthropic's published premium ratio for prompt-cache writes against base input. */
-    public static final double ANTHROPIC_CACHE_WRITE_MULTIPLIER = 1.25d;
+    /** Anthropic's published premium ratio for five-minute prompt-cache writes. */
+    public static final double ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER = 1.25d;
+
+    /** Backward-compatible alias for {@link #ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER}. */
+    public static final double ANTHROPIC_CACHE_WRITE_MULTIPLIER =
+        ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER;
+
+    /** Anthropic's published premium ratio for one-hour prompt-cache writes. */
+    public static final double ANTHROPIC_1H_CACHE_WRITE_MULTIPLIER = 2.00d;
 
     /** Anthropic's published discount ratio for prompt-cache reads against base input. */
     public static final double ANTHROPIC_CACHE_READ_MULTIPLIER = 0.10d;
@@ -179,21 +186,45 @@ public interface CostCalculator {
     }
 
     /**
-     * Build a {@code Pricing} using Anthropic's published prompt-cache ratios — cache writes at
-     * {@value #ANTHROPIC_CACHE_WRITE_MULTIPLIER}× base input, cache reads at {@value
-     * #ANTHROPIC_CACHE_READ_MULTIPLIER}× base input. Use for any Claude model whose rate card
-     * matches the published ratios; deployers paying a different ratio (volume discounts, custom
-     * enterprise pricing) should build a {@link Pricing} explicitly with the four-arg factory.
+     * Backward-compatible alias for {@link #anthropicCaching5m(double, double)}.
      *
      * @param inputUsdPerMillion USD per million uncached input tokens; non-negative
      * @param outputUsdPerMillion USD per million output tokens; non-negative
-     * @return a {@code Pricing} with cache rates derived from {@code inputUsdPerMillion}
+     * @return pricing for Anthropic's default five-minute cache
      */
     public static Pricing anthropicCaching(double inputUsdPerMillion, double outputUsdPerMillion) {
+      return anthropicCaching5m(inputUsdPerMillion, outputUsdPerMillion);
+    }
+
+    /**
+     * Build pricing for Anthropic's five-minute prompt cache.
+     *
+     * @param inputUsdPerMillion USD per million uncached input tokens; non-negative
+     * @param outputUsdPerMillion USD per million output tokens; non-negative
+     * @return pricing with 1.25× cache writes and 0.10× cache reads
+     */
+    public static Pricing anthropicCaching5m(
+        double inputUsdPerMillion, double outputUsdPerMillion) {
       return ofUsdPerMillion(
           inputUsdPerMillion,
           outputUsdPerMillion,
-          inputUsdPerMillion * ANTHROPIC_CACHE_WRITE_MULTIPLIER,
+          inputUsdPerMillion * ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER,
+          inputUsdPerMillion * ANTHROPIC_CACHE_READ_MULTIPLIER);
+    }
+
+    /**
+     * Build pricing for Anthropic's one-hour prompt cache.
+     *
+     * @param inputUsdPerMillion USD per million uncached input tokens; non-negative
+     * @param outputUsdPerMillion USD per million output tokens; non-negative
+     * @return pricing with 2.00× cache writes and 0.10× cache reads
+     */
+    public static Pricing anthropicCaching1h(
+        double inputUsdPerMillion, double outputUsdPerMillion) {
+      return ofUsdPerMillion(
+          inputUsdPerMillion,
+          outputUsdPerMillion,
+          inputUsdPerMillion * ANTHROPIC_1H_CACHE_WRITE_MULTIPLIER,
           inputUsdPerMillion * ANTHROPIC_CACHE_READ_MULTIPLIER);
     }
 

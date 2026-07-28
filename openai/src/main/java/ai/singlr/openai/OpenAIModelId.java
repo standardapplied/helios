@@ -23,6 +23,7 @@ public enum OpenAIModelId {
   // gpt-5.6-terra and gpt-5.6-luna share the gpt-5.6 family limits per the latest-model guide;
   // adjust when OpenAI publishes per-variant pages.
   GPT_5_6("gpt-5.6", 1_050_000, 128_000, EffortSupport.FULL),
+  GPT_5_6_SOL("gpt-5.6-sol", 1_050_000, 128_000, EffortSupport.FULL),
   GPT_5_6_TERRA("gpt-5.6-terra", 1_050_000, 128_000, EffortSupport.FULL),
   GPT_5_6_LUNA("gpt-5.6-luna", 1_050_000, 128_000, EffortSupport.FULL),
   GPT_5_5("gpt-5.5", 1_050_000, 128_000, EffortSupport.EXTENDED),

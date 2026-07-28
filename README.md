@@ -99,6 +99,29 @@ try (var model = new AnthropicProvider().create(
 
 All providers implement the same `Model` interface — swap providers without touching the rest of your code.
 
+Anthropic models use managed five-minute prompt caching by default. Select the one-hour
+cache for conversations whose reusable prefixes must survive longer gaps, or disable caching
+for one-shot workloads:
+
+```java
+var provider = new AnthropicProvider();
+var config = ModelConfig.of(System.getenv("ANTHROPIC_API_KEY"));
+
+AnthropicModel longLived = provider.create(
+    AnthropicModelId.CLAUDE_OPUS_5.id(),
+    config,
+    CachePolicy.longLived());
+
+AnthropicModel uncached = provider.create(
+    AnthropicModelId.CLAUDE_OPUS_5.id(),
+    config,
+    CachePolicy.disabled());
+```
+
+When configuring cost tracking, use `Pricing.anthropicCaching5m(input, output)` or
+`Pricing.anthropicCaching1h(input, output)` so cache writes receive the correct TTL-specific
+rate. The existing `Pricing.anthropicCaching(input, output)` remains a five-minute alias.
+
 ### 2) Streamable session
 
 `AgentSession` is a long-lived object that runs an agent loop on a virtual thread. `send` messages, `subscribe` to events, `interrupt` mid-turn, `runBlocking` for synchronous results. This is the shape that shows up in production: multi-turn tool use, mid-run user steering, permission gates, observability.

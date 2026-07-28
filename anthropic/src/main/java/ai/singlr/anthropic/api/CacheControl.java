@@ -12,10 +12,10 @@ import java.util.Objects;
  * Cache-control annotation on a Claude request content block, tool definition, or system block.
  *
  * <p>The Anthropic API caches the prompt prefix up to and including every annotated block. Up to
- * four breakpoints may appear per request; additional breakpoints are silently ignored by the
- * server. Cache lifetime is {@code 5m} by default; pass {@code "1h"} via {@link #ephemeral(String)}
- * for the long-lived cache class. The provider only bills cache writes once and bills subsequent
- * cache reads at the discounted rate documented at <a
+ * four breakpoints may appear per request; the server rejects requests that exceed the limit. Cache
+ * lifetime is {@code 5m} by default; pass {@code "1h"} via {@link #ephemeral(String)} for the
+ * long-lived cache class. The provider only bills cache writes once and bills subsequent cache
+ * reads at the discounted rate documented at <a
  * href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Anthropic's
  * prompt-caching docs</a>.
  *

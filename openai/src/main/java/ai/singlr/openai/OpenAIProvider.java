@@ -13,13 +13,12 @@ import ai.singlr.core.model.ModelProvider;
 /**
  * ModelProvider implementation for OpenAI's Responses API.
  *
- * <p>Supports canonical OpenAI models (GPT-5.4, GPT-4.1, GPT-4o, o3, o4-mini) out of the box. When
- * {@link ModelConfig#baseUrl()} is set — pointing at Azure OpenAI, an OpenAI-compatible proxy
- * (LiteLLM, vLLM, Ollama), or Vertex AI — any non-blank {@code modelId} is accepted. The string is
- * used verbatim as the {@code model} field in the request body, which Azure OpenAI maps to the
- * deployment name. Context-window and max-output-tokens metadata default to {@code 0} ("unknown")
- * for unrecognised ids; callers can override output tokens via {@link
- * ModelConfig.Builder#withMaxOutputTokens(Integer)}.
+ * <p>Supports every {@link OpenAIModelId} out of the box. When {@link ModelConfig#baseUrl()} is set
+ * — pointing at Azure OpenAI, an OpenAI-compatible proxy (LiteLLM, vLLM, Ollama), or Vertex AI —
+ * any non-blank {@code modelId} is accepted. The string is used verbatim as the {@code model} field
+ * in the request body, which Azure OpenAI maps to the deployment name. Context-window and
+ * max-output-tokens metadata default to {@code 0} ("unknown") for unrecognised ids; callers can
+ * override output tokens via {@link ModelConfig.Builder#withMaxOutputTokens(Integer)}.
  */
 public class OpenAIProvider implements ModelProvider {
 

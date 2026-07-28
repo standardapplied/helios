@@ -122,6 +122,10 @@ public class AnthropicModel implements Model {
     this(wireModelId, AnthropicModelId.fromWireId(wireModelId), config, CachePolicy.shortLived());
   }
 
+  AnthropicModel(String wireModelId, ModelConfig config, CachePolicy cachePolicy) {
+    this(wireModelId, AnthropicModelId.fromWireId(wireModelId), config, cachePolicy);
+  }
+
   private AnthropicModel(
       String wireModelId,
       AnthropicModelId knownModel,
@@ -710,7 +714,7 @@ public class AnthropicModel implements Model {
       maxTokens = Math.max(maxTokens, thinkingSpec.thinking().budgetTokens() + 1024);
     }
 
-    // Adaptive-family models (Opus 4.7+, Sonnet 5, Fable 5) reject temperature/top_p outright
+    // Adaptive-family models reject temperature/top_p outright
     // with a 400, thinking on or off — never send them. Legacy models accept sampling params but
     // reject temperature alongside an active thinking config.
     Double temperature = config.temperature();
@@ -997,12 +1001,11 @@ public class AnthropicModel implements Model {
   /**
    * Translate {@link ThinkingLevel} into the Anthropic API request shape, dispatching by {@link
    * AnthropicModelId.ThinkingShape}. Adaptive-family models use {@code thinking.type=adaptive} +
-   * {@code output_config.effort=...} — except Fable 5 ({@code ALWAYS_ON}), which rejects any
-   * explicit thinking config, so the field is omitted and only the effort sibling rides. {@code
+   * {@code output_config.effort=...} — except {@code ALWAYS_ON} models, which reject any explicit
+   * thinking config, so the field is omitted and only the effort sibling rides. {@code
    * ThinkingLevel.NONE} omits the field on shapes where omission means "off", sends an explicit
-   * {@code disabled} on Sonnet 5 (where omission means adaptive-on), and omits on Fable 5 (which
-   * always thinks — there is no off). Legacy Opus 4.6 / Sonnet 4.6 use {@code
-   * thinking.type=enabled} + {@code budget_tokens=...}.
+   * {@code disabled} on adaptive-default-on models, and omits on always-on models. Legacy Opus 4.6
+   * / Sonnet 4.6 use {@code thinking.type=enabled} + {@code budget_tokens=...}.
    *
    * @return both the {@link ThinkingConfig} and any sibling {@link OutputConfig} that must ride on
    *     the request; either may be {@code null}

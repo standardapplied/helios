@@ -19,12 +19,14 @@ import ai.singlr.core.common.Strings;
  */
 public enum AnthropicModelId {
   // maxOutputTokens reflects a pragmatic default max_tokens per model — operators can override
-  // per-call via ModelConfig.Builder.withMaxOutputTokens. ThinkingShape per model: Fable 5 always
-  // thinks (any explicit thinking config is rejected); Sonnet 5 runs adaptive when the field is
-  // omitted (so NONE needs an explicit disabled); Opus 4.7/4.8 accept adaptive or disabled and run
-  // thinking-off when omitted; Opus 4.6 / Sonnet 4.6 still use enabled+budget_tokens.
-  CLAUDE_FABLE_5("claude-fable-5", 1_000_000, 64_000, ThinkingShape.ALWAYS_ON),
-  CLAUDE_SONNET_5("claude-sonnet-5", 1_000_000, 64_000, ThinkingShape.ADAPTIVE_DEFAULT_ON),
+  // per-call via ModelConfig.Builder.withMaxOutputTokens. ThinkingShape per model: Fable 5 and
+  // Mythos 5 always think; Opus 5 and Sonnet 5 run adaptive when the field is omitted; Opus
+  // 4.7/4.8 accept adaptive or disabled and run thinking-off when omitted; Opus 4.6 / Sonnet 4.6
+  // still use enabled+budget_tokens.
+  CLAUDE_FABLE_5("claude-fable-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
+  CLAUDE_MYTHOS_5("claude-mythos-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
+  CLAUDE_OPUS_5("claude-opus-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_DEFAULT_ON),
+  CLAUDE_SONNET_5("claude-sonnet-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_DEFAULT_ON),
   CLAUDE_OPUS_4_8("claude-opus-4-8", 1_000_000, 32_000, ThinkingShape.ADAPTIVE),
   CLAUDE_OPUS_4_7("claude-opus-4-7", 1_000_000, 32_000, ThinkingShape.ADAPTIVE),
   CLAUDE_OPUS_4_6("claude-opus-4-6", 1_000_000, 32_000, ThinkingShape.LEGACY_BUDGET),
@@ -51,15 +53,15 @@ public enum AnthropicModelId {
 
     /**
      * Adaptive shape, but omitting the field runs <em>with</em> adaptive thinking — turning
-     * thinking off requires an explicit {@code thinking.type=disabled} (Sonnet 5).
+     * thinking off requires an explicit {@code thinking.type=disabled} (Opus 5, Sonnet 5).
      */
     ADAPTIVE_DEFAULT_ON,
 
     /**
      * Thinking is always on and cannot be configured: any explicit {@code thinking} config —
      * including {@code disabled} — returns a 400, so the field is always omitted and depth is
-     * controlled solely via {@code output_config.effort} (Fable 5). {@code ThinkingLevel.NONE}
-     * still omits the field; the model thinks adaptively regardless.
+     * controlled solely via {@code output_config.effort} (Fable 5, Mythos 5). {@code
+     * ThinkingLevel.NONE} still omits the field; the model thinks adaptively regardless.
      */
     ALWAYS_ON
   }
@@ -98,8 +100,8 @@ public enum AnthropicModelId {
    * budget_tokens}.
    *
    * @return true for every shape except {@link ThinkingShape#LEGACY_BUDGET}
-   * @deprecated use {@link #thinkingShape()}; the boolean cannot express Sonnet 5's
-   *     adaptive-by-default or Fable 5's always-on semantics
+   * @deprecated use {@link #thinkingShape()}; the boolean cannot express newer models'
+   *     adaptive-by-default or always-on semantics
    */
   @Deprecated(since = "2.8.0")
   public boolean usesAdaptiveThinking() {
