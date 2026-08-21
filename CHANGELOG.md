@@ -4,6 +4,10 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [2.9.2] — 2026-08-21 — Thinking shapes aligned with current provider docs
+
+No breaking changes.
+
 ### Fixed
 
 - OpenAI: `ThinkingLevel.NONE` now sends `reasoning.effort="none"` on every model whose page
