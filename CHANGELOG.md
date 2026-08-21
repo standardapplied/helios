@@ -4,6 +4,27 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Fixed
+
+- OpenAI: `ThinkingLevel.NONE` now sends `reasoning.effort="none"` on every model whose page
+  documents it (gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano) instead of omitting `reasoning`
+  and silently running the model's default effort (medium on gpt-5.5). `gpt-5.4-mini` and
+  `gpt-5.4-nano` document `xhigh` and no longer clamp it to `high`.
+- Gemini: thinking levels resolve per model. `gemini-3.7-flash` and `gemini-3.1-pro-preview`
+  document `low`/`medium`/`high` only, so `MINIMAL` now sends `low` there instead of an
+  unsupported `minimal`. `ThinkingLevel.NONE` now pins the model's lowest documented level
+  (`GeminiModelId.lowestThinkingLevel()`: `minimal` or `low`) — Gemini 3.x cannot turn
+  thinking off, and omitting the field ran the model default (medium on 3.5/3.6/3.7 Flash,
+  high on 3.1 Pro).
+
+### Changed
+
+- Anthropic: Claude Opus 4.6 and Sonnet 4.6 move from the deprecated
+  `thinking.type=enabled` + `budget_tokens` shape to `adaptive` + `output_config.effort`
+  (new `ThinkingShape.ADAPTIVE_WITHOUT_XHIGH`). `ThinkingLevel.MAX` is now honoured on 4.6;
+  `XHIGH` still fails fast. Sampling parameters remain accepted on 4.6 while thinking is off
+  (`ThinkingShape.acceptsSamplingParameters()`). `LEGACY_BUDGET` now covers Haiku 4.5 only.
+
 ## [2.9.1] — 2026-08-21 — Submit validator enforced in the session loop
 
 No breaking changes.

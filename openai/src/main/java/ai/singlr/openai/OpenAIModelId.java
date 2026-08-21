@@ -17,19 +17,18 @@ public enum OpenAIModelId {
   // operators can override per-call via ModelConfig.Builder.withMaxOutputTokens. Reasoning models
   // (o3, o4-mini) carry higher caps because their output includes reasoning tokens.
   //
-  // EffortSupport per model: the gpt-5.6 family documents the full none..max reasoning.effort
-  // range (latest-model guide, 2026-07-18); gpt-5.4 and gpt-5.5 document low..xhigh; mini/nano
-  // variants and o-series models are documented for low..high only, so higher tiers clamp.
-  // gpt-5.6-terra and gpt-5.6-luna share the gpt-5.6 family limits per the latest-model guide;
-  // adjust when OpenAI publishes per-variant pages.
+  // EffortSupport per model (model pages, 2026-08-21): the gpt-5.6 family (incl. sol/terra/luna)
+  // documents none/low/medium/high/xhigh/max; gpt-5.5, gpt-5.4, gpt-5.4-mini and gpt-5.4-nano
+  // document none/low/medium/high/xhigh; o-series and non-reasoning GPT-4.x models are STANDARD
+  // (low..high, no explicit none), so higher tiers clamp.
   GPT_5_6("gpt-5.6", 1_050_000, 128_000, EffortSupport.FULL),
   GPT_5_6_SOL("gpt-5.6-sol", 1_050_000, 128_000, EffortSupport.FULL),
   GPT_5_6_TERRA("gpt-5.6-terra", 1_050_000, 128_000, EffortSupport.FULL),
   GPT_5_6_LUNA("gpt-5.6-luna", 1_050_000, 128_000, EffortSupport.FULL),
   GPT_5_5("gpt-5.5", 1_050_000, 128_000, EffortSupport.EXTENDED),
   GPT_5_4("gpt-5.4", 1_050_000, 128_000, EffortSupport.EXTENDED),
-  GPT_5_4_MINI("gpt-5.4-mini", 400_000, 128_000, EffortSupport.STANDARD),
-  GPT_5_4_NANO("gpt-5.4-nano", 400_000, 128_000, EffortSupport.STANDARD),
+  GPT_5_4_MINI("gpt-5.4-mini", 400_000, 128_000, EffortSupport.EXTENDED),
+  GPT_5_4_NANO("gpt-5.4-nano", 400_000, 128_000, EffortSupport.EXTENDED),
   GPT_4_1("gpt-4.1", 1_000_000, 32_000, EffortSupport.STANDARD),
   GPT_4_1_MINI("gpt-4.1-mini", 1_000_000, 32_000, EffortSupport.STANDARD),
   GPT_4_1_NANO("gpt-4.1-nano", 1_000_000, 16_000, EffortSupport.STANDARD),
@@ -44,10 +43,16 @@ public enum OpenAIModelId {
    * max}.
    */
   public enum EffortSupport {
-    /** {@code low} / {@code medium} / {@code high} only; higher Helios tiers clamp to high. */
+    /**
+     * {@code low} / {@code medium} / {@code high} only; higher Helios tiers clamp to high and
+     * {@code ThinkingLevel.NONE} omits the {@code reasoning} config.
+     */
     STANDARD,
 
-    /** Adds {@code xhigh}; {@code ThinkingLevel.MAX} clamps to xhigh. */
+    /**
+     * {@code none} / {@code low} / {@code medium} / {@code high} / {@code xhigh} (gpt-5.4 and
+     * gpt-5.5 families); {@code ThinkingLevel.MAX} clamps to xhigh.
+     */
     EXTENDED,
 
     /**

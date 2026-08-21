@@ -782,18 +782,50 @@ class GeminiModelTest {
   }
 
   @Test
-  void buildRequestThinkingLevelNoneOmitsField() {
+  void buildRequestThinkingLevelNoneSendsLowestSupportedLevel() {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
             .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.NONE)
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
-    var messages = List.of(Message.user("Hello"));
 
-    var request = model.buildRequest(messages, null, null);
+    var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
 
-    assertNull(request.generationConfig().thinkingLevel());
+    assertEquals(
+        "minimal",
+        request.generationConfig().thinkingLevel(),
+        "Gemini 3.x cannot turn thinking off; NONE must pin the lowest tier, not the default");
+  }
+
+  @Test
+  void buildRequestThinkingLevelNoneOnLowFloorModelSendsLow() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.NONE)
+            .build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
+
+    assertEquals("low", request.generationConfig().thinkingLevel());
+  }
+
+  @Test
+  void buildRequestThinkingLevelMinimalClampsToLowWhereMinimalIsUnsupported() {
+    for (var id : List.of(GeminiModelId.GEMINI_3_7_FLASH, GeminiModelId.GEMINI_3_1_PRO_PREVIEW)) {
+      var config =
+          ModelConfig.newBuilder()
+              .withApiKey("test-key")
+              .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.MINIMAL)
+              .build();
+      var model = new GeminiModel(id, config);
+
+      var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
+
+      assertEquals("low", request.generationConfig().thinkingLevel(), id.id());
+    }
   }
 
   @Test

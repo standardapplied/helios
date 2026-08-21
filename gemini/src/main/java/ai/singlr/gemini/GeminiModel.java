@@ -425,26 +425,30 @@ public class GeminiModel implements Model {
     if (config.seed() != null) {
       builder.withSeed(config.seed());
     }
-    if (config.thinkingLevel() != null && config.thinkingLevel() != ThinkingLevel.NONE) {
-      // Gemini exposes minimal / low / medium / high — XHIGH and MAX are Anthropic-only effort
-      // tiers that clamp to high here. Callers who target XHIGH/MAX on a Gemini model get
-      // Gemini's highest reasoning tier rather than a request error.
-      var thinkingLevel =
-          switch (config.thinkingLevel()) {
-            case NONE -> "none";
-            case MINIMAL -> "minimal";
-            case LOW -> "low";
-            case MEDIUM -> "medium";
-            case HIGH, XHIGH, MAX -> "high";
-          };
-      builder.withThinkingLevel(thinkingLevel);
-    }
+    builder.withThinkingLevel(thinkingLevel());
     var toolChoice = buildToolChoice();
     if (toolChoice != null) {
       builder.withToolChoice(toolChoice);
     }
 
     return builder.build();
+  }
+
+  /**
+   * Resolve the {@code thinking_level} wire value. Gemini 3.x cannot turn thinking off and omitting
+   * the field runs the model's default tier (medium on 3.5/3.6/3.7 Flash, high on 3.1 Pro), so
+   * {@link ThinkingLevel#NONE} and {@link ThinkingLevel#MINIMAL} both pin the model's documented
+   * floor via {@link GeminiModelId#lowestThinkingLevel()}. {@code XHIGH} and {@code MAX} are
+   * Anthropic/OpenAI-only tiers that clamp to {@code high}.
+   */
+  private String thinkingLevel() {
+    var level = config.thinkingLevel() == null ? ThinkingLevel.NONE : config.thinkingLevel();
+    return switch (level) {
+      case NONE, MINIMAL -> modelId.lowestThinkingLevel();
+      case LOW -> "low";
+      case MEDIUM -> "medium";
+      case HIGH, XHIGH, MAX -> "high";
+    };
   }
 
   private ToolChoiceConfig buildToolChoice() {

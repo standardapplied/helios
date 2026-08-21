@@ -562,13 +562,42 @@ class OpenAIModelTest {
   }
 
   @Test
-  void noneOmitsReasoningOnModelsWithoutExplicitNone() {
+  void gpt55NoneSendsExplicitNoneInsteadOfDefaultMedium() {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.NONE)
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_5_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Quick")), List.of(), null);
+
+    assertNotNull(request.reasoning(), "omitting reasoning runs gpt-5.5's default medium effort");
+    assertEquals("none", request.reasoning().effort());
+  }
+
+  @Test
+  void gpt54MiniXhighIsSentVerbatim() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.XHIGH)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_5_4_MINI, config);
+
+    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+
+    assertEquals("xhigh", request.reasoning().effort());
+  }
+
+  @Test
+  void noneOmitsReasoningOnModelsWithoutExplicitNone() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.O4_MINI, config);
 
     var request = model.buildRequest(List.of(Message.user("Quick")), List.of(), null);
 

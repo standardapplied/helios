@@ -41,16 +41,17 @@ public enum ThinkingLevel {
   HIGH,
 
   /**
-   * Extra-deep reasoning with extended exploration. Anthropic Opus 4.7 only on the native wire;
-   * other providers clamp to {@link #HIGH}.
+   * Extra-deep reasoning with extended exploration. Sent verbatim as {@code xhigh} on Anthropic
+   * adaptive models from Opus 4.7 on (Opus 4.7/4.8/5, Sonnet 5, Fable 5) and on OpenAI gpt-5.4+
+   * families; Claude 4.6 and Haiku 4.5 fail fast; other providers clamp to {@link #HIGH}.
    */
   XHIGH,
 
   /**
-   * Unbounded reasoning — "always thinks with no constraints on thinking depth". Anthropic
-   * adaptive-capable models (Opus 4.7, Opus 4.6, Sonnet 4.6) accept {@code "max"} on the native
-   * wire; legacy enabled+budget_tokens has no equivalent and is rejected. Other providers clamp to
-   * {@link #HIGH}.
+   * Unbounded reasoning — "always thinks with no constraints on thinking depth". Sent verbatim as
+   * {@code max} on Anthropic adaptive models (Opus 4.6 and later, Sonnet 4.6 and later, Fable 5)
+   * and OpenAI's gpt-5.6 family; Haiku 4.5's enabled+budget_tokens mode has no equivalent and fails
+   * fast. Other providers clamp to {@link #HIGH}.
    */
   MAX
 }
