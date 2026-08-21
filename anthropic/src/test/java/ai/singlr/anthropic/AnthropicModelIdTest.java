@@ -27,7 +27,28 @@ class AnthropicModelIdTest {
   @Test
   void opus48UsesAdaptiveThinking() {
     assertTrue(AnthropicModelId.CLAUDE_OPUS_4_8.usesAdaptiveThinking());
-    assertEquals(32_000, AnthropicModelId.CLAUDE_OPUS_4_8.maxOutputTokens());
+    assertEquals(128_000, AnthropicModelId.CLAUDE_OPUS_4_8.maxOutputTokens());
+  }
+
+  @Test
+  void legacyFamilyMaxOutputMatchesPublishedLimits() {
+    assertEquals(128_000, AnthropicModelId.CLAUDE_OPUS_4_7.maxOutputTokens());
+    assertEquals(128_000, AnthropicModelId.CLAUDE_OPUS_4_6.maxOutputTokens());
+    assertEquals(128_000, AnthropicModelId.CLAUDE_SONNET_4_6.maxOutputTokens());
+  }
+
+  @Test
+  void haiku45IsCataloguedWithLegacyThinkingShape() {
+    assertEquals("claude-haiku-4-5", AnthropicModelId.CLAUDE_HAIKU_4_5.id());
+    assertEquals(200_000, AnthropicModelId.CLAUDE_HAIKU_4_5.contextWindow());
+    assertEquals(64_000, AnthropicModelId.CLAUDE_HAIKU_4_5.maxOutputTokens());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.LEGACY_BUDGET,
+        AnthropicModelId.CLAUDE_HAIKU_4_5.thinkingShape());
+    assertTrue(AnthropicModelId.isSupported("claude-haiku-4-5"));
+    assertEquals(
+        AnthropicModelId.CLAUDE_HAIKU_4_5,
+        AnthropicModelId.fromWireId("claude-haiku-4-5-20251001"));
   }
 
   @Test

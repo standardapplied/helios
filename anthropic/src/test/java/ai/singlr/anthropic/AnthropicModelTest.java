@@ -257,14 +257,14 @@ class AnthropicModelTest {
   @Test
   void buildRequestPerModelDefaultDiffersByModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var sonnetModel = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var haikuModel = new AnthropicModel(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
     var opus47Model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
 
-    var sonnetReq = sonnetModel.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var haikuReq = haikuModel.buildRequest(List.of(Message.user("Hi")), List.of(), null);
     var opusReq = opus47Model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
 
-    assertEquals(64_000, sonnetReq.maxTokens());
-    assertEquals(32_000, opusReq.maxTokens());
+    assertEquals(64_000, haikuReq.maxTokens());
+    assertEquals(128_000, opusReq.maxTokens());
   }
 
   @Test
@@ -288,7 +288,7 @@ class AnthropicModelTest {
     assertEquals("adaptive", request.thinking().type());
     assertNull(request.thinking().budgetTokens());
     assertEquals("high", request.outputConfig().effort());
-    assertEquals(32_000, model.maxOutputTokens());
+    assertEquals(128_000, model.maxOutputTokens());
   }
 
   @Test

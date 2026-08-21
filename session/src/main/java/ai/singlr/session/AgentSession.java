@@ -160,6 +160,13 @@ public interface AgentSession extends AutoCloseable {
    * expected to honor the schema's shape in their final answer; markdown fences and prose prefixes
    * are tolerated via {@link StructuredContentParser}'s existing recovery passes.
    *
+   * <p>When the session was built with the same {@code schema} (see {@code
+   * SessionOptions.Builder#withOutputSchema}), the loop has already self-corrected schema
+   * mismatches and {@link ai.singlr.core.common.SubmitValidator} rejections within {@code
+   * SessionLimits.maxTurns()}, so a returned value always satisfies both; a model that never
+   * converges terminates as {@link ResultMessage.ErrorMaxTurns} and this method throws rather than
+   * returning a rejected value.
+   *
    * @param message the message; non-null
    * @param schema the output schema; non-null
    * @param <T> the parsed output type
@@ -169,7 +176,8 @@ public interface AgentSession extends AutoCloseable {
    *     — the caller cannot recover a typed value from {@link ResultMessage.Cancelled} / {@link
    *     ResultMessage.ErrorDuringExecution} / etc.
    * @throws ai.singlr.core.schema.StructuredOutputParseException if the final assistant text does
-   *     not parse against the schema; carries a per-field diff
+   *     not parse against the schema (carries a per-field diff) or, as {@link
+   *     ai.singlr.core.schema.SubmitValidationException}, fails the schema's submit validator
    */
   default <T> T runBlocking(UserMessage message, OutputSchema<T> schema) {
     Objects.requireNonNull(message, "message must not be null");

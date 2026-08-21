@@ -6,7 +6,6 @@ package ai.singlr.repl.codeact;
 
 import ai.singlr.core.common.Provenanced;
 import ai.singlr.core.common.SubmitValidator;
-import ai.singlr.core.common.ValidationResult;
 import ai.singlr.core.schema.JsonSchema;
 import ai.singlr.core.schema.OutputSchema;
 import ai.singlr.core.schema.SchemaValidator;
@@ -117,17 +116,7 @@ final class SubmitValidation {
       }
     }
     SubmitValidator validator = schema.submitValidator();
-    ValidationResult result;
-    try {
-      result = validator.validate(parsed);
-    } catch (RuntimeException validatorEx) {
-      result = ValidationResult.failure("submit validator threw: " + validatorEx.getMessage());
-    }
-    if (result == null) {
-      throw new IllegalArgumentException(
-          "Submit validation failed:\n  - validator returned null"
-              + "\nFix the output value and call submit again.");
-    }
+    var result = validator.validateSafely(parsed);
     if (!result.ok()) {
       throw new IllegalArgumentException(
           "Submit validation failed:\n  - "

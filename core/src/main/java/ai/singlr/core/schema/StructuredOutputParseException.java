@@ -36,7 +36,17 @@ public class StructuredOutputParseException extends RuntimeException {
    *     {@code null} when the caller doesn't have it available
    */
   public StructuredOutputParseException(List<String> errors, String rawContent) {
-    super(buildMessage(errors));
+    this("Structured output schema validation failed", errors, rawContent);
+  }
+
+  /**
+   * Subclass constructor with a custom exception-message summary; {@code errors} and {@code
+   * rawContent} carry the same contract as the public constructor.
+   *
+   * @param summary the first line of {@link #getMessage()}; the errors are itemised beneath it
+   */
+  protected StructuredOutputParseException(String summary, List<String> errors, String rawContent) {
+    super(buildMessage(summary, errors));
     Objects.requireNonNull(errors, "errors must not be null");
     if (errors.isEmpty()) {
       throw new IllegalArgumentException("errors must not be empty");
@@ -62,21 +72,27 @@ public class StructuredOutputParseException extends RuntimeException {
    * why.
    */
   public String correctionMessage() {
-    var sb =
-        new StringBuilder(
-            "Your structured output did not match the schema. Fix the listed fields and re-emit "
-                + "the structured output:\n");
+    var sb = new StringBuilder(correctionPreamble()).append('\n');
     for (var error : errors) {
       sb.append("  - ").append(error).append('\n');
     }
     return sb.toString();
   }
 
-  private static String buildMessage(List<String> errors) {
+  /**
+   * The sentence that opens {@link #correctionMessage()}, before the itemised errors. Subclasses
+   * override it to describe their failure class accurately to the model.
+   */
+  protected String correctionPreamble() {
+    return "Your structured output did not match the schema. Fix the listed fields and re-emit "
+        + "the structured output:";
+  }
+
+  private static String buildMessage(String summary, List<String> errors) {
     if (errors == null || errors.isEmpty()) {
-      return "Structured output schema validation failed";
+      return summary;
     }
-    var sb = new StringBuilder("Structured output schema validation failed:");
+    var sb = new StringBuilder(summary).append(':');
     for (var error : errors) {
       sb.append("\n  - ").append(error);
     }

@@ -23,6 +23,9 @@ import java.util.Map;
  *       StructuredOutputParseException} carrying the field-level diff.
  *   <li>Type-coerce the map into the schema's output class. For provenanced schemas use {@link
  *       OutputSchema#reconstructProvenanced(Map, java.util.function.Function)}.
+ *   <li>Run the schema's {@link ai.singlr.core.common.SubmitValidator}, if any, against the typed
+ *       value. On rejection throw {@link SubmitValidationException} carrying the validator's
+ *       correction — the same self-correction channel as a schema mismatch.
  *   <li>On JSON-syntax failure retry once after stripping markdown fences. If that also fails,
  *       throw {@link StructuredOutputParseException} so the session loop's self-correction
  *       mechanism can inject a correction message and retry, same as for schema-validation
@@ -61,8 +64,9 @@ public final class StructuredContentParser {
   }
 
   /**
-   * Parse {@code content} against {@code schema} using the supplied {@code adapter}. All parse
-   * failures — both schema-validation mismatches and JSON-syntax errors — surface as {@link
+   * Parse {@code content} against {@code schema} using the supplied {@code adapter}. All failures —
+   * JSON-syntax errors, schema-validation mismatches, and {@link
+   * ai.singlr.core.common.SubmitValidator} rejections — surface as {@link
    * StructuredOutputParseException} so the session loop's self-correction mechanism can handle them
    * uniformly.
    *
@@ -116,19 +120,32 @@ public final class StructuredContentParser {
     if (!errors.isEmpty()) {
       throw new StructuredOutputParseException(errors, json);
     }
-    if (schema.innerOutputType() == null) {
-      return adapter.fromMap(raw, schema.type());
+    T typed =
+        schema.innerOutputType() == null
+            ? adapter.fromMap(raw, schema.type())
+            : (T)
+                OutputSchema.reconstructProvenanced(
+                    raw,
+                    m -> {
+                      try {
+                        return adapter.fromMap((Map<String, Object>) m, schema.innerOutputType());
+                      } catch (Exception e) {
+                        throw new RuntimeException(e);
+                      }
+                    });
+    return submitValidated(typed, schema, json);
+  }
+
+  private static <T> T submitValidated(T typed, OutputSchema<T> schema, String json) {
+    var validator = schema.submitValidator();
+    if (validator == null) {
+      return typed;
     }
-    return (T)
-        OutputSchema.reconstructProvenanced(
-            raw,
-            m -> {
-              try {
-                return adapter.fromMap((Map<String, Object>) m, schema.innerOutputType());
-              } catch (Exception e) {
-                throw new RuntimeException(e);
-              }
-            });
+    var verdict = validator.validateSafely(typed);
+    if (!verdict.ok()) {
+      throw new SubmitValidationException(verdict.message(), json);
+    }
+    return typed;
   }
 
   /**

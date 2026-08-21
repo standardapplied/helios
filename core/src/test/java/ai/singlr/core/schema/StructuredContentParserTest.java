@@ -6,15 +6,21 @@
 package ai.singlr.core.schema;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.core.common.Confidence;
+import ai.singlr.core.common.Provenanced;
+import ai.singlr.core.common.SubmitValidator;
+import ai.singlr.core.common.ValidationResult;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class StructuredContentParserTest {
@@ -97,6 +103,129 @@ class StructuredContentParserTest {
             StructuredOutputParseException.class,
             () -> StructuredContentParser.parse(content, OutputSchema.of(Bag.class), adapter));
     assertTrue(ex.errors().stream().anyMatch(e -> e.contains("count")));
+  }
+
+  // --- Submit validator runs after structural validation ---------------------------------------
+
+  private static final String POSITIVE_COUNT = "count must be positive";
+
+  private static OutputSchema<Bag> positiveCountSchema() {
+    return OutputSchema.of(Bag.class).withSubmitValidator(b -> b.count() > 0, POSITIVE_COUNT);
+  }
+
+  @Test
+  void submitValidatorSuccessReturnsTyped() {
+    var content = "{\"name\":\"alpha\",\"count\":7}";
+    var adapter = adapterFor(content, new LinkedHashMap<>(Map.of("name", "alpha", "count", 7)));
+
+    var result = StructuredContentParser.parse(content, positiveCountSchema(), adapter);
+
+    assertEquals(new Bag("alpha", 7), result);
+  }
+
+  @Test
+  void submitValidatorFailureThrowsSubmitValidationException() {
+    var content = "{\"name\":\"alpha\",\"count\":0}";
+    var adapter = adapterFor(content, new LinkedHashMap<>(Map.of("name", "alpha", "count", 0)));
+
+    var ex =
+        assertThrows(
+            SubmitValidationException.class,
+            () -> StructuredContentParser.parse(content, positiveCountSchema(), adapter));
+
+    assertEquals(List.of(POSITIVE_COUNT), ex.errors());
+    assertEquals(content, ex.rawContent());
+    assertTrue(ex.getMessage().contains(POSITIVE_COUNT), ex.getMessage());
+    var correction = ex.correctionMessage();
+    assertTrue(correction.contains(POSITIVE_COUNT), correction);
+    assertFalse(
+        correction.contains("did not match the schema"),
+        "semantic failures must not be reported as schema mismatches: " + correction);
+  }
+
+  @Test
+  void submitValidatorThrowSurfacesAsFailureNotCrash() {
+    var content = "{\"name\":\"alpha\",\"count\":7}";
+    var adapter = adapterFor(content, new LinkedHashMap<>(Map.of("name", "alpha", "count", 7)));
+    SubmitValidator<Bag> noisy =
+        b -> {
+          throw new IllegalStateException("operator bug");
+        };
+    var schema = OutputSchema.of(Bag.class).withSubmitValidator(noisy);
+
+    var ex =
+        assertThrows(
+            SubmitValidationException.class,
+            () -> StructuredContentParser.parse(content, schema, adapter));
+
+    assertEquals(List.of("submit validator threw: operator bug"), ex.errors());
+  }
+
+  @Test
+  void submitValidatorIsSkippedWhenStructuralValidationFails() {
+    var content = "{\"name\":\"alpha\"}";
+    var adapter = adapterFor(content, new LinkedHashMap<>(Map.of("name", "alpha")));
+    var called = new AtomicBoolean();
+    SubmitValidator<Bag> spy =
+        b -> {
+          called.set(true);
+          return ValidationResult.success();
+        };
+    var schema = OutputSchema.of(Bag.class).withSubmitValidator(spy);
+
+    var ex =
+        assertThrows(
+            StructuredOutputParseException.class,
+            () -> StructuredContentParser.parse(content, schema, adapter));
+
+    assertFalse(ex instanceof SubmitValidationException);
+    assertFalse(called.get(), "validator must only see structurally valid output");
+  }
+
+  @Test
+  void submitValidatorRunsOnFenceStrippedContent() {
+    var inner = "{\"name\":\"beta\",\"count\":0}";
+    var wrapped = "```json\n" + inner + "\n```";
+    var adapter = adapterFor(inner, new LinkedHashMap<>(Map.of("name", "beta", "count", 0)));
+
+    var ex =
+        assertThrows(
+            SubmitValidationException.class,
+            () -> StructuredContentParser.parse(wrapped, positiveCountSchema(), adapter));
+
+    assertEquals(inner, ex.rawContent());
+  }
+
+  @Test
+  void submitValidatorOnProvenancedSchemaSeesTheEnvelope() {
+    var content = "{provenanced}";
+    var provenance =
+        List.<Object>of(
+            new LinkedHashMap<>(
+                Map.of(
+                    "field", "name",
+                    "sources", List.of(),
+                    "reasoning", "given",
+                    "confidence", "LOW")),
+            new LinkedHashMap<>(
+                Map.of(
+                    "field", "count",
+                    "sources", List.of(),
+                    "reasoning", "given",
+                    "confidence", "LOW")));
+    var envelope = new LinkedHashMap<String, Object>();
+    envelope.put("output", new LinkedHashMap<>(Map.of("name", "alpha", "count", 7)));
+    envelope.put("provenance", provenance);
+    var adapter = adapterFor(content, envelope);
+    var schema =
+        OutputSchema.provenancedOf(Bag.class)
+            .withSubmitValidator(
+                p -> p.provenance().size() == 2 && p.output().count() == 7, "unexpected envelope");
+
+    Provenanced<Bag> result = StructuredContentParser.parse(content, schema, adapter);
+
+    assertEquals(new Bag("alpha", 7), result.output());
+    assertEquals(Confidence.LOW, result.provenance().get(0).confidence());
   }
 
   // --- JSON syntax fallback through markdown strip ---------------------------------------------

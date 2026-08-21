@@ -18,19 +18,20 @@ import ai.singlr.core.common.Strings;
  * thinking, {@code 32_000} output tokens) — see {@link #hasClaudePrefix(String)}.
  */
 public enum AnthropicModelId {
-  // maxOutputTokens reflects a pragmatic default max_tokens per model — operators can override
-  // per-call via ModelConfig.Builder.withMaxOutputTokens. ThinkingShape per model: Fable 5 and
-  // Mythos 5 always think; Opus 5 and Sonnet 5 run adaptive when the field is omitted; Opus
-  // 4.7/4.8 accept adaptive or disabled and run thinking-off when omitted; Opus 4.6 / Sonnet 4.6
-  // still use enabled+budget_tokens.
+  // contextWindow / maxOutputTokens mirror the documented per-model limits (Models overview, Aug
+  // 2026) — operators can override per-call via ModelConfig.Builder.withMaxOutputTokens.
+  // ThinkingShape per model: Fable 5 and Mythos 5 always think; Opus 5 and Sonnet 5 run adaptive
+  // when the field is omitted; Opus 4.7/4.8 accept adaptive or disabled and run thinking-off when
+  // omitted; Opus 4.6 / Sonnet 4.6 / Haiku 4.5 still use enabled+budget_tokens.
   CLAUDE_FABLE_5("claude-fable-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
   CLAUDE_MYTHOS_5("claude-mythos-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
   CLAUDE_OPUS_5("claude-opus-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_DEFAULT_ON),
   CLAUDE_SONNET_5("claude-sonnet-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_DEFAULT_ON),
-  CLAUDE_OPUS_4_8("claude-opus-4-8", 1_000_000, 32_000, ThinkingShape.ADAPTIVE),
-  CLAUDE_OPUS_4_7("claude-opus-4-7", 1_000_000, 32_000, ThinkingShape.ADAPTIVE),
-  CLAUDE_OPUS_4_6("claude-opus-4-6", 1_000_000, 32_000, ThinkingShape.LEGACY_BUDGET),
-  CLAUDE_SONNET_4_6("claude-sonnet-4-6", 1_000_000, 64_000, ThinkingShape.LEGACY_BUDGET);
+  CLAUDE_OPUS_4_8("claude-opus-4-8", 1_000_000, 128_000, ThinkingShape.ADAPTIVE),
+  CLAUDE_OPUS_4_7("claude-opus-4-7", 1_000_000, 128_000, ThinkingShape.ADAPTIVE),
+  CLAUDE_OPUS_4_6("claude-opus-4-6", 1_000_000, 128_000, ThinkingShape.LEGACY_BUDGET),
+  CLAUDE_SONNET_4_6("claude-sonnet-4-6", 1_000_000, 128_000, ThinkingShape.LEGACY_BUDGET),
+  CLAUDE_HAIKU_4_5("claude-haiku-4-5", 200_000, 64_000, ThinkingShape.LEGACY_BUDGET);
 
   /**
    * The thinking request shape a Claude model accepts, and what omitting the {@code thinking} field
@@ -41,7 +42,7 @@ public enum AnthropicModelId {
   public enum ThinkingShape {
     /**
      * {@code thinking.type=enabled} + {@code budget_tokens}; omitting the field runs without
-     * thinking (Opus 4.6, Sonnet 4.6). Sampling parameters allowed when thinking is off.
+     * thinking (Opus 4.6, Sonnet 4.6, Haiku 4.5). Sampling parameters allowed when thinking is off.
      */
     LEGACY_BUDGET,
 

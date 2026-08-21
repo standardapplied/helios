@@ -341,8 +341,10 @@ public final class TurnRunner {
   }
 
   /**
-   * Structured-output self-correction. When the model emits JSON that either doesn't match the
-   * session's configured {@link OutputSchema} or is syntactically invalid, the parser raises {@link
+   * Structured-output self-correction. When the model emits JSON that is syntactically invalid,
+   * doesn't match the session's configured {@link OutputSchema}, or is rejected by the schema's
+   * {@link ai.singlr.core.common.SubmitValidator} ({@link
+   * ai.singlr.core.schema.SubmitValidationException}), the parser raises {@link
    * StructuredOutputParseException}. Provider IO errors still terminate via {@link
    * FinishReason#ERROR}.
    *

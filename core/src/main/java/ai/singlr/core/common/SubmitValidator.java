@@ -17,15 +17,15 @@ package ai.singlr.core.common;
  * counts, forbidden phrasing, every claim having a non-empty source, presence of a required
  * keyword, etc.
  *
- * <p>When this validator returns {@link ValidationResult#failure(String)}, the submit path throws
- * back through JSON-RPC. The model sees the message inline in its next iteration and retries within
- * the existing iteration / LLM-call budget — the same machinery structural validation failures use.
- * Retries respect {@code maxIterations} and {@code maxLlmCalls}, so a model that cannot satisfy the
- * validator eventually surfaces as a {@code FAILED} run status rather than looping forever.
+ * <p>Every path that accepts a final structured output runs it: {@code
+ * ai.singlr.core.schema.StructuredContentParser} (providers, the session loop, typed {@code
+ * runBlocking}) and the CodeAct {@code Submit} tool. A {@link ValidationResult#failure(String)}
+ * reaches the model as a correction message and the loop retries within its turn budget — the same
+ * machinery structural validation failures use — so a model that cannot satisfy the validator
+ * terminates at {@code maxTurns} rather than looping forever or handing back a rejected value.
  *
- * <p>Operator-thrown exceptions inside the validator are caught by the submit path and converted to
- * a validation failure with message {@code "submit validator threw: <message>"}, so a buggy
- * predicate doesn't tombstone the agent run.
+ * <p>Callers invoke {@link #validateSafely(Object)}: an operator exception or a {@code null}
+ * verdict becomes a validation failure so a buggy predicate doesn't tombstone the agent run.
  *
  * <p>Composition via {@link #andThen(SubmitValidator)} runs validators left-to-right and
  * short-circuits on the first failure — same semantics as {@link
@@ -43,6 +43,24 @@ public interface SubmitValidator<O> {
    * @return success or a failure carrying a model-readable correction message
    */
   ValidationResult validate(O output);
+
+  /**
+   * {@link #validate(Object)} hardened for the accept path: an exception thrown by the validator
+   * becomes {@code failure("submit validator threw: <message>")} and a {@code null} verdict becomes
+   * {@code failure("submit validator returned null")}.
+   *
+   * @param output the typed output the model submitted; never {@code null}
+   * @return a non-null verdict
+   */
+  default ValidationResult validateSafely(O output) {
+    ValidationResult result;
+    try {
+      result = validate(output);
+    } catch (RuntimeException e) {
+      return ValidationResult.failure("submit validator threw: " + e.getMessage());
+    }
+    return result == null ? ValidationResult.failure("submit validator returned null") : result;
+  }
 
   /**
    * Compose this validator with another. The returned validator runs {@code this} first; if it
