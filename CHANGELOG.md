@@ -4,6 +4,10 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [2.9.1] — 2026-08-21 — Submit validator enforced in the session loop
+
+No breaking changes.
+
 ### Fixed
 
 - `OutputSchema.submitValidator` is now enforced on the plain `AgentSession` path, not only on
