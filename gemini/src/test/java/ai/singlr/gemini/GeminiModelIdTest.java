@@ -22,6 +22,7 @@ class GeminiModelIdTest {
     assertEquals("gemini-3.5-flash", GeminiModelId.GEMINI_3_5_FLASH.id());
     assertEquals("gemini-3.5-flash-lite", GeminiModelId.GEMINI_3_5_FLASH_LITE.id());
     assertEquals("gemini-3.6-flash", GeminiModelId.GEMINI_3_6_FLASH.id());
+    assertEquals("gemini-3.7-flash", GeminiModelId.GEMINI_3_7_FLASH.id());
   }
 
   @Test
@@ -36,6 +37,8 @@ class GeminiModelIdTest {
     assertEquals(65_536, GeminiModelId.GEMINI_3_5_FLASH_LITE.maxOutputTokens());
     assertEquals(1_048_576, GeminiModelId.GEMINI_3_6_FLASH.contextWindow());
     assertEquals(65_536, GeminiModelId.GEMINI_3_6_FLASH.maxOutputTokens());
+    assertEquals(1_048_576, GeminiModelId.GEMINI_3_7_FLASH.contextWindow());
+    assertEquals(65_536, GeminiModelId.GEMINI_3_7_FLASH.maxOutputTokens());
   }
 
   @Test
@@ -50,6 +53,7 @@ class GeminiModelIdTest {
     assertEquals(
         GeminiModelId.GEMINI_3_5_FLASH_LITE, GeminiModelId.fromId("gemini-3.5-flash-lite"));
     assertEquals(GeminiModelId.GEMINI_3_6_FLASH, GeminiModelId.fromId("gemini-3.6-flash"));
+    assertEquals(GeminiModelId.GEMINI_3_7_FLASH, GeminiModelId.fromId("gemini-3.7-flash"));
   }
 
   @Test
@@ -76,6 +80,7 @@ class GeminiModelIdTest {
     assertTrue(GeminiModelId.isSupported("gemini-3.5-flash"));
     assertTrue(GeminiModelId.isSupported("gemini-3.5-flash-lite"));
     assertTrue(GeminiModelId.isSupported("gemini-3.6-flash"));
+    assertTrue(GeminiModelId.isSupported("gemini-3.7-flash"));
   }
 
   @Test

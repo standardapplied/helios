@@ -20,7 +20,8 @@ public enum GeminiModelId {
   GEMINI_3_1_FLASH_LITE("gemini-3.1-flash-lite", 1_048_576, 65_536),
   GEMINI_3_5_FLASH("gemini-3.5-flash", 1_048_576, 65_536),
   GEMINI_3_5_FLASH_LITE("gemini-3.5-flash-lite", 1_048_576, 65_536),
-  GEMINI_3_6_FLASH("gemini-3.6-flash", 1_048_576, 65_536);
+  GEMINI_3_6_FLASH("gemini-3.6-flash", 1_048_576, 65_536),
+  GEMINI_3_7_FLASH("gemini-3.7-flash", 1_048_576, 65_536);
 
   private final String id;
   private final int contextWindow;

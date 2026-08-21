@@ -4,6 +4,28 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Fixed
+
+- `OutputSchema.submitValidator` is now enforced on the plain `AgentSession` path, not only on
+  the CodeAct `Submit` tool. `StructuredContentParser.parse` runs the validator after structural
+  validation and raises the new `SubmitValidationException` (a `StructuredOutputParseException`
+  subtype), so the session loop's existing schema self-correction appends the rejected attempt,
+  injects the validator's correction as a synthetic user turn, and retries within
+  `SessionLimits.maxTurns()`. A validator that never passes terminates as `ErrorMaxTurns`;
+  `runBlocking(message, schema)` can no longer return a value the validator rejects.
+- `SubmitValidator.validateSafely` turns a throwing or null-returning validator into a failure
+  verdict; the parser and the CodeAct `Submit` pipeline share it.
+
+### Added
+
+- Gemini: stable `gemini-3.7-flash`.
+- Anthropic: `claude-haiku-4-5` (200K context, 64K output, legacy `budget_tokens` thinking).
+
+### Corrected
+
+- Claude Opus 4.8 / 4.7 / 4.6 and Sonnet 4.6 maximum-output metadata now reflects their
+  documented 128K-token output limit (was 32K / 32K / 32K / 64K).
+
 ## [2.9.0] — 2026-07-28 — Current model catalogs and configurable Anthropic caching
 
 No breaking changes.

@@ -41,11 +41,13 @@ import java.util.function.Predicate;
  * user's actual output class, since Java's type erasure prevents Jackson from doing this from
  * {@code type = Provenanced.class} alone.
  *
- * <p>{@code submitValidator} is an optional whole-output semantic check that runs at submit time
- * after structural validation. Use {@link #withSubmitValidator(SubmitValidator)} (or the {@link
- * #withSubmitValidator(Predicate, String)} convenience overload) to attach one. The submit path
- * throws back through JSON-RPC on failure; the model sees the correction message inline and retries
- * within the existing iteration budget.
+ * <p>{@code submitValidator} is an optional whole-output semantic check that runs after structural
+ * validation wherever a final structured output is accepted: {@link StructuredContentParser} (so
+ * every provider, the {@code AgentSession} loop, and typed {@code runBlocking}) and the CodeAct
+ * {@code Submit} tool. Use {@link #withSubmitValidator(SubmitValidator)} (or the {@link
+ * #withSubmitValidator(Predicate, String)} convenience overload) to attach one. On failure the
+ * model sees the correction message as its next user turn and retries within the session's turn
+ * budget.
  *
  * @param <T> the type of the output
  * @param type the class
@@ -93,10 +95,11 @@ public record OutputSchema<T>(
 
   /**
    * Returns a copy of this schema with the given {@link SubmitValidator} attached. When the model
-   * submits an output, the submit path runs JSON Schema validation, then provenance validation
-   * (when applicable), then this validator on the parsed typed output. A failure returned by the
-   * validator is surfaced through JSON-RPC the same way structural failures are — the model sees
-   * the message inline and retries within the existing iteration / LLM-call budget.
+   * produces a final output, the accept path runs JSON Schema validation, then provenance
+   * reconstruction (when applicable), then this validator on the parsed typed output. A failure is
+   * surfaced the same way structural failures are: {@link StructuredContentParser} throws {@link
+   * SubmitValidationException} and the session loop injects the correction and retries, bounded by
+   * {@code SessionLimits.maxTurns()}; the CodeAct {@code Submit} tool returns it inline.
    *
    * <p>Operator-thrown exceptions inside the validator are caught and converted to a failure with
    * message {@code "submit validator threw: <message>"}, so a buggy predicate doesn't tombstone the

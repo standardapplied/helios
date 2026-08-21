@@ -58,6 +58,33 @@ class SubmitValidatorTest {
   }
 
   @Test
+  void validateSafelyPassesThroughVerdict() {
+    SubmitValidator<Pick> v = p -> ValidationResult.failure("too short");
+    assertEquals("too short", v.validateSafely(new Pick("x")).message());
+    SubmitValidator<Pick> ok = p -> ValidationResult.success();
+    assertTrue(ok.validateSafely(new Pick("x")).ok());
+  }
+
+  @Test
+  void validateSafelyConvertsThrowToFailure() {
+    SubmitValidator<Pick> noisy =
+        p -> {
+          throw new IllegalStateException("operator bug");
+        };
+    var result = noisy.validateSafely(new Pick("x"));
+    assertFalse(result.ok());
+    assertEquals("submit validator threw: operator bug", result.message());
+  }
+
+  @Test
+  void validateSafelyConvertsNullToFailure() {
+    SubmitValidator<Pick> nullish = p -> null;
+    var result = nullish.validateSafely(new Pick("x"));
+    assertFalse(result.ok());
+    assertEquals("submit validator returned null", result.message());
+  }
+
+  @Test
   void andThenRejectsNullNext() {
     SubmitValidator<Pick> any = p -> ValidationResult.success();
     assertThrows(IllegalArgumentException.class, () -> any.andThen(null));
