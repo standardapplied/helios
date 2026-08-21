@@ -357,10 +357,41 @@ class AnthropicModelTest {
     var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
 
     assertNotNull(request.thinking());
-    assertEquals("enabled", request.thinking().type());
+    assertEquals("adaptive", request.thinking().type(), "4.6 deprecates enabled+budget_tokens");
+    assertNull(request.thinking().budgetTokens());
+    assertEquals("medium", request.outputConfig().effort());
+    assertNull(request.temperature(), "temperature is dropped while thinking is active");
+  }
+
+  @Test
+  void haiku45UsesLegacyBudgetShape() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.MEDIUM)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
+
+    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+
+    assertEquals("enabled", request.thinking().type(), "Haiku 4.5 rejects adaptive");
     assertEquals(10000, request.thinking().budgetTokens());
+    assertNull(request.outputConfig(), "legacy shape must NOT carry output_config");
     assertNull(request.temperature());
     assertTrue(request.maxTokens() >= 10000 + 1024);
+  }
+
+  @Test
+  void haiku45RejectsXhighAndMax() {
+    for (var level : List.of(ThinkingLevel.XHIGH, ThinkingLevel.MAX)) {
+      var config = ModelConfig.newBuilder().withApiKey("test-key").withThinkingLevel(level).build();
+      var model = new AnthropicModel(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
+      var ex =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> model.buildRequest(List.of(Message.user("Hi")), List.of(), null));
+      assertTrue(ex.getMessage().contains("claude-haiku-4-5"), ex.getMessage());
+    }
   }
 
   @Test
@@ -487,9 +518,7 @@ class AnthropicModelTest {
   }
 
   @Test
-  void opus46RejectsMaxEffort() {
-    // MAX has no equivalent in legacy enabled+budget_tokens. Reject rather than silently degrade
-    // to HIGH (a 32k budget) — callers who asked for MAX deserve to know it isn't honoured.
+  void opus46MaxMapsToAdaptiveMaxEffort() {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
@@ -497,18 +526,14 @@ class AnthropicModelTest {
             .build();
     var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
 
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> model.buildRequest(List.of(Message.user("Hi")), List.of(), null));
-    assertTrue(
-        ex.getMessage().toLowerCase(java.util.Locale.ROOT).contains("max"),
-        () -> "exception must name the rejected effort: " + ex.getMessage());
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals("adaptive", request.thinking().type());
+    assertEquals("max", request.outputConfig().effort());
   }
 
   @Test
-  void opus46KeepsLegacyEnabledShape() {
-    // Older models still use enabled+budget_tokens. Don't break them with the adaptive change.
+  void opus46UsesAdaptiveShapeWithoutBudget() {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
@@ -518,9 +543,9 @@ class AnthropicModelTest {
 
     var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
 
-    assertEquals("enabled", request.thinking().type(), "Opus 4.6 stays on legacy shape");
-    assertEquals(10000, request.thinking().budgetTokens());
-    assertNull(request.outputConfig(), "legacy shape must NOT carry output_config");
+    assertEquals("adaptive", request.thinking().type());
+    assertNull(request.thinking().budgetTokens());
+    assertEquals("medium", request.outputConfig().effort());
   }
 
   @Test
@@ -544,7 +569,7 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.MINIMAL)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
 
     var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
 
@@ -558,7 +583,7 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.LOW)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
 
     var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
 
@@ -572,7 +597,7 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.HIGH)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
 
     var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
 
@@ -977,7 +1002,7 @@ class AnthropicModelTest {
     assertEquals(
         0.2,
         request.temperature(),
-        "dated snapshots of legacy models keep the family's LEGACY_BUDGET semantics");
+        "dated snapshots resolve to the family shape, which still accepts sampling params");
   }
 
   @Test

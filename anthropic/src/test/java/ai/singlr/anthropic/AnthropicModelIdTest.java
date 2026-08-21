@@ -152,11 +152,23 @@ class AnthropicModelIdTest {
     assertEquals(
         AnthropicModelId.ThinkingShape.ADAPTIVE, AnthropicModelId.CLAUDE_OPUS_4_7.thinkingShape());
     assertEquals(
-        AnthropicModelId.ThinkingShape.LEGACY_BUDGET,
+        AnthropicModelId.ThinkingShape.ADAPTIVE_WITHOUT_XHIGH,
         AnthropicModelId.CLAUDE_OPUS_4_6.thinkingShape());
     assertEquals(
-        AnthropicModelId.ThinkingShape.LEGACY_BUDGET,
+        AnthropicModelId.ThinkingShape.ADAPTIVE_WITHOUT_XHIGH,
         AnthropicModelId.CLAUDE_SONNET_4_6.thinkingShape());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.LEGACY_BUDGET,
+        AnthropicModelId.CLAUDE_HAIKU_4_5.thinkingShape());
+  }
+
+  @Test
+  void samplingParametersAcceptedOnlyWhereDocumented() {
+    assertTrue(AnthropicModelId.ThinkingShape.LEGACY_BUDGET.acceptsSamplingParameters());
+    assertTrue(AnthropicModelId.ThinkingShape.ADAPTIVE_WITHOUT_XHIGH.acceptsSamplingParameters());
+    assertFalse(AnthropicModelId.ThinkingShape.ADAPTIVE.acceptsSamplingParameters());
+    assertFalse(AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON.acceptsSamplingParameters());
+    assertFalse(AnthropicModelId.ThinkingShape.ALWAYS_ON.acceptsSamplingParameters());
   }
 
   @Test
@@ -164,7 +176,8 @@ class AnthropicModelIdTest {
   void deprecatedAdaptiveFlagDerivesFromShape() {
     assertTrue(AnthropicModelId.CLAUDE_FABLE_5.usesAdaptiveThinking());
     assertTrue(AnthropicModelId.CLAUDE_OPUS_4_8.usesAdaptiveThinking());
-    assertFalse(AnthropicModelId.CLAUDE_SONNET_4_6.usesAdaptiveThinking());
+    assertTrue(AnthropicModelId.CLAUDE_SONNET_4_6.usesAdaptiveThinking());
+    assertFalse(AnthropicModelId.CLAUDE_HAIKU_4_5.usesAdaptiveThinking());
   }
 
   @Test

@@ -182,4 +182,15 @@ class OpenAIModelIdTest {
       assertTrue(model.contextWindow() > 0);
     }
   }
+
+  @Test
+  void effortSupportPerModel() {
+    assertEquals(OpenAIModelId.EffortSupport.FULL, OpenAIModelId.GPT_5_6.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.EXTENDED, OpenAIModelId.GPT_5_5.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.EXTENDED, OpenAIModelId.GPT_5_4.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.EXTENDED, OpenAIModelId.GPT_5_4_MINI.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.EXTENDED, OpenAIModelId.GPT_5_4_NANO.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.STANDARD, OpenAIModelId.O3.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.STANDARD, OpenAIModelId.GPT_4_1.effortSupport());
+  }
 }

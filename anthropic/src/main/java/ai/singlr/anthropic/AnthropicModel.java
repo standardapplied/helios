@@ -719,7 +719,7 @@ public class AnthropicModel implements Model {
     // reject temperature alongside an active thinking config.
     Double temperature = config.temperature();
     Double topP = config.topP();
-    if (thinkingShape != AnthropicModelId.ThinkingShape.LEGACY_BUDGET) {
+    if (!thinkingShape.acceptsSamplingParameters()) {
       temperature = null;
       topP = null;
     } else if (thinkingSpec.thinking() != null
@@ -1004,59 +1004,62 @@ public class AnthropicModel implements Model {
    * {@code output_config.effort=...} — except {@code ALWAYS_ON} models, which reject any explicit
    * thinking config, so the field is omitted and only the effort sibling rides. {@code
    * ThinkingLevel.NONE} omits the field on shapes where omission means "off", sends an explicit
-   * {@code disabled} on adaptive-default-on models, and omits on always-on models. Legacy Opus 4.6
-   * / Sonnet 4.6 use {@code thinking.type=enabled} + {@code budget_tokens=...}.
+   * {@code disabled} on adaptive-default-on models, and omits on always-on models. {@code
+   * ADAPTIVE_WITHOUT_XHIGH} models (Opus 4.6, Sonnet 4.6) fail fast on {@code XHIGH}; {@code
+   * LEGACY_BUDGET} models (Haiku 4.5) use {@code thinking.type=enabled} + {@code budget_tokens} and
+   * fail fast on {@code XHIGH}/{@code MAX}, which have no budget equivalent.
    *
    * @return both the {@link ThinkingConfig} and any sibling {@link OutputConfig} that must ride on
    *     the request; either may be {@code null}
    */
   private ThinkingSpec buildThinkingSpec() {
-    if (config.thinkingLevel() == null || config.thinkingLevel() == ThinkingLevel.NONE) {
+    var level = config.thinkingLevel() == null ? ThinkingLevel.NONE : config.thinkingLevel();
+    if (level == ThinkingLevel.NONE) {
       return thinkingShape == AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON
           ? new ThinkingSpec(ThinkingConfig.disabled(), null)
           : new ThinkingSpec(null, null);
     }
-
-    if (thinkingShape != AnthropicModelId.ThinkingShape.LEGACY_BUDGET) {
-      var effort =
-          switch (config.thinkingLevel()) {
-            case NONE -> null;
-            case MINIMAL, LOW -> OutputConfig.LOW;
-            case MEDIUM -> OutputConfig.MEDIUM;
-            case HIGH -> OutputConfig.HIGH;
-            case XHIGH -> OutputConfig.XHIGH;
-            case MAX -> OutputConfig.MAX;
-          };
-      var thinking =
-          thinkingShape == AnthropicModelId.ThinkingShape.ALWAYS_ON
-              ? null
-              : ThinkingConfig.adaptive();
-      return new ThinkingSpec(thinking, effort);
+    if (thinkingShape == AnthropicModelId.ThinkingShape.LEGACY_BUDGET) {
+      return new ThinkingSpec(ThinkingConfig.enabled(legacyBudgetTokens(level)), null);
     }
-
-    if (config.thinkingLevel() == ThinkingLevel.XHIGH) {
+    if (level == ThinkingLevel.XHIGH
+        && thinkingShape == AnthropicModelId.ThinkingShape.ADAPTIVE_WITHOUT_XHIGH) {
       throw new IllegalArgumentException(
-          "ThinkingLevel.XHIGH requires an adaptive-capable model (Opus 4.7+); model "
+          "ThinkingLevel.XHIGH requires Opus 4.7 or later; model "
               + wireModelId
-              + " uses the legacy enabled+budget_tokens shape which has no 'xhigh' equivalent.");
+              + " accepts effort low/medium/high/max only.");
     }
-    if (config.thinkingLevel() == ThinkingLevel.MAX) {
-      throw new IllegalArgumentException(
-          "ThinkingLevel.MAX requires an adaptive-capable model (Opus 4.7+); model "
-              + wireModelId
-              + " uses the legacy enabled+budget_tokens shape which has no 'max' equivalent.");
-    }
-    var budgetTokens =
-        switch (config.thinkingLevel()) {
-          case NONE -> 0;
-          case MINIMAL -> 1024;
-          case LOW -> 4096;
-          case MEDIUM -> 10000;
-          case HIGH -> 32000;
-          case XHIGH, MAX ->
-              throw new IllegalStateException("XHIGH/MAX handled above; unreachable");
+    var effort =
+        switch (level) {
+          case NONE -> throw new IllegalStateException("NONE handled above; unreachable");
+          case MINIMAL, LOW -> OutputConfig.LOW;
+          case MEDIUM -> OutputConfig.MEDIUM;
+          case HIGH -> OutputConfig.HIGH;
+          case XHIGH -> OutputConfig.XHIGH;
+          case MAX -> OutputConfig.MAX;
         };
-    return new ThinkingSpec(ThinkingConfig.enabled(budgetTokens), null);
+    var thinking =
+        thinkingShape == AnthropicModelId.ThinkingShape.ALWAYS_ON
+            ? null
+            : ThinkingConfig.adaptive();
+    return new ThinkingSpec(thinking, effort);
+  }
+
+  private int legacyBudgetTokens(ThinkingLevel level) {
+    return switch (level) {
+      case MINIMAL -> 1024;
+      case LOW -> 4096;
+      case MEDIUM -> 10000;
+      case HIGH -> 32000;
+      case NONE, XHIGH, MAX ->
+          throw new IllegalArgumentException(
+              "ThinkingLevel."
+                  + level
+                  + " has no enabled+budget_tokens equivalent; model "
+                  + wireModelId
+                  + " supports extended thinking only (MINIMAL..HIGH). Adaptive models from"
+                  + " Opus 4.7 on accept xhigh/max.");
+    };
   }
 
   /**

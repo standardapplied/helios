@@ -20,35 +20,46 @@ import ai.singlr.core.common.Strings;
 public enum AnthropicModelId {
   // contextWindow / maxOutputTokens mirror the documented per-model limits (Models overview, Aug
   // 2026) — operators can override per-call via ModelConfig.Builder.withMaxOutputTokens.
-  // ThinkingShape per model: Fable 5 and Mythos 5 always think; Opus 5 and Sonnet 5 run adaptive
-  // when the field is omitted; Opus 4.7/4.8 accept adaptive or disabled and run thinking-off when
-  // omitted; Opus 4.6 / Sonnet 4.6 / Haiku 4.5 still use enabled+budget_tokens.
+  // ThinkingShape per model (thinking-troubleshooting table, Aug 2026): Fable 5 and Mythos 5
+  // always think; Opus 5 and Sonnet 5 run adaptive when the field is omitted; Opus 4.7/4.8 run
+  // thinking-off when omitted; Opus 4.6 / Sonnet 4.6 take adaptive without xhigh (their
+  // enabled+budget_tokens mode is deprecated); Haiku 4.5 supports extended thinking only.
   CLAUDE_FABLE_5("claude-fable-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
   CLAUDE_MYTHOS_5("claude-mythos-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
   CLAUDE_OPUS_5("claude-opus-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_DEFAULT_ON),
   CLAUDE_SONNET_5("claude-sonnet-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_DEFAULT_ON),
   CLAUDE_OPUS_4_8("claude-opus-4-8", 1_000_000, 128_000, ThinkingShape.ADAPTIVE),
   CLAUDE_OPUS_4_7("claude-opus-4-7", 1_000_000, 128_000, ThinkingShape.ADAPTIVE),
-  CLAUDE_OPUS_4_6("claude-opus-4-6", 1_000_000, 128_000, ThinkingShape.LEGACY_BUDGET),
-  CLAUDE_SONNET_4_6("claude-sonnet-4-6", 1_000_000, 128_000, ThinkingShape.LEGACY_BUDGET),
+  CLAUDE_OPUS_4_6("claude-opus-4-6", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_WITHOUT_XHIGH),
+  CLAUDE_SONNET_4_6("claude-sonnet-4-6", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_WITHOUT_XHIGH),
   CLAUDE_HAIKU_4_5("claude-haiku-4-5", 200_000, 64_000, ThinkingShape.LEGACY_BUDGET);
 
   /**
    * The thinking request shape a Claude model accepts, and what omitting the {@code thinking} field
-   * means there. Drives {@code AnthropicModel}'s per-model request build; every shape except {@link
-   * #LEGACY_BUDGET} also rejects sampling parameters ({@code temperature}/{@code top_p}) with a
-   * 400, so the request builder never sends them.
+   * means there. Drives {@code AnthropicModel}'s per-model request build; shapes whose {@link
+   * #acceptsSamplingParameters()} is false reject {@code temperature}/{@code top_p} with a 400 on
+   * every request, so the request builder never sends them.
    */
   public enum ThinkingShape {
     /**
-     * {@code thinking.type=enabled} + {@code budget_tokens}; omitting the field runs without
-     * thinking (Opus 4.6, Sonnet 4.6, Haiku 4.5). Sampling parameters allowed when thinking is off.
+     * {@code thinking.type=enabled} + {@code budget_tokens}, the only mode on extended-thinking
+     * models (Haiku 4.5); {@code adaptive} is rejected. Omitting the field runs without thinking.
+     * Sampling parameters allowed when thinking is off; {@code xhigh}/{@code max} have no
+     * equivalent and fail fast.
      */
     LEGACY_BUDGET,
 
     /**
-     * {@code thinking.type=adaptive} + sibling {@code output_config.effort}; omitting the field
-     * runs without thinking (Opus 4.7, Opus 4.8).
+     * {@code thinking.type=adaptive} + sibling {@code output_config.effort} with {@code low},
+     * {@code medium}, {@code high} and {@code max} but not {@code xhigh}; omitting the field runs
+     * without thinking (Opus 4.6, Sonnet 4.6). Sampling parameters allowed when thinking is off.
+     * Their {@code enabled}+{@code budget_tokens} mode is deprecated and no longer sent.
+     */
+    ADAPTIVE_WITHOUT_XHIGH,
+
+    /**
+     * {@code thinking.type=adaptive} + sibling {@code output_config.effort} across the full {@code
+     * low}..{@code max} range; omitting the field runs without thinking (Opus 4.7, Opus 4.8).
      */
     ADAPTIVE,
 
@@ -64,7 +75,18 @@ public enum AnthropicModelId {
      * controlled solely via {@code output_config.effort} (Fable 5, Mythos 5). {@code
      * ThinkingLevel.NONE} still omits the field; the model thinks adaptively regardless.
      */
-    ALWAYS_ON
+    ALWAYS_ON;
+
+    /**
+     * Whether the model accepts {@code temperature} / {@code top_p}. Claude 4.7 and later reject
+     * them with a 400 on every request regardless of thinking configuration; 4.6 and earlier accept
+     * them while thinking is off.
+     *
+     * @return true for {@link #LEGACY_BUDGET} and {@link #ADAPTIVE_WITHOUT_XHIGH}
+     */
+    public boolean acceptsSamplingParameters() {
+      return this == LEGACY_BUDGET || this == ADAPTIVE_WITHOUT_XHIGH;
+    }
   }
 
   /**

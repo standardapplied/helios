@@ -42,6 +42,17 @@ class GeminiModelIdTest {
   }
 
   @Test
+  void lowestThinkingLevelFollowsPublishedSupportTable() {
+    assertEquals("minimal", GeminiModelId.GEMINI_3_FLASH_PREVIEW.lowestThinkingLevel());
+    assertEquals("low", GeminiModelId.GEMINI_3_1_PRO_PREVIEW.lowestThinkingLevel());
+    assertEquals("minimal", GeminiModelId.GEMINI_3_1_FLASH_LITE.lowestThinkingLevel());
+    assertEquals("minimal", GeminiModelId.GEMINI_3_5_FLASH.lowestThinkingLevel());
+    assertEquals("minimal", GeminiModelId.GEMINI_3_5_FLASH_LITE.lowestThinkingLevel());
+    assertEquals("minimal", GeminiModelId.GEMINI_3_6_FLASH.lowestThinkingLevel());
+    assertEquals("low", GeminiModelId.GEMINI_3_7_FLASH.lowestThinkingLevel());
+  }
+
+  @Test
   void fromIdReturnsMatchingEnum() {
     assertEquals(
         GeminiModelId.GEMINI_3_FLASH_PREVIEW, GeminiModelId.fromId("gemini-3-flash-preview"));

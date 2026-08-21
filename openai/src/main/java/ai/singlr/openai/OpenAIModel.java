@@ -474,11 +474,11 @@ public class OpenAIModel implements Model {
   }
 
   /**
-   * Model-aware effort dispatch driven by {@link OpenAIModelId.EffortSupport}. FULL models (gpt-5.6
-   * family) accept the whole none..max range, so {@code ThinkingLevel.NONE} maps to an explicit
-   * {@code "none"} (omitting the config would run the model's default medium reasoning) and {@code
-   * MAX} maps to {@code "max"}. EXTENDED models (gpt-5.4/5.5) top out at {@code xhigh}; STANDARD
-   * models clamp everything above {@code high} down so requests stay valid.
+   * Model-aware effort dispatch driven by {@link OpenAIModelId.EffortSupport}. Every model that
+   * documents an explicit {@code "none"} effort (the gpt-5.4, gpt-5.5 and gpt-5.6 families) gets it
+   * for {@code ThinkingLevel.NONE} — omitting the config would run the model's default reasoning
+   * (medium on gpt-5.5 and gpt-5.6). {@link OpenAIModelId.EffortSupport#STANDARD} models omit the
+   * config instead and clamp higher tiers to {@code high}.
    */
   private ResponsesRequest.ReasoningConfig buildReasoningConfig() {
     var support =
@@ -486,9 +486,9 @@ public class OpenAIModel implements Model {
     var level = config.thinkingLevel() == null ? ThinkingLevel.NONE : config.thinkingLevel();
 
     if (level == ThinkingLevel.NONE) {
-      return support == OpenAIModelId.EffortSupport.FULL
-          ? ResponsesRequest.ReasoningConfig.of("none")
-          : null;
+      return support == OpenAIModelId.EffortSupport.STANDARD
+          ? null
+          : ResponsesRequest.ReasoningConfig.of("none");
     }
 
     var effort =
