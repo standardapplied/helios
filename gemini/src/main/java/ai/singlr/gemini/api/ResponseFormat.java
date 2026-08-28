@@ -11,8 +11,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Map;
 
 /**
- * Polymorphic {@code response_format} field on {@link InteractionRequest} ({@code Api-Revision:
- * 2026-05-20}).
+ * Polymorphic {@code response_format} field on a stable {@link InteractionRequest}.
  *
  * <p>Replaces the legacy raw-schema map and the removed {@code response_mime_type} field. The
  * discriminator is the {@link #type()}:

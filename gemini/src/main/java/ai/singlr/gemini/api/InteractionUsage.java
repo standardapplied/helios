@@ -8,7 +8,7 @@ package ai.singlr.gemini.api;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * Token usage statistics from the Interactions API ({@code Api-Revision: 2026-05-20}).
+ * Token usage statistics from the stable Interactions API.
  *
  * <p>The live wire shape carries {@code total_tokens}, {@code total_input_tokens}, {@code
  * total_output_tokens}, {@code total_cached_tokens} (plus optional per-modality breakdowns and

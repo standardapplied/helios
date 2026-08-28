@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.common.CostCalculator;
 import ai.singlr.core.context.TokenCounter;
+import ai.singlr.core.model.FileReference;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Model;
 import ai.singlr.core.model.ModelChunk;
@@ -218,7 +219,8 @@ final class HookIntegrationTest {
     OnUserMessageHook rewriter = (msg, ctx) -> HookOutcome.mutateText("REDACTED");
     var hooks = new HookRegistry(List.of(rewriter));
     var queue = new SteeringQueue(8);
-    queue.offer(UserMessage.text("PII data"));
+    var reference = FileReference.of("https://example.com/video.mp4", "video/mp4");
+    queue.offer(UserMessage.newBuilder().withText("PII data").withFileReference(reference).build());
     var model =
         scriptedModel(
             List.of(
@@ -229,6 +231,7 @@ final class HookIntegrationTest {
     buildLoop(model, ToolRegistry.empty(), hooks, queue).run(state, SessionLimits.defaults());
     // History's user message should carry the rewritten text.
     assertEquals("REDACTED", state.historySnapshot().get(0).content());
+    assertEquals(List.of(reference), state.historySnapshot().get(0).fileReferences());
   }
 
   @Test

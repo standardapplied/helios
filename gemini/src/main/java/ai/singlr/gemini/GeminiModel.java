@@ -61,7 +61,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Gemini model implementation using the Interactions API ({@code Api-Revision: 2026-05-20}).
+ * Gemini model implementation using the stable Interactions API.
  *
  * <p>All requests use SSE streaming internally for robust timeout handling. Synchronous {@link
  * #chat} methods stream under the hood and accumulate the response, avoiding HTTP read timeouts on
@@ -71,8 +71,7 @@ import tools.jackson.databind.json.JsonMapper;
 public class GeminiModel implements Model {
 
   private static final String PROVIDER_NAME = "gemini";
-  static final String DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-  static final String API_REVISION = "2026-05-20";
+  static final String DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1";
   static final String THOUGHT_SIGNATURES_KEY = "gemini.thoughtSignatures";
   static final String INTERACTION_ID_KEY = "gemini.interactionId";
   static final String SIGNATURE_DELIMITER = "\u001E";
@@ -93,6 +92,14 @@ public class GeminiModel implements Model {
     if (!hasCustomEndpoint && Strings.isBlank(config.apiKey())) {
       throw new IllegalArgumentException(
           "config with valid apiKey is required (or set baseUrl + auth header)");
+    }
+    if (config.temperature() != null) {
+      throw new IllegalArgumentException(
+          "temperature is not supported by the stable Gemini Interactions API");
+    }
+    if (config.topP() != null) {
+      throw new IllegalArgumentException(
+          "topP is not supported by the stable Gemini Interactions API");
     }
     this.modelId = modelId;
     this.config = config;
@@ -373,12 +380,18 @@ public class GeminiModel implements Model {
   }
 
   private static Step buildUserStep(Message message) {
-    if (message.hasInlineFiles()) {
+    if (message.hasInlineFiles() || message.hasFileReferences()) {
       var items = new ArrayList<ContentItem>();
-      for (var file : message.inlineFiles()) {
+      if (message.hasInlineFiles()) {
+        for (var file : message.inlineFiles()) {
+          var contentType = interactionsContentType(file.mimeType());
+          var base64 = Base64.getEncoder().encodeToString(file.data());
+          items.add(ContentItem.inlineData(contentType, file.mimeType(), base64));
+        }
+      }
+      for (var file : message.fileReferences()) {
         var contentType = interactionsContentType(file.mimeType());
-        var base64 = Base64.getEncoder().encodeToString(file.data());
-        items.add(ContentItem.inlineData(contentType, file.mimeType(), base64));
+        items.add(ContentItem.fileUri(contentType, file.mimeType(), file.uri()));
       }
       if (message.content() != null) {
         items.add(ContentItem.text(message.content()));
@@ -413,12 +426,6 @@ public class GeminiModel implements Model {
     builder.withMaxOutputTokens(
         config.maxOutputTokens() != null ? config.maxOutputTokens() : modelId.maxOutputTokens());
 
-    if (config.temperature() != null) {
-      builder.withTemperature(config.temperature());
-    }
-    if (config.topP() != null) {
-      builder.withTopP(config.topP());
-    }
     if (config.stopSequences() != null) {
       builder.withStopSequences(config.stopSequences());
     }
@@ -479,8 +486,6 @@ public class GeminiModel implements Model {
     if (!Strings.isBlank(config.apiKey())) {
       defaults.put("x-goog-api-key", config.apiKey());
     }
-    defaults.put("Api-Revision", API_REVISION);
-
     var builder =
         HttpRequest.newBuilder().uri(uri).POST(HttpRequest.BodyPublishers.ofString(jsonBody));
     for (var entry : config.effectiveHeaders(defaults).entrySet()) {

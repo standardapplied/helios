@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.core.model.FileReference;
 import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.InlineFile;
 import ai.singlr.core.model.Message;
@@ -140,6 +141,32 @@ final class Phase3AcceptanceTest {
             .findFirst()
             .orElseThrow();
     assertEquals(0, userObserved.inlineFiles().size());
+  }
+
+  @Test
+  void fileReferenceReachesTheModel() throws Exception {
+    var model = new RecordingModel();
+    var options =
+        SessionOptions.newBuilder()
+            .withModel(model)
+            .withSessionId("phase3-reference-" + UUID.randomUUID())
+            .build();
+    var reference = FileReference.of("https://example.com/video.mp4", "video/mp4");
+
+    try (var session = AgentSession.create(options)) {
+      session.runBlocking(
+          UserMessage.newBuilder()
+              .withText("Summarize this video")
+              .withFileReference(reference)
+              .build());
+    }
+
+    var userObserved =
+        model.observedMessages.stream()
+            .filter(m -> m.role() == Role.USER)
+            .findFirst()
+            .orElseThrow();
+    assertEquals(List.of(reference), userObserved.fileReferences());
   }
 
   @Test

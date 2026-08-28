@@ -11,7 +11,7 @@ import java.util.List;
 import tools.jackson.databind.annotation.JsonDeserialize;
 
 /**
- * A {@code Content} union member from the Interactions API ({@code Api-Revision: 2026-05-20}).
+ * A {@code Content} union member from the stable Interactions API.
  *
  * <p>Goes inside {@code step.content[]} on {@code user_input} and {@code model_output} steps, and
  * inside {@code step.summary[]} on {@code thought} steps. Doubles as the carrier for {@code

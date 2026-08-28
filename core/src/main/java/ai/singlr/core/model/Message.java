@@ -18,6 +18,7 @@ import java.util.Map;
  * @param toolName the name of the tool that was called (for TOOL role)
  * @param metadata provider-specific data for round-tripping (e.g., thought signatures)
  * @param inlineFiles inline file attachments for multimodal input (for USER role)
+ * @param fileReferences provider-accessible file references for multimodal input (for USER role)
  */
 public record Message(
     Role role,
@@ -26,7 +27,23 @@ public record Message(
     String toolCallId,
     String toolName,
     Map<String, String> metadata,
-    List<InlineFile> inlineFiles) {
+    List<InlineFile> inlineFiles,
+    List<FileReference> fileReferences) {
+
+  public Message {
+    fileReferences = fileReferences == null ? List.of() : List.copyOf(fileReferences);
+  }
+
+  public Message(
+      Role role,
+      String content,
+      List<ToolCall> toolCalls,
+      String toolCallId,
+      String toolName,
+      Map<String, String> metadata,
+      List<InlineFile> inlineFiles) {
+    this(role, content, toolCalls, toolCallId, toolName, metadata, inlineFiles, List.of());
+  }
 
   public static Builder newBuilder() {
     return new Builder();
@@ -37,11 +54,11 @@ public record Message(
   }
 
   public static Message system(String content) {
-    return new Message(Role.SYSTEM, content, List.of(), null, null, Map.of(), List.of());
+    return new Message(Role.SYSTEM, content, List.of(), null, null, Map.of(), List.of(), List.of());
   }
 
   public static Message user(String content) {
-    return new Message(Role.USER, content, List.of(), null, null, Map.of(), List.of());
+    return new Message(Role.USER, content, List.of(), null, null, Map.of(), List.of(), List.of());
   }
 
   public static Message user(String content, List<InlineFile> inlineFiles) {
@@ -49,21 +66,29 @@ public record Message(
       throw new NullPointerException("inlineFiles must not be null — pass List.of() for none");
     }
     return new Message(
-        Role.USER, content, List.of(), null, null, Map.of(), List.copyOf(inlineFiles));
+        Role.USER, content, List.of(), null, null, Map.of(), List.copyOf(inlineFiles), List.of());
   }
 
   public static Message assistant(String content) {
-    return new Message(Role.ASSISTANT, content, List.of(), null, null, Map.of(), List.of());
+    return new Message(
+        Role.ASSISTANT, content, List.of(), null, null, Map.of(), List.of(), List.of());
   }
 
   public static Message assistant(List<ToolCall> toolCalls) {
     return new Message(
-        Role.ASSISTANT, null, List.copyOf(toolCalls), null, null, Map.of(), List.of());
+        Role.ASSISTANT, null, List.copyOf(toolCalls), null, null, Map.of(), List.of(), List.of());
   }
 
   public static Message assistant(String content, List<ToolCall> toolCalls) {
     return new Message(
-        Role.ASSISTANT, content, List.copyOf(toolCalls), null, null, Map.of(), List.of());
+        Role.ASSISTANT,
+        content,
+        List.copyOf(toolCalls),
+        null,
+        null,
+        Map.of(),
+        List.of(),
+        List.of());
   }
 
   public static Message assistant(
@@ -75,11 +100,13 @@ public record Message(
         null,
         null,
         metadata != null ? Map.copyOf(metadata) : Map.of(),
+        List.of(),
         List.of());
   }
 
   public static Message tool(String toolCallId, String toolName, String content) {
-    return new Message(Role.TOOL, content, List.of(), toolCallId, toolName, Map.of(), List.of());
+    return new Message(
+        Role.TOOL, content, List.of(), toolCallId, toolName, Map.of(), List.of(), List.of());
   }
 
   public boolean hasToolCalls() {
@@ -90,6 +117,10 @@ public record Message(
     return inlineFiles != null && !inlineFiles.isEmpty();
   }
 
+  public boolean hasFileReferences() {
+    return fileReferences != null && !fileReferences.isEmpty();
+  }
+
   public static class Builder {
     private Role role;
     private String content;
@@ -98,6 +129,7 @@ public record Message(
     private String toolName;
     private Map<String, String> metadata = Map.of();
     private List<InlineFile> inlineFiles = List.of();
+    private List<FileReference> fileReferences = List.of();
 
     private Builder() {}
 
@@ -109,6 +141,7 @@ public record Message(
       this.toolName = message.toolName;
       this.metadata = message.metadata;
       this.inlineFiles = message.inlineFiles;
+      this.fileReferences = message.fileReferences;
     }
 
     public Builder withRole(Role role) {
@@ -146,11 +179,17 @@ public record Message(
       return this;
     }
 
+    public Builder withFileReferences(List<FileReference> fileReferences) {
+      this.fileReferences = fileReferences != null ? List.copyOf(fileReferences) : List.of();
+      return this;
+    }
+
     public Message build() {
       if (role == null) {
         throw new IllegalStateException("Role is required");
       }
-      return new Message(role, content, toolCalls, toolCallId, toolName, metadata, inlineFiles);
+      return new Message(
+          role, content, toolCalls, toolCallId, toolName, metadata, inlineFiles, fileReferences);
     }
   }
 }

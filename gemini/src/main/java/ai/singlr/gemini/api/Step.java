@@ -12,7 +12,7 @@ import java.util.Map;
 import tools.jackson.databind.annotation.JsonDeserialize;
 
 /**
- * A typed step in the Interactions API timeline ({@code Api-Revision: 2026-05-20}).
+ * A typed step in the stable Interactions API timeline.
  *
  * <p>Steps are the unit that both flows through the request {@code input[]} and the response {@code
  * steps[]}. The {@link #type()} discriminator selects which fields are meaningful:

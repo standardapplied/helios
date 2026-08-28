@@ -10,14 +10,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * Generation configuration for the Interactions API ({@code Api-Revision: 2026-05-20}).
+ * Generation configuration for the stable Interactions API.
  *
  * <p>{@code tool_choice} lives here per the spec, not at the top level of the request body.
  *
- * @param temperature sampling temperature (0.0 to 2.0)
  * @param maxOutputTokens maximum number of tokens to generate
- * @param topP nucleus sampling parameter
- * @param topK top-k sampling parameter
  * @param stopSequences sequences that stop generation
  * @param seed random seed for reproducibility
  * @param thinkingLevel thinking/reasoning level ({@code none}, {@code low}, {@code medium}, {@code
@@ -27,10 +24,7 @@ import java.util.List;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record InteractionGenerationConfig(
-    Double temperature,
     @JsonProperty("max_output_tokens") Integer maxOutputTokens,
-    @JsonProperty("top_p") Double topP,
-    @JsonProperty("top_k") Integer topK,
     @JsonProperty("stop_sequences") List<String> stopSequences,
     Long seed,
     @JsonProperty("thinking_level") String thinkingLevel,
@@ -41,10 +35,7 @@ public record InteractionGenerationConfig(
   }
 
   public static class Builder {
-    private Double temperature;
     private Integer maxOutputTokens;
-    private Double topP;
-    private Integer topK;
     private List<String> stopSequences;
     private Long seed;
     private String thinkingLevel;
@@ -52,23 +43,8 @@ public record InteractionGenerationConfig(
 
     private Builder() {}
 
-    public Builder withTemperature(Double temperature) {
-      this.temperature = temperature;
-      return this;
-    }
-
     public Builder withMaxOutputTokens(Integer maxOutputTokens) {
       this.maxOutputTokens = maxOutputTokens;
-      return this;
-    }
-
-    public Builder withTopP(Double topP) {
-      this.topP = topP;
-      return this;
-    }
-
-    public Builder withTopK(Integer topK) {
-      this.topK = topK;
       return this;
     }
 
@@ -94,7 +70,7 @@ public record InteractionGenerationConfig(
 
     public InteractionGenerationConfig build() {
       return new InteractionGenerationConfig(
-          temperature, maxOutputTokens, topP, topK, stopSequences, seed, thinkingLevel, toolChoice);
+          maxOutputTokens, stopSequences, seed, thinkingLevel, toolChoice);
     }
   }
 }

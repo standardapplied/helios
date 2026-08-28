@@ -5,9 +5,11 @@
 package ai.singlr.session.loop;
 
 import ai.singlr.core.context.TokenCounter;
+import ai.singlr.core.model.FileReference;
 import ai.singlr.core.model.InlineFile;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.Response;
+import ai.singlr.core.model.Role;
 import ai.singlr.session.CompactionResult;
 import ai.singlr.session.ContextCompactor;
 import ai.singlr.session.QueryEvent;
@@ -257,7 +259,7 @@ public final class AgentLoop {
                   state.sessionId(), state.currentTurnIndex(), clock.instant(), msg));
         }
         case HookOutcome.MutateText m -> {
-          var replacement = UserMessage.text(m.text());
+          var replacement = new UserMessage(m.text(), msg.attachments(), msg.fileReferences());
           accepted.add(replacement);
           emitter.emitHookFired(state, hookName, "OnUserMessageHook", "MutateText");
           emitter.emit(
@@ -297,12 +299,13 @@ public final class AgentLoop {
     if (accepted.isEmpty()) {
       return;
     }
-    var attachments = collectAttachments(accepted);
-    if (attachments.isEmpty()) {
-      state.appendMessage(Message.user(composeContent(accepted)));
-    } else {
-      state.appendMessage(Message.user(composeContent(accepted), attachments));
-    }
+    state.appendMessage(
+        Message.newBuilder()
+            .withRole(Role.USER)
+            .withContent(composeContent(accepted))
+            .withInlineFiles(collectAttachments(accepted))
+            .withFileReferences(collectFileReferences(accepted))
+            .build());
   }
 
   private static List<InlineFile> collectAttachments(List<UserMessage> messages) {
@@ -311,6 +314,14 @@ public final class AgentLoop {
       attachments.addAll(m.attachments());
     }
     return attachments;
+  }
+
+  private static List<FileReference> collectFileReferences(List<UserMessage> messages) {
+    var references = new ArrayList<FileReference>();
+    for (var message : messages) {
+      references.addAll(message.fileReferences());
+    }
+    return references;
   }
 
   private static String composeContent(List<UserMessage> messages) {

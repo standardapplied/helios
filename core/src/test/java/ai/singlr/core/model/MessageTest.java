@@ -271,4 +271,59 @@ class MessageTest {
     assertTrue(copy.hasInlineFiles());
     assertEquals(1, copy.inlineFiles().size());
   }
+
+  @Test
+  void builderWithFileReferences() {
+    var file = FileReference.of("https://example.com/video.mp4", "video/mp4");
+    var mutable = new java.util.ArrayList<>(List.of(file));
+
+    var msg =
+        Message.newBuilder()
+            .withRole(Role.USER)
+            .withContent("Summarize")
+            .withFileReferences(mutable)
+            .build();
+    mutable.clear();
+
+    assertTrue(msg.hasFileReferences());
+    assertEquals(List.of(file), msg.fileReferences());
+  }
+
+  @Test
+  void builderWithNullFileReferencesDefaultsToEmpty() {
+    var msg =
+        Message.newBuilder().withRole(Role.USER).withContent("Hi").withFileReferences(null).build();
+
+    assertFalse(msg.hasFileReferences());
+    assertTrue(msg.fileReferences().isEmpty());
+  }
+
+  @Test
+  void copyBuilderPreservesFileReferences() {
+    var file = FileReference.of("gs://bucket/video.mp4", "video/mp4");
+    var original =
+        Message.newBuilder()
+            .withRole(Role.USER)
+            .withContent("Summarize")
+            .withFileReferences(List.of(file))
+            .build();
+
+    var copy = Message.newBuilder(original).withContent("Describe").build();
+
+    assertEquals(List.of(file), copy.fileReferences());
+  }
+
+  @Test
+  void legacyConstructorDefaultsFileReferencesToEmpty() {
+    var msg = new Message(Role.USER, "content", List.of(), null, null, Map.of(), List.of());
+
+    assertTrue(msg.fileReferences().isEmpty());
+  }
+
+  @Test
+  void canonicalConstructorDefaultsNullFileReferencesToEmpty() {
+    var msg = new Message(Role.USER, "content", List.of(), null, null, Map.of(), List.of(), null);
+
+    assertTrue(msg.fileReferences().isEmpty());
+  }
 }

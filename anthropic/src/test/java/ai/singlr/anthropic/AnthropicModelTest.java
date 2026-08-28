@@ -16,10 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.anthropic.api.ContentBlock;
 import ai.singlr.anthropic.api.MessagesRequest;
 import ai.singlr.core.common.HttpClientFactory;
+import ai.singlr.core.model.FileReference;
 import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.InlineFile;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.ModelConfig;
+import ai.singlr.core.model.Role;
 import ai.singlr.core.model.ThinkingLevel;
 import ai.singlr.core.model.ToolCall;
 import ai.singlr.core.model.ToolChoice;
@@ -1040,6 +1042,26 @@ class AnthropicModelTest {
     var request = model.buildRequest(List.of(Message.user("Hi")), null, null);
 
     assertNull(request.tools());
+  }
+
+  @Test
+  void rejectsProviderFileReferencesInsteadOfSilentlyDroppingThem() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var message =
+        Message.newBuilder()
+            .withRole(Role.USER)
+            .withContent("Summarize")
+            .withFileReferences(
+                List.of(FileReference.of("https://example.com/video.mp4", "video/mp4")))
+            .build();
+
+    var error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> model.buildRequest(List.of(message), List.of(), null));
+
+    assertTrue(error.getMessage().contains("file references"));
   }
 
   @Test

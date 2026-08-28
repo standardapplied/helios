@@ -8,7 +8,7 @@ package ai.singlr.gemini.api;
 import java.util.List;
 
 /**
- * Response from the Gemini Interactions API ({@code Api-Revision: 2026-05-20}).
+ * Response from the stable Gemini Interactions API.
  *
  * <p>The legacy flat {@code outputs[]} array is replaced by a structured {@code steps[]} timeline.
  * {@code POST /interactions} returns only output steps; {@code GET /interactions/&#123;id&#125;}
