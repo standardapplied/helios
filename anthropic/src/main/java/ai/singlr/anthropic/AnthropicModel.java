@@ -874,6 +874,10 @@ public class AnthropicModel implements Model {
   }
 
   private static MessagesRequest.MessageEntry convertUserMessage(Message message) {
+    if (message.hasFileReferences()) {
+      throw new IllegalArgumentException(
+          "Anthropic does not support URI file references through this message API");
+    }
     var text = message.content() != null ? message.content() : "";
     if (!message.hasInlineFiles()) {
       return MessagesRequest.MessageEntry.user(text);

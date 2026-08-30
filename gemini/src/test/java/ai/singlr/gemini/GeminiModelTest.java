@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.common.HttpClientFactory;
+import ai.singlr.core.model.FileReference;
 import ai.singlr.core.model.InlineFile;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.model.ModelConfig;
@@ -214,8 +215,27 @@ class GeminiModelTest {
   }
 
   @Test
-  void apiRevisionConstantTracksMay2026Schema() {
-    assertEquals("2026-05-20", GeminiModel.API_REVISION);
+  void defaultBaseUrlUsesStableInteractionsApi() {
+    assertEquals("https://generativelanguage.googleapis.com/v1", GeminiModel.DEFAULT_BASE_URL);
+  }
+
+  @Test
+  void rejectsSamplingParametersRemovedFromStableInteractionsApi() {
+    var withTemperature =
+        ModelConfig.newBuilder().withApiKey("test-key").withTemperature(0.5).build();
+    var withTopP = ModelConfig.newBuilder().withApiKey("test-key").withTopP(0.9).build();
+
+    var temperatureError =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, withTemperature));
+    var topPError =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, withTopP));
+
+    assertTrue(temperatureError.getMessage().contains("temperature"));
+    assertTrue(topPError.getMessage().contains("topP"));
   }
 
   @Test
@@ -389,6 +409,33 @@ class GeminiModelTest {
     assertEquals("document", doc.type());
     assertEquals("application/pdf", doc.mimeType());
     assertNotNull(doc.data());
+  }
+
+  @Test
+  void convertMessagesUserWithUploadedVideoEmitsVideoUriContent() {
+    var video =
+        FileReference.of(
+            "https://generativelanguage.googleapis.com/v1beta/files/video-123", "video/mp4");
+    var user =
+        new Message(
+            Role.USER,
+            "Summarize this video",
+            List.of(),
+            null,
+            null,
+            Map.of(),
+            null,
+            List.of(video));
+
+    var result = createModel().convertMessages(List.of(user));
+
+    var content = result.steps().getFirst().content();
+    assertEquals(2, content.size());
+    assertEquals("video", content.getFirst().type());
+    assertEquals("video/mp4", content.getFirst().mimeType());
+    assertEquals(video.uri(), content.getFirst().uri());
+    assertNull(content.getFirst().data());
+    assertEquals("Summarize this video", content.getLast().text());
   }
 
   @Test
@@ -982,10 +1029,10 @@ class GeminiModelTest {
     var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     var httpRequest = model.buildHttpRequest("{}");
     assertEquals(
-        java.net.URI.create(
-            "https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse"),
+        java.net.URI.create("https://generativelanguage.googleapis.com/v1/interactions?alt=sse"),
         httpRequest.uri());
     assertEquals("g-key", httpRequest.headers().firstValue("x-goog-api-key").orElseThrow());
+    assertTrue(httpRequest.headers().firstValue("Api-Revision").isEmpty());
   }
 
   @Test

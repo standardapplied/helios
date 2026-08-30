@@ -10,8 +10,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * {@code POST /interactions} request body for the Interactions API ({@code Api-Revision:
- * 2026-05-20}).
+ * {@code POST /interactions} request body for the stable Interactions API.
  *
  * <p>The {@code input} field is a {@code StepList} per the spec: every element is a {@link Step}
  * with its own {@link Step#type()} discriminator (e.g. {@code user_input}, {@code model_output},

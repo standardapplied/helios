@@ -99,6 +99,30 @@ try (var model = new AnthropicProvider().create(
 
 All providers implement the same `Model` interface — swap providers without touching the rest of your code.
 
+Gemini video understanding uses the Files API for large or reusable videos, then sends the returned
+URI through the stable Interactions API. Uploads stream from disk and poll until Google marks the
+file active:
+
+```java
+var config = ModelConfig.of(System.getenv("GEMINI_API_KEY"));
+
+try (var files = new GeminiFilesClient(config);
+    var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_7_FLASH.id(), config)) {
+  var video = files.upload(Path.of("meeting.mp4"), "video/mp4");
+  var message = Message.newBuilder()
+      .withRole(Role.USER)
+      .withContent("Summarize this video and list the decisions.")
+      .withFileReferences(List.of(video))
+      .build();
+
+  System.out.println(model.chat(List.of(message)).content());
+}
+```
+
+For an `AgentSession`, attach the same reference with
+`UserMessage.newBuilder().withFileReference(video)`. Inline media remains available for small,
+one-off inputs; `GeminiFilesClient` avoids loading large videos into heap.
+
 Anthropic models use managed five-minute prompt caching by default. Select the one-hour
 cache for conversations whose reusable prefixes must survive longer gaps, or disable caching
 for one-shot workloads:

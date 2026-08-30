@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.common.HttpClientFactory;
+import ai.singlr.core.model.FileReference;
 import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.InlineFile;
 import ai.singlr.core.model.Message;
@@ -938,6 +939,22 @@ class OpenAIModelTest {
 
     assertEquals(1, request.input().size());
     assertEquals("", request.input().getFirst().content());
+  }
+
+  @Test
+  void rejectsProviderFileReferencesInsteadOfSilentlyDroppingThem() {
+    var message =
+        Message.newBuilder()
+            .withRole(Role.USER)
+            .withContent("Summarize")
+            .withFileReferences(
+                List.of(FileReference.of("https://example.com/video.mp4", "video/mp4")))
+            .build();
+
+    var error =
+        assertThrows(IllegalArgumentException.class, () -> OpenAIModel.convertUserMessage(message));
+
+    assertTrue(error.getMessage().contains("file references"));
   }
 
   @Test

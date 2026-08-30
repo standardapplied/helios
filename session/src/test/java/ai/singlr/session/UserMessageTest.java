@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.core.model.FileReference;
 import ai.singlr.core.model.InlineFile;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -69,6 +70,13 @@ final class UserMessageTest {
   }
 
   @Test
+  void canonicalConstructorDefaultsNullFileReferencesToEmpty() {
+    var message = new UserMessage("hi", List.of(), null);
+
+    assertTrue(message.fileReferences().isEmpty());
+  }
+
+  @Test
   void attachmentsListWithNullEntryRejected() {
     var list = new java.util.ArrayList<InlineFile>();
     list.add(null);
@@ -79,7 +87,8 @@ final class UserMessageTest {
   void blankTextWithoutAttachmentsThrows() {
     var ex = assertThrows(IllegalArgumentException.class, () -> new UserMessage("", List.of()));
     assertEquals(
-        "UserMessage must carry either non-blank text or at least one attachment", ex.getMessage());
+        "UserMessage must carry non-blank text, an attachment, or a file reference",
+        ex.getMessage());
   }
 
   @Test
@@ -142,6 +151,24 @@ final class UserMessageTest {
   void builderBuildRefusesEmptyAndNoAttachments() {
     var b = UserMessage.newBuilder();
     assertThrows(IllegalArgumentException.class, b::build);
+  }
+
+  @Test
+  void builderAcceptsFileReferenceWithoutReadingBytes() {
+    var reference = FileReference.of("https://example.com/video.mp4", "video/mp4");
+
+    var msg = UserMessage.newBuilder().withFileReference(reference).build();
+
+    assertTrue(msg.hasFileReferences());
+    assertEquals(List.of(reference), msg.fileReferences());
+    assertTrue(msg.attachments().isEmpty());
+  }
+
+  @Test
+  void builderRejectsNullFileReference() {
+    var builder = UserMessage.newBuilder().withText("video");
+
+    assertThrows(NullPointerException.class, () -> builder.withFileReference(null));
   }
 
   @Test

@@ -52,7 +52,7 @@ import java.util.Map;
  * @param baseUrl override the provider's default API endpoint. {@code null} (default) means use the
  *     provider's canonical URL ({@code https://api.openai.com/v1/responses}, {@code
  *     https://api.anthropic.com/v1/messages}, {@code
- *     https://generativelanguage.googleapis.com/v1beta}). Set to an Azure OpenAI deployment URL, an
+ *     https://generativelanguage.googleapis.com/v1}). Set to an Azure OpenAI deployment URL, an
  *     OpenAI-compatible proxy (LiteLLM, vLLM, Ollama), Vertex AI, or Bedrock to point a provider at
  *     a non-default endpoint. The framework does not parse or interpret this value — it is used
  *     verbatim as the request URI's authority + path prefix

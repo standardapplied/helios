@@ -19,6 +19,8 @@ module ai.singlr.gemini {
 
   opens ai.singlr.gemini.api to
       tools.jackson.databind;
+  opens ai.singlr.gemini to
+      tools.jackson.databind;
 
   provides ai.singlr.core.model.ModelProvider with
       ai.singlr.gemini.GeminiProvider;

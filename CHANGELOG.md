@@ -4,6 +4,22 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Added
+
+- Gemini video understanding through the Files API and stable Interactions API. The new
+  `GeminiFilesClient` performs resumable, file-backed uploads with bounded HTTP response reads,
+  disabled redirects, same-origin upload-session validation, processing-state polling, failure
+  propagation, and a configurable processing timeout. It returns a provider-neutral
+  `FileReference` that can be attached through `Message.Builder.withFileReferences(...)` or
+  `UserMessage.Builder.withFileReference(...)` without buffering the video in heap.
+
+### Changed
+
+- Gemini Interactions now target the generally available `/v1/interactions` endpoint and no
+  longer send the obsolete `Api-Revision` header. `temperature` and `topP` fail fast because the
+  stable Interactions generation schema does not support them.
+- Anthropic and OpenAI reject URI file references explicitly instead of silently dropping them.
+
 ## [2.9.2] — 2026-08-21 — Thinking shapes aligned with current provider docs
 
 No breaking changes.

@@ -10,7 +10,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Map;
 
 /**
- * A streaming event from the Interactions API SSE stream ({@code Api-Revision: 2026-05-20}).
+ * A streaming event from the stable Interactions API SSE stream.
  *
  * <p>The legacy {@code interaction.start} / {@code content.start} / {@code content.delta} / {@code
  * content.stop} / {@code interaction.complete} / {@code interaction.status_update} family is
@@ -74,10 +74,8 @@ public record StreamingEvent(
   }
 
   /**
-   * The deployed {@code Api-Revision: 2026-05-20} server still emits the legacy unified {@code
-   * interaction.status_update} event in place of the doc-promised {@code interaction.in_progress} /
-   * {@code interaction.requires_action} split. Carries {@link #interactionId()} and {@link
-   * #status()}.
+   * The stable API emits a unified {@code interaction.status_update} carrying {@link
+   * #interactionId()} and {@link #status()}.
    */
   public boolean hasTypeInteractionStatusUpdate() {
     return "interaction.status_update".equals(eventType);

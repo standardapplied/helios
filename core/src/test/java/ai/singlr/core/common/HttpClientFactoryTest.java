@@ -65,6 +65,15 @@ class HttpClientFactoryTest {
   }
 
   @Test
+  void supportsExplicitRedirectPolicy() {
+    var client = HttpClientFactory.create(null, HttpClient.Redirect.NEVER);
+
+    assertEquals(HttpClient.Redirect.NEVER, client.followRedirects());
+
+    HttpClientFactory.shutdownGracefully(client);
+  }
+
+  @Test
   void readBoundedErrorBodyCapsAtLimitAndMarksTruncation() throws Exception {
     var oversized = new byte[64 * 1024 + 1024];
     java.util.Arrays.fill(oversized, (byte) 'x');

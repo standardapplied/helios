@@ -5,6 +5,7 @@
 package ai.singlr.session;
 
 import ai.singlr.core.common.Strings;
+import ai.singlr.core.model.FileReference;
 import ai.singlr.core.model.InlineFile;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,10 +19,9 @@ import java.util.Objects;
 /**
  * A message from the user to the agent session.
  *
- * <p>Carries the user's text plus an optional list of {@link InlineFile} attachments — images,
- * PDFs, and similar binary content the provider can render natively in the next API call. The
- * session's agent loop preserves attachments across the {@link UserMessage} → {@code Message.user}
- * conversion so each provider's adapter receives them and encodes the right wire shape.
+ * <p>Carries the user's text plus inline {@link InlineFile} attachments and provider-accessible
+ * {@link FileReference} values. The session's agent loop preserves both across the {@link
+ * UserMessage} to model-message conversion so each provider adapter receives the intended media.
  *
  * <p>Construct via {@link #text(String)} for the common plain-text case, or {@link #newBuilder()}
  * for messages carrying attachments. The builder's path-based helper sniffs the media type via
@@ -34,27 +34,38 @@ import java.util.Objects;
  *
  * @param text the message text; non-null, may be empty (callers attaching files often skip prose)
  * @param attachments inline file attachments; non-null, defensively copied, may be empty
+ * @param fileReferences provider-accessible file references; defensively copied, null is treated as
+ *     empty for serialized backward compatibility
  */
-public record UserMessage(String text, List<InlineFile> attachments) {
+public record UserMessage(
+    String text, List<InlineFile> attachments, List<FileReference> fileReferences) {
+
+  public UserMessage(String text, List<InlineFile> attachments) {
+    this(text, attachments, List.of());
+  }
 
   /**
    * Canonical constructor.
    *
-   * @throws NullPointerException if either argument is null
-   * @throws IllegalArgumentException if {@code text} is blank AND {@code attachments} is empty (a
-   *     user message must carry SOMETHING — either prose or at least one attachment)
+   * @throws NullPointerException if text or attachments is null
+   * @throws IllegalArgumentException if the message has no text, attachments, or file references
    */
   public UserMessage {
     Objects.requireNonNull(text, "text must not be null");
     Objects.requireNonNull(attachments, "attachments must not be null");
+    fileReferences = fileReferences == null ? List.of() : fileReferences;
     for (var a : attachments) {
       Objects.requireNonNull(a, "attachments must not contain null");
     }
-    if (Strings.isBlank(text) && attachments.isEmpty()) {
+    for (var reference : fileReferences) {
+      Objects.requireNonNull(reference, "fileReferences must not contain null");
+    }
+    if (Strings.isBlank(text) && attachments.isEmpty() && fileReferences.isEmpty()) {
       throw new IllegalArgumentException(
-          "UserMessage must carry either non-blank text or at least one attachment");
+          "UserMessage must carry non-blank text, an attachment, or a file reference");
     }
     attachments = List.copyOf(attachments);
+    fileReferences = List.copyOf(fileReferences);
   }
 
   /**
@@ -68,7 +79,7 @@ public record UserMessage(String text, List<InlineFile> attachments) {
     if (Strings.isBlank(text)) {
       throw new IllegalArgumentException("text must not be blank");
     }
-    return new UserMessage(text, List.of());
+    return new UserMessage(text, List.of(), List.of());
   }
 
   /**
@@ -90,11 +101,16 @@ public record UserMessage(String text, List<InlineFile> attachments) {
     return !attachments.isEmpty();
   }
 
+  public boolean hasFileReferences() {
+    return !fileReferences.isEmpty();
+  }
+
   /** Mutable builder for {@link UserMessage}. */
   public static final class Builder {
 
     private String text = "";
     private final List<InlineFile> attachments = new ArrayList<>();
+    private final List<FileReference> fileReferences = new ArrayList<>();
 
     private Builder() {}
 
@@ -133,6 +149,11 @@ public record UserMessage(String text, List<InlineFile> attachments) {
       return this;
     }
 
+    public Builder withFileReference(FileReference fileReference) {
+      fileReferences.add(Objects.requireNonNull(fileReference, "fileReference must not be null"));
+      return this;
+    }
+
     /**
      * Attach a file from disk. Reads the bytes and sniffs the media type via {@link
      * Files#probeContentType(Path)} with a fallback to a small extension table for the formats
@@ -162,7 +183,7 @@ public record UserMessage(String text, List<InlineFile> attachments) {
      * @throws IllegalArgumentException if both {@code text} is blank and no attachments were added
      */
     public UserMessage build() {
-      return new UserMessage(text, List.copyOf(attachments));
+      return new UserMessage(text, List.copyOf(attachments), List.copyOf(fileReferences));
     }
   }
 

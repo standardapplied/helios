@@ -405,6 +405,10 @@ public class OpenAIModel implements Model {
    * @return the input item
    */
   static InputItem convertUserMessage(Message message) {
+    if (message.hasFileReferences()) {
+      throw new IllegalArgumentException(
+          "OpenAI does not support URI file references through this message API");
+    }
     var text = message.content() != null ? message.content() : "";
     if (!message.hasInlineFiles()) {
       return InputItem.userMessage(text);

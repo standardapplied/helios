@@ -11,6 +11,7 @@ import java.io.InputStream;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Objects;
 
 /**
  * Factory and shared utilities for {@link HttpClient} instances used by provider modules.
@@ -31,6 +32,17 @@ public final class HttpClientFactory {
    * @return a new HttpClient instance
    */
   public static HttpClient create(ModelConfig config) {
+    return create(config, HttpClient.Redirect.NORMAL);
+  }
+
+  /**
+   * Create an HttpClient with an explicit redirect policy.
+   *
+   * @param config the model configuration containing timeout settings
+   * @param redirectPolicy redirect policy for the client
+   * @return a new HttpClient instance
+   */
+  public static HttpClient create(ModelConfig config, HttpClient.Redirect redirectPolicy) {
     Duration connectTimeout =
         config != null && config.connectTimeout() != null
             ? config.connectTimeout()
@@ -38,7 +50,7 @@ public final class HttpClientFactory {
 
     return HttpClient.newBuilder()
         .connectTimeout(connectTimeout)
-        .followRedirects(HttpClient.Redirect.NORMAL)
+        .followRedirects(Objects.requireNonNull(redirectPolicy, "redirectPolicy must not be null"))
         .build();
   }
 

@@ -812,19 +812,13 @@ class SerializationTest {
   void interactionGenerationConfigBuilderCoversEverySetter() throws Exception {
     var cfg =
         InteractionGenerationConfig.newBuilder()
-            .withTemperature(0.5)
             .withMaxOutputTokens(64)
-            .withTopP(0.9)
-            .withTopK(40)
             .withStopSequences(List.of("STOP"))
             .withSeed(42L)
             .withThinkingLevel("medium")
             .withToolChoice(ToolChoiceConfig.any())
             .build();
-    assertEquals(0.5, cfg.temperature());
     assertEquals(64, cfg.maxOutputTokens());
-    assertEquals(0.9, cfg.topP());
-    assertEquals(40, cfg.topK());
     assertEquals(List.of("STOP"), cfg.stopSequences());
     assertEquals(42L, cfg.seed());
     assertEquals("medium", cfg.thinkingLevel());
@@ -832,8 +826,6 @@ class SerializationTest {
 
     var json = objectMapper.writeValueAsString(cfg);
     assertTrue(json.contains("\"max_output_tokens\":64"));
-    assertTrue(json.contains("\"top_p\":0.9"));
-    assertTrue(json.contains("\"top_k\":40"));
     assertTrue(json.contains("\"stop_sequences\""));
     assertTrue(json.contains("\"seed\":42"));
     assertTrue(json.contains("\"thinking_level\":\"medium\""));
