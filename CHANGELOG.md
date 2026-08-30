@@ -4,6 +4,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [2.10.0] — 2026-08-30 — Stable Gemini Interactions and video understanding
+
 ### Added
 
 - Gemini video understanding through the Files API and stable Interactions API. The new
