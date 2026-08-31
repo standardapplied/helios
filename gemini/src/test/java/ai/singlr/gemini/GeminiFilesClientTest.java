@@ -6,6 +6,7 @@
 package ai.singlr.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -26,6 +27,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -48,6 +50,15 @@ import tools.jackson.databind.json.JsonMapper;
 class GeminiFilesClientTest {
 
   @TempDir Path tempDir;
+
+  @Test
+  void productionHttpClientNeverFollowsRedirects() {
+    var config = ModelConfig.newBuilder().withApiKey("key").build();
+
+    try (var http = GeminiFilesClient.createHttpClient(config)) {
+      assertEquals(HttpClient.Redirect.NEVER, http.followRedirects());
+    }
+  }
 
   @Test
   void uploadStreamsFileAndWaitsUntilActive() throws Exception {
@@ -116,6 +127,123 @@ class GeminiFilesClientTest {
 
     client(http, Duration.ofSeconds(5)).upload(video, "video/mp4");
 
+    assertEquals(2, http.requests.size());
+  }
+
+  @Test
+  void managedUploadExposesReferenceAndDeletesOnlyByValidatedResourceName() throws Exception {
+    var video = tempDir.resolve("managed.mp4");
+    Files.write(video, new byte[] {1, 2, 3});
+    var http = new StubHttpClient();
+    http.enqueue(
+        200, Map.of("x-goog-upload-url", List.of("https://api.example/upload/managed")), "");
+    http.enqueue(
+        200,
+        Map.of(),
+        "{\"file\":{\"name\":\"files/managed-1\",\"mimeType\":\"video/mp4\","
+            + "\"uri\":\"https://provider-supplied.example/private/video\",\"state\":\"ACTIVE\"}}");
+    http.enqueue(204, Map.of(), "");
+
+    var managed = client(http, Duration.ofSeconds(5)).uploadManaged(video, "video/mp4");
+
+    assertEquals("files/managed-1", managed.resourceName());
+    assertEquals("https://provider-supplied.example/private/video", managed.reference().uri());
+    assertEquals("video/mp4", managed.reference().mimeType());
+
+    managed.delete();
+    managed.delete();
+    managed.close();
+
+    assertEquals(3, http.requests.size());
+    var delete = http.requests.getLast();
+    assertEquals("DELETE", delete.method());
+    assertEquals("https://api.example/v1beta/files/managed-1", delete.uri().toString());
+    assertFalse(delete.uri().toString().contains("provider-supplied.example"));
+  }
+
+  @Test
+  void managedDeleteTreatsAlreadyAbsentFileAsSuccess() throws Exception {
+    var video = tempDir.resolve("absent.mp4");
+    Files.write(video, new byte[] {1});
+    var http = managedUpload(httpClient(), "files/already-absent", "https://files.example/private");
+    http.enqueue(404, Map.of(), "{\"error\":{\"message\":\"not found\"}}");
+
+    try (var managed = client(http, Duration.ofSeconds(5)).uploadManaged(video, "video/mp4")) {
+      managed.delete();
+    }
+
+    assertEquals(3, http.requests.size());
+  }
+
+  @Test
+  void managedDeleteErrorDoesNotRetainCredentialsOrFileUri() throws Exception {
+    var video = tempDir.resolve("private.mp4");
+    Files.write(video, new byte[] {1});
+    var apiKey = "api-key-canary-never-retain";
+    var fileUri = "https://files.example/file-uri-canary-never-retain";
+    var http = managedUpload(httpClient(), "files/private-1", fileUri);
+    http.enqueue(
+        500, Map.of(), "{\"error\":{\"message\":\"failed " + apiKey + " " + fileUri + "\"}}");
+    var config =
+        ModelConfig.newBuilder().withApiKey(apiKey).withBaseUrl("https://api.example/v1").build();
+    var managed = client(config, http, Duration.ofSeconds(5)).uploadManaged(video, "video/mp4");
+
+    var error = assertThrows(GeminiException.class, managed::delete);
+
+    assertEquals(500, error.statusCode());
+    assertFalse(error.getMessage().contains(apiKey));
+    assertFalse(error.getMessage().contains(fileUri));
+    assertFalse(exceptionGraphContains(error, apiKey));
+    assertFalse(exceptionGraphContains(error, fileUri));
+  }
+
+  @Test
+  void managedDeleteCanRetryAfterFailureAndStopsAfterSuccess() throws Exception {
+    var video = tempDir.resolve("retry-delete.mp4");
+    Files.write(video, new byte[] {1});
+    var http = managedUpload(httpClient(), "files/retry-delete", "https://files.example/retry");
+    http.enqueue(503, Map.of(), "temporary");
+    http.enqueue(204, Map.of(), "");
+    var managed = client(http, Duration.ofSeconds(5)).uploadManaged(video, "video/mp4");
+
+    assertThrows(GeminiException.class, managed::delete);
+    managed.delete();
+    managed.delete();
+
+    assertEquals(4, http.requests.size());
+  }
+
+  @Test
+  void managedDeleteNeverFollowsCrossOriginRedirect() throws Exception {
+    var video = tempDir.resolve("redirect-delete.mp4");
+    Files.write(video, new byte[] {1});
+    var http =
+        managedUpload(httpClient(), "files/redirect-delete", "https://files.example/private");
+    http.enqueue(
+        302, Map.of("location", List.of("https://attacker.example/collect")), "redirecting");
+    var managed = client(http, Duration.ofSeconds(5)).uploadManaged(video, "video/mp4");
+
+    var error = assertThrows(GeminiException.class, managed::delete);
+
+    assertEquals(302, error.statusCode());
+    assertEquals(3, http.requests.size());
+    assertEquals(
+        "https://api.example/v1beta/files/redirect-delete",
+        http.requests.getLast().uri().toString());
+  }
+
+  @Test
+  void managedUploadRejectsInvalidResourceNameBeforeItCanBeDeleted() throws Exception {
+    var video = tempDir.resolve("invalid-name.mp4");
+    Files.write(video, new byte[] {1});
+    var http = managedUpload(httpClient(), "files/good/../../other", "https://files.example/x");
+
+    var error =
+        assertThrows(
+            GeminiException.class,
+            () -> client(http, Duration.ofSeconds(5)).uploadManaged(video, "video/mp4"));
+
+    assertTrue(error.getMessage().contains("invalid file name"));
     assertEquals(2, http.requests.size());
   }
 
@@ -190,6 +318,25 @@ class GeminiFilesClientTest {
         IllegalArgumentException.class,
         () -> client.upload(tempDir.resolve("missing.mp4"), "video/mp4"));
     assertThrows(IllegalArgumentException.class, () -> client.upload(empty, "invalid"));
+    assertTrue(http.requests.isEmpty());
+  }
+
+  @Test
+  void rejectsFilesAboveCurrentTwoGigabyteProviderLimitBeforeSending() throws Exception {
+    var oversized = tempDir.resolve("oversized.mp4");
+    try (var channel =
+        Files.newByteChannel(oversized, StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
+      channel.position(2L * 1024 * 1024 * 1024);
+      channel.write(ByteBuffer.wrap(new byte[] {1}));
+    }
+    var http = new StubHttpClient();
+
+    var error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> client(http, Duration.ofSeconds(5)).upload(oversized, "video/mp4"));
+
+    assertTrue(error.getMessage().contains("2 GB"));
     assertTrue(http.requests.isEmpty());
   }
 
@@ -443,6 +590,34 @@ class GeminiFilesClientTest {
     return assertThrows(
         GeminiException.class,
         () -> client(http, Duration.ofSeconds(5)).upload(video, "video/mp4"));
+  }
+
+  private static StubHttpClient httpClient() {
+    return new StubHttpClient();
+  }
+
+  private static StubHttpClient managedUpload(
+      StubHttpClient http, String resourceName, String fileUri) {
+    http.enqueue(
+        200, Map.of("x-goog-upload-url", List.of("https://api.example/upload/managed")), "");
+    http.enqueue(
+        200,
+        Map.of(),
+        "{\"file\":{\"name\":\""
+            + resourceName
+            + "\",\"mimeType\":\"video/mp4\",\"uri\":\""
+            + fileUri
+            + "\",\"state\":\"ACTIVE\"}}");
+    return http;
+  }
+
+  private static boolean exceptionGraphContains(Throwable error, String canary) {
+    for (var current = error; current != null; current = current.getCause()) {
+      if (String.valueOf(current.getMessage()).contains(canary)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private StubHttpClient uploadClient(String uploadResponse) {

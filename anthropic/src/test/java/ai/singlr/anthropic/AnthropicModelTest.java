@@ -26,6 +26,7 @@ import ai.singlr.core.model.ThinkingLevel;
 import ai.singlr.core.model.ToolCall;
 import ai.singlr.core.model.ToolChoice;
 import ai.singlr.core.schema.OutputSchema;
+import ai.singlr.core.schema.RawOutputCapturePolicy;
 import ai.singlr.core.schema.StructuredOutputParseException;
 import ai.singlr.core.tool.ParameterType;
 import ai.singlr.core.tool.Tool;
@@ -1176,6 +1177,27 @@ class AnthropicModelTest {
         ex.errors().stream().anyMatch(e -> e.contains("age") && e.contains("required")),
         "diff must name the missing 'age' field as required: " + ex.errors());
     assertEquals("{\"name\":\"Alice\"}", ex.rawContent());
+  }
+
+  @Test
+  void disabledRawOutputCaptureIsAppliedByAnthropicParser() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
+            .build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+
+    var error =
+        assertThrows(
+            StructuredOutputParseException.class,
+            () ->
+                model.parseStructuredContent(
+                    "{\"name\":\"private-model-output-canary\"}",
+                    OutputSchema.of(TestPerson.class)));
+
+    assertNull(error.rawContent());
+    assertEquals(RawOutputCapturePolicy.DISABLED, model.rawOutputCapturePolicy());
   }
 
   @Test

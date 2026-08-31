@@ -1337,6 +1337,26 @@ class StreamingIteratorTest {
   }
 
   @org.junit.jupiter.api.Test
+  void statelessIteratorDoesNotPropagateInteractionIdAndReportsApiVersion() {
+    var sse =
+        "data: {\"event_type\":\"interaction.status_update\","
+            + "\"interaction_id\":\"interaction-secret\",\"status\":\"completed\"}\n\n";
+    var inputStream = new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8));
+    try (var iterator =
+        new GeminiModel.StreamingIterator(
+            fakeResponse(inputStream), objectMapper, Duration.ofSeconds(5), false, "v1beta")) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getLast();
+      assertFalse(done.response().metadata().containsKey(GeminiModel.INTERACTION_ID_KEY));
+      assertEquals("v1beta", done.response().metadata().get(GeminiModel.API_VERSION_KEY));
+      assertFalse(done.response().metadata().containsValue("interaction-secret"));
+    }
+  }
+
+  @org.junit.jupiter.api.Test
   void googleSearchStepsDoNotBreakParsing() {
     var searchCall = stepStart(0, "{\"type\":\"google_search_call\",\"id\":\"gs_1\"}");
     var searchResult = stepStart(1, "{\"type\":\"google_search_result\",\"call_id\":\"gs_1\"}");

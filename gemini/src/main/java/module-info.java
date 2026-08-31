@@ -7,7 +7,7 @@
  * Singular Agentic Framework - Google Gemini Provider Module.
  *
  * <p>Implements the ModelProvider SPI for Google's Gemini API using the Interactions API for
- * stateful conversations and streaming support.
+ * configurable provider-side continuation and streaming support.
  */
 module ai.singlr.gemini {
   requires ai.singlr.core;

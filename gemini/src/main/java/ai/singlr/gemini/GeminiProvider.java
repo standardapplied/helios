@@ -5,7 +5,6 @@
 
 package ai.singlr.gemini;
 
-import ai.singlr.core.model.Model;
 import ai.singlr.core.model.ModelConfig;
 import ai.singlr.core.model.ModelProvider;
 
@@ -24,7 +23,7 @@ public class GeminiProvider implements ModelProvider {
   }
 
   @Override
-  public Model create(String modelId, ModelConfig config) {
+  public GeminiModel create(String modelId, ModelConfig config) {
     var geminiModel = GeminiModelId.fromId(modelId);
     if (geminiModel == null) {
       throw new IllegalArgumentException("Unsupported model: " + modelId);

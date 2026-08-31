@@ -8,6 +8,7 @@ import ai.singlr.core.common.Strings;
 import ai.singlr.core.model.Message;
 import ai.singlr.core.runtime.CancellationToken;
 import ai.singlr.core.runtime.SessionContext;
+import ai.singlr.core.schema.RawOutputCapturePolicy;
 import ai.singlr.session.ask.AskUserQuestionRequest;
 import ai.singlr.session.ask.AskUserQuestionResponse;
 import ai.singlr.session.ask.AskUserQuestionTool;
@@ -94,6 +95,7 @@ public final class AgentSessionImpl implements AgentSession {
   private final ConcurrentHashMap<String, CompletableFuture<AskUserQuestionResponse>>
       pendingQuestions = new ConcurrentHashMap<>();
   private final Clock clock;
+  private final RawOutputCapturePolicy rawOutputCapturePolicy;
 
   /**
    * Build a session from a composition record.
@@ -107,6 +109,7 @@ public final class AgentSessionImpl implements AgentSession {
     this.limits = options.limits();
     this.clock = options.clock();
     this.executionProvider = options.executionProvider();
+    this.rawOutputCapturePolicy = options.model().rawOutputCapturePolicy();
     var concurrency = options.concurrency();
     var cancellation = new CancellationToken();
     this.state = new SessionState(sessionId, cancellation, clock);
@@ -164,6 +167,11 @@ public final class AgentSessionImpl implements AgentSession {
             clock,
             options.tokenCounter(),
             options.contextCompactor());
+  }
+
+  @Override
+  public RawOutputCapturePolicy rawOutputCapturePolicy() {
+    return rawOutputCapturePolicy;
   }
 
   /**

@@ -23,16 +23,19 @@ import java.util.concurrent.locks.ReentrantLock;
  * a crashing producer does not leave a partial line in the file.
  *
  * <p>Closing the sink flushes and closes the underlying writer. Sinks opened with {@link
- * #open(Path)} are {@link AutoCloseable} — use try-with-resources or explicit {@link #close()}.
+ * #openFull(Path)} or {@link #openMetadataOnly(Path)} are {@link AutoCloseable} — use
+ * try-with-resources or explicit {@link #close()}.
  */
 public final class JsonlEventSink implements EventSink, AutoCloseable {
 
   private final BufferedWriter writer;
+  private final boolean metadataOnly;
   private final ReentrantLock lock = new ReentrantLock();
   private volatile boolean closed;
 
-  private JsonlEventSink(BufferedWriter writer) {
+  private JsonlEventSink(BufferedWriter writer, boolean metadataOnly) {
     this.writer = writer;
+    this.metadataOnly = metadataOnly;
   }
 
   /**
@@ -41,8 +44,33 @@ public final class JsonlEventSink implements EventSink, AutoCloseable {
    * @param path destination file; parent directory must exist
    * @return an open sink; close with {@link #close()} or try-with-resources
    * @throws UncheckedIOException if the file cannot be opened for writing
+   * @deprecated use {@link #openFull(Path)} or {@link #openMetadataOnly(Path)} so persistence of
+   *     sensitive content is explicit
    */
+  @Deprecated(since = "2.10.1")
   public static JsonlEventSink open(Path path) {
+    return openFull(path);
+  }
+
+  /**
+   * Opens a full-content JSONL sink.
+   *
+   * <p><strong>Sensitive:</strong> full mode persists assistant text, thinking, tool arguments,
+   * custom data, and error text verbatim. Do not use it for privacy-sensitive media or prompts.
+   */
+  public static JsonlEventSink openFull(Path path) {
+    return open(path, false);
+  }
+
+  /**
+   * Opens a metadata-only JSONL sink that excludes content-bearing event values and emits only
+   * identifiers, event types, timing, counts, tool names, outcomes, and redacted error categories.
+   */
+  public static JsonlEventSink openMetadataOnly(Path path) {
+    return open(path, true);
+  }
+
+  private static JsonlEventSink open(Path path, boolean metadataOnly) {
     Objects.requireNonNull(path, "path");
     try {
       var writer =
@@ -52,7 +80,7 @@ public final class JsonlEventSink implements EventSink, AutoCloseable {
               StandardOpenOption.CREATE,
               StandardOpenOption.WRITE,
               StandardOpenOption.APPEND);
-      return new JsonlEventSink(writer);
+      return new JsonlEventSink(writer, metadataOnly);
     } catch (IOException e) {
       throw new UncheckedIOException("Failed to open JSONL event file: " + path, e);
     }
@@ -64,7 +92,8 @@ public final class JsonlEventSink implements EventSink, AutoCloseable {
     if (closed) {
       throw new IllegalStateException("JsonlEventSink is closed");
     }
-    var line = EventJsonWriter.encode(event);
+    var line =
+        metadataOnly ? EventJsonWriter.encodeMetadataOnly(event) : EventJsonWriter.encode(event);
     lock.lock();
     try {
       if (closed) {

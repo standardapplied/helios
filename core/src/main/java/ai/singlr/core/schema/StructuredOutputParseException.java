@@ -20,10 +20,11 @@ import java.util.Objects;
  * {@code chat(...)} call, the loop injects {@link #correctionMessage()} as a USER turn and
  * continues iterating instead of failing terminally.
  *
- * <p>The {@link #rawContent()} field preserves the model's original output for log-side debugging;
- * it is intentionally <em>not</em> echoed back to the model on retry, since the model has the same
- * content in its own conversation context and re-attaching it would balloon input cost on every
- * retry. The model sees only {@link #correctionMessage()} — the diff, not the haystack.
+ * <p>The {@link #rawContent()} field preserves the model's original output for log-side debugging
+ * when {@link RawOutputCapturePolicy#ENABLED}. Privacy-sensitive callers select {@link
+ * RawOutputCapturePolicy#DISABLED} through {@code ModelConfig}; correction details remain available
+ * while {@code rawContent()} stays {@code null}. Raw content is never echoed in {@link
+ * #correctionMessage()}.
  */
 public class StructuredOutputParseException extends RuntimeException {
 
@@ -37,6 +38,21 @@ public class StructuredOutputParseException extends RuntimeException {
    */
   public StructuredOutputParseException(List<String> errors, String rawContent) {
     this("Structured output schema validation failed", errors, rawContent);
+  }
+
+  /**
+   * Creates a parse failure under an explicit raw-output capture policy.
+   *
+   * @param errors actionable validation messages; never empty
+   * @param rawContent the model's raw response text
+   * @param capturePolicy whether {@code rawContent} may be retained
+   */
+  public StructuredOutputParseException(
+      List<String> errors, String rawContent, RawOutputCapturePolicy capturePolicy) {
+    this(
+        "Structured output schema validation failed",
+        errors,
+        Objects.requireNonNull(capturePolicy, "capturePolicy must not be null").retain(rawContent));
   }
 
   /**

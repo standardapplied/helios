@@ -16,6 +16,8 @@
  * <p>Library consumers tap in by registering an {@link ai.singlr.core.events.EventSink}. Two
  * reference sinks ship in core: {@link ai.singlr.core.events.CollectingEventSink} (accumulates into
  * a list for tests and snapshot UIs) and {@link ai.singlr.core.events.JsonlEventSink} (writes one
- * JSON line per event to a file for session replay).
+ * JSON line per event). Use {@code JsonlEventSink.openMetadataOnly(...)} for privacy-safe
+ * operational persistence. Full mode retains content-bearing fields verbatim and is intended only
+ * for explicitly sensitive replay/debugging stores.
  */
 package ai.singlr.core.events;

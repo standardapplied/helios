@@ -8,6 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.common.Ids;
+import ai.singlr.core.model.FileReference;
+import ai.singlr.core.model.Message;
+import ai.singlr.core.model.Response;
+import ai.singlr.core.model.Role;
 import ai.singlr.core.tool.ToolResult;
 import ai.singlr.core.trace.Trace;
 import java.io.UncheckedIOException;
@@ -15,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -105,6 +110,142 @@ class JsonlEventSinkTest {
       assertTrue(line.startsWith("{") && line.endsWith("}"), "malformed line: " + line);
       assertFalse(line.contains(",}"), "trailing comma in: " + line);
     }
+  }
+
+  @Test
+  void metadataOnlyModeOmitsSensitiveValuesAcrossEveryEventShape(@TempDir Path tmp)
+      throws Exception {
+    var file = tmp.resolve("metadata.jsonl");
+    var runId = Ids.newId();
+    var canary = "sensitive-canary-never-persist";
+    var fileUri = "https://private-files.example/" + canary;
+    var message =
+        Message.newBuilder()
+            .withRole(Role.USER)
+            .withContent(canary)
+            .withMetadata(Map.of("private", canary))
+            .withFileReferences(List.of(FileReference.of(fileUri, "video/mp4")))
+            .build();
+    var trace =
+        Trace.newBuilder()
+            .withModelId("gemini-3.7-flash")
+            .withDuration(Duration.ofMillis(9))
+            .withError(canary)
+            .withInputText(canary)
+            .withOutputText(canary)
+            .withAttribute("gemini.apiVersion", "v1beta")
+            .withAttribute("private", canary)
+            .withUsage(Response.Usage.of(11, 7, 0, 3))
+            .build();
+
+    try (var sink = JsonlEventSink.openMetadataOnly(file)) {
+      sink.onEvent(
+          new HeliosEvent.RunStarted(
+              NOW,
+              runId,
+              Optional.empty(),
+              canary,
+              Map.of("gemini.apiVersion", "v1beta", "private", canary)));
+      sink.onEvent(
+          new HeliosEvent.RunStarted(
+              NOW, runId, Optional.empty(), "agent", Map.of("apiVersion", canary)));
+      sink.onEvent(new HeliosEvent.RunCompleted(NOW, runId, Optional.empty(), trace));
+      sink.onEvent(new HeliosEvent.RunFailed(NOW, runId, Optional.empty(), canary, trace));
+      sink.onEvent(
+          new HeliosEvent.BeforeApiCall(
+              NOW, runId, Optional.empty(), canary, Ids.newId(), List.of(message), 1));
+      sink.onEvent(
+          new HeliosEvent.AfterTurn(
+              NOW,
+              runId,
+              Optional.empty(),
+              canary,
+              Ids.newId(),
+              Optional.of(message),
+              Message.assistant(canary),
+              List.of(Message.tool("call-1", "lookup", canary)),
+              1));
+      sink.onEvent(
+          new HeliosEvent.BeforeCompaction(
+              NOW, runId, Optional.empty(), canary, Ids.newId(), List.of(message)));
+      sink.onEvent(
+          new HeliosEvent.SessionEnd(
+              NOW,
+              runId,
+              Optional.empty(),
+              canary,
+              Ids.newId(),
+              List.of(message),
+              HeliosEvent.SessionEnd.Termination.FAILED));
+      sink.onEvent(new HeliosEvent.AssistantTextDelta(NOW, runId, Optional.empty(), canary));
+      sink.onEvent(new HeliosEvent.AssistantText(NOW, runId, Optional.empty(), canary));
+      sink.onEvent(new HeliosEvent.AssistantThinkingDelta(NOW, runId, Optional.empty(), canary));
+      sink.onEvent(
+          new HeliosEvent.AssistantThinkingComplete(
+              NOW, runId, Optional.empty(), canary, Optional.of(canary)));
+      sink.onEvent(
+          new HeliosEvent.ToolCallStarted(
+              NOW, runId, Optional.empty(), "call-1", "lookup", Map.of("query", canary)));
+      sink.onEvent(
+          new HeliosEvent.ToolCallCompleted(
+              NOW,
+              runId,
+              Optional.empty(),
+              "call-1",
+              ToolResult.success(canary, Map.of("private", canary)),
+              Duration.ofMillis(2)));
+      sink.onEvent(new HeliosEvent.ToolCallFailed(NOW, runId, Optional.empty(), "call-1", canary));
+      sink.onEvent(new HeliosEvent.MemoryWritten(NOW, runId, Optional.empty(), canary, canary));
+      sink.onEvent(new HeliosEvent.MemoryRead(NOW, runId, Optional.empty(), canary));
+      sink.onEvent(
+          new HeliosEvent.SpanOpened(
+              NOW, runId, Optional.empty(), Ids.newId(), Optional.empty(), canary));
+      sink.onEvent(
+          new HeliosEvent.SpanClosed(
+              NOW,
+              runId,
+              Optional.empty(),
+              Ids.newId(),
+              Duration.ofMillis(3),
+              false,
+              Optional.of(canary)));
+      sink.onEvent(
+          new HeliosEvent.SubAgentStarted(NOW, runId, Optional.empty(), canary, Ids.newId()));
+      sink.onEvent(
+          new HeliosEvent.SubAgentCompleted(
+              NOW, runId, Optional.empty(), canary, Duration.ofMillis(4)));
+      sink.onEvent(
+          new HeliosEvent.OptimizerCandidateProposed(
+              NOW, runId, Optional.empty(), Ids.newId(), Optional.empty(), canary));
+      sink.onEvent(
+          new HeliosEvent.Custom(NOW, runId, Optional.empty(), canary, Map.of("private", canary)));
+    }
+
+    var output = Files.readString(file);
+    assertFalse(output.contains(canary), output);
+    assertFalse(output.contains(fileUri), output);
+    assertFalse(output.contains("fullText"), output);
+    assertFalse(output.contains("thinkingText"), output);
+    assertFalse(output.contains("args"), output);
+    assertFalse(output.contains("data"), output);
+    assertTrue(output.contains("\"toolName\":\"lookup\""), output);
+    assertTrue(output.contains("\"success\":true"), output);
+    assertTrue(output.contains("\"errorCategory\":\"run_failed\""), output);
+    assertTrue(output.contains("\"modelId\":\"gemini-3.7-flash\""), output);
+    assertTrue(output.contains("\"apiVersion\":\"v1beta\""), output);
+    assertTrue(output.contains("\"inputTokens\":11"), output);
+    assertTrue(output.contains("\"outputTokens\":7"), output);
+  }
+
+  @Test
+  void explicitFullModeRetainsReplayContent(@TempDir Path tmp) throws Exception {
+    var file = tmp.resolve("full.jsonl");
+    try (var sink = JsonlEventSink.openFull(file)) {
+      sink.onEvent(
+          new HeliosEvent.AssistantText(NOW, Ids.newId(), Optional.empty(), "full-mode-canary"));
+    }
+
+    assertTrue(Files.readString(file).contains("full-mode-canary"));
   }
 
   @Test

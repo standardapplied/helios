@@ -195,6 +195,160 @@ final class EventJsonWriter {
     return sb.toString();
   }
 
+  static String encodeMetadataOnly(HeliosEvent event) {
+    var sb = new StringBuilder(192);
+    sb.append('{');
+    writeBaseFields(sb, event);
+    switch (event) {
+      case RunStarted e -> {
+        appendString(sb, "type", "RunStarted");
+        appendApiVersion(sb, e.attributes());
+      }
+      case RunCompleted e -> {
+        appendString(sb, "type", "RunCompleted");
+        appendMetadataTraceSummary(sb, e.trace(), true);
+      }
+      case RunFailed e -> {
+        appendString(sb, "type", "RunFailed");
+        appendString(sb, "errorCategory", "run_failed");
+        appendMetadataTraceSummary(sb, e.trace(), false);
+      }
+      case IterationStarted e -> {
+        appendString(sb, "type", "IterationStarted");
+        appendNumber(sb, "iteration", e.iteration());
+        appendNumber(sb, "maxIterations", e.maxIterations());
+      }
+      case IterationCompleted e -> {
+        appendString(sb, "type", "IterationCompleted");
+        appendNumber(sb, "iteration", e.iteration());
+      }
+      case BeforeApiCall e -> {
+        appendString(sb, "type", "BeforeApiCall");
+        appendNumber(sb, "messageCount", e.messages().size());
+        appendNumber(sb, "iteration", e.iteration());
+      }
+      case AfterTurn e -> {
+        appendString(sb, "type", "AfterTurn");
+        appendNumber(sb, "toolMessageCount", e.toolMessages().size());
+        appendNumber(sb, "iteration", e.iteration());
+      }
+      case BeforeCompaction e -> {
+        appendString(sb, "type", "BeforeCompaction");
+        appendNumber(sb, "messageCount", e.messages().size());
+      }
+      case SessionEnd e -> {
+        appendString(sb, "type", "SessionEnd");
+        appendString(sb, "termination", e.termination().name());
+        appendNumber(sb, "finalMessageCount", e.finalMessages().size());
+      }
+      case AssistantTextDelta e -> appendString(sb, "type", "AssistantTextDelta");
+      case AssistantText e -> appendString(sb, "type", "AssistantText");
+      case AssistantThinkingDelta e -> appendString(sb, "type", "AssistantThinkingDelta");
+      case AssistantThinkingComplete e -> appendString(sb, "type", "AssistantThinkingComplete");
+      case ToolCallStarted e -> {
+        appendString(sb, "type", "ToolCallStarted");
+        appendString(sb, "toolCallId", e.toolCallId());
+        appendString(sb, "toolName", e.toolName());
+      }
+      case ToolCallCompleted e -> {
+        appendString(sb, "type", "ToolCallCompleted");
+        appendString(sb, "toolCallId", e.toolCallId());
+        appendBoolean(sb, "success", e.result().success());
+        appendNumber(sb, "tookNanos", e.took().toNanos());
+      }
+      case ToolCallFailed e -> {
+        appendString(sb, "type", "ToolCallFailed");
+        appendString(sb, "toolCallId", e.toolCallId());
+        appendBoolean(sb, "success", false);
+        appendString(sb, "errorCategory", "tool_failed");
+      }
+      case MemoryWritten e -> {
+        appendString(sb, "type", "MemoryWritten");
+      }
+      case MemoryRead e -> appendString(sb, "type", "MemoryRead");
+      case SpanOpened e -> {
+        appendString(sb, "type", "SpanOpened");
+        appendString(sb, "openedSpanId", e.openedSpanId().toString());
+        appendOptionalString(sb, "parentSpanId", e.parentSpanId().map(Object::toString));
+      }
+      case SpanClosed e -> {
+        appendString(sb, "type", "SpanClosed");
+        appendString(sb, "closedSpanId", e.closedSpanId().toString());
+        appendNumber(sb, "durationNanos", e.duration().toNanos());
+        appendBoolean(sb, "success", e.success());
+        if (!e.success()) {
+          appendString(sb, "errorCategory", "span_failed");
+        }
+      }
+      case SubAgentStarted e -> {
+        appendString(sb, "type", "SubAgentStarted");
+        appendString(sb, "parentSpanId", e.parentSpanId().toString());
+      }
+      case SubAgentCompleted e -> {
+        appendString(sb, "type", "SubAgentCompleted");
+        appendNumber(sb, "durationNanos", e.duration().toNanos());
+      }
+      case CompactionTriggered e -> {
+        appendString(sb, "type", "CompactionTriggered");
+        appendNumber(sb, "beforeTokens", e.beforeTokens());
+        appendNumber(sb, "afterTokens", e.afterTokens());
+      }
+      case OptimizerCandidateProposed e -> {
+        appendString(sb, "type", "OptimizerCandidateProposed");
+        appendString(sb, "candidateId", e.candidateId().toString());
+        appendOptionalString(sb, "parentCandidateId", e.parentCandidateId().map(Object::toString));
+      }
+      case OptimizerCandidateScored e -> {
+        appendString(sb, "type", "OptimizerCandidateScored");
+        appendString(sb, "candidateId", e.candidateId().toString());
+        appendNumber(sb, "aggregateScore", e.aggregateScore());
+        appendDoubleArray(sb, "perInstanceScores", e.perInstanceScores());
+      }
+      case Custom e -> {
+        appendString(sb, "type", "Custom");
+      }
+    }
+    trimTrailingComma(sb);
+    sb.append('}');
+    return sb.toString();
+  }
+
+  private static void appendMetadataTraceSummary(StringBuilder sb, Trace trace, boolean success) {
+    writeKey(sb, "trace");
+    sb.append('{');
+    appendString(sb, "id", trace.id().toString());
+    if (trace.duration() != null) {
+      appendNumber(sb, "durationNanos", trace.duration().toNanos());
+    }
+    appendNumber(sb, "spanCount", trace.spans().size());
+    appendBoolean(sb, "success", success);
+    if (trace.modelId() != null) {
+      appendString(sb, "modelId", trace.modelId());
+    }
+    appendApiVersion(sb, trace.attributes());
+    if (trace.usage() != null) {
+      appendNumber(sb, "inputTokens", trace.usage().inputTokens());
+      appendNumber(sb, "outputTokens", trace.usage().outputTokens());
+      appendNumber(sb, "cacheCreationInputTokens", trace.usage().cacheCreationInputTokens());
+      appendNumber(sb, "cacheReadInputTokens", trace.usage().cacheReadInputTokens());
+      appendNumber(sb, "totalTokens", trace.usage().totalTokens());
+    } else {
+      appendNumber(sb, "totalTokens", trace.totalTokens());
+    }
+    trimTrailingComma(sb);
+    sb.append('}').append(',');
+  }
+
+  private static void appendApiVersion(StringBuilder sb, Map<String, String> attributes) {
+    var apiVersion = attributes.get("gemini.apiVersion");
+    if (apiVersion == null) {
+      apiVersion = attributes.get("apiVersion");
+    }
+    if ("v1".equals(apiVersion) || "v1beta".equals(apiVersion) || "custom".equals(apiVersion)) {
+      appendString(sb, "apiVersion", apiVersion);
+    }
+  }
+
   /**
    * Emits a compact JSON object summarizing the trace — id, duration, top-level span count, total
    * tokens. The full nested span tree is intentionally omitted from JSONL to keep one event per

@@ -35,7 +35,7 @@ public final class GeminiFilesClient implements AutoCloseable {
       URI.create("https://generativelanguage.googleapis.com");
   private static final Duration DEFAULT_POLL_INTERVAL = Duration.ofSeconds(2);
   private static final Duration DEFAULT_PROCESSING_TIMEOUT = Duration.ofMinutes(10);
-  private static final long MAX_FILE_BYTES = 20L * 1024 * 1024 * 1024;
+  private static final long MAX_FILE_BYTES = 2L * 1024 * 1024 * 1024;
   private static final int MAX_JSON_BYTES = 1024 * 1024;
   private static final Pattern FILE_NAME =
       Pattern.compile("files/[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?");
@@ -87,12 +87,24 @@ public final class GeminiFilesClient implements AutoCloseable {
   /**
    * Streams a file to Gemini and waits until it is ready for use in an interaction.
    *
-   * @param path readable, non-empty file of at most 20 GB
+   * @param path readable, non-empty file of at most 2 GB
    * @return the provider file reference for a model message
    * @throws IllegalArgumentException if the file is invalid or its MIME type cannot be detected
    * @throws GeminiException if upload or processing fails
    */
   public FileReference upload(Path path) {
+    return upload(path, inferMimeType(path));
+  }
+
+  /**
+   * Streams a file to Gemini and returns a managed reference whose {@link ManagedFile#close()}
+   * deletes the provider resource.
+   */
+  public ManagedFile uploadManaged(Path path) {
+    return uploadManaged(path, inferMimeType(path));
+  }
+
+  private String inferMimeType(Path path) {
     Objects.requireNonNull(path, "path must not be null");
     String mimeType;
     try {
@@ -104,13 +116,13 @@ public final class GeminiFilesClient implements AutoCloseable {
       throw new IllegalArgumentException(
           "Could not determine MIME type for " + path + "; call upload(path, mimeType)");
     }
-    return upload(path, mimeType);
+    return mimeType;
   }
 
   /**
    * Streams a file with an explicit MIME type and waits for Gemini's processing to finish.
    *
-   * @param path readable, non-empty file of at most 20 GB
+   * @param path readable, non-empty file of at most 2 GB
    * @param mimeType valid media type such as {@code video/mp4}
    * @return the provider file reference for a model message
    * @throws IllegalArgumentException if the file or MIME type is invalid
@@ -124,7 +136,7 @@ public final class GeminiFilesClient implements AutoCloseable {
    * Streams a file and waits up to the supplied duration for provider-side processing. The timeout
    * starts after the streamed upload completes.
    *
-   * @param path readable, non-empty file of at most 20 GB
+   * @param path readable, non-empty file of at most 2 GB
    * @param mimeType valid media type such as {@code video/mp4}
    * @param timeout maximum provider-side processing wait
    * @return the provider file reference for a model message
@@ -132,6 +144,27 @@ public final class GeminiFilesClient implements AutoCloseable {
    * @throws GeminiException if upload or processing fails
    */
   public FileReference upload(Path path, String mimeType, Duration timeout) {
+    return uploadResource(path, mimeType, timeout).reference();
+  }
+
+  /**
+   * Streams a file with an explicit MIME type and returns a managed provider resource.
+   *
+   * @param path readable, non-empty file of at most 2 GB
+   * @param mimeType valid media type such as {@code video/mp4}
+   * @return managed file reference; close it to delete the provider resource
+   */
+  public ManagedFile uploadManaged(Path path, String mimeType) {
+    return uploadManaged(path, mimeType, processingTimeout);
+  }
+
+  /** Streams a file, waits up to the supplied duration, and returns a managed provider resource. */
+  public ManagedFile uploadManaged(Path path, String mimeType, Duration timeout) {
+    var uploaded = uploadResource(path, mimeType, timeout);
+    return new ManagedFile(this, uploaded.reference(), uploaded.resourceName());
+  }
+
+  private ReadyFile uploadResource(Path path, String mimeType, Duration timeout) {
     var file = validateFile(path, mimeType);
     var validatedTimeout = requireNonNegative(timeout, "timeout");
     try {
@@ -172,7 +205,7 @@ public final class GeminiFilesClient implements AutoCloseable {
       }
       if (size > MAX_FILE_BYTES) {
         throw new IllegalArgumentException(
-            "file exceeds the Gemini Files API 20 GB limit: " + path);
+            "file exceeds the Gemini Files API 2 GB per-file limit: " + path);
       }
       var displayName = path.getFileName().toString();
       if (displayName.length() > 512) {
@@ -233,7 +266,7 @@ public final class GeminiFilesClient implements AutoCloseable {
     return uploadResponse.file();
   }
 
-  private FileReference awaitActive(GeminiFileResource initial, Duration timeout)
+  private ReadyFile awaitActive(GeminiFileResource initial, Duration timeout)
       throws IOException, InterruptedException {
     var file = initial;
     var started = System.nanoTime();
@@ -241,10 +274,11 @@ public final class GeminiFilesClient implements AutoCloseable {
     while (true) {
       var state = file.state();
       if ("ACTIVE".equals(state)) {
+        var resourceName = requireFileName(file.name());
         if (Strings.isBlank(file.uri()) || Strings.isBlank(file.mimeType())) {
           throw new GeminiException("Active Gemini file is missing its URI or MIME type");
         }
-        return FileReference.of(file.uri(), file.mimeType());
+        return new ReadyFile(FileReference.of(file.uri(), file.mimeType()), resourceName);
       }
       if ("FAILED".equals(state)) {
         var detail =
@@ -263,16 +297,38 @@ public final class GeminiFilesClient implements AutoCloseable {
       if (!pollInterval.isZero()) {
         Thread.sleep(pollInterval);
       }
-      file = getFile(file.name());
+      file = getFile(requireFileName(file.name()));
     }
   }
 
   private GeminiFileResource getFile(String name) throws IOException, InterruptedException {
-    if (Strings.isBlank(name) || !FILE_NAME.matcher(name).matches()) {
-      throw new GeminiException("Gemini Files API returned an invalid file name");
-    }
     var request = requestBuilder(endpoint("/v1beta/" + name), authenticatedHeaders()).GET().build();
     return readJson(send(request), GeminiFileResource.class);
+  }
+
+  private void deleteFile(String resourceName) {
+    var name = requireFileName(resourceName);
+    var request =
+        requestBuilder(endpoint("/v1beta/" + name), authenticatedHeaders()).DELETE().build();
+    try {
+      var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+      try (var body = response.body()) {
+        if ((response.statusCode() >= 200 && response.statusCode() < 300)
+            || response.statusCode() == 404) {
+          return;
+        }
+      }
+      throw new GeminiException(
+          "Gemini Files API delete failed (status " + response.statusCode() + ")",
+          response.statusCode());
+    } catch (GeminiException e) {
+      throw e;
+    } catch (IOException e) {
+      throw new GeminiException("Failed to communicate with the Gemini Files API during delete");
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new GeminiException("Gemini file deletion interrupted");
+    }
   }
 
   private HttpResponse<InputStream> send(HttpRequest request)
@@ -354,7 +410,7 @@ public final class GeminiFilesClient implements AutoCloseable {
     return config;
   }
 
-  private static HttpClient createHttpClient(ModelConfig config) {
+  static HttpClient createHttpClient(ModelConfig config) {
     var validated = requireConfig(config);
     apiRoot(validated);
     return HttpClientFactory.create(validated, HttpClient.Redirect.NEVER);
@@ -422,7 +478,56 @@ public final class GeminiFilesClient implements AutoCloseable {
     return value;
   }
 
+  private static String requireFileName(String name) {
+    if (Strings.isBlank(name) || !FILE_NAME.matcher(name).matches()) {
+      throw new GeminiException("Gemini Files API returned an invalid file name");
+    }
+    return name;
+  }
+
+  /** A provider file reference with deterministic, idempotent lifecycle management. */
+  public static final class ManagedFile implements AutoCloseable {
+
+    private final GeminiFilesClient client;
+    private final FileReference reference;
+    private final String resourceName;
+    private boolean deleted;
+
+    private ManagedFile(GeminiFilesClient client, FileReference reference, String resourceName) {
+      this.client = client;
+      this.reference = reference;
+      this.resourceName = resourceName;
+    }
+
+    /** Model-facing file reference. */
+    public FileReference reference() {
+      return reference;
+    }
+
+    /** Validated Gemini resource name in {@code files/{id}} form. */
+    public String resourceName() {
+      return resourceName;
+    }
+
+    /** Deletes the provider resource. Repeated successful calls perform no additional request. */
+    public synchronized void delete() {
+      if (deleted) {
+        return;
+      }
+      client.deleteFile(resourceName);
+      deleted = true;
+    }
+
+    /** Deletes the provider resource. */
+    @Override
+    public void close() {
+      delete();
+    }
+  }
+
   private record UploadFile(Path path, String displayName, String mimeType, long size) {}
+
+  private record ReadyFile(FileReference reference, String resourceName) {}
 
   private record GeminiFileUploadResponse(GeminiFileResource file) {}
 
