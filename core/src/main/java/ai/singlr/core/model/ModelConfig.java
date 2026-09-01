@@ -6,11 +6,13 @@
 package ai.singlr.core.model;
 
 import ai.singlr.core.common.Strings;
+import ai.singlr.core.schema.RawOutputCapturePolicy;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Configuration for model providers.
@@ -61,6 +63,13 @@ import java.util.Map;
  *     x-api-key}, {@code x-goog-api-key}, etc.) and user-supplied values replace built-in values of
  *     the same name. Common use: set {@code api-key} when pointing {@link #baseUrl} at Azure OpenAI
  *     (which uses {@code api-key} rather than {@code Authorization: Bearer})
+ * @param providerContinuation whether providers may use server-side conversation continuation.
+ *     Enabled by default for compatibility. When disabled, providers that support continuation
+ *     resend local message history and must not propagate provider conversation identifiers
+ * @param apiVersion provider API version override. {@code null} selects the provider default;
+ *     providers that support version selection validate their values at model construction
+ * @param rawOutputCapturePolicy whether structured-output exceptions retain raw model responses.
+ *     Defaults to {@link RawOutputCapturePolicy#ENABLED} for compatibility
  */
 public record ModelConfig(
     String apiKey,
@@ -79,10 +88,58 @@ public record ModelConfig(
     String promptCacheKey,
     Duration streamIdleTimeout,
     String baseUrl,
-    Map<String, String> headers) {
+    Map<String, String> headers,
+    boolean providerContinuation,
+    String apiVersion,
+    RawOutputCapturePolicy rawOutputCapturePolicy) {
 
   public ModelConfig {
     headers = headers == null ? Map.of() : Map.copyOf(headers);
+    Objects.requireNonNull(rawOutputCapturePolicy, "rawOutputCapturePolicy must not be null");
+  }
+
+  /**
+   * Binary-compatible constructor for configurations compiled against Helios 2.10.0 and earlier.
+   */
+  public ModelConfig(
+      String apiKey,
+      ThinkingLevel thinkingLevel,
+      Duration connectTimeout,
+      Duration responseTimeout,
+      Double temperature,
+      Double topP,
+      Integer maxOutputTokens,
+      Integer contextWindow,
+      List<String> stopSequences,
+      Long seed,
+      ToolChoice toolChoice,
+      boolean webSearch,
+      boolean webFetch,
+      String promptCacheKey,
+      Duration streamIdleTimeout,
+      String baseUrl,
+      Map<String, String> headers) {
+    this(
+        apiKey,
+        thinkingLevel,
+        connectTimeout,
+        responseTimeout,
+        temperature,
+        topP,
+        maxOutputTokens,
+        contextWindow,
+        stopSequences,
+        seed,
+        toolChoice,
+        webSearch,
+        webFetch,
+        promptCacheKey,
+        streamIdleTimeout,
+        baseUrl,
+        headers,
+        true,
+        null,
+        RawOutputCapturePolicy.ENABLED);
   }
 
   /**
@@ -132,6 +189,9 @@ public record ModelConfig(
     sb.append(", promptCacheKey=").append(promptCacheKey);
     sb.append(", streamIdleTimeout=").append(streamIdleTimeout);
     sb.append(", baseUrl=").append(baseUrl);
+    sb.append(", providerContinuation=").append(providerContinuation);
+    sb.append(", apiVersion=").append(apiVersion);
+    sb.append(", rawOutputCapturePolicy=").append(rawOutputCapturePolicy);
     sb.append(", headers={");
     var first = true;
     for (var name : headers.keySet()) {
@@ -219,6 +279,9 @@ public record ModelConfig(
     private Duration streamIdleTimeout = DEFAULT_STREAM_IDLE_TIMEOUT;
     private String baseUrl;
     private LinkedHashMap<String, String> headers = new LinkedHashMap<>();
+    private boolean providerContinuation = true;
+    private String apiVersion;
+    private RawOutputCapturePolicy rawOutputCapturePolicy = RawOutputCapturePolicy.ENABLED;
 
     private Builder() {}
 
@@ -240,6 +303,9 @@ public record ModelConfig(
       this.streamIdleTimeout = config.streamIdleTimeout;
       this.baseUrl = config.baseUrl;
       this.headers = new LinkedHashMap<>(config.headers);
+      this.providerContinuation = config.providerContinuation;
+      this.apiVersion = config.apiVersion;
+      this.rawOutputCapturePolicy = config.rawOutputCapturePolicy;
     }
 
     public Builder withApiKey(String apiKey) {
@@ -366,6 +432,30 @@ public record ModelConfig(
     }
 
     /**
+     * Allow providers to continue conversations using provider-side state. Disable this to resend
+     * local message history without sending or propagating provider conversation identifiers.
+     */
+    public Builder withProviderContinuation(boolean providerContinuation) {
+      this.providerContinuation = providerContinuation;
+      return this;
+    }
+
+    /**
+     * Select a provider API version. Providers that support version selection validate their values
+     * during model construction; {@code null} restores the provider default.
+     */
+    public Builder withApiVersion(String apiVersion) {
+      this.apiVersion = apiVersion;
+      return this;
+    }
+
+    /** Configure whether structured-output exceptions retain raw model responses. */
+    public Builder withRawOutputCapture(RawOutputCapturePolicy rawOutputCapturePolicy) {
+      this.rawOutputCapturePolicy = rawOutputCapturePolicy;
+      return this;
+    }
+
+    /**
      * Replace the current header map with the given entries. {@code null} clears all extra headers.
      * Names match case-insensitively against built-in provider headers and override them.
      */
@@ -405,7 +495,10 @@ public record ModelConfig(
           promptCacheKey,
           streamIdleTimeout,
           baseUrl,
-          Map.copyOf(headers));
+          Map.copyOf(headers),
+          providerContinuation,
+          apiVersion,
+          rawOutputCapturePolicy);
     }
   }
 }

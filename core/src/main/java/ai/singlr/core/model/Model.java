@@ -7,6 +7,7 @@ package ai.singlr.core.model;
 
 import ai.singlr.core.runtime.CancellationToken;
 import ai.singlr.core.schema.OutputSchema;
+import ai.singlr.core.schema.RawOutputCapturePolicy;
 import ai.singlr.core.tool.Tool;
 import java.util.ArrayList;
 import java.util.List;
@@ -262,6 +263,11 @@ public interface Model extends AutoCloseable {
    */
   default int maxOutputTokens() {
     return 0;
+  }
+
+  /** Raw structured-output retention policy used by this model and its sessions. */
+  default RawOutputCapturePolicy rawOutputCapturePolicy() {
+    return RawOutputCapturePolicy.ENABLED;
   }
 
   /**

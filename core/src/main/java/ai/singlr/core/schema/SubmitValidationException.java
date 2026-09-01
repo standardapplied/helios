@@ -24,6 +24,16 @@ public final class SubmitValidationException extends StructuredOutputParseExcept
     super("Structured output failed submit validation", List.of(correction), rawContent);
   }
 
+  /** Creates a submit-validation failure under an explicit raw-output capture policy. */
+  public SubmitValidationException(
+      String correction, String rawContent, RawOutputCapturePolicy capturePolicy) {
+    super(
+        "Structured output failed submit validation",
+        List.of(correction),
+        java.util.Objects.requireNonNull(capturePolicy, "capturePolicy must not be null")
+            .retain(rawContent));
+  }
+
   @Override
   protected String correctionPreamble() {
     return "Your structured output matched the schema but failed a semantic check. Fix the listed"

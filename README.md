@@ -99,20 +99,24 @@ try (var model = new AnthropicProvider().create(
 
 All providers implement the same `Model` interface — swap providers without touching the rest of your code.
 
-Gemini video understanding uses the Files API for large or reusable videos, then sends the returned
-URI through the stable Interactions API. Uploads stream from disk and poll until Google marks the
-file active:
+Gemini video understanding uses the Files API for large or reusable videos. Google currently
+accepts Files API video references through the beta Interactions endpoint; the stable endpoint can
+reject the same `video` content block. Select `v1beta` before constructing the model. Helios never
+replays a rejected stable request against beta automatically.
 
 ```java
-var config = ModelConfig.of(System.getenv("GEMINI_API_KEY"));
+var config = ModelConfig.newBuilder()
+    .withApiKey(System.getenv("GEMINI_API_KEY"))
+    .withApiVersion("v1beta")
+    .build();
 
 try (var files = new GeminiFilesClient(config);
+    var video = files.uploadManaged(Path.of("meeting.mp4"), "video/mp4");
     var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_7_FLASH.id(), config)) {
-  var video = files.upload(Path.of("meeting.mp4"), "video/mp4");
   var message = Message.newBuilder()
       .withRole(Role.USER)
       .withContent("Summarize this video and list the decisions.")
-      .withFileReferences(List.of(video))
+      .withFileReferences(List.of(video.reference()))
       .build();
 
   System.out.println(model.chat(List.of(message)).content());
@@ -120,8 +124,56 @@ try (var files = new GeminiFilesClient(config);
 ```
 
 For an `AgentSession`, attach the same reference with
-`UserMessage.newBuilder().withFileReference(video)`. Inline media remains available for small,
-one-off inputs; `GeminiFilesClient` avoids loading large videos into heap.
+`UserMessage.newBuilder().withFileReference(video.reference())`. `ManagedFile.close()` issues an
+idempotent deletion against its validated `files/{id}` resource, including on exceptional exits
+from try-with-resources. Existing `upload(...)` methods remain available when the caller owns file
+lifecycle separately. Inline media remains available for small inputs; `GeminiFilesClient` streams
+uploads without loading video bytes into heap.
+
+### Gemini privacy controls
+
+For privacy-sensitive calls, combine managed deletion, stateless interactions, metadata-only event
+persistence, and disabled raw-output capture:
+
+```java
+var config = ModelConfig.newBuilder()
+    .withApiKey(System.getenv("GEMINI_API_KEY"))
+    .withApiVersion("v1beta")
+    .withProviderContinuation(false)
+    .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
+    .build();
+
+try (var events = JsonlEventSink.openMetadataOnly(Path.of("events.jsonl"));
+    var files = new GeminiFilesClient(config);
+    var media = files.uploadManaged(Path.of("private-video.mp4"), "video/mp4");
+    var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_7_FLASH.id(), config)) {
+  var input = Message.newBuilder()
+      .withRole(Role.USER)
+      .withContent("Analyze the video.")
+      .withFileReferences(List.of(media.reference()))
+      .build();
+  var response = model.chat(List.of(input));
+}
+```
+
+`withProviderContinuation(false)` resends local history and neither sends nor returns Gemini
+interaction IDs. `RawOutputCapturePolicy.DISABLED` preserves actionable schema and submit-validator
+corrections while keeping raw model text out of structured-output exceptions. The effective
+Interactions version is available from `GeminiModel.apiVersion()` and response metadata under
+`gemini.apiVersion`; base URLs and credentials are excluded from those diagnostics.
+When `withBaseUrl(...)` is also set, that compatibility override supplies the complete endpoint
+prefix and therefore takes precedence over canonical version-path construction.
+
+The Gemini provider has no logging calls and does not log request bodies, uploaded bytes, file URIs,
+API keys, prompts, responses, or thinking text. Application code must apply the same discipline to
+exceptions and model responses. Managed deletion requests early removal, but provider-side
+processing and physical retention remain controlled by Google. Google currently documents Files
+API uploads as temporary with automatic deletion after 48 hours; consult Google's current data and
+retention terms for the deployed account and region.
+
+Keep video traffic on `v1beta` until the credential-gated `GeminiVideoIntegrationTest` also passes
+when configured for `v1` with the same model, Files API upload, and structured-output schema. Only
+then change the configured version; endpoint selection is immutable for each model instance.
 
 Anthropic models use managed five-minute prompt caching by default. Select the one-hour
 cache for conversations whose reusable prefixes must survive longer gaps, or disable caching
@@ -373,7 +425,17 @@ session.events().subscribe(new Flow.Subscriber<QueryEvent>() {
 
 For HTTP clients, `helios-runtime` exposes the same events as Server-Sent Events under `GET /sessions/{id}/events`.
 
-`helios-core` also ships generic event-sink primitives (`EventSink`, `JsonlEventSink`, `CollectingEventSink` in `ai.singlr.core.events`) plus a `Trace` / `Span` value-type hierarchy in `ai.singlr.core.trace` for custom collectors. These are currently inert for `AgentSession` runs — wire them via your own hook or stream subscriber.
+`helios-core` also ships generic event-sink primitives (`EventSink`, `JsonlEventSink`,
+`CollectingEventSink` in `ai.singlr.core.events`) plus a `Trace` / `Span` value-type hierarchy in
+`ai.singlr.core.trace` for custom collectors. These are currently inert for `AgentSession` runs —
+wire them via your own hook or stream subscriber.
+
+`JsonlEventSink.openMetadataOnly(path)` persists run/span IDs, event types, timing, model and token
+counts, API version, tool names, outcomes, and redacted error categories. It omits message history,
+assistant text, thinking and signatures, tool arguments and results, file URIs, arbitrary
+attributes, and custom-data values. `JsonlEventSink.openFull(path)` is the explicit replay/debugging
+mode and persists sensitive content verbatim; it is unsuitable for customer-media workflows. The
+legacy `open(path)` method remains as a deprecated compatibility alias for full mode.
 
 ## Sandboxed Code Execution (`helios-repl`)
 

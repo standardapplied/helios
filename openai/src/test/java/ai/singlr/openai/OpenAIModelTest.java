@@ -23,6 +23,7 @@ import ai.singlr.core.model.ThinkingLevel;
 import ai.singlr.core.model.ToolCall;
 import ai.singlr.core.model.ToolChoice;
 import ai.singlr.core.schema.OutputSchema;
+import ai.singlr.core.schema.RawOutputCapturePolicy;
 import ai.singlr.core.schema.StructuredOutputParseException;
 import ai.singlr.core.tool.ParameterType;
 import ai.singlr.core.tool.Tool;
@@ -1183,6 +1184,27 @@ class OpenAIModelTest {
             () ->
                 model.parseStructuredContent("not json at all", OutputSchema.of(TestPerson.class)));
     assertTrue(ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")));
+  }
+
+  @Test
+  void disabledRawOutputCaptureIsAppliedByOpenAiParser() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
+
+    var error =
+        assertThrows(
+            StructuredOutputParseException.class,
+            () ->
+                model.parseStructuredContent(
+                    "{\"name\":\"private-model-output-canary\"}",
+                    OutputSchema.of(TestPerson.class)));
+
+    assertNull(error.rawContent());
+    assertEquals(RawOutputCapturePolicy.DISABLED, model.rawOutputCapturePolicy());
   }
 
   @Test

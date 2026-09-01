@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.core.schema.RawOutputCapturePolicy;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +53,33 @@ class ModelConfigTest {
     assertEquals(ThinkingLevel.NONE, config.thinkingLevel());
     assertEquals(Duration.ofSeconds(10), config.connectTimeout());
     assertEquals(Duration.ofSeconds(60), config.responseTimeout());
+    assertTrue(config.providerContinuation());
+    assertNull(config.apiVersion());
+    assertEquals(RawOutputCapturePolicy.ENABLED, config.rawOutputCapturePolicy());
+  }
+
+  @Test
+  void privacyAndProviderOptionsRoundTripThroughCopyBuilder() {
+    var original =
+        ModelConfig.newBuilder()
+            .withApiKey("key")
+            .withProviderContinuation(false)
+            .withApiVersion("v1beta")
+            .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
+            .build();
+
+    var copy = ModelConfig.newBuilder(original).build();
+
+    assertFalse(copy.providerContinuation());
+    assertEquals("v1beta", copy.apiVersion());
+    assertEquals(RawOutputCapturePolicy.DISABLED, copy.rawOutputCapturePolicy());
+  }
+
+  @Test
+  void rawOutputCaptureRejectsNullPolicy() {
+    assertThrows(
+        NullPointerException.class,
+        () -> ModelConfig.newBuilder().withRawOutputCapture(null).build());
   }
 
   @Test
@@ -200,6 +228,8 @@ class ModelConfigTest {
 
     assertTrue(config.toString().contains("webSearch=true"));
     assertTrue(config.toString().contains("webFetch=false"));
+    assertTrue(config.toString().contains("providerContinuation=true"));
+    assertTrue(config.toString().contains("rawOutputCapturePolicy=ENABLED"));
   }
 
   @Test

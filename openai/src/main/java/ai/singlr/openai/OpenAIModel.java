@@ -19,6 +19,7 @@ import ai.singlr.core.model.ToolCall;
 import ai.singlr.core.model.ToolChoice;
 import ai.singlr.core.model.TransientStreamException;
 import ai.singlr.core.schema.OutputSchema;
+import ai.singlr.core.schema.RawOutputCapturePolicy;
 import ai.singlr.core.schema.StructuredContentParser;
 import ai.singlr.core.tool.Tool;
 import ai.singlr.openai.api.ApiStreamEvent;
@@ -137,6 +138,11 @@ public class OpenAIModel implements Model {
   }
 
   @Override
+  public RawOutputCapturePolicy rawOutputCapturePolicy() {
+    return config.rawOutputCapturePolicy();
+  }
+
+  @Override
   public void close() {
     HttpClientFactory.shutdownGracefully(httpClient);
   }
@@ -191,7 +197,8 @@ public class OpenAIModel implements Model {
   }
 
   <T> T parseStructuredContent(String content, OutputSchema<T> schema) {
-    return StructuredContentParser.parse(content, schema, jsonAdapter);
+    return StructuredContentParser.parse(
+        content, schema, jsonAdapter, config.rawOutputCapturePolicy());
   }
 
   @SuppressWarnings({"unchecked", "rawtypes"})

@@ -78,47 +78,66 @@ public final class StructuredContentParser {
    * @return the typed output, or {@code null} when {@code content} was null/blank
    */
   public static <T> T parse(String content, OutputSchema<T> schema, JsonAdapter adapter) {
+    return parse(content, schema, adapter, RawOutputCapturePolicy.ENABLED);
+  }
+
+  /**
+   * Parses structured output while applying an explicit raw-output retention policy to every retry
+   * and terminal parse or submit-validation failure.
+   */
+  public static <T> T parse(
+      String content,
+      OutputSchema<T> schema,
+      JsonAdapter adapter,
+      RawOutputCapturePolicy capturePolicy) {
+    java.util.Objects.requireNonNull(capturePolicy, "capturePolicy must not be null");
     if (Strings.isBlank(content)) {
       return null;
     }
     var trimmed = content.trim();
     try {
-      return parseToType(trimmed, schema, adapter);
+      return parseToType(trimmed, schema, adapter, capturePolicy);
     } catch (StructuredOutputParseException schemaMismatch) {
       throw schemaMismatch;
     } catch (Exception firstAttempt) {
       var stripped = stripMarkdownWrapper(trimmed);
       if (!stripped.equals(trimmed)) {
         try {
-          return parseToType(stripped, schema, adapter);
+          return parseToType(stripped, schema, adapter, capturePolicy);
         } catch (StructuredOutputParseException schemaMismatch) {
           throw schemaMismatch;
         } catch (Exception ignored) {
-          // fall through to extraction retry
         }
       }
       var extracted = extractFirstJsonObject(trimmed);
       if (extracted != null && !extracted.equals(trimmed)) {
         try {
-          return parseToType(extracted, schema, adapter);
+          return parseToType(extracted, schema, adapter, capturePolicy);
         } catch (StructuredOutputParseException schemaMismatch) {
           throw schemaMismatch;
         } catch (Exception ignored) {
-          // fall through to terminal failure
         }
       }
+      var detail =
+          capturePolicy == RawOutputCapturePolicy.ENABLED
+              ? firstAttempt.getMessage()
+              : "invalid JSON";
       throw new StructuredOutputParseException(
-          List.of("JSON syntax error: " + firstAttempt.getMessage()), content);
+          List.of("JSON syntax error: " + detail), content, capturePolicy);
     }
   }
 
   @SuppressWarnings({"unchecked", "rawtypes"})
-  private static <T> T parseToType(String json, OutputSchema<T> schema, JsonAdapter adapter)
+  private static <T> T parseToType(
+      String json,
+      OutputSchema<T> schema,
+      JsonAdapter adapter,
+      RawOutputCapturePolicy capturePolicy)
       throws Exception {
     Map<String, Object> raw = adapter.toMap(json);
     var errors = SchemaValidator.validate(raw, schema.schema());
     if (!errors.isEmpty()) {
-      throw new StructuredOutputParseException(errors, json);
+      throw new StructuredOutputParseException(errors, json, capturePolicy);
     }
     T typed =
         schema.innerOutputType() == null
@@ -133,17 +152,18 @@ public final class StructuredContentParser {
                         throw new RuntimeException(e);
                       }
                     });
-    return submitValidated(typed, schema, json);
+    return submitValidated(typed, schema, json, capturePolicy);
   }
 
-  private static <T> T submitValidated(T typed, OutputSchema<T> schema, String json) {
+  private static <T> T submitValidated(
+      T typed, OutputSchema<T> schema, String json, RawOutputCapturePolicy capturePolicy) {
     var validator = schema.submitValidator();
     if (validator == null) {
       return typed;
     }
     var verdict = validator.validateSafely(typed);
     if (!verdict.ok()) {
-      throw new SubmitValidationException(verdict.message(), json);
+      throw new SubmitValidationException(verdict.message(), json, capturePolicy);
     }
     return typed;
   }

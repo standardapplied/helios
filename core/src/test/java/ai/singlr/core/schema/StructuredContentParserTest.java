@@ -105,6 +105,24 @@ class StructuredContentParserTest {
     assertTrue(ex.errors().stream().anyMatch(e -> e.contains("count")));
   }
 
+  @Test
+  void disabledCaptureKeepsSchemaCorrectionWithoutRawOutput() {
+    var canary = "raw-output-canary";
+    var content = "{\"name\":\"" + canary + "\"}";
+    var adapter = adapterFor(content, new LinkedHashMap<>(Map.of("name", canary)));
+
+    var ex =
+        assertThrows(
+            StructuredOutputParseException.class,
+            () ->
+                StructuredContentParser.parse(
+                    content, OutputSchema.of(Bag.class), adapter, RawOutputCapturePolicy.DISABLED));
+
+    assertNull(ex.rawContent());
+    assertTrue(ex.correctionMessage().contains("count"));
+    assertFalse(exceptionGraphContains(ex, canary));
+  }
+
   // --- Submit validator runs after structural validation ---------------------------------------
 
   private static final String POSITIVE_COUNT = "count must be positive";
@@ -141,6 +159,59 @@ class StructuredContentParserTest {
     assertFalse(
         correction.contains("did not match the schema"),
         "semantic failures must not be reported as schema mismatches: " + correction);
+  }
+
+  @Test
+  void disabledCaptureAppliesAfterMarkdownRetryAndSubmitValidation() {
+    var canary = "retry-output-canary";
+    var inner = "{\"name\":\"" + canary + "\",\"count\":0}";
+    var wrapped = "```json\n" + inner + "\n```";
+    var adapter = adapterFor(inner, new LinkedHashMap<>(Map.of("name", canary, "count", 0)));
+
+    var ex =
+        assertThrows(
+            SubmitValidationException.class,
+            () ->
+                StructuredContentParser.parse(
+                    wrapped, positiveCountSchema(), adapter, RawOutputCapturePolicy.DISABLED));
+
+    assertNull(ex.rawContent());
+    assertEquals(List.of(POSITIVE_COUNT), ex.errors());
+    assertFalse(exceptionGraphContains(ex, canary));
+  }
+
+  @Test
+  void disabledCaptureDoesNotRetainSyntaxFailureFromRetries() {
+    var canary = "syntax-output-canary";
+    var wrapped = "```json\n{" + canary + "\n```";
+
+    var ex =
+        assertThrows(
+            StructuredOutputParseException.class,
+            () ->
+                StructuredContentParser.parse(
+                    wrapped,
+                    OutputSchema.of(Bag.class),
+                    throwingAdapter(),
+                    RawOutputCapturePolicy.DISABLED));
+
+    assertNull(ex.rawContent());
+    assertTrue(ex.errors().getFirst().startsWith("JSON syntax error:"));
+    assertFalse(exceptionGraphContains(ex, canary));
+  }
+
+  private static boolean exceptionGraphContains(Throwable error, String canary) {
+    for (var current = error; current != null; current = current.getCause()) {
+      if (String.valueOf(current.getMessage()).contains(canary)) {
+        return true;
+      }
+      for (var suppressed : current.getSuppressed()) {
+        if (exceptionGraphContains(suppressed, canary)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   @Test

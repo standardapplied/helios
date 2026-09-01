@@ -5,6 +5,7 @@
 package ai.singlr.session;
 
 import ai.singlr.core.schema.OutputSchema;
+import ai.singlr.core.schema.RawOutputCapturePolicy;
 import ai.singlr.core.schema.StructuredContentParser;
 import ai.singlr.session.ask.AskUserQuestionResponse;
 import java.util.Map;
@@ -189,7 +190,13 @@ public interface AgentSession extends AutoCloseable {
               + terminal.getClass().getSimpleName()
               + "; cannot parse a typed result from a non-Success terminal");
     }
-    return StructuredContentParser.parse(success.result(), schema, JacksonJsonAdapter.SHARED);
+    return StructuredContentParser.parse(
+        success.result(), schema, JacksonJsonAdapter.SHARED, rawOutputCapturePolicy());
+  }
+
+  /** Structured-output retention policy inherited from the session model. */
+  default RawOutputCapturePolicy rawOutputCapturePolicy() {
+    return RawOutputCapturePolicy.ENABLED;
   }
 
   /**

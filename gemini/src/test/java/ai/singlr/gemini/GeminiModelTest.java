@@ -21,6 +21,7 @@ import ai.singlr.core.model.ModelConfig;
 import ai.singlr.core.model.Role;
 import ai.singlr.core.model.ToolCall;
 import ai.singlr.core.schema.OutputSchema;
+import ai.singlr.core.schema.RawOutputCapturePolicy;
 import ai.singlr.core.schema.StructuredOutputParseException;
 import ai.singlr.core.tool.ParameterType;
 import ai.singlr.core.tool.Tool;
@@ -29,9 +30,15 @@ import ai.singlr.core.tool.ToolResult;
 import ai.singlr.gemini.api.ContentItem;
 import ai.singlr.gemini.api.OutputAnnotation;
 import ai.singlr.gemini.api.Step;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.ServerSocket;
+import java.net.SocketException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 
 class GeminiModelTest {
@@ -216,7 +223,42 @@ class GeminiModelTest {
 
   @Test
   void defaultBaseUrlUsesStableInteractionsApi() {
-    assertEquals("https://generativelanguage.googleapis.com/v1", GeminiModel.DEFAULT_BASE_URL);
+    assertEquals("https://generativelanguage.googleapis.com", GeminiModel.DEFAULT_API_ROOT);
+  }
+
+  @Test
+  void configuredApiVersionsResolveToCanonicalStableAndBetaEndpoints() {
+    var stable =
+        new GeminiModel(
+            GeminiModelId.GEMINI_3_7_FLASH,
+            ModelConfig.newBuilder().withApiKey("key").withApiVersion("v1").build());
+    var beta =
+        new GeminiModel(
+            GeminiModelId.GEMINI_3_7_FLASH,
+            ModelConfig.newBuilder().withApiKey("key").withApiVersion("v1beta").build());
+
+    assertEquals(
+        "https://generativelanguage.googleapis.com/v1/interactions?alt=sse",
+        stable.buildHttpRequest("{}").uri().toString());
+    assertEquals(
+        "https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse",
+        beta.buildHttpRequest("{}").uri().toString());
+    assertEquals("v1", stable.apiVersion());
+    assertEquals("v1beta", beta.apiVersion());
+  }
+
+  @Test
+  void constructorRejectsMalformedOrUnsupportedApiVersions() {
+    for (var value : List.of("", " ", "beta", "V1", "v2", "/v1", "v1?key=secret")) {
+      var config = ModelConfig.newBuilder().withApiKey("key").withApiVersion(value).build();
+      var error =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, config),
+              value);
+      assertTrue(error.getMessage().contains("apiVersion"));
+      assertFalse(error.getMessage().contains("secret"));
+    }
   }
 
   @Test
@@ -745,6 +787,29 @@ class GeminiModelTest {
   }
 
   @Test
+  void statelessInteractionsResendLocalHistoryWithoutInteractionId() {
+    var config =
+        ModelConfig.newBuilder().withApiKey("test-key").withProviderContinuation(false).build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, config);
+    var messages =
+        List.of(
+            Message.system("system"),
+            Message.user("first"),
+            Message.assistant(
+                "answer", List.of(), Map.of(GeminiModel.INTERACTION_ID_KEY, "interaction-secret")),
+            Message.user("second"));
+
+    var request = model.buildRequest(messages, null, null);
+
+    assertNull(request.previousInteractionId());
+    assertEquals("system", request.systemInstruction());
+    assertEquals(3, request.input().size());
+    assertTrue(request.input().get(0).hasTypeUserInput());
+    assertTrue(request.input().get(1).hasTypeModelOutput());
+    assertTrue(request.input().get(2).hasTypeUserInput());
+  }
+
+  @Test
   void buildRequestThinkingLevelMinimalMapsToMinimal() {
     var config =
         ModelConfig.newBuilder()
@@ -1002,6 +1067,27 @@ class GeminiModelTest {
   }
 
   @Test
+  void disabledRawOutputCaptureIsAppliedByGeminiParser() {
+    var canary = "private-model-output-canary";
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
+            .build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+
+    var error =
+        assertThrows(
+            StructuredOutputParseException.class,
+            () ->
+                model.parseStructuredContent(
+                    "{\"name\":\"" + canary + "\"}", OutputSchema.of(TestPerson.class)));
+
+    assertNull(error.rawContent());
+    assertFalse(error.getMessage().contains(canary));
+  }
+
+  @Test
   void readBoundedErrorBodyCapsAtLimitAndMarksTruncation() throws Exception {
     var oversized = new byte[MAX_ERROR_BODY_BYTES + 1024];
     java.util.Arrays.fill(oversized, (byte) 'x');
@@ -1036,6 +1122,69 @@ class GeminiModelTest {
   }
 
   @Test
+  void stableVideoRejectionIsSurfacedWithoutBetaReplay() throws Exception {
+    var paths = new CopyOnWriteArrayList<String>();
+    try (var server = new ServerSocket(0)) {
+      var serverThread =
+          Thread.startVirtualThread(
+              () -> {
+                try {
+                  while (!server.isClosed()) {
+                    try (var socket = server.accept()) {
+                      var reader =
+                          new BufferedReader(
+                              new InputStreamReader(
+                                  socket.getInputStream(), StandardCharsets.US_ASCII));
+                      var requestLine = reader.readLine();
+                      paths.add(requestLine.split(" ")[1].replace("?alt=sse", ""));
+                      String header;
+                      while ((header = reader.readLine()) != null && !header.isEmpty()) {}
+                      var body =
+                          "{\"error\":{\"message\":\"The value 'video' is not supported for 'type'\"}}"
+                              .getBytes(StandardCharsets.UTF_8);
+                      var output = socket.getOutputStream();
+                      output.write(
+                          ("HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: "
+                                  + body.length
+                                  + "\r\nConnection: close\r\n\r\n")
+                              .getBytes(StandardCharsets.US_ASCII));
+                      output.write(body);
+                      output.flush();
+                    }
+                  }
+                } catch (SocketException ignored) {
+                  return;
+                } catch (Exception e) {
+                  throw new RuntimeException(e);
+                }
+              });
+      var baseUrl = "http://127.0.0.1:" + server.getLocalPort() + "/v1";
+      var config =
+          ModelConfig.newBuilder()
+              .withApiKey("test-key")
+              .withApiVersion("v1")
+              .withBaseUrl(baseUrl)
+              .build();
+      var model = new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, config);
+      var video = FileReference.of("https://files.example/private", "video/mp4");
+      var message =
+          Message.newBuilder()
+              .withRole(Role.USER)
+              .withContent("analyze")
+              .withFileReferences(List.of(video))
+              .build();
+
+      var error = assertThrows(GeminiException.class, () -> model.chat(List.of(message)));
+
+      assertEquals(400, error.statusCode());
+      assertTrue(error.getMessage().contains("video"));
+      assertEquals(List.of("/v1/interactions"), paths);
+      server.close();
+      serverThread.join();
+    }
+  }
+
+  @Test
   void buildHttpRequestUsesConfiguredBaseUrl() {
     var config =
         ModelConfig.newBuilder()
@@ -1048,6 +1197,19 @@ class GeminiModelTest {
         java.net.URI.create("https://vertex.example/v1beta/interactions?alt=sse"),
         httpRequest.uri(),
         "configured baseUrl replaces the default host+/v1beta prefix; provider keeps appending its own /interactions?alt=sse");
+    assertEquals("v1beta", model.apiVersion());
+  }
+
+  @Test
+  void customBaseUrlHasNonSensitiveCustomVersionDiagnostic() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("g-key")
+            .withBaseUrl("https://gateway.example/gemini")
+            .build();
+    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+
+    assertEquals("custom", model.apiVersion());
   }
 
   @Test

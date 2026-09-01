@@ -4,6 +4,27 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Added
+
+- Gemini managed Files API uploads expose both a model-ready `FileReference` and the validated
+  provider resource name. `ManagedFile` is `AutoCloseable`; deletion is idempotent, treats an
+  already-absent resource as success, never follows redirects, and never derives its target from a
+  provider file URI.
+- `ModelConfig.withApiVersion(...)` selects Gemini Interactions `v1` or `v1beta` explicitly. The
+  effective version is fixed when the model is built and available through non-sensitive response
+  metadata and `GeminiModel.apiVersion()` diagnostics.
+- Privacy controls now include stateless provider interactions, metadata-only JSONL events, and an
+  opt-out policy for retaining raw model output in structured-output exceptions.
+
+### Fixed
+
+- Gemini stateless mode resends local conversation history without sending or propagating
+  `previous_interaction_id` values.
+- Gemini video documentation selects `v1beta`, matching the currently working Files API video
+  contract, without automatic cross-version replay after a rejected stable request.
+- Gemini Files API validation now enforces Google's 2 GB per-file limit instead of the aggregate
+  project-storage limit.
+
 ## [2.10.0] — 2026-08-30 — Stable Gemini Interactions and video understanding
 
 ### Added

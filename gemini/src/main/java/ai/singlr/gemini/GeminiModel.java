@@ -21,6 +21,7 @@ import ai.singlr.core.model.ToolCall;
 import ai.singlr.core.model.ToolChoice;
 import ai.singlr.core.model.TransientStreamException;
 import ai.singlr.core.schema.OutputSchema;
+import ai.singlr.core.schema.RawOutputCapturePolicy;
 import ai.singlr.core.schema.StructuredContentParser;
 import ai.singlr.core.tool.Tool;
 import ai.singlr.gemini.api.ContentItem;
@@ -61,7 +62,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Gemini model implementation using the stable Interactions API.
+ * Gemini model implementation using the configured Interactions API version.
  *
  * <p>All requests use SSE streaming internally for robust timeout handling. Synchronous {@link
  * #chat} methods stream under the hood and accumulate the response, avoiding HTTP read timeouts on
@@ -71,15 +72,19 @@ import tools.jackson.databind.json.JsonMapper;
 public class GeminiModel implements Model {
 
   private static final String PROVIDER_NAME = "gemini";
-  static final String DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1";
+  static final String DEFAULT_API_ROOT = "https://generativelanguage.googleapis.com";
+  static final String DEFAULT_API_VERSION = "v1";
   static final String THOUGHT_SIGNATURES_KEY = "gemini.thoughtSignatures";
   static final String INTERACTION_ID_KEY = "gemini.interactionId";
+  static final String API_VERSION_KEY = "gemini.apiVersion";
   static final String SIGNATURE_DELIMITER = "\u001E";
 
   private final GeminiModelId modelId;
   private final ModelConfig config;
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
+  private final String apiVersion;
+  private final String interactionsBaseUrl;
 
   GeminiModel(GeminiModelId modelId, ModelConfig config) {
     if (modelId == null) {
@@ -95,14 +100,15 @@ public class GeminiModel implements Model {
     }
     if (config.temperature() != null) {
       throw new IllegalArgumentException(
-          "temperature is not supported by the stable Gemini Interactions API");
+          "temperature is not supported by the Gemini Interactions API");
     }
     if (config.topP() != null) {
-      throw new IllegalArgumentException(
-          "topP is not supported by the stable Gemini Interactions API");
+      throw new IllegalArgumentException("topP is not supported by the Gemini Interactions API");
     }
     this.modelId = modelId;
     this.config = config;
+    this.apiVersion = resolveApiVersion(config);
+    this.interactionsBaseUrl = resolveInteractionsBaseUrl(config, apiVersion);
     this.httpClient = HttpClientFactory.create(config);
     this.objectMapper =
         JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
@@ -118,6 +124,11 @@ public class GeminiModel implements Model {
     return PROVIDER_NAME;
   }
 
+  /** Effective non-sensitive Gemini Interactions API version for diagnostics. */
+  public String apiVersion() {
+    return apiVersion;
+  }
+
   @Override
   public int contextWindow() {
     return config.contextWindow() != null ? config.contextWindow() : modelId.contextWindow();
@@ -126,6 +137,11 @@ public class GeminiModel implements Model {
   @Override
   public int maxOutputTokens() {
     return modelId.maxOutputTokens();
+  }
+
+  @Override
+  public RawOutputCapturePolicy rawOutputCapturePolicy() {
+    return config.rawOutputCapturePolicy();
   }
 
   @Override
@@ -183,7 +199,8 @@ public class GeminiModel implements Model {
   }
 
   <T> T parseStructuredContent(String content, OutputSchema<T> schema) {
-    return StructuredContentParser.parse(content, schema, jsonAdapter);
+    return StructuredContentParser.parse(
+        content, schema, jsonAdapter, config.rawOutputCapturePolicy());
   }
 
   @SuppressWarnings({"unchecked", "rawtypes"})
@@ -213,7 +230,12 @@ public class GeminiModel implements Model {
             httpResponse.statusCode());
       }
     }
-    return new StreamingIterator(httpResponse, objectMapper, config.streamIdleTimeout());
+    return new StreamingIterator(
+        httpResponse,
+        objectMapper,
+        config.streamIdleTimeout(),
+        config.providerContinuation(),
+        apiVersion);
   }
 
   private Response<Void> streamAndDrain(InteractionRequest request) {
@@ -281,7 +303,7 @@ public class GeminiModel implements Model {
 
     var generationConfig = buildGenerationConfig();
 
-    var continuation = findContinuationPoint(messages);
+    var continuation = config.providerContinuation() ? findContinuationPoint(messages) : null;
     if (continuation != null) {
       var systemInstruction = extractSystemInstruction(messages);
       var continuationSteps = buildContinuationSteps(messages, continuation.startIndex);
@@ -480,7 +502,7 @@ public class GeminiModel implements Model {
   }
 
   HttpRequest buildHttpRequest(String jsonBody) {
-    var uri = URI.create(config.effectiveBaseUrl(DEFAULT_BASE_URL) + "/interactions?alt=sse");
+    var uri = URI.create(interactionsBaseUrl + "/interactions?alt=sse");
     var defaults = new LinkedHashMap<String, String>();
     defaults.put("Content-Type", "application/json");
     if (!Strings.isBlank(config.apiKey())) {
@@ -497,6 +519,32 @@ public class GeminiModel implements Model {
     }
 
     return builder.build();
+  }
+
+  private static String resolveApiVersion(ModelConfig config) {
+    if (config.apiVersion() != null) {
+      if ("v1".equals(config.apiVersion()) || "v1beta".equals(config.apiVersion())) {
+        return config.apiVersion();
+      }
+      throw new IllegalArgumentException("apiVersion must be exactly 'v1' or 'v1beta'");
+    }
+    if (!Strings.isBlank(config.baseUrl())) {
+      var normalized = config.baseUrl().replaceFirst("/+$", "");
+      if (normalized.endsWith("/v1beta")) {
+        return "v1beta";
+      }
+      if (!normalized.endsWith("/v1")) {
+        return "custom";
+      }
+    }
+    return DEFAULT_API_VERSION;
+  }
+
+  private static String resolveInteractionsBaseUrl(ModelConfig config, String apiVersion) {
+    if (!Strings.isBlank(config.baseUrl())) {
+      return config.baseUrl().replaceFirst("/+$", "");
+    }
+    return DEFAULT_API_ROOT + "/" + apiVersion;
   }
 
   /**
@@ -547,6 +595,8 @@ public class GeminiModel implements Model {
     private final BufferedReader reader;
     private final ObjectMapper objectMapper;
     private final Duration streamIdleTimeout;
+    private final boolean propagateInteractionId;
+    private final String apiVersion;
     private final ExecutorService readExecutor;
     private final StringBuilder contentBuilder = new StringBuilder();
     private final List<ToolCall> toolCalls = new ArrayList<>();
@@ -563,11 +613,22 @@ public class GeminiModel implements Model {
 
     StreamingIterator(
         HttpResponse<InputStream> response, ObjectMapper objectMapper, Duration streamIdleTimeout) {
+      this(response, objectMapper, streamIdleTimeout, true, DEFAULT_API_VERSION);
+    }
+
+    StreamingIterator(
+        HttpResponse<InputStream> response,
+        ObjectMapper objectMapper,
+        Duration streamIdleTimeout,
+        boolean propagateInteractionId,
+        String apiVersion) {
       this.rawStream = response.body();
       this.reader =
           new BufferedReader(new InputStreamReader(this.rawStream, StandardCharsets.UTF_8));
       this.objectMapper = objectMapper;
       this.streamIdleTimeout = streamIdleTimeout;
+      this.propagateInteractionId = propagateInteractionId;
+      this.apiVersion = apiVersion;
       this.readExecutor = Executors.newVirtualThreadPerTaskExecutor();
     }
 
@@ -908,10 +969,11 @@ public class GeminiModel implements Model {
           streamingCitations.isEmpty() ? List.<Citation>of() : List.copyOf(streamingCitations);
 
       var metadata = new HashMap<String, String>();
+      metadata.put(API_VERSION_KEY, apiVersion);
       if (!thoughtSignatures.isEmpty()) {
         metadata.put(THOUGHT_SIGNATURES_KEY, String.join(SIGNATURE_DELIMITER, thoughtSignatures));
       }
-      if (interactionId != null) {
+      if (propagateInteractionId && interactionId != null) {
         metadata.put(INTERACTION_ID_KEY, interactionId);
       }
 

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -21,6 +22,8 @@ import ai.singlr.core.model.Response.Usage;
 import ai.singlr.core.runtime.CancellationToken;
 import ai.singlr.core.runtime.SessionContext;
 import ai.singlr.core.schema.OutputSchema;
+import ai.singlr.core.schema.RawOutputCapturePolicy;
+import ai.singlr.core.schema.StructuredOutputParseException;
 import ai.singlr.core.tool.Tool;
 import ai.singlr.session.ask.AskUserQuestionResponse;
 import ai.singlr.session.execution.ExecutionCapabilities;
@@ -868,6 +871,45 @@ final class AgentSessionImplTest {
       var result = s.runBlocking(UserMessage.text("hi"), OutputSchema.of(TypedAnswer.class));
       assertEquals("bob", result.name());
       assertEquals(7, result.score());
+    }
+  }
+
+  @Test
+  void typedRunBlockingInheritsDisabledRawOutputCaptureFromModel() {
+    var canary = "session-raw-output-canary";
+    var delegate = textOnceModel("{\"name\":\"" + canary + "\"}", FinishReason.STOP);
+    Model privacyModel =
+        new Model() {
+          @Override
+          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+            return delegate.chat(messages, tools);
+          }
+
+          @Override
+          public String id() {
+            return delegate.id();
+          }
+
+          @Override
+          public String provider() {
+            return delegate.provider();
+          }
+
+          @Override
+          public RawOutputCapturePolicy rawOutputCapturePolicy() {
+            return RawOutputCapturePolicy.DISABLED;
+          }
+        };
+
+    try (var session = buildSession(privacyModel)) {
+      var error =
+          assertThrows(
+              StructuredOutputParseException.class,
+              () ->
+                  session.runBlocking(UserMessage.text("hi"), OutputSchema.of(TypedAnswer.class)));
+
+      assertNull(error.rawContent());
+      assertFalse(error.getMessage().contains(canary));
     }
   }
 
