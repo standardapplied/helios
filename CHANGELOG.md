@@ -4,6 +4,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [2.10.1] — 2026-09-01 — Gemini privacy controls and endpoint selection
+
 ### Added
 
 - Gemini managed Files API uploads expose both a model-ready `FileReference` and the validated
