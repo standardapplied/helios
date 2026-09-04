@@ -4,6 +4,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [2.11.0] — 2026-09-04 — Claude Fable 5.1, Mythos 5.1 and Gemini 3.8 Flash
+
 ### Added
 
 - Anthropic: `claude-fable-5-1` and `claude-mythos-5-1` (1M context, 128K output, always-on
