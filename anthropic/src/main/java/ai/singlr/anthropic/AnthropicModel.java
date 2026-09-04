@@ -146,6 +146,15 @@ public class AnthropicModel implements Model {
       throw new IllegalArgumentException(
           "config with valid apiKey is required (or set baseUrl + auth header)");
     }
+    if (knownModel != null
+        && !knownModel.acceptsForcedToolChoice()
+        && isForced(config.toolChoice())) {
+      throw new IllegalArgumentException(
+          "Model "
+              + wireModelId
+              + " rejects forced tool use (tool_choice any/required); use ToolChoice.auto() and"
+              + " instruct the model in the prompt, or a structured OutputSchema.");
+    }
     this.wireModelId = wireModelId;
     this.knownModel = knownModel;
     // Unrecognised Claude IDs default to the adaptive thinking shape: new releases adopt it, and
@@ -989,6 +998,10 @@ public class AnthropicModel implements Model {
 
   /** One thinking content block — text plus its content-block-scoped Anthropic signature. */
   record ThinkingBlock(String text, String signature) {}
+
+  private static boolean isForced(ToolChoice toolChoice) {
+    return toolChoice instanceof ToolChoice.Any || toolChoice instanceof ToolChoice.Required;
+  }
 
   private ToolChoiceConfig buildToolChoice(List<Tool> tools) {
     if (config.toolChoice() == null) {

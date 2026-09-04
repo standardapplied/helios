@@ -4,6 +4,18 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [2.11.0] — 2026-09-04 — Claude Fable 5.1, Mythos 5.1 and Gemini 3.8 Flash
+
+### Added
+
+- Anthropic: `claude-fable-5-1` and `claude-mythos-5-1` (1M context, 128K output, always-on
+  adaptive thinking). Both reject forced tool use, so `AnthropicModel` fails fast at construction
+  when `ModelConfig.toolChoice` is `any()` or `required(...)` on them —
+  `AnthropicModelId.acceptsForcedToolChoice()` records the rule. `auto()` and `none()` are
+  unchanged.
+- Gemini: stable `gemini-3.8-flash` (1,048,576 context, 65,536 output, `low`/`medium`/`high`
+  thinking levels).
+
 ## [2.10.1] — 2026-09-01 — Gemini privacy controls and endpoint selection
 
 ### Added

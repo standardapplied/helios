@@ -95,6 +95,16 @@ class GeminiModelIdTest {
   }
 
   @Test
+  void gemini38FlashIsCataloguedWithLowThinkingFloor() {
+    assertEquals("gemini-3.8-flash", GeminiModelId.GEMINI_3_8_FLASH.id());
+    assertEquals(1_048_576, GeminiModelId.GEMINI_3_8_FLASH.contextWindow());
+    assertEquals(65_536, GeminiModelId.GEMINI_3_8_FLASH.maxOutputTokens());
+    assertEquals("low", GeminiModelId.GEMINI_3_8_FLASH.lowestThinkingLevel());
+    assertEquals(GeminiModelId.GEMINI_3_8_FLASH, GeminiModelId.fromId("gemini-3.8-flash"));
+    assertTrue(GeminiModelId.isSupported("gemini-3.8-flash"));
+  }
+
+  @Test
   void flashLitePreviewIdIsRetiredAndNotSupported() {
     // Per Google's May 2026 GA announcement, gemini-3.1-flash-lite-preview shuts down
     // 2026-05-25. Helios exposes the GA id only — the preview alias must NOT resolve.
