@@ -696,6 +696,49 @@ class AnthropicModelTest {
   }
 
   @Test
+  void fable51RejectsForcedToolChoiceAtConstruction() {
+    for (var choice : List.of(ToolChoice.any(), ToolChoice.required("my_tool"))) {
+      var config = ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(choice).build();
+      var ex =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> new AnthropicModel(AnthropicModelId.CLAUDE_FABLE_5_1, config));
+      assertTrue(ex.getMessage().contains("claude-fable-5-1"), ex.getMessage());
+      assertTrue(ex.getMessage().contains("forced tool use"), ex.getMessage());
+    }
+    var wireConfig =
+        ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.any()).build();
+    assertThrows(
+        IllegalArgumentException.class, () -> new AnthropicModel("claude-mythos-5-1", wireConfig));
+  }
+
+  @Test
+  void fable51AcceptsAutoAndNoneToolChoice() {
+    var tool =
+        Tool.newBuilder()
+            .withName("test")
+            .withDescription("test")
+            .withExecutor((args, ctx) -> ToolResult.success("ok"))
+            .build();
+
+    var auto =
+        ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.auto()).build();
+    var autoRequest =
+        new AnthropicModel(AnthropicModelId.CLAUDE_FABLE_5_1, auto)
+            .buildRequest(List.of(Message.user("Hi")), List.of(tool), null);
+    assertEquals("auto", autoRequest.toolChoice().type());
+    assertNull(autoRequest.thinking());
+    assertNull(autoRequest.temperature());
+
+    var none =
+        ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.none()).build();
+    var noneRequest =
+        new AnthropicModel(AnthropicModelId.CLAUDE_FABLE_5_1, none)
+            .buildRequest(List.of(Message.user("Hi")), List.of(tool), null);
+    assertNull(noneRequest.toolChoice());
+  }
+
+  @Test
   void buildRequestToolChoiceRequiredMultipleThrows() {
     var config =
         ModelConfig.newBuilder()

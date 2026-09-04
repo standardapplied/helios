@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class AnthropicModelIdTest {
@@ -122,6 +123,39 @@ class AnthropicModelIdTest {
     assertEquals("claude-sonnet-5", AnthropicModelId.CLAUDE_SONNET_5.id());
     assertEquals(1_000_000, AnthropicModelId.CLAUDE_SONNET_5.contextWindow());
     assertEquals(128_000, AnthropicModelId.CLAUDE_SONNET_5.maxOutputTokens());
+  }
+
+  @Test
+  void fable51AndMythos51AreCataloguedAsAlwaysOnThinkingModels() {
+    for (var model :
+        List.of(AnthropicModelId.CLAUDE_FABLE_5_1, AnthropicModelId.CLAUDE_MYTHOS_5_1)) {
+      assertEquals(1_000_000, model.contextWindow());
+      assertEquals(128_000, model.maxOutputTokens());
+      assertEquals(AnthropicModelId.ThinkingShape.ALWAYS_ON, model.thinkingShape());
+      assertFalse(model.acceptsForcedToolChoice());
+    }
+    assertEquals("claude-fable-5-1", AnthropicModelId.CLAUDE_FABLE_5_1.id());
+    assertEquals("claude-mythos-5-1", AnthropicModelId.CLAUDE_MYTHOS_5_1.id());
+    assertEquals(AnthropicModelId.CLAUDE_FABLE_5_1, AnthropicModelId.fromId("claude-fable-5-1"));
+    assertEquals(
+        AnthropicModelId.CLAUDE_MYTHOS_5_1, AnthropicModelId.fromWireId("claude-mythos-5-1"));
+    assertTrue(AnthropicModelId.isSupported("claude-fable-5-1"));
+  }
+
+  @Test
+  void fable51WireIdDoesNotResolveToFable5Family() {
+    assertEquals(
+        AnthropicModelId.CLAUDE_FABLE_5_1, AnthropicModelId.fromWireId("claude-fable-5-1"));
+    assertEquals(AnthropicModelId.CLAUDE_FABLE_5, AnthropicModelId.fromWireId("claude-fable-5"));
+  }
+
+  @Test
+  void forcedToolChoiceAcceptedEverywhereExceptThe51Models() {
+    for (var model : AnthropicModelId.values()) {
+      var isFivePointOne =
+          model == AnthropicModelId.CLAUDE_FABLE_5_1 || model == AnthropicModelId.CLAUDE_MYTHOS_5_1;
+      assertEquals(!isFivePointOne, model.acceptsForcedToolChoice(), model.name());
+    }
   }
 
   @Test

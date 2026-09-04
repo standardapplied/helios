@@ -112,7 +112,7 @@ var config = ModelConfig.newBuilder()
 
 try (var files = new GeminiFilesClient(config);
     var video = files.uploadManaged(Path.of("meeting.mp4"), "video/mp4");
-    var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_7_FLASH.id(), config)) {
+    var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config)) {
   var message = Message.newBuilder()
       .withRole(Role.USER)
       .withContent("Summarize this video and list the decisions.")
@@ -146,7 +146,7 @@ var config = ModelConfig.newBuilder()
 try (var events = JsonlEventSink.openMetadataOnly(Path.of("events.jsonl"));
     var files = new GeminiFilesClient(config);
     var media = files.uploadManaged(Path.of("private-video.mp4"), "video/mp4");
-    var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_7_FLASH.id(), config)) {
+    var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config)) {
   var input = Message.newBuilder()
       .withRole(Role.USER)
       .withContent("Analyze the video.")

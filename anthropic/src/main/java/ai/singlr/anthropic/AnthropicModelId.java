@@ -20,10 +20,12 @@ import ai.singlr.core.common.Strings;
 public enum AnthropicModelId {
   // contextWindow / maxOutputTokens mirror the documented per-model limits (Models overview, Aug
   // 2026) — operators can override per-call via ModelConfig.Builder.withMaxOutputTokens.
-  // ThinkingShape per model (thinking-troubleshooting table, Aug 2026): Fable 5 and Mythos 5
-  // always think; Opus 5 and Sonnet 5 run adaptive when the field is omitted; Opus 4.7/4.8 run
-  // thinking-off when omitted; Opus 4.6 / Sonnet 4.6 take adaptive without xhigh (their
+  // ThinkingShape per model (thinking-troubleshooting table, Sep 2026): Fable 5/5.1 and Mythos
+  // 5/5.1 always think; Opus 5 and Sonnet 5 run adaptive when the field is omitted; Opus 4.7/4.8
+  // run thinking-off when omitted; Opus 4.6 / Sonnet 4.6 take adaptive without xhigh (their
   // enabled+budget_tokens mode is deprecated); Haiku 4.5 supports extended thinking only.
+  CLAUDE_FABLE_5_1("claude-fable-5-1", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
+  CLAUDE_MYTHOS_5_1("claude-mythos-5-1", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
   CLAUDE_FABLE_5("claude-fable-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
   CLAUDE_MYTHOS_5("claude-mythos-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
   CLAUDE_OPUS_5("claude-opus-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_DEFAULT_ON),
@@ -116,6 +118,18 @@ public enum AnthropicModelId {
    */
   public ThinkingShape thinkingShape() {
     return thinkingShape;
+  }
+
+  /**
+   * Whether this model accepts forced tool use ({@code tool_choice.type} {@code any} or {@code
+   * tool}). Fable 5.1 and Mythos 5.1 reject both with a 400 because a forced call would skip their
+   * always-on thinking; {@code auto} and {@code none} are unaffected. {@link AnthropicModel} fails
+   * fast at construction rather than letting the request 400.
+   *
+   * @return false for {@link #CLAUDE_FABLE_5_1} and {@link #CLAUDE_MYTHOS_5_1}, true otherwise
+   */
+  public boolean acceptsForcedToolChoice() {
+    return this != CLAUDE_FABLE_5_1 && this != CLAUDE_MYTHOS_5_1;
   }
 
   /**
