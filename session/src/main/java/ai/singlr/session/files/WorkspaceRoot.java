@@ -13,6 +13,7 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Arrays;
 import java.util.Objects;
@@ -176,7 +177,9 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
    * Open {@code resolved} for writing without following a symlink at the leaf. Callers choose the
    * create/truncate semantics via {@code options} ({@link
    * java.nio.file.StandardOpenOption#CREATE_NEW} for create, {@link
-   * java.nio.file.StandardOpenOption#TRUNCATE_EXISTING} for replace).
+   * java.nio.file.StandardOpenOption#TRUNCATE_EXISTING} for replace). With no options, creates a
+   * missing file or truncates an existing file, as {@link Files#newOutputStream(Path,
+   * OpenOption...)} does.
    *
    * @param resolved a path previously returned by {@link #resolveSafe(String)}
    * @param options open options; {@link LinkOption#NOFOLLOW_LINKS} is always added
@@ -186,8 +189,14 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
    * @throws IOException if the leaf is a symlink or cannot be opened with {@code options}
    */
   public OutputStream newOutputStream(Path resolved, OpenOption... options) throws IOException {
-    var withNoFollow = Arrays.copyOf(options, options.length + 1);
-    withNoFollow[options.length] = LinkOption.NOFOLLOW_LINKS;
+    Objects.requireNonNull(options, "options must not be null");
+    var effectiveOptions =
+        options.length == 0
+            ? new OpenOption[] {StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING}
+            : options;
+    var withNoFollow =
+        Arrays.copyOf(effectiveOptions, effectiveOptions.length + 1, OpenOption[].class);
+    withNoFollow[effectiveOptions.length] = LinkOption.NOFOLLOW_LINKS;
     return Files.newOutputStream(requireResolved(resolved), withNoFollow);
   }
 
