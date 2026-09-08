@@ -4,6 +4,18 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Fixed
+
+- `CancellationToken` registration is now linearizable and exactly-once. A private lock guards the
+  reason and the pending-registration set, so a callback registered while another thread is
+  cancelling can no longer be dropped (the old `CopyOnWriteArrayList` snapshot-then-clear lost
+  registrations that landed between the two). Callbacks still run outside the lock, so reentrant
+  register/remove/cancel from a callback cannot deadlock. Clarified contract: `Registration.remove()`
+  ordered after the winning `cancel` is a no-op that never blocks on a running callback; a callback
+  throwing an `Error` no longer skips the remaining callbacks — they all run, then the first `Error`
+  is rethrown with later ones attached as suppressed, matching the session loop's "Errors escape"
+  rule. No public-surface change.
+
 ## [2.11.0] — 2026-09-04 — Claude Fable 5.1, Mythos 5.1 and Gemini 3.8 Flash
 
 ### Added

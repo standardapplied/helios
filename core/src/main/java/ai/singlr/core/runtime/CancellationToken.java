@@ -4,12 +4,11 @@
  */
 package ai.singlr.core.runtime;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -25,18 +24,40 @@ import java.util.logging.Logger;
  * does not interrupt OS threads, close I/O streams, or unsubscribe {@code Flow.Subscription}s —
  * those side effects are wired by the consumer.
  *
- * <h2>Thread-safety</h2>
+ * <h2>Linearization</h2>
  *
- * Thread-safe. {@code cancel}, {@code isCancelled}, {@code reason}, and {@code throwIfCancelled}
- * may be called from any thread concurrently; the {@code compareAndSet} on the underlying {@link
- * AtomicReference} guarantees that only the first {@code cancel} that wins the race sets the state.
+ * A single private lock guards the cancellation reason and the set of pending registrations. {@link
+ * #onCancel(Runnable)}, {@link #cancel(String)} and {@link Registration#remove()} each update that
+ * state in one critical section, so every call takes effect at a well-defined point in a total
+ * order:
+ *
+ * <ul>
+ *   <li>A registration whose {@code onCancel} is ordered before the winning {@code cancel} fires
+ *       exactly once, on the cancelling thread, unless its {@code remove()} is ordered in between.
+ *   <li>A registration ordered after the winning {@code cancel} fires exactly once, immediately, on
+ *       the registering thread.
+ *   <li>A {@code remove()} ordered before the winning {@code cancel} guarantees the callback never
+ *       runs. A {@code remove()} ordered after it is a no-op: the callback is already claimed by
+ *       the cancelling thread and may be running or complete. {@code remove()} never blocks on it.
+ * </ul>
+ *
+ * <p>Callbacks always run outside the lock, so a callback may register, remove, or cancel
+ * reentrantly without deadlocking. A callback throwing a {@link RuntimeException} is logged at
+ * {@code WARNING} and does not stop later callbacks. A callback throwing an {@link Error} does not
+ * stop later callbacks either, but once every claimed callback has run the first {@code Error} is
+ * rethrown with any later ones attached as suppressed — the same "Errors escape, cleanup still
+ * runs" rule the session loop applies to host failures.
+ *
+ * <p>Fired and removed registrations are dropped from the token immediately, so a long-lived token
+ * retains only the callbacks that are still armed.
  */
 public final class CancellationToken {
 
   private static final Logger LOGGER = Logger.getLogger(CancellationToken.class.getName());
 
-  private final AtomicReference<String> reason = new AtomicReference<>();
-  private final CopyOnWriteArrayList<Runnable> callbacks = new CopyOnWriteArrayList<>();
+  private final Object lock = new Object();
+  private final LinkedHashSet<CallbackRegistration> registrations = new LinkedHashSet<>();
+  private volatile String reason;
 
   /**
    * Whether {@link #cancel(String)} has been called at least once.
@@ -44,7 +65,7 @@ public final class CancellationToken {
    * @return {@code true} if cancelled
    */
   public boolean isCancelled() {
-    return reason.get() != null;
+    return reason != null;
   }
 
   /**
@@ -53,7 +74,7 @@ public final class CancellationToken {
    * @return the cancellation reason, or {@link Optional#empty()} if not cancelled
    */
   public Optional<String> reason() {
-    return Optional.ofNullable(reason.get());
+    return Optional.ofNullable(reason);
   }
 
   /**
@@ -61,88 +82,109 @@ public final class CancellationToken {
    * are no-ops and the first reason is preserved. The return value lets callers distinguish "I was
    * the cause" from "someone else cancelled first" — useful for audit attribution.
    *
+   * <p>The winning call claims every pending registration atomically with the state transition and
+   * then runs the claimed callbacks on the calling thread, in registration order, outside the lock.
+   * The method returns only after all claimed callbacks have run.
+   *
    * @param reason a human-readable reason for the cancellation
    * @return {@code true} if this call transitioned the token to cancelled; {@code false} if it was
    *     already cancelled
    * @throws NullPointerException if {@code reason} is null
    * @throws IllegalArgumentException if {@code reason} is blank
+   * @throws Error the first {@code Error} thrown by a claimed callback, after every other claimed
+   *     callback has run
    */
   public boolean cancel(String reason) {
     Objects.requireNonNull(reason, "reason must not be null");
     if (reason.isBlank()) {
       throw new IllegalArgumentException("reason must not be blank");
     }
-    if (!this.reason.compareAndSet(null, reason)) {
-      return false;
+    List<CallbackRegistration> claimed;
+    synchronized (lock) {
+      if (this.reason != null) {
+        return false;
+      }
+      this.reason = reason;
+      claimed = List.copyOf(registrations);
+      registrations.clear();
     }
-    fireCallbacks();
+    fire(claimed);
     return true;
   }
 
   /**
    * Register a callback that runs synchronously when the token transitions to cancelled. If the
-   * token is already cancelled, the callback runs immediately on the calling thread.
-   *
-   * <p>Callbacks fire on the thread that wins the {@link #cancel(String)} race (or the registering
-   * thread if already cancelled). Each callback is exception-isolated: a throwing callback is
-   * logged at {@code WARNING} but does not prevent subsequent callbacks from firing.
+   * token is already cancelled, the callback runs immediately on the calling thread and the
+   * returned handle is {@link Registration#NOOP}.
    *
    * <p>Callbacks are not deduplicated — register the same callback twice and it fires twice.
    *
    * <p>The returned {@link Registration} lets callers deregister the callback once the work it
    * guards has completed — important for long-lived tokens (per-session) against which many short-
-   * lived callers register (per-tool-call, per-execute). Without deregistration, callbacks would
-   * accumulate in the token's list for the lifetime of the session even though each is inert after
-   * its guarded work finished. Calling {@link Registration#remove()} after the token has already
-   * fired is a safe no-op.
+   * lived callers register (per-tool-call, per-execute). Calling {@link Registration#remove()}
+   * after the token has claimed the callback is a safe no-op; see the class-level linearization
+   * contract.
    *
    * @param callback the work to run on cancellation; non-null
-   * @return a handle for removing this callback before cancellation fires
+   * @return a handle for removing this callback before cancellation claims it
    * @throws NullPointerException if {@code callback} is null
    */
   public Registration onCancel(Runnable callback) {
     Objects.requireNonNull(callback, "callback must not be null");
-    if (isCancelled()) {
-      runSafely(callback);
-      return Registration.NOOP;
+    var registration = new CallbackRegistration(callback);
+    synchronized (lock) {
+      if (reason == null) {
+        registrations.add(registration);
+        return registration;
+      }
     }
-    callbacks.add(callback);
-    if (isCancelled() && callbacks.remove(callback)) {
-      // Lost the race — fire ourselves so the caller always sees a callback fire exactly once.
-      runSafely(callback);
-      return Registration.NOOP;
-    }
-    return new ListRegistration(callbacks, callback);
+    fire(List.of(registration));
+    return Registration.NOOP;
   }
 
-  private void fireCallbacks() {
-    for (var cb : callbacks) {
-      runSafely(cb);
+  private void fire(List<CallbackRegistration> claimed) {
+    Error hostError = null;
+    for (var registration : claimed) {
+      try {
+        registration.callback.run();
+      } catch (RuntimeException ex) {
+        LOGGER.log(Level.WARNING, "cancellation callback threw", ex);
+      } catch (Error err) {
+        if (hostError == null) {
+          hostError = err;
+        } else if (hostError != err) {
+          hostError.addSuppressed(err);
+        }
+      }
     }
-    callbacks.clear();
+    if (hostError != null) {
+      throw hostError;
+    }
   }
 
   /**
-   * Visible-for-testing accessor exposing the count of currently-attached callbacks. Used to verify
+   * Visible-for-testing accessor exposing the count of currently-armed callbacks. Used to verify
    * that per-call sites (tool dispatch, question gateway) correctly invoke {@link
    * Registration#remove()} when their guarded work finishes, so callbacks do not accumulate on the
    * long-lived per-session token.
    *
-   * @return the number of {@link #onCancel(Runnable)} registrations that have not yet fired or been
-   *     removed
+   * @return the number of {@link #onCancel(Runnable)} registrations that have not yet been claimed
+   *     by cancellation or removed
    */
   public int activeCallbackCountForTests() {
-    return callbacks.size();
+    synchronized (lock) {
+      return registrations.size();
+    }
   }
 
   /**
    * Handle for a callback registered via {@link CancellationToken#onCancel(Runnable)}. Calling
    * {@link #remove()} detaches the callback so it will not fire on subsequent token cancellation.
    *
-   * <p>Idempotent: calling {@code remove()} more than once, or after the token has already fired
-   * the callback, is a safe no-op.
+   * <p>Idempotent: calling {@code remove()} more than once, or after cancellation has claimed the
+   * callback, is a safe no-op. It never blocks on a callback that is already running.
    */
-  public sealed interface Registration permits ListRegistration, NoopRegistration {
+  public sealed interface Registration permits CallbackRegistration, NoopRegistration {
 
     /** A pre-fired or never-registered handle — {@link #remove()} is a no-op. */
     Registration NOOP = new NoopRegistration();
@@ -151,18 +193,18 @@ public final class CancellationToken {
     void remove();
   }
 
-  private static final class ListRegistration implements Registration {
-    private final List<Runnable> list;
+  private final class CallbackRegistration implements Registration {
     private final Runnable callback;
 
-    ListRegistration(List<Runnable> list, Runnable callback) {
-      this.list = list;
+    CallbackRegistration(Runnable callback) {
       this.callback = callback;
     }
 
     @Override
     public void remove() {
-      list.remove(callback);
+      synchronized (lock) {
+        registrations.remove(this);
+      }
     }
   }
 
@@ -173,14 +215,6 @@ public final class CancellationToken {
     }
   }
 
-  private static void runSafely(Runnable callback) {
-    try {
-      callback.run();
-    } catch (RuntimeException ex) {
-      LOGGER.log(Level.WARNING, "cancellation callback threw", ex);
-    }
-  }
-
   /**
    * Throw if this token has been cancelled. Tools and other cooperative cancellation participants
    * should call this at safe points in their work.
@@ -188,7 +222,7 @@ public final class CancellationToken {
    * @throws CancellationException if cancelled; the exception message is the cancellation reason
    */
   public void throwIfCancelled() {
-    var r = reason.get();
+    var r = reason;
     if (r != null) {
       throw new CancellationException(r);
     }
