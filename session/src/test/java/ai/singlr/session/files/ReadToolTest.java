@@ -17,7 +17,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 final class ReadToolTest {
@@ -796,5 +799,44 @@ final class ReadToolTest {
     assertEquals(4 * 1024 * 1024, ReadTool.MAX_OUTPUT_BYTES);
     assertEquals(5L * 1024 * 1024, ReadTool.MAX_IMAGE_BYTES);
     assertEquals(20L * 1024 * 1024, ReadTool.MAX_PDF_BYTES);
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void symlinkOutsideWorkspaceIsRefusedAndInsideIsReadAtRealPath(@TempDir Path tmp)
+      throws IOException {
+    var root = Files.createDirectory(tmp.resolve("ws"));
+    var outside = Files.createDirectory(tmp.resolve("outside"));
+    Files.writeString(outside.resolve("secret.txt"), "SENTINEL\n", StandardCharsets.UTF_8);
+    Files.writeString(root.resolve("inside.txt"), "inside\n", StandardCharsets.UTF_8);
+    Files.createSymbolicLink(root.resolve("leak.txt"), outside.resolve("secret.txt"));
+    Files.createSymbolicLink(root.resolve("alias.txt"), root.resolve("inside.txt"));
+    Files.createSymbolicLink(root.resolve("dangling.txt"), root.resolve("gone.txt"));
+    var tracker = InMemoryFileTracker.create();
+    var tool = ReadTool.binding(WorkspaceRoot.of(root), tracker).tool();
+
+    var leak = tool.execute(Map.of("path", "leak.txt"));
+    assertFalse(leak.success());
+    assertFalse(leak.output().contains("SENTINEL"), leak.output());
+
+    var dangling = tool.execute(Map.of("path", "dangling.txt"));
+    assertFalse(dangling.success());
+
+    var alias = tool.execute(Map.of("path", "alias.txt"));
+    assertTrue(alias.success(), alias.output());
+    assertTrue(alias.output().contains("inside"), alias.output());
+    assertTrue(tracker.fingerprintAtLastRead(root.toRealPath().resolve("inside.txt")).isPresent());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void specialFileIsRefusedBeforeOpen(@TempDir Path tmp) {
+    Assumptions.assumeTrue(SpecialFiles.mkfifo(tmp.resolve("pipe.txt")));
+    var result =
+        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+            .tool()
+            .execute(Map.of("path", "pipe.txt"));
+    assertFalse(result.success());
+    assertTrue(result.output().contains("not a regular file"), result.output());
   }
 }

@@ -165,6 +165,15 @@ class JvmSandboxTest {
   }
 
   @Test
+  void hostNativeAccessIsNotGrantedToSandbox() {
+    assertFalse(JvmSandbox.shouldPropagateJvmArg("--enable-native-access=ALL-UNNAMED"));
+    assertFalse(JvmSandbox.shouldPropagateJvmArg("--enable-native-access=ai.singlr.session"));
+    assertTrue(JvmSandbox.shouldPropagateJvmArg("--illegal-native-access=deny"));
+    var command = JvmSandbox.buildLaunchCommand("/fake/java", JvmSandboxConfig.defaults());
+    assertTrue(command.stream().noneMatch(arg -> arg.startsWith("--enable-native-access")));
+  }
+
+  @Test
   void shouldPropagateJvmArgFiltersHeapArgs() {
     assertFalse(JvmSandbox.shouldPropagateJvmArg("-Xmx512m"));
     assertFalse(JvmSandbox.shouldPropagateJvmArg("-Xms128m"));

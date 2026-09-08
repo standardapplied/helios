@@ -11,6 +11,10 @@ Published to [Maven Central](https://central.sonatype.com/namespace/ai.singlr) u
 - Java 25+
 - Maven 3.9+
 
+Strict workspace file tools and filesystem memory additionally require Linux x86-64/AArch64,
+the default filesystem, `/proc/self/fd`, and an explicit JVM native-access grant. See
+[workspace confinement](#path-traversal-jails) for launch flags and compatibility details.
+
 ## Modules
 
 Pick what you need — each jar is published independently:
@@ -38,7 +42,7 @@ Helios is used in production but has documented limitations that you should unde
 - **Fail-secure defaults.** `RuntimeServer.Builder` binds `127.0.0.1` (loopback) by default — external traffic is explicit opt-in via `withHost("0.0.0.0")`. The HTTP routes are unauthenticated and create real model-spending sessions, so deployers that expose externally should sit behind authenticated fronting infrastructure.
 - **Cooperative cancellation, no `Error` swallowing.** `RetryPolicy` and the session loop catch `Exception`, not `Throwable` — OOM / StackOverflow / LinkageError escape cleanly so the host JVM dies rather than retrying a corrupted process. `Tool.execute` preserves the calling thread's interrupt status when the executor's exception chain carries `InterruptedException`.
 - **Sandboxed subprocess execution with dedicated RPC channel and descendant reaping.** The `JvmSandbox` ↔ host RPC runs on a per-session Unix domain socket bound in a private temp directory (mode 0700); the host accepts exactly one connection then closes the listener, so no other process — including a JShell snippet inside the subprocess — can forge frames by writing to subprocess stdout. (Earlier versions used a `\0RPC:`-prefixed channel multiplexed on stdout, which a snippet could forge via `new PrintStream(new FileOutputStream(FileDescriptor.out))`. C1 in the original review.) Subprocess stdout stays for captured output only and is never parsed as RPC. `JvmSandbox.close()` and its JVM-shutdown-hook path snapshot descendants before killing the parent, then forcibly destroy the snapshot — snippets that call `Runtime.exec(...)` cannot orphan grandchildren past sandbox lifetime. Uninterruptible JShell snippets are escalated through a documented ladder (`Thread.interrupt` → 1s join → `jshell.stop()` → 1s join).
-- **Path-traversal jails on every filesystem boundary.** `WorkspaceRoot` backing the session's `Read` / `Grep` / `Glob` tools (lexical `..`/absolute refusal + `toRealPath` symlink check), `OnnxModelDownloader` (refuses absolute paths and traversal in HuggingFace-supplied filenames), and `CommandGrant` (per-call temp working directory, argv pre-scan refusing registered secrets).
+- **Path-traversal jails on every filesystem boundary.** `WorkspaceRoot` backing the session's `Read` / `Grep` / `Glob` tools and the filesystem memory backend (lexical `..`/absolute refusal + canonicalisation of the deepest existing prefix + no-follow opens), `OnnxModelDownloader` (refuses absolute paths and traversal in HuggingFace-supplied filenames), and `CommandGrant` (per-call temp working directory, argv pre-scan refusing registered secrets).
 - **SQL identifier validation on the persistence schema name.** `PgConfig` rejects schema names that don't match Postgres' unquoted-identifier shape, so configuration-driven schema names cannot inject SQL via the qualifier substitution.
 - **Secret redaction at the documented boundaries.** `CommandGrant` flows model-visible output through a shared `SecretRegistry`-derived `Redactor`; the workspace `Read` and `Grep` tools accept an optional `Redactor` overload that does the same for any file content they return to the model. The REPL `SandboxBindingsListener` (operator telemetry of sandbox working memory) also redacts against the registry. `ModelConfig.toString()` redacts the API key and header values so accidental `log.info("config={}", cfg)` callsites don't leak credentials.
 - **No `Error` propagation from sandbox bindings collection.** `JvmSandboxBootstrap.collectBindings` catches `Throwable` per binding so a malicious `toString()` that throws `StackOverflowError` / `OutOfMemoryError` yields an `<error: …>` stub instead of escaping into the virtual thread's uncaught handler.
@@ -336,7 +340,7 @@ var bindings  = List.of(
     GlobTool.binding(corpus));                     // paths only — no redactor
 ```
 
-Path-jail (`..` / absolute refusal + `toRealPath` symlink check) is built into `WorkspaceRoot`; per-file size caps, per-output byte caps, hidden-directory pruning, and binary skip are built into the tools. `Permission.planMode()` or a curated `Permission` policy enforces read-only at the session level — there is no `Write` tool to disable.
+Path-jail (`..` / absolute refusal + canonicalisation + no-follow opens) is built into `WorkspaceRoot`; per-file size caps, per-output byte caps, hidden-directory pruning, symlink/special-file skipping during walks, and binary skip are built into the tools. `Permission.planMode()` or a curated `Permission` policy enforces read-only at the session level — there is no `Write` tool to disable.
 
 ## Structured Output
 
@@ -576,10 +580,30 @@ The sandbox subprocess RPC runs on a per-session Unix domain socket bound in a p
 
 Every filesystem boundary in the framework refuses traversal. Lexical normalise + `startsWith(root)` first (to reject `..` and absolute paths without dereferencing), then `toRealPath()` to refuse symlink escapes:
 
-- `WorkspaceRoot` (backing the session's `Read` / `Grep` / `Glob` tools at the workspace or any curated-corpus root)
+- `WorkspaceRoot` (backing the session's `Read` / `Grep` / `Glob` tools at the workspace or any curated-corpus root, and `FileSystemMemoryBackend`)
 - `CommandGrant` (per-call temp cwd unless explicit `withCwd`)
 - `OnnxModelDownloader` (HF-supplied file paths against the local model cache)
 - `PgConfig` (Postgres schema name validated against unquoted-identifier shape)
+
+`WorkspaceRoot` is the confinement contract for `Read`, `Grep`, `Glob`, `Ls`, file fingerprints and filesystem memory. `root()` is canonical. `resolveSafe` canonicalises the deepest *existing* prefix, rejecting outside, dangling and looping links even for a not-yet-existing leaf. Explicitly configured root aliases and requests through legitimate in-workspace aliases remain supported; returned paths use their canonical spelling.
+
+Strict I/O does not trust that earlier path check. It descends from the filesystem root using directory descriptors and single-component no-follow `openat` calls, including every ancestor of the workspace root. An `O_PATH` descriptor pins the leaf for metadata inspection without opening a FIFO or device for I/O. Only a regular file is reopened through the kernel's `/proc/self/fd` namespace, while its descriptor remains owned by the stream. Size-limited reads validate that pinned target and enforce the byte budget during reading, including concurrent growth. `Grep` sniffs and searches the same bounded content. MIME detection does not invoke platform detectors that might reopen an unconfined pathname.
+
+Directory creation (`mkdirat`), deletion (`unlinkat`), and directory enumeration also use pinned directory descriptors. Walkers never follow directory symlinks, and content tools skip non-regular entries. `Ls` can display symlink metadata without following it. A missing workspace root is not recreated. New files and directories are owner-only (0600/0700, further restricted by the process umask); existing permissions are preserved. Default output creates or truncates, `CREATE_NEW` remains exclusive, and `DELETE_ON_CLOSE` is explicitly unsupported in strict mode.
+
+`FileSystemMemoryBackend` is strictly narrower: a `/memories/...` path must canonicalise to exactly its lexical location under `<root>/.agent/memory`, so any symlink in that path — even one pointing at another file inside the workspace — is refused for `view`, `create`, `strReplace`, `insert`, `delete` and `list`. Memory always uses strict I/O, even if supplied a trusted-mode workspace. Memory content is strict UTF-8; invalid text is rejected before creating directories or opening a write target.
+
+Strict mode requires Linux x86-64 or AArch64, the default filesystem and mounted `/proc/self/fd`. It uses JDK 25's Foreign Function & Memory API to call libc; no downloaded native library, compiler or private JDK API is needed. Enable native access for the session module:
+
+```text
+java --enable-native-access=ai.singlr.session --module-path ... --module your.application/your.Main
+```
+
+For a classpath application, use `java --enable-native-access=ALL-UNNAMED -cp ... your.Main`. Maven tests configure these grants automatically. The host grant is not propagated to `JvmSandbox` child JVMs. Construction fails closed when native access, the filesystem or the platform is unsupported, including macOS and Windows; there is no automatic weaker fallback.
+
+`new WorkspaceRoot(root, false)` is the explicit, portable **trusted-workspace** opt-out, never a preset default. It permits symlinks outside the root and does not provide race-resistant ancestor confinement. It does not relax filesystem memory's requirements.
+
+Descriptor confinement prevents symlink substitution from redirecting an operation. It is not a filesystem snapshot: an opened inode remains the operation's target after a rename, and another writer can still edit its contents. Hard links, bind mounts, a hostile kernel or a process that can modify the host's mount namespace require OS-level isolation. These file tools are not a sandbox for arbitrary code execution.
 
 ### HTTP surface defaults
 

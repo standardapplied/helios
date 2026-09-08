@@ -7,6 +7,7 @@ package ai.singlr.session.files;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
@@ -60,24 +61,48 @@ public record FileFingerprint(Instant mtime, long size, String sha256) {
    * digest. Memory footprint is constant ({@value #READ_BUFFER_BYTES}-byte buffer) regardless of
    * file size, so multi-gigabyte files do not pressure the session heap.
    *
-   * @param path the file; must exist and be a regular file
+   * <p>This overload is for host-authorised paths, not model-supplied paths: it rejects only leaf
+   * symlinks. Workspace callers must use {@link #of(WorkspaceRoot, Path, long)}.
+   *
+   * @param path the host-authorised file; must exist and be a regular file
    * @return a fresh fingerprint
    * @throws NullPointerException if {@code path} is null
    * @throws IOException if reading fails
    */
   public static FileFingerprint of(Path path) throws IOException {
     Objects.requireNonNull(path, "path must not be null");
+    try (var in = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
+      return compute(in, Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toInstant());
+    }
+  }
+
+  /**
+   * Fingerprint a confined regular file, enforcing a limit on the pinned target and bytes read.
+   *
+   * @param workspace the confinement boundary
+   * @param path a resolved workspace path
+   * @param maxBytes maximum source size
+   * @return the content fingerprint
+   * @throws IOException if opening, reading or size validation fails
+   */
+  public static FileFingerprint of(WorkspaceRoot workspace, Path path, long maxBytes)
+      throws IOException {
+    var mtime = workspace.attributes(path).lastModifiedTime().toInstant();
+    try (var in = workspace.newInputStream(path, maxBytes)) {
+      return compute(in, mtime);
+    }
+  }
+
+  private static FileFingerprint compute(InputStream in, Instant mtime) throws IOException {
     var digest = newSha256();
     long size = 0L;
     var buffer = new byte[READ_BUFFER_BYTES];
-    try (InputStream in = Files.newInputStream(path);
-        var digestStream = new DigestInputStream(in, digest)) {
+    try (var digestStream = new DigestInputStream(in, digest)) {
       int read;
       while ((read = digestStream.read(buffer)) != -1) {
         size += read;
       }
     }
-    var mtime = Files.getLastModifiedTime(path).toInstant();
     return new FileFingerprint(mtime, size, HexFormat.of().formatHex(digest.digest()));
   }
 

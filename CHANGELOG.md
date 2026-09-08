@@ -4,6 +4,29 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Security
+
+- Workspace and memory I/O now use descriptor-relative Linux operations through JDK 25 FFM.
+  Every ancestor is opened no-follow, files are pinned with `O_PATH` and verified regular before
+  I/O, and directory creation/deletion use `mkdirat`/`unlinkat`. This closes ancestor-symlink races
+  without opening FIFOs or devices. Walkers and `Ls` enumerate pinned directories; bounded reads
+  validate the opened target and enforce limits during growth. `Grep` sniffs and searches one
+  bounded buffer; `Read` classifies MIME without platform pathname probes. Host native-access
+  grants are not forwarded to sandbox child JVMs.
+- **Compatibility:** strict workspaces and filesystem memory require Linux x86-64/AArch64,
+  mounted `/proc/self/fd`, the default filesystem and `--enable-native-access=ai.singlr.session`
+  (module path) or `--enable-native-access=ALL-UNNAMED` (classpath). Unsupported configurations
+  fail closed. The explicit portable `new WorkspaceRoot(root, false)` remains weaker trusted
+  mode, never a preset default; filesystem memory remains strict even with that workspace.
+  New files/directories are owner-only; strict output rejects `DELETE_ON_CLOSE`. Default output
+  create/truncate semantics and covariant option arrays are preserved.
+- Roots and resolved paths are canonical, including explicitly configured aliases. Outside,
+  dangling and looping links are rejected before side effects. In-workspace aliases remain
+  usable by workspace tools, but every symlink in a memory path is refused, including aliases
+  within the workspace. Memory reads require valid UTF-8; unencodable writes fail before opening
+  a target or creating directories. `Glob` no longer lists symlinks. Confinement is not a snapshot
+  or protection against hard links, mount manipulation or in-place edits by another writer.
+
 ### Fixed
 
 - `CancellationToken` registration is now linearizable and exactly-once. A private lock guards the

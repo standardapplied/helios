@@ -4,13 +4,16 @@
  */
 package ai.singlr.session.memory;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import ai.singlr.session.files.WorkspaceRoot;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardOpenOption;
@@ -25,13 +28,21 @@ import java.util.Objects;
  * <workspace>/.agent/memory} under an existing {@link WorkspaceRoot}. The {@code /memories/}
  * virtual prefix is stripped and re-joined when listing, so the model never sees the on-disk path.
  *
- * <p>The backend creates the root directory lazily — first write would, but Phase 2 only exposes
- * {@code view} + {@code list}. {@code view} on a missing entry throws {@link NoSuchFileException};
- * {@code list} on a missing root returns the empty list (a fresh workspace has nothing to list yet,
- * which should not be an error).
+ * <p>The backend creates the root directory lazily on first write. {@code view} on a missing entry
+ * throws {@link NoSuchFileException}; {@code list} on a missing root returns the empty list (a
+ * fresh workspace has nothing to list yet, which should not be an error).
  *
- * <p>All paths route through {@link WorkspaceRoot#resolveSafe(String)}, so symlinks pointing
- * outside the memory root are refused by the path-jail.
+ * <p>Memory has a strictly narrower confinement contract than the workspace tools. Every path
+ * routes through {@link WorkspaceRoot#resolveSafe(String)} and must canonicalise to exactly its
+ * lexical location under the canonical memory root, so a symlink anywhere below {@code
+ * .agent/memory} — even one pointing at another file inside the workspace — is refused before any
+ * side effect, whichever {@code confineSymlinks} mode the workspace uses. Reads, writes, creation,
+ * deletion and listing use strict descriptor-relative workspace operations, including when the
+ * supplied workspace is in trusted mode. The strict platform and native-access requirements apply.
+ *
+ * <p>Content is strict UTF-8: a file that is not valid UTF-8 fails to read rather than being
+ * silently rewritten with replacement characters, and content that cannot be encoded (unpaired
+ * surrogates) is rejected before the target is opened, so an existing entry is never truncated.
  */
 public final class FileSystemMemoryBackend implements MemoryBackend {
 
@@ -39,10 +50,12 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
   public static final String STORAGE_SUBDIR = ".agent/memory";
 
   private final WorkspaceRoot workspace;
+  private final WorkspaceRoot files;
   private final Path memoryRoot;
 
   private FileSystemMemoryBackend(WorkspaceRoot workspace) {
     this.workspace = Objects.requireNonNull(workspace, "workspace must not be null");
+    this.files = workspace.confineSymlinks() ? workspace : WorkspaceRoot.of(workspace.root());
     this.memoryRoot = workspace.root().resolve(STORAGE_SUBDIR).normalize();
   }
 
@@ -76,14 +89,7 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
 
   @Override
   public String view(String path) throws IOException {
-    var resolved = resolveMemoryPath(path);
-    if (!Files.exists(resolved)) {
-      throw new NoSuchFileException(path);
-    }
-    if (!Files.isRegularFile(resolved)) {
-      throw new IOException("memory entry is not a regular file: " + path);
-    }
-    return Files.readString(resolved, StandardCharsets.UTF_8);
+    return read(path, resolveMemoryPath(path));
   }
 
   @Override
@@ -94,32 +100,25 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
       throw new IllegalArgumentException(
           "prefix must start with " + PREFIX + ", got '" + prefix + "'");
     }
-    if (!Files.exists(memoryRoot)) {
+    var start = confine(normalisedPrefix, normalisedPrefix.substring(PREFIX.length()));
+    BasicFileAttributes attributes;
+    try {
+      attributes = files.attributes(start);
+    } catch (NoSuchFileException missing) {
       return List.of();
     }
-    var rel = normalisedPrefix.substring(PREFIX.length());
-    Path start;
-    if (rel.isEmpty()) {
-      start = memoryRoot;
-    } else {
-      start = workspace.resolveSafe(STORAGE_SUBDIR + "/" + rel);
-      if (!start.startsWith(memoryRoot)) {
-        throw new IllegalArgumentException("prefix escapes memory root: " + prefix);
-      }
-      if (!Files.exists(start)) {
-        return List.of();
-      }
-    }
-    if (Files.isRegularFile(start)) {
+    if (attributes.isRegularFile()) {
       return List.of(toMemoryPath(start));
     }
     var out = new ArrayList<String>();
-    Files.walkFileTree(
+    files.walkFileTree(
         start,
         new SimpleFileVisitor<>() {
           @Override
           public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-            out.add(toMemoryPath(file));
+            if (attrs.isRegularFile()) {
+              out.add(toMemoryPath(file));
+            }
             return FileVisitResult.CONTINUE;
           }
 
@@ -136,16 +135,14 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
   public void create(String path, String content) throws IOException {
     Objects.requireNonNull(content, "content must not be null");
     var resolved = resolveMemoryPath(path);
-    if (Files.exists(resolved)) {
+    var bytes = encode(content);
+    try {
+      files.attributes(resolved);
       throw new FileAlreadyExistsException(path);
+    } catch (NoSuchFileException missing) {
     }
-    Files.createDirectories(resolved.getParent());
-    Files.writeString(
-        resolved,
-        content,
-        StandardCharsets.UTF_8,
-        StandardOpenOption.CREATE_NEW,
-        StandardOpenOption.WRITE);
+    files.createDirectories(resolved.getParent());
+    write(resolved, bytes, StandardOpenOption.CREATE_NEW);
   }
 
   @Override
@@ -156,10 +153,7 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
     }
     Objects.requireNonNull(newString, "newString must not be null");
     var resolved = resolveMemoryPath(path);
-    if (!Files.exists(resolved)) {
-      throw new NoSuchFileException(path);
-    }
-    var content = Files.readString(resolved, StandardCharsets.UTF_8);
+    var content = read(path, resolved);
     var first = content.indexOf(oldString);
     if (first < 0) {
       throw new IOException("strReplace: oldString not found in " + path);
@@ -173,22 +167,14 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
     }
     var updated =
         content.substring(0, first) + newString + content.substring(first + oldString.length());
-    Files.writeString(
-        resolved,
-        updated,
-        StandardCharsets.UTF_8,
-        StandardOpenOption.TRUNCATE_EXISTING,
-        StandardOpenOption.WRITE);
+    write(resolved, updated, StandardOpenOption.TRUNCATE_EXISTING);
   }
 
   @Override
   public void insert(String path, int lineNumber, String content) throws IOException {
     Objects.requireNonNull(content, "content must not be null");
     var resolved = resolveMemoryPath(path);
-    if (!Files.exists(resolved)) {
-      throw new NoSuchFileException(path);
-    }
-    var existing = Files.readString(resolved, StandardCharsets.UTF_8);
+    var existing = read(path, resolved);
     var lines = new ArrayList<>(List.of(existing.split("\n", -1)));
     // split("\n", -1) on "" yields [""] — a single empty trailing element. Drop it for empty files
     // so a 1-line file becomes [singleLine] not [singleLine, ""].
@@ -209,33 +195,27 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
     if (existing.endsWith("\n") || existing.isEmpty()) {
       rebuilt = rebuilt + "\n";
     }
-    Files.writeString(
-        resolved,
-        rebuilt,
-        StandardCharsets.UTF_8,
-        StandardOpenOption.TRUNCATE_EXISTING,
-        StandardOpenOption.WRITE);
+    write(resolved, rebuilt, StandardOpenOption.TRUNCATE_EXISTING);
   }
 
   @Override
   public void delete(String path) throws IOException {
     var resolved = resolveMemoryPath(path);
-    if (!Files.exists(resolved)) {
-      throw new NoSuchFileException(path);
-    }
-    if (Files.isDirectory(resolved)) {
+    if (files.attributes(resolved).isDirectory()) {
       throw new IOException("delete: refusing to delete a directory: " + path);
     }
-    Files.delete(resolved);
+    files.deleteFile(resolved);
   }
 
   /**
-   * Resolve a {@code /memories/...} path to an on-disk path, validating the prefix and routing
-   * through the workspace's path-jail.
+   * Resolve a {@code /memories/...} path to an on-disk path, validating the prefix, routing through
+   * the workspace's path-jail, and requiring the canonical location to equal the lexical one under
+   * the memory root so no symlink component is ever traversed.
    *
    * @param path the memory path; non-null
-   * @return the absolute, normalised on-disk path
-   * @throws IllegalArgumentException if {@code path} is malformed
+   * @return the absolute, canonical on-disk path
+   * @throws IllegalArgumentException if {@code path} is malformed, escapes the memory root, or
+   *     traverses a symlink
    */
   Path resolveMemoryPath(String path) {
     Objects.requireNonNull(path, "path must not be null");
@@ -246,11 +226,51 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
     if (rel.isEmpty()) {
       throw new IllegalArgumentException("path must name a file under " + PREFIX);
     }
-    var resolved = workspace.resolveSafe(STORAGE_SUBDIR + "/" + rel);
-    if (!resolved.startsWith(memoryRoot)) {
+    return confine(path, rel);
+  }
+
+  private Path confine(String path, String rel) {
+    var lexical = memoryRoot.resolve(rel).normalize();
+    if (!lexical.startsWith(memoryRoot)) {
       throw new IllegalArgumentException("path escapes memory root: " + path);
     }
+    var resolved = files.resolveSafe(lexical.toString());
+    if (!resolved.equals(lexical)) {
+      throw new IllegalArgumentException("path traverses a symlink inside memory: " + path);
+    }
     return resolved;
+  }
+
+  private String read(String path, Path resolved) throws IOException {
+    BasicFileAttributes attrs;
+    try {
+      attrs = files.attributes(resolved);
+    } catch (NoSuchFileException e) {
+      throw new NoSuchFileException(path);
+    }
+    if (!attrs.isRegularFile()) {
+      throw new IOException("memory entry is not a regular file: " + path);
+    }
+    try (var in = files.newInputStream(resolved)) {
+      return UTF_8.newDecoder().decode(ByteBuffer.wrap(in.readAllBytes())).toString();
+    }
+  }
+
+  private void write(Path resolved, String content, OpenOption mode) throws IOException {
+    write(resolved, encode(content), mode);
+  }
+
+  private static byte[] encode(String content) throws IOException {
+    var encoded = UTF_8.newEncoder().encode(CharBuffer.wrap(content));
+    var bytes = new byte[encoded.remaining()];
+    encoded.get(bytes);
+    return bytes;
+  }
+
+  private void write(Path resolved, byte[] bytes, OpenOption mode) throws IOException {
+    try (var out = files.newOutputStream(resolved, mode, StandardOpenOption.WRITE)) {
+      out.write(bytes);
+    }
   }
 
   private String toMemoryPath(Path absolute) {

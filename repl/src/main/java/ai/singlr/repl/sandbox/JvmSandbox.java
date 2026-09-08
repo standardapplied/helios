@@ -657,6 +657,9 @@ public final class JvmSandbox implements Sandbox {
   }
 
   static boolean shouldPropagateJvmArg(String arg) {
+    if (arg.startsWith("--enable-native-access")) {
+      return false;
+    }
     if (arg.startsWith("-Xmx") || arg.startsWith("-Xms")) {
       return false;
     }

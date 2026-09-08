@@ -15,11 +15,13 @@ import ai.singlr.session.tools.ToolArgs;
 import ai.singlr.session.tools.ToolBinding;
 import ai.singlr.session.tools.ToolCategory;
 import ai.singlr.session.tools.ToolPermissionKey;
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -50,6 +52,8 @@ import java.util.regex.PatternSyntaxException;
  *   <li>Total result cap: {@code 1000} match lines.
  *   <li>Binary detection: files with a NUL byte in the first 8 KiB are skipped.
  *   <li>Hidden directories ({@code ".git"} etc.) are pruned during traversal.
+ *   <li>Only regular files are opened: symlinks, FIFOs and device files discovered during the walk
+ *       are skipped, and every open is no-follow via {@link WorkspaceRoot#newInputStream(Path)}.
  * </ul>
  */
 public final class GrepTool {
@@ -149,14 +153,14 @@ public final class GrepTool {
     var includeArg = ToolArgs.stringArg(args, "include");
     try {
       var root = workspace.resolveSafe(pathArg);
-      if (!Files.isDirectory(root)) {
+      if (!workspace.attributes(root).isDirectory()) {
         return ToolResult.failure("Grep: not a directory: " + workspace.relativize(root));
       }
       var includeMatcher =
           includeArg.isEmpty() ? null : GlobMatchers.compile(root.getFileSystem(), includeArg);
       var out = new StringBuilder();
       var matchCount = new int[] {0};
-      Files.walkFileTree(
+      workspace.walkFileTree(
           root,
           new SimpleFileVisitor<>() {
             @Override
@@ -175,7 +179,7 @@ public final class GrepTool {
               if (ctx.cancellation().isCancelled() || matchCount[0] >= MAX_MATCHES) {
                 return FileVisitResult.TERMINATE;
               }
-              if (attrs.size() > MAX_FILE_BYTES) {
+              if (!attrs.isRegularFile() || attrs.size() > MAX_FILE_BYTES) {
                 return FileVisitResult.CONTINUE;
               }
               if (includeMatcher != null) {
@@ -185,12 +189,20 @@ public final class GrepTool {
                 }
               }
               try {
-                if (isBinary(file)) {
+                byte[] bytes;
+                try (var in = workspace.newInputStream(file, MAX_FILE_BYTES)) {
+                  bytes = in.readAllBytes();
+                }
+                if (isBinary(bytes)) {
                   return FileVisitResult.CONTINUE;
                 }
                 var relPath = workspace.relativize(file);
                 var lineNum = 0;
-                try (var reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+                try (var reader =
+                    new BufferedReader(
+                        new InputStreamReader(
+                            new ByteArrayInputStream(bytes),
+                            StandardCharsets.UTF_8.newDecoder()))) {
                   String line;
                   while ((line = reader.readLine()) != null) {
                     lineNum++;
@@ -238,16 +250,12 @@ public final class GrepTool {
     }
   }
 
-  private static boolean isBinary(Path file) throws IOException {
-    try (var in = Files.newInputStream(file)) {
-      var buf = new byte[BINARY_SNIFF_BYTES];
-      var n = in.read(buf);
-      for (var i = 0; i < n; i++) {
-        if (buf[i] == 0) {
-          return true;
-        }
+  private static boolean isBinary(byte[] bytes) {
+    for (var i = 0; i < Math.min(bytes.length, BINARY_SNIFF_BYTES); i++) {
+      if (bytes[i] == 0) {
+        return true;
       }
-      return false;
     }
+    return false;
   }
 }

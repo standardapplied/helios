@@ -20,7 +20,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -47,21 +47,21 @@ import java.util.Objects;
  * Text reading is bounded by <b>three</b> independent caps:
  *
  * <ul>
- *   <li>{@link #MAX_FILE_SIZE_BYTES} on the source file — pre-checked via {@link Files#size} before
- *       any I/O. A 500 MB log fails before allocating a buffer.
+ *   <li>{@link #MAX_FILE_SIZE_BYTES} on the source file — pre-checked from the leaf's own
+ *       (no-follow) attributes before any I/O. A 500 MB log fails before allocating a buffer.
  *   <li>{@link #MAX_LINE_BYTES} on each emitted line — a 100 MB single-line JSON gets truncated
  *       with a marker rather than blowing the model's context.
  *   <li>{@link #MAX_OUTPUT_BYTES} on the total output payload — the line cap is a ceiling, not a
  *       guarantee against pathological per-line growth.
  * </ul>
  *
- * The reader streams the file via {@link BufferedReader} and stops at the first cap hit; the rest
- * of the file is never touched. The truncation marker teaches the model what to try next ("use
- * {@code offset} to continue, or {@code Grep} for a narrower target").
+ * Text rendering streams through {@link BufferedReader} and stops at the first output cap hit;
+ * fingerprinting separately reads the bounded source. The truncation marker explains what to try
+ * next ("use {@code offset} to continue, or {@code Grep} for a narrower target").
  *
  * <h2>Multimodal dispatch</h2>
  *
- * {@link Files#probeContentType} drives a three-way dispatch:
+ * Extension-based MIME classification and a bounded header sniff drive a three-way dispatch:
  *
  * <ul>
  *   <li>Text-like MIME ({@code text/*}, {@code application/json}, {@code application/xml}, {@code
@@ -225,12 +225,15 @@ public final class ReadTool {
     } catch (WorkspaceRoot.WorkspaceEscapeException e) {
       return ToolResult.failure("Read: " + e.getMessage());
     }
-    if (!Files.isRegularFile(resolved)) {
-      return ToolResult.failure("Read: not a regular file: " + workspace.relativize(resolved));
-    }
     long size;
     try {
-      size = Files.size(resolved);
+      var attrs = workspace.attributes(resolved);
+      if (!attrs.isRegularFile()) {
+        return ToolResult.failure("Read: not a regular file: " + workspace.relativize(resolved));
+      }
+      size = attrs.size();
+    } catch (NoSuchFileException e) {
+      return ToolResult.failure("Read: not a regular file: " + workspace.relativize(resolved));
     } catch (IOException e) {
       return ToolResult.failure("Read: I/O error reading size: " + e.getMessage());
     }
@@ -243,7 +246,7 @@ public final class ReadTool {
               + "). Use a Grep over the relevant pattern or split the file before reading.");
     }
     try {
-      var fingerprint = FileFingerprint.of(resolved);
+      var fingerprint = FileFingerprint.of(workspace, resolved, MAX_FILE_SIZE_BYTES);
       tracker.recordRead(resolved, fingerprint);
     } catch (IOException e) {
       return ToolResult.failure("Read: I/O error fingerprinting: " + e.getMessage());
@@ -251,9 +254,9 @@ public final class ReadTool {
 
     var mimeType = detectMimeType(resolved);
     if (isAttachableBinary(mimeType)) {
-      return readBinaryAsAttachment(resolved, mimeType, size, workspace.relativize(resolved));
+      return readBinaryAsAttachment(workspace, resolved, mimeType, size);
     }
-    if (isTextLike(mimeType) || isLikelyText(resolved)) {
+    if (isTextLike(mimeType) || isLikelyText(workspace, resolved)) {
       var offset = ToolArgs.intArg(args, "offset", 1);
       var limit = ToolArgs.intArg(args, "limit", DEFAULT_LIMIT);
       if (offset < 1) {
@@ -262,7 +265,7 @@ public final class ReadTool {
       if (limit < 1) {
         return ToolResult.failure("Read: 'limit' must be >= 1, got " + limit);
       }
-      return readTextStreaming(resolved, offset, limit, redactor);
+      return readTextStreaming(workspace, resolved, offset, limit, redactor);
     }
     return ToolResult.failure(
         "Read: refusing to decode binary file as text (detected MIME "
@@ -277,7 +280,8 @@ public final class ReadTool {
    * #MAX_OUTPUT_BYTES}; either cap appends a truncation marker that teaches the model the next
    * move. The remainder of the file is never read once a cap fires.
    */
-  private static ToolResult readTextStreaming(Path file, int offset, int limit, Redactor redactor) {
+  private static ToolResult readTextStreaming(
+      WorkspaceRoot workspace, Path file, int offset, int limit, Redactor redactor) {
     var out = new StringBuilder();
     int linesEmitted = 0;
     long currentLine = 0;
@@ -286,7 +290,8 @@ public final class ReadTool {
     boolean truncatedAnyLine = false;
     try (var reader =
         new BufferedReader(
-            new InputStreamReader(Files.newInputStream(file), StandardCharsets.UTF_8))) {
+            new InputStreamReader(
+                workspace.newInputStream(file, MAX_FILE_SIZE_BYTES), StandardCharsets.UTF_8))) {
       String line;
       while ((line = reader.readLine()) != null) {
         currentLine++;
@@ -347,7 +352,8 @@ public final class ReadTool {
    * and what to do next, rather than racing the API to a cryptic provider 400.
    */
   private static ToolResult readBinaryAsAttachment(
-      Path file, String mimeType, long size, String relPath) {
+      WorkspaceRoot workspace, Path file, String mimeType, long size) {
+    var relPath = workspace.relativize(file);
     var limit = mimeType.startsWith("image/") ? MAX_IMAGE_BYTES : MAX_PDF_BYTES;
     if (size > limit) {
       return ToolResult.failure(
@@ -367,7 +373,9 @@ public final class ReadTool {
     }
     byte[] bytes;
     try {
-      bytes = Files.readAllBytes(file);
+      try (var in = workspace.newInputStream(file, limit)) {
+        bytes = in.readAllBytes();
+      }
     } catch (IOException e) {
       return ToolResult.failure("Read: I/O error reading attachment bytes: " + e.getMessage());
     }
@@ -383,20 +391,10 @@ public final class ReadTool {
   }
 
   /**
-   * Probe the file's MIME type. Falls back to extension sniffing when {@link
-   * Files#probeContentType} returns null — the JDK's probe relies on the host platform's registry,
-   * which can be sparse on minimal containers. Returns {@code null} when nothing recognises the
-   * file.
+   * Classify by extension without invoking platform detectors that might reopen an unconfined path.
+   * Returns {@code null} for unknown extensions; the caller sniffs a confined stream.
    */
   static String detectMimeType(Path file) {
-    try {
-      var probed = Files.probeContentType(file);
-      if (probed != null) {
-        return probed;
-      }
-    } catch (IOException ignored) {
-      // probeContentType is best-effort; fall through to extension sniffing.
-    }
     var name = file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
     return switch (extensionOf(name)) {
       case "pdf" -> "application/pdf";
@@ -455,8 +453,8 @@ public final class ReadTool {
    * serve uncategorised-but-clearly-text files (e.g. config files without standard extensions) as
    * text rather than failing.
    */
-  static boolean isLikelyText(Path file) {
-    try (InputStream in = Files.newInputStream(file)) {
+  static boolean isLikelyText(WorkspaceRoot workspace, Path file) {
+    try (InputStream in = workspace.newInputStream(file, MAX_FILE_SIZE_BYTES)) {
       var buf = new byte[BINARY_SNIFF_BYTES];
       var n = in.readNBytes(buf, 0, buf.length);
       for (var i = 0; i < n; i++) {

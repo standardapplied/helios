@@ -16,7 +16,6 @@ import ai.singlr.session.tools.ToolCategory;
 import ai.singlr.session.tools.ToolPermissionKey;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -105,12 +104,12 @@ public final class GlobTool {
     var pathArg = ToolArgs.pathArg(args);
     try {
       var root = workspace.resolveSafe(pathArg);
-      if (!Files.isDirectory(root)) {
+      if (!workspace.attributes(root).isDirectory()) {
         return ToolResult.failure("Glob: not a directory: " + workspace.relativize(root));
       }
       var matcher = GlobMatchers.compile(root.getFileSystem(), pattern);
       var hits = new ArrayList<Match>();
-      Files.walkFileTree(
+      workspace.walkFileTree(
           root,
           new SimpleFileVisitor<>() {
             @Override
@@ -128,6 +127,9 @@ public final class GlobTool {
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
               if (ctx.cancellation().isCancelled()) {
                 return FileVisitResult.TERMINATE;
+              }
+              if (!attrs.isRegularFile()) {
+                return FileVisitResult.CONTINUE;
               }
               var rel = root.relativize(file);
               if (matcher.matches(rel) && hits.size() < MAX_RESULTS) {
