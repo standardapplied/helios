@@ -6,48 +6,72 @@ package ai.singlr.session.files;
 
 import ai.singlr.core.common.Strings;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * Bounded filesystem root the file tools resolve every model-supplied path against. Paths that
- * escape the root — either lexically via {@code ..} or via symlink dereference — surface as a
- * {@link WorkspaceEscapeException} rather than reaching the underlying I/O layer.
+ * Bounded filesystem root the file tools resolve every model-supplied path against, and the single
+ * confinement contract every workspace file operation goes through. Paths that escape the root —
+ * lexically via {@code ..}, or via a symlink anywhere in the path — surface as a {@link
+ * WorkspaceEscapeException} rather than reaching the underlying I/O layer.
  *
- * <p>Two-stage check: lexical normalize + {@code startsWith(root)} catches {@code ..}; if {@code
- * confineSymlinks} is true and the file exists, a follow-up {@link Path#toRealPath(LinkOption...)}
- * confirms the real path is still under the real root. The lexical check runs first so it can
- * refuse a non-existent path that escapes lexically — {@code toRealPath} would have thrown {@code
- * NoSuchFileException} on the same input.
+ * <p>{@link #resolveSafe(String)} runs two stages. The lexical stage normalises the input and
+ * requires {@code startsWith(root)}, which refuses {@code ..} and absolute paths without touching
+ * the filesystem. The canonical stage then resolves the deepest <em>existing</em> prefix of the
+ * path with {@link Path#toRealPath(LinkOption...)}; dangling and looping links are refused
+ * outright, and when {@code confineSymlinks} is true the result must stay under the (canonical)
+ * root. The returned path is that canonical prefix joined with the not-yet-existing suffix, so it
+ * never contains a symlink component at resolution time — a new leaf under an ancestor that links
+ * outside the root is refused before any side effect.
  *
- * <p>{@link #resolveSafe(String)} accepts either a relative path (resolved against the root) or an
- * absolute path (must already be under the root). The sandbox is the security boundary; this is
- * defense-in-depth.
+ * <p>Because no JDK API exposes {@code openat2(RESOLVE_BENEATH)}, resolution alone cannot stop
+ * another actor from swapping a component between resolve and open. The open primitives here
+ * ({@link #attributes}, {@link #newInputStream}, {@link #newOutputStream}) close the leaf-level
+ * window by always passing {@link LinkOption#NOFOLLOW_LINKS}: a leaf replaced by a symlink fails to
+ * open instead of being followed. Callers must additionally check {@link
+ * BasicFileAttributes#isRegularFile()} before opening so FIFOs and device files are never opened.
+ * An ancestor directory swapped for a symlink in that window remains a residual the platform cannot
+ * close from Java; OS-level sandboxing stays the authoritative boundary.
  *
- * <p>{@code root} is normalised + absolutised at construction time, so {@link #root()} can be
- * compared safely.
+ * <p>{@code confineSymlinks=false} is the explicitly weaker trusted-workspace mode: paths are still
+ * canonicalised (so the open primitives keep working no-follow) but the canonical result may lie
+ * anywhere a symlink points, including outside the root. It is never the default.
+ *
+ * <p>{@code root} is canonicalised at construction time, so {@link #root()} can be compared safely;
+ * a root reached through a symlinked ancestor (e.g. {@code /tmp} on macOS) is accepted and reported
+ * by its real path.
  *
  * @param root the workspace root directory; must exist and be a directory at construction
- * @param confineSymlinks when {@code true}, resolved paths are checked via {@code toRealPath} to
- *     refuse symlinks that point outside the root; when {@code false}, only the lexical check runs
+ * @param confineSymlinks when {@code true}, every canonicalised path is required to stay under the
+ *     root; when {@code false}, only the lexical check bounds the request
  */
 public record WorkspaceRoot(Path root, boolean confineSymlinks) {
 
   /**
-   * Canonical constructor; normalises and absolutises {@code root}.
+   * Canonical constructor; canonicalises {@code root}.
    *
    * @throws NullPointerException if {@code root} is null
-   * @throws IllegalArgumentException if {@code root} does not exist as a directory
+   * @throws IllegalArgumentException if {@code root} does not exist as a directory or cannot be
+   *     canonicalised
    */
   public WorkspaceRoot {
     Objects.requireNonNull(root, "root must not be null");
     if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) {
       throw new IllegalArgumentException("root is not a directory: " + root);
     }
-    root = root.toAbsolutePath().normalize();
+    try {
+      root = root.toRealPath();
+    } catch (IOException e) {
+      throw new IllegalArgumentException("root cannot be canonicalised: " + root, e);
+    }
   }
 
   /**
@@ -63,13 +87,15 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
   /**
    * Resolve a model-supplied path against the root. The input may be a relative path (resolved
    * against the root) or an absolute path that's already under the root; either way the resolved
-   * path is normalised and verified to be inside the root.
+   * path is normalised, verified to be inside the root, and canonicalised so it contains no symlink
+   * component.
    *
    * @param requested the input path; non-null, non-blank
    * @return the resolved absolute, normalised path inside the workspace
    * @throws NullPointerException if {@code requested} is null
    * @throws WorkspaceEscapeException if the path is blank, syntactically invalid, escapes the root
-   *     lexically, or (when symlinks are confined and the path exists) escapes via a symlink
+   *     lexically, traverses a dangling or looping symlink, or (when symlinks are confined)
+   *     traverses a symlink that leads outside the root
    */
   public Path resolveSafe(String requested) {
     Objects.requireNonNull(requested, "requested must not be null");
@@ -87,18 +113,79 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
     if (!resolved.startsWith(root)) {
       throw new WorkspaceEscapeException("path escapes workspace root: " + requested);
     }
-    if (confineSymlinks && Files.exists(resolved, LinkOption.NOFOLLOW_LINKS)) {
-      try {
-        var real = resolved.toRealPath();
-        var realRoot = root.toRealPath();
-        if (!real.startsWith(realRoot)) {
-          throw new WorkspaceEscapeException(
-              "path escapes workspace root via symlink: " + requested);
-        }
-      } catch (IOException e) {
-        throw new WorkspaceEscapeException(
-            "failed to resolve real path for " + requested + ": " + e.getMessage());
-      }
+    return canonicalise(resolved, requested);
+  }
+
+  private Path canonicalise(Path resolved, String requested) {
+    var existing = resolved;
+    while (!Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+      existing = existing.getParent();
+    }
+    Path real;
+    try {
+      real = existing.toRealPath();
+    } catch (IOException e) {
+      throw new WorkspaceEscapeException(
+          "path traverses a dangling or looping symlink: " + requested + ": " + e.getMessage());
+    }
+    if (confineSymlinks && !real.startsWith(root)) {
+      throw new WorkspaceEscapeException("path escapes workspace root via symlink: " + requested);
+    }
+    return real.resolve(existing.relativize(resolved));
+  }
+
+  /**
+   * Attributes of the entry at {@code resolved} without following a symlink at the leaf. Check
+   * {@link BasicFileAttributes#isRegularFile()} before opening.
+   *
+   * @param resolved a path previously returned by {@link #resolveSafe(String)}
+   * @return the leaf's own attributes
+   * @throws IllegalArgumentException if {@code resolved} was not resolved through this root
+   * @throws java.nio.file.NoSuchFileException if nothing exists at {@code resolved}
+   * @throws IOException if the attributes cannot be read
+   */
+  public BasicFileAttributes attributes(Path resolved) throws IOException {
+    return Files.readAttributes(
+        requireResolved(resolved), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+  }
+
+  /**
+   * Open {@code resolved} for reading without following a symlink at the leaf.
+   *
+   * @param resolved a path previously returned by {@link #resolveSafe(String)}
+   * @return an open stream
+   * @throws IllegalArgumentException if {@code resolved} was not resolved through this root
+   * @throws IOException if the leaf is a symlink, is missing, or cannot be opened
+   */
+  public InputStream newInputStream(Path resolved) throws IOException {
+    return Files.newInputStream(requireResolved(resolved), LinkOption.NOFOLLOW_LINKS);
+  }
+
+  /**
+   * Open {@code resolved} for writing without following a symlink at the leaf. Callers choose the
+   * create/truncate semantics via {@code options} ({@link
+   * java.nio.file.StandardOpenOption#CREATE_NEW} for create, {@link
+   * java.nio.file.StandardOpenOption#TRUNCATE_EXISTING} for replace).
+   *
+   * @param resolved a path previously returned by {@link #resolveSafe(String)}
+   * @param options open options; {@link LinkOption#NOFOLLOW_LINKS} is always added
+   * @return an open stream
+   * @throws IllegalArgumentException if {@code resolved} was not resolved through this root
+   * @throws IOException if the leaf is a symlink or cannot be opened with {@code options}
+   */
+  public OutputStream newOutputStream(Path resolved, OpenOption... options) throws IOException {
+    var withNoFollow = Arrays.copyOf(options, options.length + 1);
+    withNoFollow[options.length] = LinkOption.NOFOLLOW_LINKS;
+    return Files.newOutputStream(requireResolved(resolved), withNoFollow);
+  }
+
+  private Path requireResolved(Path resolved) {
+    Objects.requireNonNull(resolved, "resolved must not be null");
+    if (!resolved.isAbsolute()
+        || !resolved.normalize().equals(resolved)
+        || (confineSymlinks && !resolved.startsWith(root))) {
+      throw new IllegalArgumentException(
+          "path was not resolved through this workspace root: " + resolved);
     }
     return resolved;
   }

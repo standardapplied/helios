@@ -129,6 +129,9 @@ public final class GlobTool {
               if (ctx.cancellation().isCancelled()) {
                 return FileVisitResult.TERMINATE;
               }
+              if (!attrs.isRegularFile()) {
+                return FileVisitResult.CONTINUE;
+              }
               var rel = root.relativize(file);
               if (matcher.matches(rel) && hits.size() < MAX_RESULTS) {
                 hits.add(

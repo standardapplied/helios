@@ -18,6 +18,8 @@ import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 final class GlobToolTest {
@@ -180,5 +182,21 @@ final class GlobToolTest {
   @Test
   void rejectsNullWorkspace() {
     assertThrows(NullPointerException.class, () -> GlobTool.binding(null));
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void skipsSymlinksDuringWalk(@TempDir Path tmp) throws IOException {
+    var root = Files.createDirectory(tmp.resolve("ws"));
+    var outside = Files.createDirectory(tmp.resolve("outside"));
+    Files.writeString(outside.resolve("secret.md"), "s", StandardCharsets.UTF_8);
+    Files.writeString(root.resolve("real.md"), "r", StandardCharsets.UTF_8);
+    Files.createSymbolicLink(root.resolve("leak.md"), outside.resolve("secret.md"));
+    Files.createSymbolicLink(root.resolve("alias.md"), root.resolve("real.md"));
+    Files.createSymbolicLink(root.resolve("dir.md"), outside);
+    var result =
+        GlobTool.binding(WorkspaceRoot.of(root)).tool().execute(Map.of("pattern", "**/*.md"));
+    assertTrue(result.success(), result.output());
+    assertEquals("real.md\n", result.output());
   }
 }

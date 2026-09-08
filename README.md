@@ -38,7 +38,7 @@ Helios is used in production but has documented limitations that you should unde
 - **Fail-secure defaults.** `RuntimeServer.Builder` binds `127.0.0.1` (loopback) by default — external traffic is explicit opt-in via `withHost("0.0.0.0")`. The HTTP routes are unauthenticated and create real model-spending sessions, so deployers that expose externally should sit behind authenticated fronting infrastructure.
 - **Cooperative cancellation, no `Error` swallowing.** `RetryPolicy` and the session loop catch `Exception`, not `Throwable` — OOM / StackOverflow / LinkageError escape cleanly so the host JVM dies rather than retrying a corrupted process. `Tool.execute` preserves the calling thread's interrupt status when the executor's exception chain carries `InterruptedException`.
 - **Sandboxed subprocess execution with dedicated RPC channel and descendant reaping.** The `JvmSandbox` ↔ host RPC runs on a per-session Unix domain socket bound in a private temp directory (mode 0700); the host accepts exactly one connection then closes the listener, so no other process — including a JShell snippet inside the subprocess — can forge frames by writing to subprocess stdout. (Earlier versions used a `\0RPC:`-prefixed channel multiplexed on stdout, which a snippet could forge via `new PrintStream(new FileOutputStream(FileDescriptor.out))`. C1 in the original review.) Subprocess stdout stays for captured output only and is never parsed as RPC. `JvmSandbox.close()` and its JVM-shutdown-hook path snapshot descendants before killing the parent, then forcibly destroy the snapshot — snippets that call `Runtime.exec(...)` cannot orphan grandchildren past sandbox lifetime. Uninterruptible JShell snippets are escalated through a documented ladder (`Thread.interrupt` → 1s join → `jshell.stop()` → 1s join).
-- **Path-traversal jails on every filesystem boundary.** `WorkspaceRoot` backing the session's `Read` / `Grep` / `Glob` tools (lexical `..`/absolute refusal + `toRealPath` symlink check), `OnnxModelDownloader` (refuses absolute paths and traversal in HuggingFace-supplied filenames), and `CommandGrant` (per-call temp working directory, argv pre-scan refusing registered secrets).
+- **Path-traversal jails on every filesystem boundary.** `WorkspaceRoot` backing the session's `Read` / `Grep` / `Glob` tools and the filesystem memory backend (lexical `..`/absolute refusal + canonicalisation of the deepest existing prefix + no-follow opens), `OnnxModelDownloader` (refuses absolute paths and traversal in HuggingFace-supplied filenames), and `CommandGrant` (per-call temp working directory, argv pre-scan refusing registered secrets).
 - **SQL identifier validation on the persistence schema name.** `PgConfig` rejects schema names that don't match Postgres' unquoted-identifier shape, so configuration-driven schema names cannot inject SQL via the qualifier substitution.
 - **Secret redaction at the documented boundaries.** `CommandGrant` flows model-visible output through a shared `SecretRegistry`-derived `Redactor`; the workspace `Read` and `Grep` tools accept an optional `Redactor` overload that does the same for any file content they return to the model. The REPL `SandboxBindingsListener` (operator telemetry of sandbox working memory) also redacts against the registry. `ModelConfig.toString()` redacts the API key and header values so accidental `log.info("config={}", cfg)` callsites don't leak credentials.
 - **No `Error` propagation from sandbox bindings collection.** `JvmSandboxBootstrap.collectBindings` catches `Throwable` per binding so a malicious `toString()` that throws `StackOverflowError` / `OutOfMemoryError` yields an `<error: …>` stub instead of escaping into the virtual thread's uncaught handler.
@@ -336,7 +336,7 @@ var bindings  = List.of(
     GlobTool.binding(corpus));                     // paths only — no redactor
 ```
 
-Path-jail (`..` / absolute refusal + `toRealPath` symlink check) is built into `WorkspaceRoot`; per-file size caps, per-output byte caps, hidden-directory pruning, and binary skip are built into the tools. `Permission.planMode()` or a curated `Permission` policy enforces read-only at the session level — there is no `Write` tool to disable.
+Path-jail (`..` / absolute refusal + canonicalisation + no-follow opens) is built into `WorkspaceRoot`; per-file size caps, per-output byte caps, hidden-directory pruning, symlink/special-file skipping during walks, and binary skip are built into the tools. `Permission.planMode()` or a curated `Permission` policy enforces read-only at the session level — there is no `Write` tool to disable.
 
 ## Structured Output
 
@@ -576,10 +576,16 @@ The sandbox subprocess RPC runs on a per-session Unix domain socket bound in a p
 
 Every filesystem boundary in the framework refuses traversal. Lexical normalise + `startsWith(root)` first (to reject `..` and absolute paths without dereferencing), then `toRealPath()` to refuse symlink escapes:
 
-- `WorkspaceRoot` (backing the session's `Read` / `Grep` / `Glob` tools at the workspace or any curated-corpus root)
+- `WorkspaceRoot` (backing the session's `Read` / `Grep` / `Glob` tools at the workspace or any curated-corpus root, and `FileSystemMemoryBackend`)
 - `CommandGrant` (per-call temp cwd unless explicit `withCwd`)
 - `OnnxModelDownloader` (HF-supplied file paths against the local model cache)
 - `PgConfig` (Postgres schema name validated against unquoted-identifier shape)
+
+`WorkspaceRoot` is the one confinement contract for workspace file access. `root()` is canonical. `resolveSafe` canonicalises the deepest *existing* prefix of the request, so a not-yet-existing leaf under a symlinked ancestor is judged by where the ancestor really points, and dangling or looping links are refused before any side effect. The returned path contains no symlink component, and every open goes through `WorkspaceRoot.attributes` / `newInputStream` / `newOutputStream`, which always pass `NOFOLLOW_LINKS` — a leaf swapped for a symlink between resolve and open fails to open instead of being followed. Walkers (`Grep`, `Glob`, memory `list`) skip anything that is not a regular file per `lstat`, so symlinks, FIFOs and device files are never opened. Symlinks that stay inside the root are followed and reported at their real path.
+
+`FileSystemMemoryBackend` is strictly narrower: a `/memories/...` path must canonicalise to exactly its lexical location under `<root>/.agent/memory`, so any symlink below the memory root — even one pointing at another file inside the workspace — is refused for `view`, `create`, `strReplace`, `insert`, `delete` and `list`.
+
+`new WorkspaceRoot(root, false)` is the explicitly weaker trusted-workspace mode: the lexical check still bounds the request, but a symlink may lead anywhere. It is never a preset default. Platform note: the JDK exposes no `openat2(RESOLVE_BENEATH)`, so an ancestor *directory* replaced by a symlink in the microseconds between resolve and open is a residual that Java cannot close; OS-level sandboxing remains the authoritative boundary. `NOFOLLOW_LINKS` opens are honoured on Linux, macOS and Windows.
 
 ### HTTP surface defaults
 

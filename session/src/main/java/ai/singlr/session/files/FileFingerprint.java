@@ -7,6 +7,7 @@ package ai.singlr.session.files;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
@@ -60,7 +61,7 @@ public record FileFingerprint(Instant mtime, long size, String sha256) {
    * digest. Memory footprint is constant ({@value #READ_BUFFER_BYTES}-byte buffer) regardless of
    * file size, so multi-gigabyte files do not pressure the session heap.
    *
-   * @param path the file; must exist and be a regular file
+   * @param path the file; must exist and be a regular file. Symlinks are never followed
    * @return a fresh fingerprint
    * @throws NullPointerException if {@code path} is null
    * @throws IOException if reading fails
@@ -70,14 +71,14 @@ public record FileFingerprint(Instant mtime, long size, String sha256) {
     var digest = newSha256();
     long size = 0L;
     var buffer = new byte[READ_BUFFER_BYTES];
-    try (InputStream in = Files.newInputStream(path);
+    try (InputStream in = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS);
         var digestStream = new DigestInputStream(in, digest)) {
       int read;
       while ((read = digestStream.read(buffer)) != -1) {
         size += read;
       }
     }
-    var mtime = Files.getLastModifiedTime(path).toInstant();
+    var mtime = Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toInstant();
     return new FileFingerprint(mtime, size, HexFormat.of().formatHex(digest.digest()));
   }
 

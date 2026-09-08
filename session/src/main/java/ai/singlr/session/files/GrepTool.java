@@ -15,7 +15,9 @@ import ai.singlr.session.tools.ToolArgs;
 import ai.singlr.session.tools.ToolBinding;
 import ai.singlr.session.tools.ToolCategory;
 import ai.singlr.session.tools.ToolPermissionKey;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
@@ -50,6 +52,8 @@ import java.util.regex.PatternSyntaxException;
  *   <li>Total result cap: {@code 1000} match lines.
  *   <li>Binary detection: files with a NUL byte in the first 8 KiB are skipped.
  *   <li>Hidden directories ({@code ".git"} etc.) are pruned during traversal.
+ *   <li>Only regular files are opened: symlinks, FIFOs and device files discovered during the walk
+ *       are skipped, and every open is no-follow via {@link WorkspaceRoot#newInputStream(Path)}.
  * </ul>
  */
 public final class GrepTool {
@@ -175,7 +179,7 @@ public final class GrepTool {
               if (ctx.cancellation().isCancelled() || matchCount[0] >= MAX_MATCHES) {
                 return FileVisitResult.TERMINATE;
               }
-              if (attrs.size() > MAX_FILE_BYTES) {
+              if (!attrs.isRegularFile() || attrs.size() > MAX_FILE_BYTES) {
                 return FileVisitResult.CONTINUE;
               }
               if (includeMatcher != null) {
@@ -185,12 +189,15 @@ public final class GrepTool {
                 }
               }
               try {
-                if (isBinary(file)) {
+                if (isBinary(workspace, file)) {
                   return FileVisitResult.CONTINUE;
                 }
                 var relPath = workspace.relativize(file);
                 var lineNum = 0;
-                try (var reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+                try (var reader =
+                    new BufferedReader(
+                        new InputStreamReader(
+                            workspace.newInputStream(file), StandardCharsets.UTF_8.newDecoder()))) {
                   String line;
                   while ((line = reader.readLine()) != null) {
                     lineNum++;
@@ -238,8 +245,8 @@ public final class GrepTool {
     }
   }
 
-  private static boolean isBinary(Path file) throws IOException {
-    try (var in = Files.newInputStream(file)) {
+  private static boolean isBinary(WorkspaceRoot workspace, Path file) throws IOException {
+    try (var in = workspace.newInputStream(file)) {
       var buf = new byte[BINARY_SNIFF_BYTES];
       var n = in.read(buf);
       for (var i = 0; i < n; i++) {

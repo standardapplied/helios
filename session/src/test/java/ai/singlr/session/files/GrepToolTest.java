@@ -16,7 +16,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 final class GrepToolTest {
@@ -213,5 +216,60 @@ final class GrepToolTest {
     assertTrue(withNull.success());
     assertTrue(oneArg.success());
     assertEquals(oneArg.output(), withNull.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void neverReadsThroughSymlinks(@TempDir Path tmp) throws IOException {
+    var root = Files.createDirectory(tmp.resolve("ws"));
+    var outside = Files.createDirectory(tmp.resolve("outside"));
+    Files.writeString(outside.resolve("secret.txt"), "SENTINEL\n", StandardCharsets.UTF_8);
+    Files.writeString(root.resolve("inside.txt"), "SENTINEL inside\n", StandardCharsets.UTF_8);
+    Files.createSymbolicLink(root.resolve("leak.txt"), outside.resolve("secret.txt"));
+    Files.createSymbolicLink(root.resolve("leakdir"), outside);
+    Files.createSymbolicLink(root.resolve("alias.txt"), root.resolve("inside.txt"));
+    Files.createSymbolicLink(root.resolve("dangling.txt"), root.resolve("gone.txt"));
+    Files.createSymbolicLink(root.resolve("loop.txt"), root.resolve("loop.txt"));
+
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(root)).tool().execute(Map.of("pattern", "SENTINEL"));
+
+    assertTrue(result.success(), result.output());
+    assertEquals("inside.txt:1:SENTINEL inside\n", result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void sizeCapAppliesToTheTargetNotTheLinkAttributes(@TempDir Path tmp) throws IOException {
+    var buf = new byte[2 * 1024 * 1024];
+    java.util.Arrays.fill(buf, (byte) 'A');
+    Files.write(tmp.resolve("big.txt"), buf);
+    Files.createSymbolicLink(tmp.resolve("b"), tmp.resolve("big.txt"));
+    var result = GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "AAA"));
+    assertTrue(result.success(), result.output());
+    assertEquals("", result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void skipsSpecialFilesWithoutBlocking(@TempDir Path tmp) throws IOException {
+    Assumptions.assumeTrue(SpecialFiles.mkfifo(tmp.resolve("pipe.txt")));
+    Files.writeString(tmp.resolve("a.txt"), "hello\n", StandardCharsets.UTF_8);
+    var result = GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "hello"));
+    assertTrue(result.success(), result.output());
+    assertEquals("a.txt:1:hello\n", result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void symlinkedSearchRootInsideWorkspaceIsSearchedAtItsRealPath(@TempDir Path tmp)
+      throws IOException {
+    var ws = WorkspaceRoot.of(tmp);
+    Files.createDirectories(ws.root().resolve("real"));
+    Files.writeString(ws.root().resolve("real/a.txt"), "hello\n", StandardCharsets.UTF_8);
+    Files.createSymbolicLink(ws.root().resolve("alias"), ws.root().resolve("real"));
+    var result = GrepTool.binding(ws).tool().execute(Map.of("pattern", "hello", "path", "alias"));
+    assertTrue(result.success(), result.output());
+    assertEquals("real/a.txt:1:hello\n", result.output());
   }
 }
