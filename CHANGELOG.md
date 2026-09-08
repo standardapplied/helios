@@ -6,31 +6,26 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Security
 
-- Workspace and memory file access is symlink-safe. `WorkspaceRoot.root()` is now canonical
-  (`toRealPath`) and `resolveSafe` canonicalises the deepest *existing* prefix of every request, so
-  a not-yet-existing leaf beneath an ancestor that links outside the root is refused before any
-  side effect, and dangling or looping links are refused outright. The returned path never
-  contains a symlink component. New `WorkspaceRoot.attributes` / `newInputStream` /
-  `newOutputStream` open the leaf with `NOFOLLOW_LINKS` and refuse paths that were not resolved
-  through the root, including any path whose parent chain contains an unresolved directory
-  symlink; `Read`, `Grep` and `FileFingerprint` use them, so a leaf swapped for a symlink
-  between resolve and open fails instead of being followed. `Grep` and `Glob` skip anything that
-  is not a regular file per `lstat` (symlinks, FIFOs, devices) and `Grep` applies its size cap to
-  the file it will actually open, not to link attributes. `FileSystemMemoryBackend` is strictly
-  narrower: a `/memories/...` path must canonicalise to exactly its lexical location under
-  `<root>/.agent/memory`, so a symlink below the memory root — even one aliasing another workspace
-  file — cannot be read, replaced, inserted into, deleted or listed through; reads and writes are
-  no-follow and `create` re-verifies the parent chain is real. Memory content is strict UTF-8: a
-  file that is not valid UTF-8 fails to read instead of being rewritten with replacement
-  characters, and unencodable content is rejected before the target is opened. Behaviour changes
-  for legitimate workspaces: a root reached through a symlinked ancestor is reported by its real
-  path (so `WorkspaceRoot.root()` may differ from the path passed in, e.g. `/tmp` vs
-  `/private/tmp` on macOS) while absolute requests spelled with the original alias are still
-  accepted; symlinks that stay inside the root still work and are reported at their real path;
-  `Glob` no longer lists symlink entries. `new WorkspaceRoot(root, false)` remains the explicitly
-  weaker trusted mode (lexical bound only). Residual documented in the README: the JDK has no
-  `openat2(RESOLVE_BENEATH)`, so an ancestor directory swapped for a symlink in the window between
-  resolve and open cannot be closed from Java.
+- Workspace and memory I/O now use descriptor-relative Linux operations through JDK 25 FFM.
+  Every ancestor is opened no-follow, files are pinned with `O_PATH` and verified regular before
+  I/O, and directory creation/deletion use `mkdirat`/`unlinkat`. This closes ancestor-symlink races
+  without opening FIFOs or devices. Walkers and `Ls` enumerate pinned directories; bounded reads
+  validate the opened target and enforce limits during growth. `Grep` sniffs and searches one
+  bounded buffer; `Read` classifies MIME without platform pathname probes. Host native-access
+  grants are not forwarded to sandbox child JVMs.
+- **Compatibility:** strict workspaces and filesystem memory require Linux x86-64/AArch64,
+  mounted `/proc/self/fd`, the default filesystem and `--enable-native-access=ai.singlr.session`
+  (module path) or `--enable-native-access=ALL-UNNAMED` (classpath). Unsupported configurations
+  fail closed. The explicit portable `new WorkspaceRoot(root, false)` remains weaker trusted
+  mode, never a preset default; filesystem memory remains strict even with that workspace.
+  New files/directories are owner-only; strict output rejects `DELETE_ON_CLOSE`. Default output
+  create/truncate semantics and covariant option arrays are preserved.
+- Roots and resolved paths are canonical, including explicitly configured aliases. Outside,
+  dangling and looping links are rejected before side effects. In-workspace aliases remain
+  usable by workspace tools, but every symlink in a memory path is refused, including aliases
+  within the workspace. Memory reads require valid UTF-8; unencodable writes fail before opening
+  a target or creating directories. `Glob` no longer lists symlinks. Confinement is not a snapshot
+  or protection against hard links, mount manipulation or in-place edits by another writer.
 
 ### Fixed
 

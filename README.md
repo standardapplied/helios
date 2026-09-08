@@ -11,6 +11,10 @@ Published to [Maven Central](https://central.sonatype.com/namespace/ai.singlr) u
 - Java 25+
 - Maven 3.9+
 
+Strict workspace file tools and filesystem memory additionally require Linux x86-64/AArch64,
+the default filesystem, `/proc/self/fd`, and an explicit JVM native-access grant. See
+[workspace confinement](#path-traversal-jails) for launch flags and compatibility details.
+
 ## Modules
 
 Pick what you need — each jar is published independently:
@@ -581,11 +585,25 @@ Every filesystem boundary in the framework refuses traversal. Lexical normalise 
 - `OnnxModelDownloader` (HF-supplied file paths against the local model cache)
 - `PgConfig` (Postgres schema name validated against unquoted-identifier shape)
 
-`WorkspaceRoot` is the one confinement contract for workspace file access. `root()` is canonical. `resolveSafe` canonicalises the deepest *existing* prefix of the request, so a not-yet-existing leaf under a symlinked ancestor is judged by where the ancestor really points, and dangling or looping links are refused before any side effect. The returned path contains no symlink component, and every open goes through `WorkspaceRoot.attributes` / `newInputStream` / `newOutputStream`, which always pass `NOFOLLOW_LINKS` — a leaf swapped for a symlink between resolve and open fails to open instead of being followed. Walkers (`Grep`, `Glob`, memory `list`) skip anything that is not a regular file per `lstat`, so symlinks, FIFOs and device files are never opened. Symlinks that stay inside the root are followed and reported at their real path.
+`WorkspaceRoot` is the confinement contract for `Read`, `Grep`, `Glob`, `Ls`, file fingerprints and filesystem memory. `root()` is canonical. `resolveSafe` canonicalises the deepest *existing* prefix, rejecting outside, dangling and looping links even for a not-yet-existing leaf. Explicitly configured root aliases and requests through legitimate in-workspace aliases remain supported; returned paths use their canonical spelling.
 
-`FileSystemMemoryBackend` is strictly narrower: a `/memories/...` path must canonicalise to exactly its lexical location under `<root>/.agent/memory`, so any symlink below the memory root — even one pointing at another file inside the workspace — is refused for `view`, `create`, `strReplace`, `insert`, `delete` and `list`.
+Strict I/O does not trust that earlier path check. It descends from the filesystem root using directory descriptors and single-component no-follow `openat` calls, including every ancestor of the workspace root. An `O_PATH` descriptor pins the leaf for metadata inspection without opening a FIFO or device for I/O. Only a regular file is reopened through the kernel's `/proc/self/fd` namespace, while its descriptor remains owned by the stream. Size-limited reads validate that pinned target and enforce the byte budget during reading, including concurrent growth. `Grep` sniffs and searches the same bounded content. MIME detection does not invoke platform detectors that might reopen an unconfined pathname.
 
-`new WorkspaceRoot(root, false)` is the explicitly weaker trusted-workspace mode: the lexical check still bounds the request, but a symlink may lead anywhere. It is never a preset default. Platform note: the JDK exposes no `openat2(RESOLVE_BENEATH)`, so an ancestor *directory* replaced by a symlink in the microseconds between resolve and open is a residual that Java cannot close; OS-level sandboxing remains the authoritative boundary. `NOFOLLOW_LINKS` opens are honoured on Linux, macOS and Windows.
+Directory creation (`mkdirat`), deletion (`unlinkat`), and directory enumeration also use pinned directory descriptors. Walkers never follow directory symlinks, and content tools skip non-regular entries. `Ls` can display symlink metadata without following it. A missing workspace root is not recreated. New files and directories are owner-only (0600/0700, further restricted by the process umask); existing permissions are preserved. Default output creates or truncates, `CREATE_NEW` remains exclusive, and `DELETE_ON_CLOSE` is explicitly unsupported in strict mode.
+
+`FileSystemMemoryBackend` is strictly narrower: a `/memories/...` path must canonicalise to exactly its lexical location under `<root>/.agent/memory`, so any symlink in that path — even one pointing at another file inside the workspace — is refused for `view`, `create`, `strReplace`, `insert`, `delete` and `list`. Memory always uses strict I/O, even if supplied a trusted-mode workspace. Memory content is strict UTF-8; invalid text is rejected before creating directories or opening a write target.
+
+Strict mode requires Linux x86-64 or AArch64, the default filesystem and mounted `/proc/self/fd`. It uses JDK 25's Foreign Function & Memory API to call libc; no downloaded native library, compiler or private JDK API is needed. Enable native access for the session module:
+
+```text
+java --enable-native-access=ai.singlr.session --module-path ... --module your.application/your.Main
+```
+
+For a classpath application, use `java --enable-native-access=ALL-UNNAMED -cp ... your.Main`. Maven tests configure these grants automatically. The host grant is not propagated to `JvmSandbox` child JVMs. Construction fails closed when native access, the filesystem or the platform is unsupported, including macOS and Windows; there is no automatic weaker fallback.
+
+`new WorkspaceRoot(root, false)` is the explicit, portable **trusted-workspace** opt-out, never a preset default. It permits symlinks outside the root and does not provide race-resistant ancestor confinement. It does not relax filesystem memory's requirements.
+
+Descriptor confinement prevents symlink substitution from redirecting an operation. It is not a filesystem snapshot: an opened inode remains the operation's target after a rename, and another writer can still edit its contents. Hard links, bind mounts, a hostile kernel or a process that can modify the host's mount namespace require OS-level isolation. These file tools are not a sandbox for arbitrary code execution.
 
 ### HTTP surface defaults
 

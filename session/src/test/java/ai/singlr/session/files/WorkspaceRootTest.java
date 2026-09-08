@@ -303,16 +303,16 @@ final class WorkspaceRootTest {
     var unresolved = ws.root().resolve("escape/secret.txt");
     assertThrows(
         WorkspaceRoot.WorkspaceEscapeException.class, () -> ws.resolveSafe("escape/secret.txt"));
-    assertThrows(IllegalArgumentException.class, () -> ws.attributes(unresolved));
-    assertThrows(IllegalArgumentException.class, () -> ws.newInputStream(unresolved).close());
+    assertThrows(IOException.class, () -> ws.attributes(unresolved));
+    assertThrows(IOException.class, () -> ws.newInputStream(unresolved).close());
     assertThrows(
-        IllegalArgumentException.class,
+        IOException.class,
         () ->
             ws.newOutputStream(
                     unresolved, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)
                 .close());
     assertThrows(
-        IllegalArgumentException.class,
+        IOException.class,
         () ->
             ws.newOutputStream(ws.root().resolve("escape/new.txt"), StandardOpenOption.CREATE_NEW)
                 .close());

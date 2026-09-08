@@ -8,6 +8,10 @@ import ai.singlr.core.common.Strings;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.DirectoryIteratorException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileVisitResult;
+import java.nio.file.FileVisitor;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
@@ -15,7 +19,9 @@ import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.Objects;
 
 /**
@@ -36,16 +42,17 @@ import java.util.Objects;
  * time — a new leaf under an ancestor that links outside the root is refused before any side
  * effect.
  *
- * <p>Because no JDK API exposes {@code openat2(RESOLVE_BENEATH)}, resolution alone cannot stop
- * another actor from swapping a component between resolve and open. The open primitives here
- * ({@link #attributes}, {@link #newInputStream}, {@link #newOutputStream}) refuse any path whose
- * parent chain is not real — an unresolved directory symlink anywhere above the leaf is rejected,
- * not followed — and close the leaf-level window by always passing {@link
- * LinkOption#NOFOLLOW_LINKS}: a leaf replaced by a symlink fails to open instead of being followed.
- * Callers must additionally check {@link BasicFileAttributes#isRegularFile()} before opening so
- * FIFOs and device files are never opened. An ancestor directory swapped for a symlink between that
- * check and the open remains a residual the platform cannot close from Java; OS-level sandboxing
- * stays the authoritative boundary.
+ * <p>Strict I/O descends directory descriptors with no-follow opens, including the ancestors of the
+ * configured root. Files are pinned for metadata inspection before regular-file I/O, so replacing
+ * either an ancestor or a leaf with a symlink, FIFO or device cannot redirect or block an open.
+ * Directory creation and deletion are also descriptor-relative. A descriptor continues to refer to
+ * the entry it opened if that entry is subsequently renamed; this is confinement, not a filesystem
+ * snapshot or protection against in-place edits by another writer.
+ *
+ * <p>Strict mode requires Linux x86-64/AArch64, the default filesystem, mounted {@code
+ * /proc/self/fd} and explicit native access: {@code --enable-native-access=ai.singlr.session} on
+ * the module path, or {@code --enable-native-access=ALL-UNNAMED} on the class path. Unsupported
+ * configurations fail closed. No native library download, compiler or private JDK API is required.
  *
  * <p>{@code confineSymlinks=false} is the explicitly weaker trusted-workspace mode: paths are still
  * canonicalised (so the open primitives keep working no-follow) but the canonical result may lie
@@ -67,14 +74,23 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
    * @throws NullPointerException if {@code root} is null
    * @throws IllegalArgumentException if {@code root} does not exist as a directory or cannot be
    *     canonicalised
+   * @throws UnsupportedOperationException if strict mode is unavailable on this platform or native
+   *     access has not been enabled
    */
   public WorkspaceRoot {
     Objects.requireNonNull(root, "root must not be null");
-    if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) {
-      throw new IllegalArgumentException("root is not a directory: " + root);
-    }
     try {
       root = root.toRealPath();
+      if (confineSymlinks) {
+        LinuxFiles.requireSupport(root);
+      }
+      var attrs =
+          confineSymlinks
+              ? LinuxFiles.attributes(root)
+              : Files.readAttributes(root, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+      if (!attrs.isDirectory()) {
+        throw new IllegalArgumentException("root is not a directory: " + root);
+      }
     } catch (IOException e) {
       throw new IllegalArgumentException("root cannot be canonicalised: " + root, e);
     }
@@ -150,14 +166,16 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
    *
    * @param resolved a path previously returned by {@link #resolveSafe(String)}
    * @return the leaf's own attributes
-   * @throws IllegalArgumentException if {@code resolved} was not resolved through this root or
-   *     contains an unresolved ancestor symlink
+   * @throws IllegalArgumentException if {@code resolved} is not absolute, normalised and confined
    * @throws java.nio.file.NoSuchFileException if nothing exists at {@code resolved}
-   * @throws IOException if the attributes cannot be read
+   * @throws IOException if an ancestor is a symlink or the attributes cannot be read
    */
   public BasicFileAttributes attributes(Path resolved) throws IOException {
-    return Files.readAttributes(
-        requireResolved(resolved), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+    requireResolved(resolved);
+    if (confineSymlinks) {
+      return LinuxFiles.attributes(resolved);
+    }
+    return Files.readAttributes(resolved, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
   }
 
   /**
@@ -165,12 +183,34 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
    *
    * @param resolved a path previously returned by {@link #resolveSafe(String)}
    * @return an open stream
-   * @throws IllegalArgumentException if {@code resolved} was not resolved through this root or
-   *     contains an unresolved ancestor symlink
-   * @throws IOException if the leaf is a symlink, is missing, or cannot be opened
+   * @throws IllegalArgumentException if {@code resolved} is not absolute, normalised and confined
+   * @throws IOException if a component is a symlink, the leaf is not regular, or opening fails
    */
   public InputStream newInputStream(Path resolved) throws IOException {
-    return Files.newInputStream(requireResolved(resolved), LinkOption.NOFOLLOW_LINKS);
+    return newInputStream(resolved, Long.MAX_VALUE);
+  }
+
+  /**
+   * Read a regular file with a byte limit, checked on the pinned target and during reading.
+   *
+   * @param resolved a resolved file path
+   * @param maxBytes maximum readable bytes; non-negative
+   * @return a caller-owned stream
+   * @throws IOException if opening fails, the target is not regular, or the limit is exceeded
+   */
+  public InputStream newInputStream(Path resolved, long maxBytes) throws IOException {
+    requireResolved(resolved);
+    if (confineSymlinks) {
+      return LinuxFiles.input(resolved, maxBytes);
+    }
+    if (maxBytes < 0) {
+      throw new IllegalArgumentException("maxBytes must not be negative");
+    }
+    var attrs = attributes(resolved);
+    if (!attrs.isRegularFile() || attrs.size() > maxBytes) {
+      throw new IOException("entry is not a regular file within the size limit: " + resolved);
+    }
+    return LinuxFiles.limit(Files.newInputStream(resolved, LinkOption.NOFOLLOW_LINKS), maxBytes);
   }
 
   /**
@@ -179,17 +219,22 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
    * java.nio.file.StandardOpenOption#CREATE_NEW} for create, {@link
    * java.nio.file.StandardOpenOption#TRUNCATE_EXISTING} for replace). With no options, creates a
    * missing file or truncates an existing file, as {@link Files#newOutputStream(Path,
-   * OpenOption...)} does.
+   * OpenOption...)} does. Strict-mode files are created owner-only, further restricted by the
+   * process umask. {@link StandardOpenOption#DELETE_ON_CLOSE} is unsupported in strict mode.
    *
    * @param resolved a path previously returned by {@link #resolveSafe(String)}
    * @param options open options; {@link LinkOption#NOFOLLOW_LINKS} is always added
    * @return an open stream
-   * @throws IllegalArgumentException if {@code resolved} was not resolved through this root or
-   *     contains an unresolved ancestor symlink
-   * @throws IOException if the leaf is a symlink or cannot be opened with {@code options}
+   * @throws IllegalArgumentException if the path or options are invalid
+   * @throws UnsupportedOperationException if an option is unsupported
+   * @throws IOException if a component is a symlink, the leaf is not regular, or opening fails
    */
   public OutputStream newOutputStream(Path resolved, OpenOption... options) throws IOException {
     Objects.requireNonNull(options, "options must not be null");
+    requireResolved(resolved);
+    if (confineSymlinks) {
+      return LinuxFiles.output(resolved, options);
+    }
     var effectiveOptions =
         options.length == 0
             ? new OpenOption[] {StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING}
@@ -200,25 +245,178 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
     return Files.newOutputStream(requireResolved(resolved), withNoFollow);
   }
 
+  /**
+   * Create missing directories beneath this root without following any symlink component.
+   * Strict-mode directories are owner-only, further restricted by the process umask.
+   *
+   * @param resolved a resolved directory path
+   * @throws IOException if creation fails or a component is not a directory
+   */
+  public void createDirectories(Path resolved) throws IOException {
+    requireResolved(resolved);
+    if (confineSymlinks) {
+      LinuxFiles.createDirectories(root, resolved);
+    } else {
+      Files.createDirectories(resolved);
+    }
+  }
+
+  /**
+   * Delete a non-directory entry. A raced leaf symlink is unlinked, never followed.
+   *
+   * @param resolved a resolved file path
+   * @throws IOException if the entry is missing, is a directory, or cannot be deleted
+   */
+  public void deleteFile(Path resolved) throws IOException {
+    requireResolved(resolved);
+    if (confineSymlinks) {
+      LinuxFiles.deleteFile(resolved);
+    } else {
+      if (attributes(resolved).isDirectory()) {
+        throw new IOException("refusing to delete a directory: " + resolved);
+      }
+      Files.delete(resolved);
+    }
+  }
+
+  /**
+   * Enumerate a pinned directory, returning logical workspace paths rather than descriptor paths.
+   *
+   * @param resolved a resolved directory path
+   * @return a caller-owned directory stream
+   * @throws IOException if the directory cannot be opened without following links
+   */
+  public DirectoryStream<Path> newDirectoryStream(Path resolved) throws IOException {
+    requireResolved(resolved);
+    return confineSymlinks ? LinuxFiles.entries(resolved) : Files.newDirectoryStream(resolved);
+  }
+
+  /**
+   * Walk without following links, using the same confined operations for every opened entry.
+   *
+   * @param start a resolved starting path
+   * @param visitor traversal callbacks
+   * @throws IOException if traversal or a visitor fails
+   */
+  public void walkFileTree(Path start, FileVisitor<? super Path> visitor) throws IOException {
+    requireResolved(start);
+    Objects.requireNonNull(visitor, "visitor must not be null");
+    try (var stack = new WalkStack()) {
+      Path next = start;
+      while (next != null) {
+        FileVisitResult result;
+        BasicFileAttributes attrs;
+        try {
+          attrs = attributes(next);
+        } catch (IOException failure) {
+          result = visitor.visitFileFailed(next, failure);
+          if (result == FileVisitResult.TERMINATE) {
+            return;
+          }
+          next = stack.next(visitor, result);
+          continue;
+        }
+        if (attrs.isDirectory()) {
+          result = visitor.preVisitDirectory(next, attrs);
+          if (result == FileVisitResult.CONTINUE) {
+            try {
+              stack.push(new WalkFrame(next, newDirectoryStream(next)));
+            } catch (IOException failure) {
+              result = visitor.visitFileFailed(next, failure);
+            }
+          }
+        } else {
+          result = visitor.visitFile(next, attrs);
+        }
+        if (result == FileVisitResult.TERMINATE) {
+          return;
+        }
+        next = stack.next(visitor, result);
+      }
+    }
+  }
+
+  private static final class WalkFrame implements AutoCloseable {
+    final Path path;
+    final DirectoryStream<Path> stream;
+    final Iterator<Path> iterator;
+    boolean skipSiblings;
+
+    WalkFrame(Path path, DirectoryStream<Path> stream) throws IOException {
+      this.path = path;
+      this.stream = stream;
+      try {
+        this.iterator = stream.iterator();
+      } catch (Throwable failure) {
+        try (stream) {
+          throw failure;
+        }
+      }
+    }
+
+    @Override
+    public void close() throws IOException {
+      stream.close();
+    }
+  }
+
+  private static final class WalkStack implements AutoCloseable {
+    private final ArrayDeque<WalkFrame> frames = new ArrayDeque<>();
+
+    void push(WalkFrame frame) {
+      frames.push(frame);
+    }
+
+    Path next(FileVisitor<? super Path> visitor, FileVisitResult result) throws IOException {
+      while (!frames.isEmpty()) {
+        var frame = frames.peek();
+        frame.skipSiblings |= result == FileVisitResult.SKIP_SIBLINGS;
+        IOException failure = null;
+        try {
+          if (!frame.skipSiblings && frame.iterator.hasNext()) {
+            return frame.iterator.next();
+          }
+        } catch (DirectoryIteratorException e) {
+          failure = e.getCause();
+        }
+        frames.pop().close();
+        result = visitor.postVisitDirectory(frame.path, failure);
+        if (result == FileVisitResult.TERMINATE) {
+          return null;
+        }
+      }
+      return null;
+    }
+
+    @Override
+    public void close() throws IOException {
+      IOException failure = null;
+      while (!frames.isEmpty()) {
+        try {
+          frames.pop().close();
+        } catch (IOException e) {
+          if (failure == null) {
+            failure = e;
+          } else if (failure != e) {
+            failure.addSuppressed(e);
+          }
+        }
+      }
+      if (failure != null) {
+        throw failure;
+      }
+    }
+  }
+
   private Path requireResolved(Path resolved) {
     Objects.requireNonNull(resolved, "resolved must not be null");
     if (!resolved.isAbsolute()
         || !resolved.normalize().equals(resolved)
-        || (confineSymlinks && !resolved.startsWith(root))
-        || !parentIsReal(resolved)) {
+        || (confineSymlinks && !resolved.startsWith(root))) {
       throw new IllegalArgumentException(
           "path was not resolved through this workspace root: " + resolved);
     }
     return resolved;
-  }
-
-  private boolean parentIsReal(Path resolved) {
-    var parent = resolved.equals(root) ? root : resolved.getParent();
-    try {
-      return canonicalise(parent, parent.toString()).equals(parent);
-    } catch (WorkspaceEscapeException e) {
-      return false;
-    }
   }
 
   /**

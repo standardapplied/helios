@@ -20,7 +20,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
@@ -56,13 +55,13 @@ import java.util.Objects;
  *       guarantee against pathological per-line growth.
  * </ul>
  *
- * The reader streams the file via {@link BufferedReader} and stops at the first cap hit; the rest
- * of the file is never touched. The truncation marker teaches the model what to try next ("use
- * {@code offset} to continue, or {@code Grep} for a narrower target").
+ * Text rendering streams through {@link BufferedReader} and stops at the first output cap hit;
+ * fingerprinting separately reads the bounded source. The truncation marker explains what to try
+ * next ("use {@code offset} to continue, or {@code Grep} for a narrower target").
  *
  * <h2>Multimodal dispatch</h2>
  *
- * {@link Files#probeContentType} drives a three-way dispatch:
+ * Extension-based MIME classification and a bounded header sniff drive a three-way dispatch:
  *
  * <ul>
  *   <li>Text-like MIME ({@code text/*}, {@code application/json}, {@code application/xml}, {@code
@@ -247,7 +246,7 @@ public final class ReadTool {
               + "). Use a Grep over the relevant pattern or split the file before reading.");
     }
     try {
-      var fingerprint = FileFingerprint.of(resolved);
+      var fingerprint = FileFingerprint.of(workspace, resolved, MAX_FILE_SIZE_BYTES);
       tracker.recordRead(resolved, fingerprint);
     } catch (IOException e) {
       return ToolResult.failure("Read: I/O error fingerprinting: " + e.getMessage());
@@ -291,7 +290,8 @@ public final class ReadTool {
     boolean truncatedAnyLine = false;
     try (var reader =
         new BufferedReader(
-            new InputStreamReader(workspace.newInputStream(file), StandardCharsets.UTF_8))) {
+            new InputStreamReader(
+                workspace.newInputStream(file, MAX_FILE_SIZE_BYTES), StandardCharsets.UTF_8))) {
       String line;
       while ((line = reader.readLine()) != null) {
         currentLine++;
@@ -373,7 +373,7 @@ public final class ReadTool {
     }
     byte[] bytes;
     try {
-      try (var in = workspace.newInputStream(file)) {
+      try (var in = workspace.newInputStream(file, limit)) {
         bytes = in.readAllBytes();
       }
     } catch (IOException e) {
@@ -391,20 +391,10 @@ public final class ReadTool {
   }
 
   /**
-   * Probe the file's MIME type. Falls back to extension sniffing when {@link
-   * Files#probeContentType} returns null — the JDK's probe relies on the host platform's registry,
-   * which can be sparse on minimal containers. Returns {@code null} when nothing recognises the
-   * file.
+   * Classify by extension without invoking platform detectors that might reopen an unconfined path.
+   * Returns {@code null} for unknown extensions; the caller sniffs a confined stream.
    */
   static String detectMimeType(Path file) {
-    try {
-      var probed = Files.probeContentType(file);
-      if (probed != null) {
-        return probed;
-      }
-    } catch (IOException ignored) {
-      // probeContentType is best-effort; fall through to extension sniffing.
-    }
     var name = file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
     return switch (extensionOf(name)) {
       case "pdf" -> "application/pdf";
@@ -464,7 +454,7 @@ public final class ReadTool {
    * text rather than failing.
    */
   static boolean isLikelyText(WorkspaceRoot workspace, Path file) {
-    try (InputStream in = workspace.newInputStream(file)) {
+    try (InputStream in = workspace.newInputStream(file, MAX_FILE_SIZE_BYTES)) {
       var buf = new byte[BINARY_SNIFF_BYTES];
       var n = in.readNBytes(buf, 0, buf.length);
       for (var i = 0; i < n; i++) {

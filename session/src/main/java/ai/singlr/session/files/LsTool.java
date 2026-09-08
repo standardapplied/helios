@@ -15,8 +15,8 @@ import ai.singlr.session.tools.ToolCategory;
 import ai.singlr.session.tools.ToolPermissionKey;
 import java.io.IOException;
 import java.nio.file.DirectoryIteratorException;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -83,14 +83,14 @@ public final class LsTool {
     var pathArg = ToolArgs.pathArg(args);
     try {
       var resolved = workspace.resolveSafe(pathArg);
-      if (!Files.isDirectory(resolved)) {
+      if (!workspace.attributes(resolved).isDirectory()) {
         return ToolResult.failure("LS: not a directory: " + workspace.relativize(resolved));
       }
       var entries = new ArrayList<Entry>();
-      try (var stream = Files.newDirectoryStream(resolved)) {
+      try (var stream = workspace.newDirectoryStream(resolved)) {
         for (Path entry : stream) {
           ctx.cancellation().throwIfCancelled();
-          entries.add(Entry.of(entry));
+          entries.add(Entry.of(entry, workspace.attributes(entry)));
         }
       } catch (DirectoryIteratorException e) {
         throw e.getCause();
@@ -110,12 +110,12 @@ public final class LsTool {
   }
 
   private record Entry(EntryKind kind, String name) {
-    static Entry of(Path p) {
+    static Entry of(Path p, BasicFileAttributes attributes) {
       var name = p.getFileName().toString();
       EntryKind kind;
-      if (Files.isSymbolicLink(p)) {
+      if (attributes.isSymbolicLink()) {
         kind = EntryKind.SYMLINK;
-      } else if (Files.isDirectory(p)) {
+      } else if (attributes.isDirectory()) {
         kind = EntryKind.DIRECTORY;
       } else {
         kind = EntryKind.FILE;

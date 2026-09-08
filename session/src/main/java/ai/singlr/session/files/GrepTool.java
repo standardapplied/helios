@@ -16,12 +16,12 @@ import ai.singlr.session.tools.ToolBinding;
 import ai.singlr.session.tools.ToolCategory;
 import ai.singlr.session.tools.ToolPermissionKey;
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -153,14 +153,14 @@ public final class GrepTool {
     var includeArg = ToolArgs.stringArg(args, "include");
     try {
       var root = workspace.resolveSafe(pathArg);
-      if (!Files.isDirectory(root)) {
+      if (!workspace.attributes(root).isDirectory()) {
         return ToolResult.failure("Grep: not a directory: " + workspace.relativize(root));
       }
       var includeMatcher =
           includeArg.isEmpty() ? null : GlobMatchers.compile(root.getFileSystem(), includeArg);
       var out = new StringBuilder();
       var matchCount = new int[] {0};
-      Files.walkFileTree(
+      workspace.walkFileTree(
           root,
           new SimpleFileVisitor<>() {
             @Override
@@ -189,7 +189,11 @@ public final class GrepTool {
                 }
               }
               try {
-                if (isBinary(workspace, file)) {
+                byte[] bytes;
+                try (var in = workspace.newInputStream(file, MAX_FILE_BYTES)) {
+                  bytes = in.readAllBytes();
+                }
+                if (isBinary(bytes)) {
                   return FileVisitResult.CONTINUE;
                 }
                 var relPath = workspace.relativize(file);
@@ -197,7 +201,8 @@ public final class GrepTool {
                 try (var reader =
                     new BufferedReader(
                         new InputStreamReader(
-                            workspace.newInputStream(file), StandardCharsets.UTF_8.newDecoder()))) {
+                            new ByteArrayInputStream(bytes),
+                            StandardCharsets.UTF_8.newDecoder()))) {
                   String line;
                   while ((line = reader.readLine()) != null) {
                     lineNum++;
@@ -245,16 +250,12 @@ public final class GrepTool {
     }
   }
 
-  private static boolean isBinary(WorkspaceRoot workspace, Path file) throws IOException {
-    try (var in = workspace.newInputStream(file)) {
-      var buf = new byte[BINARY_SNIFF_BYTES];
-      var n = in.read(buf);
-      for (var i = 0; i < n; i++) {
-        if (buf[i] == 0) {
-          return true;
-        }
+  private static boolean isBinary(byte[] bytes) {
+    for (var i = 0; i < Math.min(bytes.length, BINARY_SNIFF_BYTES); i++) {
+      if (bytes[i] == 0) {
+        return true;
       }
-      return false;
     }
+    return false;
   }
 }

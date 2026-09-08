@@ -12,8 +12,6 @@ import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
@@ -38,8 +36,9 @@ import java.util.Objects;
  * routes through {@link WorkspaceRoot#resolveSafe(String)} and must canonicalise to exactly its
  * lexical location under the canonical memory root, so a symlink anywhere below {@code
  * .agent/memory} — even one pointing at another file inside the workspace — is refused before any
- * side effect, whichever {@code confineSymlinks} mode the workspace uses. All reads and writes open
- * the leaf no-follow, and {@code create} re-verifies the parent chain is real after creating it.
+ * side effect, whichever {@code confineSymlinks} mode the workspace uses. Reads, writes, creation,
+ * deletion and listing use strict descriptor-relative workspace operations, including when the
+ * supplied workspace is in trusted mode. The strict platform and native-access requirements apply.
  *
  * <p>Content is strict UTF-8: a file that is not valid UTF-8 fails to read rather than being
  * silently rewritten with replacement characters, and content that cannot be encoded (unpaired
@@ -51,10 +50,12 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
   public static final String STORAGE_SUBDIR = ".agent/memory";
 
   private final WorkspaceRoot workspace;
+  private final WorkspaceRoot files;
   private final Path memoryRoot;
 
   private FileSystemMemoryBackend(WorkspaceRoot workspace) {
     this.workspace = Objects.requireNonNull(workspace, "workspace must not be null");
+    this.files = workspace.confineSymlinks() ? workspace : WorkspaceRoot.of(workspace.root());
     this.memoryRoot = workspace.root().resolve(STORAGE_SUBDIR).normalize();
   }
 
@@ -99,18 +100,18 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
       throw new IllegalArgumentException(
           "prefix must start with " + PREFIX + ", got '" + prefix + "'");
     }
-    if (!Files.exists(memoryRoot, LinkOption.NOFOLLOW_LINKS)) {
-      return List.of();
-    }
     var start = confine(normalisedPrefix, normalisedPrefix.substring(PREFIX.length()));
-    if (!Files.exists(start, LinkOption.NOFOLLOW_LINKS)) {
+    BasicFileAttributes attributes;
+    try {
+      attributes = files.attributes(start);
+    } catch (NoSuchFileException missing) {
       return List.of();
     }
-    if (Files.isRegularFile(start, LinkOption.NOFOLLOW_LINKS)) {
+    if (attributes.isRegularFile()) {
       return List.of(toMemoryPath(start));
     }
     var out = new ArrayList<String>();
-    Files.walkFileTree(
+    files.walkFileTree(
         start,
         new SimpleFileVisitor<>() {
           @Override
@@ -134,15 +135,14 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
   public void create(String path, String content) throws IOException {
     Objects.requireNonNull(content, "content must not be null");
     var resolved = resolveMemoryPath(path);
-    if (Files.exists(resolved, LinkOption.NOFOLLOW_LINKS)) {
+    var bytes = encode(content);
+    try {
+      files.attributes(resolved);
       throw new FileAlreadyExistsException(path);
+    } catch (NoSuchFileException missing) {
     }
-    var parent = resolved.getParent();
-    Files.createDirectories(parent);
-    if (!parent.toRealPath().equals(parent)) {
-      throw new IOException("memory parent directory is a symlink: " + path);
-    }
-    write(resolved, content, StandardOpenOption.CREATE_NEW);
+    files.createDirectories(resolved.getParent());
+    write(resolved, bytes, StandardOpenOption.CREATE_NEW);
   }
 
   @Override
@@ -201,13 +201,10 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
   @Override
   public void delete(String path) throws IOException {
     var resolved = resolveMemoryPath(path);
-    if (!Files.exists(resolved, LinkOption.NOFOLLOW_LINKS)) {
-      throw new NoSuchFileException(path);
-    }
-    if (Files.isDirectory(resolved, LinkOption.NOFOLLOW_LINKS)) {
+    if (files.attributes(resolved).isDirectory()) {
       throw new IOException("delete: refusing to delete a directory: " + path);
     }
-    Files.delete(resolved);
+    files.deleteFile(resolved);
   }
 
   /**
@@ -237,7 +234,7 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
     if (!lexical.startsWith(memoryRoot)) {
       throw new IllegalArgumentException("path escapes memory root: " + path);
     }
-    var resolved = workspace.resolveSafe(lexical.toString());
+    var resolved = files.resolveSafe(lexical.toString());
     if (!resolved.equals(lexical)) {
       throw new IllegalArgumentException("path traverses a symlink inside memory: " + path);
     }
@@ -247,23 +244,31 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
   private String read(String path, Path resolved) throws IOException {
     BasicFileAttributes attrs;
     try {
-      attrs = workspace.attributes(resolved);
+      attrs = files.attributes(resolved);
     } catch (NoSuchFileException e) {
       throw new NoSuchFileException(path);
     }
     if (!attrs.isRegularFile()) {
       throw new IOException("memory entry is not a regular file: " + path);
     }
-    try (var in = workspace.newInputStream(resolved)) {
+    try (var in = files.newInputStream(resolved)) {
       return UTF_8.newDecoder().decode(ByteBuffer.wrap(in.readAllBytes())).toString();
     }
   }
 
   private void write(Path resolved, String content, OpenOption mode) throws IOException {
+    write(resolved, encode(content), mode);
+  }
+
+  private static byte[] encode(String content) throws IOException {
     var encoded = UTF_8.newEncoder().encode(CharBuffer.wrap(content));
     var bytes = new byte[encoded.remaining()];
     encoded.get(bytes);
-    try (var out = workspace.newOutputStream(resolved, mode, StandardOpenOption.WRITE)) {
+    return bytes;
+  }
+
+  private void write(Path resolved, byte[] bytes, OpenOption mode) throws IOException {
+    try (var out = files.newOutputStream(resolved, mode, StandardOpenOption.WRITE)) {
       out.write(bytes);
     }
   }

@@ -14,6 +14,10 @@
     <name>helios-runtime</name>
     <description>Helidon SE service wrapper that exposes helios-session sessions over HTTP and SSE</description>
 
+    <properties>
+        <helios.test.native-access>ALL-UNNAMED,ai.singlr.session</helios.test.native-access>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>ai.singlr</groupId>
