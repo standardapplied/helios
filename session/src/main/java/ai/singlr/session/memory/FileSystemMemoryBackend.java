@@ -4,9 +4,12 @@
  */
 package ai.singlr.session.memory;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import ai.singlr.session.files.WorkspaceRoot;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -37,6 +40,10 @@ import java.util.Objects;
  * .agent/memory} — even one pointing at another file inside the workspace — is refused before any
  * side effect, whichever {@code confineSymlinks} mode the workspace uses. All reads and writes open
  * the leaf no-follow, and {@code create} re-verifies the parent chain is real after creating it.
+ *
+ * <p>Content is strict UTF-8: a file that is not valid UTF-8 fails to read rather than being
+ * silently rewritten with replacement characters, and content that cannot be encoded (unpaired
+ * surrogates) is rejected before the target is opened, so an existing entry is never truncated.
  */
 public final class FileSystemMemoryBackend implements MemoryBackend {
 
@@ -248,13 +255,16 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
       throw new IOException("memory entry is not a regular file: " + path);
     }
     try (var in = workspace.newInputStream(resolved)) {
-      return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+      return UTF_8.newDecoder().decode(ByteBuffer.wrap(in.readAllBytes())).toString();
     }
   }
 
   private void write(Path resolved, String content, OpenOption mode) throws IOException {
+    var encoded = UTF_8.newEncoder().encode(CharBuffer.wrap(content));
+    var bytes = new byte[encoded.remaining()];
+    encoded.get(bytes);
     try (var out = workspace.newOutputStream(resolved, mode, StandardOpenOption.WRITE)) {
-      out.write(content.getBytes(StandardCharsets.UTF_8));
+      out.write(bytes);
     }
   }
 

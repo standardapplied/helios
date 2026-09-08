@@ -4,6 +4,7 @@
  */
 package ai.singlr.session.memory;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -13,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.session.files.SpecialFiles;
 import ai.singlr.session.files.WorkspaceRoot;
 import java.io.IOException;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -404,5 +406,34 @@ final class FileSystemMemoryBackendTest {
     assertThrows(IOException.class, () -> backend.view("/memories/pipe.md"));
     assertThrows(IOException.class, () -> backend.strReplace("/memories/pipe.md", "a", "b"));
     assertEquals(List.of(), backend.list(""));
+  }
+
+  @Test
+  void malformedUtf8IsRejectedAndLeftUntouched(@TempDir Path tmp) throws IOException {
+    var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
+    var malformed = new byte[] {0x61, (byte) 0xff, 0x0a};
+    var file = seed(tmp, "bad.md", "");
+    Files.write(file, malformed);
+    assertThrows(CharacterCodingException.class, () -> backend.view("/memories/bad.md"));
+    assertThrows(
+        CharacterCodingException.class, () -> backend.strReplace("/memories/bad.md", "a", "b"));
+    assertThrows(CharacterCodingException.class, () -> backend.insert("/memories/bad.md", 1, "x"));
+    assertArrayEquals(malformed, Files.readAllBytes(file));
+  }
+
+  @Test
+  void unencodableContentIsRejectedBeforeTouchingTheFile(@TempDir Path tmp) throws IOException {
+    var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
+    var file = seed(tmp, "note.md", "keep\n");
+    var unpaired = "x\ud800y";
+    assertThrows(
+        CharacterCodingException.class, () -> backend.create("/memories/new.md", unpaired));
+    assertFalse(Files.exists(file.resolveSibling("new.md")));
+    assertThrows(
+        CharacterCodingException.class,
+        () -> backend.strReplace("/memories/note.md", "keep", unpaired));
+    assertThrows(
+        CharacterCodingException.class, () -> backend.insert("/memories/note.md", 1, unpaired));
+    assertEquals("keep\n", Files.readString(file, StandardCharsets.UTF_8));
   }
 }

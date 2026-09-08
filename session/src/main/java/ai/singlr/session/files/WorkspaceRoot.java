@@ -23,23 +23,28 @@ import java.util.Objects;
  * lexically via {@code ..}, or via a symlink anywhere in the path — surface as a {@link
  * WorkspaceEscapeException} rather than reaching the underlying I/O layer.
  *
- * <p>{@link #resolveSafe(String)} runs two stages. The lexical stage normalises the input and
- * requires {@code startsWith(root)}, which refuses {@code ..} and absolute paths without touching
+ * <p>{@link #resolveSafe(String)} runs two stages. The lexical stage normalises the input and, for
+ * a relative request, requires {@code startsWith(root)}, which refuses {@code ..} without touching
  * the filesystem. The canonical stage then resolves the deepest <em>existing</em> prefix of the
  * path with {@link Path#toRealPath(LinkOption...)}; dangling and looping links are refused
  * outright, and when {@code confineSymlinks} is true the result must stay under the (canonical)
- * root. The returned path is that canonical prefix joined with the not-yet-existing suffix, so it
- * never contains a symlink component at resolution time — a new leaf under an ancestor that links
- * outside the root is refused before any side effect.
+ * root. An absolute request is accepted when either its lexical or its canonical form lies under
+ * the root, so a workspace addressed through a symlinked ancestor (e.g. {@code /tmp} on macOS)
+ * still accepts absolute paths spelled with that alias. The returned path is the canonical prefix
+ * joined with the not-yet-existing suffix, so it never contains a symlink component at resolution
+ * time — a new leaf under an ancestor that links outside the root is refused before any side
+ * effect.
  *
  * <p>Because no JDK API exposes {@code openat2(RESOLVE_BENEATH)}, resolution alone cannot stop
  * another actor from swapping a component between resolve and open. The open primitives here
- * ({@link #attributes}, {@link #newInputStream}, {@link #newOutputStream}) close the leaf-level
- * window by always passing {@link LinkOption#NOFOLLOW_LINKS}: a leaf replaced by a symlink fails to
- * open instead of being followed. Callers must additionally check {@link
- * BasicFileAttributes#isRegularFile()} before opening so FIFOs and device files are never opened.
- * An ancestor directory swapped for a symlink in that window remains a residual the platform cannot
- * close from Java; OS-level sandboxing stays the authoritative boundary.
+ * ({@link #attributes}, {@link #newInputStream}, {@link #newOutputStream}) refuse any path whose
+ * parent chain is not real — an unresolved directory symlink anywhere above the leaf is rejected,
+ * not followed — and close the leaf-level window by always passing {@link
+ * LinkOption#NOFOLLOW_LINKS}: a leaf replaced by a symlink fails to open instead of being followed.
+ * Callers must additionally check {@link BasicFileAttributes#isRegularFile()} before opening so
+ * FIFOs and device files are never opened. An ancestor directory swapped for a symlink between that
+ * check and the open remains a residual the platform cannot close from Java; OS-level sandboxing
+ * stays the authoritative boundary.
  *
  * <p>{@code confineSymlinks=false} is the explicitly weaker trusted-workspace mode: paths are still
  * canonicalised (so the open primitives keep working no-follow) but the canonical result may lie
@@ -86,9 +91,9 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
 
   /**
    * Resolve a model-supplied path against the root. The input may be a relative path (resolved
-   * against the root) or an absolute path that's already under the root; either way the resolved
-   * path is normalised, verified to be inside the root, and canonicalised so it contains no symlink
-   * component.
+   * against the root) or an absolute path under the root or under an alias of it; either way the
+   * resolved path is normalised, verified to be inside the root, and canonicalised so it contains
+   * no symlink component.
    *
    * @param requested the input path; non-null, non-blank
    * @return the resolved absolute, normalised path inside the workspace
@@ -110,10 +115,14 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
     }
     Path resolved =
         candidate.isAbsolute() ? candidate.normalize() : root.resolve(candidate).normalize();
-    if (!resolved.startsWith(root)) {
+    if (!candidate.isAbsolute() && !resolved.startsWith(root)) {
       throw new WorkspaceEscapeException("path escapes workspace root: " + requested);
     }
-    return canonicalise(resolved, requested);
+    var canonical = canonicalise(resolved, requested);
+    if (!resolved.startsWith(root) && !canonical.startsWith(root)) {
+      throw new WorkspaceEscapeException("path escapes workspace root: " + requested);
+    }
+    return canonical;
   }
 
   private Path canonicalise(Path resolved, String requested) {
@@ -140,7 +149,8 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
    *
    * @param resolved a path previously returned by {@link #resolveSafe(String)}
    * @return the leaf's own attributes
-   * @throws IllegalArgumentException if {@code resolved} was not resolved through this root
+   * @throws IllegalArgumentException if {@code resolved} was not resolved through this root or
+   *     contains an unresolved ancestor symlink
    * @throws java.nio.file.NoSuchFileException if nothing exists at {@code resolved}
    * @throws IOException if the attributes cannot be read
    */
@@ -154,7 +164,8 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
    *
    * @param resolved a path previously returned by {@link #resolveSafe(String)}
    * @return an open stream
-   * @throws IllegalArgumentException if {@code resolved} was not resolved through this root
+   * @throws IllegalArgumentException if {@code resolved} was not resolved through this root or
+   *     contains an unresolved ancestor symlink
    * @throws IOException if the leaf is a symlink, is missing, or cannot be opened
    */
   public InputStream newInputStream(Path resolved) throws IOException {
@@ -170,7 +181,8 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
    * @param resolved a path previously returned by {@link #resolveSafe(String)}
    * @param options open options; {@link LinkOption#NOFOLLOW_LINKS} is always added
    * @return an open stream
-   * @throws IllegalArgumentException if {@code resolved} was not resolved through this root
+   * @throws IllegalArgumentException if {@code resolved} was not resolved through this root or
+   *     contains an unresolved ancestor symlink
    * @throws IOException if the leaf is a symlink or cannot be opened with {@code options}
    */
   public OutputStream newOutputStream(Path resolved, OpenOption... options) throws IOException {
@@ -183,11 +195,21 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
     Objects.requireNonNull(resolved, "resolved must not be null");
     if (!resolved.isAbsolute()
         || !resolved.normalize().equals(resolved)
-        || (confineSymlinks && !resolved.startsWith(root))) {
+        || (confineSymlinks && !resolved.startsWith(root))
+        || !parentIsReal(resolved)) {
       throw new IllegalArgumentException(
           "path was not resolved through this workspace root: " + resolved);
     }
     return resolved;
+  }
+
+  private boolean parentIsReal(Path resolved) {
+    var parent = resolved.equals(root) ? root : resolved.getParent();
+    try {
+      return canonicalise(parent, parent.toString()).equals(parent);
+    } catch (WorkspaceEscapeException e) {
+      return false;
+    }
   }
 
   /**
