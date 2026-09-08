@@ -152,7 +152,7 @@ public final class CancellationToken {
       } catch (Error err) {
         if (hostError == null) {
           hostError = err;
-        } else {
+        } else if (hostError != err) {
           hostError.addSuppressed(err);
         }
       }

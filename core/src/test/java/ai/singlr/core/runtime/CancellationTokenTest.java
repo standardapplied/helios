@@ -375,6 +375,35 @@ final class CancellationTokenTest {
   }
 
   @Test
+  void repeatedErrorInstanceDoesNotSkipRemainingCallbacks() {
+    var t = new CancellationToken();
+    var first = new AssertionError("shared");
+    var second = new AssertionError("distinct");
+    var failures = new AtomicInteger();
+    var cleanup = new AtomicInteger();
+    for (var error : List.of(first, first, second, first)) {
+      t.onCancel(
+          () -> {
+            failures.incrementAndGet();
+            throw error;
+          });
+    }
+    t.onCancel(cleanup::incrementAndGet);
+
+    var thrown = assertThrows(AssertionError.class, () -> t.cancel("host-failure"));
+
+    assertSame(first, thrown);
+    assertEquals(List.of(second), List.of(thrown.getSuppressed()));
+    assertEquals(4, failures.get(), "every throwing callback must run exactly once");
+    assertEquals(1, cleanup.get(), "repeated Error instances must not skip cleanup");
+    assertEquals(Optional.of("host-failure"), t.reason());
+    assertEquals(0, t.activeCallbackCountForTests());
+    assertFalse(t.cancel("retry"), "the failed dispatch must not undo cancellation");
+    assertEquals(4, failures.get());
+    assertEquals(1, cleanup.get());
+  }
+
+  @Test
   void errorFromImmediateFireEscapesToRegisteringThread() {
     var t = new CancellationToken();
     t.cancel("already");
