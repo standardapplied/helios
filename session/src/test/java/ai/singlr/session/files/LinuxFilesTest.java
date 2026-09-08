@@ -106,11 +106,11 @@ final class LinuxFilesTest {
             .start(
                 () -> {
                   try {
-                    ready.countDown();
                     while (!stop.get()) {
                       Files.move(parent, held, StandardCopyOption.ATOMIC_MOVE);
                       try {
                         Files.createSymbolicLink(parent, outside);
+                        ready.countDown();
                         Thread.yield();
                       } finally {
                         Files.deleteIfExists(parent);
