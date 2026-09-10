@@ -838,7 +838,7 @@ class PolicyBytecodeVerifierTest {
    * public static void {@code test()} and the writer must leave the operand stack balanced (the
    * helper appends {@code return} after).
    */
-  private static byte[] buildTestClass(Consumer<java.lang.classfile.CodeBuilder> codeWriter) {
+  static byte[] buildTestClass(Consumer<java.lang.classfile.CodeBuilder> codeWriter) {
     return ClassFile.of()
         .build(
             ClassDesc.of("TestClass"),

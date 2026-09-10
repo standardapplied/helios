@@ -21,8 +21,10 @@ import java.util.Set;
  * against honest mistakes and probing snippets but is not a substitute for OS-level isolation
  * (Incus / namespaces / per-UID separation). A sufficiently motivated adversary inside the
  * subprocess can still side-step in-JVM controls; the only authoritative boundary is the host
- * kernel. Deployers running untrusted snippet payloads must arrange external isolation around the
- * Helios host process.
+ * kernel. The sandbox subprocess runs as the same user and in the same namespaces as the host
+ * process, so a private working directory is not filesystem or network isolation. Deployers running
+ * untrusted snippet payloads must arrange external isolation around the process that owns the
+ * sandbox; the README's "Least-privilege deployment" section documents the supported recipe.
  *
  * @param allowedPackages opt-in allow-list of JDK package prefixes. When non-empty, the policy
  *     flips from "default-allow" to "default-deny" for JDK-owned classes (those under {@code

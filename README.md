@@ -570,11 +570,36 @@ The persistence layer does **not** route through the registry today — see [Kno
 
 Defense in depth, not a single boundary:
 
-1. **OS-level sandbox** (deployer's responsibility) — Incus, Docker, gVisor, etc. This is the authoritative escape boundary.
+1. **OS-level sandbox** (deployer's responsibility) — a container, VM, or namespace boundary around the Helios process. This is the authoritative escape boundary and the only layer that isolates the filesystem and the network.
 2. **JVM subprocess sandbox** (`JvmSandbox`) — the model's code runs in a separate JVM with cleared environment, system-properties stripped from parent JVM args, classpath/modulepath inherited but agents (`-javaagent`, `-Dauth.token=…`) filtered, descendants reaped on close / shutdown hook, single-execute serialised via `Semaphore(1)`.
-3. **JShell prelude controls** — typed wrappers around `HostFunction`s, reserved-name skip on synthesiser, frozen `HostFunctionRegistry` after sandbox boot.
+3. **Bytecode policy** (`SandboxPolicy` + `PolicyBytecodeVerifier`) — every snippet class is scanned before it links. Direct calls, field access, class literals, and every reference reachable through `invokedynamic` bootstrap arguments, method-handle constants and dynamic constants are checked against the same owner/member rules, so `FileReader::new` is denied exactly like `new FileReader(...)`. Malformed or cyclic constant pools fail closed.
+4. **JShell prelude controls** — typed wrappers around `HostFunction`s, reserved-name skip on synthesiser, frozen `HostFunctionRegistry` after sandbox boot.
 
-The sandbox subprocess RPC runs on a per-session Unix domain socket bound in a private temp directory (mode 0700) — the host accepts exactly one connection from the subprocess on startup and then closes the listener and deletes the socket file. A JShell snippet that obtains a raw `PrintStream` to `FileDescriptor.out` can write whatever it wants to subprocess stdout; the host reads stdout into the execution result's captured-output buffer but never parses it as RPC, so forged frames are inert text. Layer 1 (OS-level sandboxing) remains the authoritative escape boundary against everything outside the documented Java API surface (native code via FFM with `--enable-native-access`, reflective access via `--add-opens`, etc.).
+**What the sandbox subprocess is not.** The child JVM runs as the same user as the Helios process, in the same mount and network namespaces. Its private working directory scopes relative paths, nothing more: absolute paths, `/proc`, the host's sockets and every file the Helios user can read are reachable from a snippet unless a bytecode policy denies the API or the OS boundary hides the resource. The bytecode verifier is defense in depth against honest mistakes and probing snippets; it is a static scan of JShell-compiled classes, not a JVM security manager, and it inherits the JVM's own limits (a static receiver type it cannot widen, JDK internals reached through `--add-opens`, native code with `--enable-native-access`). Treat layer 1 as mandatory for untrusted snippets.
+
+The sandbox subprocess RPC runs on a per-session Unix domain socket bound in a private temp directory (mode 0700) — the host accepts exactly one connection from the subprocess on startup and then closes the listener and deletes the socket file. A JShell snippet that obtains a raw `PrintStream` to `FileDescriptor.out` can write whatever it wants to subprocess stdout; the host reads stdout into the execution result's captured-output buffer but never parses it as RPC, so forged frames are inert text.
+
+#### Least-privilege deployment
+
+`JvmSandbox` launches its child with `ProcessBuilder`, so the child shares whatever confinement the Helios process itself runs under. The supported least-privilege contract is therefore to run the process that owns the sandbox — the whole application, or a dedicated executor service that exposes only the `Sandbox` seam — inside a container that grants nothing it does not need. Rootless Podman, no image beyond the JDK and your jars:
+
+```bash
+podman run --rm \
+  --network none \
+  --read-only --tmpfs /tmp \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --pids-limit 256 --memory 1g \
+  -v /opt/helios/app:/opt/helios/app:ro \
+  -v /srv/tenant-42/workspace:/workspace:ro \
+  docker.io/library/eclipse-temurin:25-jre \
+  java --enable-native-access=ALL-UNNAMED -cp '/opt/helios/app/*' your.Executor
+```
+
+- `--network none` removes every interface but loopback inside the container; the host's listeners and the wider network are unreachable even with a permissive `SandboxPolicy`. Replace it with an egress-filtered network only for workloads that need one.
+- `--read-only --tmpfs /tmp` gives the sandbox its scratch directory and RPC socket directory on a private tmpfs and nothing else writable. Mount the workspace read-only and let host-owned tools (`Read` / `Grep` / `Glob` on a `WorkspaceRoot`) mediate access.
+- `--cap-drop ALL --security-opt no-new-privileges` blocks privilege escalation inside the container; `--pids-limit` and `--memory` bound fork bombs and heap abuse beyond `JvmSandboxConfig.maxHeapMb`.
+
+`IsolatedDeploymentTest` in `helios-repl` exercises this recipe with the real `JvmSandbox` under a permissive policy: a snippet inside the container cannot read a host sentinel file or connect to a host TCP listener. It runs wherever rootless Podman can start a container and skips with a stated reason elsewhere, so a green build on an unsupported host is not a claim of enforcement.
 
 ### Path-traversal jails
 

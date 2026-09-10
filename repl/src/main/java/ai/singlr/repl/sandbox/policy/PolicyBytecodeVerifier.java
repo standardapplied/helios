@@ -5,13 +5,23 @@
 
 package ai.singlr.repl.sandbox.policy;
 
+import java.lang.classfile.BootstrapMethodEntry;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.CodeModel;
+import java.lang.classfile.constantpool.ClassEntry;
+import java.lang.classfile.constantpool.ConstantDynamicEntry;
+import java.lang.classfile.constantpool.ConstantValueEntry;
+import java.lang.classfile.constantpool.LoadableConstantEntry;
+import java.lang.classfile.constantpool.MethodHandleEntry;
+import java.lang.classfile.constantpool.MethodTypeEntry;
 import java.lang.classfile.instruction.ConstantInstruction;
 import java.lang.classfile.instruction.FieldInstruction;
+import java.lang.classfile.instruction.InvokeDynamicInstruction;
 import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.NewObjectInstruction;
 import java.lang.constant.ClassDesc;
+import java.lang.constant.DirectMethodHandleDesc;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -22,7 +32,7 @@ import java.util.stream.Collectors;
  * denied operation it finds by throwing {@link SandboxPolicyException}.
  *
  * <p><strong>Instruction families scanned.</strong> Every method's code stream is walked for the
- * five instruction families that can name a denied API:
+ * instruction families that can name a policy-relevant API:
  *
  * <ul>
  *   <li>{@link InvokeInstruction} — {@code INVOKEVIRTUAL} / {@code INVOKESPECIAL} / {@code
@@ -31,18 +41,33 @@ import java.util.stream.Collectors;
  *       even runs.
  *   <li>{@link FieldInstruction} — {@code GET*} / {@code PUT*}. Catches static-field access that
  *       names denied classes (e.g. {@code System.out} when {@code java.lang.System} is denied).
- *   <li>{@link ConstantInstruction.LoadConstantInstruction} — {@code LDC} carrying a {@link
- *       ClassDesc}. Catches class literals like {@code ProcessBuilder.class} that would otherwise
- *       reach reflection via {@code MethodHandles.lookup().findStatic(ProcessBuilder.class, ...)}.
+ *   <li>{@link ConstantInstruction.LoadConstantInstruction} — {@code LDC} of a class, method handle
+ *       or dynamic constant. Class literals like {@code ProcessBuilder.class} (array types are
+ *       peeled to their element class) are checked as class mentions; method-handle constants are
+ *       checked as owner/member references; dynamic constants are walked as described below.
+ *   <li>{@link InvokeDynamicInstruction} — {@code INVOKEDYNAMIC}. The bootstrap method and every
+ *       bootstrap argument are walked as described below.
  * </ul>
  *
- * <p>{@code INVOKEDYNAMIC} is deliberately NOT scanned: its bootstrap-method reference points to
- * platform code ({@code LambdaMetafactory.metafactory}, {@code StringConcatFactory.makeConcat*},
- * {@code ObjectMethods.bootstrap}) that the JVM dispatches on the user's behalf. Scanning the
- * bootstrap method would reject every lambda and string concatenation in the snippet without any
- * security benefit — the dangerous capability isn't the bootstrap dispatch itself, it's an explicit
- * {@code INVOKESTATIC java/lang/invoke/MethodHandles.lookup} the user writes, which the {@link
- * InvokeInstruction} scan catches.
+ * <p><strong>Indirect references.</strong> A method handle in a bootstrap argument is a capability
+ * exactly like a direct call: {@code FileReader::new} compiles to an {@code INVOKEDYNAMIC} whose
+ * {@code LambdaMetafactory} argument list carries a {@code REF_newInvokeSpecial
+ * java/io/FileReader.<init>} handle, and no ordinary invoke instruction ever names the constructor.
+ * The verifier therefore applies the same owner/member policy to every reference reachable through
+ * {@code INVOKEDYNAMIC} bootstraps, method-handle constants and dynamic constants, including nested
+ * bootstrap arguments. Language bootstraps whose dispatch is platform code — {@code
+ * LambdaMetafactory}, {@code StringConcatFactory}, {@code ObjectMethods}, {@code SwitchBootstraps}
+ * and the {@code ConstantBootstraps} materialisers — are trusted as dispatchers so lambdas,
+ * records, string concatenation and pattern switches keep working under every policy, but their
+ * user-supplied arguments are never trusted. Any other bootstrap is checked like a direct call.
+ * Method-type signatures are not policy-relevant for direct invokes and stay unchecked here too.
+ *
+ * <p>Traversal is over constant-pool entries rather than nominal descriptors (whose construction
+ * eagerly recurses through nested arguments), is bounded to {@value #MAX_CONSTANT_DEPTH} nested
+ * dynamic constants, rejects a dynamic constant that references itself, and rejects any classfile
+ * the Classfile API cannot parse. Each of those surfaces as a {@link SandboxPolicyException} with a
+ * rule label ({@code dynamicConstantDepth}, {@code dynamicConstantCycle}, {@code
+ * malformedClassfile}) so malformed input fails closed instead of escaping the scan.
  *
  * <p><strong>Rule order.</strong> Explicit {@link SandboxPolicy#deniedClasses()} and {@link
  * SandboxPolicy#deniedPackages()} match before the categorical flags ({@link
@@ -93,6 +118,34 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
    */
   private static final List<String> JDK_PREFIXES =
       List.of("java/", "javax/", "jdk/", "sun/", "com/sun/");
+
+  /** Maximum nesting of dynamic constants the walker follows before failing closed. */
+  static final int MAX_CONSTANT_DEPTH = 32;
+
+  /**
+   * Bootstrap methods the JVM dispatches on the language's behalf. Their dispatch is trusted so
+   * lambdas, method references, string concatenation, record methods, pattern switches and
+   * compiler-emitted dynamic constants stay usable under every policy; their arguments are checked
+   * like any other reference. A bootstrap outside this set is checked as a direct static call.
+   */
+  private static final Set<String> TRUSTED_BOOTSTRAPS =
+      Set.of(
+          "java/lang/invoke/LambdaMetafactory.metafactory",
+          "java/lang/invoke/LambdaMetafactory.altMetafactory",
+          "java/lang/invoke/StringConcatFactory.makeConcat",
+          "java/lang/invoke/StringConcatFactory.makeConcatWithConstants",
+          "java/lang/runtime/ObjectMethods.bootstrap",
+          "java/lang/runtime/SwitchBootstraps.typeSwitch",
+          "java/lang/runtime/SwitchBootstraps.enumSwitch",
+          "java/lang/invoke/ConstantBootstraps.nullConstant",
+          "java/lang/invoke/ConstantBootstraps.primitiveClass",
+          "java/lang/invoke/ConstantBootstraps.enumConstant",
+          "java/lang/invoke/ConstantBootstraps.getStaticFinal",
+          "java/lang/invoke/ConstantBootstraps.invoke",
+          "java/lang/invoke/ConstantBootstraps.explicitCast",
+          "java/lang/invoke/ConstantBootstraps.fieldVarHandle",
+          "java/lang/invoke/ConstantBootstraps.staticFieldVarHandle",
+          "java/lang/invoke/ConstantBootstraps.arrayVarHandle");
 
   private static final Set<String> NATIVE_ACCESS_MEMBERS =
       Set.of(
@@ -202,9 +255,15 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
 
   @Override
   public void verify(String internalName, byte[] bytecodes) {
-    var classModel = ClassFile.of().parse(bytecodes);
-    for (var method : classModel.methods()) {
-      method.code().ifPresent(this::checkCode);
+    try {
+      var classModel = ClassFile.of().parse(bytecodes);
+      for (var method : classModel.methods()) {
+        method.code().ifPresent(this::checkCode);
+      }
+    } catch (SandboxPolicyException e) {
+      throw e;
+    } catch (RuntimeException e) {
+      throw new SandboxPolicyException(internalName, null, "malformedClassfile");
     }
   }
 
@@ -212,25 +271,88 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
     for (var element : code.elementList()) {
       switch (element) {
         case InvokeInstruction ins ->
-            checkOwnerMember(ins.owner().asInternalName(), ins.name().stringValue());
-        case NewObjectInstruction ins ->
-            checkOwnerMember(ins.className().asInternalName(), "<init>");
+            checkOwnerMember(ownerOf(ins.owner()), ins.name().stringValue());
+        case NewObjectInstruction ins -> checkOwnerMember(ownerOf(ins.className()), "<init>");
         case FieldInstruction ins ->
-            checkOwnerMember(ins.owner().asInternalName(), ins.name().stringValue());
-        case ConstantInstruction.LoadConstantInstruction ins -> {
-          if (ins.constantValue() instanceof ClassDesc cd) {
-            var internal = internalNameFromDesc(cd);
-            if (internal != null) {
-              checkOwnerMember(internal, null);
-            }
-          }
-        }
+            checkOwnerMember(ownerOf(ins.owner()), ins.name().stringValue());
+        case ConstantInstruction.LoadConstantInstruction ins ->
+            checkConstant(ins.constantEntry(), new HashSet<>());
+        case InvokeDynamicInstruction ins ->
+            checkBootstrap(ins.invokedynamic().bootstrap(), new HashSet<>());
         default -> {}
       }
     }
   }
 
+  private void checkBootstrap(BootstrapMethodEntry bootstrap, Set<Integer> path) {
+    var handle = bootstrap.bootstrapMethod();
+    if (!isTrustedBootstrap(handle)) {
+      checkHandle(handle);
+    }
+    for (var argument : bootstrap.arguments()) {
+      checkConstant(argument, path);
+    }
+  }
+
+  private void checkConstant(LoadableConstantEntry entry, Set<Integer> path) {
+    switch (entry) {
+      case ClassEntry c -> checkOwnerMember(ownerOf(c), null);
+      case MethodHandleEntry h -> checkHandle(h);
+      case ConstantDynamicEntry d -> checkDynamicConstant(d, path);
+      case MethodTypeEntry t -> {}
+      case ConstantValueEntry v -> {}
+    }
+  }
+
+  private void checkDynamicConstant(ConstantDynamicEntry entry, Set<Integer> path) {
+    if (path.size() >= MAX_CONSTANT_DEPTH) {
+      throw new SandboxPolicyException(null, null, "dynamicConstantDepth");
+    }
+    if (!path.add(entry.index())) {
+      throw new SandboxPolicyException(null, null, "dynamicConstantCycle");
+    }
+    checkOwnerMember(ownerOf(entry.typeSymbol()), null);
+    checkBootstrap(entry.bootstrap(), path);
+    path.remove(entry.index());
+  }
+
+  private void checkHandle(MethodHandleEntry handle) {
+    var reference = handle.reference();
+    checkOwnerMember(ownerOf(reference.owner()), reference.name().stringValue());
+  }
+
+  private static boolean isTrustedBootstrap(MethodHandleEntry handle) {
+    var reference = handle.reference();
+    return handle.kind() == DirectMethodHandleDesc.Kind.STATIC.refKind
+        && TRUSTED_BOOTSTRAPS.contains(
+            reference.owner().asInternalName() + "." + reference.name().stringValue());
+  }
+
+  private static String ownerOf(ClassEntry entry) {
+    return ownerOf(entry.asSymbol());
+  }
+
+  /**
+   * Internal-form name of the class an owner descriptor refers to, peeling array types down to
+   * their element class so {@code ProcessBuilder[].class} is judged as {@code ProcessBuilder}.
+   * Returns {@code null} for primitives and primitive arrays, which name no class at all.
+   */
+  private static String ownerOf(ClassDesc desc) {
+    var element = desc;
+    while (element.isArray()) {
+      element = element.componentType();
+    }
+    if (!element.isClassOrInterface()) {
+      return null;
+    }
+    var descriptor = element.descriptorString();
+    return descriptor.substring(1, descriptor.length() - 1);
+  }
+
   private void checkOwnerMember(String ownerInternal, String member) {
+    if (ownerInternal == null) {
+      return;
+    }
     if (deniedClassesInternal.contains(ownerInternal)) {
       throw new SandboxPolicyException(
           ownerInternal, member, "deniedClasses:" + ownerInternal.replace('/', '.'));
@@ -378,13 +500,5 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
       return true;
     }
     return owner.equals(FILE_OWNER) && member != null && FILE_UNSAFE_MEMBERS.contains(member);
-  }
-
-  private static String internalNameFromDesc(ClassDesc desc) {
-    if (desc.isClassOrInterface()) {
-      var ds = desc.descriptorString();
-      return ds.substring(1, ds.length() - 1);
-    }
-    return null;
   }
 }

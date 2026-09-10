@@ -10,8 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.repl.host.HostFunctionRegistry;
 import ai.singlr.repl.sandbox.policy.SandboxPolicy;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * End-to-end enforcement test through the real {@link JvmSandbox} subprocess. Closes the gap left
@@ -21,8 +26,8 @@ import org.junit.jupiter.api.Test;
  * ExecutionResult#stderr()}.
  *
  * <p>Each test launches a fresh JVM subprocess (~1-2 s each), so this class deliberately holds
- * exactly two tests — one denial, one allow — covering the wire end-to-end without ballooning CI
- * cost.
+ * three tests — one denial, one allow, one sentinel read/write through method references — covering
+ * the wire end-to-end without ballooning CI cost.
  */
 class SandboxPolicySubprocessEnforcementTest {
 
@@ -73,6 +78,50 @@ class SandboxPolicySubprocessEnforcementTest {
       assertTrue(
           !result.stderr().contains("Sandbox policy denied"),
           () -> "Allowed snippet unexpectedly produced a policy denial: " + result.stderr());
+    }
+  }
+
+  @Test
+  void noEgressBlocksMethodReferenceReadAndWriteOfSentinelInRealSubprocess(@TempDir Path dir)
+      throws IOException {
+    var sentinel = dir.resolve("sentinel.txt");
+    var marker = "SENTINEL-" + UUID.randomUUID();
+    Files.writeString(sentinel, marker);
+    var config =
+        JvmSandboxConfig.newBuilder()
+            .withSandboxPolicy(SandboxPolicy.noEgress())
+            .withExecutionTimeout(Duration.ofSeconds(20))
+            .build();
+    try (var sandbox = JvmSandbox.create(config, new HostFunctionRegistry())) {
+      var read =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  "interface Opener { java.io.Reader open(String p) throws java.io.IOException; }\n"
+                      + "Opener opener = java.io.FileReader::new;\n"
+                      + "var reader = opener.open(\""
+                      + sentinel
+                      + "\");\n"
+                      + "char[] buf = new char[256];\n"
+                      + "System.out.println(new String(buf, 0, reader.read(buf)));"));
+      assertTrue(
+          read.stderr().contains("Sandbox policy denied java.io.FileReader#<init>"),
+          () -> "Expected FileReader::new denial, got stderr=[" + read.stderr() + "]");
+      assertTrue(
+          !read.stdout().contains(marker),
+          () -> "Sentinel content leaked through a method reference: " + read.stdout());
+
+      var write =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  "interface Sink { java.io.Writer open(String p) throws java.io.IOException; }\n"
+                      + "Sink sink = java.io.FileWriter::new;\n"
+                      + "try (var out = sink.open(\""
+                      + sentinel
+                      + "\")) { out.write(\"overwritten\"); }"));
+      assertTrue(
+          write.stderr().contains("Sandbox policy denied java.io.FileWriter#<init>"),
+          () -> "Expected FileWriter::new denial, got stderr=[" + write.stderr() + "]");
+      assertEquals(marker, Files.readString(sentinel));
     }
   }
 }
