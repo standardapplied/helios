@@ -6,6 +6,32 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Security
 
+- `PolicyBytecodeVerifier` now applies the sandbox policy to indirect references. A method
+  reference such as `FileReader::new` compiles to an `invokedynamic` whose bootstrap argument is a
+  `REF_newInvokeSpecial` method handle, and no ordinary invoke instruction names the constructor;
+  the previous scanner ignored `invokedynamic` entirely and only inspected class-literal constants,
+  so `SandboxPolicy.noEgress()` let such a reference read a file. The verifier now walks every
+  `invokedynamic` bootstrap, method-handle constant and dynamic constant (nested arguments
+  included) at the constant-pool-entry level and checks each class, owner and member against the
+  same rules as direct instructions. Array class literals are judged by their element class.
+  Traversal is bounded (32 nested dynamic constants), shared constants are memoized with their
+  checked depth to prevent exponential work, self-referencing constants are rejected, and
+  a classfile the Classfile API cannot parse is rejected instead of skipped; the new rule labels are
+  `dynamicConstantDepth`, `dynamicConstantCycle` and `malformedClassfile`.
+- **Compatibility:** language bootstraps (`LambdaMetafactory`, `StringConcatFactory`,
+  `ObjectMethods`, `SwitchBootstraps`, `ConstantBootstraps`) remain trusted as dispatchers, so
+  lambdas, method references to allowed APIs, records, string concatenation and pattern switches
+  (including qualified enum labels) are unaffected under every policy. Newly rejected constructs
+  are exactly the method references, method-handle constants and dynamic constants that name an
+  API the policy already denied when called directly; a bootstrap method outside the language set
+  is now checked like a direct static call. No API change.
+- README "Sandbox security model" now states the trust boundary explicitly — bytecode checks are
+  defense in depth, and a same-user subprocess with a private working directory is not filesystem
+  or network isolation — and documents a least-privilege rootless Podman deployment for the
+  process that owns the sandbox. `IsolatedDeploymentTest` exercises that recipe against a host
+  sentinel file and a host TCP listener, skipping with a reason where rootless Podman is
+  unavailable.
+
 - Workspace and memory I/O now use descriptor-relative Linux operations through JDK 25 FFM.
   Every ancestor is opened no-follow, files are pinned with `O_PATH` and verified regular before
   I/O, and directory creation/deletion use `mkdirat`/`unlinkat`. This closes ancestor-symlink races

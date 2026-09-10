@@ -127,6 +127,45 @@ class SandboxPolicyEnforcementTest {
         "ProcessBuilder");
   }
 
+  @Test
+  void noEgressRejectsConstructorReferenceToFileInputStream() {
+    assertDenied(
+        SandboxPolicy.noEgress(),
+        "java.util.function.Function<java.io.FileDescriptor, java.io.FileInputStream> open ="
+            + " java.io.FileInputStream::new;",
+        "java.io.FileInputStream#<init>");
+  }
+
+  @Test
+  void noEgressRejectsBoundMethodReferenceToFileExists() {
+    assertDenied(
+        SandboxPolicy.noEgress(),
+        "java.util.function.Supplier<Boolean> probe = new java.io.File(\"/etc/passwd\")::exists;",
+        "java.io.File#exists");
+  }
+
+  @Test
+  void noEgressAllowsRecordDeclaration() {
+    assertAllowed(SandboxPolicy.noEgress(), "record Point(int x, String label) {}");
+  }
+
+  @Test
+  void noEgressAllowsPatternSwitchWithQualifiedEnumLabel() {
+    assertAllowed(
+        SandboxPolicy.noEgress(),
+        "int classify(Object o) { return switch (o) { case java.time.DayOfWeek.MONDAY -> 1;"
+            + " case String s -> s.length(); default -> 0; }; }");
+  }
+
+  @Test
+  void noEgressAllowsMethodReferencesWithPrimitiveAndArraySignatures() {
+    assertAllowed(
+        SandboxPolicy.noEgress(),
+        "int[] f(int[] xs) { java.util.function.Supplier<int[]> copy = xs::clone;"
+            + " java.util.function.IntUnaryOperator abs = Math::abs;"
+            + " return copy.get(); }");
+  }
+
   private static void assertDenied(SandboxPolicy policy, String snippet, String expectedMessage) {
     var capture = new ByteArrayOutputStream();
     var lastEvent = runSnippet(policy, snippet, capture);
