@@ -8,6 +8,7 @@ package ai.singlr.repl.sandbox;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -54,7 +55,32 @@ class IsolatedDeploymentTest {
           "--security-opt",
           "no-new-privileges",
           "--tmpfs",
-          "/tmp");
+          "/tmp",
+          "--pids-limit",
+          "256",
+          "--memory",
+          "1g");
+
+  @Test
+  void processTimeoutDoesNotWaitForOutputToClose() {
+    var sleep = findOnPath("sleep");
+    assumeTrue(sleep != null, "sleep is not on PATH; process timeout probe unavailable");
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(5),
+        () -> {
+          var ex = assertThrows(IllegalStateException.class, () -> run(List.of(sleep, "3"), 1));
+          assertTrue(ex.getMessage().startsWith("timed out after 1s:"), ex::getMessage);
+        });
+  }
+
+  @Test
+  void processOutputLargerThanAPipeBufferIsCaptured() throws Exception {
+    var shell = findOnPath("sh");
+    assumeTrue(shell != null, "sh is not on PATH; process output probe unavailable");
+    var outcome = run(List.of(shell, "-c", "printf '%131072s' x; printf 'stderr' >&2"), 5);
+    assertEquals(0, outcome.exitCode());
+    assertEquals(" ".repeat(131071) + "xstderr", outcome.output());
+  }
 
   @Test
   void leastPrivilegeContainerHidesHostFilesAndNetworkFromSandbox(@TempDir Path hostDir)
@@ -79,7 +105,7 @@ class IsolatedDeploymentTest {
     var marker = "SENTINEL-" + UUID.randomUUID();
     var sentinel = hostDir.resolve("sentinel.txt");
     Files.writeString(sentinel, marker);
-    try (var listener = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+    try (var listener = new ServerSocket(0, 1, InetAddress.ofLiteral("127.0.0.1"))) {
       var command = new ArrayList<>(baseCommand);
       var javaBin = System.getProperty("java.home") + "/bin/java";
       var launch = JvmSandbox.buildLaunchCommand(javaBin, JvmSandboxConfig.defaults());
@@ -180,13 +206,25 @@ class IsolatedDeploymentTest {
 
   private static Outcome run(List<String> command, int timeoutSeconds)
       throws IOException, InterruptedException {
-    var process = new ProcessBuilder(command).redirectErrorStream(true).start();
-    process.getOutputStream().close();
-    var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    if (!process.waitFor(Duration.ofSeconds(timeoutSeconds).toSeconds(), TimeUnit.SECONDS)) {
-      process.destroyForcibly();
-      throw new IllegalStateException("timed out after " + timeoutSeconds + "s: " + command);
+    var output = Files.createTempFile("podman-probe-", ".log");
+    try {
+      var process =
+          new ProcessBuilder(command)
+              .redirectErrorStream(true)
+              .redirectOutput(output.toFile())
+              .start();
+      try {
+        process.getOutputStream().close();
+        if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+          throw new IllegalStateException("timed out after " + timeoutSeconds + "s: " + command);
+        }
+        return new Outcome(process.exitValue(), Files.readString(output, StandardCharsets.UTF_8));
+      } finally {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+      }
+    } finally {
+      Files.deleteIfExists(output);
     }
-    return new Outcome(process.exitValue(), output);
   }
 }

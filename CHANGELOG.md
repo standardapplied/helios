@@ -14,7 +14,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `invokedynamic` bootstrap, method-handle constant and dynamic constant (nested arguments
   included) at the constant-pool-entry level and checks each class, owner and member against the
   same rules as direct instructions. Array class literals are judged by their element class.
-  Traversal is bounded (32 nested dynamic constants), self-referencing constants are rejected, and
+  Traversal is bounded (32 nested dynamic constants), shared constants are memoized with their
+  checked depth to prevent exponential work, self-referencing constants are rejected, and
   a classfile the Classfile API cannot parse is rejected instead of skipped; the new rule labels are
   `dynamicConstantDepth`, `dynamicConstantCycle` and `malformedClassfile`.
 - **Compatibility:** language bootstraps (`LambdaMetafactory`, `StringConcatFactory`,

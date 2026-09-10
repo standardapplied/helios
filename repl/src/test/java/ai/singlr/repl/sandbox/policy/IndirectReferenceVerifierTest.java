@@ -18,9 +18,11 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.constantpool.ConstantDynamicEntry;
+import java.lang.classfile.constantpool.LoadableConstantEntry;
 import java.lang.classfile.constantpool.StringEntry;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.ConstantDesc;
@@ -30,7 +32,9 @@ import java.lang.constant.DynamicCallSiteDesc;
 import java.lang.constant.DynamicConstantDesc;
 import java.lang.constant.MethodHandleDesc;
 import java.lang.constant.MethodTypeDesc;
+import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -301,6 +305,44 @@ class IndirectReferenceVerifierTest {
   }
 
   @Test
+  void sharedDynamicConstantsAreVerifiedWithoutExponentialWork() {
+    var bytes = sharedConstants(PolicyBytecodeVerifier.MAX_CONSTANT_DEPTH, false);
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(2), () -> assertAccepted(SandboxPolicy.noEgress(), bytes));
+  }
+
+  @Test
+  void cachedDynamicConstantsRemainAcceptedAtTheDepthBound() {
+    assertAccepted(
+        SandboxPolicy.noEgress(), sharedConstants(PolicyBytecodeVerifier.MAX_CONSTANT_DEPTH, true));
+  }
+
+  @Test
+  void cachedDynamicConstantsCannotBypassTheDepthBound() {
+    var bytes = sharedConstants(PolicyBytecodeVerifier.MAX_CONSTANT_DEPTH + 1, true);
+    var ex = assertDenied(SandboxPolicy.noEgress(), bytes);
+    assertEquals("dynamicConstantDepth", ex.rule());
+  }
+
+  @Test
+  void checkedConstantsAreNotReusedAcrossClassesOrAfterFailure() {
+    var verifier = new PolicyBytecodeVerifier(SandboxPolicy.noEgress());
+    var allowed =
+        loadConstant(DynamicConstantDesc.ofNamed(ConstantDescs.BSM_NULL_CONSTANT, "_", CD_String));
+    var denied =
+        loadConstant(
+            DynamicConstantDesc.ofNamed(ConstantDescs.BSM_NULL_CONSTANT, "_", CD_FileReader));
+    verifier.verify("TestClass", allowed);
+    for (var i = 0; i < 2; i++) {
+      var ex =
+          assertThrows(SandboxPolicyException.class, () -> verifier.verify("TestClass", denied));
+      assertEquals("java/io/FileReader", ex.deniedOwner());
+      assertEquals("denyFileSystemAccess", ex.rule());
+    }
+    verifier.verify("TestClass", allowed);
+  }
+
+  @Test
   void cyclicDynamicConstantIsRejectedWithoutUnboundedRecursion() {
     var inner = DynamicConstantDesc.ofNamed(BSM_INVOKE, "inner", CD_Object, "seed");
     var outer = DynamicConstantDesc.ofNamed(BSM_INVOKE, "outer", CD_Object, inner);
@@ -349,6 +391,32 @@ class IndirectReferenceVerifierTest {
       condy = DynamicConstantDesc.ofNamed(BSM_INVOKE, "level" + i, CD_Object, condy);
     }
     return condy;
+  }
+
+  private static byte[] sharedConstants(int depth, boolean loadChildrenFirst) {
+    return buildTestClass(
+        code -> {
+          var pool = code.constantPool();
+          var bootstrap = pool.methodHandleEntry(BSM_INVOKE);
+          var target =
+              pool.methodHandleEntry(
+                  MethodHandleDesc.ofMethod(
+                      DirectMethodHandleDesc.Kind.STATIC,
+                      ClassDesc.of("java.util.Objects"),
+                      "requireNonNullElse",
+                      MethodTypeDesc.of(CD_Object, CD_Object, CD_Object)));
+          LoadableConstantEntry child = pool.stringEntry("seed");
+          for (var i = 0; i < depth; i++) {
+            child =
+                pool.constantDynamicEntry(
+                    pool.bsmEntry(bootstrap, List.of(target, child, child)),
+                    pool.nameAndTypeEntry("level" + i, CD_Object));
+            if (loadChildrenFirst) {
+              code.ldc(child).pop();
+            }
+          }
+          code.ldc(child).pop();
+        });
   }
 
   /**

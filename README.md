@@ -591,10 +591,11 @@ podman run --rm \
   --pids-limit 256 --memory 1g \
   -v /opt/helios/app:/opt/helios/app:ro \
   -v /srv/tenant-42/workspace:/workspace:ro \
-  docker.io/library/eclipse-temurin:25-jre \
+  docker.io/library/eclipse-temurin:25-jdk \
   java --enable-native-access=ALL-UNNAMED -cp '/opt/helios/app/*' your.Executor
 ```
 
+- Use a full JDK 25 image: the executor and sandbox require `jdk.jshell` and `jdk.compiler`, which are absent from the Temurin JRE image.
 - `--network none` removes every interface but loopback inside the container; the host's listeners and the wider network are unreachable even with a permissive `SandboxPolicy`. Replace it with an egress-filtered network only for workloads that need one.
 - `--read-only --tmpfs /tmp` gives the sandbox its scratch directory and RPC socket directory on a private tmpfs and nothing else writable. Mount the workspace read-only and let host-owned tools (`Read` / `Grep` / `Glob` on a `WorkspaceRoot`) mediate access.
 - `--cap-drop ALL --security-opt no-new-privileges` blocks privilege escalation inside the container; `--pids-limit` and `--memory` bound fork bombs and heap abuse beyond `JvmSandboxConfig.maxHeapMb`.

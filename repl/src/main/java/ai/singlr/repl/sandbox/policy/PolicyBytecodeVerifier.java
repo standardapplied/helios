@@ -21,8 +21,10 @@ import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.NewObjectInstruction;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.DirectMethodHandleDesc;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -64,10 +66,11 @@ import java.util.stream.Collectors;
  *
  * <p>Traversal is over constant-pool entries rather than nominal descriptors (whose construction
  * eagerly recurses through nested arguments), is bounded to {@value #MAX_CONSTANT_DEPTH} nested
- * dynamic constants, rejects a dynamic constant that references itself, and rejects any classfile
- * the Classfile API cannot parse. Each of those surfaces as a {@link SandboxPolicyException} with a
- * rule label ({@code dynamicConstantDepth}, {@code dynamicConstantCycle}, {@code
- * malformedClassfile}) so malformed input fails closed instead of escaping the scan.
+ * dynamic constants, memoizes the greatest checked depth per constant within each class, rejects a
+ * dynamic constant that references itself, and rejects any classfile the Classfile API cannot
+ * parse. Each of those surfaces as a {@link SandboxPolicyException} with a rule label ({@code
+ * dynamicConstantDepth}, {@code dynamicConstantCycle}, {@code malformedClassfile}) so malformed
+ * input fails closed instead of escaping the scan.
  *
  * <p><strong>Rule order.</strong> Explicit {@link SandboxPolicy#deniedClasses()} and {@link
  * SandboxPolicy#deniedPackages()} match before the categorical flags ({@link
@@ -257,8 +260,9 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
   public void verify(String internalName, byte[] bytecodes) {
     try {
       var classModel = ClassFile.of().parse(bytecodes);
+      var checkedDepth = new HashMap<Integer, Integer>();
       for (var method : classModel.methods()) {
-        method.code().ifPresent(this::checkCode);
+        method.code().ifPresent(code -> checkCode(code, checkedDepth));
       }
     } catch (SandboxPolicyException e) {
       throw e;
@@ -267,7 +271,7 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
     }
   }
 
-  private void checkCode(CodeModel code) {
+  private void checkCode(CodeModel code, Map<Integer, Integer> checkedDepth) {
     for (var element : code.elementList()) {
       switch (element) {
         case InvokeInstruction ins ->
@@ -276,43 +280,50 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
         case FieldInstruction ins ->
             checkOwnerMember(ownerOf(ins.owner()), ins.name().stringValue());
         case ConstantInstruction.LoadConstantInstruction ins ->
-            checkConstant(ins.constantEntry(), new HashSet<>());
+            checkConstant(ins.constantEntry(), new HashSet<>(), checkedDepth);
         case InvokeDynamicInstruction ins ->
-            checkBootstrap(ins.invokedynamic().bootstrap(), new HashSet<>());
+            checkBootstrap(ins.invokedynamic().bootstrap(), new HashSet<>(), checkedDepth);
         default -> {}
       }
     }
   }
 
-  private void checkBootstrap(BootstrapMethodEntry bootstrap, Set<Integer> path) {
+  private void checkBootstrap(
+      BootstrapMethodEntry bootstrap, Set<Integer> path, Map<Integer, Integer> checkedDepth) {
     var handle = bootstrap.bootstrapMethod();
     if (!isTrustedBootstrap(handle)) {
       checkHandle(handle);
     }
     for (var argument : bootstrap.arguments()) {
-      checkConstant(argument, path);
+      checkConstant(argument, path, checkedDepth);
     }
   }
 
-  private void checkConstant(LoadableConstantEntry entry, Set<Integer> path) {
+  private void checkConstant(
+      LoadableConstantEntry entry, Set<Integer> path, Map<Integer, Integer> checkedDepth) {
     switch (entry) {
       case ClassEntry c -> checkOwnerMember(ownerOf(c), null);
       case MethodHandleEntry h -> checkHandle(h);
-      case ConstantDynamicEntry d -> checkDynamicConstant(d, path);
+      case ConstantDynamicEntry d -> checkDynamicConstant(d, path, checkedDepth);
       case MethodTypeEntry t -> {}
       case ConstantValueEntry v -> {}
     }
   }
 
-  private void checkDynamicConstant(ConstantDynamicEntry entry, Set<Integer> path) {
-    if (path.size() >= MAX_CONSTANT_DEPTH) {
+  private void checkDynamicConstant(
+      ConstantDynamicEntry entry, Set<Integer> path, Map<Integer, Integer> checkedDepth) {
+    var depth = path.size();
+    if (depth >= MAX_CONSTANT_DEPTH) {
       throw new SandboxPolicyException(null, null, "dynamicConstantDepth");
     }
     if (!path.add(entry.index())) {
       throw new SandboxPolicyException(null, null, "dynamicConstantCycle");
     }
-    checkOwnerMember(ownerOf(entry.typeSymbol()), null);
-    checkBootstrap(entry.bootstrap(), path);
+    if (checkedDepth.getOrDefault(entry.index(), -1) < depth) {
+      checkOwnerMember(ownerOf(entry.typeSymbol()), null);
+      checkBootstrap(entry.bootstrap(), path, checkedDepth);
+      checkedDepth.put(entry.index(), depth);
+    }
     path.remove(entry.index());
   }
 

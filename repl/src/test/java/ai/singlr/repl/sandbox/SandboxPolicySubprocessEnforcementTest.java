@@ -33,7 +33,7 @@ class SandboxPolicySubprocessEnforcementTest {
 
   @Test
   void denyingPolicyRejectsDeniedSnippetInRealSubprocess() {
-    var policy = SandboxPolicy.newBuilder().withDenyReflection(true).build();
+    var policy = SandboxPolicy.noEgress();
     var config =
         JvmSandboxConfig.newBuilder()
             .withSandboxPolicy(policy)
@@ -52,12 +52,43 @@ class SandboxPolicySubprocessEnforcementTest {
                   + "] stdout=["
                   + result.stdout()
                   + "]");
+      var staticReference =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  "interface Loader { Class<?> load(String name) throws ClassNotFoundException; }\n"
+                      + "Loader loader = Class::forName;"));
+      assertTrue(
+          staticReference.stderr().contains("Sandbox policy denied java.lang.Class#forName"),
+          staticReference::stderr);
+      var instanceReference =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  "java.util.function.Function<java.io.File, java.io.File[]> lister ="
+                      + " java.io.File::listFiles;"));
+      assertTrue(
+          instanceReference.stderr().contains("Sandbox policy denied java.io.File#listFiles"),
+          instanceReference::stderr);
+      var boundReference =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  "java.util.function.Supplier<Boolean> exists = new java.io.File(\".\")::exists;"));
+      assertTrue(
+          boundReference.stderr().contains("Sandbox policy denied java.io.File#exists"),
+          boundReference::stderr);
+      var nestedReference =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  "java.util.function.Supplier<java.util.function.Predicate<java.io.File>>"
+                      + " nested = () -> java.io.File::exists;"));
+      assertTrue(
+          nestedReference.stderr().contains("Sandbox policy denied java.io.File#exists"),
+          nestedReference::stderr);
     }
   }
 
   @Test
-  void denyingPolicyAllowsLegitimateSnippetInRealSubprocess() {
-    var policy = SandboxPolicy.newBuilder().withDenyReflection(true).build();
+  void noEgressAllowsLanguageBootstrapsInRealSubprocess() {
+    var policy = SandboxPolicy.noEgress();
     var config =
         JvmSandboxConfig.newBuilder()
             .withSandboxPolicy(policy)
@@ -65,7 +96,29 @@ class SandboxPolicySubprocessEnforcementTest {
             .build();
     var registry = new HostFunctionRegistry();
     try (var sandbox = JvmSandbox.create(config, registry)) {
-      var result = sandbox.execute(ExecutionRequest.java("int sum = 21 * 2;"));
+      var result =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  """
+                  record Point(int x, String label) {}
+                  int[] values = {1, -2};
+                  java.util.function.Supplier<int[]> copy = values::clone;
+                  java.util.function.IntUnaryOperator abs = Math::abs;
+                  int factor = 3;
+                  java.util.function.IntUnaryOperator scale = value -> value * factor;
+                  Point point = new Point(scale.applyAsInt(abs.applyAsInt(copy.get()[1])), "ok");
+                  int classify(Object value) {
+                    return switch (value) {
+                      case java.time.DayOfWeek.MONDAY -> 1;
+                      case String s -> s.length();
+                      default -> 0;
+                    };
+                  }
+                  System.out.println("point=" + point);
+                  System.out.println(point.equals(new Point(6, "ok")));
+                  System.out.println(point.hashCode() == new Point(6, "ok").hashCode());
+                  System.out.println("day=" + classify(java.time.DayOfWeek.MONDAY));
+                  """));
       assertEquals(
           0,
           result.exitCode(),
@@ -78,6 +131,7 @@ class SandboxPolicySubprocessEnforcementTest {
       assertTrue(
           !result.stderr().contains("Sandbox policy denied"),
           () -> "Allowed snippet unexpectedly produced a policy denial: " + result.stderr());
+      assertEquals("point=Point[x=6, label=ok]\ntrue\ntrue\nday=1\n", result.stdout());
     }
   }
 
