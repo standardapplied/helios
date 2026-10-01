@@ -18,6 +18,7 @@ import com.standardapplied.helios.repl.protocol.RpcMessage;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.io.PrintStream;
@@ -25,8 +26,11 @@ import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import jdk.jshell.JShell;
 import org.junit.jupiter.api.AfterEach;
@@ -515,26 +519,20 @@ class JvmSandboxBootstrapTest {
     var jshellLocal = createJShell();
     var stdinWriter = new PipedOutputStream();
     var stdinPipe = new PipedInputStream(stdinWriter);
-    var stdoutPipe = new PipedOutputStream();
-    var stdoutReader = new PipedInputStream(stdoutPipe);
-    var realOut = new PrintStream(stdoutPipe, true, StandardCharsets.UTF_8);
+    var stdout = new LineSink();
+    var realOut = new PrintStream(stdout, true, StandardCharsets.UTF_8);
     var stdinBufReader =
         new BufferedReader(new InputStreamReader(stdinPipe, StandardCharsets.UTF_8));
     var pipedBootstrap = new JvmSandboxBootstrap(jshellLocal, stdinBufReader, realOut);
-    var stdoutBufReader =
-        new BufferedReader(new InputStreamReader(stdoutReader, StandardCharsets.UTF_8));
-    return new PipedBootstrapEnv(jshellLocal, pipedBootstrap, stdinWriter, stdoutBufReader);
+    return new PipedBootstrapEnv(jshellLocal, pipedBootstrap, stdinWriter, stdout);
   }
 
   private record PipedBootstrapEnv(
-      JShell jshell,
-      JvmSandboxBootstrap bootstrap,
-      PipedOutputStream stdinWriter,
-      BufferedReader stdoutBufReader)
+      JShell jshell, JvmSandboxBootstrap bootstrap, PipedOutputStream stdinWriter, LineSink stdout)
       implements AutoCloseable {
 
     String readLine() throws Exception {
-      return stdoutBufReader.readLine();
+      return stdout.nextLine();
     }
 
     void writeLine(String content) throws Exception {
@@ -545,6 +543,31 @@ class JvmSandboxBootstrapTest {
     @Override
     public void close() throws Exception {
       jshell.close();
+    }
+  }
+
+  /**
+   * Collects what the bootstrap prints as whole lines. The bootstrap prints from several
+   * short-lived threads, and a {@code PipedInputStream} fails with "Write end dead" whenever its
+   * reader arrives after one writer thread has exited and before the next one writes.
+   */
+  private static final class LineSink extends OutputStream {
+    private final BlockingQueue<String> lines = new LinkedBlockingQueue<>();
+    private final ByteArrayOutputStream partial = new ByteArrayOutputStream();
+
+    @Override
+    public synchronized void write(int b) {
+      if (b == '\n') {
+        lines.add(partial.toString(StandardCharsets.UTF_8));
+        partial.reset();
+      } else {
+        partial.write(b);
+      }
+    }
+
+    String nextLine() throws InterruptedException {
+      return Objects.requireNonNull(
+          lines.poll(60, TimeUnit.SECONDS), "the bootstrap printed no line within 60 s");
     }
   }
 }
