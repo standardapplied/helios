@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -10,11 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.runtime.SessionContext;
-import ai.singlr.repl.ReplConfig;
-import ai.singlr.repl.execution.JShellExecutionProvider;
-import ai.singlr.repl.sandbox.JvmSandbox;
-import ai.singlr.session.execution.SessionStartOutcome;
+import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.repl.ReplConfig;
+import com.standardapplied.helios.repl.execution.JShellExecutionProvider;
+import com.standardapplied.helios.repl.sandbox.JvmSandbox;
+import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import org.junit.jupiter.api.Test;
 
 /**

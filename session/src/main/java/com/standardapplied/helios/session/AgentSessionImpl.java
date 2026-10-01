@@ -1,34 +1,34 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.runtime.SessionContext;
-import ai.singlr.core.schema.RawOutputCapturePolicy;
-import ai.singlr.session.ask.AskUserQuestionRequest;
-import ai.singlr.session.ask.AskUserQuestionResponse;
-import ai.singlr.session.ask.AskUserQuestionTool;
-import ai.singlr.session.ask.QuestionGateway;
-import ai.singlr.session.execution.ExecutionProvider;
-import ai.singlr.session.execution.SessionStartOutcome;
-import ai.singlr.session.hooks.DefaultHookContext;
-import ai.singlr.session.hooks.Hook;
-import ai.singlr.session.hooks.HookContext;
-import ai.singlr.session.hooks.HookRegistry;
-import ai.singlr.session.loop.AgentLoop;
-import ai.singlr.session.loop.SessionState;
-import ai.singlr.session.loop.StopClassifier;
-import ai.singlr.session.loop.ToolDispatch;
-import ai.singlr.session.loop.TurnRunner;
-import ai.singlr.session.memory.MemoryReadTool;
-import ai.singlr.session.memory.MemoryWriteTool;
-import ai.singlr.session.permissions.DefaultPermissionEvaluator;
-import ai.singlr.session.tools.ToolBinding;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
+import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
+import com.standardapplied.helios.session.ask.AskUserQuestionTool;
+import com.standardapplied.helios.session.ask.QuestionGateway;
+import com.standardapplied.helios.session.execution.ExecutionProvider;
+import com.standardapplied.helios.session.execution.SessionStartOutcome;
+import com.standardapplied.helios.session.hooks.DefaultHookContext;
+import com.standardapplied.helios.session.hooks.Hook;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.loop.AgentLoop;
+import com.standardapplied.helios.session.loop.SessionState;
+import com.standardapplied.helios.session.loop.StopClassifier;
+import com.standardapplied.helios.session.loop.ToolDispatch;
+import com.standardapplied.helios.session.loop.TurnRunner;
+import com.standardapplied.helios.session.memory.MemoryReadTool;
+import com.standardapplied.helios.session.memory.MemoryWriteTool;
+import com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -504,9 +504,9 @@ public final class AgentSessionImpl implements AgentSession {
    * boundaries by {@link StopClassifier}, so a turn whose model stream never delivers {@code
    * onComplete} / {@code onError} (silent socket, hung edge / proxy / load balancer) blocks the
    * loop indefinitely. The wall-clock cancellation flips the token; {@link
-   * ai.singlr.session.loop.TurnSubscriber#awaitDone(CancellationToken)} observes it and unblocks;
-   * the loop proceeds to its next iteration, where {@link StopClassifier} sees {@code
-   * state.elapsed() > maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}.
+   * com.standardapplied.helios.session.loop.TurnSubscriber#awaitDone(CancellationToken)} observes
+   * it and unblocks; the loop proceeds to its next iteration, where {@link StopClassifier} sees
+   * {@code state.elapsed() > maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}.
    *
    * <p>The future is captured so {@link #close()} can cancel it before shutdown; the scheduler
    * itself is owned by this session and drained by {@link #closeRuntime()}.
@@ -530,13 +530,13 @@ public final class AgentSessionImpl implements AgentSession {
    * matchmaking baseline's 3/24 viewers with {@code tokens=0/0 cost=$0.0000}.
    *
    * <p>{@link AgentLoop#run} catches {@code Exception} and {@link
-   * ai.singlr.session.hooks.HookRegistry} catches {@code RuntimeException}; in practice only {@link
-   * Error} subtypes (OOM, StackOverflow, LinkageError, AssertionError from a hook) reach the outer
-   * {@code catch}. We still capture {@link Throwable} as defense-in-depth against future contract
-   * drift — without it a RuntimeException escape would leave callers blocked on {@code
-   * result().join()} forever. The failure is held across the publisher drain so {@code
-   * closeRuntime} always runs; {@link #rethrowSneakily} preserves the original throwable type
-   * without an {@code instanceof} cascade that would leave unreachable branches in coverage.
+   * com.standardapplied.helios.session.hooks.HookRegistry} catches {@code RuntimeException}; in
+   * practice only {@link Error} subtypes (OOM, StackOverflow, LinkageError, AssertionError from a
+   * hook) reach the outer {@code catch}. We still capture {@link Throwable} as defense-in-depth
+   * against future contract drift — without it a RuntimeException escape would leave callers
+   * blocked on {@code result().join()} forever. The failure is held across the publisher drain so
+   * {@code closeRuntime} always runs; {@link #rethrowSneakily} preserves the original throwable
+   * type without an {@code instanceof} cascade that would leave unreachable branches in coverage.
    */
   private void runLoop() {
     ResultMessage terminal = null;

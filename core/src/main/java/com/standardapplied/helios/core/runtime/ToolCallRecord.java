@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.runtime;
+package com.standardapplied.helios.core.runtime;
 
 import java.time.OffsetDateTime;
 import java.util.Collections;
@@ -16,8 +16,9 @@ import java.util.UUID;
  * Durable journal entry for a single tool invocation within an {@link AgentRun}.
  *
  * <p>One row per logical call: written as {@link ToolCallStatus#STARTED} immediately before the
- * tool's {@link ai.singlr.core.fault.FaultTolerance} envelope is entered, and updated to a terminal
- * status after the envelope returns — regardless of how many in-process retries happened inside.
+ * tool's {@link com.standardapplied.helios.core.fault.FaultTolerance} envelope is entered, and
+ * updated to a terminal status after the envelope returns — regardless of how many in-process
+ * retries happened inside.
  *
  * @param runId run this call belongs to
  * @param iteration zero-based iteration index at the time the call was journaled
@@ -25,8 +26,8 @@ import java.util.UUID;
  * @param toolName the tool's name
  * @param args arguments passed to the tool, nullable for tools without parameters
  * @param status current status; transitions {@code STARTED -> SUCCEEDED|FAILED}
- * @param output truncated output text from a successful {@link ai.singlr.core.tool.ToolResult},
- *     nullable
+ * @param output truncated output text from a successful {@link
+ *     com.standardapplied.helios.core.tool.ToolResult}, nullable
  * @param error error message when {@link ToolCallStatus#FAILED}, otherwise {@code null}
  * @param startedAt UTC time {@code STARTED} was journaled
  * @param endedAt UTC time the terminal status was journaled, or {@code null} while in-flight

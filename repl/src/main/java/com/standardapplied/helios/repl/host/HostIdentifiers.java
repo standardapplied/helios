@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.host;
+package com.standardapplied.helios.repl.host;
 
 /**
  * Identifier-validation helpers for host-function and host-parameter names. Names that flow into

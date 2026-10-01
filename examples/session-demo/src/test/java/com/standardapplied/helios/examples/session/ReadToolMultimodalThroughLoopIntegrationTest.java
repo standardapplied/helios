@@ -1,18 +1,18 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
-package ai.singlr.examples.session;
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
+package com.standardapplied.helios.examples.session;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.gemini.GeminiModelId;
-import ai.singlr.gemini.GeminiProvider;
-import ai.singlr.session.AgentSession;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SessionLimits;
-import ai.singlr.session.SessionPresets;
-import ai.singlr.session.UserMessage;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.gemini.GeminiModelId;
+import com.standardapplied.helios.gemini.GeminiProvider;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SessionPresets;
+import com.standardapplied.helios.session.UserMessage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -25,13 +25,13 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * End-to-end live regression for {@link ai.singlr.session.files.ReadTool}'s multimodal dispatch.
- * The unit tests in {@code ReadToolTest} prove the bytes survive ReadTool unchanged; the loop test
- * in {@code TurnRunnerToolDispatchTest} proves the attachment splice produces the right {@code
- * Message.user(text, inlineFiles)} shape. Neither of those proves the full chain — Read → loop
- * splice → provider adapter (Gemini converts {@code InlineFile} to {@code inline_data}) → the live
- * Gemini server actually accepting and parsing the binary payload → the model returning a coherent
- * response.
+ * End-to-end live regression for {@link com.standardapplied.helios.session.files.ReadTool}'s
+ * multimodal dispatch. The unit tests in {@code ReadToolTest} prove the bytes survive ReadTool
+ * unchanged; the loop test in {@code TurnRunnerToolDispatchTest} proves the attachment splice
+ * produces the right {@code Message.user(text, inlineFiles)} shape. Neither of those proves the
+ * full chain — Read → loop splice → provider adapter (Gemini converts {@code InlineFile} to {@code
+ * inline_data}) → the live Gemini server actually accepting and parsing the binary payload → the
+ * model returning a coherent response.
  *
  * <p>This file closes that gap with two live Gemini calls (~5 s each on a warm key):
  *
@@ -75,7 +75,7 @@ final class ReadToolMultimodalThroughLoopIntegrationTest {
     Files.write(workspace.resolve("pixel.png"), minimalValid1x1PngBytes());
 
     var options =
-        ai.singlr.session.SessionOptions.newBuilder()
+        com.standardapplied.helios.session.SessionOptions.newBuilder()
             .apply(SessionPresets.readOnly(workspace))
             .withModel(model)
             .withSystemPrompt(
@@ -113,7 +113,7 @@ final class ReadToolMultimodalThroughLoopIntegrationTest {
     Files.write(workspace.resolve("greeting.pdf"), pdfBytes);
 
     var options =
-        ai.singlr.session.SessionOptions.newBuilder()
+        com.standardapplied.helios.session.SessionOptions.newBuilder()
             .apply(SessionPresets.readOnly(workspace))
             .withModel(model)
             .withSystemPrompt(

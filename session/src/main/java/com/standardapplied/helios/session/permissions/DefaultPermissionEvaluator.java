@@ -1,20 +1,20 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.permissions;
+package com.standardapplied.helios.session.permissions;
 
-import ai.singlr.core.common.Ids;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.session.ask.AskUserQuestionOption;
-import ai.singlr.session.ask.AskUserQuestionRequest;
-import ai.singlr.session.ask.QuestionGateway;
-import ai.singlr.session.hooks.HookContext;
-import ai.singlr.session.hooks.HookOutcome;
-import ai.singlr.session.hooks.PreToolUseHook;
-import ai.singlr.session.tools.ToolBinding;
-import ai.singlr.session.tools.ToolCategory;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.session.ask.AskUserQuestionOption;
+import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
+import com.standardapplied.helios.session.ask.QuestionGateway;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.PreToolUseHook;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -155,13 +155,14 @@ public final class DefaultPermissionEvaluator implements PreToolUseHook {
 
   /**
    * Route an ASK decision through the session's {@link QuestionGateway}, blocking the agent-loop's
-   * virtual thread until the host calls {@link ai.singlr.session.AgentSession#answer(String,
-   * ai.singlr.session.ask.AskUserQuestionResponse) AgentSession.answer}. Returns {@link
-   * HookOutcome.Continue} only when the user's selection matches {@link #ALLOW_LABEL}
+   * virtual thread until the host calls {@link
+   * com.standardapplied.helios.session.AgentSession#answer(String,
+   * com.standardapplied.helios.session.ask.AskUserQuestionResponse) AgentSession.answer}. Returns
+   * {@link HookOutcome.Continue} only when the user's selection matches {@link #ALLOW_LABEL}
    * (case-insensitive); anything else is Block.
    */
   private HookOutcome handleAsk(
-      ai.singlr.session.tools.ToolPermissionKey key, PermissionDecision decision) {
+      com.standardapplied.helios.session.tools.ToolPermissionKey key, PermissionDecision decision) {
     if (questionGateway.isEmpty()) {
       return HookOutcome.block(
           "permission: ASK rule without handler — no QuestionGateway wired. " + decision.reason());
@@ -199,7 +200,7 @@ public final class DefaultPermissionEvaluator implements PreToolUseHook {
    * @return the resolved decision
    */
   public PermissionDecision evaluate(
-      ai.singlr.session.tools.ToolPermissionKey key, ToolCategory category) {
+      com.standardapplied.helios.session.tools.ToolPermissionKey key, ToolCategory category) {
     Objects.requireNonNull(key, "key must not be null");
     Objects.requireNonNull(category, "category must not be null");
 

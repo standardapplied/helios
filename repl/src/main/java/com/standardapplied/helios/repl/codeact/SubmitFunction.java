@@ -1,20 +1,20 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.tool.ParameterType;
-import ai.singlr.repl.host.HostFunction;
-import ai.singlr.repl.host.HostParameter;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.repl.host.HostFunction;
+import com.standardapplied.helios.repl.host.HostParameter;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /**
  * In-sandbox {@code submit} host function: callable from JShell code via {@code submit(output)}
- * (routed through {@link ai.singlr.repl.sandbox.HostBridge#submit(Object)}).
+ * (routed through {@link com.standardapplied.helios.repl.sandbox.HostBridge#submit(Object)}).
  *
  * <p>Shares the validation pipeline with {@link SubmitTool} via {@link SubmitValidation} so the
  * behavior is identical regardless of whether the model finalized via the agent-loop {@code Submit}
@@ -38,7 +38,7 @@ public final class SubmitFunction {
    * @param schema the typed output schema the submitted value is validated against; non-null
    * @param holder the per-session holder that captures the parsed value; non-null
    * @return a host function suitable for registration in {@link
-   *     ai.singlr.repl.ReplConfig.Builder#withHostFunction(HostFunction)}
+   *     com.standardapplied.helios.repl.ReplConfig.Builder#withHostFunction(HostFunction)}
    * @throws NullPointerException if either argument is null
    */
   public static HostFunction create(OutputSchema<?> schema, SubmittedValueHolder holder) {

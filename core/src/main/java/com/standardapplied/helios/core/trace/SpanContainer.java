@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.trace;
+package com.standardapplied.helios.core.trace;
 
 /**
  * Anything that can hold spans — either a top-level {@link TraceBuilder} or a nested {@link

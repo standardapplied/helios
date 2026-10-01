@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic;
+package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -12,10 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.anthropic.api.MessagesRequest;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.model.StreamEvent;
+import com.standardapplied.helios.anthropic.api.MessagesRequest;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.StreamEvent;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.URI;
@@ -83,10 +83,11 @@ class AnthropicWebToolsTest {
   void serverToolsAppendAfterClientTools() {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
     var clientTool =
-        ai.singlr.core.tool.Tool.newBuilder()
+        com.standardapplied.helios.core.tool.Tool.newBuilder()
             .withName("lookup")
             .withDescription("Look something up")
-            .withExecutor((args, ctx) -> ai.singlr.core.tool.ToolResult.success("ok"))
+            .withExecutor(
+                (args, ctx) -> com.standardapplied.helios.core.tool.ToolResult.success("ok"))
             .build();
 
     var request =
@@ -437,7 +438,7 @@ class AnthropicWebToolsTest {
         ModelConfig.newBuilder()
             .withApiKey("k")
             .withWebSearch(true)
-            .withToolChoice(new ai.singlr.core.model.ToolChoice.Any())
+            .withToolChoice(new com.standardapplied.helios.core.model.ToolChoice.Any())
             .build();
     var m = model(config);
     var initial = m.buildRequest(List.of(Message.user("go")), List.of(), null);
@@ -483,7 +484,7 @@ class AnthropicWebToolsTest {
     var done = drainDone(refusalAfterToolUse);
 
     assertEquals(
-        ai.singlr.core.model.FinishReason.REFUSAL,
+        com.standardapplied.helios.core.model.FinishReason.REFUSAL,
         done.response().finishReason(),
         "a provider refusal must not be reclassified as TOOL_CALLS");
   }
@@ -493,10 +494,11 @@ class AnthropicWebToolsTest {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
     var m = model(config);
     var clientTool =
-        ai.singlr.core.tool.Tool.newBuilder()
+        com.standardapplied.helios.core.tool.Tool.newBuilder()
             .withName("lookup")
             .withDescription("Look something up")
-            .withExecutor((args, ctx) -> ai.singlr.core.tool.ToolResult.success("ok"))
+            .withExecutor(
+                (args, ctx) -> com.standardapplied.helios.core.tool.ToolResult.success("ok"))
             .build();
 
     var request = m.buildRequest(List.of(Message.user("Hi")), List.of(clientTool), null);
@@ -510,10 +512,11 @@ class AnthropicWebToolsTest {
   void clientToolNameCollidingWithServerToolFailsFast() {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
     var collider =
-        ai.singlr.core.tool.Tool.newBuilder()
+        com.standardapplied.helios.core.tool.Tool.newBuilder()
             .withName("web_search")
             .withDescription("clashes")
-            .withExecutor((args, ctx) -> ai.singlr.core.tool.ToolResult.success("ok"))
+            .withExecutor(
+                (args, ctx) -> com.standardapplied.helios.core.tool.ToolResult.success("ok"))
             .build();
 
     var ex =

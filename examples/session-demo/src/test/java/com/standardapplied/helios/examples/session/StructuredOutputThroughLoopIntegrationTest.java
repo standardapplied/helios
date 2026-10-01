@@ -1,20 +1,20 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
-package ai.singlr.examples.session;
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
+package com.standardapplied.helios.examples.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.gemini.GeminiModelId;
-import ai.singlr.gemini.GeminiProvider;
-import ai.singlr.session.AgentSession;
-import ai.singlr.session.SessionLimits;
-import ai.singlr.session.SessionOptions;
-import ai.singlr.session.UserMessage;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.gemini.GeminiModelId;
+import com.standardapplied.helios.gemini.GeminiProvider;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.UserMessage;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;

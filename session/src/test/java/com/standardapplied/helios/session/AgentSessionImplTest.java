@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -12,26 +12,26 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.CostCalculator;
-import ai.singlr.core.common.CostEstimate;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.runtime.SessionContext;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.schema.RawOutputCapturePolicy;
-import ai.singlr.core.schema.StructuredOutputParseException;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.session.ask.AskUserQuestionResponse;
-import ai.singlr.session.execution.ExecutionCapabilities;
-import ai.singlr.session.execution.ExecutionProvider;
-import ai.singlr.session.execution.ExecutionRequest;
-import ai.singlr.session.execution.ExecutionResult;
-import ai.singlr.session.execution.SessionStartOutcome;
-import ai.singlr.session.hooks.PreStopHook;
+import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.core.schema.StructuredOutputParseException;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
+import com.standardapplied.helios.session.execution.ExecutionCapabilities;
+import com.standardapplied.helios.session.execution.ExecutionProvider;
+import com.standardapplied.helios.session.execution.ExecutionRequest;
+import com.standardapplied.helios.session.execution.ExecutionResult;
+import com.standardapplied.helios.session.execution.SessionStartOutcome;
+import com.standardapplied.helios.session.hooks.PreStopHook;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -1238,14 +1238,14 @@ final class AgentSessionImplTest {
     }
 
     @Override
-    public Flow.Publisher<ai.singlr.core.model.ModelChunk> chatStream(
+    public Flow.Publisher<com.standardapplied.helios.core.model.ModelChunk> chatStream(
         List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
       untypedDispatch.set(true);
       return one("{\"field\":\"untyped\"}");
     }
 
     @Override
-    public Flow.Publisher<ai.singlr.core.model.ModelChunk> chatStream(
+    public Flow.Publisher<com.standardapplied.helios.core.model.ModelChunk> chatStream(
         List<Message> messages,
         List<Tool> tools,
         OutputSchema<?> outputSchema,
@@ -1255,7 +1255,8 @@ final class AgentSessionImplTest {
       return one("{\"field\":\"typed-with-schema\"}");
     }
 
-    private static Flow.Publisher<ai.singlr.core.model.ModelChunk> one(String content) {
+    private static Flow.Publisher<com.standardapplied.helios.core.model.ModelChunk> one(
+        String content) {
       return subscriber -> {
         subscriber.onSubscribe(
             new Flow.Subscription() {
@@ -1264,12 +1265,13 @@ final class AgentSessionImplTest {
               @Override
               public void request(long n) {
                 if (i == 0) {
-                  subscriber.onNext(new ai.singlr.core.model.ModelChunk.TextDelta(content));
+                  subscriber.onNext(
+                      new com.standardapplied.helios.core.model.ModelChunk.TextDelta(content));
                   i = 1;
                 }
                 if (i == 1) {
                   subscriber.onNext(
-                      new ai.singlr.core.model.ModelChunk.MessageStop(
+                      new com.standardapplied.helios.core.model.ModelChunk.MessageStop(
                           FinishReason.STOP.name(), Usage.of(1, 1), Map.of()));
                   i = 2;
                   subscriber.onComplete();

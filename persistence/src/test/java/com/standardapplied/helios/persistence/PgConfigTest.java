@@ -1,6 +1,6 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.singlr.core.common.SecretRegistry;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import org.junit.jupiter.api.Test;
 
 class PgConfigTest {

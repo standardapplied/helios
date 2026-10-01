@@ -1,22 +1,22 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.FileReference;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.InlineFile;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.Role;
-import ai.singlr.core.tool.Tool;
+import com.standardapplied.helios.core.model.FileReference;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.InlineFile;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.Role;
+import com.standardapplied.helios.core.tool.Tool;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -35,8 +35,9 @@ import org.junit.jupiter.api.io.TempDir;
  *
  * <p>The agent loop is exercised end-to-end with a recording stub Model. We assert the Model
  * observed the attachment bytes and media types verbatim — proving the path from {@link
- * UserMessage.Builder#withAttachment} through {@link ai.singlr.session.loop.AgentLoop} to {@link
- * Message} works without provider involvement.
+ * UserMessage.Builder#withAttachment} through {@link
+ * com.standardapplied.helios.session.loop.AgentLoop} to {@link Message} works without provider
+ * involvement.
  */
 final class Phase3AcceptanceTest {
 

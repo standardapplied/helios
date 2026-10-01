@@ -1,27 +1,28 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Response.Usage;
 import java.util.Map;
 import java.util.Objects;
 
 /**
  * Outcome of one model turn, produced by {@link TurnRunner#runTurn(SessionState,
- * ai.singlr.session.SessionLimits)} and consumed by {@link StopClassifier#classify(SessionState,
- * ai.singlr.session.SessionLimits, FinishReason, String, Throwable, int, boolean)}.
+ * com.standardapplied.helios.session.SessionLimits)} and consumed by {@link
+ * StopClassifier#classify(SessionState, com.standardapplied.helios.session.SessionLimits,
+ * FinishReason, String, Throwable, int, boolean)}.
  *
  * <p>{@code assistantContent} is the fully-assembled assistant text accumulated from every {@link
- * ai.singlr.core.model.ModelChunk.TextDelta TextDelta} chunk during the turn — never null, possibly
- * empty (a tool-call-only turn produces empty content). {@code usage} is the {@link
- * ai.singlr.core.model.ModelChunk.MessageStop MessageStop} usage from the same turn — the
- * authoritative final tally for the turn. {@code metadata} carries provider-round-trip data (Gemini
- * thought signatures, Anthropic citation pointers, …) lifted off the {@code MessageStop} chunk; the
- * agent loop stores it on the assistant message so it survives into the next turn's follow-up
- * request.
+ * com.standardapplied.helios.core.model.ModelChunk.TextDelta TextDelta} chunk during the turn —
+ * never null, possibly empty (a tool-call-only turn produces empty content). {@code usage} is the
+ * {@link com.standardapplied.helios.core.model.ModelChunk.MessageStop MessageStop} usage from the
+ * same turn — the authoritative final tally for the turn. {@code metadata} carries
+ * provider-round-trip data (Gemini thought signatures, Anthropic citation pointers, …) lifted off
+ * the {@code MessageStop} chunk; the agent loop stores it on the assistant message so it survives
+ * into the next turn's follow-up request.
  *
  * <p>{@code streamError} carries the throwable the subscriber recorded when the turn ended with
  * {@link FinishReason#ERROR} — including its full cause chain — so {@link StopClassifier} can

@@ -1,17 +1,17 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.common;
+package com.standardapplied.helios.core.common;
 
 /**
  * Per-entry calibration check applied to {@link FieldProvenance}. The default rejects {@link
  * Confidence#MEDIUM} or {@link Confidence#HIGH} entries that have no {@link Source} citations — the
  * only built-in mechanism preventing the model from rubber-stamping {@code HIGH} on every field.
  *
- * <p>Override per use case via {@link ai.singlr.core.schema.OutputSchema#provenancedOf(Class,
- * ProvenanceValidator)}:
+ * <p>Override per use case via {@link
+ * com.standardapplied.helios.core.schema.OutputSchema#provenancedOf(Class, ProvenanceValidator)}:
  *
  * <ul>
  *   <li><b>SDTM mapping:</b> accept {@code cdisc-ct://} URIs as valid sources for HIGH without

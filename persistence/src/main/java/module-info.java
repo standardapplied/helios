@@ -1,24 +1,24 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
 /**
- * Singular Agentic Framework - PostgreSQL Persistence Module.
+ * Helios - PostgreSQL Persistence Module.
  *
  * <p>Provides PostgreSQL-backed implementations of core persistence interfaces using Helidon
- * DbClient, starting with {@link ai.singlr.core.prompt.PromptRegistry}.
+ * DbClient, starting with {@link com.standardapplied.helios.core.prompt.PromptRegistry}.
  */
-module ai.singlr.persistence {
-  requires ai.singlr.core;
-  requires ai.singlr.scimsql;
+module com.standardapplied.helios.persistence {
+  requires com.standardapplied.helios.core;
+  requires com.standardapplied.helios.scimsql;
   requires io.helidon.dbclient;
   requires io.helidon.common.mapper;
   requires tools.jackson.databind;
   requires java.sql;
 
-  exports ai.singlr.persistence;
+  exports com.standardapplied.helios.persistence;
 
   provides io.helidon.common.mapper.spi.MapperProvider with
-      ai.singlr.persistence.mapper.DbTypeMapperProvider;
+      com.standardapplied.helios.persistence.mapper.DbTypeMapperProvider;
 }

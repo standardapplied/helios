@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
-import ai.singlr.core.model.Message;
+import com.standardapplied.helios.core.model.Message;
 import java.util.List;
 
 /**
@@ -26,7 +26,8 @@ import java.util.List;
  *       and treated as {@link HookOutcome.Continue Continue}; the compactor still runs against the
  *       unmodified history. Callers that need to veto compaction entirely should register a {@code
  *       ContextCompactor} of their own (or wire {@link
- *       ai.singlr.session.ContextCompactor#disabled() ContextCompactor.disabled()}).
+ *       com.standardapplied.helios.session.ContextCompactor#disabled()
+ *       ContextCompactor.disabled()}).
  * </ul>
  */
 @FunctionalInterface

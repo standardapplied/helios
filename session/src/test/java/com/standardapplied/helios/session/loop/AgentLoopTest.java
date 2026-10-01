@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -10,24 +10,24 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.CostCalculator;
-import ai.singlr.core.context.TokenCounter;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.runtime.SessionContext;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.session.CompactionResult;
-import ai.singlr.session.ConcurrencyLimits;
-import ai.singlr.session.ContextCompactor;
-import ai.singlr.session.QueryEvent;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SessionLimits;
-import ai.singlr.session.SteeringQueue;
-import ai.singlr.session.UserMessage;
+import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.context.TokenCounter;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.CompactionResult;
+import com.standardapplied.helios.session.ConcurrencyLimits;
+import com.standardapplied.helios.session.ContextCompactor;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SteeringQueue;
+import com.standardapplied.helios.session.UserMessage;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -44,12 +44,12 @@ final class AgentLoopTest {
   private static final Clock CLOCK = Clock.fixed(FIXED, ZoneOffset.UTC);
 
   private final List<QueryEvent> events = new ArrayList<>();
-  private final ai.singlr.session.hooks.HookRegistry hooks =
-      ai.singlr.session.hooks.HookRegistry.empty();
+  private final com.standardapplied.helios.session.hooks.HookRegistry hooks =
+      com.standardapplied.helios.session.hooks.HookRegistry.empty();
   private final ToolDispatch dispatch =
       new ToolDispatch(
           SessionContext.forTesting("loop-test"),
-          ai.singlr.session.tools.ToolRegistry.empty(),
+          com.standardapplied.helios.session.tools.ToolRegistry.empty(),
           ConcurrencyLimits.defaults());
 
   private static final Model CTX_MODEL =
@@ -71,10 +71,10 @@ final class AgentLoopTest {
       };
 
   private static final java.util.function.Function<
-          SessionState, ai.singlr.session.hooks.HookContext>
+          SessionState, com.standardapplied.helios.session.hooks.HookContext>
       CTX_FACTORY =
           s ->
-              new ai.singlr.session.hooks.DefaultHookContext(
+              new com.standardapplied.helios.session.hooks.DefaultHookContext(
                   s.sessionId(), s.currentTurnIndex(), s.cancellation(), CTX_MODEL);
 
   private SessionState freshState() {
@@ -824,9 +824,10 @@ final class AgentLoopTest {
     queue.offer(UserMessage.text("second"));
     queue.offer(UserMessage.text("third"));
     var replacement = List.of(Message.system("compacted system"), Message.user("merged turn"));
-    ai.singlr.session.hooks.PreModelTurnHook trimmer =
-        (history, ctx) -> ai.singlr.session.hooks.HookOutcome.mutateHistory(replacement);
-    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(trimmer));
+    com.standardapplied.helios.session.hooks.PreModelTurnHook trimmer =
+        (history, ctx) ->
+            com.standardapplied.helios.session.hooks.HookOutcome.mutateHistory(replacement);
+    var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(trimmer));
     var runner =
         new TurnRunner(
             fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)),
@@ -1182,7 +1183,7 @@ final class AgentLoopTest {
       SteeringQueue queue,
       TokenCounter counter,
       ContextCompactor compactor,
-      ai.singlr.session.hooks.HookRegistry hookRegistry) {
+      com.standardapplied.helios.session.hooks.HookRegistry hookRegistry) {
     var runner =
         new TurnRunner(
             model,
@@ -1220,9 +1221,10 @@ final class AgentLoopTest {
           return CompactionResult.noOp(history);
         };
     var replacement = List.<Message>of(Message.user("rewritten by hook"));
-    ai.singlr.session.hooks.PreCompactHook mutator =
-        (history, ctx) -> ai.singlr.session.hooks.HookOutcome.mutateHistory(replacement);
-    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(mutator));
+    com.standardapplied.helios.session.hooks.PreCompactHook mutator =
+        (history, ctx) ->
+            com.standardapplied.helios.session.hooks.HookOutcome.mutateHistory(replacement);
+    var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(mutator));
     buildLoopWithHooks(
             fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
             queue,
@@ -1257,13 +1259,13 @@ final class AgentLoopTest {
                 List.of(Message.user("[Earlier context summary]\nthe gist")), Usage.of(0, 0), "");
     var payloadSeen =
         new java.util.concurrent.atomic.AtomicReference<
-            ai.singlr.session.hooks.CompactionPayload>();
-    ai.singlr.session.hooks.PostCompactHook observer =
+            com.standardapplied.helios.session.hooks.CompactionPayload>();
+    com.standardapplied.helios.session.hooks.PostCompactHook observer =
         (payload, ctx) -> {
           payloadSeen.set(payload);
-          return ai.singlr.session.hooks.HookOutcome.cont();
+          return com.standardapplied.helios.session.hooks.HookOutcome.cont();
         };
-    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(observer));
+    var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(observer));
     buildLoopWithHooks(
             fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
             queue,
@@ -1285,12 +1287,12 @@ final class AgentLoopTest {
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
     ContextCompactor noOp = (history, state) -> CompactionResult.noOp(history);
     var fired = new AtomicInteger(0);
-    ai.singlr.session.hooks.PostCompactHook observer =
+    com.standardapplied.helios.session.hooks.PostCompactHook observer =
         (payload, ctx) -> {
           fired.incrementAndGet();
-          return ai.singlr.session.hooks.HookOutcome.cont();
+          return com.standardapplied.helios.session.hooks.HookOutcome.cont();
         };
-    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(observer));
+    var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(observer));
     buildLoopWithHooks(
             fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)), queue, trigger, noOp, hookRegistry)
         .run(freshState(), limits);
@@ -1309,9 +1311,10 @@ final class AgentLoopTest {
           observed.add(history);
           return CompactionResult.noOp(history);
         };
-    ai.singlr.session.hooks.PreCompactHook empty =
-        (history, ctx) -> ai.singlr.session.hooks.HookOutcome.mutateHistory(List.of());
-    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(empty));
+    com.standardapplied.helios.session.hooks.PreCompactHook empty =
+        (history, ctx) ->
+            com.standardapplied.helios.session.hooks.HookOutcome.mutateHistory(List.of());
+    var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(empty));
     buildLoopWithHooks(
             fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
             queue,
@@ -1331,9 +1334,9 @@ final class AgentLoopTest {
     // Continue so the compactor still runs against the unmodified history.
     var outcomes =
         List.of(
-            ai.singlr.session.hooks.HookOutcome.block("nope"),
-            ai.singlr.session.hooks.HookOutcome.stop("would-stop"),
-            ai.singlr.session.hooks.HookOutcome.inject("would-inject"));
+            com.standardapplied.helios.session.hooks.HookOutcome.block("nope"),
+            com.standardapplied.helios.session.hooks.HookOutcome.stop("would-stop"),
+            com.standardapplied.helios.session.hooks.HookOutcome.inject("would-inject"));
     for (var outcome : outcomes) {
       var queue = new SteeringQueue(8);
       queue.offer(UserMessage.text("hi"));
@@ -1345,8 +1348,8 @@ final class AgentLoopTest {
             compactorInvoked.incrementAndGet();
             return CompactionResult.noOp(history);
           };
-      ai.singlr.session.hooks.PreCompactHook hook = (history, ctx) -> outcome;
-      var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(hook));
+      com.standardapplied.helios.session.hooks.PreCompactHook hook = (history, ctx) -> outcome;
+      var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(hook));
       buildLoopWithHooks(
               fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
               queue,
@@ -1368,9 +1371,10 @@ final class AgentLoopTest {
     // session terminates normally.
     var outcomes =
         List.of(
-            ai.singlr.session.hooks.HookOutcome.mutateArgs(Map.of("ignored", "value")),
-            ai.singlr.session.hooks.HookOutcome.block("nope"),
-            ai.singlr.session.hooks.HookOutcome.inject("would-inject"));
+            com.standardapplied.helios.session.hooks.HookOutcome.mutateArgs(
+                Map.of("ignored", "value")),
+            com.standardapplied.helios.session.hooks.HookOutcome.block("nope"),
+            com.standardapplied.helios.session.hooks.HookOutcome.inject("would-inject"));
     for (var outcome : outcomes) {
       var queue = new SteeringQueue(8);
       queue.offer(UserMessage.text("hi"));
@@ -1381,8 +1385,8 @@ final class AgentLoopTest {
           (history, state) ->
               new CompactionResult(
                   List.of(Message.user("[Earlier context summary]\nshort")), Usage.of(0, 0), "");
-      ai.singlr.session.hooks.PostCompactHook hook = (payload, ctx) -> outcome;
-      var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(hook));
+      com.standardapplied.helios.session.hooks.PostCompactHook hook = (payload, ctx) -> outcome;
+      var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(hook));
       var freshEventBuffer = new ArrayList<QueryEvent>(events);
       freshEventBuffer.clear();
       events.clear();
@@ -1412,9 +1416,10 @@ final class AgentLoopTest {
         (history, state) ->
             new CompactionResult(
                 List.of(Message.user("[Earlier context summary]\nshort")), Usage.of(0, 0), "");
-    ai.singlr.session.hooks.PostCompactHook stopper =
-        (payload, ctx) -> ai.singlr.session.hooks.HookOutcome.stop("post-compact veto");
-    var hookRegistry = new ai.singlr.session.hooks.HookRegistry(List.of(stopper));
+    com.standardapplied.helios.session.hooks.PostCompactHook stopper =
+        (payload, ctx) ->
+            com.standardapplied.helios.session.hooks.HookOutcome.stop("post-compact veto");
+    var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(stopper));
     var state = freshState();
     var result =
         buildLoopWithHooks(

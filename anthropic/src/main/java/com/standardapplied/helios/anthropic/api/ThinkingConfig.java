@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic.api;
+package com.standardapplied.helios.anthropic.api;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -11,8 +11,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 /**
  * Thinking configuration for the Claude Messages API.
  *
- * <p>Four request shapes coexist; {@link ai.singlr.anthropic.AnthropicModelId#thinkingShape()}
- * controls dispatch:
+ * <p>Four request shapes coexist; {@link
+ * com.standardapplied.helios.anthropic.AnthropicModelId#thinkingShape()} controls dispatch:
  *
  * <ul>
  *   <li><b>Extended</b> (Haiku 4.5): {@code {"type":"enabled","budget_tokens":N}}. Built via {@link
@@ -55,8 +55,8 @@ public record ThinkingConfig(
 
   /**
    * Adaptive shape with {@code display="summarized"} so callers continue to receive thinking deltas
-   * through {@link ai.singlr.core.model.ModelChunk.ThinkingDelta}. Effort is set via the request's
-   * sibling {@code output_config.effort} field, not on this object.
+   * through {@link com.standardapplied.helios.core.model.ModelChunk.ThinkingDelta}. Effort is set
+   * via the request's sibling {@code output_config.effort} field, not on this object.
    */
   public static ThinkingConfig adaptive() {
     return new ThinkingConfig("adaptive", null, "summarized");

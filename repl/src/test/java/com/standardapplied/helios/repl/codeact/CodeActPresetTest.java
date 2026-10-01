@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -10,18 +10,18 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelChunk;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.repl.execution.JShellExecutionProvider;
-import ai.singlr.repl.sandbox.JvmSandbox;
-import ai.singlr.repl.sandbox.SandboxFactory;
-import ai.singlr.session.SessionOptions;
-import ai.singlr.session.execution.ExecuteTool;
-import ai.singlr.session.permissions.PermissionMode;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.repl.execution.JShellExecutionProvider;
+import com.standardapplied.helios.repl.sandbox.JvmSandbox;
+import com.standardapplied.helios.repl.sandbox.SandboxFactory;
+import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.execution.ExecuteTool;
+import com.standardapplied.helios.session.permissions.PermissionMode;
 import java.util.List;
 import java.util.concurrent.Flow;
 import org.junit.jupiter.api.Test;
@@ -263,7 +263,7 @@ final class CodeActPresetTest {
     assertNotNull(options);
   }
 
-  private static SessionOptions build(ai.singlr.session.SessionPreset preset) {
+  private static SessionOptions build(com.standardapplied.helios.session.SessionPreset preset) {
     return SessionOptions.newBuilder().withModel(fixedReply("ignored")).apply(preset).build();
   }
 }

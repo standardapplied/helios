@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
 /**
  * Hook fired immediately after the agent loop swaps in a successfully shrunk history but before it

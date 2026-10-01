@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.permissions;
+package com.standardapplied.helios.session.permissions;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -10,20 +10,20 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.session.hooks.DefaultHookContext;
-import ai.singlr.session.hooks.HookContext;
-import ai.singlr.session.hooks.HookOutcome;
-import ai.singlr.session.tools.ToolBinding;
-import ai.singlr.session.tools.ToolCategory;
-import ai.singlr.session.tools.ToolPermissionKey;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.hooks.DefaultHookContext;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -33,7 +33,8 @@ final class DefaultPermissionEvaluatorTest {
   private static final Model STUB_MODEL =
       new Model() {
         @Override
-        public Response<Void> chat(List<Message> messages, List<ai.singlr.core.tool.Tool> tools) {
+        public Response<Void> chat(
+            List<Message> messages, List<com.standardapplied.helios.core.tool.Tool> tools) {
           return Response.newBuilder().build();
         }
 
@@ -149,10 +150,10 @@ final class DefaultPermissionEvaluatorTest {
     var perm = Permission.defaultInWorkspace();
     var tools = ToolRegistry.empty();
     var gateway =
-        new ai.singlr.session.ask.QuestionGateway() {
+        new com.standardapplied.helios.session.ask.QuestionGateway() {
           @Override
-          public ai.singlr.session.ask.AskUserQuestionResponse ask(
-              ai.singlr.session.ask.AskUserQuestionRequest request) {
+          public com.standardapplied.helios.session.ask.AskUserQuestionResponse ask(
+              com.standardapplied.helios.session.ask.AskUserQuestionRequest request) {
             throw new UnsupportedOperationException("not invoked by this test");
           }
         };

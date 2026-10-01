@@ -1,13 +1,13 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.core.events;
+package com.standardapplied.helios.core.events;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.Ids;
-import ai.singlr.core.trace.Trace;
+import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.trace.Trace;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;

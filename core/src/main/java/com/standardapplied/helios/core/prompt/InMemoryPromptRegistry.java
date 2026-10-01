@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.prompt;
+package com.standardapplied.helios.core.prompt;
 
-import ai.singlr.core.common.Strings;
+import com.standardapplied.helios.core.common.Strings;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;

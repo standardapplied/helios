@@ -1,14 +1,14 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
-import ai.singlr.core.common.Provenanced;
-import ai.singlr.core.common.SubmitValidator;
-import ai.singlr.core.schema.JsonSchema;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.schema.SchemaValidator;
+import com.standardapplied.helios.core.common.Provenanced;
+import com.standardapplied.helios.core.common.SubmitValidator;
+import com.standardapplied.helios.core.schema.JsonSchema;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.SchemaValidator;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -47,8 +47,9 @@ final class SubmitValidation {
 
   /**
    * Run the model's raw {@code output} through the full pipeline. Returns the parsed typed value on
-   * accept; an error string suitable for {@link ai.singlr.core.tool.ToolResult#failure(String)} (or
-   * {@link IllegalArgumentException} payload) on reject.
+   * accept; an error string suitable for {@link
+   * com.standardapplied.helios.core.tool.ToolResult#failure(String)} (or {@link
+   * IllegalArgumentException} payload) on reject.
    *
    * @param rawOutput the value the model supplied (typically a {@code Map<String, Object>} from a
    *     JSON parse); must be non-null

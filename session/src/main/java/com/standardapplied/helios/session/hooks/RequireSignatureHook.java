@@ -1,13 +1,13 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.tool.ToolResult;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.tool.ToolResult;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;

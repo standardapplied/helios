@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic;
+package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.singlr.core.common.CostCalculator.Pricing;
-import ai.singlr.core.common.CostEstimate;
-import ai.singlr.core.model.Response.Usage;
+import com.standardapplied.helios.core.common.CostCalculator.Pricing;
+import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.model.Response.Usage;
 import org.junit.jupiter.api.Test;
 
 class AnthropicPricingTest {

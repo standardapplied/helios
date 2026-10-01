@@ -1,19 +1,19 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.onnx;
+package com.standardapplied.helios.onnx;
 
 import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
-import ai.singlr.core.common.Result;
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.embedding.EmbeddingConfig;
-import ai.singlr.core.embedding.EmbeddingModel;
+import com.standardapplied.helios.core.common.Result;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.embedding.EmbeddingConfig;
+import com.standardapplied.helios.core.embedding.EmbeddingModel;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.HashMap;

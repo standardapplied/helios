@@ -1,6 +1,6 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.persistence.sql;
+package com.standardapplied.helios.persistence.sql;
 
 /** SQL constants for session registry operations. */
 public final class SessionSql {

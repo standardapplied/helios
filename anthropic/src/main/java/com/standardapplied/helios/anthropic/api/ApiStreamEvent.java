@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic.api;
+package com.standardapplied.helios.anthropic.api;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -43,8 +43,8 @@ public record ApiStreamEvent(
     /**
      * Whether re-issuing the same request can succeed: the API was overloaded, failed internally,
      * timed out, or rate limited the caller. Mirrors the HTTP statuses {@link
-     * ai.singlr.core.model.ProviderException#isRetryable()} treats as retryable (529, 500, 504,
-     * 429).
+     * com.standardapplied.helios.core.model.ProviderException#isRetryable()} treats as retryable
+     * (529, 500, 504, 429).
      *
      * @return true for {@code overloaded_error}, {@code api_error}, {@code timeout_error} and
      *     {@code rate_limit_error}

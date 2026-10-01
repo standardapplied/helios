@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -11,10 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.repl.host.HostFunctionRegistry;
-import ai.singlr.repl.protocol.ProcessTransport;
-import ai.singlr.repl.protocol.RpcChannel;
-import ai.singlr.repl.protocol.RpcMessage;
+import com.standardapplied.helios.repl.host.HostFunctionRegistry;
+import com.standardapplied.helios.repl.protocol.ProcessTransport;
+import com.standardapplied.helios.repl.protocol.RpcChannel;
+import com.standardapplied.helios.repl.protocol.RpcMessage;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -46,7 +46,7 @@ class JvmSandboxTest {
     assertEquals("/fake/java", cmd.get(0));
     assertTrue(cmd.contains("-cp"), "must pass -cp so non-JPMS callers work");
     assertTrue(
-        cmd.contains("ai.singlr.repl.sandbox.JvmSandboxBootstrap"),
+        cmd.contains("com.standardapplied.helios.repl.sandbox.JvmSandboxBootstrap"),
         "main class must be on the command line");
     assertTrue(
         cmd.stream().anyMatch(a -> a.startsWith("-Xmx")),
@@ -59,8 +59,8 @@ class JvmSandboxTest {
    * relative path {@code "target/cron.jar"}. The sandbox subprocess then sets its working directory
    * to a private {@code /tmp/helios-sandbox-cwd-*} (so the model can't see host files), which means
    * {@code target/cron.jar} no longer resolves. The subprocess dies with {@code
-   * ClassNotFoundException: ai.singlr.repl.sandbox.JvmSandboxBootstrap}, the host's accept loop
-   * times out 30 s later, and we surface a generic IOException to the caller.
+   * ClassNotFoundException: com.standardapplied.helios.repl.sandbox.JvmSandboxBootstrap}, the
+   * host's accept loop times out 30 s later, and we surface a generic IOException to the caller.
    *
    * <p>The fix: every relative entry in {@code java.class.path} must be resolved against the host
    * JVM's current working directory before being passed to the subprocess as {@code -cp}.
@@ -167,7 +167,9 @@ class JvmSandboxTest {
   @Test
   void hostNativeAccessIsNotGrantedToSandbox() {
     assertFalse(JvmSandbox.shouldPropagateJvmArg("--enable-native-access=ALL-UNNAMED"));
-    assertFalse(JvmSandbox.shouldPropagateJvmArg("--enable-native-access=ai.singlr.session"));
+    assertFalse(
+        JvmSandbox.shouldPropagateJvmArg(
+            "--enable-native-access=com.standardapplied.helios.session"));
     assertTrue(JvmSandbox.shouldPropagateJvmArg("--illegal-native-access=deny"));
     var command = JvmSandbox.buildLaunchCommand("/fake/java", JvmSandboxConfig.defaults());
     assertTrue(command.stream().noneMatch(arg -> arg.startsWith("--enable-native-access")));
@@ -298,7 +300,7 @@ class JvmSandboxTest {
     var descendantPidHolder = new AtomicReference<Long>();
     var registry = new HostFunctionRegistry();
     registry.register(
-        new ai.singlr.repl.host.HostFunction(
+        new com.standardapplied.helios.repl.host.HostFunction(
             "submit",
             "test capture for descendant PID",
             params -> {
@@ -900,7 +902,7 @@ class JvmSandboxTest {
     var submittedHolder = new AtomicReference<>();
     var registry = new HostFunctionRegistry();
     registry.register(
-        new ai.singlr.repl.host.HostFunction(
+        new com.standardapplied.helios.repl.host.HostFunction(
             "submit",
             "stub submit for the JvmSandbox end-to-end test",
             params -> {
@@ -946,14 +948,18 @@ class JvmSandboxTest {
     var capturedArgs = new AtomicReference<Map<String, Object>>();
     var registry = new HostFunctionRegistry();
     registry.register(
-        new ai.singlr.repl.host.HostFunction(
+        new com.standardapplied.helios.repl.host.HostFunction(
             "marketQuote",
             "Get a stock quote",
             List.of(
-                ai.singlr.repl.host.HostParameter.required(
-                    "ticker", ai.singlr.core.tool.ParameterType.STRING, "Ticker symbol"),
-                ai.singlr.repl.host.HostParameter.optional(
-                    "limit", ai.singlr.core.tool.ParameterType.INTEGER, "Max bars")),
+                com.standardapplied.helios.repl.host.HostParameter.required(
+                    "ticker",
+                    com.standardapplied.helios.core.tool.ParameterType.STRING,
+                    "Ticker symbol"),
+                com.standardapplied.helios.repl.host.HostParameter.optional(
+                    "limit",
+                    com.standardapplied.helios.core.tool.ParameterType.INTEGER,
+                    "Max bars")),
             params -> {
               capturedArgs.set(params);
               return Map.of("price", 234.56, "ticker", params.get("ticker"));
@@ -1155,7 +1161,7 @@ class JvmSandboxTest {
     // synthesis produces something a model can actually invoke from JShell.
     var registry = new HostFunctionRegistry();
     registry.register(
-        new ai.singlr.repl.host.HostFunction(
+        new com.standardapplied.helios.repl.host.HostFunction(
             "listSymbols", "All known tickers", params -> List.of("AAPL", "GOOG", "MSFT")));
     var config =
         JvmSandboxConfig.newBuilder()
@@ -1262,7 +1268,7 @@ class JvmSandboxTest {
     var invocations = new java.util.concurrent.atomic.AtomicInteger();
     var registry = new HostFunctionRegistry();
     registry.register(
-        new ai.singlr.repl.host.HostFunction(
+        new com.standardapplied.helios.repl.host.HostFunction(
             "auditCallback",
             "test capture for forged RPC invocations",
             params -> {
@@ -1378,7 +1384,9 @@ class JvmSandboxTest {
     var config = JvmSandboxConfig.newBuilder().withSubprocessStartupTimeout(startupTimeout).build();
     var registry = new HostFunctionRegistry();
     var thrown =
-        assertThrows(ai.singlr.repl.ReplException.class, () -> JvmSandbox.create(config, registry));
+        assertThrows(
+            com.standardapplied.helios.repl.ReplException.class,
+            () -> JvmSandbox.create(config, registry));
     assertNotNull(thrown.getCause(), "expected wrapped cause");
     var causeMessage = thrown.getCause().getMessage();
     assertNotNull(causeMessage, "cause must carry a message");
@@ -1404,10 +1412,13 @@ class JvmSandboxTest {
     // Request directly to the host.
     //
     // setAccessible(true) on a private field in a named module requires the module to be `open`
-    // or specifically opened via `--add-opens`. ai.singlr.repl does NOT open the sandbox package,
+    // or specifically opened via `--add-opens`. com.standardapplied.helios.repl does NOT open the
+    // sandbox package,
     // so under a clean JPMS launch the snippet cannot reach the field. BUT: classpath-launched
     // deployments put the bootstrap in an unnamed module which is fully open; and a parent JVM
-    // that uses `--add-opens=ai.singlr.repl/ai.singlr.repl.sandbox=...` (as Surefire does, and
+    // that uses
+    // `--add-opens=com.standardapplied.helios.repl/com.standardapplied.helios.repl.sandbox=...` (as
+    // Surefire does, and
     // as common testing/instrumentation setups do) leaks that into the subprocess via
     // JvmSandbox.shouldPropagateJvmArg, opening the package even under modulepath.
     //
@@ -1420,7 +1431,7 @@ class JvmSandboxTest {
     var invocations = new java.util.concurrent.atomic.AtomicInteger();
     var registry = new HostFunctionRegistry();
     registry.register(
-        new ai.singlr.repl.host.HostFunction(
+        new com.standardapplied.helios.repl.host.HostFunction(
             "auditCallback",
             "test capture for forged RPC invocations",
             params -> {
@@ -1440,7 +1451,7 @@ class JvmSandboxTest {
       // `instance` field reflectively, then pull `realOut` (which IS the RPC socket PrintStream
       // post-C1) and write a fully-formed JSON-RPC Request frame.
       var attack =
-          "var c = Class.forName(\"ai.singlr.repl.sandbox.JvmSandboxBootstrap\");"
+          "var c = Class.forName(\"com.standardapplied.helios.repl.sandbox.JvmSandboxBootstrap\");"
               + "var instField = c.getDeclaredField(\"instance\");"
               + "instField.setAccessible(true);"
               + "var b = instField.get(null);"
@@ -1490,7 +1501,8 @@ class JvmSandboxTest {
     // that reliably triggers the Throwable branch is brittle. The catch type is the
     // security-critical invariant; this test prevents an unwitting future revert to
     // `catch (Exception e)`.
-    var sourcePath = Path.of("src/main/java/ai/singlr/repl/sandbox/JvmSandboxBootstrap.java");
+    var sourcePath =
+        Path.of("src/main/java/com/standardapplied/helios/repl/sandbox/JvmSandboxBootstrap.java");
     var source = Files.readString(sourcePath, StandardCharsets.UTF_8);
     var collectBindingsStart = source.indexOf("Map<String, String> collectBindings(");
     assertTrue(collectBindingsStart > 0, "collectBindings method declaration not found");

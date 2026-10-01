@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.openai.api;
+package com.standardapplied.helios.openai.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -11,10 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.tool.ParameterType;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolParameter;
-import ai.singlr.core.tool.ToolResult;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolParameter;
+import com.standardapplied.helios.core.tool.ToolResult;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;

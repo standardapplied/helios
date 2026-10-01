@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl;
+package com.standardapplied.helios.repl;
 
-import ai.singlr.repl.sandbox.ExecutionResult;
+import com.standardapplied.helios.repl.sandbox.ExecutionResult;
 import java.util.Map;
 
 /**

@@ -1,24 +1,26 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.execution;
+package com.standardapplied.helios.session.execution;
 
-import ai.singlr.core.common.Validate;
+import com.standardapplied.helios.core.common.Validate;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
 /**
- * Outcome of a single {@link ExecutionProvider#execute(ai.singlr.core.runtime.SessionContext,
- * ExecutionRequest, ai.singlr.core.runtime.CancellationToken) execute} call. Strings have already
- * been redacted against the provider's secret registry, so the model-visible text is safe to
- * surface verbatim.
+ * Outcome of a single {@link
+ * ExecutionProvider#execute(com.standardapplied.helios.core.runtime.SessionContext,
+ * ExecutionRequest, com.standardapplied.helios.core.runtime.CancellationToken) execute} call.
+ * Strings have already been redacted against the provider's secret registry, so the model-visible
+ * text is safe to surface verbatim.
  *
- * <p>Naming overlaps with {@code ai.singlr.repl.sandbox.ExecutionResult} — that one is internal to
- * the JShell sandbox subprocess protocol and stays scoped to its package. This is the v2 session-
- * level result the {@code Execute} tool wraps into a {@link ai.singlr.core.tool.ToolResult}.
+ * <p>Naming overlaps with {@code com.standardapplied.helios.repl.sandbox.ExecutionResult} — that
+ * one is internal to the JShell sandbox subprocess protocol and stays scoped to its package. This
+ * is the v2 session- level result the {@code Execute} tool wraps into a {@link
+ * com.standardapplied.helios.core.tool.ToolResult}.
  *
  * @param exitCode the process exit code, or {@code -1} on timeout / refusal / unsupported runtime.
  *     Providers should reserve {@code -1} for "did not produce a normal exit" so the model can

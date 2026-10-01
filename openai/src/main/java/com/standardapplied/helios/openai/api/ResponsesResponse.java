@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.openai.api;
+package com.standardapplied.helios.openai.api;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;

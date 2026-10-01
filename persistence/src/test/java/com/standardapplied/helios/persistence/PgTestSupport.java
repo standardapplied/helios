@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
 import io.helidon.config.Config;
 import io.helidon.config.ConfigSources;
@@ -69,14 +69,14 @@ final class PgTestSupport {
    * REFERENCES helios_agent_runs(run_id) ON DELETE CASCADE rejects orphan tool-call inserts.
    */
   static java.util.UUID newSeededRunId() {
-    var runId = ai.singlr.core.common.Ids.newId();
+    var runId = com.standardapplied.helios.core.common.Ids.newId();
     seedRun(runId);
     return runId;
   }
 
   /** Insert a minimal RUNNING row into helios_agent_runs for {@code runId}. Idempotent. */
   static void seedRun(java.util.UUID runId) {
-    var now = ai.singlr.core.common.Ids.now();
+    var now = com.standardapplied.helios.core.common.Ids.now();
     dbClient()
         .execute()
         .dml(

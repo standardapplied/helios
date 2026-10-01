@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.files;
+package com.standardapplied.helios.session.files;
 
 import java.nio.file.FileSystem;
 import java.nio.file.PathMatcher;

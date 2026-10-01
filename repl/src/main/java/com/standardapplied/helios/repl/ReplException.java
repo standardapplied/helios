@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl;
+package com.standardapplied.helios.repl;
 
 /** Unchecked exception for REPL session and sandbox errors. */
 public final class ReplException extends RuntimeException {

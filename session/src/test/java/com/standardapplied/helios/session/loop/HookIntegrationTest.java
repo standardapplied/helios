@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -10,39 +10,39 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.CostCalculator;
-import ai.singlr.core.context.TokenCounter;
-import ai.singlr.core.model.FileReference;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelChunk;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.runtime.SessionContext;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.session.ConcurrencyLimits;
-import ai.singlr.session.ContextCompactor;
-import ai.singlr.session.QueryEvent;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SessionLimits;
-import ai.singlr.session.SteeringQueue;
-import ai.singlr.session.UserMessage;
-import ai.singlr.session.hooks.DefaultHookContext;
-import ai.singlr.session.hooks.HookContext;
-import ai.singlr.session.hooks.HookOutcome;
-import ai.singlr.session.hooks.HookRegistry;
-import ai.singlr.session.hooks.OnUserMessageHook;
-import ai.singlr.session.hooks.PostModelTurnHook;
-import ai.singlr.session.hooks.PostToolUseHook;
-import ai.singlr.session.hooks.PreModelTurnHook;
-import ai.singlr.session.hooks.PreStopHook;
-import ai.singlr.session.hooks.PreToolUseHook;
-import ai.singlr.session.tools.ToolBinding;
-import ai.singlr.session.tools.ToolCategory;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.context.TokenCounter;
+import com.standardapplied.helios.core.model.FileReference;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.ConcurrencyLimits;
+import com.standardapplied.helios.session.ContextCompactor;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SteeringQueue;
+import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.hooks.DefaultHookContext;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.hooks.OnUserMessageHook;
+import com.standardapplied.helios.session.hooks.PostModelTurnHook;
+import com.standardapplied.helios.session.hooks.PostToolUseHook;
+import com.standardapplied.helios.session.hooks.PreModelTurnHook;
+import com.standardapplied.helios.session.hooks.PreStopHook;
+import com.standardapplied.helios.session.hooks.PreToolUseHook;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -509,7 +509,7 @@ final class HookIntegrationTest {
     var history = state.historySnapshot();
     var toolMsg =
         history.stream()
-            .filter(m -> m.role() == ai.singlr.core.model.Role.TOOL)
+            .filter(m -> m.role() == com.standardapplied.helios.core.model.Role.TOOL)
             .findFirst()
             .orElseThrow();
     assertEquals("REWRITTEN", toolMsg.content());
@@ -589,7 +589,7 @@ final class HookIntegrationTest {
     // Tool message was appended before the Stop fired
     var toolMsg =
         state.historySnapshot().stream()
-            .filter(m -> m.role() == ai.singlr.core.model.Role.TOOL)
+            .filter(m -> m.role() == com.standardapplied.helios.core.model.Role.TOOL)
             .findFirst()
             .orElseThrow();
     assertEquals("echoed: x", toolMsg.content());

@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
-import ai.singlr.core.model.Citation;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.ModelChunk;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.session.QueryEvent;
+import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.session.QueryEvent;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -188,7 +188,8 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * cancelled, or the calling thread is interrupted. Without the cancellation hook a provider
    * stream that never delivers {@code onComplete} / {@code onError} (silent socket, hung proxy)
    * would pin this thread indefinitely — defeating {@link
-   * ai.singlr.session.SessionLimits#maxWallClock()} which is only re-checked at turn boundaries.
+   * com.standardapplied.helios.session.SessionLimits#maxWallClock()} which is only re-checked at
+   * turn boundaries.
    *
    * <p>The cancellation callback is removed in {@code finally} so a long-lived session token does
    * not accumulate one stale registration per turn (see the {@code CancellationToken.onCancel}
@@ -221,9 +222,10 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
   /**
    * Build the turn outcome with an explicit {@code streamAttempts} count. Used by {@link
-   * TurnRunner} when retrying a {@link ai.singlr.core.model.TransientStreamException}; the count
-   * surfaces on {@link ai.singlr.session.ResultMessage.ErrorTransientStream} when the retry budget
-   * is exhausted.
+   * TurnRunner} when retrying a {@link
+   * com.standardapplied.helios.core.model.TransientStreamException}; the count surfaces on {@link
+   * com.standardapplied.helios.session.ResultMessage.ErrorTransientStream} when the retry budget is
+   * exhausted.
    *
    * <p>The throwable recorded by {@link #onError(Throwable)} is carried through unchanged so
    * downstream consumers ({@link StopClassifier}, observability listeners) can walk the full cause
@@ -260,8 +262,9 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   /**
    * The terminal error captured by {@link #onError(Throwable)}, or {@code null} when the stream
    * completed normally. Used by {@link TurnRunner} to inspect for recoverable conditions (e.g.
-   * {@link ai.singlr.core.schema.StructuredOutputParseException}) before letting the {@link
-   * ai.singlr.core.model.FinishReason#ERROR} verdict propagate to the {@link StopClassifier}.
+   * {@link com.standardapplied.helios.core.schema.StructuredOutputParseException}) before letting
+   * the {@link com.standardapplied.helios.core.model.FinishReason#ERROR} verdict propagate to the
+   * {@link StopClassifier}.
    *
    * @return the error, or {@code null}
    */

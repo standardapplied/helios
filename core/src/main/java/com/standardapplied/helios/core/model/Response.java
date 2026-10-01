@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.model;
+package com.standardapplied.helios.core.model;
 
 import java.util.List;
 import java.util.Map;
@@ -83,8 +83,8 @@ public record Response<T>(
    * The four counts ({@code inputTokens}, {@code outputTokens}, {@code cacheCreationInputTokens},
    * {@code cacheReadInputTokens}) are <b>disjoint</b>: a token contributes to exactly one of them.
    * Providers translate their wire shape into this canonical form, which lets {@link
-   * ai.singlr.core.common.CostCalculator.Pricing} apply a distinct rate per class without
-   * double-counting.
+   * com.standardapplied.helios.core.common.CostCalculator.Pricing} apply a distinct rate per class
+   * without double-counting.
    *
    * <ul>
    *   <li><b>Anthropic native shape</b> already matches: {@code input_tokens} is uncached, {@code

@@ -1,16 +1,17 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.tool;
+package com.standardapplied.helios.core.tool;
 
 import java.util.Map;
 
 /**
  * Functional interface for tool execution. Arguments come from the model as a {@code Map} (parsed
  * from JSON); the {@link ToolContext} carries the session's {@link
- * ai.singlr.core.runtime.CancellationToken CancellationToken} and the per-call deadline.
+ * com.standardapplied.helios.core.runtime.CancellationToken CancellationToken} and the per-call
+ * deadline.
  *
  * <p>Tools that perform long-running I/O should poll {@code ctx.cancellation()} at safe points so
  * that an {@code AgentSession.interrupt(...)} or session close propagates promptly. Tools that

@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.common;
+package com.standardapplied.helios.core.common;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,9 +16,9 @@ import java.util.Map;
  * <p>Mirrors the {@code { output, basis }} shape of parallel.ai's Task API Basis framework, with
  * the family renamed to "provenance" throughout the Helios surface.
  *
- * <p>Use {@link ai.singlr.core.schema.OutputSchema#provenancedOf(Class)} to derive a schema that
- * tells the model how to populate this wrapper, and {@link ProvenanceValidator} to enforce
- * calibration rules (default: {@link Confidence#MEDIUM} or {@link Confidence#HIGH} requires
+ * <p>Use {@link com.standardapplied.helios.core.schema.OutputSchema#provenancedOf(Class)} to derive
+ * a schema that tells the model how to populate this wrapper, and {@link ProvenanceValidator} to
+ * enforce calibration rules (default: {@link Confidence#MEDIUM} or {@link Confidence#HIGH} requires
  * citations).
  *
  * @param <T> the underlying output payload type

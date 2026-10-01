@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.runtime;
+package com.standardapplied.helios.runtime;
 
-import ai.singlr.core.common.Ids;
-import ai.singlr.core.common.Strings;
-import ai.singlr.session.AgentSession;
-import ai.singlr.session.QueryEvent;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SessionOptions;
-import ai.singlr.session.UserMessage;
+import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.UserMessage;
 import io.helidon.http.Status;
 import io.helidon.http.sse.SseEvent;
 import io.helidon.webserver.CloseConnectionException;
@@ -52,19 +52,19 @@ import tools.jackson.databind.ObjectMapper;
  *       handler blocks the request thread until the publisher signals {@code onComplete} or the
  *       client disconnects.
  *   <li>{@code GET /sessions/{sessionId}/result?timeout=<seconds>} — long-poll for the terminal
- *       {@link ai.singlr.session.ResultMessage ResultMessage}. Returns {@code 200 OK} with body
- *       {@code {type: "<SubtypeName>", result: <record-fields>}} when terminal; {@code 204 No
- *       Content} when the {@code timeout} elapses with no terminal. {@code timeout} defaults to 60
- *       s and is clamped to {@code [0, 300]} so a single request cannot pin a server thread longer
- *       than five minutes.
+ *       {@link com.standardapplied.helios.session.ResultMessage ResultMessage}. Returns {@code 200
+ *       OK} with body {@code {type: "<SubtypeName>", result: <record-fields>}} when terminal;
+ *       {@code 204 No Content} when the {@code timeout} elapses with no terminal. {@code timeout}
+ *       defaults to 60 s and is clamped to {@code [0, 300]} so a single request cannot pin a server
+ *       thread longer than five minutes.
  *   <li>{@code DELETE /sessions/{sessionId}} — closes and unregisters the session; returns {@code
  *       204 No Content}.
  * </ul>
  *
  * <p>The {@code optionsFactory} is the seam through which deployments choose how a new session is
  * configured: the runtime takes the generated session id and produces a fully-populated {@link
- * SessionOptions}. For Phase 1 the typical impl returns the same {@link ai.singlr.core.model.Model
- * Model} for every session.
+ * SessionOptions}. For Phase 1 the typical impl returns the same {@link
+ * com.standardapplied.helios.core.model.Model Model} for every session.
  *
  * <h2>Thread-safety</h2>
  *

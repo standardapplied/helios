@@ -1,20 +1,20 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.files;
+package com.standardapplied.helios.session.files;
 
-import ai.singlr.core.common.Redactor;
-import ai.singlr.core.model.InlineFile;
-import ai.singlr.core.tool.ParameterType;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolContext;
-import ai.singlr.core.tool.ToolParameter;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.session.tools.ToolArgs;
-import ai.singlr.session.tools.ToolBinding;
-import ai.singlr.session.tools.ToolCategory;
-import ai.singlr.session.tools.ToolPermissionKey;
+import com.standardapplied.helios.core.common.Redactor;
+import com.standardapplied.helios.core.model.InlineFile;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolContext;
+import com.standardapplied.helios.core.tool.ToolParameter;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.tools.ToolArgs;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -149,8 +149,8 @@ public final class ReadTool {
    * the supplied {@link Redactor} before returning it to the model. Use this overload when wiring
    * the tool against a corpus that may contain registered secrets (the "curated knowledge corpus"
    * pattern) — pass {@code registry.redactor()} where {@code registry} is the same {@link
-   * ai.singlr.core.common.SecretRegistry} you handed to {@code CommandGrant}, so a token written by
-   * one tool is scrubbed when another reads it back.
+   * com.standardapplied.helios.core.common.SecretRegistry} you handed to {@code CommandGrant}, so a
+   * token written by one tool is scrubbed when another reads it back.
    *
    * <p>Redaction applies to text-body output only. Error messages, attachment notes, and truncation
    * markers (which may contain workspace-relative paths) are not redacted — paths are structural

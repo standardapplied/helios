@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
 /**
  * First-class extension point in the agent loop. Hooks observe and optionally steer specific
@@ -32,8 +32,8 @@ public sealed interface Hook
 
   /**
    * The hook's stable name. Surfaced in audit events, error messages, and the {@link
-   * ai.singlr.session.QueryEvent.HookFired HookFired} event once that subtype lands. Must be
-   * non-blank and stable across the hook's lifetime.
+   * com.standardapplied.helios.session.QueryEvent.HookFired HookFired} event once that subtype
+   * lands. Must be non-blank and stable across the hook's lifetime.
    *
    * @return non-blank, non-null identifier
    */

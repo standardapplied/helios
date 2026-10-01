@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -22,8 +22,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * loop's virtual thread and the read happens on the caller's wait thread.
  *
  * <p>This holder is intentionally untyped ({@code Object}) — the typed type lives in the {@link
- * ai.singlr.core.schema.OutputSchema} the {@code SubmitTool} was constructed with, and the
- * downstream consumer ({@code runBlocking} integration in PR 3) carries that type parameter.
+ * com.standardapplied.helios.core.schema.OutputSchema} the {@code SubmitTool} was constructed with,
+ * and the downstream consumer ({@code runBlocking} integration in PR 3) carries that type
+ * parameter.
  */
 public final class SubmittedValueHolder {
 

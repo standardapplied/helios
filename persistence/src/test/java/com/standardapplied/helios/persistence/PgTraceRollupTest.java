@@ -1,20 +1,20 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.CostEstimate;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.trace.Trace;
-import ai.singlr.core.trace.TraceFilter;
-import ai.singlr.core.trace.TraceRollup;
-import ai.singlr.core.trace.TraceRollupKey;
+import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.trace.Trace;
+import com.standardapplied.helios.core.trace.TraceFilter;
+import com.standardapplied.helios.core.trace.TraceRollup;
+import com.standardapplied.helios.core.trace.TraceRollupKey;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;

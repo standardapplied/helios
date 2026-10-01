@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.common;
+package com.standardapplied.helios.core.common;
 
 import java.util.List;
 
@@ -11,10 +11,10 @@ import java.util.List;
  * A source citation attached to a {@link FieldProvenance} entry. Names the origin of the supporting
  * evidence for one field of a {@code Provenanced} output.
  *
- * <p>Distinct from {@link ai.singlr.core.model.Citation} which carries grounding citations returned
- * by a model during {@code chat()} (e.g. Google Search results). {@code Source} is for provenance
- * the agent <em>produces</em> as part of structured output, not for citations the model returns
- * inline with text.
+ * <p>Distinct from {@link com.standardapplied.helios.core.model.Citation} which carries grounding
+ * citations returned by a model during {@code chat()} (e.g. Google Search results). {@code Source}
+ * is for provenance the agent <em>produces</em> as part of structured output, not for citations the
+ * model returns inline with text.
  *
  * <p>Excerpts are short verbatim spans the model lifted from the source. They are advisory, not
  * fetched-and-verified — callers that need verification must dereference the {@code url}

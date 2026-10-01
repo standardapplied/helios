@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence.mapper;
+package com.standardapplied.helios.persistence.mapper;
 
-import ai.singlr.core.runtime.AgentRun;
-import ai.singlr.core.runtime.AgentRunStatus;
+import com.standardapplied.helios.core.runtime.AgentRun;
+import com.standardapplied.helios.core.runtime.AgentRunStatus;
 import io.helidon.dbclient.DbRow;
 import java.time.OffsetDateTime;
 import java.util.List;

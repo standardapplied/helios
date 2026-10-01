@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.execution;
+package com.standardapplied.helios.repl.execution;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -12,15 +12,15 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.runtime.SessionContext;
-import ai.singlr.repl.ReplConfig;
-import ai.singlr.repl.ReplException;
-import ai.singlr.repl.sandbox.ExecuteParams;
-import ai.singlr.repl.sandbox.Sandbox;
-import ai.singlr.session.execution.ExecutionRequest;
-import ai.singlr.session.execution.Runtime;
-import ai.singlr.session.execution.SessionStartOutcome;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.repl.ReplConfig;
+import com.standardapplied.helios.repl.ReplException;
+import com.standardapplied.helios.repl.sandbox.ExecuteParams;
+import com.standardapplied.helios.repl.sandbox.Sandbox;
+import com.standardapplied.helios.session.execution.ExecutionRequest;
+import com.standardapplied.helios.session.execution.Runtime;
+import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Set;
@@ -51,8 +51,8 @@ final class JShellExecutionProviderTest {
     boolean throwOnExecute = false;
 
     @Override
-    public ai.singlr.repl.sandbox.ExecutionResult execute(
-        ai.singlr.repl.sandbox.ExecutionRequest request) {
+    public com.standardapplied.helios.repl.sandbox.ExecutionResult execute(
+        com.standardapplied.helios.repl.sandbox.ExecutionRequest request) {
       calls.incrementAndGet();
       lastCode.set(request.code());
       if (delayMillis > 0) {
@@ -75,13 +75,13 @@ final class JShellExecutionProviderTest {
       if (throwOnExecute) {
         throw new RuntimeException("sandbox boom");
       }
-      return new ai.singlr.repl.sandbox.ExecutionResult(
+      return new com.standardapplied.helios.repl.sandbox.ExecutionResult(
           stdoutPerCall, stderrPerCall, exitCodePerCall, null);
     }
 
     @Override
-    public ai.singlr.repl.sandbox.ExecutionResult execute(
-        ai.singlr.repl.sandbox.ExecutionRequest request, ExecuteParams params) {
+    public com.standardapplied.helios.repl.sandbox.ExecutionResult execute(
+        com.standardapplied.helios.repl.sandbox.ExecutionRequest request, ExecuteParams params) {
       return execute(request);
     }
 
@@ -261,7 +261,7 @@ final class JShellExecutionProviderTest {
       // the full diagnostic path, not just the outermost wrapper.
       assertNotNull(refuse.cause(), "underlying throwable must be preserved");
       assertEquals(
-          "ai.singlr.repl.ReplException",
+          "com.standardapplied.helios.repl.ReplException",
           refuse.cause().getClass().getName(),
           "ReplSession wraps sandbox failures, so the immediate cause is ReplException");
       assertSame(
@@ -674,8 +674,8 @@ final class JShellExecutionProviderTest {
     var sandbox =
         new StubSandbox() {
           @Override
-          public ai.singlr.repl.sandbox.ExecutionResult execute(
-              ai.singlr.repl.sandbox.ExecutionRequest request) {
+          public com.standardapplied.helios.repl.sandbox.ExecutionResult execute(
+              com.standardapplied.helios.repl.sandbox.ExecutionRequest request) {
             throw new ReplException((String) null);
           }
         };

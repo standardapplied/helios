@@ -1,18 +1,18 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.tool.ParameterType;
-import ai.singlr.repl.host.HostFunction;
-import ai.singlr.repl.host.HostFunctionRegistry;
-import ai.singlr.repl.host.HostParameter;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.repl.host.HostFunction;
+import com.standardapplied.helios.repl.host.HostFunctionRegistry;
+import com.standardapplied.helios.repl.host.HostParameter;
 import java.util.List;
 import jdk.jshell.JShell;
 import jdk.jshell.Snippet;
@@ -55,7 +55,9 @@ class SandboxPreludeSynthesisTest {
         "expected typed signature, got:\n" + snippet);
     // The body packs args by parameter name and dispatches to HostBridge.__call.
     assertTrue(snippet.contains("__args.put(\"ticker\", ticker)"));
-    assertTrue(snippet.contains("ai.singlr.repl.sandbox.HostBridge.__call(\"marketQuote\""));
+    assertTrue(
+        snippet.contains(
+            "com.standardapplied.helios.repl.sandbox.HostBridge.__call(\"marketQuote\""));
     assertFalse(
         snippet.contains("Map.of"),
         "non-empty params must use a LinkedHashMap so optional/null values don't trip Map.of's"
@@ -143,7 +145,7 @@ class SandboxPreludeSynthesisTest {
     try (var jshell = JShell.builder().executionEngine("local").build()) {
       // The wrapper body references HostBridge — make it resolvable for compilation.
       var bridgeJar =
-          ai.singlr.repl.sandbox.HostBridge.class
+          com.standardapplied.helios.repl.sandbox.HostBridge.class
               .getProtectionDomain()
               .getCodeSource()
               .getLocation();

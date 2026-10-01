@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.trace;
+package com.standardapplied.helios.core.trace;
 
-import ai.singlr.core.common.Ids;
-import ai.singlr.core.common.Strings;
+import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.common.Strings;
 import java.time.OffsetDateTime;
 import java.util.Collections;
 import java.util.LinkedHashMap;

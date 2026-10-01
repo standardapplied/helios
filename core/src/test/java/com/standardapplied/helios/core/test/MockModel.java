@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.test;
+package com.standardapplied.helios.core.test;
 
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.tool.Tool;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.tool.Tool;
 import java.util.List;
 
 /** Shared test utility that returns a canned response and captures the last messages sent. */

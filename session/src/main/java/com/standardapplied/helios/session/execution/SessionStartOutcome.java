@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.execution;
+package com.standardapplied.helios.session.execution;
 
-import ai.singlr.core.common.Strings;
+import com.standardapplied.helios.core.common.Strings;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -14,13 +14,14 @@ import java.util.Optional;
  * Refuse}).
  *
  * <p>A {@link Refuse} outcome short-circuits session construction — the agent loop never starts;
- * the session's terminal becomes {@link ai.singlr.session.ResultMessage.ErrorProviderUnavailable}
- * carrying the reason. This is the canonical signal for "provider is saturated" (warm pool
- * exhausted), "auth failed for this session" (per-session API keys), or "this provider does not
- * accept new work right now" (in-flight close).
+ * the session's terminal becomes {@link
+ * com.standardapplied.helios.session.ResultMessage.ErrorProviderUnavailable} carrying the reason.
+ * This is the canonical signal for "provider is saturated" (warm pool exhausted), "auth failed for
+ * this session" (per-session API keys), or "this provider does not accept new work right now"
+ * (in-flight close).
  *
- * <p>Mirrors the {@link ai.singlr.session.hooks.HookOutcome} pattern — sealed sum type that
- * pattern-matches cleanly inside the session loop.
+ * <p>Mirrors the {@link com.standardapplied.helios.session.hooks.HookOutcome} pattern — sealed sum
+ * type that pattern-matches cleanly inside the session loop.
  *
  * <p>Spec: §11.2.
  */

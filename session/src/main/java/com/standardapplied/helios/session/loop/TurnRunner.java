@@ -1,37 +1,37 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
-import ai.singlr.core.common.CostCalculator;
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelChunk;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.model.TransientStreamException;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.schema.StructuredOutputParseException;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.session.QueryEvent;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SerializedError;
-import ai.singlr.session.SessionLimits;
-import ai.singlr.session.SteeringQueue;
-import ai.singlr.session.StopReason;
-import ai.singlr.session.UserMessage;
-import ai.singlr.session.hooks.HookContext;
-import ai.singlr.session.hooks.HookDecision;
-import ai.singlr.session.hooks.HookOutcome;
-import ai.singlr.session.hooks.HookRegistry;
-import ai.singlr.session.tools.ToolBinding;
-import ai.singlr.session.tools.ToolVisibilityContext;
+import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.StructuredOutputParseException;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SerializedError;
+import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SteeringQueue;
+import com.standardapplied.helios.session.StopReason;
+import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookDecision;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolVisibilityContext;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -76,8 +76,8 @@ import java.util.logging.Logger;
  * <h2>Thread-safety</h2>
  *
  * One instance is safe to share across many sessions: it has no mutable state of its own. Each
- * {@link #runTurn(SessionState, ai.singlr.session.SessionLimits)} invocation creates its own
- * subscriber state.
+ * {@link #runTurn(SessionState, com.standardapplied.helios.session.SessionLimits)} invocation
+ * creates its own subscriber state.
  */
 public final class TurnRunner {
 
@@ -96,9 +96,10 @@ public final class TurnRunner {
 
   /**
    * Lazily-initialised process-wide daemon scheduler used by the 9-arg convenience constructor.
-   * Production callers ({@link ai.singlr.session.AgentSessionImpl}) construct a session-scoped
-   * scheduler and pass it via the 10-arg constructor so resource lifetime is bounded; this default
-   * exists only so test fixtures don't have to wire one. Daemon threads never block JVM exit.
+   * Production callers ({@link com.standardapplied.helios.session.AgentSessionImpl}) construct a
+   * session-scoped scheduler and pass it via the 10-arg constructor so resource lifetime is
+   * bounded; this default exists only so test fixtures don't have to wire one. Daemon threads never
+   * block JVM exit.
    */
   private static volatile ScheduledExecutorService DEFAULT_SCHEDULER;
 
@@ -119,7 +120,7 @@ public final class TurnRunner {
    * Build a turn runner.
    *
    * @param model the model providing {@link Model#chatStream(List, List,
-   *     ai.singlr.core.runtime.CancellationToken)}; non-null
+   *     com.standardapplied.helios.core.runtime.CancellationToken)}; non-null
    * @param hooks priority-sorted hook registry; non-null
    * @param toolDispatch dispatcher for tool calls the model emits; non-null
    * @param steeringQueue per-session inbox into which Inject-outcome hooks enqueue synthetic
@@ -129,17 +130,18 @@ public final class TurnRunner {
    *     non-null
    * @param clock clock supplying event timestamps; non-null
    * @param costCalculator converts per-turn {@link Usage} into a {@link
-   *     ai.singlr.core.common.CostEstimate}; non-null. Use {@link CostCalculator#ZERO} to disable
-   *     cost tracking
+   *     com.standardapplied.helios.core.common.CostEstimate}; non-null. Use {@link
+   *     CostCalculator#ZERO} to disable cost tracking
    * @param outputSchema the schema the model's text output must conform to, or {@code null} when
    *     the session has no structured-output constraint. When non-null, the loop dispatches {@link
-   *     Model#chatStream(List, List, OutputSchema, ai.singlr.core.runtime.CancellationToken)} on
-   *     every turn so the schema rides the provider's native channel (Gemini {@code
-   *     response_format.schema}, OpenAI {@code text.format=json_schema}, Anthropic {@code
-   *     system_instruction} text). The schema is dormant on tool-calling turns (tool arguments
-   *     validate against the tool's own schema) and activates on text-output turns. When {@code
-   *     null}, the loop dispatches {@link Model#chatStream(List, List,
-   *     ai.singlr.core.runtime.CancellationToken)} and the model is free to produce arbitrary text
+   *     Model#chatStream(List, List, OutputSchema,
+   *     com.standardapplied.helios.core.runtime.CancellationToken)} on every turn so the schema
+   *     rides the provider's native channel (Gemini {@code response_format.schema}, OpenAI {@code
+   *     text.format=json_schema}, Anthropic {@code system_instruction} text). The schema is dormant
+   *     on tool-calling turns (tool arguments validate against the tool's own schema) and activates
+   *     on text-output turns. When {@code null}, the loop dispatches {@link Model#chatStream(List,
+   *     List, com.standardapplied.helios.core.runtime.CancellationToken)} and the model is free to
+   *     produce arbitrary text
    * @throws NullPointerException if any non-{@code outputSchema} argument is null
    */
   public TurnRunner(
@@ -168,12 +170,12 @@ public final class TurnRunner {
   /**
    * Same as {@link #TurnRunner(Model, HookRegistry, ToolDispatch, SteeringQueue, Consumer,
    * Function, Clock, CostCalculator, OutputSchema)} but supplies an explicit scheduler. Production
-   * callers ({@link ai.singlr.session.AgentSessionImpl}) pass a session-scoped scheduler that is
-   * shut down with the session; test fixtures use the convenience 9-arg overload that defaults to a
-   * process-wide daemon scheduler.
+   * callers ({@link com.standardapplied.helios.session.AgentSessionImpl}) pass a session-scoped
+   * scheduler that is shut down with the session; test fixtures use the convenience 9-arg overload
+   * that defaults to a process-wide daemon scheduler.
    *
    * @param model the model providing {@link Model#chatStream(List, List,
-   *     ai.singlr.core.runtime.CancellationToken)}; non-null
+   *     com.standardapplied.helios.core.runtime.CancellationToken)}; non-null
    * @param hooks priority-sorted hook registry; non-null
    * @param toolDispatch dispatcher for tool calls the model emits; non-null
    * @param steeringQueue per-session inbox into which Inject-outcome hooks enqueue synthetic
@@ -183,7 +185,7 @@ public final class TurnRunner {
    *     non-null
    * @param clock clock supplying event timestamps; non-null
    * @param costCalculator converts per-turn {@link Usage} into a {@link
-   *     ai.singlr.core.common.CostEstimate}; non-null
+   *     com.standardapplied.helios.core.common.CostEstimate}; non-null
    * @param outputSchema the schema the model's text output must conform to, or {@code null} when
    *     the session has no structured-output constraint
    * @param scheduler shared per-session scheduler used by {@link TurnSubscriber} to enforce the
@@ -352,8 +354,8 @@ public final class TurnRunner {
   /**
    * Structured-output self-correction. When the model emits JSON that is syntactically invalid,
    * doesn't match the session's configured {@link OutputSchema}, or is rejected by the schema's
-   * {@link ai.singlr.core.common.SubmitValidator} ({@link
-   * ai.singlr.core.schema.SubmitValidationException}), the parser raises {@link
+   * {@link com.standardapplied.helios.core.common.SubmitValidator} ({@link
+   * com.standardapplied.helios.core.schema.SubmitValidationException}), the parser raises {@link
    * StructuredOutputParseException}. Provider IO errors still terminate via {@link
    * FinishReason#ERROR}.
    *
@@ -364,7 +366,8 @@ public final class TurnRunner {
    * Return a {@link TurnOutcome} with {@link FinishReason#TOOL_CALLS}; the TOOL_CALLS sentinel
    * mirrors the {@code SKIP_MODEL} inject-hook path and routes back through the iteration boundary
    * regardless of {@link StopClassifier} state. The overall retry count is bounded by {@link
-   * ai.singlr.session.SessionLimits#maxTurns()} — no dedicated parse-retry ceiling.
+   * com.standardapplied.helios.session.SessionLimits#maxTurns()} — no dedicated parse-retry
+   * ceiling.
    *
    * <p>Returns {@code null} when the subscriber's error is not a {@link
    * StructuredOutputParseException} (or there is no error, or the steering queue rejected the
@@ -483,8 +486,9 @@ public final class TurnRunner {
    *
    * <p>{@code delay} is contractually non-null and non-negative — callers pass {@link
    * StreamRetryPolicy#nextDelay(int)} which is itself bounded by {@link
-   * ai.singlr.core.fault.Backoff}'s validation. Zero short-circuits the latch path; the caller's
-   * subsequent retry attempt re-checks cancellation before issuing the next request.
+   * com.standardapplied.helios.core.fault.Backoff}'s validation. Zero short-circuits the latch
+   * path; the caller's subsequent retry attempt re-checks cancellation before issuing the next
+   * request.
    */
   private static boolean sleepHonouringCancellation(Duration delay, CancellationToken token) {
     if (token.isCancelled()) {

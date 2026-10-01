@@ -1,13 +1,13 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.onnx;
+package com.standardapplied.helios.onnx;
 
-import ai.singlr.core.embedding.EmbeddingConfig;
-import ai.singlr.core.embedding.EmbeddingModel;
-import ai.singlr.core.embedding.EmbeddingProvider;
+import com.standardapplied.helios.core.embedding.EmbeddingConfig;
+import com.standardapplied.helios.core.embedding.EmbeddingModel;
+import com.standardapplied.helios.core.embedding.EmbeddingProvider;
 import java.util.logging.Logger;
 
 /**

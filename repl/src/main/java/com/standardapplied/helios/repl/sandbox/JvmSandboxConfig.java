@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
-import ai.singlr.repl.sandbox.policy.SandboxPolicy;
+import com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy;
 import java.nio.file.Path;
 import java.time.Duration;
 
@@ -22,10 +22,10 @@ import java.time.Duration;
  *     instrumentation (profilers, native-image init). Exceeded launches fail with an {@code
  *     IOException} whose message names the configured duration so the failure mode is debuggable.
  * @param sandboxPolicy declarative L2 policy enforced inside the subprocess by {@link
- *     ai.singlr.repl.sandbox.policy.GuardedExecutionControl GuardedExecutionControl}. Defaults to
- *     {@link SandboxPolicy#permissive()}, which is equivalent to no policy layer (the bootstrap's
- *     own default) — non-permissive policies travel to the subprocess via a {@code
- *     --sandbox-policy=<encoded>} argv flag.
+ *     com.standardapplied.helios.repl.sandbox.policy.GuardedExecutionControl
+ *     GuardedExecutionControl}. Defaults to {@link SandboxPolicy#permissive()}, which is equivalent
+ *     to no policy layer (the bootstrap's own default) — non-permissive policies travel to the
+ *     subprocess via a {@code --sandbox-policy=<encoded>} argv flag.
  * @param subprocessModules L3 JDK-module restriction applied to the subprocess JVM via {@code
  *     --limit-modules}. Defaults to {@link SubprocessModules#unrestricted()} — current pre-L3
  *     behaviour, all JDK modules observable. Use {@link SubprocessModules#minimal()} to strip
@@ -33,14 +33,14 @@ import java.time.Duration;
  *     SubprocessModules#allowingExtras(String...)} to add specific JDK modules (e.g. {@code
  *     java.net.http}) on top of the minimal baseline.
  * @param workingDirectory the working directory the subprocess JVM is launched in. {@code null}
- *     (default) means the {@link ai.singlr.repl.sandbox.JvmSandbox JvmSandbox} creates a private
- *     {@code helios-sandbox-cwd-*} temp directory per session, sets it on {@link
+ *     (default) means the {@link com.standardapplied.helios.repl.sandbox.JvmSandbox JvmSandbox}
+ *     creates a private {@code helios-sandbox-cwd-*} temp directory per session, sets it on {@link
  *     ProcessBuilder#directory(java.io.File)}, and deletes it (recursively) when {@link
- *     ai.singlr.repl.sandbox.JvmSandbox#close()} fires — predictable per-session scratch space, no
- *     cross-session leak, no inheritance from the host JVM's cwd. Pass a non-null path to point the
- *     subprocess at a caller-owned directory (e.g. a customer's per-tenant scratch mount);
- *     caller-owned directories are <b>not</b> deleted by {@code close()}, only the ephemeral
- *     default is.
+ *     com.standardapplied.helios.repl.sandbox.JvmSandbox#close()} fires — predictable per-session
+ *     scratch space, no cross-session leak, no inheritance from the host JVM's cwd. Pass a non-null
+ *     path to point the subprocess at a caller-owned directory (e.g. a customer's per-tenant
+ *     scratch mount); caller-owned directories are <b>not</b> deleted by {@code close()}, only the
+ *     ephemeral default is.
  *     <p>Restricting the working directory is necessary but not sufficient for filesystem
  *     containment — absolute paths bypass cwd entirely. Combine with {@link
  *     SandboxPolicy#denyFileSystemAccess()} to block snippet-direct filesystem reach; the cwd

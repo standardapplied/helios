@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -12,9 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.Ids;
-import ai.singlr.core.runtime.ToolCallRecord;
-import ai.singlr.core.runtime.ToolCallStatus;
+import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.runtime.ToolCallRecord;
+import com.standardapplied.helios.core.runtime.ToolCallStatus;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -186,7 +186,7 @@ class PgToolCallJournalTest {
 
   @Test
   void toolCallFieldsAreScrubbedWhenRedactorConfigured() {
-    var registry = new ai.singlr.core.common.SecretRegistry();
+    var registry = new com.standardapplied.helios.core.common.SecretRegistry();
     registry.register("GH_TOKEN", "ghp_supersecret_12345678");
     var redactingJournal =
         new PgToolCallJournal(
@@ -223,7 +223,7 @@ class PgToolCallJournalTest {
     // serialises the args map. This test exercises the deep walk: the secret appears inside a
     // nested map AND inside a list element, neither of which a top-level redaction pass would
     // reach. Both occurrences must surface as <redacted:API_KEY> in the round-tripped args.
-    var registry = new ai.singlr.core.common.SecretRegistry();
+    var registry = new com.standardapplied.helios.core.common.SecretRegistry();
     var secret = "sk-supersecret-abc12345";
     registry.register("API_KEY", secret);
     var redactingJournal =
@@ -287,7 +287,7 @@ class PgToolCallJournalTest {
 
   @Test
   void failErrorIsScrubbedWhenRedactorConfigured() {
-    var registry = new ai.singlr.core.common.SecretRegistry();
+    var registry = new com.standardapplied.helios.core.common.SecretRegistry();
     registry.register("API_KEY", "sk-supersecret-abc12345");
     var redactingJournal =
         new PgToolCallJournal(

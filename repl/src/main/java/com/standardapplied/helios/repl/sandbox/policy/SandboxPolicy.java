@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox.policy;
+package com.standardapplied.helios.repl.sandbox.policy;
 
 import java.util.Set;
 
@@ -67,8 +67,8 @@ import java.util.Set;
  *     through host-owned tools (e.g. the session's {@code Read} / {@code Grep} / {@code Glob} tools
  *     rooted at a curated {@code WorkspaceRoot}) rather than raw {@code Files.readAllBytes} — set
  *     this flag, then expose the curated path-jail surface as host tools. Combine with {@link
- *     ai.singlr.repl.sandbox.JvmSandboxConfig#workingDirectory()} for defense-in-depth on
- *     relative-path resolution.
+ *     com.standardapplied.helios.repl.sandbox.JvmSandboxConfig#workingDirectory()} for
+ *     defense-in-depth on relative-path resolution.
  * @param onViolation how the verifier reports a violation. {@link ViolationAction#THROW} is the
  *     only mode in PR 1; a future {@code ASK_HOST} mode may route through a {@code QuestionGateway}
  *     when one is wired.
@@ -157,8 +157,8 @@ public record SandboxPolicy(
    * <p>Deployers who need a single API call to lock the agent into "data crunching with no egress"
    * reach for this preset and customise from there. Returns a fresh {@link SandboxPolicy}; pass
    * directly to {@link
-   * ai.singlr.repl.sandbox.JvmSandboxConfig.Builder#withSandboxPolicy(SandboxPolicy)} or compose by
-   * round-tripping through a Builder.
+   * com.standardapplied.helios.repl.sandbox.JvmSandboxConfig.Builder#withSandboxPolicy(SandboxPolicy)}
+   * or compose by round-tripping through a Builder.
    */
   public static SandboxPolicy noEgress() {
     return new SandboxPolicy(

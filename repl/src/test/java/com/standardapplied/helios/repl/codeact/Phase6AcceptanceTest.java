@@ -1,28 +1,28 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelChunk;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.session.AgentSession;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SessionOptions;
-import ai.singlr.session.UserMessage;
-import ai.singlr.session.execution.ExecuteTool;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.execution.ExecuteTool;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -31,8 +31,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Phase 6 acceptance: scripted-model tests that drive {@link CodeActPreset} end-to-end against a
- * real {@link ai.singlr.repl.execution.JShellExecutionProvider} sandbox. Validates that the typed
- * and RLM (withSubLm) shapes both terminate with the expected typed value through the agent loop.
+ * real {@link com.standardapplied.helios.repl.execution.JShellExecutionProvider} sandbox. Validates
+ * that the typed and RLM (withSubLm) shapes both terminate with the expected typed value through
+ * the agent loop.
  */
 final class Phase6AcceptanceTest {
 
@@ -284,10 +285,11 @@ final class Phase6AcceptanceTest {
             .apply(CodeActPreset.typed(SumInput.class, Sum.class, input))
             .build();
     assertInstanceOf(
-        ai.singlr.session.permissions.Permission.class, options.permission().orElseThrow());
+        com.standardapplied.helios.session.permissions.Permission.class,
+        options.permission().orElseThrow());
     assertTrue(options.memoryBackend().isPresent());
     assertEquals(
-        ai.singlr.session.permissions.PermissionMode.LOCKED_DOWN,
+        com.standardapplied.helios.session.permissions.PermissionMode.LOCKED_DOWN,
         options.permission().orElseThrow().mode());
   }
 

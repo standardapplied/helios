@@ -1,27 +1,27 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
 /**
- * Singular Agentic Framework - Google Gemini Provider Module.
+ * Helios - Google Gemini Provider Module.
  *
  * <p>Implements the ModelProvider SPI for Google's Gemini API using the Interactions API for
  * configurable provider-side continuation and streaming support.
  */
-module ai.singlr.gemini {
-  requires ai.singlr.core;
+module com.standardapplied.helios.gemini {
+  requires com.standardapplied.helios.core;
   requires java.net.http;
   requires tools.jackson.databind;
   requires com.fasterxml.jackson.annotation;
 
-  exports ai.singlr.gemini;
+  exports com.standardapplied.helios.gemini;
 
-  opens ai.singlr.gemini.api to
+  opens com.standardapplied.helios.gemini.api to
       tools.jackson.databind;
-  opens ai.singlr.gemini to
+  opens com.standardapplied.helios.gemini to
       tools.jackson.databind;
 
-  provides ai.singlr.core.model.ModelProvider with
-      ai.singlr.gemini.GeminiProvider;
+  provides com.standardapplied.helios.core.model.ModelProvider with
+      com.standardapplied.helios.gemini.GeminiProvider;
 }

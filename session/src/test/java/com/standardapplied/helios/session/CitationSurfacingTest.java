@@ -1,20 +1,20 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Citation;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.tool.Tool;
+import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.tool.Tool;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -31,8 +31,8 @@ import org.junit.jupiter.api.Test;
  * {@link ResultMessage.Success#citations()}. Drives a full {@link AgentSession} against an inline
  * grounded {@link Model} whose {@code chat} returns a {@link Response} carrying citations; the
  * default {@code chatStream} adapter forwards them onto {@link
- * ai.singlr.core.model.ModelChunk.MessageStop}, the loop accumulates them, and they land on the
- * result.
+ * com.standardapplied.helios.core.model.ModelChunk.MessageStop}, the loop accumulates them, and
+ * they land on the result.
  */
 final class CitationSurfacingTest {
 

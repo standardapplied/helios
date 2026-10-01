@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -10,14 +10,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.CostEstimate;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.TransientStreamException;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SessionLimits;
+import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionLimits;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;

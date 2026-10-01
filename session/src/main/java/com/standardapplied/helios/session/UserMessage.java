@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.FileReference;
-import ai.singlr.core.model.InlineFile;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.FileReference;
+import com.standardapplied.helios.core.model.InlineFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;

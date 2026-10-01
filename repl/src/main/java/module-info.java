@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
 /**
- * Singular Agentic Framework - REPL Module.
+ * Helios - REPL Module.
  *
  * <p>Provides sandboxed code execution for Recursive Language Model (RLM) patterns:
  *
@@ -15,19 +15,19 @@
  *   <li>CodeExecutionTool factory for agent integration
  * </ul>
  */
-module ai.singlr.repl {
-  requires ai.singlr.core;
-  requires ai.singlr.session;
+module com.standardapplied.helios.repl {
+  requires com.standardapplied.helios.core;
+  requires com.standardapplied.helios.session;
   requires java.logging;
   requires java.management;
   requires jdk.jshell;
   requires tools.jackson.databind;
 
-  exports ai.singlr.repl;
-  exports ai.singlr.repl.codeact;
-  exports ai.singlr.repl.execution;
-  exports ai.singlr.repl.sandbox;
-  exports ai.singlr.repl.sandbox.policy;
-  exports ai.singlr.repl.host;
-  exports ai.singlr.repl.protocol;
+  exports com.standardapplied.helios.repl;
+  exports com.standardapplied.helios.repl.codeact;
+  exports com.standardapplied.helios.repl.execution;
+  exports com.standardapplied.helios.repl.sandbox;
+  exports com.standardapplied.helios.repl.sandbox.policy;
+  exports com.standardapplied.helios.repl.host;
+  exports com.standardapplied.helios.repl.protocol;
 }

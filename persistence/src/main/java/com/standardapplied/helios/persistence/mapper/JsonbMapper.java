@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence.mapper;
+package com.standardapplied.helios.persistence.mapper;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.ToolCall;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.ToolCall;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;

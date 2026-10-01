@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.repl.ReplException;
-import ai.singlr.repl.host.HostFunctionRegistry;
-import ai.singlr.repl.protocol.ProcessTransport;
-import ai.singlr.repl.protocol.RpcChannel;
-import ai.singlr.repl.sandbox.policy.SandboxPolicySerialization;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.repl.ReplException;
+import com.standardapplied.helios.repl.host.HostFunctionRegistry;
+import com.standardapplied.helios.repl.protocol.ProcessTransport;
+import com.standardapplied.helios.repl.protocol.RpcChannel;
+import com.standardapplied.helios.repl.sandbox.policy.SandboxPolicySerialization;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -525,9 +525,9 @@ public final class JvmSandbox implements Sandbox {
   /**
    * Build the subprocess command line. Inherits the parent JVM's input arguments so the subprocess
    * resolves modules the same way the parent does — critical for JPMS projects where the {@code
-   * ai.singlr.repl} module lives on {@code --module-path}, not {@code -cp}. Without this, the
-   * subprocess starts with a sparse classpath (just {@code java.class.path}) and dies with {@code
-   * NoClassDefFoundError} on {@link JvmSandboxBootstrap}.
+   * com.standardapplied.helios.repl} module lives on {@code --module-path}, not {@code -cp}.
+   * Without this, the subprocess starts with a sparse classpath (just {@code java.class.path}) and
+   * dies with {@code NoClassDefFoundError} on {@link JvmSandboxBootstrap}.
    *
    * <p>Inheritance rules:
    *
@@ -546,13 +546,13 @@ public final class JvmSandbox implements Sandbox {
    *             Surefire and similar test runners propagate {@code --add-modules=ALL-MODULE-PATH}
    *             which would re-add every module on the parent's module path and defeat any L3
    *             {@code --limit-modules} restriction the bootstrap applies. The bootstrap re-adds
-   *             only what it provably needs ({@code ai.singlr.repl} via the explicit add-modules
-   *             below; everything else flows through transitive resolution).
+   *             only what it provably needs ({@code com.standardapplied.helios.repl} via the
+   *             explicit add-modules below; everything else flows through transitive resolution).
    *       </ul>
    *   <li>Parent's {@code java.class.path} as {@code -cp} — safe for both JPMS and non-JPMS
    *       parents. Non-JPMS parents rely on this entirely; JPMS parents have it sparse but correct.
-   *   <li>{@code --add-modules ai.singlr.repl} when the parent uses {@code --module-path}, so the
-   *       bootstrap module is a root module in the subprocess's boot layer.
+   *   <li>{@code --add-modules com.standardapplied.helios.repl} when the parent uses {@code
+   *       --module-path}, so the bootstrap module is a root module in the subprocess's boot layer.
    * </ul>
    */
   static List<String> buildLaunchCommand(String javaBin, JvmSandboxConfig config) {
@@ -567,9 +567,9 @@ public final class JvmSandbox implements Sandbox {
    * itself — not used by the production {@link #create} path.
    *
    * <p>A non-permissive {@link JvmSandboxConfig#sandboxPolicy()} is encoded via {@link
-   * SandboxPolicySerialization#encode(ai.singlr.repl.sandbox.policy.SandboxPolicy)} and appended as
-   * {@code --sandbox-policy=<encoded>}. A permissive policy is the bootstrap's own default, so it
-   * is not propagated — keeping the command line stable for the common case.
+   * SandboxPolicySerialization#encode(com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy)}
+   * and appended as {@code --sandbox-policy=<encoded>}. A permissive policy is the bootstrap's own
+   * default, so it is not propagated — keeping the command line stable for the common case.
    */
   static List<String> buildLaunchCommand(
       String javaBin, JvmSandboxConfig config, String rpcSocketPath) {
@@ -595,7 +595,7 @@ public final class JvmSandbox implements Sandbox {
     var modulepathLaunch = parentUsesModulePath(parentArgs);
     if (modulepathLaunch) {
       command.add("--add-modules");
-      command.add("ai.singlr.repl");
+      command.add("com.standardapplied.helios.repl");
     }
 
     var limitModules = config.subprocessModules().limitModulesArg(modulepathLaunch);
@@ -604,7 +604,7 @@ public final class JvmSandbox implements Sandbox {
       command.add(limitModules);
     }
 
-    command.add("ai.singlr.repl.sandbox.JvmSandboxBootstrap");
+    command.add("com.standardapplied.helios.repl.sandbox.JvmSandboxBootstrap");
     if (rpcSocketPath != null) {
       command.add("--rpc-socket=" + rpcSocketPath);
     }
@@ -625,8 +625,8 @@ public final class JvmSandbox implements Sandbox {
    * therefore cannot be resolved by the subprocess. This bites callers running as {@code java -jar
    * target/app.jar}: the JDK puts {@code "target/app.jar"} in {@code java.class.path}, the
    * subprocess can't find it from its new cwd, and dies with {@code ClassNotFoundException:
-   * ai.singlr.repl.sandbox.JvmSandboxBootstrap}. The host then waits the full RPC accept timeout
-   * for a connection that will never come.
+   * com.standardapplied.helios.repl.sandbox.JvmSandboxBootstrap}. The host then waits the full RPC
+   * accept timeout for a connection that will never come.
    *
    * <p>Normalising to absolute paths against the host cwd reproduces the resolution the host JVM
    * already performed when it loaded its own classpath. Jars whose manifests carry a relative

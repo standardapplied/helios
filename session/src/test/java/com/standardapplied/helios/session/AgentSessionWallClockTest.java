@@ -1,18 +1,18 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelChunk;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.tool.Tool;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.tool.Tool;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -24,10 +24,10 @@ import org.junit.jupiter.api.Test;
  * Regression coverage for the "session hangs past {@code maxWallClock}" bug surfaced in a client
  * stack trace where the JVM main thread parked at {@code AgentSession.runBlocking} → {@code
  * CompletableFuture.join()} for 494 s despite a 2-minute wall-clock cap. Root cause: {@link
- * ai.singlr.session.loop.StopClassifier} checks {@code maxWallClock} only between turns, while
- * {@link ai.singlr.session.loop.TurnSubscriber#awaitDone()} blocks indefinitely waiting for a
- * provider stream that may never deliver {@code onComplete} / {@code onError} (silent socket, hung
- * proxy, mid-stream stall).
+ * com.standardapplied.helios.session.loop.StopClassifier} checks {@code maxWallClock} only between
+ * turns, while {@link com.standardapplied.helios.session.loop.TurnSubscriber#awaitDone()} blocks
+ * indefinitely waiting for a provider stream that may never deliver {@code onComplete} / {@code
+ * onError} (silent socket, hung proxy, mid-stream stall).
  *
  * <p>The tests in this class construct an inline {@link Model} whose {@code chatStream} returns a
  * publisher that calls {@code onSubscribe} and then never emits another signal — the bare-minimum

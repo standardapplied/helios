@@ -1,18 +1,18 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.schema;
+package com.standardapplied.helios.core.schema;
 
 import java.util.List;
 
 /**
  * Thrown when a model's structured output is structurally valid but fails the schema's {@link
- * ai.singlr.core.common.SubmitValidator}. A {@link StructuredOutputParseException} subtype so the
- * session loop's self-correction treats a semantic rejection exactly like a schema mismatch —
- * append the rejected attempt, inject {@link #correctionMessage()}, retry within the turn budget —
- * while callers that care can still tell the two apart by type.
+ * com.standardapplied.helios.core.common.SubmitValidator}. A {@link StructuredOutputParseException}
+ * subtype so the session loop's self-correction treats a semantic rejection exactly like a schema
+ * mismatch — append the rejected attempt, inject {@link #correctionMessage()}, retry within the
+ * turn budget — while callers that care can still tell the two apart by type.
  */
 public final class SubmitValidationException extends StructuredOutputParseException {
 

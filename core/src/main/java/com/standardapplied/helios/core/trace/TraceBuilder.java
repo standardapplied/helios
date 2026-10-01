@@ -1,14 +1,14 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.trace;
+package com.standardapplied.helios.core.trace;
 
-import ai.singlr.core.common.CostEstimate;
-import ai.singlr.core.common.Ids;
-import ai.singlr.core.events.EventSink;
-import ai.singlr.core.model.Response.Usage;
+import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.events.EventSink;
+import com.standardapplied.helios.core.model.Response.Usage;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -27,11 +27,11 @@ import java.util.function.Function;
  * immutable {@link Trace}.
  *
  * <p>The terminal {@link Trace} is returned from {@link #end()} / {@link #fail(String)} so callers
- * can attach it to a {@link ai.singlr.core.events.HeliosEvent.RunCompleted} or {@link
- * ai.singlr.core.events.HeliosEvent.RunFailed} event. Per-span {@link
- * ai.singlr.core.events.HeliosEvent.SpanOpened} / {@link
- * ai.singlr.core.events.HeliosEvent.SpanClosed} events are emitted directly by {@link SpanBuilder}
- * to the supplied {@code eventSinks}.
+ * can attach it to a {@link com.standardapplied.helios.core.events.HeliosEvent.RunCompleted} or
+ * {@link com.standardapplied.helios.core.events.HeliosEvent.RunFailed} event. Per-span {@link
+ * com.standardapplied.helios.core.events.HeliosEvent.SpanOpened} / {@link
+ * com.standardapplied.helios.core.events.HeliosEvent.SpanClosed} events are emitted directly by
+ * {@link SpanBuilder} to the supplied {@code eventSinks}.
  *
  * <p>Not thread-safe. Designed for sequential use within an agent loop.
  */
@@ -168,7 +168,8 @@ public final class TraceBuilder implements SpanContainer {
 
   /**
    * Completes this trace successfully and returns the built {@link Trace}. The caller is
-   * responsible for surfacing it via {@link ai.singlr.core.events.HeliosEvent.RunCompleted}.
+   * responsible for surfacing it via {@link
+   * com.standardapplied.helios.core.events.HeliosEvent.RunCompleted}.
    *
    * @return the immutable Trace
    * @throws IllegalStateException if this trace has already ended
@@ -187,7 +188,7 @@ public final class TraceBuilder implements SpanContainer {
   /**
    * Completes this trace with an error. Auto-fails any open spans and returns the built {@link
    * Trace}. The caller is responsible for surfacing it via {@link
-   * ai.singlr.core.events.HeliosEvent.RunFailed}.
+   * com.standardapplied.helios.core.events.HeliosEvent.RunFailed}.
    *
    * @param error the error message
    * @return the immutable Trace

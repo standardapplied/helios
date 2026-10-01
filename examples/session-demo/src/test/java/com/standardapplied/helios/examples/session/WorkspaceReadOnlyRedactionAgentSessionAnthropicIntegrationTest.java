@@ -1,26 +1,26 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
-package ai.singlr.examples.session;
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
+package com.standardapplied.helios.examples.session;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.anthropic.AnthropicModelId;
-import ai.singlr.anthropic.AnthropicProvider;
-import ai.singlr.core.common.SecretRegistry;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.session.AgentSession;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SessionLimits;
-import ai.singlr.session.SessionOptions;
-import ai.singlr.session.UserMessage;
-import ai.singlr.session.files.GlobTool;
-import ai.singlr.session.files.GrepTool;
-import ai.singlr.session.files.InMemoryFileTracker;
-import ai.singlr.session.files.ReadTool;
-import ai.singlr.session.files.WorkspaceRoot;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.anthropic.AnthropicModelId;
+import com.standardapplied.helios.anthropic.AnthropicProvider;
+import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.files.GlobTool;
+import com.standardapplied.helios.session.files.GrepTool;
+import com.standardapplied.helios.session.files.InMemoryFileTracker;
+import com.standardapplied.helios.session.files.ReadTool;
+import com.standardapplied.helios.session.files.WorkspaceRoot;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

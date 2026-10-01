@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
 /** Unchecked exception thrown when PostgreSQL operations fail. */
 public class PgException extends RuntimeException {

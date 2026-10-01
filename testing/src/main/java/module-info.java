@@ -1,18 +1,18 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
 /**
- * Singular Agentic Framework — testing support.
+ * Helios — testing support.
  *
  * <p>Deterministic test doubles for Helios consumers. {@code ScriptedModel} replays a fixed script
  * of turns (text, tool calls, structured JSON) through the real {@code Model} contract so agent
  * tests and CI evals run without a live provider.
  */
-module ai.singlr.testing {
-  requires ai.singlr.core;
+module com.standardapplied.helios.testing {
+  requires com.standardapplied.helios.core;
   requires tools.jackson.databind;
 
-  exports ai.singlr.testing;
+  exports com.standardapplied.helios.testing;
 }

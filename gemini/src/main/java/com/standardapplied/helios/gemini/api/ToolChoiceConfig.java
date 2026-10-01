@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.gemini.api;
+package com.standardapplied.helios.gemini.api;
 
 import com.fasterxml.jackson.annotation.JsonValue;
 import java.util.List;

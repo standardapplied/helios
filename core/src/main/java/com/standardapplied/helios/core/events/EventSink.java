@@ -1,6 +1,6 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.core.events;
+package com.standardapplied.helios.core.events;
 
 /**
  * Receives {@link HeliosEvent}s as they happen during a Helios primitive run.

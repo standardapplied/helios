@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic.api;
+package com.standardapplied.helios.anthropic.api;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;

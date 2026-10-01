@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.tools;
+package com.standardapplied.helios.session.tools;
 
 /**
  * Classification axis for tools. Drives default permission rules, audit attribution, and the

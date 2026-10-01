@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic;
+package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -11,18 +11,18 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.model.StreamEvent;
-import ai.singlr.core.model.ThinkingLevel;
-import ai.singlr.core.schema.Description;
-import ai.singlr.core.schema.Nullable;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.tool.ParameterType;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolParameter;
-import ai.singlr.core.tool.ToolResult;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.ThinkingLevel;
+import com.standardapplied.helios.core.schema.Description;
+import com.standardapplied.helios.core.schema.Nullable;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolParameter;
+import com.standardapplied.helios.core.tool.ToolResult;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
@@ -229,10 +229,10 @@ class AnthropicModelIntegrationTest {
    * thinking blocks included, so a request the API would reject for a modified or misplaced block
    * fails here.
    */
-  private static List<ai.singlr.core.model.Response<Void>> runToolLoop(
+  private static List<com.standardapplied.helios.core.model.Response<Void>> runToolLoop(
       AnthropicModel candidate, List<Message> opening, List<Tool> tools, String toolOutput) {
     var history = new ArrayList<>(opening);
-    var turns = new ArrayList<ai.singlr.core.model.Response<Void>>();
+    var turns = new ArrayList<com.standardapplied.helios.core.model.Response<Void>>();
     for (var turn = 0; turn < 8; turn++) {
       var response = candidate.chat(history, tools);
       turns.add(response);
@@ -356,7 +356,7 @@ class AnthropicModelIntegrationTest {
       var turns = runToolLoop(opus, opening, tools, profile);
 
       assertTrue(
-          turns.stream().anyMatch(ai.singlr.core.model.Response::hasThinking),
+          turns.stream().anyMatch(com.standardapplied.helios.core.model.Response::hasThinking),
           "a level above NONE requests the summarized display, so the notes Opus 5.5 writes"
               + " between tool calls arrive as thinking text instead of empty blocks");
     }

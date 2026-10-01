@@ -1,34 +1,34 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
-package ai.singlr.examples.session;
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
+package com.standardapplied.helios.examples.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.gemini.GeminiModelId;
-import ai.singlr.gemini.GeminiProvider;
-import ai.singlr.session.AgentSession;
-import ai.singlr.session.QueryEvent;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SessionLimits;
-import ai.singlr.session.SessionOptions;
-import ai.singlr.session.UserMessage;
-import ai.singlr.session.files.GlobTool;
-import ai.singlr.session.files.GrepTool;
-import ai.singlr.session.files.InMemoryFileTracker;
-import ai.singlr.session.files.LsTool;
-import ai.singlr.session.files.ReadTool;
-import ai.singlr.session.files.WorkspaceRoot;
-import ai.singlr.session.memory.FileSystemMemoryBackend;
-import ai.singlr.session.memory.MemoryWriteTool;
-import ai.singlr.session.permissions.Permission;
-import ai.singlr.session.permissions.PermissionEffect;
-import ai.singlr.session.permissions.PermissionMode;
-import ai.singlr.session.permissions.PermissionRule;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.gemini.GeminiModelId;
+import com.standardapplied.helios.gemini.GeminiProvider;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.files.GlobTool;
+import com.standardapplied.helios.session.files.GrepTool;
+import com.standardapplied.helios.session.files.InMemoryFileTracker;
+import com.standardapplied.helios.session.files.LsTool;
+import com.standardapplied.helios.session.files.ReadTool;
+import com.standardapplied.helios.session.files.WorkspaceRoot;
+import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
+import com.standardapplied.helios.session.memory.MemoryWriteTool;
+import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.permissions.PermissionEffect;
+import com.standardapplied.helios.session.permissions.PermissionMode;
+import com.standardapplied.helios.session.permissions.PermissionRule;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -217,7 +217,7 @@ final class SessionDemoIntegrationTest {
                   if (ev instanceof QueryEvent.QuestionAsked qa) {
                     session.answer(
                         qa.request().questionId(),
-                        ai.singlr.session.ask.AskUserQuestionResponse.single(
+                        com.standardapplied.helios.session.ask.AskUserQuestionResponse.single(
                             qa.request().questionId(), "Deny"));
                   }
                 }

@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -12,9 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.repl.protocol.ProcessTransport;
-import ai.singlr.repl.protocol.RpcError;
-import ai.singlr.repl.protocol.RpcMessage;
+import com.standardapplied.helios.repl.protocol.ProcessTransport;
+import com.standardapplied.helios.repl.protocol.RpcError;
+import com.standardapplied.helios.repl.protocol.RpcMessage;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStreamReader;
@@ -57,7 +57,8 @@ class JvmSandboxBootstrapTest {
 
   @Test
   void warnIfReducedIsolationFiresWhenSandboxPackageIsOpened() {
-    // The Surefire harness runs with --add-opens=ai.singlr.repl/ai.singlr.repl.sandbox=ALL-UNNAMED
+    // The Surefire harness runs with
+    // --add-opens=com.standardapplied.helios.repl/com.standardapplied.helios.repl.sandbox=ALL-UNNAMED
     // (also propagated to the JvmSandbox subprocess via shouldPropagateJvmArg). That open is what
     // makes the reflection RPC forgery in JvmSandboxTest reproduce — so under this test JVM the
     // WARNING must fire. Real production launches without --add-opens, in modulepath mode, will
@@ -85,7 +86,7 @@ class JvmSandboxBootstrapTest {
     var module = JvmSandboxBootstrap.class.getModule();
     var unnamedProbe = ClassLoader.getPlatformClassLoader().getUnnamedModule();
     var inReducedIsolation =
-        !module.isNamed() || module.isOpen("ai.singlr.repl.sandbox", unnamedProbe);
+        !module.isNamed() || module.isOpen("com.standardapplied.helios.repl.sandbox", unnamedProbe);
     if (inReducedIsolation) {
       return;
     }
@@ -99,7 +100,7 @@ class JvmSandboxBootstrapTest {
   void addHostBridgeToJShellClasspathIsSafe() {
     try (var fresh = JShell.builder().executionEngine("local").build()) {
       JvmSandboxBootstrap.addHostBridgeToJShellClasspath(fresh);
-      var events = fresh.eval("import ai.singlr.repl.sandbox.HostBridge;");
+      var events = fresh.eval("import com.standardapplied.helios.repl.sandbox.HostBridge;");
       assertTrue(
           events.stream().allMatch(e -> e.status() == jdk.jshell.Snippet.Status.VALID),
           "import should succeed after addHostBridgeToJShellClasspath: " + events);
@@ -505,8 +506,8 @@ class JvmSandboxBootstrapTest {
     if (java.nio.file.Files.isDirectory(targetClasses)) {
       jshell.addToClasspath(targetClasses.toString());
     }
-    jshell.eval("import static ai.singlr.repl.sandbox.HostBridge.*;");
-    jshell.eval("import ai.singlr.repl.sandbox.HostBridge;");
+    jshell.eval("import static com.standardapplied.helios.repl.sandbox.HostBridge.*;");
+    jshell.eval("import com.standardapplied.helios.repl.sandbox.HostBridge;");
     return jshell;
   }
 

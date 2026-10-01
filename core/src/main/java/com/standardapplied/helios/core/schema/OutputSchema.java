@@ -1,18 +1,18 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.schema;
+package com.standardapplied.helios.core.schema;
 
-import ai.singlr.core.common.Confidence;
-import ai.singlr.core.common.FieldProvenance;
-import ai.singlr.core.common.ProvenanceValidator;
-import ai.singlr.core.common.Provenanced;
-import ai.singlr.core.common.Source;
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.common.SubmitValidator;
-import ai.singlr.core.common.ValidationResult;
+import com.standardapplied.helios.core.common.Confidence;
+import com.standardapplied.helios.core.common.FieldProvenance;
+import com.standardapplied.helios.core.common.ProvenanceValidator;
+import com.standardapplied.helios.core.common.Provenanced;
+import com.standardapplied.helios.core.common.Source;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.common.SubmitValidator;
+import com.standardapplied.helios.core.common.ValidationResult;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;

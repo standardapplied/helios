@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
-import ai.singlr.core.common.CostEstimate;
+import com.standardapplied.helios.core.common.CostEstimate;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.OptionalLong;
@@ -37,16 +37,16 @@ import java.util.OptionalLong;
  *       as a hard cap and clamped against the model's actual window to avoid requesting more
  *       context than the provider supports.
  *   <li>{@code streamIdleTimeout}: 60 seconds — if a provider stream emits no chunk for this long,
- *       the turn fails with {@link ai.singlr.core.model.FinishReason#ERROR}, surfaced as {@link
- *       ResultMessage.ErrorDuringExecution} with a {@code stream-idle-timeout} error code. Guards
- *       against silent-socket / hung-edge stalls that {@code maxWallClock} would otherwise catch
- *       only at the end of the wall-clock budget. Composes with stream retry — a turn that
- *       idle-times-out becomes a retry candidate when the provider classifies the failure as
- *       transient.
+ *       the turn fails with {@link com.standardapplied.helios.core.model.FinishReason#ERROR},
+ *       surfaced as {@link ResultMessage.ErrorDuringExecution} with a {@code stream-idle-timeout}
+ *       error code. Guards against silent-socket / hung-edge stalls that {@code maxWallClock} would
+ *       otherwise catch only at the end of the wall-clock budget. Composes with stream retry — a
+ *       turn that idle-times-out becomes a retry candidate when the provider classifies the failure
+ *       as transient.
  *   <li>{@code streamRetryPolicy}: 3 attempts, 1 s/4 s/16 s exponential back-off capped at 30 s,
  *       ±25% jitter (see {@link StreamRetryPolicy#defaults()}). The loop retries a turn that failed
- *       with {@link ai.singlr.core.model.TransientStreamException}; on exhaustion the session
- *       terminates as {@link ResultMessage.ErrorTransientStream}. Use {@link
+ *       with {@link com.standardapplied.helios.core.model.TransientStreamException}; on exhaustion
+ *       the session terminates as {@link ResultMessage.ErrorTransientStream}. Use {@link
  *       StreamRetryPolicy#disabled()} for fail-fast behaviour.
  * </ul>
  *
@@ -62,15 +62,15 @@ import java.util.OptionalLong;
  * @param toolTimeoutDefault default per-tool execution timeout; must be non-null and strictly
  *     positive
  * @param maxContextTokens soft trigger for context compaction, measured as the {@link
- *     ai.singlr.core.context.TokenCounter}'s estimate of the <em>total tokens across every message
- *     in the conversation history so far</em> — cumulative, never per-turn. Must be non-negative.
- *     {@code 0} signals "auto" — the agent loop resolves an effective ceiling from {@link
- *     ai.singlr.core.model.Model#contextWindow()}. Any positive value is an explicit cap clamped
- *     against the model's actual window
+ *     com.standardapplied.helios.core.context.TokenCounter}'s estimate of the <em>total tokens
+ *     across every message in the conversation history so far</em> — cumulative, never per-turn.
+ *     Must be non-negative. {@code 0} signals "auto" — the agent loop resolves an effective ceiling
+ *     from {@link com.standardapplied.helios.core.model.Model#contextWindow()}. Any positive value
+ *     is an explicit cap clamped against the model's actual window
  * @param streamIdleTimeout per-chunk idle ceiling on a model stream; must be non-null and strictly
  *     positive
  * @param streamRetryPolicy how the loop retries a turn that failed with {@link
- *     ai.singlr.core.model.TransientStreamException}; non-null
+ *     com.standardapplied.helios.core.model.TransientStreamException}; non-null
  */
 public record SessionLimits(
     int maxTurns,
@@ -236,9 +236,9 @@ public record SessionLimits(
      * Set the soft context-compaction trigger in tokens.
      *
      * <p>{@code 0} signals "auto" — the agent loop derives an effective ceiling from {@link
-     * ai.singlr.core.model.Model#contextWindow()} at run time, subtracting a small output-token
-     * reservation for the next response. Any positive value is an explicit cap and the loop uses
-     * the smaller of the cap and the model's actual window.
+     * com.standardapplied.helios.core.model.Model#contextWindow()} at run time, subtracting a small
+     * output-token reservation for the next response. Any positive value is an explicit cap and the
+     * loop uses the smaller of the cap and the model's actual window.
      *
      * @param maxContextTokens non-negative token ceiling; {@code 0} means auto
      * @return this builder
@@ -251,7 +251,7 @@ public record SessionLimits(
     /**
      * Set the per-chunk stream-idle ceiling. A model stream that emits no chunk within this
      * duration is treated as stalled and the turn fails with {@link
-     * ai.singlr.core.model.FinishReason#ERROR}.
+     * com.standardapplied.helios.core.model.FinishReason#ERROR}.
      */
     public Builder withStreamIdleTimeout(Duration streamIdleTimeout) {
       this.streamIdleTimeout = streamIdleTimeout;
@@ -260,9 +260,9 @@ public record SessionLimits(
 
     /**
      * Set the stream-retry policy. The loop applies this policy when a turn fails with {@link
-     * ai.singlr.core.model.TransientStreamException}. Pass {@link StreamRetryPolicy#disabled()} to
-     * opt out of retry entirely; the loop will then terminate on the first transient failure via
-     * {@link ResultMessage.ErrorTransientStream}.
+     * com.standardapplied.helios.core.model.TransientStreamException}. Pass {@link
+     * StreamRetryPolicy#disabled()} to opt out of retry entirely; the loop will then terminate on
+     * the first transient failure via {@link ResultMessage.ErrorTransientStream}.
      *
      * @param streamRetryPolicy the policy; non-null
      * @return this builder

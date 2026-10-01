@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -11,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.repl.protocol.ProcessTransport;
-import ai.singlr.repl.protocol.RpcMessage;
+import com.standardapplied.helios.repl.protocol.ProcessTransport;
+import com.standardapplied.helios.repl.protocol.RpcMessage;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PipedInputStream;

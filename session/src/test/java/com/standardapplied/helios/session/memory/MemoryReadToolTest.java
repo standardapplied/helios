@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.memory;
+package com.standardapplied.helios.session.memory;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.session.files.WorkspaceRoot;
-import ai.singlr.session.tools.ToolCategory;
+import com.standardapplied.helios.session.files.WorkspaceRoot;
+import com.standardapplied.helios.session.tools.ToolCategory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

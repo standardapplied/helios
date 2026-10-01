@@ -1,6 +1,6 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.core.embedding;
+package com.standardapplied.helios.core.embedding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.Result;
+import com.standardapplied.helios.core.common.Result;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 

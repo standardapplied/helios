@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.protocol;
+package com.standardapplied.helios.repl.protocol;
 
-import ai.singlr.core.common.Strings;
+import com.standardapplied.helios.core.common.Strings;
 
 /**
  * JSON-RPC 2.0 error object.

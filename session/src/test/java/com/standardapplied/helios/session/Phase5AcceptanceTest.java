@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -10,24 +10,24 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import ai.singlr.core.common.SecretRegistry;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelChunk;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.tool.CommandGrant;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.session.execution.ExecuteTool;
-import ai.singlr.session.execution.ExecutionResult;
-import ai.singlr.session.execution.LocalProcessExecutionProvider;
-import ai.singlr.session.permissions.Permission;
-import ai.singlr.session.permissions.PermissionEffect;
-import ai.singlr.session.permissions.PermissionMode;
-import ai.singlr.session.permissions.PermissionRule;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.tool.CommandGrant;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.execution.ExecuteTool;
+import com.standardapplied.helios.session.execution.ExecutionResult;
+import com.standardapplied.helios.session.execution.LocalProcessExecutionProvider;
+import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.permissions.PermissionEffect;
+import com.standardapplied.helios.session.permissions.PermissionMode;
+import com.standardapplied.helios.session.permissions.PermissionRule;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;

@@ -1,18 +1,18 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
 /**
- * Singular Agentic Framework - Helidon SE Runtime Module.
+ * Helios - Helidon SE Runtime Module.
  *
- * <p>Exposes {@link ai.singlr.session.AgentSession} instances over HTTP and SSE via a Helidon SE
- * {@code WebServer}. The runtime is the deployment shell that fronts the session SDK; the SDK
- * itself never depends on Helidon.
+ * <p>Exposes {@link com.standardapplied.helios.session.AgentSession} instances over HTTP and SSE
+ * via a Helidon SE {@code WebServer}. The runtime is the deployment shell that fronts the session
+ * SDK; the SDK itself never depends on Helidon.
  */
-module ai.singlr.runtime {
-  requires ai.singlr.session;
-  requires ai.singlr.core;
+module com.standardapplied.helios.runtime {
+  requires com.standardapplied.helios.session;
+  requires com.standardapplied.helios.core;
   requires io.helidon.webserver;
   requires io.helidon.webserver.sse;
   requires io.helidon.http;
@@ -23,5 +23,5 @@ module ai.singlr.runtime {
   requires java.logging;
   requires java.net.http;
 
-  exports ai.singlr.runtime;
+  exports com.standardapplied.helios.runtime;
 }

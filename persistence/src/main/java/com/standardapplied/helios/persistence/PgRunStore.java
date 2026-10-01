@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
-import ai.singlr.core.common.Ids;
-import ai.singlr.core.runtime.AgentRun;
-import ai.singlr.core.runtime.AgentRunStatus;
-import ai.singlr.core.runtime.RunStore;
-import ai.singlr.persistence.mapper.AgentRunMapper;
-import ai.singlr.persistence.sql.AgentRunSql;
+import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.runtime.AgentRun;
+import com.standardapplied.helios.core.runtime.AgentRunStatus;
+import com.standardapplied.helios.core.runtime.RunStore;
+import com.standardapplied.helios.persistence.mapper.AgentRunMapper;
+import com.standardapplied.helios.persistence.sql.AgentRunSql;
 import io.helidon.dbclient.DbClient;
 import java.time.Duration;
 import java.util.List;

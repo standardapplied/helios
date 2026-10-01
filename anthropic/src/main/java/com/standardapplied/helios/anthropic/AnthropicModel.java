@@ -1,36 +1,36 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic;
+package com.standardapplied.helios.anthropic;
 
-import ai.singlr.anthropic.api.CacheControl;
-import ai.singlr.anthropic.api.ContentBlock;
-import ai.singlr.anthropic.api.MessagesRequest;
-import ai.singlr.anthropic.api.OutputConfig;
-import ai.singlr.anthropic.api.SystemContent;
-import ai.singlr.anthropic.api.ThinkingConfig;
-import ai.singlr.anthropic.api.ToolChoiceConfig;
-import ai.singlr.anthropic.api.ToolDefinition;
-import ai.singlr.core.common.HttpClientFactory;
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.CloseableIterator;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Role;
-import ai.singlr.core.model.StreamEvent;
-import ai.singlr.core.model.ThinkingLevel;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.model.ToolChoice;
-import ai.singlr.core.model.TransientStreamException;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.schema.RawOutputCapturePolicy;
-import ai.singlr.core.schema.StructuredContentParser;
-import ai.singlr.core.tool.Tool;
+import com.standardapplied.helios.anthropic.api.CacheControl;
+import com.standardapplied.helios.anthropic.api.ContentBlock;
+import com.standardapplied.helios.anthropic.api.MessagesRequest;
+import com.standardapplied.helios.anthropic.api.OutputConfig;
+import com.standardapplied.helios.anthropic.api.SystemContent;
+import com.standardapplied.helios.anthropic.api.ThinkingConfig;
+import com.standardapplied.helios.anthropic.api.ToolChoiceConfig;
+import com.standardapplied.helios.anthropic.api.ToolDefinition;
+import com.standardapplied.helios.core.common.HttpClientFactory;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.CloseableIterator;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Role;
+import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.ThinkingLevel;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.model.ToolChoice;
+import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.core.schema.StructuredContentParser;
+import com.standardapplied.helios.core.tool.Tool;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -477,7 +477,7 @@ public class AnthropicModel implements Model {
     var toolCalls = new ArrayList<ToolCall>(first.toolCalls());
     toolCalls.addAll(second.toolCalls());
 
-    var citations = new ArrayList<ai.singlr.core.model.Citation>();
+    var citations = new ArrayList<com.standardapplied.helios.core.model.Citation>();
     if (first.citations() != null) {
       citations.addAll(first.citations());
     }

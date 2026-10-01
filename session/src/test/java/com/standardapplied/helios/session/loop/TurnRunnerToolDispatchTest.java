@@ -1,31 +1,31 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.CostCalculator;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelChunk;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.runtime.SessionContext;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.session.ConcurrencyLimits;
-import ai.singlr.session.QueryEvent;
-import ai.singlr.session.SessionLimits;
-import ai.singlr.session.tools.ToolBinding;
-import ai.singlr.session.tools.ToolCategory;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.ConcurrencyLimits;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -45,9 +45,10 @@ final class TurnRunnerToolDispatchTest {
   private static final Clock CLOCK = Clock.fixed(FIXED, ZoneOffset.UTC);
 
   private final List<QueryEvent> events = new ArrayList<>();
-  private final ai.singlr.session.hooks.HookRegistry hooks =
-      ai.singlr.session.hooks.HookRegistry.empty();
-  private final ai.singlr.session.SteeringQueue queue = new ai.singlr.session.SteeringQueue(8);
+  private final com.standardapplied.helios.session.hooks.HookRegistry hooks =
+      com.standardapplied.helios.session.hooks.HookRegistry.empty();
+  private final com.standardapplied.helios.session.SteeringQueue queue =
+      new com.standardapplied.helios.session.SteeringQueue(8);
 
   private static final Model CTX_MODEL =
       new Model() {
@@ -68,10 +69,10 @@ final class TurnRunnerToolDispatchTest {
       };
 
   private static final java.util.function.Function<
-          SessionState, ai.singlr.session.hooks.HookContext>
+          SessionState, com.standardapplied.helios.session.hooks.HookContext>
       CTX_FACTORY =
           s ->
-              new ai.singlr.session.hooks.DefaultHookContext(
+              new com.standardapplied.helios.session.hooks.DefaultHookContext(
                   s.sessionId(), s.currentTurnIndex(), s.cancellation(), CTX_MODEL);
 
   private static Tool echoTool() {
@@ -173,10 +174,10 @@ final class TurnRunnerToolDispatchTest {
     var history = state.historySnapshot();
     assertEquals(3, history.size());
     var assistant = history.get(1);
-    assertEquals(ai.singlr.core.model.Role.ASSISTANT, assistant.role());
+    assertEquals(com.standardapplied.helios.core.model.Role.ASSISTANT, assistant.role());
     assertEquals(1, assistant.toolCalls().size());
     var toolMsg = history.get(2);
-    assertEquals(ai.singlr.core.model.Role.TOOL, toolMsg.role());
+    assertEquals(com.standardapplied.helios.core.model.Role.TOOL, toolMsg.role());
     assertEquals("echoed: hello", toolMsg.content());
     assertEquals("call-1", toolMsg.toolCallId());
     assertEquals("echo", toolMsg.toolName());
@@ -395,7 +396,9 @@ final class TurnRunnerToolDispatchTest {
                 (args, ctx) ->
                     ToolResult.successWithAttachments(
                         "Returned image/png file (8 bytes) for inspection.",
-                        List.of(ai.singlr.core.model.InlineFile.of(pngBytes, "image/png"))))
+                        List.of(
+                            com.standardapplied.helios.core.model.InlineFile.of(
+                                pngBytes, "image/png"))))
             .build();
     var binding = ToolBinding.newBuilder(attachmentTool).withCategory(ToolCategory.READ).build();
     var registry = new ToolRegistry(List.of(binding));
@@ -424,11 +427,11 @@ final class TurnRunnerToolDispatchTest {
     // Expected shape: user("call echo"), assistant(toolCall), tool(text), user(synthetic+attached).
     assertEquals(4, history.size(), "tool result + splice user message must both land in history");
     var toolMsg = history.get(2);
-    assertEquals(ai.singlr.core.model.Role.TOOL, toolMsg.role());
+    assertEquals(com.standardapplied.helios.core.model.Role.TOOL, toolMsg.role());
     assertEquals("Returned image/png file (8 bytes) for inspection.", toolMsg.content());
 
     var splice = history.get(3);
-    assertEquals(ai.singlr.core.model.Role.USER, splice.role());
+    assertEquals(com.standardapplied.helios.core.model.Role.USER, splice.role());
     assertTrue(
         splice.content().contains("tool 'returnPng' returned 1 attachment"),
         "splice user message must name the tool and attachment count: " + splice.content());
@@ -468,6 +471,6 @@ final class TurnRunnerToolDispatchTest {
 
     var history = state.historySnapshot();
     assertEquals(3, history.size(), "no attachments -> no splice message");
-    assertEquals(ai.singlr.core.model.Role.TOOL, history.get(2).role());
+    assertEquals(com.standardapplied.helios.core.model.Role.TOOL, history.get(2).role());
   }
 }

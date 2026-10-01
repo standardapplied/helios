@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic;
+package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -12,8 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.StreamEvent;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.PipedInputStream;
@@ -800,10 +800,14 @@ class StreamingIteratorTest {
     assertEquals(FinishReason.REFUSAL, done.response().finishReason());
     assertEquals(
         "cyber",
-        done.response().metadata().get(ai.singlr.core.model.Response.REFUSAL_CATEGORY_KEY));
+        done.response()
+            .metadata()
+            .get(com.standardapplied.helios.core.model.Response.REFUSAL_CATEGORY_KEY));
     assertEquals(
         "This request was declined because it could enable cyber harm.",
-        done.response().metadata().get(ai.singlr.core.model.Response.REFUSAL_EXPLANATION_KEY));
+        done.response()
+            .metadata()
+            .get(com.standardapplied.helios.core.model.Response.REFUSAL_EXPLANATION_KEY));
   }
 
   @org.junit.jupiter.api.Test
@@ -818,8 +822,11 @@ class StreamingIteratorTest {
     var metadata = doneMetadata(sse);
 
     assertEquals("refusal", metadata.get(AnthropicModel.STOP_REASON_KEY));
-    assertFalse(metadata.containsKey(ai.singlr.core.model.Response.REFUSAL_CATEGORY_KEY));
-    assertFalse(metadata.containsKey(ai.singlr.core.model.Response.REFUSAL_EXPLANATION_KEY));
+    assertFalse(
+        metadata.containsKey(com.standardapplied.helios.core.model.Response.REFUSAL_CATEGORY_KEY));
+    assertFalse(
+        metadata.containsKey(
+            com.standardapplied.helios.core.model.Response.REFUSAL_EXPLANATION_KEY));
   }
 
   @org.junit.jupiter.api.Test
@@ -830,7 +837,9 @@ class StreamingIteratorTest {
             + messageDelta("{\"stop_reason\":\"end_turn\",\"stop_details\":null}")
             + MESSAGE_STOP;
 
-    assertFalse(doneMetadata(sse).containsKey(ai.singlr.core.model.Response.REFUSAL_CATEGORY_KEY));
+    assertFalse(
+        doneMetadata(sse)
+            .containsKey(com.standardapplied.helios.core.model.Response.REFUSAL_CATEGORY_KEY));
   }
 
   // ── API errors reported mid-stream ────────────────────────────────────────
@@ -848,7 +857,9 @@ class StreamingIteratorTest {
 
       var cause =
           assertInstanceOf(
-              ai.singlr.core.model.TransientStreamException.class, error.cause(), type);
+              com.standardapplied.helios.core.model.TransientStreamException.class,
+              error.cause(),
+              type);
       assertEquals("anthropic", cause.providerName());
       assertTrue(error.message().startsWith("API stream error:"), error.message());
       assertTrue(cause.getMessage().contains(type), cause.getMessage());

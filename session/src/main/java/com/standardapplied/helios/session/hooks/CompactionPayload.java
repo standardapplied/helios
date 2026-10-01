@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.session.DropMiddleToolResultsCompactor;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.session.DropMiddleToolResultsCompactor;
 import java.util.List;
 import java.util.Objects;
 
@@ -60,7 +60,8 @@ public record CompactionPayload(
   }
 
   /**
-   * The compactor's summary text, when {@link ai.singlr.session.DropMiddleToolResultsCompactor
+   * The compactor's summary text, when {@link
+   * com.standardapplied.helios.session.DropMiddleToolResultsCompactor
    * DropMiddleToolResultsCompactor} produced the result. Implementations follow the convention of
    * placing the summary in a single user-role message at index {@code historyAfter.size() - tail -
    * 1} prefixed with {@code "[Earlier context summary]\n"}; this accessor walks the after-history

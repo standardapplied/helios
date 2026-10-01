@@ -1,17 +1,17 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.runtime.SessionContext;
-import ai.singlr.core.tool.ToolContext;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.session.ConcurrencyLimits;
-import ai.singlr.session.tools.ToolCategory;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.tool.ToolContext;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.ConcurrencyLimits;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;

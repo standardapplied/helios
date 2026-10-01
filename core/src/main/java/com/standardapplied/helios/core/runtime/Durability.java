@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.runtime;
+package com.standardapplied.helios.core.runtime;
 
-import ai.singlr.core.common.Strings;
+import com.standardapplied.helios.core.common.Strings;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -88,7 +88,7 @@ public record Durability(
   /**
    * Returns the deployer-supplied idempotency override for the named tool, or {@code null} when no
    * override is configured. Callers should fall back to {@link
-   * ai.singlr.core.tool.Tool#idempotent()} when this returns null.
+   * com.standardapplied.helios.core.tool.Tool#idempotent()} when this returns null.
    */
   public Boolean idempotentOverride(String toolName) {
     return toolName == null ? null : idempotentToolsOverride.get(toolName);

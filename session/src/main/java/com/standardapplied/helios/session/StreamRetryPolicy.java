@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
-import ai.singlr.core.fault.Backoff;
+import com.standardapplied.helios.core.fault.Backoff;
 import java.time.Duration;
 import java.util.Objects;
 
 /**
  * Policy controlling how the agent loop retries a model-stream attempt that failed with a {@link
- * ai.singlr.core.model.TransientStreamException}.
+ * com.standardapplied.helios.core.model.TransientStreamException}.
  *
  * <p>The loop owns retry orchestration; the provider classifies which exceptions are transient. On
  * each failure the loop emits a {@link QueryEvent.TurnRetried} carrying the next back-off delay,
@@ -19,8 +19,8 @@ import java.util.Objects;
  * ResultMessage.ErrorTransientStream}.
  *
  * <p>The {@code maxAttempts} field counts the <i>total</i> attempts including the initial one,
- * mirroring the existing {@link ai.singlr.core.fault.RetryPolicy} convention. {@code maxAttempts =
- * 1} disables retry; {@link #disabled()} is a named alias for that case.
+ * mirroring the existing {@link com.standardapplied.helios.core.fault.RetryPolicy} convention.
+ * {@code maxAttempts = 1} disables retry; {@link #disabled()} is a named alias for that case.
  *
  * <p>Production defaults (see {@link #defaults()}): three attempts (initial plus two retries), 1 s
  * initial back-off with multiplier 4 capped at 30 s, ±25% jitter. Conservative enough that one

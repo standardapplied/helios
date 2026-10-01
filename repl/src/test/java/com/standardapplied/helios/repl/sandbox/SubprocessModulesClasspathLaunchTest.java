@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.repl.host.HostFunctionRegistry;
-import ai.singlr.repl.protocol.ProcessTransport;
-import ai.singlr.repl.protocol.RpcChannel;
+import com.standardapplied.helios.repl.host.HostFunctionRegistry;
+import com.standardapplied.helios.repl.protocol.ProcessTransport;
+import com.standardapplied.helios.repl.protocol.RpcChannel;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.net.StandardProtocolFamily;
@@ -31,13 +31,13 @@ import org.junit.jupiter.api.Test;
  * non-JPMS library users would hit. The Maven Surefire test runner that invokes us uses {@code
  * --module-path}, so the normal {@link JvmSandbox#create} path always exercises modulepath launch.
  * To verify the classpath path, this test manually constructs a subprocess launch command using
- * only {@code -cp} (no {@code --module-path}, no {@code --add-modules ai.singlr.repl}) and
- * verifies:
+ * only {@code -cp} (no {@code --module-path}, no {@code --add-modules
+ * com.standardapplied.helios.repl}) and verifies:
  *
  * <ol>
  *   <li>The subprocess starts (regression coverage for the pre-fix bug where {@code
- *       --limit-modules} named {@code ai.singlr.repl} on classpath and crashed with "Module not
- *       found")
+ *       --limit-modules} named {@code com.standardapplied.helios.repl} on classpath and crashed
+ *       with "Module not found")
  *   <li>{@code --limit-modules} actually strips JDK modules from the subprocess's boot layer
  *   <li>Snippets compile and run against the restricted JDK module graph
  * </ol>
@@ -90,7 +90,8 @@ class SubprocessModulesClasspathLaunchTest {
 
   @Test
   void classpathLaunchUnderMinimalAlsoStripsJavaNetHttp() throws Exception {
-    // Under classpath launch, ai.singlr.core's `requires java.net.http` is ignored (the JAR is
+    // Under classpath launch, com.standardapplied.helios.core's `requires java.net.http` is ignored
+    // (the JAR is
     // an unnamed-module member when on classpath), so http IS strippable here — unlike modulepath
     // launch where the bootstrap's transitive requires keep http in the resolved graph.
     var classpath = buildFlattenedClasspath();
@@ -168,7 +169,7 @@ class SubprocessModulesClasspathLaunchTest {
           cmd.add("--limit-modules");
           cmd.add(limitModulesArg);
         }
-        cmd.add("ai.singlr.repl.sandbox.JvmSandboxBootstrap");
+        cmd.add("com.standardapplied.helios.repl.sandbox.JvmSandboxBootstrap");
         cmd.add("--rpc-socket=" + socketPath);
 
         var pb = new ProcessBuilder(cmd);

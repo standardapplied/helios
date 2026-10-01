@@ -1,28 +1,28 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.CostCalculator;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelChunk;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.runtime.SessionContext;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.session.QueryEvent;
-import ai.singlr.session.SessionLimits;
-import ai.singlr.session.StopReason;
+import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.StopReason;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -42,14 +42,15 @@ final class TurnRunnerTest {
   private static final Clock CLOCK = Clock.fixed(FIXED, ZoneOffset.UTC);
 
   private final List<QueryEvent> events = new ArrayList<>();
-  private final ai.singlr.session.hooks.HookRegistry hooks =
-      ai.singlr.session.hooks.HookRegistry.empty();
-  private final ai.singlr.session.SteeringQueue queue = new ai.singlr.session.SteeringQueue(8);
+  private final com.standardapplied.helios.session.hooks.HookRegistry hooks =
+      com.standardapplied.helios.session.hooks.HookRegistry.empty();
+  private final com.standardapplied.helios.session.SteeringQueue queue =
+      new com.standardapplied.helios.session.SteeringQueue(8);
   private final ToolDispatch dispatch =
       new ToolDispatch(
           SessionContext.forTesting("turn-runner-test"),
-          ai.singlr.session.tools.ToolRegistry.empty(),
-          ai.singlr.session.ConcurrencyLimits.defaults());
+          com.standardapplied.helios.session.tools.ToolRegistry.empty(),
+          com.standardapplied.helios.session.ConcurrencyLimits.defaults());
 
   private static final Model CTX_MODEL =
       new Model() {
@@ -70,10 +71,10 @@ final class TurnRunnerTest {
       };
 
   private static final java.util.function.Function<
-          SessionState, ai.singlr.session.hooks.HookContext>
+          SessionState, com.standardapplied.helios.session.hooks.HookContext>
       CTX_FACTORY =
           s ->
-              new ai.singlr.session.hooks.DefaultHookContext(
+              new com.standardapplied.helios.session.hooks.DefaultHookContext(
                   s.sessionId(), s.currentTurnIndex(), s.cancellation(), CTX_MODEL);
 
   private SessionState freshState() {
@@ -308,7 +309,7 @@ final class TurnRunnerTest {
     assertEquals(2, history.size());
     assertEquals("hello", history.get(0).content());
     assertEquals("answer", history.get(1).content());
-    assertEquals(ai.singlr.core.model.Role.ASSISTANT, history.get(1).role());
+    assertEquals(com.standardapplied.helios.core.model.Role.ASSISTANT, history.get(1).role());
   }
 
   @Test
@@ -664,8 +665,8 @@ final class TurnRunnerTest {
   // ── outputSchema dispatch: schema is transmitted to the model when configured ──
 
   /**
-   * Sample record used to construct an {@link ai.singlr.core.schema.OutputSchema} for tests
-   * exercising the typed dispatch branch in {@link TurnRunner}.
+   * Sample record used to construct an {@link com.standardapplied.helios.core.schema.OutputSchema}
+   * for tests exercising the typed dispatch branch in {@link TurnRunner}.
    */
   public record Sample(String field) {}
 
@@ -676,7 +677,7 @@ final class TurnRunnerTest {
    * non-null at construction time.
    */
   private static final class DispatchRecordingModel implements Model {
-    final AtomicReference<ai.singlr.core.schema.OutputSchema<?>> seenSchema =
+    final AtomicReference<com.standardapplied.helios.core.schema.OutputSchema<?>> seenSchema =
         new AtomicReference<>();
     final java.util.concurrent.atomic.AtomicBoolean typedDispatch =
         new java.util.concurrent.atomic.AtomicBoolean(false);
@@ -699,7 +700,7 @@ final class TurnRunnerTest {
     public Flow.Publisher<ModelChunk> chatStream(
         List<Message> messages,
         List<Tool> tools,
-        ai.singlr.core.schema.OutputSchema<?> outputSchema,
+        com.standardapplied.helios.core.schema.OutputSchema<?> outputSchema,
         CancellationToken cancellation) {
       typedDispatch.set(true);
       seenSchema.set(outputSchema);
@@ -765,7 +766,7 @@ final class TurnRunnerTest {
 
   @Test
   void dispatchUsesTypedChatStreamWhenOutputSchemaIsConfigured() {
-    var schema = ai.singlr.core.schema.OutputSchema.of(Sample.class);
+    var schema = com.standardapplied.helios.core.schema.OutputSchema.of(Sample.class);
     var model = new DispatchRecordingModel();
     var runner =
         new TurnRunner(
@@ -791,16 +792,16 @@ final class TurnRunnerTest {
   }
 
   /**
-   * Defensive: when {@link ai.singlr.core.schema.StructuredOutputParseException} fires <i>and</i>
-   * the steering queue is full so the correction message can't be enqueued, the runner must let the
-   * underlying parse error surface (returns {@link FinishReason#ERROR}) rather than silently
-   * swallowing it.
+   * Defensive: when {@link com.standardapplied.helios.core.schema.StructuredOutputParseException}
+   * fires <i>and</i> the steering queue is full so the correction message can't be enqueued, the
+   * runner must let the underlying parse error surface (returns {@link FinishReason#ERROR}) rather
+   * than silently swallowing it.
    */
   @Test
   void parseFailureWithFullSteeringQueueFallsThroughToErrorOutcome() {
-    var schema = ai.singlr.core.schema.OutputSchema.of(Sample.class);
-    var saturatedQueue = new ai.singlr.session.SteeringQueue(1);
-    saturatedQueue.offer(ai.singlr.session.UserMessage.text("pre-existing"));
+    var schema = com.standardapplied.helios.core.schema.OutputSchema.of(Sample.class);
+    var saturatedQueue = new com.standardapplied.helios.session.SteeringQueue(1);
+    saturatedQueue.offer(com.standardapplied.helios.session.UserMessage.text("pre-existing"));
     var model =
         new Model() {
           @Override
@@ -812,7 +813,7 @@ final class TurnRunnerTest {
           public Flow.Publisher<ModelChunk> chatStream(
               List<Message> messages,
               List<Tool> tools,
-              ai.singlr.core.schema.OutputSchema<?> outputSchema,
+              com.standardapplied.helios.core.schema.OutputSchema<?> outputSchema,
               CancellationToken cancellation) {
             return subscriber ->
                 subscriber.onSubscribe(
@@ -820,7 +821,8 @@ final class TurnRunnerTest {
                       @Override
                       public void request(long n) {
                         subscriber.onError(
-                            new ai.singlr.core.schema.StructuredOutputParseException(
+                            new com.standardapplied.helios.core.schema
+                                .StructuredOutputParseException(
                                 List.of("field is required"), "{\"wrong\":\"shape\"}"));
                       }
 

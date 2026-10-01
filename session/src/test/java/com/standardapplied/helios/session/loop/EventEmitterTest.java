@@ -1,24 +1,24 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.session.QueryEvent;
-import ai.singlr.session.hooks.DefaultHookContext;
-import ai.singlr.session.hooks.HookContext;
-import ai.singlr.session.hooks.HookRegistry;
-import ai.singlr.session.hooks.OnStreamEventHook;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.hooks.DefaultHookContext;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;

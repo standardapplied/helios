@@ -1,20 +1,21 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.ask;
+package com.standardapplied.helios.session.ask;
 
-import ai.singlr.core.common.Strings;
+import com.standardapplied.helios.core.common.Strings;
 import java.util.List;
 import java.util.Objects;
 
 /**
  * A structured question the agent emits to the user.
  *
- * <p>Carried by {@link ai.singlr.session.QueryEvent.QuestionAsked QueryEvent.QuestionAsked} and by
- * the {@code AskUserQuestion} tool's request payload. The session blocks the tool's executing
- * virtual thread on a future keyed by {@code questionId}; the host completes that future by calling
- * {@link ai.singlr.session.AgentSession#answer(String, AskUserQuestionResponse)
+ * <p>Carried by {@link com.standardapplied.helios.session.QueryEvent.QuestionAsked
+ * QueryEvent.QuestionAsked} and by the {@code AskUserQuestion} tool's request payload. The session
+ * blocks the tool's executing virtual thread on a future keyed by {@code questionId}; the host
+ * completes that future by calling {@link
+ * com.standardapplied.helios.session.AgentSession#answer(String, AskUserQuestionResponse)
  * AgentSession.answer}.
  *
  * @param questionId opaque, unique-per-session id used to correlate the answer back to the

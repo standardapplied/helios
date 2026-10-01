@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.tool;
+package com.standardapplied.helios.core.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -87,7 +87,8 @@ class ToolResultTest {
   @Test
   void successWithAttachmentsCarriesInlineFiles() {
     var png =
-        ai.singlr.core.model.InlineFile.of(new byte[] {(byte) 0x89, 'P', 'N', 'G'}, "image/png");
+        com.standardapplied.helios.core.model.InlineFile.of(
+            new byte[] {(byte) 0x89, 'P', 'N', 'G'}, "image/png");
     var result =
         ToolResult.successWithAttachments(
             "Returned image/png for inspection.", java.util.List.of(png));
@@ -101,8 +102,9 @@ class ToolResultTest {
   @Test
   void successWithAttachmentsDefensivelyCopies() {
     var png =
-        ai.singlr.core.model.InlineFile.of(new byte[] {(byte) 0x89, 'P', 'N', 'G'}, "image/png");
-    var mutable = new java.util.ArrayList<ai.singlr.core.model.InlineFile>();
+        com.standardapplied.helios.core.model.InlineFile.of(
+            new byte[] {(byte) 0x89, 'P', 'N', 'G'}, "image/png");
+    var mutable = new java.util.ArrayList<com.standardapplied.helios.core.model.InlineFile>();
     mutable.add(png);
     var result = ToolResult.successWithAttachments("note", mutable);
     mutable.clear();

@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -12,14 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.CostEstimate;
-import ai.singlr.core.common.Paginate;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.trace.Annotation;
-import ai.singlr.core.trace.AuthorKind;
-import ai.singlr.core.trace.Span;
-import ai.singlr.core.trace.SpanKind;
-import ai.singlr.core.trace.Trace;
+import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.common.Paginate;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.trace.Annotation;
+import com.standardapplied.helios.core.trace.AuthorKind;
+import com.standardapplied.helios.core.trace.Span;
+import com.standardapplied.helios.core.trace.SpanKind;
+import com.standardapplied.helios.core.trace.Trace;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -563,9 +563,9 @@ class PgTraceStoreTest {
             .build();
 
     store.onEvent(
-        new ai.singlr.core.events.HeliosEvent.RunCompleted(
+        new com.standardapplied.helios.core.events.HeliosEvent.RunCompleted(
             java.time.Instant.now(),
-            ai.singlr.core.common.Ids.newId(),
+            com.standardapplied.helios.core.common.Ids.newId(),
             java.util.Optional.empty(),
             trace));
     var found = store.findById(trace.id());
@@ -1329,7 +1329,7 @@ class PgTraceStoreTest {
 
   @Test
   void traceTextFieldsAreScrubbedWhenRedactorConfigured() {
-    var registry = new ai.singlr.core.common.SecretRegistry();
+    var registry = new com.standardapplied.helios.core.common.SecretRegistry();
     registry.register("GH_TOKEN", "ghp_supersecret_12345678");
     var redactingStore =
         new PgTraceStore(
@@ -1360,7 +1360,7 @@ class PgTraceStoreTest {
 
   @Test
   void spanFieldsAreScrubbedWhenRedactorConfigured() {
-    var registry = new ai.singlr.core.common.SecretRegistry();
+    var registry = new com.standardapplied.helios.core.common.SecretRegistry();
     registry.register("API_KEY", "sk-supersecret-abc12345");
     var redactingStore =
         new PgTraceStore(

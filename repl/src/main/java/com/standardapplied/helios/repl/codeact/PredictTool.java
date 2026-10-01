@@ -1,18 +1,18 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.tool.ParameterType;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolParameter;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.session.tools.ToolBinding;
-import ai.singlr.session.tools.ToolCategory;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolParameter;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
 import java.util.List;
 import java.util.Objects;
 
@@ -26,11 +26,12 @@ import java.util.Objects;
  *
  * <ul>
  *   <li><b>Cost</b>: the sub-LM's usage accumulates on the session's {@link
- *       ai.singlr.core.common.CostCalculator} because the invocation flows through the agent loop's
- *       tool-dispatch path — the loop attributes the usage to the same session ledger.
+ *       com.standardapplied.helios.core.common.CostCalculator} because the invocation flows through
+ *       the agent loop's tool-dispatch path — the loop attributes the usage to the same session
+ *       ledger.
  *   <li><b>Secrets</b>: redaction is provider-side. The sub-LM uses the same {@link
- *       ai.singlr.core.common.SecretRegistry} the main provider is configured with; nothing
- *       additional needs to be wired here.
+ *       com.standardapplied.helios.core.common.SecretRegistry} the main provider is configured
+ *       with; nothing additional needs to be wired here.
  * </ul>
  *
  * <p>Errors: a sub-LM exception is caught and returned as {@link ToolResult#failure} so the model

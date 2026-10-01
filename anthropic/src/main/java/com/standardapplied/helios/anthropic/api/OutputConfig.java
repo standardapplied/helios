@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic.api;
+package com.standardapplied.helios.anthropic.api;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -22,24 +22,33 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record OutputConfig(String effort) {
 
-  /** Effort {@code low}. Maps from {@link ai.singlr.core.model.ThinkingLevel} MINIMAL/LOW. */
+  /**
+   * Effort {@code low}. Maps from {@link com.standardapplied.helios.core.model.ThinkingLevel}
+   * MINIMAL/LOW.
+   */
   public static final OutputConfig LOW = new OutputConfig("low");
 
-  /** Effort {@code medium}. Maps from {@link ai.singlr.core.model.ThinkingLevel} MEDIUM. */
+  /**
+   * Effort {@code medium}. Maps from {@link com.standardapplied.helios.core.model.ThinkingLevel}
+   * MEDIUM.
+   */
   public static final OutputConfig MEDIUM = new OutputConfig("medium");
 
-  /** Effort {@code high}. Maps from {@link ai.singlr.core.model.ThinkingLevel} HIGH. */
+  /**
+   * Effort {@code high}. Maps from {@link com.standardapplied.helios.core.model.ThinkingLevel}
+   * HIGH.
+   */
   public static final OutputConfig HIGH = new OutputConfig("high");
 
   /**
    * Effort {@code xhigh} — extra-deep reasoning with extended exploration. Opus 4.7 and later
-   * adaptive models. Maps from {@link ai.singlr.core.model.ThinkingLevel#XHIGH}.
+   * adaptive models. Maps from {@link com.standardapplied.helios.core.model.ThinkingLevel#XHIGH}.
    */
   public static final OutputConfig XHIGH = new OutputConfig("xhigh");
 
   /**
    * Effort {@code max} — unbounded reasoning. Available on every adaptive-capable model. Maps from
-   * {@link ai.singlr.core.model.ThinkingLevel#MAX}.
+   * {@link com.standardapplied.helios.core.model.ThinkingLevel#MAX}.
    */
   public static final OutputConfig MAX = new OutputConfig("max");
 }

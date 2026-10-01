@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -252,7 +252,7 @@ class PgPromptRegistryTest {
                         created_at)
                     VALUES (CAST(? AS UUID), 'prompt', 'rogue', 2, TRUE, '{}', now())
                     """,
-                    ai.singlr.core.common.Ids.newId().toString()));
+                    com.standardapplied.helios.core.common.Ids.newId().toString()));
 
     var stillActive = registry.resolve("prompt");
     assertEquals("live", stillActive.content());

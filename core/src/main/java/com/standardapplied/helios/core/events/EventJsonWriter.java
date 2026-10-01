@@ -1,34 +1,34 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.core.events;
+package com.standardapplied.helios.core.events;
 
-import ai.singlr.core.events.HeliosEvent.AfterTurn;
-import ai.singlr.core.events.HeliosEvent.AssistantText;
-import ai.singlr.core.events.HeliosEvent.AssistantTextDelta;
-import ai.singlr.core.events.HeliosEvent.AssistantThinkingComplete;
-import ai.singlr.core.events.HeliosEvent.AssistantThinkingDelta;
-import ai.singlr.core.events.HeliosEvent.BeforeApiCall;
-import ai.singlr.core.events.HeliosEvent.BeforeCompaction;
-import ai.singlr.core.events.HeliosEvent.CompactionTriggered;
-import ai.singlr.core.events.HeliosEvent.Custom;
-import ai.singlr.core.events.HeliosEvent.IterationCompleted;
-import ai.singlr.core.events.HeliosEvent.IterationStarted;
-import ai.singlr.core.events.HeliosEvent.MemoryRead;
-import ai.singlr.core.events.HeliosEvent.MemoryWritten;
-import ai.singlr.core.events.HeliosEvent.OptimizerCandidateProposed;
-import ai.singlr.core.events.HeliosEvent.OptimizerCandidateScored;
-import ai.singlr.core.events.HeliosEvent.RunCompleted;
-import ai.singlr.core.events.HeliosEvent.RunFailed;
-import ai.singlr.core.events.HeliosEvent.RunStarted;
-import ai.singlr.core.events.HeliosEvent.SessionEnd;
-import ai.singlr.core.events.HeliosEvent.SpanClosed;
-import ai.singlr.core.events.HeliosEvent.SpanOpened;
-import ai.singlr.core.events.HeliosEvent.SubAgentCompleted;
-import ai.singlr.core.events.HeliosEvent.SubAgentStarted;
-import ai.singlr.core.events.HeliosEvent.ToolCallCompleted;
-import ai.singlr.core.events.HeliosEvent.ToolCallFailed;
-import ai.singlr.core.events.HeliosEvent.ToolCallStarted;
-import ai.singlr.core.trace.Trace;
+import com.standardapplied.helios.core.events.HeliosEvent.AfterTurn;
+import com.standardapplied.helios.core.events.HeliosEvent.AssistantText;
+import com.standardapplied.helios.core.events.HeliosEvent.AssistantTextDelta;
+import com.standardapplied.helios.core.events.HeliosEvent.AssistantThinkingComplete;
+import com.standardapplied.helios.core.events.HeliosEvent.AssistantThinkingDelta;
+import com.standardapplied.helios.core.events.HeliosEvent.BeforeApiCall;
+import com.standardapplied.helios.core.events.HeliosEvent.BeforeCompaction;
+import com.standardapplied.helios.core.events.HeliosEvent.CompactionTriggered;
+import com.standardapplied.helios.core.events.HeliosEvent.Custom;
+import com.standardapplied.helios.core.events.HeliosEvent.IterationCompleted;
+import com.standardapplied.helios.core.events.HeliosEvent.IterationStarted;
+import com.standardapplied.helios.core.events.HeliosEvent.MemoryRead;
+import com.standardapplied.helios.core.events.HeliosEvent.MemoryWritten;
+import com.standardapplied.helios.core.events.HeliosEvent.OptimizerCandidateProposed;
+import com.standardapplied.helios.core.events.HeliosEvent.OptimizerCandidateScored;
+import com.standardapplied.helios.core.events.HeliosEvent.RunCompleted;
+import com.standardapplied.helios.core.events.HeliosEvent.RunFailed;
+import com.standardapplied.helios.core.events.HeliosEvent.RunStarted;
+import com.standardapplied.helios.core.events.HeliosEvent.SessionEnd;
+import com.standardapplied.helios.core.events.HeliosEvent.SpanClosed;
+import com.standardapplied.helios.core.events.HeliosEvent.SpanOpened;
+import com.standardapplied.helios.core.events.HeliosEvent.SubAgentCompleted;
+import com.standardapplied.helios.core.events.HeliosEvent.SubAgentStarted;
+import com.standardapplied.helios.core.events.HeliosEvent.ToolCallCompleted;
+import com.standardapplied.helios.core.events.HeliosEvent.ToolCallFailed;
+import com.standardapplied.helios.core.events.HeliosEvent.ToolCallStarted;
+import com.standardapplied.helios.core.trace.Trace;
 import java.util.Map;
 import java.util.Optional;
 

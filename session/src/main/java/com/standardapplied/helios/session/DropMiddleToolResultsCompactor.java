@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.Role;
-import ai.singlr.session.loop.SessionState;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.Role;
+import com.standardapplied.helios.session.loop.SessionState;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -90,10 +90,10 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
 
   /**
    * Marker prepended to the synthesised summary user-message so downstream consumers — most notably
-   * {@link ai.singlr.session.hooks.CompactionPayload#summary() CompactionPayload.summary()} and the
-   * next-turn model itself — can recognise that the row stands in for a compacted-away middle.
-   * Public to give the {@code PostCompactHook} payload one source of truth for the marker rather
-   * than relying on a duplicated string literal.
+   * {@link com.standardapplied.helios.session.hooks.CompactionPayload#summary()
+   * CompactionPayload.summary()} and the next-turn model itself — can recognise that the row stands
+   * in for a compacted-away middle. Public to give the {@code PostCompactHook} payload one source
+   * of truth for the marker rather than relying on a duplicated string literal.
    */
   public static final String SUMMARY_PREFIX = "[Earlier context summary]\n";
 

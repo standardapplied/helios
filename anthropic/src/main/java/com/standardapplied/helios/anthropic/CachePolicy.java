@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic;
+package com.standardapplied.helios.anthropic;
 
-import ai.singlr.anthropic.api.CacheControl;
+import com.standardapplied.helios.anthropic.api.CacheControl;
 
 /**
  * Anthropic prompt-caching policy for an {@link AnthropicModel} instance. Supply a policy through
- * {@link AnthropicProvider#create(String, ai.singlr.core.model.ModelConfig, CachePolicy)}; the
- * two-argument provider factory uses {@link #shortLived()}.
+ * {@link AnthropicProvider#create(String, com.standardapplied.helios.core.model.ModelConfig,
+ * CachePolicy)}; the two-argument provider factory uses {@link #shortLived()}.
  *
  * <p>Sealed: three concrete shapes covering every supported TTL plus an opt-out. New TTLs that
  * Anthropic introduces require adding a new permitted subtype, which is a deliberate breaking

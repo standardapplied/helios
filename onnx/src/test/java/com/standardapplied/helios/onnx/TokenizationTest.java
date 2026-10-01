@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.onnx;
+package com.standardapplied.helios.onnx;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
-import ai.singlr.core.embedding.EmbeddingConfig;
+import com.standardapplied.helios.core.embedding.EmbeddingConfig;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 

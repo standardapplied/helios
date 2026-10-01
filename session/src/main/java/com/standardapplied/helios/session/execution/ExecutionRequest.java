@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.execution;
+package com.standardapplied.helios.session.execution;
 
-import ai.singlr.core.common.Validate;
+import com.standardapplied.helios.core.common.Validate;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -19,9 +19,10 @@ import java.util.Optional;
  * agnostic: providers translate it into their own dispatch (a subprocess fork, a JDBC query, a
  * JShell snippet, …).
  *
- * <p>Naming overlaps with {@code ai.singlr.repl.sandbox.ExecutionRequest} — that one is internal to
- * the JShell sandbox subprocess protocol and stays scoped to its package. This is the v2 session-
- * level request that the {@code Execute} tool builds from the model's tool call arguments.
+ * <p>Naming overlaps with {@code com.standardapplied.helios.repl.sandbox.ExecutionRequest} — that
+ * one is internal to the JShell sandbox subprocess protocol and stays scoped to its package. This
+ * is the v2 session- level request that the {@code Execute} tool builds from the model's tool call
+ * arguments.
  *
  * @param runtime the dispatch target; non-null
  * @param script the script body to run. For {@link Runtime#BASH} this is the shell snippet executed

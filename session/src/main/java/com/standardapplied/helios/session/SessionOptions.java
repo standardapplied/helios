@@ -1,21 +1,21 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
-import ai.singlr.core.common.CostCalculator;
-import ai.singlr.core.common.Ids;
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.context.TokenCounter;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.session.execution.ExecutionProvider;
-import ai.singlr.session.execution.NoopExecutionProvider;
-import ai.singlr.session.hooks.Hook;
-import ai.singlr.session.memory.MemoryBackend;
-import ai.singlr.session.permissions.Permission;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.context.TokenCounter;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.session.execution.ExecutionProvider;
+import com.standardapplied.helios.session.execution.NoopExecutionProvider;
+import com.standardapplied.helios.session.hooks.Hook;
+import com.standardapplied.helios.session.memory.MemoryBackend;
+import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;

@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -16,34 +16,37 @@ import java.util.Set;
  * fails to compile in JShell with a clean error before the L2 bytecode verifier ever runs.
  *
  * <p>L3 in the layered sandbox defense model. Composes with {@link
- * ai.singlr.repl.sandbox.policy.SandboxPolicy SandboxPolicy} (L2 bytecode rules) — limit-modules
- * eliminates whole categories at compile time, the verifier catches the rest at load time, and OS
- * isolation remains the authoritative perimeter (L5).
+ * com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy SandboxPolicy} (L2 bytecode rules) —
+ * limit-modules eliminates whole categories at compile time, the verifier catches the rest at load
+ * time, and OS isolation remains the authoritative perimeter (L5).
  *
  * <p><strong>Works under classpath and modulepath launches.</strong> {@code --limit-modules}
  * applies at JVM startup regardless of how the bootstrap is launched. Under modulepath launch
- * (Maven Surefire test scenarios, JPMS production deployments), {@code ai.singlr.repl} is added to
- * the {@code --limit-modules} set so the bootstrap module remains observable. Under classpath
- * launch, {@code ai.singlr.repl} is NOT added (it lives in the unnamed module on classpath and
- * naming it would crash the JVM with "Module not found"); the JDK baseline is enough because the
- * bootstrap loads via classpath into the unnamed module which reads all observable modules. {@link
- * JvmSandbox#buildLaunchCommand} handles the conditional logic — callers configure intent here and
- * launch mode is decided at launch time based on the parent's JVM arguments.
+ * (Maven Surefire test scenarios, JPMS production deployments), {@code
+ * com.standardapplied.helios.repl} is added to the {@code --limit-modules} set so the bootstrap
+ * module remains observable. Under classpath launch, {@code com.standardapplied.helios.repl} is NOT
+ * added (it lives in the unnamed module on classpath and naming it would crash the JVM with "Module
+ * not found"); the JDK baseline is enough because the bootstrap loads via classpath into the
+ * unnamed module which reads all observable modules. {@link JvmSandbox#buildLaunchCommand} handles
+ * the conditional logic — callers configure intent here and launch mode is decided at launch time
+ * based on the parent's JVM arguments.
  *
  * <p><strong>Bootstrap-transitive-closure limit (modulepath only).</strong> Under modulepath
  * launch, the bootstrap's transitive module dependencies stay observable regardless of {@code
- * --limit-modules}. Today {@code ai.singlr.core} (a transitive dependency of the sandbox bootstrap)
- * requires {@code java.net.http} via {@code HttpClientFactory}, so {@code java.net.http} stays in
- * the resolved module graph under any {@link #minimal()} or {@link #allowingExtras(String...)}
- * configuration when launched from modulepath. Under classpath launch the module-info {@code
- * requires} clauses are ignored (classpath JARs are unnamed module members), so {@code
- * java.net.http} IS stripped under {@link #minimal()} — classpath launches actually get stricter L3
- * enforcement. {@link #minimal()} does successfully strip many modules ({@code java.sql}, {@code
- * java.naming}, {@code java.scripting}, {@code java.desktop}, {@code java.security.sasl}, {@code
- * jdk.httpserver}, ...) in BOTH launch modes — those become non-observable at compile time, so
- * snippets that {@code import java.sql.*} fail with a clean diagnostic. Deployers on modulepath who
- * need to deny modules the bootstrap transitively requires should reach for {@link
- * ai.singlr.repl.sandbox.policy.SandboxPolicy#deniedPackages() L2 deniedPackages} instead.
+ * --limit-modules}. Today {@code com.standardapplied.helios.core} (a transitive dependency of the
+ * sandbox bootstrap) requires {@code java.net.http} via {@code HttpClientFactory}, so {@code
+ * java.net.http} stays in the resolved module graph under any {@link #minimal()} or {@link
+ * #allowingExtras(String...)} configuration when launched from modulepath. Under classpath launch
+ * the module-info {@code requires} clauses are ignored (classpath JARs are unnamed module members),
+ * so {@code java.net.http} IS stripped under {@link #minimal()} — classpath launches actually get
+ * stricter L3 enforcement. {@link #minimal()} does successfully strip many modules ({@code
+ * java.sql}, {@code java.naming}, {@code java.scripting}, {@code java.desktop}, {@code
+ * java.security.sasl}, {@code jdk.httpserver}, ...) in BOTH launch modes — those become
+ * non-observable at compile time, so snippets that {@code import java.sql.*} fail with a clean
+ * diagnostic. Deployers on modulepath who need to deny modules the bootstrap transitively requires
+ * should reach for {@link
+ * com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy#deniedPackages() L2 deniedPackages}
+ * instead.
  *
  * <p>Sealed: callers exhaustively pattern-match on the variant. Three factories cover the realistic
  * shapes:
@@ -52,8 +55,8 @@ import java.util.Set;
  *   <li>{@link #unrestricted()} — no {@code --limit-modules}, all JDK modules observable. Current
  *       (pre-L3) behaviour and default.
  *   <li>{@link #minimal()} — required modules only ({@code java.base} + JShell's compile chain +
- *       {@code ai.singlr.repl}). Strips everything else, including network ({@code java.net.http}),
- *       JDBC ({@code java.sql}), JMX, scripting, smartcard, JNDI, Kerberos, …
+ *       {@code com.standardapplied.helios.repl}). Strips everything else, including network ({@code
+ *       java.net.http}), JDBC ({@code java.sql}), JMX, scripting, smartcard, JNDI, Kerberos, …
  *   <li>{@link #allowingExtras(String...)} — required modules plus the named extras. Common
  *       intermediate posture, e.g. {@code allowingExtras("java.net.http")} for a snippet that
  *       legitimately needs HTTP.
@@ -66,10 +69,10 @@ public sealed interface SubprocessModules
    * JDK modules the bootstrap subprocess always needs to start and run JShell. Always included in
    * {@code --limit-modules} regardless of launch mode.
    *
-   * <p>{@code ai.singlr.repl} is deliberately NOT in this list — it's a user module that's only
-   * observable under modulepath launch. {@link JvmSandbox#buildLaunchCommand} appends it
-   * conditionally when the parent JVM uses {@code --module-path}; under classpath launch the
-   * bootstrap loads via classpath into the unnamed module and the JDK baseline suffices.
+   * <p>{@code com.standardapplied.helios.repl} is deliberately NOT in this list — it's a user
+   * module that's only observable under modulepath launch. {@link JvmSandbox#buildLaunchCommand}
+   * appends it conditionally when the parent JVM uses {@code --module-path}; under classpath launch
+   * the bootstrap loads via classpath into the unnamed module and the JDK baseline suffices.
    *
    * <p>Includes:
    *
@@ -86,7 +89,7 @@ public sealed interface SubprocessModules
    * parent uses {@code --module-path}; naming it under classpath launch would crash the subprocess
    * JVM with "Module not found".
    */
-  String BOOTSTRAP_MODULE = "ai.singlr.repl";
+  String BOOTSTRAP_MODULE = "com.standardapplied.helios.repl";
 
   /**
    * The default — no restriction. Equivalent to the launch behaviour before L3 landed: the

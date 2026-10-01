@@ -1,14 +1,14 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.model;
+package com.standardapplied.helios.core.model;
 
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.schema.RawOutputCapturePolicy;
-import ai.singlr.core.tool.Tool;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.core.tool.Tool;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -126,8 +126,8 @@ public interface Model extends AutoCloseable {
    * chunks remain the same {@link ModelChunk} shape as the untyped variant — tool calls and
    * structured-text responses both arrive as the usual {@code TextDelta} / {@code ToolUseStart} /
    * {@code ToolUseStop} / {@code MessageStop} sequence. Callers that need the parsed value invoke
-   * {@link ai.singlr.core.schema.StructuredContentParser} on the accumulated assistant text after
-   * the final {@link ModelChunk.MessageStop}.
+   * {@link com.standardapplied.helios.core.schema.StructuredContentParser} on the accumulated
+   * assistant text after the final {@link ModelChunk.MessageStop}.
    *
    * <p>Default implementation falls back to the blocking {@link #chat(List, List, OutputSchema)}
    * call and synthesises chunks from the resulting {@link Response}; production providers override

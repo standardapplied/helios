@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic.api;
+package com.standardapplied.helios.anthropic.api;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -36,7 +36,7 @@ public record ToolDefinition(
   /**
    * Current Anthropic web-search server-tool type. The {@code _20260318} variant includes dynamic
    * filtering (Claude filters results in code before they reach context) and is supported by every
-   * model in {@link ai.singlr.anthropic.AnthropicModelId}.
+   * model in {@link com.standardapplied.helios.anthropic.AnthropicModelId}.
    */
   public static final String WEB_SEARCH_TYPE = "web_search_20260318";
 

@@ -1,13 +1,13 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.schema.RawOutputCapturePolicy;
-import ai.singlr.core.schema.StructuredContentParser;
-import ai.singlr.session.ask.AskUserQuestionResponse;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.core.schema.StructuredContentParser;
+import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -163,8 +163,8 @@ public interface AgentSession extends AutoCloseable {
    *
    * <p>When the session was built with the same {@code schema} (see {@code
    * SessionOptions.Builder#withOutputSchema}), the loop has already self-corrected schema
-   * mismatches and {@link ai.singlr.core.common.SubmitValidator} rejections within {@code
-   * SessionLimits.maxTurns()}, so a returned value always satisfies both; a model that never
+   * mismatches and {@link com.standardapplied.helios.core.common.SubmitValidator} rejections within
+   * {@code SessionLimits.maxTurns()}, so a returned value always satisfies both; a model that never
    * converges terminates as {@link ResultMessage.ErrorMaxTurns} and this method throws rather than
    * returning a rejected value.
    *
@@ -176,9 +176,10 @@ public interface AgentSession extends AutoCloseable {
    * @throws IllegalStateException if the session terminated without a {@link ResultMessage.Success}
    *     — the caller cannot recover a typed value from {@link ResultMessage.Cancelled} / {@link
    *     ResultMessage.ErrorDuringExecution} / etc.
-   * @throws ai.singlr.core.schema.StructuredOutputParseException if the final assistant text does
-   *     not parse against the schema (carries a per-field diff) or, as {@link
-   *     ai.singlr.core.schema.SubmitValidationException}, fails the schema's submit validator
+   * @throws com.standardapplied.helios.core.schema.StructuredOutputParseException if the final
+   *     assistant text does not parse against the schema (carries a per-field diff) or, as {@link
+   *     com.standardapplied.helios.core.schema.SubmitValidationException}, fails the schema's
+   *     submit validator
    */
   default <T> T runBlocking(UserMessage message, OutputSchema<T> schema) {
     Objects.requireNonNull(message, "message must not be null");

@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.onnx;
+package com.standardapplied.helios.onnx;
 
 /** Unchecked exception for ONNX embedding initialization failures. */
 public class OnnxEmbeddingException extends RuntimeException {
