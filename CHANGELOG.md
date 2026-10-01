@@ -4,6 +4,42 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Breaking
+
+**Root package, JPMS modules and Maven coordinates renamed to `com.standardapplied`.** The
+project moved from the `singlr-ai` organisation to Standard Applied Intelligence Labs. Maven
+`groupId` `ai.singlr` → `com.standardapplied`; artifact ids are unchanged (`helios-core`,
+`helios-session`, ...). Packages and modules move as below; sub-packages keep their names and each
+JPMS module is named after its package root.
+
+| 2.x | 3.0 |
+|---|---|
+| `ai.singlr.core` | `com.standardapplied.helios.core` |
+| `ai.singlr.session` | `com.standardapplied.helios.session` |
+| `ai.singlr.runtime` | `com.standardapplied.helios.runtime` |
+| `ai.singlr.gemini` | `com.standardapplied.helios.gemini` |
+| `ai.singlr.anthropic` | `com.standardapplied.helios.anthropic` |
+| `ai.singlr.openai` | `com.standardapplied.helios.openai` |
+| `ai.singlr.onnx` | `com.standardapplied.helios.onnx` |
+| `ai.singlr.persistence` | `com.standardapplied.helios.persistence` |
+| `ai.singlr.repl` | `com.standardapplied.helios.repl` |
+| `ai.singlr.testing` | `com.standardapplied.helios.testing` |
+| `ai.singlr.examples.*` | `com.standardapplied.helios.examples.*` |
+
+Migration is mechanical: replace the `groupId` in every Helios dependency, replace `ai.singlr.`
+with `com.standardapplied.helios.` in imports, `requires` clauses and
+`--enable-native-access=` / `--add-opens` flags, and load the persistence schema from the
+classpath location `com/standardapplied/helios/persistence/schema.sql`. There is no relocation
+pom and no bridging artifact; the 2.x line stays on `ai.singlr`.
+
+One `ai.singlr` name remains: `helios-persistence` depends on the separately released
+`ai.singlr:scim-sql:1.0.0` (JPMS module `ai.singlr.scimsql`), which is not part of this repository
+and keeps its published coordinates until that library is migrated.
+
+Persisted data is not migrated: class-name strings recorded by 2.x (for example
+`SerializedError.kind`) are opaque and may carry `ai.singlr` names. Table names (`helios_*`) do
+not change.
+
 ## [2.12.0] — 2026-10-01 — Claude Opus 5.5, Sonnet 5.5, the GPT-6 family and hardened confinement
 
 The last 2.x feature release. 3.0 renames the root package and removes the compatibility

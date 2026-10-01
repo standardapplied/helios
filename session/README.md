@@ -27,12 +27,12 @@ A `Model` from `helios-core` plugs in; the session owns everything else.
 
 ```xml
 <dependency>
-  <groupId>ai.singlr</groupId>
+  <groupId>com.standardapplied</groupId>
   <artifactId>helios-session</artifactId>
   <version>${helios.version}</version>
 </dependency>
 <dependency>
-  <groupId>ai.singlr</groupId>
+  <groupId>com.standardapplied</groupId>
   <artifactId>helios-anthropic</artifactId>  <!-- or -gemini, -openai -->
   <version>${helios.version}</version>
 </dependency>
@@ -41,8 +41,8 @@ A `Model` from `helios-core` plugs in; the session owns everything else.
 JPMS:
 
 ```java
-requires ai.singlr.session;
-requires ai.singlr.anthropic;
+requires com.standardapplied.helios.session;
+requires com.standardapplied.helios.anthropic;
 ```
 
 ## Quickstart — minimal session
@@ -113,7 +113,7 @@ var terminal = session.result().join();
 ```
 
 The 15-subtype `QueryEvent` sealed interface — see the [package
-Javadoc](src/main/java/ai/singlr/session/QueryEvent.java) — covers everything the loop emits.
+Javadoc](src/main/java/com/standardapplied/helios/session/QueryEvent.java) — covers everything the loop emits.
 
 ## Cost tracking + budget cap
 
@@ -260,6 +260,6 @@ gates compaction spend along with normal turn spend. Custom compactors report th
   language client. POST a message, GET an SSE stream of events, GET the result, DELETE to clean
   up. See `runtime/` for the routes.
 - `examples/session-demo` shows a full end-to-end run against Gemini against a real workspace.
-- The package-level Javadocs cover each subsystem: `ai.singlr.session.hooks`,
-  `ai.singlr.session.permissions`, `ai.singlr.session.tools`, `ai.singlr.session.memory`,
-  `ai.singlr.session.files`, `ai.singlr.session.ask`, `ai.singlr.session.loop`.
+- The package-level Javadocs cover each subsystem: `com.standardapplied.helios.session.hooks`,
+  `com.standardapplied.helios.session.permissions`, `com.standardapplied.helios.session.tools`, `com.standardapplied.helios.session.memory`,
+  `com.standardapplied.helios.session.files`, `com.standardapplied.helios.session.ask`, `com.standardapplied.helios.session.loop`.
