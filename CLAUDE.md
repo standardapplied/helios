@@ -88,13 +88,16 @@ mvn -B verify -DskipTests                                                       
 Never add `-q`: the lines that say what to fix (`PMD Failure: <class>:<line> Rule:<rule> <message>`,
 `CPD Failure: Found N lines of duplicated code at locations: ...`) are logged as warnings and
 only the summary as an error. Reports land in `target/pmd.xml` (main), `target/pmd-test/pmd.xml`
-(tests) and, at the root, `target/cpd/cpd.xml`.
+(tests) and, at the root, `target/cpd/cpd.xml`. CPD is bound to the reactor root and reads the
+sources of the modules in the reactor, so only a whole-reactor build checks duplication; a
+`-pl <module>` or `-N` build does not.
 
 ### Rules of the gate
 
 - **Fix the code, never the gate.** An exclusion is never added, and a limit never raised, to
   make a change pass.
-- **No suppression in source.** No `NOPMD` markers and no `@SuppressWarnings("PMD...")`.
+- **No suppression in source.** Neither PMD's suppression comment marker nor a
+  `@SuppressWarnings` annotation naming a PMD rule; `git grep` for both stays empty.
 - **`config/quality/pmd-exclusions.properties`** (`fully.qualified.Class=Rule1,Rule2`; a nested
   class is `Outer.Nested`). Its burn-down section lists what violated when the gate was
   installed, grouped by the follow-up spec that removes it; entries may only be removed. Its
