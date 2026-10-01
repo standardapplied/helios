@@ -1,17 +1,28 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.architecture;
 
+import static com.tngtech.archunit.base.DescribedPredicate.describe;
 import static com.tngtech.archunit.base.DescribedPredicate.not;
+import static com.tngtech.archunit.core.domain.JavaAccess.Predicates.target;
+import static com.tngtech.archunit.core.domain.JavaAccess.Predicates.targetOwner;
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.assignableTo;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.type;
+import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.GeneralCodingRules.ACCESS_STANDARD_STREAMS;
 
+import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import java.lang.module.ModuleFinder;
 import java.net.http.HttpClient;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -30,6 +41,14 @@ class ArchitectureRulesTest {
   /** Burn-down, core-and-tools: the one class that still builds its own client. */
   private static final String OWN_HTTP_CLIENT_BURN_DOWN = HELIOS + ".onnx.OnnxModelDownloader";
 
+  private static final Set<String> JDK_PACKAGES =
+      ModuleFinder.ofSystem().findAll().stream()
+          .flatMap(module -> module.descriptor().packages().stream())
+          .collect(Collectors.toUnmodifiableSet());
+
+  private static final DescribedPredicate<JavaClass> BELONG_TO_THE_JDK =
+      describe("belong to the JDK", type -> JDK_PACKAGES.contains(type.getPackageName()));
+
   private static final JavaClasses LIBRARY =
       new ClassFileImporter()
           .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
@@ -41,8 +60,7 @@ class ArchitectureRulesTest {
         .that()
         .resideInAPackage(CORE)
         .should()
-        .onlyDependOnClassesThat()
-        .resideInAnyPackage("java..", "javax..", CORE)
+        .onlyDependOnClassesThat(resideInAPackage(CORE).or(BELONG_TO_THE_JDK))
         .because("helios-core has zero dependencies: use the JDK or a type in core itself")
         .check(LIBRARY);
   }
@@ -90,9 +108,9 @@ class ArchitectureRulesTest {
         .and()
         .doNotHaveFullyQualifiedName(OWN_HTTP_CLIENT_BURN_DOWN)
         .should()
-        .callMethod(HttpClient.class, "newBuilder")
-        .orShould()
-        .callMethod(HttpClient.class, "newHttpClient")
+        .accessTargetWhere(
+            targetOwner(type(HttpClient.class))
+                .and(target(name("newBuilder").or(name("newHttpClient")))))
         .because("every java.net.http.HttpClient comes from core.common.HttpClientFactory")
         .check(LIBRARY);
   }
@@ -124,6 +142,9 @@ class ArchitectureRulesTest {
         .that()
         .resideOutsideOfPackage(HELIOS + ".repl.sandbox..")
         .should(ACCESS_STANDARD_STREAMS)
+        .orShould()
+        .accessTargetWhere(
+            targetOwner(assignableTo(Throwable.class)).and(target(name("printStackTrace"))))
         .because(
             "library code reports through java.util.logging or the trace API; only repl.sandbox,"
                 + " where capturing the standard streams is the mechanism, and the example"
