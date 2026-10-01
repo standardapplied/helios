@@ -25,7 +25,11 @@ package ai.singlr.core.model;
  * </ul>
  */
 public enum ThinkingLevel {
-  /** No reasoning trace included. */
+  /**
+   * No reasoning trace included. Thinking is turned off where the model allows it; a model that
+   * always thinks runs at its lowest thinking setting or, where even that is fixed, at the
+   * provider's default effort.
+   */
   NONE,
 
   /** Brief reasoning summary. */
@@ -50,8 +54,8 @@ public enum ThinkingLevel {
   /**
    * Unbounded reasoning — "always thinks with no constraints on thinking depth". Sent verbatim as
    * {@code max} on Anthropic adaptive models (Opus 4.6 and later, Sonnet 4.6 and later, Fable 5)
-   * and OpenAI's gpt-5.6 family; Haiku 4.5's enabled+budget_tokens mode has no equivalent and fails
-   * fast. Other providers clamp to {@link #HIGH}.
+   * and OpenAI's gpt-5.6 and gpt-6 families; Haiku 4.5's enabled+budget_tokens mode has no
+   * equivalent and fails fast. Other providers clamp to {@link #HIGH}.
    */
   MAX
 }

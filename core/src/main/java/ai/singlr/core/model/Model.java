@@ -91,11 +91,12 @@ public interface Model extends AutoCloseable {
    *
    * <p>Default implementation invokes the blocking {@link #chat(List, List)} and synthesises a
    * chunk sequence from the resulting {@link Response} so providers can opt into real streaming one
-   * at a time. The synthesised sequence is: {@link ModelChunk.TextDelta} (if the response has
-   * content), one {@link ModelChunk.ToolUseStart}/{@link ModelChunk.ToolUseStop} pair per tool call
-   * in the order returned, and a final {@link ModelChunk.MessageStop} carrying the response's stop
-   * reason and usage. {@link ModelChunk.ToolUseDelta} is not emitted by the default; real streaming
-   * providers emit it when wire-level argument deltas arrive.
+   * at a time. The synthesised sequence is: {@link ModelChunk.ThinkingDelta} (if the response has
+   * thinking text), {@link ModelChunk.TextDelta} (if the response has content), one {@link
+   * ModelChunk.ToolUseStart}/{@link ModelChunk.ToolUseStop} pair per tool call in the order
+   * returned, and a final {@link ModelChunk.MessageStop} carrying the response's stop reason and
+   * usage. {@link ModelChunk.ToolUseDelta} is not emitted by the default; real streaming providers
+   * emit it when wire-level argument deltas arrive.
    *
    * <p>The returned publisher honors {@link CancellationToken}: when the subscriber first requests
    * a chunk, if the token is already cancelled the subscriber receives {@code onError} with a
@@ -187,6 +188,9 @@ public interface Model extends AutoCloseable {
       Flow.Subscriber<? super ModelChunk> subscriber) {
     Objects.requireNonNull(subscriber, "subscriber must not be null");
     var chunks = new ArrayList<ModelChunk>();
+    if (response.hasThinking()) {
+      chunks.add(new ModelChunk.ThinkingDelta(response.thinking()));
+    }
     if (response.content() != null && !response.content().isEmpty()) {
       chunks.add(new ModelChunk.TextDelta(response.content()));
     }

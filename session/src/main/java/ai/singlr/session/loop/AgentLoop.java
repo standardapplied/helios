@@ -221,15 +221,7 @@ public final class AgentLoop {
       if (state.isTerminal()) {
         return terminateWithExistingTerminal(state);
       }
-      var terminal =
-          classifier.classify(
-              state,
-              limits,
-              outcome.finishReason(),
-              outcome.assistantContent(),
-              outcome.streamError(),
-              outcome.streamAttempts(),
-              steeringQueue.size() > 0);
+      var terminal = classifier.classify(state, limits, outcome, steeringQueue.size() > 0);
       if (terminal.isPresent()) {
         var resolved = handlePreStop(state, terminal.orElseThrow(), outcome);
         if (resolved.isPresent()) {

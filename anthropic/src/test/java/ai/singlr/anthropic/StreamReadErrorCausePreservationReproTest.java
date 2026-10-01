@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.model.Message;
@@ -55,9 +54,9 @@ import tools.jackson.databind.json.JsonMapper;
  *       StreamEvent.Error(IOException)} to a {@link TransientStreamException} (instead of the old
  *       opaque {@link AnthropicException}), so the session loop can identify it without depending
  *       on provider-specific exception classes.
- *   <li>Non-stream paths — the API-side {@code event: error} carrying a {@code null} cause, and any
- *       non-{@code IOException} cause — remain on the {@link AnthropicException} path so the loop
- *       doesn't retry programmer errors.
+ *   <li>An API-side {@code event: error} of a retryable type ({@code overloaded_error} and peers)
+ *       is transient as well; every other cause remains on the {@link AnthropicException} path so
+ *       the loop doesn't retry programmer errors.
  * </ol>
  */
 class StreamReadErrorCausePreservationReproTest {
@@ -117,7 +116,7 @@ class StreamReadErrorCausePreservationReproTest {
   }
 
   @org.junit.jupiter.api.Test
-  void streamErrorWithNullCauseIsAlsoLegalAndShouldBeHandledByDownstreamFix() {
+  void apiOverloadReportedMidStreamIsTransient() {
     var apiErrorJson =
         "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\","
             + "\"message\":\"Overloaded\"}}\n\n";
@@ -128,7 +127,10 @@ class StreamReadErrorCausePreservationReproTest {
       assertTrue(iterator.hasNext());
       var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().startsWith("API stream error:"));
-      assertNull(error.cause(), "API-side stream errors deliberately carry a null cause");
+      assertInstanceOf(
+          TransientStreamException.class,
+          error.cause(),
+          "an overloaded API is a retryable condition, not a terminal one");
     }
   }
 
@@ -213,6 +215,43 @@ class StreamReadErrorCausePreservationReproTest {
     assertEquals("anthropic", tse.providerName());
     assertNotNull(tse.getCause(), "underlying IOException is preserved as cause");
     assertInstanceOf(IOException.class, tse.getCause());
+  }
+
+  private RuntimeException drainFailure(String errorType) {
+    var sse =
+        MESSAGE_START
+            + "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\""
+            + errorType
+            + "\",\"message\":\"failed\"}}\n\n";
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5_5, config);
+    var request = model.buildRequest(List.of(Message.user("hi")), List.<Tool>of(), null);
+    return org.junit.jupiter.api.Assertions.assertThrows(
+        RuntimeException.class,
+        () ->
+            model.drainWithContinuation(
+                request,
+                ignored ->
+                    new AnthropicStreamingIterator(
+                        fakeResponse(
+                            new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8))),
+                        objectMapper,
+                        Duration.ofSeconds(5))));
+  }
+
+  @org.junit.jupiter.api.Test
+  void anthropicModelSurfacesMidStreamOverloadAsTransientStreamException() {
+    var tse = assertInstanceOf(TransientStreamException.class, drainFailure("overloaded_error"));
+
+    assertEquals("anthropic", tse.providerName());
+    assertTrue(tse.getMessage().contains("overloaded_error"), tse.getMessage());
+  }
+
+  @org.junit.jupiter.api.Test
+  void anthropicModelKeepsMidStreamRequestErrorsOnTheAnthropicExceptionPath() {
+    var ae = assertInstanceOf(AnthropicException.class, drainFailure("invalid_request_error"));
+
+    assertTrue(ae.getMessage().contains("invalid_request_error"), ae.getMessage());
   }
 
   // ── Layer 3 — non-IOException causes stay on the AnthropicException path ─────────────────

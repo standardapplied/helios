@@ -335,6 +335,69 @@ class AnthropicWebToolsTest {
   }
 
   @Test
+  void pausedTurnMergesAContinuationThatInterleavesThinking() throws Exception {
+    var interleavedFinal =
+        """
+        event: message_start
+        data: {"type":"message_start","message":{"id":"m2","type":"message","role":"assistant","content":[],"model":"claude-opus-5-5","stop_reason":null,"usage":{"input_tokens":20,"output_tokens":1}}}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Found it."}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":0}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":""}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"Looking it up locally."}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":1,"delta":{"type":"signature_delta","signature":"SIG-1"}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":1}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"t1","name":"lookup"}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{}"}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":2}
+
+        event: message_delta
+        data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":3}}
+
+        event: message_stop
+        data: {"type":"message_stop"}
+
+        """;
+    var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
+    var m = model(config);
+    var initial = m.buildRequest(List.of(Message.user("research this")), List.of(), null);
+    var segments = new ArrayList<>(List.of(PAUSED_SEGMENT_SSE, interleavedFinal));
+
+    var response = m.drainWithContinuation(initial, request -> iterator(segments.removeFirst()));
+
+    @SuppressWarnings("unchecked")
+    var merged =
+        (List<Map<String, Object>>)
+            objectMapper.readValue(
+                response.metadata().get(AnthropicModel.RAW_CONTENT_KEY), List.class);
+    assertEquals(
+        List.of("server_tool_use", "text", "thinking", "tool_use"),
+        merged.stream().map(block -> block.get("type")).toList());
+    assertEquals("SIG-1", merged.get(2).get("signature"));
+    assertEquals(1, response.toolCalls().size());
+  }
+
+  @Test
   void pauseBeforeAnyServerBlockIsStillResumable() {
     var pausedTextOnly =
         """

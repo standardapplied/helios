@@ -250,7 +250,8 @@ public final class TurnRunner {
     }
 
     var streamOutcome = subscriber.toOutcome(attemptsMade);
-    var toolCalls = subscriber.toolCalls();
+    var toolCalls =
+        isRefused(streamOutcome.finishReason()) ? List.<ToolCall>of() : subscriber.toolCalls();
 
     if (!toolCalls.isEmpty()) {
       state.appendMessage(
@@ -334,6 +335,14 @@ public final class TurnRunner {
    */
   int modelContextWindow() {
     return model.contextWindow();
+  }
+
+  /**
+   * Whether the provider declined the turn. Everything a refused turn produced before the refusal
+   * is incomplete output to discard, so tool calls it had already emitted never run.
+   */
+  private static boolean isRefused(FinishReason finishReason) {
+    return finishReason == FinishReason.REFUSAL || finishReason == FinishReason.CONTENT_FILTER;
   }
 
   private TurnOutcome finalOutcomeAfterTerminate(SessionState state) {

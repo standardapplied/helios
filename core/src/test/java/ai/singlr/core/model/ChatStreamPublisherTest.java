@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.runtime.CancellationToken;
+import ai.singlr.core.schema.OutputSchema;
 import ai.singlr.core.tool.Tool;
 import java.util.ArrayList;
 import java.util.List;
@@ -153,6 +154,108 @@ final class ChatStreamPublisherTest {
         assertInstanceOf(ModelChunk.MessageStop.class, sub.chunks.get(sub.chunks.size() - 1));
     assertEquals(List.of(cite), stop.citations());
   }
+
+  private static Model thinkingThenText(String thinking, String text) {
+    return new Model() {
+      @Override
+      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+        return Response.newBuilder()
+            .withContent(text)
+            .withThinking(thinking)
+            .withFinishReason(FinishReason.STOP)
+            .withUsage(Response.Usage.of(5, 3))
+            .build();
+      }
+
+      @Override
+      public String id() {
+        return "test";
+      }
+
+      @Override
+      public String provider() {
+        return "test";
+      }
+    };
+  }
+
+  @Test
+  void thinkingIsDeliveredAheadOfTheText() {
+    var sub = new CapturingSubscriber();
+    thinkingThenText("Checked the index. Reading the profile next.", "done")
+        .chatStream(List.of(), List.of(), new CancellationToken())
+        .subscribe(sub);
+
+    assertEquals(3, sub.chunks.size());
+    var thinking = assertInstanceOf(ModelChunk.ThinkingDelta.class, sub.chunks.get(0));
+    assertEquals("Checked the index. Reading the profile next.", thinking.text());
+    assertInstanceOf(ModelChunk.TextDelta.class, sub.chunks.get(1));
+    assertInstanceOf(ModelChunk.MessageStop.class, sub.chunks.get(2));
+  }
+
+  @Test
+  void thinkingIsDeliveredEvenWhenTheTurnHasNoText() {
+    var sub = new CapturingSubscriber();
+    thinkingThenText("Searching for founders in Austin.", "")
+        .chatStream(List.of(), List.of(), new CancellationToken())
+        .subscribe(sub);
+
+    assertEquals(2, sub.chunks.size());
+    assertInstanceOf(ModelChunk.ThinkingDelta.class, sub.chunks.get(0));
+    assertInstanceOf(ModelChunk.MessageStop.class, sub.chunks.get(1));
+  }
+
+  @Test
+  void emptyThinkingEmitsNoThinkingDelta() {
+    var sub = new CapturingSubscriber();
+    thinkingThenText("", "done")
+        .chatStream(List.of(), List.of(), new CancellationToken())
+        .subscribe(sub);
+
+    assertEquals(2, sub.chunks.size());
+    assertInstanceOf(ModelChunk.TextDelta.class, sub.chunks.get(0));
+  }
+
+  @Test
+  void structuredOutputStreamKeepsThinking() {
+    Model model =
+        new Model() {
+          @Override
+          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+            throw new AssertionError("structured stream must use the schema overload");
+          }
+
+          @Override
+          public <T> Response<T> chat(
+              List<Message> messages, List<Tool> tools, OutputSchema<T> outputSchema) {
+            return Response.newBuilder(outputSchema.type())
+                .withContent("{\"answer\":\"42\"}")
+                .withThinking("Working it out.")
+                .withFinishReason(FinishReason.STOP)
+                .withUsage(Response.Usage.of(5, 3))
+                .build();
+          }
+
+          @Override
+          public String id() {
+            return "test";
+          }
+
+          @Override
+          public String provider() {
+            return "test";
+          }
+        };
+    var sub = new CapturingSubscriber();
+    model
+        .chatStream(List.of(), List.of(), OutputSchema.of(Answer.class), new CancellationToken())
+        .subscribe(sub);
+
+    var thinking = assertInstanceOf(ModelChunk.ThinkingDelta.class, sub.chunks.get(0));
+    assertEquals("Working it out.", thinking.text());
+  }
+
+  record Answer(String answer) {}
 
   @Test
   void emptyContentEmitsOnlyMessageStop() {
