@@ -349,13 +349,23 @@ public sealed interface ResultMessage
    * The model refused to answer (safety filter or model-side policy).
    *
    * @param sessionId the session's id
-   * @param refusalText the refusal text the model returned
+   * @param refusalText the provider's explanation of the refusal when it gave one, otherwise the
+   *     text the model returned
    * @param usage accumulated token usage
    * @param cost accumulated cost
    * @param duration elapsed wall clock
+   * @param category the provider-reported policy area behind the refusal (e.g. Anthropic's {@code
+   *     cyber}, {@code bio}, {@code frontier_llm}, {@code reasoning_extraction}, {@code
+   *     general_harms}), or {@code null} when the provider names none. An open set — branch on the
+   *     values you know and treat the rest as opaque
    */
   record Refusal(
-      String sessionId, String refusalText, Usage usage, CostEstimate cost, Duration duration)
+      String sessionId,
+      String refusalText,
+      Usage usage,
+      CostEstimate cost,
+      Duration duration,
+      String category)
       implements ResultMessage {
 
     public Refusal {
@@ -364,6 +374,21 @@ public sealed interface ResultMessage
       if (Strings.isBlank(refusalText)) {
         throw new IllegalArgumentException("refusalText must not be blank");
       }
+    }
+
+    /** Convenience for a refusal the provider did not categorise. */
+    public Refusal(
+        String sessionId, String refusalText, Usage usage, CostEstimate cost, Duration duration) {
+      this(sessionId, refusalText, usage, cost, duration, null);
+    }
+
+    /**
+     * The provider-reported policy area, if any.
+     *
+     * @return an optional view of {@link #category()}; empty when the provider named none
+     */
+    public Optional<String> categoryOpt() {
+      return Optional.ofNullable(category);
     }
   }
 

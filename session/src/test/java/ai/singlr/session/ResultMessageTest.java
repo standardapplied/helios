@@ -5,6 +5,7 @@
 package ai.singlr.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,6 +15,7 @@ import ai.singlr.core.model.Citation;
 import ai.singlr.core.model.Response.Usage;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 final class ResultMessageTest {
@@ -298,6 +300,15 @@ final class ResultMessageTest {
   void refusalConstructsAndExposesFields() {
     var r = new ResultMessage.Refusal(SID, "cannot help with that", USAGE, COST, DUR);
     assertEquals("cannot help with that", r.refusalText());
+    assertNull(r.category());
+    assertEquals(Optional.empty(), r.categoryOpt());
+  }
+
+  @Test
+  void refusalCarriesProviderCategory() {
+    var r = new ResultMessage.Refusal(SID, "declined", USAGE, COST, DUR, "frontier_llm");
+    assertEquals("frontier_llm", r.category());
+    assertEquals(Optional.of("frontier_llm"), r.categoryOpt());
   }
 
   @Test

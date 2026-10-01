@@ -4,6 +4,87 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Added
+
+- Anthropic: `claude-opus-5-5` and `claude-sonnet-5-5` (1M context, 128K output). Opus 5.5 always
+  thinks (`ThinkingShape.ALWAYS_ON`); Sonnet 5.5 gets the new
+  `ThinkingShape.ADAPTIVE_BETWEEN_TOOLS`, whose `ThinkingLevel.NONE` sends a bare
+  `thinking.type=between_tools` because the model rejects `disabled`. Both reject forced tool use,
+  so `AnthropicModel` fails fast at construction for `ToolChoice.any()` / `required(...)`.
+  On Opus 5.5, `ThinkingLevel.NONE` omits `thinking` and `output_config`, and the API's default
+  effort there is `medium`, not `high` — set a level to choose the effort explicitly.
+- `AnthropicPricing.calculator(cachePolicy)`: a `CostCalculator` carrying Anthropic's list price
+  for every model in `AnthropicModelId` (dated snapshots included), with per-model cache-read
+  rates (0.025× on Fable 5.1 / Mythos 5.1, 0.05× on Opus 5.5, 0.10× elsewhere) and the
+  cache-write rate matching the policy's TTL. `AnthropicPricing.AS_OF` records when the rates were
+  last checked. Opt-in: `SessionOptions` still defaults to `CostCalculator.ZERO`.
+- `ResultMessage.Refusal.category()` (and `categoryOpt()`) carries the provider's refusal
+  category — Anthropic's `stop_details.category` (`cyber`, `bio`, `frontier_llm`,
+  `reasoning_extraction`, `general_harms`, or absent). When the model declined before producing
+  any text, `refusalText` is now the provider's explanation instead of `[refused without text]`;
+  the explanation also takes precedence over output the refusal cut short.
+  Providers report both through `Response.REFUSAL_CATEGORY_KEY` / `REFUSAL_EXPLANATION_KEY`
+  metadata.
+- OpenAI: `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol` and `gpt-6-luna` (1,050,000 context, 128K
+  output). `gpt-6-astra` and `gpt-6.1-sol` reject `reasoning.effort=none`
+  (`EffortSupport.FULL_WITHOUT_NONE`), so `ThinkingLevel.NONE` sends `low` there; `gpt-6-sol` and
+  `gpt-6-luna` take the full `none`..`max` range.
+
+### Changed
+
+- Sessions now surface thinking. The default `Model.chatStream(..., CancellationToken)` chunk
+  sequence starts with a `ModelChunk.ThinkingDelta` when the response has thinking text, so
+  `QueryEvent.AssistantThinking` fires for every provider; it never fired under the session loop
+  before. This matters most on Fable 5.1, Opus 5.5 and Sonnet 5.5, which return the notes they
+  write between tool calls as `thinking` blocks rather than `text`.
+- Anthropic: always-on models (Fable 5 / 5.1, Mythos 5 / 5.1, Opus 5.5) send
+  `thinking: {"type":"adaptive","display":"summarized"}` with the effort for every
+  `ThinkingLevel` except `NONE`. They previously omitted the field, which left the API's
+  `omitted` display in force and every thinking block empty. `NONE` still omits it.
+- `StopClassifier.classify(SessionState, SessionLimits, TurnOutcome, boolean)` replaces the
+  seven-argument overload, which is deprecated and delegates.
+- OpenAI: `temperature` and `top_p` follow one rule — sent without a reasoning config or at
+  `reasoning.effort=none`, dropped otherwise. `top_p` used to ride every request, which the GPT-6
+  family rejects with a 400 while reasoning; `temperature` used to be dropped at effort `none`,
+  silently ignoring it for `ThinkingLevel.NONE` on gpt-5.4 and later.
+
+### Fixed
+
+- Anthropic: an uncatalogued release no longer inherits the request rules of the model its ID
+  extends. `AnthropicModelId.fromWireId` treated any `<known-id>-<suffix>` as a snapshot, so
+  `claude-opus-5-5` and `claude-sonnet-5-5` resolved to Opus 5 / Sonnet 5 and sent
+  `thinking.type=disabled`, which both models reject with a 400. Only an eight-digit snapshot
+  date (`claude-haiku-4-5-20251001`) now resolves to its family.
+- Anthropic: a turn whose thinking blocks are interleaved with text or parallel tool calls, or
+  that holds a `redacted_thinking` block, is echoed back in its original block order. The typed
+  echo hoisted every thinking block to the front of the turn and dropped redacted blocks; the API
+  requires both back unmodified and in place. Such turns keep their penultimate-message cache
+  breakpoint when they end in a tool call.
+- Anthropic: web search no longer fails its next turn with a 400 when the model filters results
+  in code. The `web_search_20260318` tool runs code execution under the hood, and the
+  `code_execution_tool_result` blocks it returns were dropped from the echoed turn, leaving their
+  `server_tool_use` unpaired. Every server-side `*_tool_result` block is now captured verbatim.
+- Anthropic: a retryable API error reported after the stream opened (`overloaded_error`,
+  `api_error`, `timeout_error`, `rate_limit_error`) now surfaces as `TransientStreamException`,
+  so the session retries the turn under `SessionLimits.streamRetryPolicy` instead of ending in
+  `ErrorDuringExecution`.
+- Anthropic: the iterator-based `chatStream` no longer emits an empty `StreamEvent.ThinkingDelta`
+  for each thinking block returned under the `omitted` display, and a `thinking_delta` that arrives
+  ahead of its `content_block_start` is no longer discarded.
+- Sessions: a refused turn (`FinishReason.REFUSAL` / `CONTENT_FILTER`) no longer runs tool calls it
+  had emitted before the refusal. The loop used to dispatch them and continue, which executed
+  output the provider says to discard and lost the refusal.
+
+### Compatibility
+
+- `ResultMessage.Refusal` gains a sixth record component, `category`. The five-argument
+  constructor remains; record deconstruction patterns over `Refusal` need the extra binding.
+- `DropMiddleToolResultsCompactor` is not safe on Fable 5.1, Opus 5.5 or Sonnet 5.5 for Anthropic
+  accounts created on or after 2026-08-31: those models bind each thinking block to the history
+  that produced it, and the first request after a compaction is rejected with a 400. Size
+  `SessionLimits.maxContextTokens` so compaction does not fire, or wire
+  `ContextCompactor.disabled()`. Changing the visible tool set mid-session has the same effect.
+
 ### Security
 
 - `PolicyBytecodeVerifier` now applies the sandbox policy to indirect references. A method

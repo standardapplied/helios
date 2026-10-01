@@ -417,6 +417,31 @@ final class TurnRunnerTest {
   }
 
   @Test
+  void refusedTurnNeverRunsToolCallsItEmittedBeforeTheRefusal() {
+    var call = new ToolCall("c", "delete_everything", Map.of());
+    var model =
+        syntheticStreamingModel(
+            List.of(
+                new ModelChunk.ToolUseStop(call),
+                new ModelChunk.MessageStop(
+                    "REFUSAL",
+                    Usage.of(9, 3),
+                    Map.of(Response.REFUSAL_CATEGORY_KEY, "cyber"),
+                    List.of())));
+    var state = freshState();
+
+    var outcome = runner(model).runTurn(state, SessionLimits.defaults());
+
+    assertEquals(FinishReason.REFUSAL, outcome.finishReason());
+    assertEquals("cyber", outcome.metadata().get(Response.REFUSAL_CATEGORY_KEY));
+    assertTrue(
+        events.stream()
+            .noneMatch(e -> e instanceof QueryEvent.ToolUse || e instanceof QueryEvent.ToolResult),
+        "a refused turn's partial output is discarded, tool calls included");
+    assertTrue(state.historySnapshot().stream().noneMatch(Message::hasToolCalls));
+  }
+
+  @Test
   void usageDeltaAndToolUseChunksAreIgnored() {
     var call = new ToolCall("c", "ignored", Map.of());
     var model =

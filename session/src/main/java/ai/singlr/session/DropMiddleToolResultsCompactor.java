@@ -62,6 +62,17 @@ import java.util.logging.Logger;
  * CompactionResult} so the agent loop can accumulate it into session totals + apply the configured
  * {@code CostCalculator}. Without this, compaction spend would be invisible to {@code
  * SessionLimits.maxBudgetMicroUsd} gating.
+ *
+ * <h2>Models that bind thinking to the conversation</h2>
+ *
+ * <p>Claude Fable 5.1, Opus 5.5 and Sonnet 5.5 tie every thinking block to the exact history that
+ * produced it. This compactor rewrites the middle of that history while the preserved tail still
+ * replays its thinking blocks, so on Anthropic accounts created on or after 2026-08-31 the first
+ * request after a compaction is rejected with a 400 ({@code Invalid `signature` in `thinking`
+ * block}) and the session ends in {@code ErrorDuringExecution}. Older accounts are unaffected.
+ * Until an append-only compactor ships, sessions on those models should size {@code
+ * SessionLimits.maxContextTokens} so compaction does not fire, or wire {@link
+ * ContextCompactor#disabled()}.
  */
 public final class DropMiddleToolResultsCompactor implements ContextCompactor {
 

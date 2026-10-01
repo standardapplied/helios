@@ -198,9 +198,22 @@ AnthropicModel uncached = provider.create(
     CachePolicy.disabled());
 ```
 
-When configuring cost tracking, use `Pricing.anthropicCaching5m(input, output)` or
-`Pricing.anthropicCaching1h(input, output)` so cache writes receive the correct TTL-specific
-rate. The existing `Pricing.anthropicCaching(input, output)` remains a five-minute alias.
+For cost tracking, `AnthropicPricing.calculator(cachePolicy)` prices every catalogued Claude
+model at Anthropic's list price, including each model's cache-read rate and the cache-write rate
+that matches the policy's TTL:
+
+```java
+var options = SessionOptions.newBuilder()
+    .withModel(longLived)
+    .withCostCalculator(AnthropicPricing.calculator(CachePolicy.longLived()))
+    .build();
+```
+
+`AnthropicPricing.AS_OF` records when the rates were last checked against the pricing page. For
+negotiated or partner-platform rates, build a `CostCalculator.staticTable(...)` with
+`Pricing.anthropicCaching5m(input, output)` or `Pricing.anthropicCaching1h(input, output)`; both
+assume the standard 0.10× cache-read multiplier, which Fable 5.1 (0.025×) and Opus 5.5 (0.05×) do
+not use.
 
 ### 2) Streamable session
 

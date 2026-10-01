@@ -892,7 +892,7 @@ class AnthropicModelTest {
   }
 
   @Test
-  void fable5ThinkingLevelYieldsEffortWithoutThinkingField() {
+  void fable5ThinkingLevelSendsSummarizedAdaptiveThinkingWithEffort() {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
@@ -902,8 +902,12 @@ class AnthropicModelTest {
 
     var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
 
-    assertNull(request.thinking(), "Fable 5 rejects any explicit thinking config — omit the field");
-    assertNotNull(request.outputConfig());
+    assertEquals("adaptive", request.thinking().type());
+    assertEquals(
+        "summarized",
+        request.thinking().display(),
+        "the default display is omitted — a caller asking for thinking must get its text");
+    assertNull(request.thinking().budgetTokens());
     assertEquals("high", request.outputConfig().effort());
   }
 
@@ -997,9 +1001,174 @@ class AnthropicModelTest {
 
     var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
 
-    assertNull(request.thinking());
+    assertEquals("adaptive", request.thinking().type());
+    assertEquals("summarized", request.thinking().display());
     assertEquals("max", request.outputConfig().effort());
     assertEquals(128_000, request.maxTokens());
+  }
+
+  // ── Opus 5.5 / Sonnet 5.5 ─────────────────────────────────────────────────
+
+  private static MessagesRequest requestFor(AnthropicModelId modelId, ThinkingLevel level) {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").withThinkingLevel(level).build();
+    return new AnthropicModel(modelId, config)
+        .buildRequest(List.of(Message.user("Hi")), List.of(), null);
+  }
+
+  private static String json(Object value) {
+    return tools.jackson.databind.json.JsonMapper.builder().build().writeValueAsString(value);
+  }
+
+  @Test
+  void opus55NoneOmitsThinkingAndEffortSoTheApiDefaultsApply() {
+    var request = requestFor(AnthropicModelId.CLAUDE_OPUS_5_5, ThinkingLevel.NONE);
+
+    assertNull(request.thinking(), "disabled is a 400 on Opus 5.5 at every effort — omit instead");
+    assertNull(request.outputConfig());
+    assertEquals(128_000, request.maxTokens());
+  }
+
+  @Test
+  void opus55EveryThinkingLevelSendsItsEffortExplicitly() {
+    var expected =
+        Map.of(
+            ThinkingLevel.MINIMAL, "low",
+            ThinkingLevel.LOW, "low",
+            ThinkingLevel.MEDIUM, "medium",
+            ThinkingLevel.HIGH, "high",
+            ThinkingLevel.XHIGH, "xhigh",
+            ThinkingLevel.MAX, "max");
+    for (var entry : expected.entrySet()) {
+      var request = requestFor(AnthropicModelId.CLAUDE_OPUS_5_5, entry.getKey());
+
+      assertEquals(
+          "{\"type\":\"adaptive\",\"display\":\"summarized\"}",
+          json(request.thinking()),
+          entry.getKey().name());
+      assertEquals(entry.getValue(), request.outputConfig().effort(), entry.getKey().name());
+    }
+  }
+
+  @Test
+  void sonnet55NoneSendsBareBetweenTools() {
+    var request = requestFor(AnthropicModelId.CLAUDE_SONNET_5_5, ThinkingLevel.NONE);
+
+    assertEquals(
+        "{\"type\":\"between_tools\"}",
+        json(request.thinking()),
+        "between_tools rejects every sibling field, display included");
+    assertNull(
+        request.outputConfig(),
+        "the API default effort (high) is the highest between_tools accepts");
+  }
+
+  @Test
+  void sonnet55ThinkingLevelsUseAdaptiveNeverBetweenTools() {
+    var expected =
+        Map.of(
+            ThinkingLevel.MINIMAL, "low",
+            ThinkingLevel.LOW, "low",
+            ThinkingLevel.MEDIUM, "medium",
+            ThinkingLevel.HIGH, "high",
+            ThinkingLevel.XHIGH, "xhigh",
+            ThinkingLevel.MAX, "max");
+    for (var entry : expected.entrySet()) {
+      var request = requestFor(AnthropicModelId.CLAUDE_SONNET_5_5, entry.getKey());
+
+      assertEquals(
+          "{\"type\":\"adaptive\",\"display\":\"summarized\"}",
+          json(request.thinking()),
+          entry.getKey().name());
+      assertEquals(entry.getValue(), request.outputConfig().effort(), entry.getKey().name());
+    }
+  }
+
+  @Test
+  void the55ModelsNeverSendSamplingParams() {
+    for (var modelId :
+        List.of(AnthropicModelId.CLAUDE_OPUS_5_5, AnthropicModelId.CLAUDE_SONNET_5_5)) {
+      var config =
+          ModelConfig.newBuilder()
+              .withApiKey("test-key")
+              .withTemperature(0.3)
+              .withTopP(0.8)
+              .build();
+
+      var request =
+          new AnthropicModel(modelId, config)
+              .buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+      assertNull(request.temperature(), modelId.name());
+      assertNull(request.topP(), modelId.name());
+    }
+  }
+
+  @Test
+  void the55ModelsRejectForcedToolChoiceAtConstruction() {
+    for (var modelId :
+        List.of(AnthropicModelId.CLAUDE_OPUS_5_5, AnthropicModelId.CLAUDE_SONNET_5_5)) {
+      for (var forced : List.of(ToolChoice.any(), ToolChoice.required("search_profiles"))) {
+        var config = ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(forced).build();
+
+        var ex =
+            assertThrows(IllegalArgumentException.class, () -> new AnthropicModel(modelId, config));
+        assertTrue(ex.getMessage().contains(modelId.id()), ex.getMessage());
+        assertTrue(ex.getMessage().contains("ToolChoice.auto()"), ex.getMessage());
+      }
+    }
+  }
+
+  @Test
+  void the55ModelsAcceptAutoToolChoice() {
+    for (var modelId :
+        List.of(AnthropicModelId.CLAUDE_OPUS_5_5, AnthropicModelId.CLAUDE_SONNET_5_5)) {
+      var config =
+          ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.auto()).build();
+
+      var request =
+          new AnthropicModel(modelId, config)
+              .buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+      assertEquals("auto", request.toolChoice().type(), modelId.name());
+    }
+  }
+
+  @Test
+  void the55WireIdsResolveToTheirOwnShapeNotTheModelTheyExtend() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .build();
+
+    var opus =
+        new AnthropicModel("claude-opus-5-5", config)
+            .buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var sonnet =
+        new AnthropicModel("claude-sonnet-5-5", config)
+            .buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertNull(opus.thinking(), "Opus 5's disabled would 400 on Opus 5.5");
+    assertEquals(128_000, opus.maxTokens());
+    assertEquals("between_tools", sonnet.thinking().type());
+  }
+
+  @Test
+  void anUncataloguedReleaseNeverInheritsDisabledThinkingFromTheModelItsIdExtends() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .build();
+
+    for (var wireId : List.of("claude-opus-5-7", "claude-sonnet-5-9")) {
+      var request =
+          new AnthropicModel(wireId, config)
+              .buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+      assertNull(request.thinking(), wireId);
+      assertEquals(AnthropicModel.DEFAULT_MAX_OUTPUT_TOKENS, request.maxTokens(), wireId);
+    }
   }
 
   // ── sampling-parameter guard on adaptive-capable models ───────────────────
@@ -1852,6 +2021,135 @@ class AnthropicModelTest {
   void messagesRequestSystemAsTextHandlesNull() {
     var request = MessagesRequest.newBuilder().build();
     assertNull(request.systemAsText());
+  }
+
+  // ── verbatim echo of interleaved thinking ─────────────────────────────────
+
+  private static final String INTERLEAVED_THINKING_SSE =
+      "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}\n"
+          + "data: {\"type\":\"content_block_start\",\"index\":0,"
+          + "\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n"
+          + "data: {\"type\":\"content_block_delta\",\"index\":0,"
+          + "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Reading the first profile.\"}}\n"
+          + "data: {\"type\":\"content_block_delta\",\"index\":0,"
+          + "\"delta\":{\"type\":\"signature_delta\",\"signature\":\"SIG-1\"}}\n"
+          + "data: {\"type\":\"content_block_stop\",\"index\":0}\n"
+          + "data: {\"type\":\"content_block_start\",\"index\":1,"
+          + "\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"get_profile\"}}\n"
+          + "data: {\"type\":\"content_block_delta\",\"index\":1,"
+          + "\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"id\\\":1}\"}}\n"
+          + "data: {\"type\":\"content_block_stop\",\"index\":1}\n"
+          + "data: {\"type\":\"content_block_start\",\"index\":2,"
+          + "\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n"
+          + "data: {\"type\":\"content_block_delta\",\"index\":2,"
+          + "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Reading the second profile.\"}}\n"
+          + "data: {\"type\":\"content_block_delta\",\"index\":2,"
+          + "\"delta\":{\"type\":\"signature_delta\",\"signature\":\"SIG-2\"}}\n"
+          + "data: {\"type\":\"content_block_stop\",\"index\":2}\n"
+          + "data: {\"type\":\"content_block_start\",\"index\":3,"
+          + "\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_2\",\"name\":\"get_profile\"}}\n"
+          + "data: {\"type\":\"content_block_delta\",\"index\":3,"
+          + "\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"id\\\":2}\"}}\n"
+          + "data: {\"type\":\"content_block_stop\",\"index\":3}\n"
+          + "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},"
+          + "\"usage\":{\"output_tokens\":40}}\n"
+          + "data: {\"type\":\"message_stop\"}\n";
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void interleavedThinkingTurnIsReplayedInItsOriginalBlockOrder() throws Exception {
+    var response = drainSseFixture(INTERLEAVED_THINKING_SSE).response();
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5_5, config);
+
+    var request =
+        model.buildRequest(
+            List.of(
+                Message.user("Compare profiles 1 and 2"),
+                response.toMessage(),
+                Message.tool("toolu_1", "get_profile", "profile one"),
+                Message.tool("toolu_2", "get_profile", "profile two")),
+            List.of(),
+            null);
+
+    var assistant = (List<Map<String, Object>>) request.messages().get(1).content();
+    assertEquals(
+        List.of("thinking", "tool_use", "thinking", "tool_use"),
+        assistant.stream().map(block -> block.get("type")).toList(),
+        "each progress note must stay immediately before the tool call it introduces");
+    assertEquals("SIG-1", assistant.get(0).get("signature"));
+    assertEquals(Map.of("id", 1), assistant.get(1).get("input"));
+    assertEquals("SIG-2", assistant.get(2).get("signature"));
+    assertEquals(Map.of("id", 2), assistant.get(3).get("input"));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void rawEchoTurnEndingInAToolCallStillCarriesTheCacheBreakpoint() throws Exception {
+    var response = drainSseFixture(INTERLEAVED_THINKING_SSE).response();
+    var storedRawContent = response.metadata().get(AnthropicModel.RAW_CONTENT_KEY);
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5_5, config);
+    var assistantMessage = response.toMessage();
+
+    var request =
+        model.buildRequest(
+            List.of(
+                Message.user("Compare profiles 1 and 2"),
+                assistantMessage,
+                Message.tool("toolu_1", "get_profile", "profile one"),
+                Message.tool("toolu_2", "get_profile", "profile two")),
+            List.of(),
+            null);
+
+    var assistant = (List<Map<String, Object>>) request.messages().get(1).content();
+    assertNotNull(
+        assistant.getLast().get("cache_control"),
+        "the penultimate-message breakpoint keeps the rolling cache prefix alive");
+    assertTrue(
+        assistant.subList(0, 3).stream().noneMatch(block -> block.containsKey("cache_control")));
+    assertEquals(
+        storedRawContent,
+        assistantMessage.metadata().get(AnthropicModel.RAW_CONTENT_KEY),
+        "annotation must never leak into the stored turn");
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void rawEchoTurnEndingInAnythingButAClientToolCallIsNeverAnnotated() {
+    var rawJson =
+        "[{\"type\":\"redacted_thinking\",\"data\":\"ENC\"},"
+            + "{\"type\":\"text\",\"text\":\"Done.\"}]";
+    var assistant =
+        Message.assistant("Done.", List.of(), Map.of(AnthropicModel.RAW_CONTENT_KEY, rawJson));
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5_5, config);
+
+    var request =
+        model.buildRequest(
+            List.of(Message.user("go"), assistant, Message.user("more")), List.of(), null);
+
+    var blocks = (List<Map<String, Object>>) request.messages().get(1).content();
+    assertEquals(
+        List.of(
+            Map.of("type", "redacted_thinking", "data", "ENC"),
+            Map.of("type", "text", "text", "Done.")),
+        blocks);
+  }
+
+  @Test
+  void rawEchoTurnEndingInANonObjectBlockIsLeftUntouched() {
+    var assistant =
+        Message.assistant(
+            "Done.", List.of(), Map.of(AnthropicModel.RAW_CONTENT_KEY, "[\"not-a-block\"]"));
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
+    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5_5, config);
+
+    var request =
+        model.buildRequest(
+            List.of(Message.user("go"), assistant, Message.user("more")), List.of(), null);
+
+    assertEquals(List.of("not-a-block"), request.messages().get(1).content());
   }
 
   // ── usage capture: cache tokens ───────────────────────────────────────────

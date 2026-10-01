@@ -6,6 +6,7 @@
 package ai.singlr.anthropic;
 
 import ai.singlr.core.common.Strings;
+import java.util.regex.Pattern;
 
 /**
  * Curated Anthropic Claude model identifiers carrying known-good metadata.
@@ -18,17 +19,20 @@ import ai.singlr.core.common.Strings;
  * thinking, {@code 32_000} output tokens) — see {@link #hasClaudePrefix(String)}.
  */
 public enum AnthropicModelId {
-  // contextWindow / maxOutputTokens mirror the documented per-model limits (Models overview, Aug
+  // contextWindow / maxOutputTokens mirror the documented per-model limits (Models overview, Oct
   // 2026) — operators can override per-call via ModelConfig.Builder.withMaxOutputTokens.
-  // ThinkingShape per model (thinking-troubleshooting table, Sep 2026): Fable 5/5.1 and Mythos
-  // 5/5.1 always think; Opus 5 and Sonnet 5 run adaptive when the field is omitted; Opus 4.7/4.8
-  // run thinking-off when omitted; Opus 4.6 / Sonnet 4.6 take adaptive without xhigh (their
+  // ThinkingShape per model (Thinking "Configuring thinking" table, Oct 2026): Fable 5/5.1, Mythos
+  // 5/5.1 and Opus 5.5 always think; Sonnet 5.5 always thinks but can drop up-front thinking with
+  // between_tools; Opus 5 and Sonnet 5 run adaptive when the field is omitted; Opus 4.7/4.8 run
+  // thinking-off when omitted; Opus 4.6 / Sonnet 4.6 take adaptive without xhigh (their
   // enabled+budget_tokens mode is deprecated); Haiku 4.5 supports extended thinking only.
   CLAUDE_FABLE_5_1("claude-fable-5-1", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
   CLAUDE_MYTHOS_5_1("claude-mythos-5-1", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
   CLAUDE_FABLE_5("claude-fable-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
   CLAUDE_MYTHOS_5("claude-mythos-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
+  CLAUDE_OPUS_5_5("claude-opus-5-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
   CLAUDE_OPUS_5("claude-opus-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_DEFAULT_ON),
+  CLAUDE_SONNET_5_5("claude-sonnet-5-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_BETWEEN_TOOLS),
   CLAUDE_SONNET_5("claude-sonnet-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_DEFAULT_ON),
   CLAUDE_OPUS_4_8("claude-opus-4-8", 1_000_000, 128_000, ThinkingShape.ADAPTIVE),
   CLAUDE_OPUS_4_7("claude-opus-4-7", 1_000_000, 128_000, ThinkingShape.ADAPTIVE),
@@ -72,10 +76,21 @@ public enum AnthropicModelId {
     ADAPTIVE_DEFAULT_ON,
 
     /**
-     * Thinking is always on and cannot be configured: any explicit {@code thinking} config —
-     * including {@code disabled} — returns a 400, so the field is always omitted and depth is
-     * controlled solely via {@code output_config.effort} (Fable 5, Mythos 5). {@code
-     * ThinkingLevel.NONE} still omits the field; the model thinks adaptively regardless.
+     * Adaptive shape whose up-front thinking is turned off with {@code thinking.type=between_tools}
+     * instead of {@code disabled}, which returns a 400 (Sonnet 5.5). {@code between_tools} takes no
+     * sibling field, is accepted at effort {@code high} or below, and still returns the model's
+     * progress notes between tool calls as {@code thinking} blocks with text. {@code
+     * ThinkingLevel.NONE} sends it bare, so the API's default effort ({@code high}) applies.
+     */
+    ADAPTIVE_BETWEEN_TOOLS,
+
+    /**
+     * Thinking is always on: {@code disabled} and {@code enabled}+{@code budget_tokens} return a
+     * 400 at every effort, and depth is controlled solely via {@code output_config.effort} (Fable
+     * 5/5.1, Mythos 5/5.1, Opus 5.5). {@code ThinkingLevel.NONE} omits both fields, so the model
+     * thinks at the API's default effort ({@code medium} on Opus 5.5, {@code high} on the others)
+     * and returns no thinking text; every other level sends {@code thinking.type=adaptive} with a
+     * summarized display plus the effort.
      */
     ALWAYS_ON;
 
@@ -97,6 +112,8 @@ public enum AnthropicModelId {
    * used against the default endpoint without waiting for a framework release.
    */
   public static final String CLAUDE_ID_PREFIX = "claude";
+
+  private static final Pattern DATED_SNAPSHOT = Pattern.compile("(.+)-\\d{8}");
 
   private final String id;
   private final int contextWindow;
@@ -122,14 +139,18 @@ public enum AnthropicModelId {
 
   /**
    * Whether this model accepts forced tool use ({@code tool_choice.type} {@code any} or {@code
-   * tool}). Fable 5.1 and Mythos 5.1 reject both with a 400 because a forced call would skip their
-   * always-on thinking; {@code auto} and {@code none} are unaffected. {@link AnthropicModel} fails
-   * fast at construction rather than letting the request 400.
+   * tool}). Fable 5.1, Mythos 5.1, Opus 5.5 and Sonnet 5.5 reject both with a 400 on every request;
+   * {@code auto} and {@code none} are unaffected. {@link AnthropicModel} fails fast at construction
+   * rather than letting the request 400.
    *
-   * @return false for {@link #CLAUDE_FABLE_5_1} and {@link #CLAUDE_MYTHOS_5_1}, true otherwise
+   * @return false for {@link #CLAUDE_FABLE_5_1}, {@link #CLAUDE_MYTHOS_5_1}, {@link
+   *     #CLAUDE_OPUS_5_5} and {@link #CLAUDE_SONNET_5_5}, true otherwise
    */
   public boolean acceptsForcedToolChoice() {
-    return this != CLAUDE_FABLE_5_1 && this != CLAUDE_MYTHOS_5_1;
+    return switch (this) {
+      case CLAUDE_FABLE_5_1, CLAUDE_MYTHOS_5_1, CLAUDE_OPUS_5_5, CLAUDE_SONNET_5_5 -> false;
+      default -> true;
+    };
   }
 
   /**
@@ -194,27 +215,24 @@ public enum AnthropicModelId {
 
   /**
    * Resolves a wire model ID to curated metadata, accepting dated snapshot variants: an exact match
-   * wins, otherwise an ID of the form {@code <enum-id>-<suffix>} (e.g. {@code
-   * claude-sonnet-4-6-20251114}) resolves to its family so legacy snapshots keep legacy request
+   * wins, otherwise an ID of the form {@code <enum-id>-<yyyymmdd>} (e.g. {@code
+   * claude-haiku-4-5-20251001}) resolves to its family so legacy snapshots keep legacy request
    * semantics instead of falling into the adaptive default for unknown IDs.
    *
+   * <p>Only an eight-digit snapshot date counts as a suffix. A newer release whose ID merely
+   * extends an older one ({@code claude-opus-5-5} extends {@code claude-opus-5}) is a different
+   * model with its own request rules and must not inherit its predecessor's.
+   *
    * @param id the wire model identifier
-   * @return the matching family, or null when no enum id is an exact or dated-prefix match
+   * @return the matching family, or null when no enum id is an exact or dated-snapshot match
    */
   public static AnthropicModelId fromWireId(String id) {
     var exact = fromId(id);
-    if (exact != null) {
+    if (exact != null || Strings.isBlank(id)) {
       return exact;
     }
-    if (Strings.isBlank(id)) {
-      return null;
-    }
-    for (var model : values()) {
-      if (id.startsWith(model.id + "-")) {
-        return model;
-      }
-    }
-    return null;
+    var matcher = DATED_SNAPSHOT.matcher(id);
+    return matcher.matches() ? fromId(matcher.group(1)) : null;
   }
 
   /**

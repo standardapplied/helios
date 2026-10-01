@@ -26,6 +26,8 @@ import java.util.Map;
  *     varies by citation kind and must round-trip verbatim on later turns
  * @param stopReason stop reason from message_delta
  * @param stopSequence matched stop sequence from message_delta
+ * @param stopDetails why a {@code refusal} stop happened, from message_delta; null for every other
+ *     stop reason
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ContentDelta(
@@ -36,7 +38,18 @@ public record ContentDelta(
     String signature,
     Map<String, Object> citation,
     @JsonProperty("stop_reason") String stopReason,
-    @JsonProperty("stop_sequence") String stopSequence) {
+    @JsonProperty("stop_sequence") String stopSequence,
+    @JsonProperty("stop_details") StopDetails stopDetails) {
+
+  /**
+   * Classifier detail attached to a {@code refusal} stop.
+   *
+   * @param category the policy area that declined the request (e.g. {@code cyber}, {@code bio},
+   *     {@code frontier_llm}, {@code reasoning_extraction}, {@code general_harms}); an open set,
+   *     and null when the refusal maps to no named category
+   * @param explanation human-readable description meant for display; null alongside a null category
+   */
+  public record StopDetails(String category, String explanation) {}
 
   public boolean hasTypeTextDelta() {
     return "text_delta".equals(type);

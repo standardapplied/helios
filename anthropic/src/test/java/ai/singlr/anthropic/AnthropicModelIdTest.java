@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class AnthropicModelIdTest {
@@ -150,12 +151,66 @@ class AnthropicModelIdTest {
   }
 
   @Test
-  void forcedToolChoiceAcceptedEverywhereExceptThe51Models() {
+  void forcedToolChoiceIsRejectedOnlyByTheModelsThatDocumentIt() {
+    var rejecting =
+        Set.of(
+            AnthropicModelId.CLAUDE_FABLE_5_1,
+            AnthropicModelId.CLAUDE_MYTHOS_5_1,
+            AnthropicModelId.CLAUDE_OPUS_5_5,
+            AnthropicModelId.CLAUDE_SONNET_5_5);
     for (var model : AnthropicModelId.values()) {
-      var isFivePointOne =
-          model == AnthropicModelId.CLAUDE_FABLE_5_1 || model == AnthropicModelId.CLAUDE_MYTHOS_5_1;
-      assertEquals(!isFivePointOne, model.acceptsForcedToolChoice(), model.name());
+      assertEquals(!rejecting.contains(model), model.acceptsForcedToolChoice(), model.name());
     }
+  }
+
+  @Test
+  void opus55AndSonnet55AreCatalogued() {
+    assertEquals("claude-opus-5-5", AnthropicModelId.CLAUDE_OPUS_5_5.id());
+    assertEquals("claude-sonnet-5-5", AnthropicModelId.CLAUDE_SONNET_5_5.id());
+    for (var model :
+        List.of(AnthropicModelId.CLAUDE_OPUS_5_5, AnthropicModelId.CLAUDE_SONNET_5_5)) {
+      assertEquals(1_000_000, model.contextWindow());
+      assertEquals(128_000, model.maxOutputTokens());
+      assertTrue(AnthropicModelId.isSupported(model.id()));
+      assertEquals(model, AnthropicModelId.fromId(model.id()));
+    }
+    assertEquals(
+        AnthropicModelId.ThinkingShape.ALWAYS_ON, AnthropicModelId.CLAUDE_OPUS_5_5.thinkingShape());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.ADAPTIVE_BETWEEN_TOOLS,
+        AnthropicModelId.CLAUDE_SONNET_5_5.thinkingShape());
+  }
+
+  @Test
+  void aNewerReleaseDoesNotInheritTheModelItsIdExtends() {
+    assertEquals(AnthropicModelId.CLAUDE_OPUS_5_5, AnthropicModelId.fromWireId("claude-opus-5-5"));
+    assertEquals(
+        AnthropicModelId.CLAUDE_SONNET_5_5, AnthropicModelId.fromWireId("claude-sonnet-5-5"));
+    assertNull(
+        AnthropicModelId.fromWireId("claude-opus-5-7"),
+        "an uncatalogued release must fall back to unknown-model defaults, not Opus 5's");
+    assertNull(AnthropicModelId.fromWireId("claude-sonnet-5-9"));
+    assertNull(AnthropicModelId.fromWireId("claude-fable-5-2"));
+  }
+
+  @Test
+  void onlyAnEightDigitSnapshotDateResolvesToTheFamily() {
+    assertEquals(
+        AnthropicModelId.CLAUDE_OPUS_5_5, AnthropicModelId.fromWireId("claude-opus-5-5-20260922"));
+    assertEquals(
+        AnthropicModelId.CLAUDE_OPUS_5, AnthropicModelId.fromWireId("claude-opus-5-20260601"));
+    assertNull(AnthropicModelId.fromWireId("claude-opus-5-2026"));
+    assertNull(AnthropicModelId.fromWireId("claude-opus-5-202606011"));
+    assertNull(AnthropicModelId.fromWireId("claude-opus-5-latest"));
+    assertNull(AnthropicModelId.fromWireId("claude-opus-9-20260601"));
+    assertNull(AnthropicModelId.fromWireId("-20260601"));
+  }
+
+  @Test
+  void fromWireIdReturnsNullForBlankIds() {
+    assertNull(AnthropicModelId.fromWireId(null));
+    assertNull(AnthropicModelId.fromWireId(""));
+    assertNull(AnthropicModelId.fromWireId("   "));
   }
 
   @Test
@@ -202,6 +257,7 @@ class AnthropicModelIdTest {
     assertTrue(AnthropicModelId.ThinkingShape.ADAPTIVE_WITHOUT_XHIGH.acceptsSamplingParameters());
     assertFalse(AnthropicModelId.ThinkingShape.ADAPTIVE.acceptsSamplingParameters());
     assertFalse(AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON.acceptsSamplingParameters());
+    assertFalse(AnthropicModelId.ThinkingShape.ADAPTIVE_BETWEEN_TOOLS.acceptsSamplingParameters());
     assertFalse(AnthropicModelId.ThinkingShape.ALWAYS_ON.acceptsSamplingParameters());
   }
 

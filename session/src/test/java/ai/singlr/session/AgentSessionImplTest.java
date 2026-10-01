@@ -943,6 +943,84 @@ final class AgentSessionImplTest {
     }
   }
 
+  // ── provider-reported refusal detail and thinking reach the session surface ──
+
+  private static Model respondingWith(Response<Void> response) {
+    return new Model() {
+      @Override
+      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+        return response;
+      }
+
+      @Override
+      public String id() {
+        return "test";
+      }
+
+      @Override
+      public String provider() {
+        return "test";
+      }
+    };
+  }
+
+  @Test
+  void refusalTerminalCarriesTheProviderCategoryAndExplanation() {
+    var declined =
+        Response.newBuilder()
+            .withContent("")
+            .withFinishReason(FinishReason.REFUSAL)
+            .withUsage(Usage.of(412, 0))
+            .withMetadata(
+                Map.of(
+                    Response.REFUSAL_CATEGORY_KEY,
+                    "cyber",
+                    Response.REFUSAL_EXPLANATION_KEY,
+                    "This request was declined because it could enable cyber harm."))
+            .build();
+
+    try (var s = buildSession(respondingWith(declined))) {
+      var refusal =
+          assertInstanceOf(ResultMessage.Refusal.class, s.runBlocking(UserMessage.text("hi")));
+
+      assertEquals("cyber", refusal.category());
+      assertEquals(
+          "This request was declined because it could enable cyber harm.", refusal.refusalText());
+      assertEquals(412, refusal.usage().inputTokens());
+    }
+  }
+
+  @Test
+  void thinkingFromABlockingModelSurfacesAsAssistantThinkingBeforeTheText() throws Exception {
+    var thoughtful =
+        Response.newBuilder()
+            .withContent("Top match: profile 12.")
+            .withThinking("Ranked the candidates. Reading profile 12 next.")
+            .withFinishReason(FinishReason.STOP)
+            .withUsage(Usage.of(3, 2))
+            .build();
+
+    try (var s = buildSession(respondingWith(thoughtful))) {
+      var sub = new CollectingSubscriber();
+      s.events().subscribe(sub);
+      s.send(UserMessage.text("match me"));
+      s.result().get(5, TimeUnit.SECONDS);
+      sub.awaitDone();
+
+      var kinds =
+          sub.events.stream()
+              .filter(
+                  e ->
+                      e instanceof QueryEvent.AssistantThinking
+                          || e instanceof QueryEvent.AssistantText)
+              .toList();
+      assertEquals(2, kinds.size());
+      var thinking = assertInstanceOf(QueryEvent.AssistantThinking.class, kinds.get(0));
+      assertEquals("Ranked the candidates. Reading profile 12 next.", thinking.text());
+      assertInstanceOf(QueryEvent.AssistantText.class, kinds.get(1));
+    }
+  }
+
   // ── maxBudgetMicroUsd integration ────────────────────────────────────────
 
   @Test

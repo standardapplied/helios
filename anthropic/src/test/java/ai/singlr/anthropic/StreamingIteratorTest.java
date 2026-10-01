@@ -523,6 +523,358 @@ class StreamingIteratorTest {
     pipedOut.close();
   }
 
+  // ── thinking blocks: verbatim echo, omitted display, redaction ────────────
+
+  private static String blockStart(int index, String contentBlock) {
+    return "data: {\"type\":\"content_block_start\",\"index\":"
+        + index
+        + ",\"content_block\":"
+        + contentBlock
+        + "}\n\n";
+  }
+
+  private static String blockDelta(int index, String delta) {
+    return "data: {\"type\":\"content_block_delta\",\"index\":"
+        + index
+        + ",\"delta\":"
+        + delta
+        + "}\n\n";
+  }
+
+  private static String blockStop(int index) {
+    return "data: {\"type\":\"content_block_stop\",\"index\":" + index + "}\n\n";
+  }
+
+  private static String thinkingBlock(int index, String text, String signature) {
+    return blockStart(index, "{\"type\":\"thinking\",\"thinking\":\"\"}")
+        + blockDelta(index, "{\"type\":\"thinking_delta\",\"thinking\":\"" + text + "\"}")
+        + (signature.isEmpty()
+            ? ""
+            : blockDelta(
+                index, "{\"type\":\"signature_delta\",\"signature\":\"" + signature + "\"}"))
+        + blockStop(index);
+  }
+
+  private static String textBlock(int index, String text) {
+    return blockStart(index, "{\"type\":\"text\",\"text\":\"\"}")
+        + blockDelta(index, "{\"type\":\"text_delta\",\"text\":\"" + text + "\"}")
+        + blockStop(index);
+  }
+
+  private static String toolUseBlock(int index, String id, String name) {
+    return blockStart(
+            index, "{\"type\":\"tool_use\",\"id\":\"" + id + "\",\"name\":\"" + name + "\"}")
+        + blockDelta(index, "{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}")
+        + blockStop(index);
+  }
+
+  private static String messageDelta(String delta) {
+    return "data: {\"type\":\"message_delta\",\"delta\":"
+        + delta
+        + ",\"usage\":{\"output_tokens\":15}}\n\n";
+  }
+
+  private java.util.List<StreamEvent> drain(String sse) {
+    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+      var events = new ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      return events;
+    }
+  }
+
+  private Map<String, String> doneMetadata(String sse) {
+    return ((StreamEvent.Done) drain(sse).getLast()).response().metadata();
+  }
+
+  @SuppressWarnings("unchecked")
+  private java.util.List<Map<String, Object>> rawContent(Map<String, String> metadata) {
+    return objectMapper.readValue(
+        metadata.get(AnthropicModel.RAW_CONTENT_KEY), java.util.List.class);
+  }
+
+  @org.junit.jupiter.api.Test
+  void thinkingInterleavedWithTextAndParallelToolCallsIsEchoedInStreamOrder() {
+    var sse =
+        MESSAGE_START
+            + textBlock(0, "Checking two profiles.")
+            + thinkingBlock(1, "Reading the first profile.", "SIG-1")
+            + toolUseBlock(2, "toolu_1", "get_profile")
+            + thinkingBlock(3, "Reading the second profile.", "SIG-2")
+            + toolUseBlock(4, "toolu_2", "get_profile")
+            + messageDelta("{\"stop_reason\":\"tool_use\"}")
+            + MESSAGE_STOP;
+
+    var blocks = rawContent(doneMetadata(sse));
+
+    assertEquals(
+        java.util.List.of("text", "thinking", "tool_use", "thinking", "tool_use"),
+        blocks.stream().map(block -> block.get("type")).toList());
+    assertEquals("SIG-1", blocks.get(1).get("signature"));
+    assertEquals("Reading the first profile.", blocks.get(1).get("thinking"));
+    assertEquals("toolu_1", blocks.get(2).get("id"));
+    assertEquals("SIG-2", blocks.get(3).get("signature"));
+    assertEquals("toolu_2", blocks.get(4).get("id"));
+  }
+
+  @org.junit.jupiter.api.Test
+  void thinkingAfterAToolCallAloneRequiresTheVerbatimEcho() {
+    var sse =
+        MESSAGE_START
+            + toolUseBlock(0, "toolu_1", "search_profiles")
+            + thinkingBlock(1, "Now the second search.", "SIG-1")
+            + toolUseBlock(2, "toolu_2", "search_profiles")
+            + messageDelta("{\"stop_reason\":\"tool_use\"}")
+            + MESSAGE_STOP;
+
+    var blocks = rawContent(doneMetadata(sse));
+
+    assertEquals(
+        java.util.List.of("tool_use", "thinking", "tool_use"),
+        blocks.stream().map(block -> block.get("type")).toList());
+  }
+
+  @org.junit.jupiter.api.Test
+  void thinkingAheadOfTextAndToolCallsKeepsTheTypedEcho() {
+    var sse =
+        MESSAGE_START
+            + thinkingBlock(0, "Reasoning.", "SIG-1")
+            + thinkingBlock(1, "Searching next.", "SIG-2")
+            + textBlock(2, "On it.")
+            + toolUseBlock(3, "toolu_1", "search_profiles")
+            + messageDelta("{\"stop_reason\":\"tool_use\"}")
+            + MESSAGE_STOP;
+
+    var metadata = doneMetadata(sse);
+
+    assertNull(
+        metadata.get(AnthropicModel.RAW_CONTENT_KEY),
+        "the typed echo already reproduces thinking, text, tool_use order");
+    assertEquals(2, AnthropicModel.decodeThinkingBlocks(metadata).size());
+  }
+
+  @org.junit.jupiter.api.Test
+  void blocksThatAreNeverEchoedDoNotForceTheVerbatimEcho() {
+    var unsignedThinkingAfterText =
+        MESSAGE_START
+            + textBlock(0, "Answer.")
+            + thinkingBlock(1, "unsigned", "")
+            + MESSAGE_DELTA_END_TURN
+            + MESSAGE_STOP;
+    var emptyTextBeforeThinking =
+        MESSAGE_START
+            + blockStart(0, "{\"type\":\"text\",\"text\":\"\"}")
+            + blockStop(0)
+            + thinkingBlock(1, "Reasoning.", "SIG-1")
+            + textBlock(2, "Answer.")
+            + MESSAGE_DELTA_END_TURN
+            + MESSAGE_STOP;
+
+    assertNull(doneMetadata(unsignedThinkingAfterText).get(AnthropicModel.RAW_CONTENT_KEY));
+    assertNull(doneMetadata(emptyTextBeforeThinking).get(AnthropicModel.RAW_CONTENT_KEY));
+  }
+
+  @org.junit.jupiter.api.Test
+  void redactedThinkingIsCapturedVerbatimAndEchoedInPlace() {
+    var sse =
+        MESSAGE_START
+            + blockStart(0, "{\"type\":\"redacted_thinking\",\"data\":\"ENCRYPTED-PAYLOAD\"}")
+            + blockStop(0)
+            + thinkingBlock(1, "Visible reasoning.", "SIG-1")
+            + toolUseBlock(2, "toolu_1", "search_profiles")
+            + messageDelta("{\"stop_reason\":\"tool_use\"}")
+            + MESSAGE_STOP;
+
+    var blocks = rawContent(doneMetadata(sse));
+
+    assertEquals(
+        Map.of("type", "redacted_thinking", "data", "ENCRYPTED-PAYLOAD"),
+        blocks.get(0),
+        "dropping or rewriting a redacted block breaks the multi-turn protocol");
+    assertEquals("thinking", blocks.get(1).get("type"));
+    assertEquals("tool_use", blocks.get(2).get("type"));
+  }
+
+  @org.junit.jupiter.api.Test
+  void codeExecutionResultsFromWebSearchFilteringAreCapturedVerbatim() {
+    var sse =
+        MESSAGE_START
+            + blockStart(
+                0, "{\"type\":\"server_tool_use\",\"id\":\"srv_1\",\"name\":\"code_execution\"}")
+            + blockDelta(0, "{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}")
+            + blockStop(0)
+            + blockStart(
+                1,
+                "{\"type\":\"code_execution_tool_result\",\"tool_use_id\":\"srv_1\","
+                    + "\"content\":{\"type\":\"code_execution_result\",\"stdout\":\"1839\"}}")
+            + blockStop(1)
+            + toolUseBlock(2, "toolu_1", "save_note")
+            + messageDelta("{\"stop_reason\":\"tool_use\"}")
+            + MESSAGE_STOP;
+
+    var blocks = rawContent(doneMetadata(sse));
+
+    assertEquals(
+        java.util.List.of("server_tool_use", "code_execution_tool_result", "tool_use"),
+        blocks.stream().map(block -> block.get("type")).toList(),
+        "a server_tool_use echoed without its result block is a 400");
+    assertEquals("srv_1", blocks.get(1).get("tool_use_id"));
+    assertEquals(
+        Map.of("type", "code_execution_result", "stdout", "1839"), blocks.get(1).get("content"));
+  }
+
+  @org.junit.jupiter.api.Test
+  void anUnmodelledBlockTypeIsSkippedWithoutDisturbingTheTurn() {
+    var sse =
+        MESSAGE_START
+            + blockStart(0, "{\"type\":\"mystery_block\",\"payload\":\"x\"}")
+            + blockStop(0)
+            + blockStart(1, "{\"payload\":\"typeless\"}")
+            + blockStop(1)
+            + textBlock(2, "Answer.")
+            + MESSAGE_DELTA_END_TURN
+            + MESSAGE_STOP;
+
+    var response = ((StreamEvent.Done) drain(sse).getLast()).response();
+
+    assertEquals("Answer.", response.content());
+    assertNull(response.metadata().get(AnthropicModel.RAW_CONTENT_KEY));
+  }
+
+  @org.junit.jupiter.api.Test
+  void thinkingDeltaAheadOfItsBlockStartIsKept() {
+    var sse =
+        MESSAGE_START
+            + blockDelta(0, "{\"type\":\"thinking_delta\",\"thinking\":\"Early. \"}")
+            + thinkingBlock(0, "On time.", "SIG-1")
+            + textBlock(1, "Answer.")
+            + MESSAGE_DELTA_END_TURN
+            + MESSAGE_STOP;
+
+    var response = ((StreamEvent.Done) drain(sse).getLast()).response();
+
+    assertEquals("Early. On time.", response.thinking());
+  }
+
+  @org.junit.jupiter.api.Test
+  void omittedDisplayThinkingKeepsItsSignatureAndEmitsNoThinkingEvents() {
+    var sse =
+        MESSAGE_START
+            + thinkingBlock(0, "", "SIG-OMITTED")
+            + textBlock(1, "Answer.")
+            + MESSAGE_DELTA_END_TURN
+            + MESSAGE_STOP;
+
+    var events = drain(sse);
+    var response = ((StreamEvent.Done) events.getLast()).response();
+
+    assertTrue(
+        events.stream()
+            .noneMatch(
+                event ->
+                    event instanceof StreamEvent.ThinkingDelta
+                        || event instanceof StreamEvent.ThinkingComplete),
+        "an empty thinking block carries nothing to render");
+    assertNull(response.thinking());
+    var thinkingBlocks = AnthropicModel.decodeThinkingBlocks(response.metadata());
+    assertEquals(1, thinkingBlocks.size());
+    assertEquals("", thinkingBlocks.getFirst().text());
+    assertEquals("SIG-OMITTED", thinkingBlocks.getFirst().signature());
+  }
+
+  // ── refusal stop details ──────────────────────────────────────────────────
+
+  @org.junit.jupiter.api.Test
+  void refusalStopDetailsSurfaceAsProviderNeutralMetadata() {
+    var sse =
+        MESSAGE_START
+            + messageDelta(
+                "{\"stop_reason\":\"refusal\",\"stop_sequence\":null,\"stop_details\":"
+                    + "{\"type\":\"refusal\",\"category\":\"cyber\",\"explanation\":"
+                    + "\"This request was declined because it could enable cyber harm.\"}}")
+            + MESSAGE_STOP;
+
+    var done = (StreamEvent.Done) drain(sse).getLast();
+
+    assertEquals(FinishReason.REFUSAL, done.response().finishReason());
+    assertEquals(
+        "cyber",
+        done.response().metadata().get(ai.singlr.core.model.Response.REFUSAL_CATEGORY_KEY));
+    assertEquals(
+        "This request was declined because it could enable cyber harm.",
+        done.response().metadata().get(ai.singlr.core.model.Response.REFUSAL_EXPLANATION_KEY));
+  }
+
+  @org.junit.jupiter.api.Test
+  void uncategorisedRefusalCarriesNoCategoryMetadata() {
+    var sse =
+        MESSAGE_START
+            + messageDelta(
+                "{\"stop_reason\":\"refusal\",\"stop_details\":"
+                    + "{\"type\":\"refusal\",\"category\":null,\"explanation\":null}}")
+            + MESSAGE_STOP;
+
+    var metadata = doneMetadata(sse);
+
+    assertEquals("refusal", metadata.get(AnthropicModel.STOP_REASON_KEY));
+    assertFalse(metadata.containsKey(ai.singlr.core.model.Response.REFUSAL_CATEGORY_KEY));
+    assertFalse(metadata.containsKey(ai.singlr.core.model.Response.REFUSAL_EXPLANATION_KEY));
+  }
+
+  @org.junit.jupiter.api.Test
+  void nonRefusalStopsCarryNoRefusalMetadata() {
+    var sse =
+        MESSAGE_START
+            + textBlock(0, "Answer.")
+            + messageDelta("{\"stop_reason\":\"end_turn\",\"stop_details\":null}")
+            + MESSAGE_STOP;
+
+    assertFalse(doneMetadata(sse).containsKey(ai.singlr.core.model.Response.REFUSAL_CATEGORY_KEY));
+  }
+
+  // ── API errors reported mid-stream ────────────────────────────────────────
+
+  private StreamEvent.Error streamError(String errorObject) {
+    var sse = MESSAGE_START + "event: error\ndata: {\"type\":\"error\"" + errorObject + "}\n\n";
+    return assertInstanceOf(StreamEvent.Error.class, drain(sse).getFirst());
+  }
+
+  @org.junit.jupiter.api.Test
+  void retryableApiErrorsMidStreamAreTransient() {
+    for (var type :
+        java.util.List.of("overloaded_error", "api_error", "timeout_error", "rate_limit_error")) {
+      var error = streamError(",\"error\":{\"type\":\"" + type + "\",\"message\":\"try again\"}");
+
+      var cause =
+          assertInstanceOf(
+              ai.singlr.core.model.TransientStreamException.class, error.cause(), type);
+      assertEquals("anthropic", cause.providerName());
+      assertTrue(error.message().startsWith("API stream error:"), error.message());
+      assertTrue(cause.getMessage().contains(type), cause.getMessage());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void nonRetryableApiErrorsMidStreamStayTerminal() {
+    for (var type :
+        java.util.List.of("invalid_request_error", "authentication_error", "permission_error")) {
+      var error = streamError(",\"error\":{\"type\":\"" + type + "\",\"message\":\"no\"}");
+
+      assertNull(error.cause(), type);
+      assertTrue(error.message().contains(type), error.message());
+    }
+  }
+
+  @org.junit.jupiter.api.Test
+  void anErrorEventWithoutAnErrorObjectStaysTerminal() {
+    var missing = streamError("");
+    var untyped = streamError(",\"error\":{\"message\":\"no type\"}");
+
+    assertNull(missing.cause());
+    assertNull(untyped.cause());
+  }
+
   private AnthropicStreamingIterator createIterator(String sseData, Duration idleTimeout) {
     var inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8));
     return new AnthropicStreamingIterator(fakeResponse(inputStream), objectMapper, idleTimeout);

@@ -14,6 +14,7 @@ import ai.singlr.core.model.FinishReason;
 import ai.singlr.core.model.Response;
 import ai.singlr.core.model.StreamEvent;
 import ai.singlr.core.model.ToolCall;
+import ai.singlr.core.model.TransientStreamException;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -39,10 +40,11 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * SSE iterator over one Claude Messages API streaming response. Accumulates text, thinking, tool
- * calls, citations, usage, and — for server-tool turns — the raw content-block array required for
- * the verbatim echo on later turns. Extracted from {@code AnthropicModel} to keep both classes
- * within the class-size budget; instantiated by {@code AnthropicModel.openStream} and directly by
- * tests with canned SSE fixtures.
+ * calls, citations, usage, and — for turns whose blocks must go back exactly as they arrived
+ * (server tools, redacted thinking, thinking interleaved with other content) — the raw
+ * content-block array required for the verbatim echo on later turns. Extracted from {@code
+ * AnthropicModel} to keep both classes within the class-size budget; instantiated by {@code
+ * AnthropicModel.openStream} and directly by tests with canned SSE fixtures.
  */
 final class AnthropicStreamingIterator implements CloseableIterator<StreamEvent> {
   private final InputStream rawStream;
@@ -55,11 +57,11 @@ final class AnthropicStreamingIterator implements CloseableIterator<StreamEvent>
   private final Map<Integer, ToolCallAccumulator> toolCallAccumulators = new HashMap<>();
   private final TreeMap<Integer, StringBuilder> textAccumulators = new TreeMap<>();
   private final TreeMap<Integer, List<Map<String, Object>>> citationAccumulators = new TreeMap<>();
-  private final TreeMap<Integer, Map<String, Object>> serverBlocks = new TreeMap<>();
+  private final TreeMap<Integer, Map<String, Object>> rawBlocks = new TreeMap<>();
   private final Map<Integer, StringBuilder> serverToolInputAccumulators = new HashMap<>();
   private final TreeMap<Integer, ToolCall> completedClientToolBlocks = new TreeMap<>();
   private final List<Citation> citations = new ArrayList<>();
-  private boolean sawServerToolBlocks = false;
+  private boolean sawRawBlocks = false;
   // Per-content-block thinking accumulators keyed by block index. Each thinking block in a
   // multi-block message carries its own Anthropic signature; concatenating them into a single
   // buffer (the prior shape) yields a signature the API rejects on the next turn.
@@ -72,6 +74,7 @@ final class AnthropicStreamingIterator implements CloseableIterator<StreamEvent>
   private int cacheCreationInputTokens = 0;
   private int cacheReadInputTokens = 0;
   private String stopReason = null;
+  private ContentDelta.StopDetails stopDetails = null;
 
   AnthropicStreamingIterator(
       HttpResponse<InputStream> response, ObjectMapper objectMapper, Duration streamIdleTimeout) {
@@ -184,23 +187,22 @@ final class AnthropicStreamingIterator implements CloseableIterator<StreamEvent>
             toolCallAccumulators.put(
                 index, new ToolCallAccumulator(block.id(), block.name(), new StringBuilder()));
           } else if (block.hasTypeThinking()) {
-            thinkingAccumulators.put(
+            thinkingAccumulators.putIfAbsent(
                 index, new ThinkingAccumulator(new StringBuilder(), new StringBuilder()));
           } else if (block.hasTypeText()) {
             textAccumulators.put(
                 index, new StringBuilder(block.text() == null ? "" : block.text()));
           } else if ("server_tool_use".equals(block.type())) {
-            sawServerToolBlocks = true;
+            sawRawBlocks = true;
             var raw = new LinkedHashMap<String, Object>();
             raw.put("type", "server_tool_use");
             raw.put("id", block.id());
             raw.put("name", block.name());
-            serverBlocks.put(index, raw);
+            rawBlocks.put(index, raw);
             serverToolInputAccumulators.put(index, new StringBuilder());
-          } else if ("web_search_tool_result".equals(block.type())
-              || "web_fetch_tool_result".equals(block.type())) {
-            sawServerToolBlocks = true;
-            captureRawServerBlock(index, json);
+          } else if (arrivesComplete(block.type())) {
+            sawRawBlocks = true;
+            captureRawBlock(index, json);
           }
         }
         return null;
@@ -217,6 +219,7 @@ final class AnthropicStreamingIterator implements CloseableIterator<StreamEvent>
       if (event.hasTypeMessageDelta()) {
         if (event.delta() != null && event.delta().stopReason() != null) {
           stopReason = event.delta().stopReason();
+          stopDetails = event.delta().stopDetails();
         }
         if (event.usage() != null && event.usage().outputTokens() != null) {
           outputTokens = event.usage().outputTokens();
@@ -231,7 +234,13 @@ final class AnthropicStreamingIterator implements CloseableIterator<StreamEvent>
       }
 
       if (event.hasTypeError()) {
-        return new StreamEvent.Error("API stream error: " + json, null);
+        var message = "API stream error: " + json;
+        var isTransient = event.error() != null && event.error().isTransient();
+        return new StreamEvent.Error(
+            message,
+            isTransient
+                ? new TransientStreamException(message, null, AnthropicModel.PROVIDER_NAME)
+                : null);
       }
 
       return null;
@@ -277,8 +286,9 @@ final class AnthropicStreamingIterator implements CloseableIterator<StreamEvent>
           .text()
           .append(delta.thinking());
       // Surface each delta as a token-level event so live UIs can render the model's reasoning
-      // as it arrives, not only as the aggregated terminal block.
-      return new StreamEvent.ThinkingDelta(delta.thinking());
+      // as it arrives, not only as the aggregated terminal block. Under display=omitted the API
+      // streams one empty delta per block; that carries nothing to render.
+      return delta.thinking().isEmpty() ? null : new StreamEvent.ThinkingDelta(delta.thinking());
     }
 
     if (delta.hasTypeSignatureDelta() && delta.signature() != null && index != null) {
@@ -309,10 +319,7 @@ final class AnthropicStreamingIterator implements CloseableIterator<StreamEvent>
           input = Map.of("_raw", jsonStr);
         }
       }
-      var raw = serverBlocks.get(index);
-      if (raw != null) {
-        raw.put("input", input);
-      }
+      rawBlocks.get(index).put("input", input);
       return null;
     }
     // Thinking block closing: surface the terminal aggregation so consumers can capture the
@@ -354,19 +361,27 @@ final class AnthropicStreamingIterator implements CloseableIterator<StreamEvent>
   }
 
   /**
+   * Whether a block of this type is delivered whole in its {@code content_block_start} event and
+   * must be echoed back as received: every server-side tool result ({@code web_search_tool_result},
+   * {@code web_fetch_tool_result}, the {@code code_execution_tool_result} that web search's dynamic
+   * filtering produces, …) and {@code redacted_thinking}. Dropping one leaves its {@code
+   * server_tool_use} unpaired, which the API rejects with a 400.
+   */
+  private static boolean arrivesComplete(String type) {
+    return type != null && (type.endsWith("_tool_result") || type.equals("redacted_thinking"));
+  }
+
+  /**
    * Re-parse the raw SSE data line generically and capture the {@code content_block} node verbatim.
    * The typed {@link ContentBlock} record silently drops fields it does not model (e.g. {@code
-   * encrypted_content}), which would corrupt the mandatory verbatim echo of server-tool result
-   * blocks on later turns.
+   * encrypted_content}, a redacted thinking block's {@code data}), which would corrupt the
+   * mandatory verbatim echo of these blocks on later turns.
    */
   @SuppressWarnings("unchecked")
-  private void captureRawServerBlock(Integer index, String json) {
+  private void captureRawBlock(Integer index, String json) {
     try {
       var eventMap = (Map<String, Object>) objectMapper.readValue(json, Map.class);
-      var blockMap = (Map<String, Object>) eventMap.get("content_block");
-      if (blockMap != null) {
-        serverBlocks.put(index, blockMap);
-      }
+      rawBlocks.put(index, (Map<String, Object>) eventMap.get("content_block"));
     } catch (Exception ignored) {
       // Capture failure leaves the block out of RAW_CONTENT; a later echo or pause resume then
       // fails loudly at the API rather than silently sending corrupted content.
@@ -446,9 +461,14 @@ final class AnthropicStreamingIterator implements CloseableIterator<StreamEvent>
     if (stopReason != null) {
       metadata.put(AnthropicModel.STOP_REASON_KEY, stopReason);
     }
-    // Raw content is needed for the verbatim echo after server-tool turns AND for resuming a
-    // pause that landed before the first server-tool block streamed (the protocol permits it).
-    if (sawServerToolBlocks || "pause_turn".equals(stopReason)) {
+    if (stopDetails != null) {
+      putIfPresent(metadata, Response.REFUSAL_CATEGORY_KEY, stopDetails.category());
+      putIfPresent(metadata, Response.REFUSAL_EXPLANATION_KEY, stopDetails.explanation());
+    }
+    // Raw content is needed for the verbatim echo after turns holding raw-captured blocks or
+    // thinking the typed echo would reorder, AND for resuming a pause that landed before the first
+    // server-tool block streamed (the protocol permits it).
+    if (sawRawBlocks || hasInterleavedThinking() || "pause_turn".equals(stopReason)) {
       var rawContent = assembleRawContent();
       if (rawContent != null) {
         metadata.put(AnthropicModel.RAW_CONTENT_KEY, rawContent);
@@ -469,25 +489,58 @@ final class AnthropicStreamingIterator implements CloseableIterator<StreamEvent>
     return new StreamEvent.Done(response);
   }
 
+  private static void putIfPresent(Map<String, String> metadata, String key, String value) {
+    if (value != null) {
+      metadata.put(key, value);
+    }
+  }
+
+  /**
+   * Whether a signed thinking block arrived after text or a client tool call. The typed echo in
+   * {@code AnthropicModel.convertAssistantMessage} hoists every thinking block to the front of the
+   * turn, which would pull such a block — typically the progress note a model writes immediately
+   * before a later parallel tool call — away from the content it introduces. The API requires
+   * thinking blocks back unmodified and in place, so these turns echo their raw content instead.
+   */
+  private boolean hasInterleavedThinking() {
+    var lastThinking =
+        thinkingAccumulators.entrySet().stream()
+            .filter(entry -> !entry.getValue().signature().isEmpty())
+            .mapToInt(Map.Entry::getKey)
+            .max()
+            .orElse(-1);
+    var firstText =
+        textAccumulators.entrySet().stream()
+            .filter(entry -> !entry.getValue().isEmpty())
+            .mapToInt(Map.Entry::getKey)
+            .min()
+            .orElse(Integer.MAX_VALUE);
+    var firstToolCall =
+        completedClientToolBlocks.isEmpty()
+            ? Integer.MAX_VALUE
+            : completedClientToolBlocks.firstKey();
+    return Math.min(firstText, firstToolCall) < lastThinking;
+  }
+
   /**
    * Rebuild the assistant turn's content-block array in original stream-index order for the
-   * verbatim echo the API requires after server-tool turns. Server blocks are the raw captured
-   * JSON; text, thinking, and client tool_use blocks are reconstructed from their accumulators.
-   * Returns {@code null} when serialization fails — the metadata key is then absent and a later
-   * echo or resume fails loudly at the API instead of sending corrupted content.
+   * verbatim echo the API requires. Raw blocks are the captured JSON; text, thinking, and client
+   * tool_use blocks are reconstructed from their accumulators. Returns {@code null} when
+   * serialization fails — the metadata key is then absent and a later echo or resume fails loudly
+   * at the API instead of sending corrupted content.
    */
   private String assembleRawContent() {
     var indices = new TreeSet<Integer>();
     indices.addAll(textAccumulators.keySet());
     indices.addAll(thinkingAccumulators.keySet());
-    indices.addAll(serverBlocks.keySet());
+    indices.addAll(rawBlocks.keySet());
     indices.addAll(completedClientToolBlocks.keySet());
 
     var blocks = new ArrayList<Map<String, Object>>();
     for (var index : indices) {
-      var server = serverBlocks.get(index);
-      if (server != null) {
-        blocks.add(server);
+      var raw = rawBlocks.get(index);
+      if (raw != null) {
+        blocks.add(raw);
         continue;
       }
       var text = textAccumulators.get(index);

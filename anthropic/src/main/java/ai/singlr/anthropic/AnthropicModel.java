@@ -57,7 +57,7 @@ import tools.jackson.databind.json.JsonMapper;
  */
 public class AnthropicModel implements Model {
 
-  private static final String PROVIDER_NAME = "anthropic";
+  static final String PROVIDER_NAME = "anthropic";
   static final String DEFAULT_BASE_URL = "https://api.anthropic.com/v1/messages";
   private static final String API_VERSION = "2023-06-01";
 
@@ -83,10 +83,12 @@ public class AnthropicModel implements Model {
 
   /**
    * Metadata key carrying the assistant turn's full content-block array as raw JSON, set whenever
-   * the turn used Anthropic server tools (web search / web fetch). Those blocks — including each
-   * result's {@code encrypted_content} — must be echoed back <b>verbatim</b> on later turns or the
-   * API rejects the request with a 400; {@link #convertAssistantMessage} replays this array as the
-   * message content when present.
+   * the turn must go back exactly as it arrived: it used Anthropic server tools (web search / web
+   * fetch), held a {@code redacted_thinking} block, or interleaved thinking with text or tool
+   * calls. Those blocks — including each result's {@code encrypted_content} and each thinking
+   * block's position — must be echoed back <b>verbatim</b> on later turns or the API rejects the
+   * request with a 400; {@link #convertAssistantMessage} replays this array as the message content
+   * when present.
    */
   static final String RAW_CONTENT_KEY = "anthropic.rawContent";
 
@@ -622,6 +624,9 @@ public class AnthropicModel implements Model {
    * <ul>
    *   <li>Cause is {@link AnthropicException} — rethrown verbatim (HTTP-side failures parsed from a
    *       non-200 response retain their status code).
+   *   <li>Cause is {@link TransientStreamException} (the API reported a retryable failure such as
+   *       {@code overloaded_error} after the 200 response) — rethrown verbatim so the agent loop's
+   *       bounded retry can re-issue the turn.
    *   <li>Cause is {@link IOException} (typed signal that the SSE socket dropped mid-stream after a
    *       200 response) — promoted to {@link TransientStreamException} so the agent loop's bounded
    *       retry can re-issue the turn; the {@link IOException} is preserved as {@link
@@ -641,6 +646,9 @@ public class AnthropicModel implements Model {
       if (event instanceof StreamEvent.Error(String message, Exception cause)) {
         if (cause instanceof AnthropicException ae) {
           throw ae;
+        }
+        if (cause instanceof TransientStreamException tse) {
+          throw tse;
         }
         if (cause instanceof IOException) {
           throw new TransientStreamException(message, cause, PROVIDER_NAME);
@@ -855,7 +863,6 @@ public class AnthropicModel implements Model {
    * string-content message to single-block form first. Idempotent — re-annotating a block that
    * already carries {@code cache_control} replaces it with the new breakpoint.
    */
-  @SuppressWarnings("unchecked")
   private static void annotateMessageEntryForCaching(
       List<MessagesRequest.MessageEntry> apiMessages, int idx, CacheControl breakpoint) {
     var entry = apiMessages.get(idx);
@@ -868,18 +875,34 @@ public class AnthropicModel implements Model {
       return;
     }
     if (entry.content() instanceof List<?> raw && !raw.isEmpty()) {
-      if (!(raw.getLast() instanceof ContentBlock)) {
-        // Raw-echo content (server-tool turns) must go back verbatim — never annotate it.
+      var tail = cachedTail(raw.getLast(), breakpoint);
+      if (tail == null) {
         return;
       }
-      var blocks = (List<ContentBlock>) raw;
-      var newBlocks = new ArrayList<ContentBlock>(blocks.size());
-      for (var i = 0; i < blocks.size() - 1; i++) {
-        newBlocks.add(blocks.get(i));
-      }
-      newBlocks.add(blocks.getLast().withCacheControl(breakpoint));
+      var newBlocks = new ArrayList<Object>(raw.subList(0, raw.size() - 1));
+      newBlocks.add(tail);
       apiMessages.set(idx, new MessagesRequest.MessageEntry(entry.role(), List.copyOf(newBlocks)));
     }
+  }
+
+  /**
+   * The last block of a message carrying {@code breakpoint}, or {@code null} when the block must
+   * not be annotated. Typed blocks always take the breakpoint. A raw-echo block takes it only when
+   * it is a client {@code tool_use} — the tail of every tool-calling turn, and wire-identical to
+   * its typed form; any other raw block (server-tool results, text with citations) goes back
+   * untouched.
+   */
+  @SuppressWarnings("unchecked")
+  private static Object cachedTail(Object last, CacheControl breakpoint) {
+    if (last instanceof ContentBlock block) {
+      return block.withCacheControl(breakpoint);
+    }
+    if (last instanceof Map<?, ?> raw && "tool_use".equals(raw.get("type"))) {
+      var annotated = new LinkedHashMap<String, Object>((Map<String, Object>) raw);
+      annotated.put("cache_control", breakpoint);
+      return annotated;
+    }
+    return null;
   }
 
   private static String appendSystemText(String existing, String additional) {
@@ -932,7 +955,7 @@ public class AnthropicModel implements Model {
         return new MessagesRequest.MessageEntry("assistant", blocks);
       } catch (Exception e) {
         throw new AnthropicException(
-            "Corrupted server-tool content on assistant message; refusing to echo a truncated"
+            "Corrupted raw content on assistant message; refusing to echo a truncated"
                 + " turn (the API would reject or mis-read it)",
             e);
       }
@@ -1025,13 +1048,13 @@ public class AnthropicModel implements Model {
   /**
    * Translate {@link ThinkingLevel} into the Anthropic API request shape, dispatching by {@link
    * AnthropicModelId.ThinkingShape}. Adaptive-family models use {@code thinking.type=adaptive} +
-   * {@code output_config.effort=...} — except {@code ALWAYS_ON} models, which reject any explicit
-   * thinking config, so the field is omitted and only the effort sibling rides. {@code
-   * ThinkingLevel.NONE} omits the field on shapes where omission means "off", sends an explicit
-   * {@code disabled} on adaptive-default-on models, and omits on always-on models. {@code
-   * ADAPTIVE_WITHOUT_XHIGH} models (Opus 4.6, Sonnet 4.6) fail fast on {@code XHIGH}; {@code
-   * LEGACY_BUDGET} models (Haiku 4.5) use {@code thinking.type=enabled} + {@code budget_tokens} and
-   * fail fast on {@code XHIGH}/{@code MAX}, which have no budget equivalent.
+   * {@code output_config.effort=...}. {@code ThinkingLevel.NONE} takes each shape's lowest setting:
+   * an explicit {@code disabled} on adaptive-default-on models, {@code between_tools} on Sonnet
+   * 5.5, and an omitted field everywhere else — which leaves always-on models thinking at the API's
+   * default effort. {@code ADAPTIVE_WITHOUT_XHIGH} models (Opus 4.6, Sonnet 4.6) fail fast on
+   * {@code XHIGH}; {@code LEGACY_BUDGET} models (Haiku 4.5) use {@code thinking.type=enabled} +
+   * {@code budget_tokens} and fail fast on {@code XHIGH}/{@code MAX}, which have no budget
+   * equivalent.
    *
    * @return both the {@link ThinkingConfig} and any sibling {@link OutputConfig} that must ride on
    *     the request; either may be {@code null}
@@ -1039,9 +1062,7 @@ public class AnthropicModel implements Model {
   private ThinkingSpec buildThinkingSpec() {
     var level = config.thinkingLevel() == null ? ThinkingLevel.NONE : config.thinkingLevel();
     if (level == ThinkingLevel.NONE) {
-      return thinkingShape == AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON
-          ? new ThinkingSpec(ThinkingConfig.disabled(), null)
-          : new ThinkingSpec(null, null);
+      return new ThinkingSpec(thinkingOff(), null);
     }
     if (thinkingShape == AnthropicModelId.ThinkingShape.LEGACY_BUDGET) {
       return new ThinkingSpec(ThinkingConfig.enabled(legacyBudgetTokens(level)), null);
@@ -1062,11 +1083,15 @@ public class AnthropicModel implements Model {
           case XHIGH -> OutputConfig.XHIGH;
           case MAX -> OutputConfig.MAX;
         };
-    var thinking =
-        thinkingShape == AnthropicModelId.ThinkingShape.ALWAYS_ON
-            ? null
-            : ThinkingConfig.adaptive();
-    return new ThinkingSpec(thinking, effort);
+    return new ThinkingSpec(ThinkingConfig.adaptive(), effort);
+  }
+
+  private ThinkingConfig thinkingOff() {
+    return switch (thinkingShape) {
+      case ADAPTIVE_DEFAULT_ON -> ThinkingConfig.disabled();
+      case ADAPTIVE_BETWEEN_TOOLS -> ThinkingConfig.betweenTools();
+      case LEGACY_BUDGET, ADAPTIVE_WITHOUT_XHIGH, ADAPTIVE, ALWAYS_ON -> null;
+    };
   }
 
   private int legacyBudgetTokens(ThinkingLevel level) {
@@ -1089,8 +1114,8 @@ public class AnthropicModel implements Model {
   /**
    * Pair of thinking-related request fields. Translation in {@link #buildThinkingSpec} produces
    * exactly the right combination: legacy models get a {@code ThinkingConfig} alone; adaptive
-   * models get a {@code ThinkingConfig} plus a sibling {@code OutputConfig}; thinking-disabled runs
-   * get nulls in both slots.
+   * models get a {@code ThinkingConfig} plus a sibling {@code OutputConfig}; thinking-off runs get
+   * the shape's lowest {@code ThinkingConfig} (or none) and no {@code OutputConfig}.
    */
   private record ThinkingSpec(ThinkingConfig thinking, OutputConfig outputConfig) {}
 

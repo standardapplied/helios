@@ -6,10 +6,13 @@ package ai.singlr.session.loop;
 
 import ai.singlr.core.common.Strings;
 import ai.singlr.core.model.FinishReason;
+import ai.singlr.core.model.Response;
+import ai.singlr.core.model.Response.Usage;
 import ai.singlr.core.model.TransientStreamException;
 import ai.singlr.session.ResultMessage;
 import ai.singlr.session.SerializedError;
 import ai.singlr.session.SessionLimits;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -30,7 +33,8 @@ import java.util.Optional;
  *       CancellationToken} is signalled by a path other than wall-clock expiry (explicit {@code
  *       close()}, host-initiated cancel).
  *   <li>Turn ceiling — current turn index has reached {@code limits.maxTurns()}.
- *   <li>Refusal — the provider reported {@link FinishReason#CONTENT_FILTER}.
+ *   <li>Refusal — the provider reported {@link FinishReason#CONTENT_FILTER} or {@link
+ *       FinishReason#REFUSAL}.
  *   <li>Provider error — the provider reported {@link FinishReason#ERROR}.
  *   <li>Response truncation — the provider reported {@link FinishReason#LENGTH} (its
  *       max_output_tokens cap fired). Classifying this as terminal avoids the otherwise-silent
@@ -58,37 +62,22 @@ public final class StopClassifier {
    *
    * @param state the session state at the moment of the call; non-null
    * @param limits the session limits in force; non-null
-   * @param finishReason the provider-reported finish reason for the just-completed turn; non-null
-   * @param assistantContent the assistant text the turn produced; non-null but may be empty.
-   *     Surfaced as the result string on {@link ResultMessage.Success} and as the refusal text on
-   *     {@link ResultMessage.Refusal}; empty content forces a placeholder refusal string
-   * @param streamError the throwable that terminated the final stream attempt of the just-
-   *     completed turn, or {@code null} when no error was recorded; carried through the cause chain
-   *     via {@link SerializedError#of(Throwable)} on every error terminal
-   * @param streamAttempts the total number of stream attempts the loop made for this turn; {@code
-   *     >= 1}. Surfaced on {@link ResultMessage.ErrorTransientStream}
+   * @param outcome the just-completed turn; non-null. Its assistant content is surfaced as the
+   *     result string on {@link ResultMessage.Success} and as the refusal text on {@link
+   *     ResultMessage.Refusal}; its stream error is carried through the cause chain via {@link
+   *     SerializedError#of(Throwable)} on every error terminal; its metadata supplies the refusal
+   *     category and explanation when the provider reported them
    * @param hasPendingMessages {@code true} if the steering queue still has user messages at the
    *     iteration boundary
    * @return a terminal {@code ResultMessage} when one applies, or empty to continue
-   * @throws NullPointerException if any non-nullable argument is null
-   * @throws IllegalArgumentException if {@code streamAttempts < 1}
+   * @throws NullPointerException if any argument is null
    */
   public Optional<ResultMessage> classify(
-      SessionState state,
-      SessionLimits limits,
-      FinishReason finishReason,
-      String assistantContent,
-      Throwable streamError,
-      int streamAttempts,
-      boolean hasPendingMessages) {
+      SessionState state, SessionLimits limits, TurnOutcome outcome, boolean hasPendingMessages) {
     Objects.requireNonNull(state, "state must not be null");
     Objects.requireNonNull(limits, "limits must not be null");
-    Objects.requireNonNull(finishReason, "finishReason must not be null");
-    Objects.requireNonNull(assistantContent, "assistantContent must not be null");
-    if (streamAttempts < 1) {
-      throw new IllegalArgumentException("streamAttempts must be >= 1, got " + streamAttempts);
-    }
-
+    Objects.requireNonNull(outcome, "outcome must not be null");
+    var assistantContent = outcome.assistantContent();
     if (state.elapsed().compareTo(limits.maxWallClock()) > 0) {
       return Optional.of(
           new ResultMessage.ErrorMaxWallClock(
@@ -126,17 +115,12 @@ public final class StopClassifier {
               state.elapsed()));
     }
 
-    return switch (finishReason) {
-      case CONTENT_FILTER, REFUSAL ->
-          Optional.of(
-              new ResultMessage.Refusal(
-                  state.sessionId(),
-                  Strings.isBlank(assistantContent) ? "[refused without text]" : assistantContent,
-                  state.usage(),
-                  state.cost(),
-                  state.elapsed()));
+    return switch (outcome.finishReason()) {
+      case CONTENT_FILTER, REFUSAL -> Optional.of(buildRefusal(state, outcome));
       case ERROR ->
-          Optional.of(buildErrorTerminal(state, assistantContent, streamError, streamAttempts));
+          Optional.of(
+              buildErrorTerminal(
+                  state, assistantContent, outcome.streamError(), outcome.streamAttempts()));
       case STOP ->
           hasPendingMessages
               ? Optional.empty()
@@ -163,6 +147,57 @@ public final class StopClassifier {
                   state.elapsed()));
       case TOOL_CALLS -> Optional.empty();
     };
+  }
+
+  /**
+   * Classify a turn described by its loose fields.
+   *
+   * @param state the session state at the moment of the call; non-null
+   * @param limits the session limits in force; non-null
+   * @param finishReason the provider-reported finish reason for the just-completed turn; non-null
+   * @param assistantContent the assistant text the turn produced; non-null but may be empty
+   * @param streamError the throwable that terminated the final stream attempt, or {@code null}
+   * @param streamAttempts the total number of stream attempts made for this turn; {@code >= 1}
+   * @param hasPendingMessages {@code true} if the steering queue still has user messages
+   * @return a terminal {@code ResultMessage} when one applies, or empty to continue
+   * @throws NullPointerException if any non-nullable argument is null
+   * @throws IllegalArgumentException if {@code streamAttempts < 1}
+   * @deprecated use {@link #classify(SessionState, SessionLimits, TurnOutcome, boolean)}; the loose
+   *     fields cannot carry the provider metadata a refusal's category rides on
+   */
+  @Deprecated(since = "2.12.0")
+  public Optional<ResultMessage> classify(
+      SessionState state,
+      SessionLimits limits,
+      FinishReason finishReason,
+      String assistantContent,
+      Throwable streamError,
+      int streamAttempts,
+      boolean hasPendingMessages) {
+    return classify(
+        state,
+        limits,
+        new TurnOutcome(
+            finishReason, assistantContent, Usage.of(0, 0), Map.of(), streamError, streamAttempts),
+        hasPendingMessages);
+  }
+
+  /**
+   * Build the terminal for a refused turn. The refusal text is the provider's explanation when it
+   * gave one — any assistant text on such a turn is output cut short by the refusal — else the
+   * assistant's own words, else a placeholder; the category is whatever the provider reported under
+   * {@link Response#REFUSAL_CATEGORY_KEY}.
+   */
+  private static ResultMessage buildRefusal(SessionState state, TurnOutcome outcome) {
+    var explanation = outcome.metadata().get(Response.REFUSAL_EXPLANATION_KEY);
+    return new ResultMessage.Refusal(
+        state.sessionId(),
+        Strings.orDefault(
+            explanation, Strings.orDefault(outcome.assistantContent(), "[refused without text]")),
+        state.usage(),
+        state.cost(),
+        state.elapsed(),
+        outcome.metadata().get(Response.REFUSAL_CATEGORY_KEY));
   }
 
   /**
