@@ -4,6 +4,11 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [2.12.0] — 2026-10-01 — Claude Opus 5.5, Sonnet 5.5, the GPT-6 family and hardened confinement
+
+The last 2.x feature release. 3.0 renames the root package and removes the compatibility
+shims 2.x accumulated.
+
 ### Added
 
 - Anthropic: `claude-opus-5-5` and `claude-sonnet-5-5` (1M context, 128K output). Opus 5.5 always
@@ -74,6 +79,15 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - Sessions: a refused turn (`FinishReason.REFUSAL` / `CONTENT_FILTER`) no longer runs tool calls it
   had emitted before the refusal. The loop used to dispatch them and continue, which executed
   output the provider says to discard and lost the refusal.
+- `CancellationToken` registration is now linearizable and exactly-once. A private lock guards the
+  reason and the pending-registration set, so a callback registered while another thread is
+  cancelling can no longer be dropped (the old `CopyOnWriteArrayList` snapshot-then-clear lost
+  registrations that landed between the two). Callbacks still run outside the lock, so reentrant
+  register/remove/cancel from a callback cannot deadlock. Clarified contract: `Registration.remove()`
+  ordered after the winning `cancel` is a no-op that never blocks on a running callback; a callback
+  throwing an `Error` no longer skips the remaining callbacks — they all run, then the first `Error`
+  is rethrown with later ones attached as suppressed, matching the session loop's "Errors escape"
+  rule. No public-surface change.
 
 ### Compatibility
 
@@ -133,18 +147,6 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   within the workspace. Memory reads require valid UTF-8; unencodable writes fail before opening
   a target or creating directories. `Glob` no longer lists symlinks. Confinement is not a snapshot
   or protection against hard links, mount manipulation or in-place edits by another writer.
-
-### Fixed
-
-- `CancellationToken` registration is now linearizable and exactly-once. A private lock guards the
-  reason and the pending-registration set, so a callback registered while another thread is
-  cancelling can no longer be dropped (the old `CopyOnWriteArrayList` snapshot-then-clear lost
-  registrations that landed between the two). Callbacks still run outside the lock, so reentrant
-  register/remove/cancel from a callback cannot deadlock. Clarified contract: `Registration.remove()`
-  ordered after the winning `cancel` is a no-op that never blocks on a running callback; a callback
-  throwing an `Error` no longer skips the remaining callbacks — they all run, then the first `Error`
-  is rethrown with later ones attached as suppressed, matching the session loop's "Errors escape"
-  rule. No public-surface change.
 
 ## [2.11.0] — 2026-09-04 — Claude Fable 5.1, Mythos 5.1 and Gemini 3.8 Flash
 
