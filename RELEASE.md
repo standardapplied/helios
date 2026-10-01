@@ -6,7 +6,7 @@ This project publishes to Maven Central via the [Central Publishing Portal](http
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| **CI** | Push to `main`, pull requests | Build, test, coverage |
+| **CI** | Push to `main`, pull requests | Build, test, coverage, quality gate |
 | **Release** | Push to `release/**`, manual dispatch | Build, test, sign, deploy to Central Portal |
 
 ## Published Modules

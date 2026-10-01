@@ -35,6 +35,86 @@ Production-grade agentic framework for Java. Simple, explicit, no magic.
 
 **CRITICAL** Talk to me before making design decisions
 
+## Quality gate
+
+`mvn verify` fails on complexity, duplication and architecture violations, for main and test
+code. Every 3.0 spec's work passes the gate without adding exclusions.
+
+| Tool | Enforces | Where |
+|---|---|---|
+| PMD (`maven-pmd-plugin`, every module) | Per-method and per-class complexity, size and coupling limits; no wildcard imports | `config/quality/pmd-main.xml`, `config/quality/pmd-test.xml` |
+| CPD (same plugin, aggregated at the reactor root) | No duplicated block of 100 tokens or more, main and test code, within or across modules | plugin configuration in the root `pom.xml` |
+| ArchUnit (`architecture` module) | One way to do each thing: module dependencies, naming, single owners of a pattern | `architecture/src/test/java/.../ArchitectureRulesTest.java` |
+
+### Limits
+
+"Fails at" is the first measured value that breaks the build.
+
+| PMD rule | Measures | Fails at |
+|---|---|---|
+| `CognitiveComplexity` | Cognitive complexity of a method | 15 |
+| `CyclomaticComplexity` | Cyclomatic complexity of a method | 15 |
+| `CyclomaticComplexity` | Summed cyclomatic complexity of a class; main code only | 80 |
+| `NPathComplexity` | Acyclic execution paths through a method | 200 |
+| `AvoidDeeplyNestedIfStmts` | Depth of nested `if` statements | 3 |
+| `NcssCount` | Statements in a method | 60 |
+| `NcssCount` | Statements in a class — the "no class over 1000 lines" rule, at about 0.6 statements per code line | 600 |
+| `ExcessiveParameterList` | Parameters of a method or constructor | 10 |
+| `TooManyFields` | Non-static, non-final fields of a class | 16 |
+| `CouplingBetweenObjects` | Distinct types a class uses in fields, locals and return types | 21 |
+| `SwitchDensity` | Statements per `switch` label | 10 |
+| `GodClass` | Weighted methods (WMC ≥ 47) with foreign data access (ATFD > 5) and low cohesion (TCC < 1/3); main code only | all three |
+| `TooManyMethods` | Methods of a class, not counting `get*`, `set*`, `is*` and `with*`; main code only | 11 |
+| `OnDemandImport` | `import a.b.*` and `import static a.B.*` | 1 |
+
+A test class is expected to have many methods and a large summed complexity, so the three "main
+code only" rules are absent from `pmd-test.xml`; everything else applies to tests unchanged.
+PMD resolves types against each module's classpath, and a file it cannot analyse fails the build.
+
+ArchUnit rules today: `core` depends on nothing outside the JDK; a provider module depends on
+`core` only; `session` does not depend on a provider, `runtime` or `persistence`; a
+`java.net.http.HttpClient` is built only by `core.common.HttpClientFactory`; no top-level type is
+named `*Util`, `*Utils`, `*Helper`, `*Helpers` or `*Manager`; `System.out`, `System.err` and
+`printStackTrace` are used only in `repl.sandbox` and the example modules.
+
+### Running it
+
+```bash
+mvn -B clean verify javadoc:jar                                                      # everything, as CI does
+mvn -B verify -Dtest=ArchitectureRulesTest -Dsurefire.failIfNoSpecifiedTests=false   # the gate, without the test suite
+mvn -B verify -DskipTests                                                            # PMD and CPD only
+```
+
+Never add `-q`: the lines that say what to fix (`PMD Failure: <class>:<line> Rule:<rule> <message>`,
+`CPD Failure: Found N lines of duplicated code at locations: ...`) are logged as warnings and
+only the summary as an error. Reports land in `target/pmd.xml` (main), `target/pmd-test/pmd.xml`
+(tests) and, at the root, `target/cpd/cpd.xml`. CPD is bound to the reactor root and reads the
+sources of the modules in the reactor, so only a whole-reactor build checks duplication; a
+`-pl <module>` or `-N` build does not.
+
+### Rules of the gate
+
+- **Fix the code, never the gate.** An exclusion is never added, and a limit never raised, to
+  make a change pass.
+- **No suppression in source.** Neither PMD's suppression comment marker nor a
+  `@SuppressWarnings` annotation naming a PMD rule; `git grep` for both stays empty.
+- **`config/quality/pmd-exclusions.properties`** (`fully.qualified.Class=Rule1,Rule2`; a nested
+  class is `Outer.Nested`). Its burn-down section lists what violated when the gate was
+  installed, grouped by the follow-up spec that removes it; entries may only be removed. Its
+  accepted section holds only entries a spec names explicitly, each with a comment stating why.
+- **`config/quality/cpd-exclusions.txt`** (one comma-separated group of class names per line, no
+  blank lines). A line silences every duplication among exactly the classes it names, so lines
+  may only be removed. Duplication is never accepted; the file is deleted when it is empty.
+- **Adding an ArchUnit rule.** A spec that establishes or consolidates a pattern adds one `@Test`
+  method to `ArchitectureRulesTest`, named for the rule, with a `because(...)` clause that states
+  the one allowed way. A new library module is added to `architecture/pom.xml` as a test
+  dependency so the rules see it.
+
+The rule sets and exclusion files are resolved through `${maven.multiModuleProjectDirectory}`,
+which Maven sets to the nearest ancestor directory holding `.mvn/` — that is why the otherwise
+empty `.mvn/maven.config` is checked in. The plugin wiring constraints are commented in the root
+`pom.xml`.
+
 ## Architecture
 
 ```
@@ -49,6 +129,8 @@ helios/
 ├── onnx/                           # Local embeddings via ONNX Runtime
 ├── persistence/                    # PostgreSQL persistence — PgTraceStore + PgDurability via Helidon DbClient
 ├── testing/                        # helios-testing — ScriptedModel test double for deterministic CI evals
+├── architecture/                   # helios-architecture — ArchUnit rules over every library module; build-only, never deployed
+├── config/quality/                 # PMD rule sets + PMD/CPD exclusion files shared by every module
 └── examples/
     ├── session-demo/               # Reference: full session run against Gemini with a real workspace
     ├── codeact-demo/               # AgentSession + CodeActPreset — Java-as-action loop against Gemini
