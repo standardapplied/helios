@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.schema;
+package com.standardapplied.helios.core.schema;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -12,10 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.Confidence;
-import ai.singlr.core.common.Provenanced;
-import ai.singlr.core.common.SubmitValidator;
-import ai.singlr.core.common.ValidationResult;
+import com.standardapplied.helios.core.common.Confidence;
+import com.standardapplied.helios.core.common.Provenanced;
+import com.standardapplied.helios.core.common.SubmitValidator;
+import com.standardapplied.helios.core.common.ValidationResult;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -441,7 +441,7 @@ class StructuredContentParserTest {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     var result =
-        (ai.singlr.core.common.Provenanced<Bag>)
+        (com.standardapplied.helios.core.common.Provenanced<Bag>)
             StructuredContentParser.parse(content, schema, adapter);
 
     assertEquals(new Bag("Alice", 5), result.output());

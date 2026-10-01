@@ -34,7 +34,7 @@ jobs:
       - name: Refuse to deploy an already-published version
         run: |
           V="${{ steps.version.outputs.version }}"
-          URL="https://repo.maven.apache.org/maven2/ai/singlr/helios-core/${V}/helios-core-${V}.pom"
+          URL="https://repo.maven.apache.org/maven2/com/standardapplied/helios-core/${V}/helios-core-${V}.pom"
           if curl -sfI "$URL" > /dev/null; then
             echo "::error::helios ${V} is already published to Maven Central — bump the version instead of re-releasing. Refusing to create a duplicate deployment."
             exit 1

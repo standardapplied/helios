@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.runtime;
+package com.standardapplied.helios.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -11,12 +11,12 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.session.AgentSession;
-import ai.singlr.session.SessionOptions;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.SessionOptions;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -200,8 +200,8 @@ final class SessionRegistryTest {
   void builderWithAllOptionsAppliesEverySetter() {
     // Exercise every Builder setter in one go so a missed default propagation surfaces here.
     var closeCount = new AtomicInteger();
-    java.util.function.Function<ai.singlr.session.SessionOptions, AgentSession> customFactory =
-        opts -> new TrackingSession(opts.sessionId(), closeCount);
+    java.util.function.Function<com.standardapplied.helios.session.SessionOptions, AgentSession>
+        customFactory = opts -> new TrackingSession(opts.sessionId(), closeCount);
     var clock =
         java.time.Clock.fixed(
             java.time.Instant.parse("2026-05-16T20:00:00Z"), java.time.ZoneOffset.UTC);
@@ -398,12 +398,12 @@ final class SessionRegistryTest {
   }
 
   /** Synthesize a terminal ResultMessage so the registry timestamps termination. */
-  private static ai.singlr.session.ResultMessage stubTerminal(String sessionId) {
-    return new ai.singlr.session.ResultMessage.Success(
+  private static com.standardapplied.helios.session.ResultMessage stubTerminal(String sessionId) {
+    return new com.standardapplied.helios.session.ResultMessage.Success(
         sessionId,
         "ok",
-        ai.singlr.core.model.Response.Usage.of(0, 0),
-        ai.singlr.core.common.CostEstimate.zero(),
+        com.standardapplied.helios.core.model.Response.Usage.of(0, 0),
+        com.standardapplied.helios.core.common.CostEstimate.zero(),
         java.time.Duration.ZERO);
   }
 
@@ -440,8 +440,9 @@ final class SessionRegistryTest {
 
     private final String sessionId;
     private final AtomicInteger closeCount;
-    private final java.util.concurrent.CompletableFuture<ai.singlr.session.ResultMessage> future =
-        new java.util.concurrent.CompletableFuture<>();
+    private final java.util.concurrent.CompletableFuture<
+            com.standardapplied.helios.session.ResultMessage>
+        future = new java.util.concurrent.CompletableFuture<>();
 
     TrackingSession(String sessionId, AtomicInteger closeCount) {
       this.sessionId = sessionId;
@@ -449,18 +450,20 @@ final class SessionRegistryTest {
     }
 
     @Override
-    public void send(ai.singlr.session.UserMessage message) {}
+    public void send(com.standardapplied.helios.session.UserMessage message) {}
 
     @Override
     public void interrupt(String reason) {}
 
     @Override
-    public java.util.concurrent.Flow.Publisher<ai.singlr.session.QueryEvent> events() {
+    public java.util.concurrent.Flow.Publisher<com.standardapplied.helios.session.QueryEvent>
+        events() {
       return s -> {};
     }
 
     @Override
-    public java.util.concurrent.CompletableFuture<ai.singlr.session.ResultMessage> result() {
+    public java.util.concurrent.CompletableFuture<com.standardapplied.helios.session.ResultMessage>
+        result() {
       return future;
     }
 
@@ -480,6 +483,8 @@ final class SessionRegistryTest {
     }
 
     @Override
-    public void answer(String questionId, ai.singlr.session.ask.AskUserQuestionResponse response) {}
+    public void answer(
+        String questionId,
+        com.standardapplied.helios.session.ask.AskUserQuestionResponse response) {}
   }
 }

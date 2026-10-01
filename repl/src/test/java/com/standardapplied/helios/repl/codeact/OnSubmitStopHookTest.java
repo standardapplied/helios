@@ -1,18 +1,18 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.session.hooks.HookContext;
-import ai.singlr.session.hooks.HookOutcome;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookOutcome;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 

@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.tools;
+package com.standardapplied.helios.session.tools;
 
-import ai.singlr.core.tool.Tool;
+import com.standardapplied.helios.core.tool.Tool;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,8 +14,8 @@ import java.util.Optional;
 /**
  * Immutable registry of {@link ToolBinding}s addressable by tool name. One instance per session,
  * built from the bindings supplied via {@link #ToolRegistry(java.util.List)} or via {@link
- * ai.singlr.session.SessionOptions.Builder#withTools(ToolRegistry)} and threaded through the agent
- * loop.
+ * com.standardapplied.helios.session.SessionOptions.Builder#withTools(ToolRegistry)} and threaded
+ * through the agent loop.
  *
  * <p>Bindings are stored in registration order. Duplicate tool names are rejected at construction
  * time — the agent loop, hooks, and the model all key off the tool name, so collisions would let

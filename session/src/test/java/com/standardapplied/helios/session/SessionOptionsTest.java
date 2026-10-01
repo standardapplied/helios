@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -12,20 +12,20 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.CostCalculator;
-import ai.singlr.core.common.CostEstimate;
-import ai.singlr.core.context.TokenCounter;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.session.execution.NoopExecutionProvider;
-import ai.singlr.session.hooks.Hook;
-import ai.singlr.session.hooks.HookOutcome;
-import ai.singlr.session.hooks.PreToolUseHook;
-import ai.singlr.session.permissions.Permission;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.context.TokenCounter;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.execution.NoopExecutionProvider;
+import com.standardapplied.helios.session.hooks.Hook;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.PreToolUseHook;
+import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;

@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.core.model;
+package com.standardapplied.helios.core.model;
 
-import ai.singlr.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.Response.Usage;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -26,7 +26,8 @@ import java.util.Objects;
  *
  * Coexists with the iterator-shaped {@link StreamEvent} that older non-session callers consume. The
  * v2 session loop consumes {@code Flow.Publisher<ModelChunk>} via {@link
- * Model#chatStream(java.util.List, java.util.List, ai.singlr.core.runtime.CancellationToken)}.
+ * Model#chatStream(java.util.List, java.util.List,
+ * com.standardapplied.helios.core.runtime.CancellationToken)}.
  */
 public sealed interface ModelChunk
     permits ModelChunk.TextDelta,

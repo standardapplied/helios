@@ -1,13 +1,13 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic;
+package com.standardapplied.helios.anthropic;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.model.ModelProvider;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.ModelProvider;
 
 /**
  * ModelProvider implementation for Anthropic's Messages API.

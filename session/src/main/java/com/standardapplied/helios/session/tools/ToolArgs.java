@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.tools;
+package com.standardapplied.helios.session.tools;
 
 import java.util.Map;
 
@@ -38,7 +38,8 @@ public final class ToolArgs {
   /**
    * Extract a string argument that defaults to the empty string. Useful for "required, surfaced as
    * tool error if missing" args — the executor compares {@code stringArg(args, "x")} against {@code
-   * ""} or uses {@link ai.singlr.core.common.Strings#isBlank(String) Strings.isBlank} to decide.
+   * ""} or uses {@link com.standardapplied.helios.core.common.Strings#isBlank(String)
+   * Strings.isBlank} to decide.
    *
    * @param args the tool's argument map; non-null
    * @param name the argument name; non-null

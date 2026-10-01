@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl;
+package com.standardapplied.helios.repl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.singlr.repl.host.HostFunction;
-import ai.singlr.repl.sandbox.SandboxFactory;
+import com.standardapplied.helios.repl.host.HostFunction;
+import com.standardapplied.helios.repl.sandbox.SandboxFactory;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;

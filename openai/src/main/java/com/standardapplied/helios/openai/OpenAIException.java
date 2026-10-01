@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.openai;
+package com.standardapplied.helios.openai;
 
-import ai.singlr.core.model.ProviderException;
+import com.standardapplied.helios.core.model.ProviderException;
 
 /** Exception thrown when OpenAI API operations fail. */
 public class OpenAIException extends ProviderException {

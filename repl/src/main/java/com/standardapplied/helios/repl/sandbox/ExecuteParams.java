@@ -1,17 +1,18 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
 /**
  * Per-call sandbox-execution overrides that are independent of the {@link ExecutionRequest} body.
  * Today this carries the bindings-snapshot caps; future per-call telemetry knobs can live here too
  * without expanding the {@link ExecutionRequest} record.
  *
- * <p>{@link ai.singlr.repl.ReplSession} builds one of these from the active {@link
- * ai.singlr.repl.ReplConfig}; standalone callers can stay on {@link #DEFAULT} or {@link #DISABLED}.
+ * <p>{@link com.standardapplied.helios.repl.ReplSession} builds one of these from the active {@link
+ * com.standardapplied.helios.repl.ReplConfig}; standalone callers can stay on {@link #DEFAULT} or
+ * {@link #DISABLED}.
  *
  * @param captureBindings whether the sandbox should snapshot user-declared variables after this
  *     execute and return them in {@link ExecutionResult#bindings()}

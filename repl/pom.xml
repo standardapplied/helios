@@ -5,9 +5,9 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>ai.singlr</groupId>
+        <groupId>com.standardapplied</groupId>
         <artifactId>helios</artifactId>
-        <version>2.12.0</version>
+        <version>3.0.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>helios-repl</artifactId>
@@ -15,17 +15,17 @@
     <description>Sandboxed code execution for RLM patterns</description>
 
     <properties>
-        <helios.test.native-access>ALL-UNNAMED,ai.singlr.session</helios.test.native-access>
+        <helios.test.native-access>ALL-UNNAMED,com.standardapplied.helios.session</helios.test.native-access>
     </properties>
 
     <dependencies>
         <dependency>
-            <groupId>ai.singlr</groupId>
+            <groupId>com.standardapplied</groupId>
             <artifactId>helios-core</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>ai.singlr</groupId>
+            <groupId>com.standardapplied</groupId>
             <artifactId>helios-session</artifactId>
             <version>${project.version}</version>
         </dependency>

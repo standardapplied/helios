@@ -1,14 +1,14 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Citation;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.session.ask.AskUserQuestionRequest;
-import ai.singlr.session.ask.AskUserQuestionResponse;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
+import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -177,9 +177,10 @@ public sealed interface QueryEvent
   }
 
   /**
-   * An {@link ai.singlr.session.hooks.OnUserMessageHook OnUserMessageHook} dropped a user message
-   * via {@link ai.singlr.session.hooks.HookOutcome.Block}. The message never reaches the model; the
-   * loop continues with whatever else was queued, or stays idle until the next {@code send}.
+   * An {@link com.standardapplied.helios.session.hooks.OnUserMessageHook OnUserMessageHook} dropped
+   * a user message via {@link com.standardapplied.helios.session.hooks.HookOutcome.Block}. The
+   * message never reaches the model; the loop continues with whatever else was queued, or stays
+   * idle until the next {@code send}.
    *
    * <p>Subscribers (UIs, audit logs) use this event to surface the drop — without it, a blocked
    * message looks identical to a user who never sent anything.
@@ -290,10 +291,10 @@ public sealed interface QueryEvent
 
   /**
    * A model-stream attempt failed with a recoverable transport error ({@link
-   * ai.singlr.core.model.TransientStreamException}) and the agent loop is about to retry the turn.
-   * Fires after each failed attempt, before the configured back-off delay; the next attempt is the
-   * {@code attemptNumber + 1}-th overall. Subscribers can use this to surface "retrying…" UI
-   * affordances and to correlate per-attempt token usage in their own ledgers.
+   * com.standardapplied.helios.core.model.TransientStreamException}) and the agent loop is about to
+   * retry the turn. Fires after each failed attempt, before the configured back-off delay; the next
+   * attempt is the {@code attemptNumber + 1}-th overall. Subscribers can use this to surface
+   * "retrying…" UI affordances and to correlate per-attempt token usage in their own ledgers.
    *
    * <p>Does <em>not</em> fire on the final exhausted attempt — that one terminates the session via
    * {@link ResultMessage.ErrorTransientStream} which is surfaced through the subsequent {@link
@@ -307,7 +308,7 @@ public sealed interface QueryEvent
    * @param backoff the wall-clock delay the loop will wait before issuing the next attempt;
    *     non-null and non-negative
    * @param providerName the provider's short identifier carried from {@link
-   *     ai.singlr.core.model.TransientStreamException#providerName()}; non-blank
+   *     com.standardapplied.helios.core.model.TransientStreamException#providerName()}; non-blank
    * @param error the serialised throwable that caused this attempt to fail, with cause chain intact
    */
   record TurnRetried(
@@ -393,7 +394,8 @@ public sealed interface QueryEvent
   /**
    * A tool call completed. Carries the originating {@link ToolCall} so subscribers can correlate
    * dispatch and result without joining across events, plus the {@link
-   * ai.singlr.core.tool.ToolResult ToolResult} the tool produced (success or failure).
+   * com.standardapplied.helios.core.tool.ToolResult ToolResult} the tool produced (success or
+   * failure).
    *
    * @param sessionId the session id
    * @param turnIndex the turn index in which the call ran
@@ -406,7 +408,7 @@ public sealed interface QueryEvent
       long turnIndex,
       Instant timestamp,
       ToolCall call,
-      ai.singlr.core.tool.ToolResult result)
+      com.standardapplied.helios.core.tool.ToolResult result)
       implements QueryEvent {
 
     public ToolResult {
@@ -417,9 +419,9 @@ public sealed interface QueryEvent
   }
 
   /**
-   * A {@link ai.singlr.session.hooks.PreToolUseHook PreToolUseHook} blocked a tool call. The tool
-   * was not dispatched; the loop substitutes a synthetic tool result describing the block (so the
-   * model sees its action refused with a reason).
+   * A {@link com.standardapplied.helios.session.hooks.PreToolUseHook PreToolUseHook} blocked a tool
+   * call. The tool was not dispatched; the loop substitutes a synthetic tool result describing the
+   * block (so the model sees its action refused with a reason).
    *
    * @param sessionId the session id
    * @param turnIndex the turn index in which the block fired
@@ -452,9 +454,9 @@ public sealed interface QueryEvent
   }
 
   /**
-   * A {@link ai.singlr.session.hooks.PreToolUseHook PreToolUseHook} mutated a tool call's
-   * arguments. The loop dispatches the tool with {@code inputAfter} instead of {@code inputBefore}.
-   * Both maps are surfaced for auditability.
+   * A {@link com.standardapplied.helios.session.hooks.PreToolUseHook PreToolUseHook} mutated a tool
+   * call's arguments. The loop dispatches the tool with {@code inputAfter} instead of {@code
+   * inputBefore}. Both maps are surfaced for auditability.
    *
    * @param sessionId the session id
    * @param turnIndex the turn index in which the mutation fired
@@ -489,12 +491,14 @@ public sealed interface QueryEvent
   }
 
   /**
-   * A hook fired and produced a non-{@link ai.singlr.session.hooks.HookOutcome.Continue Continue}
-   * outcome. Subscribers can drive UI/audit off this event without polling the registry.
+   * A hook fired and produced a non-{@link
+   * com.standardapplied.helios.session.hooks.HookOutcome.Continue Continue} outcome. Subscribers
+   * can drive UI/audit off this event without polling the registry.
    *
    * <p>Continue outcomes are suppressed by design — surfacing every no-op would drown the stream.
-   * Observe-only {@link ai.singlr.session.hooks.OnStreamEventHook OnStreamEventHook} firings are
-   * also suppressed (the events they observe are already on the stream).
+   * Observe-only {@link com.standardapplied.helios.session.hooks.OnStreamEventHook
+   * OnStreamEventHook} firings are also suppressed (the events they observe are already on the
+   * stream).
    *
    * @param sessionId the session id
    * @param turnIndex the turn index in which the hook fired
@@ -502,9 +506,9 @@ public sealed interface QueryEvent
    * @param hookName the hook's name; non-null and non-blank
    * @param phase the lifecycle phase the hook was bound to (e.g. {@code "PreToolUseHook"});
    *     non-null and non-blank
-   * @param outcomeKind the simple class name of the {@link ai.singlr.session.hooks.HookOutcome
-   *     HookOutcome} subtype returned (e.g. {@code "Block"}, {@code "Inject"}); non-null and
-   *     non-blank
+   * @param outcomeKind the simple class name of the {@link
+   *     com.standardapplied.helios.session.hooks.HookOutcome HookOutcome} subtype returned (e.g.
+   *     {@code "Block"}, {@code "Inject"}); non-null and non-blank
    */
   record HookFired(
       String sessionId,
@@ -535,9 +539,10 @@ public sealed interface QueryEvent
   /**
    * The agent emitted a structured {@code AskUserQuestion} request and is awaiting an answer. The
    * host (HTTP endpoint, UI, CLI prompter) renders the question, collects the user's choice, and
-   * calls {@link ai.singlr.session.AgentSession#answer(String, AskUserQuestionResponse)} with the
-   * matching {@code questionId}. The agent loop blocks the tool's virtual thread on the pending
-   * future until {@code answer} is called or the session is cancelled.
+   * calls {@link com.standardapplied.helios.session.AgentSession#answer(String,
+   * AskUserQuestionResponse)} with the matching {@code questionId}. The agent loop blocks the
+   * tool's virtual thread on the pending future until {@code answer} is called or the session is
+   * cancelled.
    *
    * @param sessionId the session id
    * @param turnIndex the turn index in which the question was asked

@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -10,15 +10,15 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.Role;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.session.loop.SessionState;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.Role;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.loop.SessionState;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -159,7 +159,7 @@ final class DropMiddleToolResultsCompactorTest {
     assertEquals(history.get(0).content(), out.get(0).content());
     assertEquals(history.get(1).content(), out.get(1).content());
     // The middle is replaced with a summary user message prefixed with the marker.
-    assertEquals(ai.singlr.core.model.Role.USER, out.get(2).role());
+    assertEquals(com.standardapplied.helios.core.model.Role.USER, out.get(2).role());
     assertTrue(out.get(2).content().startsWith("[Earlier context summary]"));
     assertTrue(out.get(2).content().contains("the gist"));
     // The last two tail messages are preserved exactly.
@@ -256,7 +256,7 @@ final class DropMiddleToolResultsCompactorTest {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             for (var m : messages) {
-              if (m.role() == ai.singlr.core.model.Role.SYSTEM) {
+              if (m.role() == com.standardapplied.helios.core.model.Role.SYSTEM) {
                 observed.add(m.content());
               }
             }

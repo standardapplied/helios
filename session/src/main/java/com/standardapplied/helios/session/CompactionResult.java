@@ -1,17 +1,18 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Response.Usage;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Response.Usage;
 import java.util.List;
 import java.util.Objects;
 
 /**
- * Result of one {@link ContextCompactor#compact(List, ai.singlr.session.loop.SessionState)} call.
+ * Result of one {@link ContextCompactor#compact(List,
+ * com.standardapplied.helios.session.loop.SessionState)} call.
  *
  * <p>Carries the new history, the usage consumed by the compaction step itself, and the identifier
  * of the model the compactor invoked to spend that usage. Compactors that make a model call (e.g.
@@ -40,10 +41,10 @@ public record CompactionResult(List<Message> history, Usage usage, String modelI
    * Canonical constructor.
    *
    * <p>{@code history} is NOT defensively copied here — {@code AgentLoop} calls {@link
-   * ai.singlr.session.loop.SessionState#replaceHistory(List)} which performs its own copy, and
-   * leaving identity intact lets compactors signal "no-op" by returning the supplied list
-   * unchanged. Implementations that build a fresh history should return an immutable list (e.g. via
-   * {@link List#copyOf(java.util.Collection)}).
+   * com.standardapplied.helios.session.loop.SessionState#replaceHistory(List)} which performs its
+   * own copy, and leaving identity intact lets compactors signal "no-op" by returning the supplied
+   * list unchanged. Implementations that build a fresh history should return an immutable list
+   * (e.g. via {@link List#copyOf(java.util.Collection)}).
    *
    * @throws NullPointerException if any argument is null
    * @throws IllegalArgumentException if {@code usage} reports non-zero tokens but {@code modelId}

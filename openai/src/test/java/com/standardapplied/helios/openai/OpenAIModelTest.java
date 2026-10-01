@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.openai;
+package com.standardapplied.helios.openai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -12,26 +12,26 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.HttpClientFactory;
-import ai.singlr.core.model.FileReference;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.InlineFile;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.model.Role;
-import ai.singlr.core.model.ThinkingLevel;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.model.ToolChoice;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.schema.RawOutputCapturePolicy;
-import ai.singlr.core.schema.StructuredOutputParseException;
-import ai.singlr.core.tool.ParameterType;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolParameter;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.openai.api.ContentPart;
-import ai.singlr.openai.api.InputItem;
-import ai.singlr.openai.api.ResponsesRequest;
+import com.standardapplied.helios.core.common.HttpClientFactory;
+import com.standardapplied.helios.core.model.FileReference;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.InlineFile;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Role;
+import com.standardapplied.helios.core.model.ThinkingLevel;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.model.ToolChoice;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.core.schema.StructuredOutputParseException;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolParameter;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.openai.api.ContentPart;
+import com.standardapplied.helios.openai.api.InputItem;
+import com.standardapplied.helios.openai.api.ResponsesRequest;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.URI;

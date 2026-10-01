@@ -1,17 +1,17 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
-import ai.singlr.core.common.Ids;
-import ai.singlr.core.runtime.ToolCallJournal;
-import ai.singlr.core.runtime.ToolCallRecord;
-import ai.singlr.core.runtime.ToolCallStatus;
-import ai.singlr.persistence.mapper.JsonbMapper;
-import ai.singlr.persistence.mapper.ToolCallRecordMapper;
-import ai.singlr.persistence.sql.ToolCallJournalSql;
+import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.runtime.ToolCallJournal;
+import com.standardapplied.helios.core.runtime.ToolCallRecord;
+import com.standardapplied.helios.core.runtime.ToolCallStatus;
+import com.standardapplied.helios.persistence.mapper.JsonbMapper;
+import com.standardapplied.helios.persistence.mapper.ToolCallRecordMapper;
+import com.standardapplied.helios.persistence.sql.ToolCallJournalSql;
 import io.helidon.dbclient.DbClient;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

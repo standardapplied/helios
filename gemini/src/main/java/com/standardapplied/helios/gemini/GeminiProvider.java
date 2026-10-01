@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.gemini;
+package com.standardapplied.helios.gemini;
 
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.model.ModelProvider;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.ModelProvider;
 
 /**
  * ModelProvider implementation for Google's Gemini API.

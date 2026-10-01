@@ -1,17 +1,17 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.TransientStreamException;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SerializedError;
-import ai.singlr.session.SessionLimits;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SerializedError;
+import com.standardapplied.helios.session.SessionLimits;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -29,9 +29,9 @@ import java.util.Optional;
  *       be {@link ResultMessage.Cancelled} instead of the more informative {@link
  *       ResultMessage.ErrorMaxWallClock}.
  *   <li>Budget exhaustion — accumulated cost exceeds {@code limits.maxBudgetMicroUsd()}.
- *   <li>Cancellation — the session's {@link ai.singlr.core.runtime.CancellationToken
- *       CancellationToken} is signalled by a path other than wall-clock expiry (explicit {@code
- *       close()}, host-initiated cancel).
+ *   <li>Cancellation — the session's {@link
+ *       com.standardapplied.helios.core.runtime.CancellationToken CancellationToken} is signalled
+ *       by a path other than wall-clock expiry (explicit {@code close()}, host-initiated cancel).
  *   <li>Turn ceiling — current turn index has reached {@code limits.maxTurns()}.
  *   <li>Refusal — the provider reported {@link FinishReason#CONTENT_FILTER} or {@link
  *       FinishReason#REFUSAL}.

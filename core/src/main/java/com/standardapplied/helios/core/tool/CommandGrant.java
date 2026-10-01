@@ -1,14 +1,14 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.tool;
+package com.standardapplied.helios.core.tool;
 
-import ai.singlr.core.common.RedactionResult;
-import ai.singlr.core.common.Redactor;
-import ai.singlr.core.common.SecretRegistry;
-import ai.singlr.core.common.Strings;
+import com.standardapplied.helios.core.common.RedactionResult;
+import com.standardapplied.helios.core.common.Redactor;
+import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.common.Strings;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;

@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.runtime;
+package com.standardapplied.helios.runtime;
 
 import io.helidon.common.GenericType;
 import io.helidon.common.media.type.MediaTypes;

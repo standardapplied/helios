@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
-import ai.singlr.core.common.Ids;
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.prompt.Prompt;
-import ai.singlr.core.prompt.PromptRegistry;
-import ai.singlr.persistence.mapper.PromptMapper;
-import ai.singlr.persistence.sql.PromptSql;
+import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.prompt.Prompt;
+import com.standardapplied.helios.core.prompt.PromptRegistry;
+import com.standardapplied.helios.persistence.mapper.PromptMapper;
+import com.standardapplied.helios.persistence.sql.PromptSql;
 import io.helidon.dbclient.DbClient;
 import java.util.List;
 import java.util.Objects;

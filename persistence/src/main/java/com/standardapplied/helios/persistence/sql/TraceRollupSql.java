@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence.sql;
+package com.standardapplied.helios.persistence.sql;
 
-import ai.singlr.core.trace.TraceFilter;
-import ai.singlr.core.trace.TraceRollupKey;
+import com.standardapplied.helios.core.trace.TraceFilter;
+import com.standardapplied.helios.core.trace.TraceRollupKey;
 import java.util.ArrayList;
 import java.util.List;
 

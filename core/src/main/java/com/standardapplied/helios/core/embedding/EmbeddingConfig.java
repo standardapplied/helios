@@ -1,8 +1,8 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.core.embedding;
+package com.standardapplied.helios.core.embedding;
 
-import ai.singlr.core.common.Strings;
+import com.standardapplied.helios.core.common.Strings;
 
 /**
  * Provider-agnostic configuration for embedding models. Contains only user-level operational

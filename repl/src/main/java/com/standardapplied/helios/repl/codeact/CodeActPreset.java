@@ -1,25 +1,25 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
-import ai.singlr.core.model.Model;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.repl.InputBindings;
-import ai.singlr.repl.ReplConfig;
-import ai.singlr.repl.execution.JShellExecutionProvider;
-import ai.singlr.repl.host.HostFunction;
-import ai.singlr.repl.sandbox.JvmSandbox;
-import ai.singlr.repl.sandbox.SandboxFactory;
-import ai.singlr.session.SessionOptions;
-import ai.singlr.session.SessionPreset;
-import ai.singlr.session.execution.ExecuteTool;
-import ai.singlr.session.hooks.Hook;
-import ai.singlr.session.memory.MemoryBackend;
-import ai.singlr.session.permissions.Permission;
-import ai.singlr.session.tools.ToolBinding;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.repl.InputBindings;
+import com.standardapplied.helios.repl.ReplConfig;
+import com.standardapplied.helios.repl.execution.JShellExecutionProvider;
+import com.standardapplied.helios.repl.host.HostFunction;
+import com.standardapplied.helios.repl.sandbox.JvmSandbox;
+import com.standardapplied.helios.repl.sandbox.SandboxFactory;
+import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.SessionPreset;
+import com.standardapplied.helios.session.execution.ExecuteTool;
+import com.standardapplied.helios.session.hooks.Hook;
+import com.standardapplied.helios.session.memory.MemoryBackend;
+import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;

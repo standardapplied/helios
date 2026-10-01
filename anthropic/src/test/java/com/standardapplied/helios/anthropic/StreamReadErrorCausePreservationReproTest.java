@@ -1,6 +1,6 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.anthropic;
+package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -8,11 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.model.StreamEvent;
-import ai.singlr.core.model.TransientStreamException;
-import ai.singlr.core.tool.Tool;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.core.tool.Tool;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;

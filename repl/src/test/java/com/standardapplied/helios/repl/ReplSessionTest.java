@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl;
+package com.standardapplied.helios.repl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -12,10 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.repl.host.HostFunction;
-import ai.singlr.repl.sandbox.ExecutionRequest;
-import ai.singlr.repl.sandbox.ExecutionResult;
-import ai.singlr.repl.sandbox.Sandbox;
+import com.standardapplied.helios.repl.host.HostFunction;
+import com.standardapplied.helios.repl.sandbox.ExecutionRequest;
+import com.standardapplied.helios.repl.sandbox.ExecutionResult;
+import com.standardapplied.helios.repl.sandbox.Sandbox;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -339,8 +339,9 @@ class ReplSessionTest {
    * predict/marketQuote/etc through the real ReplSession wrapper path.
    */
   private static class RecordingSandbox implements Sandbox {
-    java.util.function.Consumer<ai.singlr.repl.host.HostFunctionRegistry> behavior = r -> {};
-    private ai.singlr.repl.host.HostFunctionRegistry registry;
+    java.util.function.Consumer<com.standardapplied.helios.repl.host.HostFunctionRegistry>
+        behavior = r -> {};
+    private com.standardapplied.helios.repl.host.HostFunctionRegistry registry;
 
     @Override
     public ExecutionResult execute(ExecutionRequest request) {
@@ -360,7 +361,7 @@ class ReplSessionTest {
     @Override
     public void close() {}
 
-    void setRegistry(ai.singlr.repl.host.HostFunctionRegistry registry) {
+    void setRegistry(com.standardapplied.helios.repl.host.HostFunctionRegistry registry) {
       this.registry = registry;
     }
   }

@@ -1,24 +1,24 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
 /**
- * Singular Agentic Framework - ONNX Embedding Provider Module.
+ * Helios - ONNX Embedding Provider Module.
  *
  * <p>Implements the EmbeddingProvider SPI for local ONNX Runtime inference. Downloads models from
  * HuggingFace and runs embedding generation locally.
  */
-module ai.singlr.onnx {
-  requires ai.singlr.core;
+module com.standardapplied.helios.onnx {
+  requires com.standardapplied.helios.core;
   requires java.logging;
   requires java.net.http;
   requires tools.jackson.databind;
   requires com.microsoft.onnxruntime;
   requires ai.djl.tokenizers;
 
-  exports ai.singlr.onnx;
+  exports com.standardapplied.helios.onnx;
 
-  provides ai.singlr.core.embedding.EmbeddingProvider with
-      ai.singlr.onnx.OnnxEmbeddingProvider;
+  provides com.standardapplied.helios.core.embedding.EmbeddingProvider with
+      com.standardapplied.helios.onnx.OnnxEmbeddingProvider;
 }

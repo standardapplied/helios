@@ -1,33 +1,33 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
-import ai.singlr.core.common.CostEstimate;
-import ai.singlr.core.common.Paginate;
-import ai.singlr.core.common.PaginatedList;
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.events.EventSink;
-import ai.singlr.core.events.HeliosEvent;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.trace.Annotation;
-import ai.singlr.core.trace.Span;
-import ai.singlr.core.trace.Trace;
-import ai.singlr.core.trace.TraceFilter;
-import ai.singlr.core.trace.TraceRollup;
-import ai.singlr.core.trace.TraceRollupKey;
-import ai.singlr.persistence.mapper.AnnotationMapper;
-import ai.singlr.persistence.mapper.JsonbMapper;
-import ai.singlr.persistence.mapper.SpanMapper;
-import ai.singlr.persistence.mapper.TraceMapper;
-import ai.singlr.persistence.mapper.TraceRollupMapper;
-import ai.singlr.persistence.sql.AnnotationSql;
-import ai.singlr.persistence.sql.SpanSql;
-import ai.singlr.persistence.sql.TraceRollupSql;
-import ai.singlr.persistence.sql.TraceSql;
-import ai.singlr.scimsql.ScimEngine;
+import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.common.Paginate;
+import com.standardapplied.helios.core.common.PaginatedList;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.events.EventSink;
+import com.standardapplied.helios.core.events.HeliosEvent;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.trace.Annotation;
+import com.standardapplied.helios.core.trace.Span;
+import com.standardapplied.helios.core.trace.Trace;
+import com.standardapplied.helios.core.trace.TraceFilter;
+import com.standardapplied.helios.core.trace.TraceRollup;
+import com.standardapplied.helios.core.trace.TraceRollupKey;
+import com.standardapplied.helios.persistence.mapper.AnnotationMapper;
+import com.standardapplied.helios.persistence.mapper.JsonbMapper;
+import com.standardapplied.helios.persistence.mapper.SpanMapper;
+import com.standardapplied.helios.persistence.mapper.TraceMapper;
+import com.standardapplied.helios.persistence.mapper.TraceRollupMapper;
+import com.standardapplied.helios.persistence.sql.AnnotationSql;
+import com.standardapplied.helios.persistence.sql.SpanSql;
+import com.standardapplied.helios.persistence.sql.TraceRollupSql;
+import com.standardapplied.helios.persistence.sql.TraceSql;
+import com.standardapplied.helios.scimsql.ScimEngine;
 import io.helidon.dbclient.DbClient;
 import io.helidon.dbclient.DbRow;
 import io.helidon.dbclient.DbTransaction;

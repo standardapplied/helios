@@ -1,31 +1,31 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.examples.session;
+package com.standardapplied.helios.examples.session;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.anthropic.AnthropicModelId;
-import ai.singlr.anthropic.AnthropicPricing;
-import ai.singlr.anthropic.AnthropicProvider;
-import ai.singlr.anthropic.CachePolicy;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.model.ThinkingLevel;
-import ai.singlr.core.tool.ParameterType;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolParameter;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.session.AgentSession;
-import ai.singlr.session.QueryEvent;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SessionLimits;
-import ai.singlr.session.SessionOptions;
-import ai.singlr.session.UserMessage;
-import ai.singlr.session.tools.ToolBinding;
-import ai.singlr.session.tools.ToolCategory;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.anthropic.AnthropicModelId;
+import com.standardapplied.helios.anthropic.AnthropicPricing;
+import com.standardapplied.helios.anthropic.AnthropicProvider;
+import com.standardapplied.helios.anthropic.CachePolicy;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.ThinkingLevel;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolParameter;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Flow;

@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.runtime;
+package com.standardapplied.helios.core.runtime;
 
 /**
  * Lifecycle status of a durable agent run.

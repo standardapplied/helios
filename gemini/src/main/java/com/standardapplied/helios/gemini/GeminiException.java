@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.gemini;
+package com.standardapplied.helios.gemini;
 
-import ai.singlr.core.model.ProviderException;
+import com.standardapplied.helios.core.model.ProviderException;
 
 /** Exception thrown when Gemini API operations fail. */
 public class GeminiException extends ProviderException {

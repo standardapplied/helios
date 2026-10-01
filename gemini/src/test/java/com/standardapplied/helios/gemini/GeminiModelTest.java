@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.gemini;
+package com.standardapplied.helios.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -13,23 +13,23 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.HttpClientFactory;
-import ai.singlr.core.model.FileReference;
-import ai.singlr.core.model.InlineFile;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.model.Role;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.schema.RawOutputCapturePolicy;
-import ai.singlr.core.schema.StructuredOutputParseException;
-import ai.singlr.core.tool.ParameterType;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolParameter;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.gemini.api.ContentItem;
-import ai.singlr.gemini.api.OutputAnnotation;
-import ai.singlr.gemini.api.Step;
+import com.standardapplied.helios.core.common.HttpClientFactory;
+import com.standardapplied.helios.core.model.FileReference;
+import com.standardapplied.helios.core.model.InlineFile;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Role;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.core.schema.StructuredOutputParseException;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolParameter;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.gemini.api.ContentItem;
+import com.standardapplied.helios.gemini.api.OutputAnnotation;
+import com.standardapplied.helios.gemini.api.Step;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
@@ -814,7 +814,7 @@ class GeminiModelTest {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
-            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.MINIMAL)
+            .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.MINIMAL)
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
     var messages = List.of(Message.user("Hello"));
@@ -829,7 +829,7 @@ class GeminiModelTest {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
-            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.LOW)
+            .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.LOW)
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
     var messages = List.of(Message.user("Hello"));
@@ -844,7 +844,7 @@ class GeminiModelTest {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
-            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.HIGH)
+            .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.HIGH)
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
     var messages = List.of(Message.user("Hello"));
@@ -859,7 +859,7 @@ class GeminiModelTest {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
-            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.MEDIUM)
+            .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.MEDIUM)
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
     var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
@@ -872,7 +872,7 @@ class GeminiModelTest {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
-            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.XHIGH)
+            .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.XHIGH)
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
     var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
@@ -885,7 +885,7 @@ class GeminiModelTest {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
-            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.MAX)
+            .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.MAX)
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
     var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
@@ -898,7 +898,7 @@ class GeminiModelTest {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
-            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.NONE)
+            .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.NONE)
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
 
@@ -915,7 +915,7 @@ class GeminiModelTest {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
-            .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.NONE)
+            .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.NONE)
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, config);
 
@@ -930,7 +930,7 @@ class GeminiModelTest {
       var config =
           ModelConfig.newBuilder()
               .withApiKey("test-key")
-              .withThinkingLevel(ai.singlr.core.model.ThinkingLevel.MINIMAL)
+              .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.MINIMAL)
               .build();
       var model = new GeminiModel(id, config);
 

@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox.policy;
+package com.standardapplied.helios.repl.sandbox.policy;
 
 import java.lang.classfile.BootstrapMethodEntry;
 import java.lang.classfile.ClassFile;

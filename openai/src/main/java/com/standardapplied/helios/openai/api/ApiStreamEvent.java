@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.openai.api;
+package com.standardapplied.helios.openai.api;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -81,7 +81,7 @@ public record ApiStreamEvent(
   /**
    * Terminal event for a reasoning_summary block. OpenAI Responses API emits this after the last
    * {@code reasoning_summary_text.delta} chunk so consumers can flush a {@link
-   * ai.singlr.core.model.StreamEvent.ThinkingComplete}.
+   * com.standardapplied.helios.core.model.StreamEvent.ThinkingComplete}.
    */
   public boolean hasTypeReasoningSummaryTextDone() {
     return "response.reasoning_summary_text.done".equals(type);

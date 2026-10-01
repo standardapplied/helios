@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -34,8 +34,9 @@ import org.junit.jupiter.api.io.TempDir;
  * Exercises the least-privilege deployment recipe documented in the README's "Sandbox security
  * model" section: the Helios process and its {@link JvmSandbox} child run inside a rootless Podman
  * container with no network, a read-only root, all capabilities dropped and only the JDK and the
- * classpath mounted. A permissive {@link ai.singlr.repl.sandbox.policy.SandboxPolicy} is used on
- * purpose so the observed denials come from the OS boundary alone.
+ * classpath mounted. A permissive {@link
+ * com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy} is used on purpose so the observed
+ * denials come from the OS boundary alone.
  *
  * <p>The container root is a disposable directory with the host's {@code /usr} bind-mounted
  * read-only, so no image pull is needed. Skips with an explicit reason when the platform is not

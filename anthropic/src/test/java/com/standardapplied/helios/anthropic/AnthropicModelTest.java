@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic;
+package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -13,25 +13,25 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.anthropic.api.ContentBlock;
-import ai.singlr.anthropic.api.MessagesRequest;
-import ai.singlr.core.common.HttpClientFactory;
-import ai.singlr.core.model.FileReference;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.InlineFile;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.model.Role;
-import ai.singlr.core.model.ThinkingLevel;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.model.ToolChoice;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.schema.RawOutputCapturePolicy;
-import ai.singlr.core.schema.StructuredOutputParseException;
-import ai.singlr.core.tool.ParameterType;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolParameter;
-import ai.singlr.core.tool.ToolResult;
+import com.standardapplied.helios.anthropic.api.ContentBlock;
+import com.standardapplied.helios.anthropic.api.MessagesRequest;
+import com.standardapplied.helios.core.common.HttpClientFactory;
+import com.standardapplied.helios.core.model.FileReference;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.InlineFile;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Role;
+import com.standardapplied.helios.core.model.ThinkingLevel;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.model.ToolChoice;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.core.schema.StructuredOutputParseException;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolParameter;
+import com.standardapplied.helios.core.tool.ToolResult;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -1294,7 +1294,13 @@ class AnthropicModelTest {
   void convertAssistantMessageNullContentBecomesEmpty() {
     var message =
         new Message(
-            ai.singlr.core.model.Role.ASSISTANT, null, List.of(), null, null, Map.of(), List.of());
+            com.standardapplied.helios.core.model.Role.ASSISTANT,
+            null,
+            List.of(),
+            null,
+            null,
+            Map.of(),
+            List.of());
 
     var entry = AnthropicModel.convertAssistantMessage(message);
 
@@ -1471,7 +1477,7 @@ class AnthropicModelTest {
   void decodeThinkingBlocksFallsBackToLegacySingleBlockKeys() {
     var msg =
         Message.newBuilder()
-            .withRole(ai.singlr.core.model.Role.ASSISTANT)
+            .withRole(com.standardapplied.helios.core.model.Role.ASSISTANT)
             .withContent("response")
             .withMetadata(
                 Map.of(
@@ -1493,7 +1499,7 @@ class AnthropicModelTest {
             + "{\"text\":\"second thought\",\"signature\":\"sig-2\"}]";
     var msg =
         Message.newBuilder()
-            .withRole(ai.singlr.core.model.Role.ASSISTANT)
+            .withRole(com.standardapplied.helios.core.model.Role.ASSISTANT)
             .withContent("response")
             .withMetadata(Map.of(AnthropicModel.THINKING_BLOCKS_KEY, json))
             .build();
@@ -1512,7 +1518,7 @@ class AnthropicModelTest {
     var json = "[{\"text\":\"new format\",\"signature\":\"sig-new\"}]";
     var msg =
         Message.newBuilder()
-            .withRole(ai.singlr.core.model.Role.ASSISTANT)
+            .withRole(com.standardapplied.helios.core.model.Role.ASSISTANT)
             .withContent("r")
             .withMetadata(
                 Map.of(
@@ -1532,7 +1538,7 @@ class AnthropicModelTest {
   void decodeThinkingBlocksMalformedJsonFallsBackToLegacy() {
     var msg =
         Message.newBuilder()
-            .withRole(ai.singlr.core.model.Role.ASSISTANT)
+            .withRole(com.standardapplied.helios.core.model.Role.ASSISTANT)
             .withContent("r")
             .withMetadata(
                 Map.of(
@@ -1551,7 +1557,10 @@ class AnthropicModelTest {
   @Test
   void decodeThinkingBlocksReturnsEmptyWhenNoMetadata() {
     var msg =
-        Message.newBuilder().withRole(ai.singlr.core.model.Role.ASSISTANT).withContent("r").build();
+        Message.newBuilder()
+            .withRole(com.standardapplied.helios.core.model.Role.ASSISTANT)
+            .withContent("r")
+            .build();
     assertTrue(AnthropicModel.decodeThinkingBlocks(msg.metadata()).isEmpty());
   }
 
@@ -1562,7 +1571,7 @@ class AnthropicModelTest {
             + "{\"text\":\"second thought\",\"signature\":\"sig-2\"}]";
     var msg =
         Message.newBuilder()
-            .withRole(ai.singlr.core.model.Role.ASSISTANT)
+            .withRole(com.standardapplied.helios.core.model.Role.ASSISTANT)
             .withContent("final answer")
             .withMetadata(Map.of(AnthropicModel.THINKING_BLOCKS_KEY, json))
             .build();
@@ -1667,12 +1676,13 @@ class AnthropicModelTest {
             List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
 
     @SuppressWarnings("unchecked")
-    var systemBlocks = (List<ai.singlr.anthropic.api.SystemContent>) request.system();
+    var systemBlocks =
+        (List<com.standardapplied.helios.anthropic.api.SystemContent>) request.system();
     var cc = systemBlocks.getFirst().cacheControl();
     assertNotNull(cc);
-    assertEquals(ai.singlr.anthropic.api.CacheControl.TYPE_EPHEMERAL, cc.type());
+    assertEquals(com.standardapplied.helios.anthropic.api.CacheControl.TYPE_EPHEMERAL, cc.type());
     assertEquals(
-        ai.singlr.anthropic.api.CacheControl.TTL_1_HOUR,
+        com.standardapplied.helios.anthropic.api.CacheControl.TTL_1_HOUR,
         cc.ttl(),
         "long-lived CachePolicy must propagate ttl='1h' to every cache breakpoint");
     assertInstanceOf(CachePolicy.LongLived.class, model.cachePolicy());
@@ -1690,7 +1700,8 @@ class AnthropicModelTest {
             List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
 
     @SuppressWarnings("unchecked")
-    var systemBlocks = (List<ai.singlr.anthropic.api.SystemContent>) request.system();
+    var systemBlocks =
+        (List<com.standardapplied.helios.anthropic.api.SystemContent>) request.system();
     var cc = systemBlocks.getFirst().cacheControl();
     assertNotNull(cc);
     assertNull(cc.ttl(), "short-lived policy must omit ttl so the wire stays minimal");
@@ -1720,7 +1731,8 @@ class AnthropicModelTest {
             null);
 
     @SuppressWarnings("unchecked")
-    var systemBlocks = (List<ai.singlr.anthropic.api.SystemContent>) request.system();
+    var systemBlocks =
+        (List<com.standardapplied.helios.anthropic.api.SystemContent>) request.system();
     assertEquals(1, systemBlocks.size());
     var block = systemBlocks.getFirst();
     assertEquals("text", block.type());
@@ -1728,7 +1740,9 @@ class AnthropicModelTest {
     assertNotNull(
         block.cacheControl(),
         "system prefix must carry a cache_control breakpoint for the default agent-loop pattern");
-    assertEquals(ai.singlr.anthropic.api.CacheControl.TYPE_EPHEMERAL, block.cacheControl().type());
+    assertEquals(
+        com.standardapplied.helios.anthropic.api.CacheControl.TYPE_EPHEMERAL,
+        block.cacheControl().type());
   }
 
   @Test
@@ -1781,7 +1795,7 @@ class AnthropicModelTest {
         request.tools().get(1).cacheControl(),
         "the last tool anchors the cache breakpoint covering the entire tools array");
     assertEquals(
-        ai.singlr.anthropic.api.CacheControl.TYPE_EPHEMERAL,
+        com.standardapplied.helios.anthropic.api.CacheControl.TYPE_EPHEMERAL,
         request.tools().get(1).cacheControl().type());
   }
 
@@ -1923,7 +1937,8 @@ class AnthropicModelTest {
     assertEquals("", request.messages().getFirst().content());
     // System still cached.
     @SuppressWarnings("unchecked")
-    var systemBlocks = (List<ai.singlr.anthropic.api.SystemContent>) request.system();
+    var systemBlocks =
+        (List<com.standardapplied.helios.anthropic.api.SystemContent>) request.system();
     assertNotNull(systemBlocks.getFirst().cacheControl());
   }
 
@@ -1952,7 +1967,8 @@ class AnthropicModelTest {
 
     var breakpointCount = 0;
     @SuppressWarnings("unchecked")
-    var systemBlocks = (List<ai.singlr.anthropic.api.SystemContent>) request.system();
+    var systemBlocks =
+        (List<com.standardapplied.helios.anthropic.api.SystemContent>) request.system();
     if (systemBlocks.getLast().cacheControl() != null) breakpointCount++;
     if (request.tools().getLast().cacheControl() != null) breakpointCount++;
     @SuppressWarnings("unchecked")
@@ -1988,7 +2004,8 @@ class AnthropicModelTest {
 
     var breakpointCount = 0;
     @SuppressWarnings("unchecked")
-    var systemBlocks = (List<ai.singlr.anthropic.api.SystemContent>) request.system();
+    var systemBlocks =
+        (List<com.standardapplied.helios.anthropic.api.SystemContent>) request.system();
     if (systemBlocks.getLast().cacheControl() != null) breakpointCount++;
     if (request.tools().getLast().cacheControl() != null) breakpointCount++;
     @SuppressWarnings("unchecked")
@@ -2011,8 +2028,8 @@ class AnthropicModelTest {
         MessagesRequest.newBuilder()
             .withSystem(
                 List.of(
-                    ai.singlr.anthropic.api.SystemContent.text("first"),
-                    ai.singlr.anthropic.api.SystemContent.text("second")))
+                    com.standardapplied.helios.anthropic.api.SystemContent.text("first"),
+                    com.standardapplied.helios.anthropic.api.SystemContent.text("second")))
             .build();
     assertEquals("first\n\nsecond", request.systemAsText());
   }
@@ -2213,8 +2230,8 @@ class AnthropicModelTest {
    * {@code Done} event. Local to this test file so we don't bleed implementation-detail helpers
    * across test classes.
    */
-  private static ai.singlr.core.model.StreamEvent.Done drainSseFixture(String sseBody)
-      throws Exception {
+  private static com.standardapplied.helios.core.model.StreamEvent.Done drainSseFixture(
+      String sseBody) throws Exception {
     var inputStream =
         new java.io.ByteArrayInputStream(sseBody.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     java.net.http.HttpResponse<java.io.InputStream> response =
@@ -2265,10 +2282,10 @@ class AnthropicModelTest {
             response,
             tools.jackson.databind.json.JsonMapper.builder().build(),
             java.time.Duration.ofSeconds(5))) {
-      ai.singlr.core.model.StreamEvent.Done done = null;
+      com.standardapplied.helios.core.model.StreamEvent.Done done = null;
       while (iterator.hasNext()) {
         var next = iterator.next();
-        if (next instanceof ai.singlr.core.model.StreamEvent.Done d) {
+        if (next instanceof com.standardapplied.helios.core.model.StreamEvent.Done d) {
           done = d;
         }
       }

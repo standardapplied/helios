@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.execution;
+package com.standardapplied.helios.session.execution;
 
-import ai.singlr.core.common.RedactionResult;
-import ai.singlr.core.common.SecretRegistry;
-import ai.singlr.core.common.Validate;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.runtime.SessionContext;
-import ai.singlr.core.tool.CommandGrant;
+import com.standardapplied.helios.core.common.RedactionResult;
+import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.common.Validate;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.tool.CommandGrant;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -63,8 +63,8 @@ import java.util.logging.Logger;
  *       the direct child.
  *   <li><b>Concurrency-bounded.</b> Per-provider {@link Semaphore}; overflows wait rather than fail
  *       because the {@code Execute} tool's surrounding {@link
- *       ai.singlr.session.ConcurrencyLimits#maxConcurrentExecutions() executionPermits} pool
- *       already gates the loop.
+ *       com.standardapplied.helios.session.ConcurrencyLimits#maxConcurrentExecutions()
+ *       executionPermits} pool already gates the loop.
  * </ul>
  *
  * <h2>Phase 5 scope</h2>
@@ -98,7 +98,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
 
   /**
    * Disambiguated alias for {@code java.lang.Runtime} — the simple name {@code Runtime} resolves to
-   * the {@link ai.singlr.session.execution.Runtime} enum in this package.
+   * the {@link com.standardapplied.helios.session.execution.Runtime} enum in this package.
    */
   private static final java.lang.Runtime JVM = java.lang.Runtime.getRuntime();
 

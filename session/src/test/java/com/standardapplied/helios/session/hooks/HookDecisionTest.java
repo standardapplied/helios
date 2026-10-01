@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -18,7 +18,8 @@ final class HookDecisionTest {
   private static final PreToolUseHook NAMED_HOOK =
       new PreToolUseHook() {
         @Override
-        public HookOutcome beforeTool(ai.singlr.core.model.ToolCall call, HookContext ctx) {
+        public HookOutcome beforeTool(
+            com.standardapplied.helios.core.model.ToolCall call, HookContext ctx) {
           return HookOutcome.cont();
         }
 

@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.execution;
+package com.standardapplied.helios.session.execution;
 
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.runtime.SessionContext;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
 import java.util.concurrent.CompletionStage;
 
 /**
@@ -33,7 +33,7 @@ import java.util.concurrent.CompletionStage;
  * SessionStartOutcome#accept()} for the common case, {@link SessionStartOutcome#refuse(String)
  * Refuse} when the provider cannot accept the session (pool saturated, auth failed, in-flight
  * close). Refusal short-circuits the loop — the session's terminal is {@link
- * ai.singlr.session.ResultMessage.ErrorProviderUnavailable}.
+ * com.standardapplied.helios.session.ResultMessage.ErrorProviderUnavailable}.
  *
  * <h2>Dispatch contract</h2>
  *
@@ -51,10 +51,11 @@ import java.util.concurrent.CompletionStage;
  * <h2>Thread-safety</h2>
  *
  * Providers must be safe for concurrent calls — the session loop is fully serial today, but the
- * surrounding {@link ai.singlr.session.tools.ToolCategory#EXECUTION EXECUTION} category has its own
- * dedicated concurrency cap in {@link ai.singlr.session.ConcurrencyLimits}, and future loops may
- * dispatch parallel execute tool calls. The lifecycle methods are invoked once per session each;
- * multiple sessions may invoke them concurrently against a shared provider.
+ * surrounding {@link com.standardapplied.helios.session.tools.ToolCategory#EXECUTION EXECUTION}
+ * category has its own dedicated concurrency cap in {@link
+ * com.standardapplied.helios.session.ConcurrencyLimits}, and future loops may dispatch parallel
+ * execute tool calls. The lifecycle methods are invoked once per session each; multiple sessions
+ * may invoke them concurrently against a shared provider.
  */
 public interface ExecutionProvider {
 
@@ -76,8 +77,8 @@ public interface ExecutionProvider {
    *
    * <p>If the returned outcome is a {@link SessionStartOutcome.Refuse}, the agent loop never
    * starts; the session terminates immediately with {@link
-   * ai.singlr.session.ResultMessage.ErrorProviderUnavailable}. Use {@code Refuse} for transient
-   * "cannot accept right now" cases (pool saturated, rate-limited); throw a {@link
+   * com.standardapplied.helios.session.ResultMessage.ErrorProviderUnavailable}. Use {@code Refuse}
+   * for transient "cannot accept right now" cases (pool saturated, rate-limited); throw a {@link
    * RuntimeException} only for genuinely unrecoverable misconfigurations.
    *
    * @param ctx session metadata; non-null

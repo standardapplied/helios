@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.session.loop.SessionState;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.session.loop.SessionState;
 import java.util.List;
 import java.util.Objects;
 

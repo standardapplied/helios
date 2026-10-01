@@ -1,24 +1,24 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.execution;
+package com.standardapplied.helios.repl.execution;
 
-import ai.singlr.core.common.RedactionResult;
-import ai.singlr.core.common.SecretRegistry;
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.runtime.SessionContext;
-import ai.singlr.repl.ReplConfig;
-import ai.singlr.repl.ReplException;
-import ai.singlr.repl.ReplSession;
-import ai.singlr.repl.SandboxBindingsListener;
-import ai.singlr.session.execution.ExecutionCapabilities;
-import ai.singlr.session.execution.ExecutionProvider;
-import ai.singlr.session.execution.ExecutionRequest;
-import ai.singlr.session.execution.ExecutionResult;
-import ai.singlr.session.execution.Runtime;
-import ai.singlr.session.execution.SessionStartOutcome;
+import com.standardapplied.helios.core.common.RedactionResult;
+import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.repl.ReplConfig;
+import com.standardapplied.helios.repl.ReplException;
+import com.standardapplied.helios.repl.ReplSession;
+import com.standardapplied.helios.repl.SandboxBindingsListener;
+import com.standardapplied.helios.session.execution.ExecutionCapabilities;
+import com.standardapplied.helios.session.execution.ExecutionProvider;
+import com.standardapplied.helios.session.execution.ExecutionRequest;
+import com.standardapplied.helios.session.execution.ExecutionResult;
+import com.standardapplied.helios.session.execution.Runtime;
+import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -54,8 +54,8 @@ import java.util.logging.Logger;
  *
  * <p>The provider only handles {@link Runtime#JSHELL}; other runtimes return a refusal-shaped
  * {@link ExecutionResult}. Compose with {@link
- * ai.singlr.session.execution.LocalProcessExecutionProvider} (or your own) when you need BASH /
- * PYTHON alongside JSHELL by wrapping multiple providers behind a routing adapter.
+ * com.standardapplied.helios.session.execution.LocalProcessExecutionProvider} (or your own) when
+ * you need BASH / PYTHON alongside JSHELL by wrapping multiple providers behind a routing adapter.
  *
  * <h2>Cancellation</h2>
  *
@@ -70,9 +70,9 @@ import java.util.logging.Logger;
  *
  * <h2>Output redaction</h2>
  *
- * Matches {@link ai.singlr.session.execution.LocalProcessExecutionProvider}: stdout and stderr
- * captured from the sandbox are scrubbed against the configured {@link SecretRegistry} before the
- * result is returned. Per-secret hit counts are surfaced via {@link
+ * Matches {@link com.standardapplied.helios.session.execution.LocalProcessExecutionProvider}:
+ * stdout and stderr captured from the sandbox are scrubbed against the configured {@link
+ * SecretRegistry} before the result is returned. Per-secret hit counts are surfaced via {@link
  * ExecutionResult#secretRedactionCounts()} so callers can audit how often a sandbox snippet brushed
  * against a registered secret. The default registry is empty, so a deployer who has not registered
  * any secrets pays a no-op pass.
@@ -88,7 +88,8 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
 
   /**
    * Disambiguated alias for {@code java.lang.Runtime} — the simple name {@code Runtime} resolves to
-   * the {@link ai.singlr.session.execution.Runtime} enum used as a dispatch key here.
+   * the {@link com.standardapplied.helios.session.execution.Runtime} enum used as a dispatch key
+   * here.
    */
   private static final java.lang.Runtime JVM = java.lang.Runtime.getRuntime();
 
@@ -129,8 +130,8 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
 
   /**
    * The secret registry this provider redacts stdout / stderr against. Mirrors {@link
-   * ai.singlr.session.execution.LocalProcessExecutionProvider#secretRegistry()} so a deployer can
-   * wire one shared registry across both providers.
+   * com.standardapplied.helios.session.execution.LocalProcessExecutionProvider#secretRegistry()} so
+   * a deployer can wire one shared registry across both providers.
    *
    * @return the configured registry (never null — defaults to an empty registry when {@link
    *     Builder#withSecretRegistry(SecretRegistry)} is not called)
@@ -157,7 +158,7 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
    * Helios session with the supplied {@link ReplConfig} (carrying host functions registered
    * up-front, e.g. {@code submit}, {@code predict}, {@code __getInput}) and an optional startup
    * snippet executed before the model's first {@code execute_code} call (typically the {@link
-   * ai.singlr.repl.InputBindings}-generated input-variable bindings).
+   * com.standardapplied.helios.repl.InputBindings}-generated input-variable bindings).
    *
    * @param replConfig the configuration used to spawn each session's sandbox; non-null
    * @param startupSnippet the snippet to execute once per sandbox after creation; may be {@code
@@ -408,7 +409,7 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     }
   }
 
-  private RedactedOutput redactRaw(ai.singlr.repl.sandbox.ExecutionResult raw) {
+  private RedactedOutput redactRaw(com.standardapplied.helios.repl.sandbox.ExecutionResult raw) {
     var redactor = secretRegistry.redactor();
     var stdoutResult = redactor.redact(raw.stdout());
     var stderrResult = redactor.redact(raw.stderr());
@@ -513,7 +514,7 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     /**
      * Set the shared {@link SecretRegistry} the provider redacts stdout / stderr against. Mirrors
      * the {@link
-     * ai.singlr.session.execution.LocalProcessExecutionProvider.Builder#withSecretRegistry
+     * com.standardapplied.helios.session.execution.LocalProcessExecutionProvider.Builder#withSecretRegistry
      * LocalProcessExecutionProvider} setter so a deployer can wire one shared registry across both
      * providers. Defaults to a fresh empty registry — usable but invisible to other tools.
      *

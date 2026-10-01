@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -10,9 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.CostEstimate;
-import ai.singlr.core.model.Citation;
-import ai.singlr.core.model.Response.Usage;
+import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.Response.Usage;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;

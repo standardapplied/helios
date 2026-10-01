@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.model;
+package com.standardapplied.helios.core.model;
 
 /** The role of a message in a conversation. */
 public enum Role {

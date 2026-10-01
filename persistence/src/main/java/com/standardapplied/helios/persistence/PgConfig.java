@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
-import ai.singlr.core.common.Redactor;
+import com.standardapplied.helios.core.common.Redactor;
 import io.helidon.dbclient.DbClient;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -28,8 +28,8 @@ import java.util.regex.Pattern;
  *     preserves verbatim capture — the library's standard behaviour, suitable for evals and
  *     debugging. Deployers who want trace-side redaction without wrapping the journal themselves
  *     can pass {@code registry.redactor()} from their session-level {@link
- *     ai.singlr.core.common.SecretRegistry}. Source-level redaction (via {@code CommandGrant},
- *     {@code ReadTool} / {@code GrepTool} wired with a {@code Redactor}, {@code
+ *     com.standardapplied.helios.core.common.SecretRegistry}. Source-level redaction (via {@code
+ *     CommandGrant}, {@code ReadTool} / {@code GrepTool} wired with a {@code Redactor}, {@code
  *     JShellExecutionProvider}) remains the recommended primary mitigation; this hook is ergonomic
  *     sugar for deployers who need defense-in-depth at the persistence boundary
  */

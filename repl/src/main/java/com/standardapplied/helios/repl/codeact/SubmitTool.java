@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.tool.ParameterType;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolParameter;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.session.tools.ToolBinding;
-import ai.singlr.session.tools.ToolCategory;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolParameter;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
 import java.util.Map;
 import java.util.Objects;
 
@@ -25,10 +25,11 @@ import java.util.Objects;
  *
  * <ol>
  *   <li>JSON Schema validation.
- *   <li>For provenanced schemas: reconstruct {@link ai.singlr.core.common.Provenanced} + verify
- *       structural correspondence + apply {@link ai.singlr.core.common.ProvenanceValidator}.
- *   <li>For schemas carrying a {@link ai.singlr.core.common.SubmitValidator}: convert to the typed
- *       value and run the validator.
+ *   <li>For provenanced schemas: reconstruct {@link
+ *       com.standardapplied.helios.core.common.Provenanced} + verify structural correspondence +
+ *       apply {@link com.standardapplied.helios.core.common.ProvenanceValidator}.
+ *   <li>For schemas carrying a {@link com.standardapplied.helios.core.common.SubmitValidator}:
+ *       convert to the typed value and run the validator.
  *   <li>{@link SubmittedValueHolder#submit(Object)} writes the parsed value; a {@code false} return
  *       (someone already submitted) is surfaced as a tool-result failure.
  * </ol>

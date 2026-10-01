@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.schema;
+package com.standardapplied.helios.core.schema;
 
 import java.util.List;
 import java.util.Objects;
@@ -15,10 +15,10 @@ import java.util.Objects;
  * the JSON parse error message for syntax failures), so the agent loop can surface specific
  * corrections to the model.
  *
- * <p>Distinguished from generic {@link ai.singlr.core.model.ProviderException} subclasses so the
- * session loop can pattern-match on it: when this exception type bubbles out of a structured-output
- * {@code chat(...)} call, the loop injects {@link #correctionMessage()} as a USER turn and
- * continues iterating instead of failing terminally.
+ * <p>Distinguished from generic {@link com.standardapplied.helios.core.model.ProviderException}
+ * subclasses so the session loop can pattern-match on it: when this exception type bubbles out of a
+ * structured-output {@code chat(...)} call, the loop injects {@link #correctionMessage()} as a USER
+ * turn and continues iterating instead of failing terminally.
  *
  * <p>The {@link #rawContent()} field preserves the model's original output for log-side debugging
  * when {@link RawOutputCapturePolicy#ENABLED}. Privacy-sensitive callers select {@link

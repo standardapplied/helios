@@ -1,10 +1,10 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.core.test;
+package com.standardapplied.helios.core.test;
 
-import ai.singlr.core.events.EventSink;
-import ai.singlr.core.events.HeliosEvent;
-import ai.singlr.core.trace.Trace;
+import com.standardapplied.helios.core.events.EventSink;
+import com.standardapplied.helios.core.events.HeliosEvent;
+import com.standardapplied.helios.core.trace.Trace;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 

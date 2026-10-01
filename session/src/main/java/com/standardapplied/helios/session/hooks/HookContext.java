@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
-import ai.singlr.core.model.Model;
-import ai.singlr.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 
 /**
  * Per-invocation context passed to every {@link Hook} call. Carries the session-wide handles a hook

@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
 import java.time.Duration;
 import java.util.Map;
@@ -14,8 +14,9 @@ import java.util.Map;
  * @param executedCode the source the sandbox actually ran (the model-emitted JShell snippet, or a
  *     harness-internal init snippet). Captured parent-side from {@link ExecutionRequest#code()} —
  *     no protocol change. May be truncated per {@link
- *     ai.singlr.repl.ReplConfig#maxExecutedCodeChars()} with a {@code (len=N)} marker. Empty string
- *     when not captured (legacy callers using the no-args convenience constructor)
+ *     com.standardapplied.helios.repl.ReplConfig#maxExecutedCodeChars()} with a {@code (len=N)}
+ *     marker. Empty string when not captured (legacy callers using the no-args convenience
+ *     constructor)
  * @param stdout captured standard output
  * @param stderr captured standard error
  * @param exitCode the exit code (0 = success)
@@ -80,8 +81,8 @@ public record ExecutionResult(
 
   /**
    * Return a copy of this result with the given duration. Used by {@link
-   * ai.singlr.repl.ReplSession#execute(String)} to stamp wall-clock timing onto the value the
-   * sandbox returned.
+   * com.standardapplied.helios.repl.ReplSession#execute(String)} to stamp wall-clock timing onto
+   * the value the sandbox returned.
    */
   public ExecutionResult withDuration(Duration duration) {
     return new ExecutionResult(

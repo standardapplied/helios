@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.schema;
+package com.standardapplied.helios.core.schema;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -12,9 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.Confidence;
-import ai.singlr.core.common.ProvenanceValidator;
-import ai.singlr.core.common.Provenanced;
+import com.standardapplied.helios.core.common.Confidence;
+import com.standardapplied.helios.core.common.ProvenanceValidator;
+import com.standardapplied.helios.core.common.Provenanced;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -92,7 +92,8 @@ class OutputSchemaProvenancedTest {
 
   @Test
   void provenancedOfWithCustomValidator() {
-    ProvenanceValidator strict = e -> ai.singlr.core.common.ValidationResult.success();
+    ProvenanceValidator strict =
+        e -> com.standardapplied.helios.core.common.ValidationResult.success();
     var schema = OutputSchema.provenancedOf(Pick.class, strict);
     assertSame(strict, schema.provenanceValidator());
   }
@@ -235,7 +236,8 @@ class OutputSchemaProvenancedTest {
     var schema = OutputSchema.of(Pick.class);
     assertNull(schema.submitValidator());
     var withValidator =
-        schema.withSubmitValidator(p -> ai.singlr.core.common.ValidationResult.success());
+        schema.withSubmitValidator(
+            p -> com.standardapplied.helios.core.common.ValidationResult.success());
     assertNotNull(withValidator.submitValidator());
     assertNull(schema.submitValidator(), "original schema must not be mutated");
   }
@@ -245,7 +247,9 @@ class OutputSchemaProvenancedTest {
     var schema = OutputSchema.of(Pick.class);
     assertThrows(
         IllegalArgumentException.class,
-        () -> schema.withSubmitValidator((ai.singlr.core.common.SubmitValidator<Pick>) null));
+        () ->
+            schema.withSubmitValidator(
+                (com.standardapplied.helios.core.common.SubmitValidator<Pick>) null));
   }
 
   @Test
@@ -277,7 +281,8 @@ class OutputSchemaProvenancedTest {
   void withSubmitValidatorPreservesProvenanceFields() {
     var schema =
         OutputSchema.provenancedOf(Pick.class)
-            .withSubmitValidator(p -> ai.singlr.core.common.ValidationResult.success());
+            .withSubmitValidator(
+                p -> com.standardapplied.helios.core.common.ValidationResult.success());
     assertNotNull(schema.provenanceValidator());
     assertEquals(Pick.class, schema.innerOutputType());
     assertNotNull(schema.submitValidator());

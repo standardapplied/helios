@@ -1,13 +1,13 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence.mapper;
+package com.standardapplied.helios.persistence.mapper;
 
-import ai.singlr.core.trace.TraceRollup;
-import ai.singlr.core.trace.TraceRollupKey;
-import ai.singlr.persistence.sql.TraceRollupSql;
+import com.standardapplied.helios.core.trace.TraceRollup;
+import com.standardapplied.helios.core.trace.TraceRollupKey;
+import com.standardapplied.helios.persistence.sql.TraceRollupSql;
 import io.helidon.dbclient.DbRow;
 
 /**

@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
-import ai.singlr.repl.protocol.ProcessTransport;
-import ai.singlr.repl.protocol.RpcError;
-import ai.singlr.repl.protocol.RpcMessage;
-import ai.singlr.repl.sandbox.policy.GuardedExecutionControlProvider;
-import ai.singlr.repl.sandbox.policy.SandboxPolicy;
-import ai.singlr.repl.sandbox.policy.SandboxPolicySerialization;
+import com.standardapplied.helios.repl.protocol.ProcessTransport;
+import com.standardapplied.helios.repl.protocol.RpcError;
+import com.standardapplied.helios.repl.protocol.RpcMessage;
+import com.standardapplied.helios.repl.sandbox.policy.GuardedExecutionControlProvider;
+import com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy;
+import com.standardapplied.helios.repl.sandbox.policy.SandboxPolicySerialization;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -57,8 +57,9 @@ import jdk.jshell.SourceCodeAnalysis;
  *
  * <p>Only one execute may run at a time. {@code System.out}/{@code System.err} are redirected to
  * capture buffers during eval — concurrent executes would corrupt each other's streams. A {@link
- * Semaphore} enforces this invariant; the host side ({@link ai.singlr.repl.protocol.RpcChannel#call
- * RpcChannel.call}) also serializes naturally by blocking until each response arrives.
+ * Semaphore} enforces this invariant; the host side ({@link
+ * com.standardapplied.helios.repl.protocol.RpcChannel#call RpcChannel.call}) also serializes
+ * naturally by blocking until each response arrives.
  */
 public final class JvmSandboxBootstrap {
 
@@ -102,14 +103,15 @@ public final class JvmSandboxBootstrap {
    * accessibility:
    *
    * <ul>
-   *   <li><strong>JPMS launch</strong> (parent uses {@code --module-path}): {@code ai.singlr.repl}
-   *       is a named module and the module-info does not {@code open ai.singlr.repl.sandbox} to any
-   *       other module, so the reflective access throws {@code InaccessibleObjectException}. The
-   *       reflection path is closed.
+   *   <li><strong>JPMS launch</strong> (parent uses {@code --module-path}): {@code
+   *       com.standardapplied.helios.repl} is a named module and the module-info does not {@code
+   *       open com.standardapplied.helios.repl.sandbox} to any other module, so the reflective
+   *       access throws {@code InaccessibleObjectException}. The reflection path is closed.
    *   <li><strong>Classpath launch</strong>: the class lives in an unnamed module, which is fully
    *       open to reflection; {@code setAccessible(true)} succeeds. The reflection forgery
    *       reproduces (see {@code reflectionForgesAnRpcCallToHost}).
-   *   <li><strong>JPMS launch with {@code --add-opens=ai.singlr.repl/ai.singlr.repl.sandbox=...}
+   *   <li><strong>JPMS launch with {@code
+   *       --add-opens=com.standardapplied.helios.repl/com.standardapplied.helios.repl.sandbox=...}
    *       inherited from the parent</strong>: equivalent to classpath launch for this gap. {@link
    *       JvmSandbox#shouldPropagateJvmArg} forwards {@code --add-opens} into the subprocess, so
    *       any parent that opened the package — including common test runners and JVM
@@ -153,8 +155,8 @@ public final class JvmSandboxBootstrap {
             .executionEngine(new GuardedExecutionControlProvider(policy), Map.of())
             .build();
     addHostBridgeToJShellClasspath(jshell);
-    jshell.eval("import static ai.singlr.repl.sandbox.HostBridge.*;");
-    jshell.eval("import ai.singlr.repl.sandbox.HostBridge;");
+    jshell.eval("import static com.standardapplied.helios.repl.sandbox.HostBridge.*;");
+    jshell.eval("import com.standardapplied.helios.repl.sandbox.HostBridge;");
     SandboxPrelude.install(jshell);
 
     var bootstrap = new JvmSandboxBootstrap(jshell, rpcIn, rpcOut);
@@ -188,34 +190,34 @@ public final class JvmSandboxBootstrap {
       reason =
           "running in module "
               + module.getName()
-              + " but package ai.singlr.repl.sandbox is opened to unnamed modules"
+              + " but package com.standardapplied.helios.repl.sandbox is opened to unnamed modules"
               + " (typically via --add-opens inherited from the parent JVM)";
     } else {
       return;
     }
     err.println(
-        "WARNING: ai.singlr.repl JvmSandboxBootstrap is "
+        "WARNING: com.standardapplied.helios.repl JvmSandboxBootstrap is "
             + reason
             + ". A JShell snippet can use setAccessible(true) on private bootstrap fields to"
             + " obtain the RPC socket PrintStream and forge calls into the host. C1 closes the"
             + " stdout-RPC forgery path only; closing the reflection forgery path requires both"
-            + " JPMS isolation (modulepath launch, no --add-opens to ai.singlr.repl.sandbox) AND"
+            + " JPMS isolation (modulepath launch, no --add-opens to com.standardapplied.helios.repl.sandbox) AND"
             + " an externally-arranged OS-level isolation boundary around the host process for"
             + " untrusted workloads. See the JvmSandboxBootstrap#main javadoc for the full"
             + " isolation regime.");
   }
 
   /**
-   * Detect whether {@code ai.singlr.repl.sandbox} is open to the unnamed module of some classloader
-   * — the regime in which JShell-evaluated snippets, which live in their own classloader's unnamed
-   * module, can call {@code setAccessible(true)} on this class's private fields. {@link
-   * Module#isOpen(String)} checks only unconditional opens, so it misses {@code
+   * Detect whether {@code com.standardapplied.helios.repl.sandbox} is open to the unnamed module of
+   * some classloader — the regime in which JShell-evaluated snippets, which live in their own
+   * classloader's unnamed module, can call {@code setAccessible(true)} on this class's private
+   * fields. {@link Module#isOpen(String)} checks only unconditional opens, so it misses {@code
    * --add-opens=...=ALL-UNNAMED}; the two-argument overload with an unnamed-module probe catches
    * it.
    */
   private static boolean isSandboxPackageOpenToUnnamedModules(Module module) {
     var probe = ClassLoader.getPlatformClassLoader().getUnnamedModule();
-    return module.isOpen("ai.singlr.repl.sandbox", probe);
+    return module.isOpen("com.standardapplied.helios.repl.sandbox", probe);
   }
 
   /**
@@ -263,12 +265,12 @@ public final class JvmSandboxBootstrap {
   }
 
   /**
-   * Make {@link HostBridge} (and the rest of {@code ai.singlr.repl}) visible to JShell's
-   * compilation context. The sandbox subprocess is launched with {@code --add-modules
-   * ai.singlr.repl} so the classes are on the boot layer at runtime — but JShell's internal javac
-   * runs its own compilation unit that only sees explicit classpath entries. Without this, sandbox
-   * code calling {@code predict(...)}, {@code fetch(...)}, or any other bridge method fails to
-   * compile with {@code "cannot find symbol"}.
+   * Make {@link HostBridge} (and the rest of {@code com.standardapplied.helios.repl}) visible to
+   * JShell's compilation context. The sandbox subprocess is launched with {@code --add-modules
+   * com.standardapplied.helios.repl} so the classes are on the boot layer at runtime — but JShell's
+   * internal javac runs its own compilation unit that only sees explicit classpath entries. Without
+   * this, sandbox code calling {@code predict(...)}, {@code fetch(...)}, or any other bridge method
+   * fails to compile with {@code "cannot find symbol"}.
    */
   static void addHostBridgeToJShellClasspath(JShell jshell) {
     try {

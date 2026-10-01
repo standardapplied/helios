@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.permissions;
+package com.standardapplied.helios.session.permissions;
 
 /**
  * Decision a {@link PermissionRule} carries when it matches.

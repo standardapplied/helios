@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.core.common;
+package com.standardapplied.helios.core.common;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

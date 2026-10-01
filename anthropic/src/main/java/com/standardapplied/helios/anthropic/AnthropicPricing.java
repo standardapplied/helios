@@ -1,13 +1,13 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic;
+package com.standardapplied.helios.anthropic;
 
-import ai.singlr.core.common.CostCalculator;
-import ai.singlr.core.common.CostCalculator.Pricing;
-import ai.singlr.core.common.CostEstimate;
+import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.common.CostCalculator.Pricing;
+import com.standardapplied.helios.core.common.CostEstimate;
 import java.time.LocalDate;
 import java.util.EnumMap;
 import java.util.Objects;

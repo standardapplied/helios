@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.trace;
+package com.standardapplied.helios.core.trace;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -12,8 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.CostEstimate;
-import ai.singlr.core.model.Response.Usage;
+import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.model.Response.Usage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -115,26 +115,30 @@ class TraceBuilderTest {
 
   @Test
   void eventSinksReceiveSpanOpenedAndClosed() {
-    var events = new ArrayList<ai.singlr.core.events.HeliosEvent>();
-    var runId = ai.singlr.core.common.Ids.newId();
-    ai.singlr.core.events.EventSink sink = events::add;
+    var events = new ArrayList<com.standardapplied.helios.core.events.HeliosEvent>();
+    var runId = com.standardapplied.helios.core.common.Ids.newId();
+    com.standardapplied.helios.core.events.EventSink sink = events::add;
     var builder = TraceBuilder.start("agent-run", runId, List.of(sink));
 
     builder.span("model.chat", SpanKind.MODEL_CALL).end();
     builder.end();
 
     assertTrue(
-        events.stream().anyMatch(ai.singlr.core.events.HeliosEvent.SpanOpened.class::isInstance),
+        events.stream()
+            .anyMatch(
+                com.standardapplied.helios.core.events.HeliosEvent.SpanOpened.class::isInstance),
         "expected SpanOpened");
     assertTrue(
-        events.stream().anyMatch(ai.singlr.core.events.HeliosEvent.SpanClosed.class::isInstance),
+        events.stream()
+            .anyMatch(
+                com.standardapplied.helios.core.events.HeliosEvent.SpanClosed.class::isInstance),
         "expected SpanClosed");
   }
 
   @Test
   void sinkExceptionDoesNotPreventSpanCompletion() {
-    var runId = ai.singlr.core.common.Ids.newId();
-    ai.singlr.core.events.EventSink failing =
+    var runId = com.standardapplied.helios.core.common.Ids.newId();
+    com.standardapplied.helios.core.events.EventSink failing =
         event -> {
           throw new RuntimeException("sink failed");
         };

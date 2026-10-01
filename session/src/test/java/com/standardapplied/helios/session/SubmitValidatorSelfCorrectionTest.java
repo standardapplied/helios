@@ -1,17 +1,17 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.ValidationResult;
-import ai.singlr.core.model.Role;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.schema.SubmitValidationException;
-import ai.singlr.testing.ScriptedModel;
+import com.standardapplied.helios.core.common.ValidationResult;
+import com.standardapplied.helios.core.model.Role;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.SubmitValidationException;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;

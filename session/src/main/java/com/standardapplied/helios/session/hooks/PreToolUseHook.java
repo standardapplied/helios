@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
-import ai.singlr.core.model.ToolCall;
+import com.standardapplied.helios.core.model.ToolCall;
 
 /**
  * Hook fired before a tool call is dispatched. Permission checks, secret scanners, and tool-input

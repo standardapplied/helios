@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.runtime;
+package com.standardapplied.helios.runtime;
 
-import ai.singlr.session.AgentSession;
-import ai.singlr.session.SessionOptions;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.SessionOptions;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,9 +28,9 @@ import java.util.function.Function;
  * so tests can substitute a stub session.
  *
  * <p>Sessions remain in the registry until {@link #close(String)} is called, even after they reach
- * a terminal {@link ai.singlr.session.ResultMessage ResultMessage} — keeping them around lets late
- * SSE subscribers fetch the final {@code LoopEnded} event after termination, and lets the {@code
- * DELETE /sessions/{id}} route be the explicit cleanup boundary.
+ * a terminal {@link com.standardapplied.helios.session.ResultMessage ResultMessage} — keeping them
+ * around lets late SSE subscribers fetch the final {@code LoopEnded} event after termination, and
+ * lets the {@code DELETE /sessions/{id}} route be the explicit cleanup boundary.
  *
  * <h2>Retention</h2>
  *

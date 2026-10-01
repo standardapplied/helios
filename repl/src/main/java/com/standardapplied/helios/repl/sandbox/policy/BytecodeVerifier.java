@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox.policy;
+package com.standardapplied.helios.repl.sandbox.policy;
 
 /**
  * Scans a single class's bytecode against a {@link SandboxPolicy} and throws {@link

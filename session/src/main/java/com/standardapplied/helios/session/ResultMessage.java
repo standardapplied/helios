@@ -1,13 +1,13 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
-import ai.singlr.core.common.CostEstimate;
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Citation;
-import ai.singlr.core.model.Response.Usage;
+import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.Response.Usage;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -239,8 +239,8 @@ public sealed interface ResultMessage
    * The session terminated because a model stream was interrupted by a recoverable transport
    * failure (socket reset, half-closed connection, idle-read timeout on a provider-classified
    * retryable status such as 408 / 429 / 5xx) and the configured {@link
-   * ai.singlr.session.SessionLimits#streamRetryPolicy() streamRetryPolicy} budget was exhausted
-   * without recovery.
+   * com.standardapplied.helios.session.SessionLimits#streamRetryPolicy() streamRetryPolicy} budget
+   * was exhausted without recovery.
    *
    * <p>Distinguished from {@link ErrorDuringExecution} so callers can pattern-match the failure
    * mode and decide independently whether to surface a "retry your request later" message, retry
@@ -252,7 +252,7 @@ public sealed interface ResultMessage
    *
    * @param sessionId the session's id
    * @param providerName the provider's short identifier carried from {@link
-   *     ai.singlr.core.model.TransientStreamException#providerName()}; non-blank
+   *     com.standardapplied.helios.core.model.TransientStreamException#providerName()}; non-blank
    * @param attemptsMade total number of stream attempts the loop made — always {@code >= 1}; equals
    *     {@code 1 + retriesConsumed}. A value of {@code 1} means retry was disabled
    * @param error the serialised throwable that caused the final attempt to fail, with cause chain
@@ -295,10 +295,10 @@ public sealed interface ResultMessage
 
   /**
    * The session terminated before the agent loop began because an {@link
-   * ai.singlr.session.execution.ExecutionProvider}'s {@code onSessionStart} returned a {@link
-   * ai.singlr.session.execution.SessionStartOutcome.Refuse Refuse} — typically pool saturation,
-   * per-session auth failure, in-flight provider shutdown, or a caught exception during sandbox
-   * spawn.
+   * com.standardapplied.helios.session.execution.ExecutionProvider}'s {@code onSessionStart}
+   * returned a {@link com.standardapplied.helios.session.execution.SessionStartOutcome.Refuse
+   * Refuse} — typically pool saturation, per-session auth failure, in-flight provider shutdown, or
+   * a caught exception during sandbox spawn.
    *
    * @param sessionId the session's id
    * @param providerName a short, stable name identifying which provider refused (e.g. the provider

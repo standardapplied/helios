@@ -1,39 +1,39 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.gemini;
+package com.standardapplied.helios.gemini;
 
-import ai.singlr.core.common.HttpClientFactory;
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Citation;
-import ai.singlr.core.model.CloseableIterator;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Role;
-import ai.singlr.core.model.StreamEvent;
-import ai.singlr.core.model.ThinkingLevel;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.model.ToolChoice;
-import ai.singlr.core.model.TransientStreamException;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.schema.RawOutputCapturePolicy;
-import ai.singlr.core.schema.StructuredContentParser;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.gemini.api.ContentItem;
-import ai.singlr.gemini.api.InteractionGenerationConfig;
-import ai.singlr.gemini.api.InteractionRequest;
-import ai.singlr.gemini.api.InteractionResponse;
-import ai.singlr.gemini.api.InteractionUsage;
-import ai.singlr.gemini.api.ResponseFormat;
-import ai.singlr.gemini.api.Step;
-import ai.singlr.gemini.api.StreamingEvent;
-import ai.singlr.gemini.api.ToolChoiceConfig;
-import ai.singlr.gemini.api.ToolDefinition;
+import com.standardapplied.helios.core.common.HttpClientFactory;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.CloseableIterator;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Role;
+import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.ThinkingLevel;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.model.ToolChoice;
+import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.core.schema.StructuredContentParser;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.gemini.api.ContentItem;
+import com.standardapplied.helios.gemini.api.InteractionGenerationConfig;
+import com.standardapplied.helios.gemini.api.InteractionRequest;
+import com.standardapplied.helios.gemini.api.InteractionResponse;
+import com.standardapplied.helios.gemini.api.InteractionUsage;
+import com.standardapplied.helios.gemini.api.ResponseFormat;
+import com.standardapplied.helios.gemini.api.Step;
+import com.standardapplied.helios.gemini.api.StreamingEvent;
+import com.standardapplied.helios.gemini.api.ToolChoiceConfig;
+import com.standardapplied.helios.gemini.api.ToolDefinition;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;

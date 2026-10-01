@@ -1,1 +1,1 @@
-ai.singlr.persistence.mapper.DbTypeMapperProvider
+com.standardapplied.helios.persistence.mapper.DbTypeMapperProvider

@@ -1,20 +1,20 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.anthropic;
+package com.standardapplied.helios.anthropic;
 
-import ai.singlr.anthropic.api.ApiStreamEvent;
-import ai.singlr.anthropic.api.ContentDelta;
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Citation;
-import ai.singlr.core.model.CloseableIterator;
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.StreamEvent;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.model.TransientStreamException;
+import com.standardapplied.helios.anthropic.api.ApiStreamEvent;
+import com.standardapplied.helios.anthropic.api.ContentDelta;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.CloseableIterator;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;

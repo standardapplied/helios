@@ -1,13 +1,13 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl.sandbox;
+package com.standardapplied.helios.repl.sandbox;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.repl.host.HostFunction;
-import ai.singlr.repl.host.HostFunctionRegistry;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.repl.host.HostFunction;
+import com.standardapplied.helios.repl.host.HostFunctionRegistry;
 import java.util.Set;
 import java.util.stream.Collectors;
 import jdk.jshell.JShell;
@@ -37,7 +37,8 @@ public final class SandboxPrelude {
    * Synthesizing a wrapper for these would shadow the hand-written method.
    */
   // Shared canonical reserved-name set — see HostFunctionRegistry.RESERVED_NAMES for the rationale.
-  static final Set<String> RESERVED_NAMES = ai.singlr.repl.host.HostFunctionRegistry.RESERVED_NAMES;
+  static final Set<String> RESERVED_NAMES =
+      com.standardapplied.helios.repl.host.HostFunctionRegistry.RESERVED_NAMES;
 
   private SandboxPrelude() {}
 
@@ -150,7 +151,7 @@ public final class SandboxPrelude {
             .collect(Collectors.joining(", "));
     sb.append("static Object ").append(fn.name()).append("(").append(sig).append(") {\n");
     if (fn.parameters().isEmpty()) {
-      sb.append("  return ai.singlr.repl.sandbox.HostBridge.__call(\"")
+      sb.append("  return com.standardapplied.helios.repl.sandbox.HostBridge.__call(\"")
           .append(fn.name())
           .append("\", java.util.Map.of());\n");
     } else {
@@ -162,7 +163,7 @@ public final class SandboxPrelude {
             .append(p.name())
             .append(");\n");
       }
-      sb.append("  return ai.singlr.repl.sandbox.HostBridge.__call(\"")
+      sb.append("  return com.standardapplied.helios.repl.sandbox.HostBridge.__call(\"")
           .append(fn.name())
           .append("\", __args);\n");
     }

@@ -1,22 +1,22 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.ask;
+package com.standardapplied.helios.session.ask;
 
 import java.util.concurrent.CancellationException;
 
 /**
  * Session-internal bridge between the {@code AskUserQuestion} tool and the session's pending-answer
  * map. The tool calls {@link #ask(AskUserQuestionRequest)} on the agent-loop virtual thread; the
- * gateway emits a {@link ai.singlr.session.QueryEvent.QuestionAsked} event, registers a future
- * keyed by {@code questionId}, then blocks the calling thread on that future. The session's {@code
- * answer(...)} entry-point completes the future from the producer side.
+ * gateway emits a {@link com.standardapplied.helios.session.QueryEvent.QuestionAsked} event,
+ * registers a future keyed by {@code questionId}, then blocks the calling thread on that future.
+ * The session's {@code answer(...)} entry-point completes the future from the producer side.
  *
  * <p>The interface is deliberately narrow — production implementations live in {@link
- * ai.singlr.session.AgentSessionImpl}; tests use simple fakes. There is no public factory because
- * the gateway is wired into the agent loop at session-construction time and never exposed to user
- * code directly.
+ * com.standardapplied.helios.session.AgentSessionImpl}; tests use simple fakes. There is no public
+ * factory because the gateway is wired into the agent loop at session-construction time and never
+ * exposed to user code directly.
  */
 public interface QuestionGateway {
 

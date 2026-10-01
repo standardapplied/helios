@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
-import ai.singlr.core.model.Response;
+import com.standardapplied.helios.core.model.Response;
 
 /**
  * Hook fired when the model wants to stop. Gates termination with the added power to inject

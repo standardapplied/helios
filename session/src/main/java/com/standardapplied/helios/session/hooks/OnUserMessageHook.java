@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
-import ai.singlr.session.UserMessage;
+import com.standardapplied.helios.session.UserMessage;
 
 /**
  * Hook fired when a user message is dequeued from the steering queue. PII redactors, prompt

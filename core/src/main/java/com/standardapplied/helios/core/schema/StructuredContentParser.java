@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.schema;
+package com.standardapplied.helios.core.schema;
 
-import ai.singlr.core.common.Strings;
+import com.standardapplied.helios.core.common.Strings;
 import java.util.List;
 import java.util.Map;
 
@@ -23,9 +23,9 @@ import java.util.Map;
  *       StructuredOutputParseException} carrying the field-level diff.
  *   <li>Type-coerce the map into the schema's output class. For provenanced schemas use {@link
  *       OutputSchema#reconstructProvenanced(Map, java.util.function.Function)}.
- *   <li>Run the schema's {@link ai.singlr.core.common.SubmitValidator}, if any, against the typed
- *       value. On rejection throw {@link SubmitValidationException} carrying the validator's
- *       correction — the same self-correction channel as a schema mismatch.
+ *   <li>Run the schema's {@link com.standardapplied.helios.core.common.SubmitValidator}, if any,
+ *       against the typed value. On rejection throw {@link SubmitValidationException} carrying the
+ *       validator's correction — the same self-correction channel as a schema mismatch.
  *   <li>On JSON-syntax failure retry once after stripping markdown fences. If that also fails,
  *       throw {@link StructuredOutputParseException} so the session loop's self-correction
  *       mechanism can inject a correction message and retry, same as for schema-validation
@@ -66,7 +66,7 @@ public final class StructuredContentParser {
   /**
    * Parse {@code content} against {@code schema} using the supplied {@code adapter}. All failures —
    * JSON-syntax errors, schema-validation mismatches, and {@link
-   * ai.singlr.core.common.SubmitValidator} rejections — surface as {@link
+   * com.standardapplied.helios.core.common.SubmitValidator} rejections — surface as {@link
    * StructuredOutputParseException} so the session loop's self-correction mechanism can handle them
    * uniformly.
    *

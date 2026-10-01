@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.common;
+package com.standardapplied.helios.core.common;
 
 import java.util.Locale;
 
@@ -31,9 +31,10 @@ public enum Confidence {
 
   /**
    * Returns the JSON wire form of this confidence level — the upper-case enum name. Aligns with
-   * Helios' {@link ai.singlr.core.schema.SchemaGenerator} default, which emits {@code enum: ["LOW",
-   * "MEDIUM", "HIGH"]}, and with Jackson's default enum (de)serialization. Models receive the
-   * upper-case schema and produce upper-case output, no custom serializer required.
+   * Helios' {@link com.standardapplied.helios.core.schema.SchemaGenerator} default, which emits
+   * {@code enum: ["LOW", "MEDIUM", "HIGH"]}, and with Jackson's default enum (de)serialization.
+   * Models receive the upper-case schema and produce upper-case output, no custom serializer
+   * required.
    *
    * @return the enum name, e.g. {@code "HIGH"}
    */

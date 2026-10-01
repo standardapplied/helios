@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence;
+package com.standardapplied.helios.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -11,10 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.Ids;
-import ai.singlr.core.runtime.AgentRun;
-import ai.singlr.core.runtime.AgentRunStatus;
-import ai.singlr.core.runtime.UnsafeResumePolicy;
+import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.runtime.AgentRun;
+import com.standardapplied.helios.core.runtime.AgentRunStatus;
+import com.standardapplied.helios.core.runtime.UnsafeResumePolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

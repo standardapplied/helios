@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.tool;
+package com.standardapplied.helios.core.tool;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.schema.SchemaGenerator;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.schema.SchemaGenerator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,10 +23,11 @@ import java.util.function.Function;
  * @param idempotent whether invoking this tool more than once with the same arguments is safe.
  *     Drives two behaviors: in-process retry (a non-idempotent tool with retry configured will
  *     execute at most once instead of replaying through {@link
- *     ai.singlr.core.fault.FaultTolerance}'s retry policy) and durable resume (a non-idempotent
- *     tool that was in-flight at JVM crash blocks {@code Agent.resume(...)} under {@link
- *     ai.singlr.core.runtime.UnsafeResumePolicy#FAIL_LOUD}). Defaults to {@code false} via the
- *     builder so unannotated tools are conservatively treated as having side effects
+ *     com.standardapplied.helios.core.fault.FaultTolerance}'s retry policy) and durable resume (a
+ *     non-idempotent tool that was in-flight at JVM crash blocks {@code Agent.resume(...)} under
+ *     {@link com.standardapplied.helios.core.runtime.UnsafeResumePolicy#FAIL_LOUD}). Defaults to
+ *     {@code false} via the builder so unannotated tools are conservatively treated as having side
+ *     effects
  * @param resultCompactor compacts an old tool result down to a token-cheap form when context
  *     compaction kicks in. Receives the original tool-result content and returns a replacement
  *     string for older turns. Defaults to a constant {@code [result omitted]} — sufficient for

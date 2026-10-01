@@ -1,19 +1,19 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
-package ai.singlr.examples.session;
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
+package com.standardapplied.helios.examples.session;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.anthropic.AnthropicModelId;
-import ai.singlr.anthropic.AnthropicProvider;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.session.AgentSession;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SessionLimits;
-import ai.singlr.session.SessionOptions;
-import ai.singlr.session.SessionPresets;
-import ai.singlr.session.UserMessage;
+import com.standardapplied.helios.anthropic.AnthropicModelId;
+import com.standardapplied.helios.anthropic.AnthropicProvider;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.SessionPresets;
+import com.standardapplied.helios.session.UserMessage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -35,8 +35,9 @@ import org.junit.jupiter.api.io.TempDir;
  *
  * <p>Anthropic enforces tighter per-image limits than Gemini (5 MB per image) — this test
  * deliberately uses fixtures well inside that floor (67-byte PNG, ~520-byte PDF) so the caps in
- * {@link ai.singlr.session.files.ReadTool#MAX_IMAGE_BYTES} are exercised on the happy path, not the
- * rejection path. Same {@code maxTurns=4} budget as the Gemini peer to bound spend.
+ * {@link com.standardapplied.helios.session.files.ReadTool#MAX_IMAGE_BYTES} are exercised on the
+ * happy path, not the rejection path. Same {@code maxTurns=4} budget as the Gemini peer to bound
+ * spend.
  *
  * <p>Guarded by {@code ANTHROPIC_API_KEY} so the suite stays runnable offline.
  */

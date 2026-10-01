@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -12,7 +12,7 @@ import java.util.Optional;
  * to the orchestrator paired with the {@link Hook} that produced it.
  *
  * <p>The agent loop and {@code TurnRunner} branch on {@link #outcome()} to drive the loop and on
- * {@link #firingHook()} to attribute {@link ai.singlr.session.QueryEvent.HookFired
+ * {@link #firingHook()} to attribute {@link com.standardapplied.helios.session.QueryEvent.HookFired
  * QueryEvent.HookFired} events to the actual hook (not the phase). A {@link HookOutcome.Continue}
  * outcome carries no firing hook — {@link #firingHook()} returns {@link Optional#empty()} for the
  * proceed path.

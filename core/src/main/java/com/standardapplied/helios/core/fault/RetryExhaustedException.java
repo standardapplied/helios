@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.fault;
+package com.standardapplied.helios.core.fault;
 
 /**
  * Exception thrown when all retry attempts have been exhausted.

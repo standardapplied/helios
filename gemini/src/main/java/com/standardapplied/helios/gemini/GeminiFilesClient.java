@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.gemini;
+package com.standardapplied.helios.gemini;
 
-import ai.singlr.core.common.HttpClientFactory;
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.FileReference;
-import ai.singlr.core.model.ModelConfig;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.standardapplied.helios.core.common.HttpClientFactory;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.FileReference;
+import com.standardapplied.helios.core.model.ModelConfig;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;

@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.tool;
+package com.standardapplied.helios.core.tool;
 
 /**
  * Definition of a tool parameter (JSON Schema style).
@@ -11,8 +11,9 @@ package ai.singlr.core.tool;
  * <p>The {@code items} field is the legacy hand-rolled item-schema descriptor for arrays of
  * primitive types ({@code List<String>}, {@code List<Integer>}). For arrays whose elements are
  * record-shaped POJOs, use {@code itemsClass} instead — the schema is derived at build time via
- * {@link ai.singlr.core.schema.SchemaGenerator} so callers don't hand-roll JSON Schema for objects
- * with nested fields. {@code itemsClass} takes precedence over {@code items} when both are set.
+ * {@link com.standardapplied.helios.core.schema.SchemaGenerator} so callers don't hand-roll JSON
+ * Schema for objects with nested fields. {@code itemsClass} takes precedence over {@code items}
+ * when both are set.
  *
  * @param name the parameter name
  * @param description description of the parameter for the model
@@ -80,8 +81,8 @@ public record ToolParameter(
     /**
      * Declare the items class for an {@link ParameterType#ARRAY ARRAY} parameter whose elements are
      * a record-shaped POJO. The items JSON Schema is derived via {@link
-     * ai.singlr.core.schema.SchemaGenerator} at request-build time, so the tool author doesn't
-     * hand-roll a {@code properties} map for each field.
+     * com.standardapplied.helios.core.schema.SchemaGenerator} at request-build time, so the tool
+     * author doesn't hand-roll a {@code properties} map for each field.
      *
      * @param itemsClass the record class; non-null
      * @return this builder

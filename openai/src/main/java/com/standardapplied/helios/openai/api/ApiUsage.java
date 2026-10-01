@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.openai.api;
+package com.standardapplied.helios.openai.api;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -15,7 +15,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * #inputTokensDetails()} (path: {@code usage.input_tokens_details.cached_tokens}). On the wire
  * {@link #inputTokens} is the <b>total</b> prompt tokens (cached + uncached); the cached count is a
  * subset. The Helios provider re-projects this into the disjoint {@link
- * ai.singlr.core.model.Response.Usage} shape so downstream cost accounting is unambiguous.
+ * com.standardapplied.helios.core.model.Response.Usage} shape so downstream cost accounting is
+ * unambiguous.
  *
  * <p>OpenAI does not premium cache writes (writes bill at the base input rate); only cache reads
  * carry a discount. So no {@code cache_creation} field is reported, and the Helios {@code

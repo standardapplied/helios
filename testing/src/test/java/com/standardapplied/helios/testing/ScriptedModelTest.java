@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.testing;
+package com.standardapplied.helios.testing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -11,13 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.FinishReason;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.StreamEvent;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.schema.StructuredOutputParseException;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;

@@ -1,17 +1,17 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.onnx;
+package com.standardapplied.helios.onnx;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.Result;
-import ai.singlr.core.embedding.EmbeddingConfig;
-import ai.singlr.core.embedding.EmbeddingModel;
+import com.standardapplied.helios.core.common.Result;
+import com.standardapplied.helios.core.embedding.EmbeddingConfig;
+import com.standardapplied.helios.core.embedding.EmbeddingModel;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;

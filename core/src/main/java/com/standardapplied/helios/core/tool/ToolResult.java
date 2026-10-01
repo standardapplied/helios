@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.tool;
+package com.standardapplied.helios.core.tool;
 
-import ai.singlr.core.model.InlineFile;
+import com.standardapplied.helios.core.model.InlineFile;
 import java.util.List;
 import java.util.Objects;
 

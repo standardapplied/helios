@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
 /**
- * Singular Agentic Framework — core primitives.
+ * Helios — core primitives.
  *
  * <p>Provider-agnostic foundations shared by every higher-level module:
  *
@@ -29,22 +29,22 @@
  * <p>The v1 {@code agent} / {@code workflow} / {@code memory} / {@code eval} surface was removed in
  * the v2 cut; sessions live in {@code helios-session}.
  */
-module ai.singlr.core {
+module com.standardapplied.helios.core {
   requires java.logging;
   requires java.net.http;
 
-  exports ai.singlr.core.common;
-  exports ai.singlr.core.context;
-  exports ai.singlr.core.embedding;
-  exports ai.singlr.core.events;
-  exports ai.singlr.core.fault;
-  exports ai.singlr.core.model;
-  exports ai.singlr.core.prompt;
-  exports ai.singlr.core.runtime;
-  exports ai.singlr.core.schema;
-  exports ai.singlr.core.tool;
-  exports ai.singlr.core.trace;
+  exports com.standardapplied.helios.core.common;
+  exports com.standardapplied.helios.core.context;
+  exports com.standardapplied.helios.core.embedding;
+  exports com.standardapplied.helios.core.events;
+  exports com.standardapplied.helios.core.fault;
+  exports com.standardapplied.helios.core.model;
+  exports com.standardapplied.helios.core.prompt;
+  exports com.standardapplied.helios.core.runtime;
+  exports com.standardapplied.helios.core.schema;
+  exports com.standardapplied.helios.core.tool;
+  exports com.standardapplied.helios.core.trace;
 
-  uses ai.singlr.core.embedding.EmbeddingProvider;
-  uses ai.singlr.core.model.ModelProvider;
+  uses com.standardapplied.helios.core.embedding.EmbeddingProvider;
+  uses com.standardapplied.helios.core.model.ModelProvider;
 }

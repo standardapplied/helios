@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.execution;
+package com.standardapplied.helios.session.execution;
 
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.runtime.SessionContext;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
@@ -20,7 +20,7 @@ import java.util.concurrent.CompletionStage;
  *
  * <p>Callers that genuinely want execution must wire a {@code LocalProcessExecutionProvider} (or
  * their own implementation) via {@link
- * ai.singlr.session.SessionOptions.Builder#withExecutionProvider(ExecutionProvider)}.
+ * com.standardapplied.helios.session.SessionOptions.Builder#withExecutionProvider(ExecutionProvider)}.
  *
  * <h2>Thread-safety</h2>
  *

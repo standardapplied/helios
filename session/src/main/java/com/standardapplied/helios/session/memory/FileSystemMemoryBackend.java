@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.memory;
+package com.standardapplied.helios.session.memory;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
-import ai.singlr.session.files.WorkspaceRoot;
+import com.standardapplied.helios.session.files.WorkspaceRoot;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;

@@ -1,13 +1,13 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.repl.host.HostFunction;
-import ai.singlr.repl.sandbox.SandboxPrelude;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.repl.host.HostFunction;
+import com.standardapplied.helios.repl.sandbox.SandboxPrelude;
 import java.util.List;
 import java.util.Objects;
 

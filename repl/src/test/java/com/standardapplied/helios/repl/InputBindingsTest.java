@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl;
+package com.standardapplied.helios.repl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -56,7 +56,8 @@ class InputBindingsTest {
   void snippetCallsHostBridgeGetInputNotJackson() {
     var snippet = InputBindings.snippet(Stats.class);
     assertTrue(
-        snippet.contains("var __input = ai.singlr.repl.sandbox.HostBridge.getInput();"),
+        snippet.contains(
+            "var __input = com.standardapplied.helios.repl.sandbox.HostBridge.getInput();"),
         "snippet must route through HostBridge.getInput, got:\n" + snippet);
     assertFalse(
         snippet.contains("tools.jackson"),

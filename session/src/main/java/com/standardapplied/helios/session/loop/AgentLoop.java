@@ -1,27 +1,27 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
-import ai.singlr.core.context.TokenCounter;
-import ai.singlr.core.model.FileReference;
-import ai.singlr.core.model.InlineFile;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Role;
-import ai.singlr.session.CompactionResult;
-import ai.singlr.session.ContextCompactor;
-import ai.singlr.session.QueryEvent;
-import ai.singlr.session.ResultMessage;
-import ai.singlr.session.SerializedError;
-import ai.singlr.session.SessionLimits;
-import ai.singlr.session.SteeringQueue;
-import ai.singlr.session.UserMessage;
-import ai.singlr.session.hooks.CompactionPayload;
-import ai.singlr.session.hooks.HookContext;
-import ai.singlr.session.hooks.HookOutcome;
-import ai.singlr.session.hooks.HookRegistry;
+import com.standardapplied.helios.core.context.TokenCounter;
+import com.standardapplied.helios.core.model.FileReference;
+import com.standardapplied.helios.core.model.InlineFile;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Role;
+import com.standardapplied.helios.session.CompactionResult;
+import com.standardapplied.helios.session.ContextCompactor;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SerializedError;
+import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SteeringQueue;
+import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.hooks.CompactionPayload;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -78,10 +78,10 @@ public final class AgentLoop {
    *
    * <p>The denominator is the configured {@code maxContextTokens} (or its model-aware resolution
    * when the caller left it at the auto sentinel). The numerator is the {@link
-   * ai.singlr.core.context.TokenCounter}'s estimate of <em>total tokens across every message
-   * currently in the conversation history</em> — cumulative across all turns since the session
-   * started, never the size of a single turn. The watermark check runs both before and after every
-   * turn so the trigger fires as soon as the cumulative history crosses the threshold.
+   * com.standardapplied.helios.core.context.TokenCounter}'s estimate of <em>total tokens across
+   * every message currently in the conversation history</em> — cumulative across all turns since
+   * the session started, never the size of a single turn. The watermark check runs both before and
+   * after every turn so the trigger fires as soon as the cumulative history crosses the threshold.
    */
   static final double CONTEXT_WARNING_WATERMARK = 0.85;
 
@@ -458,11 +458,11 @@ public final class AgentLoop {
    * Invoke the configured {@link ContextCompactor}, swap in the returned history, accumulate any
    * usage reported by the compactor (e.g. summary call spend) — priced against the compactor's own
    * {@link CompactionResult#modelId()} so a cheap summary model isn't billed at the main loop's
-   * rate — fire {@link ai.singlr.session.hooks.PreCompactHook} before the compactor runs and {@link
-   * ai.singlr.session.hooks.PostCompactHook} after a successful shrink, and emit {@link
-   * QueryEvent.ContextEdited} last. A returned identity (same instance) or no-shrink result is
-   * treated as a no-op — the compactor opted out for this turn and the warning flag stays set. A
-   * throwing compactor is swallowed; the loop continues.
+   * rate — fire {@link com.standardapplied.helios.session.hooks.PreCompactHook} before the
+   * compactor runs and {@link com.standardapplied.helios.session.hooks.PostCompactHook} after a
+   * successful shrink, and emit {@link QueryEvent.ContextEdited} last. A returned identity (same
+   * instance) or no-shrink result is treated as a no-op — the compactor opted out for this turn and
+   * the warning flag stays set. A throwing compactor is swallowed; the loop continues.
    */
   private void runCompactor(SessionState state, long maxTokens, long tokensBefore) {
     var historyBefore = applyPreCompactHook(state, state.historySnapshot());
@@ -506,9 +506,9 @@ public final class AgentLoop {
   }
 
   /**
-   * Fire {@link ai.singlr.session.hooks.PreCompactHook} and return the history the compactor should
-   * operate on. {@link HookOutcome.MutateHistory} swaps in the rewritten history; other
-   * non-Continue outcomes are logged and treated as Continue.
+   * Fire {@link com.standardapplied.helios.session.hooks.PreCompactHook} and return the history the
+   * compactor should operate on. {@link HookOutcome.MutateHistory} swaps in the rewritten history;
+   * other non-Continue outcomes are logged and treated as Continue.
    */
   private List<Message> applyPreCompactHook(SessionState state, List<Message> historyBefore) {
     var ctx = hookContextFactory.apply(state);
@@ -539,10 +539,10 @@ public final class AgentLoop {
   }
 
   /**
-   * Fire {@link ai.singlr.session.hooks.PostCompactHook}. Returns {@code true} when the hook
-   * elected {@link HookOutcome.Stop} so the caller skips the {@link QueryEvent.ContextEdited}
-   * emission and lets the loop terminate. Other outcomes (including the unsupported Mutate / Block
-   * / Inject) are logged and treated as Continue.
+   * Fire {@link com.standardapplied.helios.session.hooks.PostCompactHook}. Returns {@code true}
+   * when the hook elected {@link HookOutcome.Stop} so the caller skips the {@link
+   * QueryEvent.ContextEdited} emission and lets the loop terminate. Other outcomes (including the
+   * unsupported Mutate / Block / Inject) are logged and treated as Continue.
    */
   private boolean firePostCompactAndCheckStop(SessionState state, CompactionPayload payload) {
     var ctx = hookContextFactory.apply(state);

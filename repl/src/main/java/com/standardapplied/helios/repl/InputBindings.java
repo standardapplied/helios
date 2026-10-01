@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl;
+package com.standardapplied.helios.repl;
 
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.RecordComponent;
@@ -18,11 +18,12 @@ import java.util.List;
  * operation.equals("sum")} directly without parsing the JSON itself.
  *
  * <p><b>Sandbox surface stays narrow.</b> The snippet calls {@link
- * ai.singlr.repl.sandbox.HostBridge#getInput()} to retrieve the input fields as a {@code
- * Map<String, Object>} and casts each field to its declared generic type rendered as Java source.
- * The user's input class never appears in JShell, and no third-party libraries (Jackson, etc.) need
- * to be visible to JShell's compiler. The harness handles JSON conversion host-side; the sandbox
- * sees only {@code java.*} types plus the {@link ai.singlr.repl.sandbox.HostBridge}.
+ * com.standardapplied.helios.repl.sandbox.HostBridge#getInput()} to retrieve the input fields as a
+ * {@code Map<String, Object>} and casts each field to its declared generic type rendered as Java
+ * source. The user's input class never appears in JShell, and no third-party libraries (Jackson,
+ * etc.) need to be visible to JShell's compiler. The harness handles JSON conversion host-side; the
+ * sandbox sees only {@code java.*} types plus the {@link
+ * com.standardapplied.helios.repl.sandbox.HostBridge}.
  *
  * <p>Binding tiers:
  *
@@ -88,7 +89,7 @@ public final class InputBindings {
       return null;
     }
     var sb = new StringBuilder();
-    sb.append("var __input = ai.singlr.repl.sandbox.HostBridge.getInput();\n");
+    sb.append("var __input = com.standardapplied.helios.repl.sandbox.HostBridge.getInput();\n");
     for (var component : components) {
       var type = component.getGenericType();
       sb.append("var ").append(component.getName()).append(" = ");

@@ -1,15 +1,15 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.repl.execution;
+package com.standardapplied.helios.repl.execution;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.common.SecretRegistry;
-import ai.singlr.repl.SandboxBindingsListener;
-import ai.singlr.repl.sandbox.ExecutionResult;
+import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.repl.SandboxBindingsListener;
+import com.standardapplied.helios.repl.sandbox.ExecutionResult;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;

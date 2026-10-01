@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.runtime;
+package com.standardapplied.helios.core.runtime;
 
 import java.util.List;
 import java.util.UUID;
@@ -17,7 +17,7 @@ import java.util.UUID;
  *
  * <ol>
  *   <li>Agent calls {@link #start} immediately before entering the {@link
- *       ai.singlr.core.fault.FaultTolerance} envelope around the tool.
+ *       com.standardapplied.helios.core.fault.FaultTolerance} envelope around the tool.
  *   <li>One of {@link #complete} or {@link #fail} fires after the envelope returns. A JVM crash
  *       between (1) and (2) leaves the entry as {@link ToolCallStatus#STARTED}; on resume, {@link
  *       #inflight} surfaces it.

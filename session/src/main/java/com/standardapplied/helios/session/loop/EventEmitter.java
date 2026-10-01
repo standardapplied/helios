@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
-import ai.singlr.session.QueryEvent;
-import ai.singlr.session.hooks.HookContext;
-import ai.singlr.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookRegistry;
 import java.time.Clock;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -14,9 +14,10 @@ import java.util.function.Function;
 
 /**
  * Glue between the agent loop's {@link QueryEvent} sink and its {@link HookRegistry}'s observe-only
- * {@link ai.singlr.session.hooks.OnStreamEventHook OnStreamEventHook} dispatch. The agent loop and
- * {@link TurnRunner} share one instance per session; every {@link #emit(SessionState, QueryEvent)}
- * call writes to the publisher and fires the stream-event hooks against the same context.
+ * {@link com.standardapplied.helios.session.hooks.OnStreamEventHook OnStreamEventHook} dispatch.
+ * The agent loop and {@link TurnRunner} share one instance per session; every {@link
+ * #emit(SessionState, QueryEvent)} call writes to the publisher and fires the stream-event hooks
+ * against the same context.
  *
  * <p>{@link #emitHookFired(SessionState, String, String, String)} is a convenience for the common
  * "a hook just decided something" event — it falls back to the phase name when the firing hook

@@ -1,20 +1,20 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.loop;
+package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelChunk;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.session.hooks.DefaultHookContext;
-import ai.singlr.session.hooks.HookRegistry;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.hooks.DefaultHookContext;
+import com.standardapplied.helios.session.hooks.HookRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.ZoneOffset;
@@ -30,8 +30,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Unit coverage for the race-handling guards in {@link TurnSubscriber#armIdleTimer()} — the paths
- * the end-to-end {@link ai.singlr.session.AgentSessionStreamIdleTest} can't reach deterministically
- * because they depend on the relative ordering of producer / scheduler / runner threads.
+ * the end-to-end {@link com.standardapplied.helios.session.AgentSessionStreamIdleTest} can't reach
+ * deterministically because they depend on the relative ordering of producer / scheduler / runner
+ * threads.
  *
  * <p>Two guards are pinned here:
  *

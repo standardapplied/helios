@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.repl;
+package com.standardapplied.helios.repl;
 
-import ai.singlr.repl.host.HostFunction;
-import ai.singlr.repl.host.HostFunctionRegistry;
-import ai.singlr.repl.sandbox.ExecuteParams;
-import ai.singlr.repl.sandbox.ExecutionRequest;
-import ai.singlr.repl.sandbox.ExecutionResult;
-import ai.singlr.repl.sandbox.Sandbox;
+import com.standardapplied.helios.repl.host.HostFunction;
+import com.standardapplied.helios.repl.host.HostFunctionRegistry;
+import com.standardapplied.helios.repl.sandbox.ExecuteParams;
+import com.standardapplied.helios.repl.sandbox.ExecutionRequest;
+import com.standardapplied.helios.repl.sandbox.ExecutionResult;
+import com.standardapplied.helios.repl.sandbox.Sandbox;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * resources and the concurrency semaphore permit. In v2, RLM/CodeAct harness flows are gone —
  * {@code predict} and {@code submit} live as session-level Tools on {@code AgentSession}, not as
  * sandbox host functions. {@code ReplSession} is the substrate the future CodeAct preset assembles
- * atop along with {@link ai.singlr.repl.CodeExecutionTool}.
+ * atop along with {@link com.standardapplied.helios.repl.CodeExecutionTool}.
  */
 public final class ReplSession implements AutoCloseable {
 

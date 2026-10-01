@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.core.model;
+package com.standardapplied.helios.core.model;
 
 /**
  * Base exception for provider API failures. Carries the HTTP status code (0 for non-HTTP errors

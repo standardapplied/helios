@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.persistence.sql;
+package com.standardapplied.helios.persistence.sql;
 
 /** SQL constants for prompt operations. */
 public final class PromptSql {

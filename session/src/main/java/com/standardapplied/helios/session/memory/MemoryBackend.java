@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.memory;
+package com.standardapplied.helios.session.memory;
 
 import java.io.IOException;
 import java.util.List;
@@ -21,7 +21,7 @@ import java.util.List;
  *
  * <p>{@link FileSystemMemoryBackend} is the reference implementation; it maps {@code /memories/**}
  * to {@code <workspace>/.agent/memory/**} under the existing {@link
- * ai.singlr.session.files.WorkspaceRoot} path-jail.
+ * com.standardapplied.helios.session.files.WorkspaceRoot} path-jail.
  */
 public interface MemoryBackend {
 
@@ -32,13 +32,14 @@ public interface MemoryBackend {
    * Sentinel "memory is intentionally off" backend that refuses every operation with a clear
    * message. Returned by presets that want to surface a deliberate "no memory" stance — applying
    * the sentinel via {@link
-   * ai.singlr.session.SessionOptions.Builder#withMemoryBackend(MemoryBackend)} causes any {@code
-   * MemoryRead} / {@code MemoryWrite} tool call to fail loudly instead of silently succeeding or
-   * NPE-ing.
+   * com.standardapplied.helios.session.SessionOptions.Builder#withMemoryBackend(MemoryBackend)}
+   * causes any {@code MemoryRead} / {@code MemoryWrite} tool call to fail loudly instead of
+   * silently succeeding or NPE-ing.
    *
-   * <p>{@link ai.singlr.session.SessionOptions.Builder#withMemoryBackend(MemoryBackend)} accepts
-   * {@code null} to mean "no backend configured" — for CodeAct and similar presets that want a
-   * permanent stance against memory, prefer the sentinel because it communicates intent and
+   * <p>{@link
+   * com.standardapplied.helios.session.SessionOptions.Builder#withMemoryBackend(MemoryBackend)}
+   * accepts {@code null} to mean "no backend configured" — for CodeAct and similar presets that
+   * want a permanent stance against memory, prefer the sentinel because it communicates intent and
    * produces a descriptive failure if the model bypasses the permission policy.
    *
    * @return a process-wide singleton sentinel

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
@@ -9,9 +9,9 @@
  * <p>Top-level types ({@code AgentSession}, {@code SessionOptions}, {@code SessionPresets}, {@code
  * QueryEvent}, {@code ResultMessage}, {@code UserMessage}, ...) live in this package. The
  * cooperative {@code CancellationToken} threaded through every session lives in {@code
- * ai.singlr.core.runtime} so tools and non-session callers can depend on it without importing the
- * session module. Specialised subsystems — {@code loop}, {@code hooks}, {@code tools}, {@code
- * files}, {@code execution}, {@code memory}, {@code permissions}, {@code audit}, {@code preset},
- * {@code config} — live in nested packages added as their first types land.
+ * com.standardapplied.helios.core.runtime} so tools and non-session callers can depend on it
+ * without importing the session module. Specialised subsystems — {@code loop}, {@code hooks},
+ * {@code tools}, {@code files}, {@code execution}, {@code memory}, {@code permissions}, {@code
+ * audit}, {@code preset}, {@code config} — live in nested packages added as their first types land.
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;

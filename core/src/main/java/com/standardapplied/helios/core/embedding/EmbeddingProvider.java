@@ -1,6 +1,6 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.core.embedding;
+package com.standardapplied.helios.core.embedding;
 
 import java.util.List;
 import java.util.Optional;
@@ -10,8 +10,8 @@ import java.util.ServiceLoader;
  * Service Provider Interface (SPI) for embedding providers.
  *
  * <p>Implementations are discovered via JPMS {@link ServiceLoader}. Provider modules declare
- * themselves with {@code provides ai.singlr.core.embedding.EmbeddingProvider with ...} in their
- * {@code module-info.java}.
+ * themselves with {@code provides com.standardapplied.helios.core.embedding.EmbeddingProvider with
+ * ...} in their {@code module-info.java}.
  *
  * <p>Example usage:
  *

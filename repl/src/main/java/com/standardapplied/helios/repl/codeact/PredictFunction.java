@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.tool.ParameterType;
-import ai.singlr.repl.host.HostFunction;
-import ai.singlr.repl.host.HostParameter;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.repl.host.HostFunction;
+import com.standardapplied.helios.repl.host.HostParameter;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -17,7 +17,7 @@ import java.util.Objects;
 /**
  * In-sandbox {@code predict} host function: callable from JShell code via {@code
  * predict(instructions, input)} (routed through {@link
- * ai.singlr.repl.sandbox.HostBridge#predict(String, String)}).
+ * com.standardapplied.helios.repl.sandbox.HostBridge#predict(String, String)}).
  *
  * <p>Issues a fresh-context {@link Model#chat} call against a sub-LM and returns the response
  * content as a {@code String}. The sub-LM never sees the main session's conversation history —
@@ -45,7 +45,7 @@ public final class PredictFunction {
    *
    * @param subModel the sub-LM; non-null
    * @return a host function suitable for registration in {@link
-   *     ai.singlr.repl.ReplConfig.Builder#withHostFunction(HostFunction)}
+   *     com.standardapplied.helios.repl.ReplConfig.Builder#withHostFunction(HostFunction)}
    * @throws NullPointerException if {@code subModel} is null
    */
   public static HostFunction create(Model subModel) {

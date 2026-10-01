@@ -1,10 +1,10 @@
 # Helios
 
-The Singular agentic framework for the JVM. A provider-agnostic `Model` interface, a streamable steerable session SDK, sandboxed code execution, structured output, durability primitives, and end-to-end tracing — for tool-using agents that run reliably in production.
+The Helios agentic framework for the JVM. A provider-agnostic `Model` interface, a streamable steerable session SDK, sandboxed code execution, structured output, durability primitives, and end-to-end tracing — for tool-using agents that run reliably in production.
 
 Simple, explicit, no magic. No annotation-driven DI, no reflective surprises.
 
-Published to [Maven Central](https://central.sonatype.com/namespace/ai.singlr) under the `ai.singlr` namespace. MIT licensed.
+Published to [Maven Central](https://central.sonatype.com/namespace/com.standardapplied) under the `com.standardapplied` namespace. MIT licensed.
 
 ## Requirements
 
@@ -64,12 +64,12 @@ If any of these is a deal-breaker for your use case, open an issue — prioritis
 
 ```xml
 <dependency>
-  <groupId>ai.singlr</groupId>
+  <groupId>com.standardapplied</groupId>
   <artifactId>helios-session</artifactId>
   <version>${helios.version}</version>
 </dependency>
 <dependency>
-  <groupId>ai.singlr</groupId>
+  <groupId>com.standardapplied</groupId>
   <artifactId>helios-anthropic</artifactId>  <!-- or -gemini, -openai -->
   <version>${helios.version}</version>
 </dependency>
@@ -78,8 +78,8 @@ If any of these is a deal-breaker for your use case, open an issue — prioritis
 JPMS:
 
 ```java
-requires ai.singlr.session;
-requires ai.singlr.anthropic;
+requires com.standardapplied.helios.session;
+requires com.standardapplied.helios.anthropic;
 ```
 
 ## Quick Start
@@ -422,7 +422,7 @@ var result = ft.execute(() -> model.chat(messages));   // checked exceptions: se
 
 ## Observability
 
-The session's `events()` publisher is the primary observability surface. Subscribe a `Flow.Subscriber<QueryEvent>` (or a per-phase `OnStreamEventHook` for in-loop interception) and pick the events you care about — see the 15-subtype sealed hierarchy in `ai.singlr.session.QueryEvent` (`AssistantText`, `ToolUse`, `ToolResult`, `ContextWarning`, `ContextEdited`, `HookFired`, `TurnEnded`, `LoopEnded`, etc.).
+The session's `events()` publisher is the primary observability surface. Subscribe a `Flow.Subscriber<QueryEvent>` (or a per-phase `OnStreamEventHook` for in-loop interception) and pick the events you care about — see the 15-subtype sealed hierarchy in `com.standardapplied.helios.session.QueryEvent` (`AssistantText`, `ToolUse`, `ToolResult`, `ContextWarning`, `ContextEdited`, `HookFired`, `TurnEnded`, `LoopEnded`, etc.).
 
 ```java
 session.events().subscribe(new Flow.Subscriber<QueryEvent>() {
@@ -443,8 +443,8 @@ session.events().subscribe(new Flow.Subscriber<QueryEvent>() {
 For HTTP clients, `helios-runtime` exposes the same events as Server-Sent Events under `GET /sessions/{id}/events`.
 
 `helios-core` also ships generic event-sink primitives (`EventSink`, `JsonlEventSink`,
-`CollectingEventSink` in `ai.singlr.core.events`) plus a `Trace` / `Span` value-type hierarchy in
-`ai.singlr.core.trace` for custom collectors. These are currently inert for `AgentSession` runs —
+`CollectingEventSink` in `com.standardapplied.helios.core.events`) plus a `Trace` / `Span` value-type hierarchy in
+`com.standardapplied.helios.core.trace` for custom collectors. These are currently inert for `AgentSession` runs —
 wire them via your own hook or stream subscriber.
 
 `JsonlEventSink.openMetadataOnly(path)` persists run/span IDs, event types, timing, model and token
@@ -550,7 +550,7 @@ var promptRegistry = new PgPromptRegistry(pgConfig);
 var durability = PgDurability.of(pgConfig);   // RunStore + ToolCallJournal
 ```
 
-Schema lives on the classpath at `ai/singlr/persistence/schema.sql` — run it against your database to create the `helios_*` tables. Optional custom schema prefix is applied to all generated SQL; the schema name is validated against Postgres' unquoted-identifier shape (`[A-Za-z_][A-Za-z0-9_]{0,62}`) at `PgConfig` construction.
+Schema lives on the classpath at `com/standardapplied/helios/persistence/schema.sql` — run it against your database to create the `helios_*` tables. Optional custom schema prefix is applied to all generated SQL; the schema name is validated against Postgres' unquoted-identifier shape (`[A-Za-z_][A-Za-z0-9_]{0,62}`) at `PgConfig` construction.
 
 **Annotations.** `core.trace.Annotation` is a structured note attached to a real trace or span (`subjectId`). An optional `facet` addresses a named sub-coordinate within the subject, so one author can hold several judgments about one subject — e.g. one rating per evaluation dimension — without minting synthetic ids; `authorKind` (`HUMAN | MODEL | SYSTEM`) types the author and `metadata` (a `jsonb` map) carries opaque consumer context. `PgTraceStore.upsertAnnotation` persists the full record and is idempotent on `(subjectId, facet, label, authorId)`. Read via `findAnnotationsBySubject(id)`, `findAnnotationsBySubjects(ids)` (batch), or `listAnnotations(paginate, scimFilter)` (SCIM over the first-class columns). `facet`, `label`, and `metadata` are opaque to Helios — it stores and returns them without interpretation.
 
@@ -635,7 +635,7 @@ Directory creation (`mkdirat`), deletion (`unlinkat`), and directory enumeration
 Strict mode requires Linux x86-64 or AArch64, the default filesystem and mounted `/proc/self/fd`. It uses JDK 25's Foreign Function & Memory API to call libc; no downloaded native library, compiler or private JDK API is needed. Enable native access for the session module:
 
 ```text
-java --enable-native-access=ai.singlr.session --module-path ... --module your.application/your.Main
+java --enable-native-access=com.standardapplied.helios.session --module-path ... --module your.application/your.Main
 ```
 
 For a classpath application, use `java --enable-native-access=ALL-UNNAMED -cp ... your.Main`. Maven tests configure these grants automatically. The host grant is not propagated to `JvmSandbox` child JVMs. Construction fails closed when native access, the filesystem or the platform is unsupported, including macOS and Windows; there is no automatic weaker fallback.

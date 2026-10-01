@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.runtime;
+package com.standardapplied.helios.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -134,14 +134,14 @@ final class JacksonReaderWriterTest {
   @Test
   void successResultSerializesGroundingCitationsOntoTheWire() {
     var success =
-        new ai.singlr.session.ResultMessage.Success(
+        new com.standardapplied.helios.session.ResultMessage.Success(
             "sess-1",
             "Canberra is the capital.",
-            ai.singlr.core.model.Response.Usage.of(1, 1),
-            ai.singlr.core.common.CostEstimate.zero(),
+            com.standardapplied.helios.core.model.Response.Usage.of(1, 1),
+            com.standardapplied.helios.core.common.CostEstimate.zero(),
             java.time.Duration.ZERO,
             List.of(
-                ai.singlr.core.model.Citation.newBuilder()
+                com.standardapplied.helios.core.model.Citation.newBuilder()
                     .withSourceId("https://en.wikipedia.org/x")
                     .withTitle("wikipedia.org")
                     .build()));

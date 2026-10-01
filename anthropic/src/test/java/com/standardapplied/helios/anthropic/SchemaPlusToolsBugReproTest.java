@@ -1,17 +1,17 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.anthropic;
+package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.ModelConfig;
-import ai.singlr.core.schema.OutputSchema;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.core.tool.ToolResult;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolResult;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -34,9 +34,9 @@ import org.junit.jupiter.api.Test;
  *
  * <ol>
  *   <li>{@link AnthropicModel#chat(java.util.List, java.util.List,
- *       ai.singlr.core.schema.OutputSchema)} skips {@code parseStructuredContent} when {@code
- *       response.toolCalls()} is non-empty — tool-calling turns are intermediate, structured output
- *       is the deliverable of a later text-only turn.
+ *       com.standardapplied.helios.core.schema.OutputSchema)} skips {@code parseStructuredContent}
+ *       when {@code response.toolCalls()} is non-empty — tool-calling turns are intermediate,
+ *       structured output is the deliverable of a later text-only turn.
  *   <li>{@link AnthropicModel#buildRequest} rephrases the schema instruction when tools are present
  *       so it stops fighting the deployer's "use tools first" guidance.
  * </ol>

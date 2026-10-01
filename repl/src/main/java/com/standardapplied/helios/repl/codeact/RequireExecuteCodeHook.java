@@ -1,18 +1,18 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.repl.codeact;
+package com.standardapplied.helios.repl.codeact;
 
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.session.execution.ExecuteTool;
-import ai.singlr.session.hooks.HookContext;
-import ai.singlr.session.hooks.HookOutcome;
-import ai.singlr.session.hooks.PostToolUseHook;
-import ai.singlr.session.hooks.PreStopHook;
-import ai.singlr.session.hooks.RequireSignatureHook;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.execution.ExecuteTool;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.PostToolUseHook;
+import com.standardapplied.helios.session.hooks.PreStopHook;
+import com.standardapplied.helios.session.hooks.RequireSignatureHook;
 
 /**
  * CodeAct-specific stop gate: refuses termination until the model has actually executed code (i.e.

@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.files;
+package com.standardapplied.helios.session.files;
 
-import ai.singlr.core.common.Strings;
+import com.standardapplied.helios.core.common.Strings;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -50,9 +50,10 @@ import java.util.Objects;
  * snapshot or protection against in-place edits by another writer.
  *
  * <p>Strict mode requires Linux x86-64/AArch64, the default filesystem, mounted {@code
- * /proc/self/fd} and explicit native access: {@code --enable-native-access=ai.singlr.session} on
- * the module path, or {@code --enable-native-access=ALL-UNNAMED} on the class path. Unsupported
- * configurations fail closed. No native library download, compiler or private JDK API is required.
+ * /proc/self/fd} and explicit native access: {@code
+ * --enable-native-access=com.standardapplied.helios.session} on the module path, or {@code
+ * --enable-native-access=ALL-UNNAMED} on the class path. Unsupported configurations fail closed. No
+ * native library download, compiler or private JDK API is required.
  *
  * <p>{@code confineSymlinks=false} is the explicitly weaker trusted-workspace mode: paths are still
  * canonicalised (so the open primitives keep working no-follow) but the canonical result may lie

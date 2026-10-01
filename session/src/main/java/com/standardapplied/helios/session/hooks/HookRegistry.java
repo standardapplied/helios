@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.session.QueryEvent;
-import ai.singlr.session.UserMessage;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.UserMessage;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -21,7 +21,7 @@ import java.util.logging.Logger;
 
 /**
  * Priority-sorted hook dispatcher. One instance per session, built from the hook list supplied via
- * {@link ai.singlr.session.SessionOptions.Builder#withHook(Hook)}.
+ * {@link com.standardapplied.helios.session.SessionOptions.Builder#withHook(Hook)}.
  *
  * <p>Hooks of each phase are sorted by {@link Hook#priority()} (low → high), then by registration
  * order for ties. For non-observe phases, firing returns the first non-{@link HookOutcome.Continue}

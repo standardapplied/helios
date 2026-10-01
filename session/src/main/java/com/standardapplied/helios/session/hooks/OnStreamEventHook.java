@@ -1,10 +1,10 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.hooks;
+package com.standardapplied.helios.session.hooks;
 
-import ai.singlr.session.QueryEvent;
+import com.standardapplied.helios.session.QueryEvent;
 
 /**
  * Observe-only hook fired for every {@link QueryEvent} the loop emits. Live observability, progress

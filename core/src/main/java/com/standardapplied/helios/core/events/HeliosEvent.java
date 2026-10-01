@@ -1,11 +1,11 @@
-/* Copyright (c) 2026 Singular | SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package ai.singlr.core.events;
+package com.standardapplied.helios.core.events;
 
-import ai.singlr.core.common.Strings;
-import ai.singlr.core.model.Message;
-import ai.singlr.core.tool.ToolResult;
-import ai.singlr.core.trace.Trace;
+import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.core.trace.Trace;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;

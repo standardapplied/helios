@@ -1,25 +1,25 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
 
 /**
- * Singular Agentic Framework - Anthropic Claude Provider Module.
+ * Helios - Anthropic Claude Provider Module.
  *
  * <p>Implements the ModelProvider SPI for Anthropic's Claude API using the Messages API for
  * multi-turn conversations and SSE streaming support.
  */
-module ai.singlr.anthropic {
-  requires ai.singlr.core;
+module com.standardapplied.helios.anthropic {
+  requires com.standardapplied.helios.core;
   requires java.net.http;
   requires tools.jackson.databind;
   requires com.fasterxml.jackson.annotation;
 
-  exports ai.singlr.anthropic;
+  exports com.standardapplied.helios.anthropic;
 
-  opens ai.singlr.anthropic.api to
+  opens com.standardapplied.helios.anthropic.api to
       tools.jackson.databind;
 
-  provides ai.singlr.core.model.ModelProvider with
-      ai.singlr.anthropic.AnthropicProvider;
+  provides com.standardapplied.helios.core.model.ModelProvider with
+      com.standardapplied.helios.anthropic.AnthropicProvider;
 }

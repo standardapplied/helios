@@ -1,17 +1,17 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session.permissions;
+package com.standardapplied.helios.session.permissions;
 
-import ai.singlr.core.common.Strings;
+import com.standardapplied.helios.core.common.Strings;
 import java.util.Objects;
 import java.util.Optional;
 
 /**
  * One row of a permission table. Matches if the tool name equals {@code toolName} AND, when {@code
  * argPattern} is present, the canonical args (from {@link
- * ai.singlr.session.tools.ToolPermissionKey#canonicalArgs()}) match the glob.
+ * com.standardapplied.helios.session.tools.ToolPermissionKey#canonicalArgs()}) match the glob.
  *
  * <p>Glob syntax follows {@code java.nio.file.PathMatcher} semantics — {@code *} matches a single
  * path segment, {@code **} matches any number of segments, brackets / question marks supported. An

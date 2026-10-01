@@ -1,37 +1,37 @@
 /*
- * Copyright (c) 2026 Singular
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package ai.singlr.session;
+package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.core.model.Message;
-import ai.singlr.core.model.Model;
-import ai.singlr.core.model.ModelChunk;
-import ai.singlr.core.model.Response;
-import ai.singlr.core.model.Response.Usage;
-import ai.singlr.core.model.ToolCall;
-import ai.singlr.core.runtime.CancellationToken;
-import ai.singlr.core.tool.Tool;
-import ai.singlr.session.ask.AskUserQuestionResponse;
-import ai.singlr.session.ask.AskUserQuestionTool;
-import ai.singlr.session.files.GlobTool;
-import ai.singlr.session.files.GrepTool;
-import ai.singlr.session.files.InMemoryFileTracker;
-import ai.singlr.session.files.LsTool;
-import ai.singlr.session.files.ReadTool;
-import ai.singlr.session.files.WorkspaceRoot;
-import ai.singlr.session.memory.FileSystemMemoryBackend;
-import ai.singlr.session.memory.MemoryReadTool;
-import ai.singlr.session.permissions.Permission;
-import ai.singlr.session.permissions.PermissionEffect;
-import ai.singlr.session.permissions.PermissionMode;
-import ai.singlr.session.permissions.PermissionRule;
-import ai.singlr.session.tools.ToolRegistry;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
+import com.standardapplied.helios.session.ask.AskUserQuestionTool;
+import com.standardapplied.helios.session.files.GlobTool;
+import com.standardapplied.helios.session.files.GrepTool;
+import com.standardapplied.helios.session.files.InMemoryFileTracker;
+import com.standardapplied.helios.session.files.LsTool;
+import com.standardapplied.helios.session.files.ReadTool;
+import com.standardapplied.helios.session.files.WorkspaceRoot;
+import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
+import com.standardapplied.helios.session.memory.MemoryReadTool;
+import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.permissions.PermissionEffect;
+import com.standardapplied.helios.session.permissions.PermissionMode;
+import com.standardapplied.helios.session.permissions.PermissionRule;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
