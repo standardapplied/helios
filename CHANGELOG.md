@@ -40,6 +40,12 @@ Persisted data is not migrated: class-name strings recorded by 2.x (for example
 `SerializedError.kind`) are opaque and may carry `ai.singlr` names. Table names (`helios_*`) do
 not change.
 
+### Added
+
+- **`CircuitBreaker.Builder.withClock(InstantSource)`.** The breaker reads the current instant from
+  an injectable source (default `Clock.systemUTC()`), so the half-open delay can be driven by hand
+  instead of by sleeping. A `java.time.Clock` is an `InstantSource` and can be passed directly.
+
 ## [2.12.0] — 2026-10-01 — Claude Opus 5.5, Sonnet 5.5, the GPT-6 family and hardened confinement
 
 The last 2.x feature release. 3.0 renames the root package and removes the compatibility
