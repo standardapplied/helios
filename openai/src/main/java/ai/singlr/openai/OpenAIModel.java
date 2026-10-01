@@ -293,10 +293,11 @@ public class OpenAIModel implements Model {
     var toolChoiceValue = buildToolChoice(tools);
     var reasoningConfig = buildReasoningConfig();
 
-    Double temperature = config.temperature();
-    if (reasoningConfig != null) {
-      temperature = null;
-    }
+    // A request that reasons rejects sampling parameters with a 400; they are accepted only
+    // without a reasoning config or at effort none.
+    var samplingAllowed = reasoningConfig == null || "none".equals(reasoningConfig.effort());
+    var temperature = samplingAllowed ? config.temperature() : null;
+    var topP = samplingAllowed ? config.topP() : null;
 
     var builder =
         ResponsesRequest.newBuilder()
@@ -307,7 +308,7 @@ public class OpenAIModel implements Model {
             .withTools(toolDefs)
             .withToolChoice(toolChoiceValue)
             .withTemperature(temperature)
-            .withTopP(config.topP())
+            .withTopP(topP)
             .withMaxOutputTokens(
                 config.maxOutputTokens() != null ? config.maxOutputTokens() : maxOutputTokens())
             .withStop(config.stopSequences())
@@ -486,10 +487,12 @@ public class OpenAIModel implements Model {
 
   /**
    * Model-aware effort dispatch driven by {@link OpenAIModelId.EffortSupport}. Every model that
-   * documents an explicit {@code "none"} effort (the gpt-5.4, gpt-5.5 and gpt-5.6 families) gets it
-   * for {@code ThinkingLevel.NONE} — omitting the config would run the model's default reasoning
-   * (medium on gpt-5.5 and gpt-5.6). {@link OpenAIModelId.EffortSupport#STANDARD} models omit the
-   * config instead and clamp higher tiers to {@code high}.
+   * documents an explicit {@code "none"} effort (the gpt-5.4, gpt-5.5 and gpt-5.6 families,
+   * gpt-6-sol, gpt-6-luna) gets it for {@code ThinkingLevel.NONE} — omitting the config would run
+   * the model's default reasoning (medium). Models that reject {@code "none"} (gpt-6-astra,
+   * gpt-6.1-sol) get {@code "low"}, their lowest effort. {@link
+   * OpenAIModelId.EffortSupport#STANDARD} models omit the config instead and clamp higher tiers to
+   * {@code high}.
    */
   private ResponsesRequest.ReasoningConfig buildReasoningConfig() {
     var support =
@@ -497,9 +500,11 @@ public class OpenAIModel implements Model {
     var level = config.thinkingLevel() == null ? ThinkingLevel.NONE : config.thinkingLevel();
 
     if (level == ThinkingLevel.NONE) {
-      return support == OpenAIModelId.EffortSupport.STANDARD
-          ? null
-          : ResponsesRequest.ReasoningConfig.of("none");
+      return switch (support) {
+        case STANDARD -> null;
+        case EXTENDED, FULL -> ResponsesRequest.ReasoningConfig.of("none");
+        case FULL_WITHOUT_NONE -> ResponsesRequest.ReasoningConfig.of("low");
+      };
     }
 
     var effort =
@@ -513,7 +518,7 @@ public class OpenAIModel implements Model {
               switch (support) {
                 case STANDARD -> "high";
                 case EXTENDED -> "xhigh";
-                case FULL -> "max";
+                case FULL, FULL_WITHOUT_NONE -> "max";
               };
         };
 

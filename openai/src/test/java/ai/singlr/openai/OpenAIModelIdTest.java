@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class OpenAIModelIdTest {
@@ -153,6 +154,37 @@ class OpenAIModelIdTest {
     assertEquals("gpt-5.6-terra", OpenAIModelId.GPT_5_6_TERRA.id());
     assertEquals("gpt-5.6-luna", OpenAIModelId.GPT_5_6_LUNA.id());
     assertEquals(OpenAIModelId.GPT_5_6_SOL, OpenAIModelId.fromId("gpt-5.6-sol"));
+  }
+
+  @Test
+  void gpt6FamilyIsCatalogued() {
+    assertEquals("gpt-6-astra", OpenAIModelId.GPT_6_ASTRA.id());
+    assertEquals("gpt-6.1-sol", OpenAIModelId.GPT_6_1_SOL.id());
+    assertEquals("gpt-6-sol", OpenAIModelId.GPT_6_SOL.id());
+    assertEquals("gpt-6-luna", OpenAIModelId.GPT_6_LUNA.id());
+    for (var model :
+        List.of(
+            OpenAIModelId.GPT_6_ASTRA,
+            OpenAIModelId.GPT_6_1_SOL,
+            OpenAIModelId.GPT_6_SOL,
+            OpenAIModelId.GPT_6_LUNA)) {
+      assertEquals(1_050_000, model.contextWindow(), model.id());
+      assertEquals(128_000, model.maxOutputTokens(), model.id());
+      assertEquals(model, OpenAIModelId.fromId(model.id()));
+      assertTrue(OpenAIModelId.isSupported(model.id()));
+    }
+  }
+
+  @Test
+  @SuppressWarnings("deprecation")
+  void gpt6EffortSupportSeparatesModelsThatRejectNone() {
+    assertEquals(
+        OpenAIModelId.EffortSupport.FULL_WITHOUT_NONE, OpenAIModelId.GPT_6_ASTRA.effortSupport());
+    assertEquals(
+        OpenAIModelId.EffortSupport.FULL_WITHOUT_NONE, OpenAIModelId.GPT_6_1_SOL.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.FULL, OpenAIModelId.GPT_6_SOL.effortSupport());
+    assertEquals(OpenAIModelId.EffortSupport.FULL, OpenAIModelId.GPT_6_LUNA.effortSupport());
+    assertTrue(OpenAIModelId.GPT_6_ASTRA.supportsXhighEffort());
   }
 
   @Test

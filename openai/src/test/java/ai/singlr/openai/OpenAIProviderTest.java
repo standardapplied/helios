@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.core.model.ModelConfig;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class OpenAIProviderTest {
@@ -52,6 +53,13 @@ class OpenAIProviderTest {
   @Test
   void supportsGpt56Sol() {
     assertTrue(provider.supports("gpt-5.6-sol"));
+  }
+
+  @Test
+  void supportsGpt6Family() {
+    for (var id : List.of("gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna")) {
+      assertTrue(provider.supports(id), id);
+    }
   }
 
   @Test

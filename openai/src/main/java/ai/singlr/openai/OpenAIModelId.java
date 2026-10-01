@@ -17,10 +17,15 @@ public enum OpenAIModelId {
   // operators can override per-call via ModelConfig.Builder.withMaxOutputTokens. Reasoning models
   // (o3, o4-mini) carry higher caps because their output includes reasoning tokens.
   //
-  // EffortSupport per model (model pages, 2026-08-21): the gpt-5.6 family (incl. sol/terra/luna)
-  // documents none/low/medium/high/xhigh/max; gpt-5.5, gpt-5.4, gpt-5.4-mini and gpt-5.4-nano
-  // document none/low/medium/high/xhigh; o-series and non-reasoning GPT-4.x models are STANDARD
-  // (low..high, no explicit none), so higher tiers clamp.
+  // EffortSupport per model (model pages, 2026-10-01): gpt-6-astra and gpt-6.1-sol document
+  // low/medium/high/xhigh/max and reject none; gpt-6-sol, gpt-6-luna and the gpt-5.6 family (incl.
+  // sol/terra/luna) document none/low/medium/high/xhigh/max; gpt-5.5, gpt-5.4, gpt-5.4-mini and
+  // gpt-5.4-nano document none/low/medium/high/xhigh; o-series and non-reasoning GPT-4.x models are
+  // STANDARD (low..high, no explicit none), so higher tiers clamp.
+  GPT_6_ASTRA("gpt-6-astra", 1_050_000, 128_000, EffortSupport.FULL_WITHOUT_NONE),
+  GPT_6_1_SOL("gpt-6.1-sol", 1_050_000, 128_000, EffortSupport.FULL_WITHOUT_NONE),
+  GPT_6_SOL("gpt-6-sol", 1_050_000, 128_000, EffortSupport.FULL),
+  GPT_6_LUNA("gpt-6-luna", 1_050_000, 128_000, EffortSupport.FULL),
   GPT_5_6("gpt-5.6", 1_050_000, 128_000, EffortSupport.FULL),
   GPT_5_6_SOL("gpt-5.6-sol", 1_050_000, 128_000, EffortSupport.FULL),
   GPT_5_6_TERRA("gpt-5.6-terra", 1_050_000, 128_000, EffortSupport.FULL),
@@ -38,9 +43,9 @@ public enum OpenAIModelId {
   O4_MINI("o4-mini", 200_000, 100_000, EffortSupport.STANDARD);
 
   /**
-   * The {@code reasoning.effort} value range a model accepts on the Responses API. Wider tiers are
-   * supersets: {@link #FULL} accepts everything {@link #EXTENDED} does plus {@code none} and {@code
-   * max}.
+   * The {@code reasoning.effort} value range a model accepts on the Responses API. {@link
+   * #STANDARD}, {@link #EXTENDED} and {@link #FULL} widen in that order; {@link #FULL_WITHOUT_NONE}
+   * is {@link #FULL} minus {@code none}.
    */
   public enum EffortSupport {
     /**
@@ -57,9 +62,16 @@ public enum OpenAIModelId {
 
     /**
      * Full range {@code none} / {@code low} / {@code medium} / {@code high} / {@code xhigh} /
-     * {@code max} (gpt-5.6 family).
+     * {@code max} (gpt-5.6 family, gpt-6-sol, gpt-6-luna).
      */
-    FULL
+    FULL,
+
+    /**
+     * {@code low} / {@code medium} / {@code high} / {@code xhigh} / {@code max}; {@code none}
+     * returns a 400 (gpt-6-astra, gpt-6.1-sol), so {@code ThinkingLevel.NONE} pins {@code low}, the
+     * lowest effort these models accept.
+     */
+    FULL_WITHOUT_NONE
   }
 
   private final String id;

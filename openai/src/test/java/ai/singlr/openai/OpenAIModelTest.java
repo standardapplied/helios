@@ -578,6 +578,109 @@ class OpenAIModelTest {
     assertEquals("none", request.reasoning().effort());
   }
 
+  private static ResponsesRequest requestFor(OpenAIModelId modelId, ThinkingLevel level) {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").withThinkingLevel(level).build();
+    return new OpenAIModel(modelId, config)
+        .buildRequest(List.of(Message.user("Hi")), List.of(), null);
+  }
+
+  @Test
+  void gpt6ModelsWithoutNoneEffortPinLowForThinkingNone() {
+    for (var modelId : List.of(OpenAIModelId.GPT_6_ASTRA, OpenAIModelId.GPT_6_1_SOL)) {
+      var request = requestFor(modelId, ThinkingLevel.NONE);
+
+      assertEquals(
+          "low",
+          request.reasoning().effort(),
+          modelId.id() + " returns a 400 for none; low is its lowest effort");
+    }
+  }
+
+  @Test
+  void gpt6ModelsWithNoneEffortSendItForThinkingNone() {
+    for (var modelId : List.of(OpenAIModelId.GPT_6_SOL, OpenAIModelId.GPT_6_LUNA)) {
+      assertEquals("none", requestFor(modelId, ThinkingLevel.NONE).reasoning().effort());
+    }
+  }
+
+  @Test
+  void gpt6FamilySendsEveryHigherEffortVerbatim() {
+    var expected =
+        Map.of(
+            ThinkingLevel.MINIMAL, "low",
+            ThinkingLevel.LOW, "low",
+            ThinkingLevel.MEDIUM, "medium",
+            ThinkingLevel.HIGH, "high",
+            ThinkingLevel.XHIGH, "xhigh",
+            ThinkingLevel.MAX, "max");
+    for (var modelId :
+        List.of(
+            OpenAIModelId.GPT_6_ASTRA,
+            OpenAIModelId.GPT_6_1_SOL,
+            OpenAIModelId.GPT_6_SOL,
+            OpenAIModelId.GPT_6_LUNA)) {
+      for (var entry : expected.entrySet()) {
+        assertEquals(
+            entry.getValue(),
+            requestFor(modelId, entry.getKey()).reasoning().effort(),
+            modelId.id() + " " + entry.getKey());
+      }
+    }
+  }
+
+  @Test
+  void samplingParametersRideAtEffortNone() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .withTemperature(0.2)
+            .withTopP(0.9)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_6_LUNA, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals("none", request.reasoning().effort());
+    assertEquals(0.2, request.temperature());
+    assertEquals(0.9, request.topP());
+  }
+
+  @Test
+  void samplingParametersAreDroppedWhenNoneFallsBackToLow() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.NONE)
+            .withTemperature(0.2)
+            .withTopP(0.9)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_6_ASTRA, config);
+
+    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+
+    assertEquals("low", request.reasoning().effort());
+    assertNull(request.temperature());
+    assertNull(request.topP());
+  }
+
+  @Test
+  void reasoningRequestsNeverCarrySamplingParameters() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withThinkingLevel(ThinkingLevel.MEDIUM)
+            .withTemperature(0.7)
+            .withTopP(0.9)
+            .build();
+    var model = new OpenAIModel(OpenAIModelId.GPT_6_ASTRA, config);
+
+    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+
+    assertNull(request.temperature());
+    assertNull(request.topP(), "top_p with a reasoning effort returns a 400 on the GPT-6 family");
+  }
+
   @Test
   void gpt54MiniXhighIsSentVerbatim() {
     var config =
