@@ -125,7 +125,7 @@ class ArchitectureRulesTest {
         .resideOutsideOfPackage(HELIOS + ".repl.sandbox..")
         .should(ACCESS_STANDARD_STREAMS)
         .because(
-            "library code reports through System.Logger or the trace API; only repl.sandbox,"
+            "library code reports through java.util.logging or the trace API; only repl.sandbox,"
                 + " where capturing the standard streams is the mechanism, and the example"
                 + " modules may use System.out, System.err or printStackTrace")
         .check(LIBRARY);

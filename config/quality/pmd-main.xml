@@ -21,7 +21,8 @@
         </properties>
     </rule>
     <rule ref="category/java/design.xml/NPathComplexity"/>
-    <rule ref="category/java/design.xml/AvoidDeeplyNestedIfStmts"/>
+    <rule ref="category/java/design.xml/AvoidDeeplyNestedIfStmts"
+          message="if statements are nested 3 or more deep (limit: a depth of 2)"/>
     <rule ref="category/java/design.xml/NcssCount">
         <properties>
             <property name="methodReportLevel" value="60"/>
@@ -29,11 +30,14 @@
         </properties>
     </rule>
     <rule ref="category/java/design.xml/ExcessiveParameterList"/>
-    <rule ref="category/java/design.xml/TooManyFields"/>
+    <rule ref="category/java/design.xml/TooManyFields"
+          message="The class has more than 15 non-static, non-final fields"/>
     <rule ref="category/java/design.xml/CouplingBetweenObjects"/>
-    <rule ref="category/java/design.xml/SwitchDensity"/>
+    <rule ref="category/java/design.xml/SwitchDensity"
+          message="The switch averages 10 or more statements per label (limit: fewer than 10)"/>
     <rule ref="category/java/design.xml/GodClass"/>
-    <rule ref="category/java/design.xml/TooManyMethods">
+    <rule ref="category/java/design.xml/TooManyMethods"
+          message="The class has more than 10 methods, not counting get*, set*, is* and with*">
         <properties>
             <property name="xpath">
                 <value>
