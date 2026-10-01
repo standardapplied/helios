@@ -5,6 +5,7 @@
 
 package com.standardapplied.helios.persistence;
 
+import ai.singlr.scimsql.ScimEngine;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.common.Paginate;
 import com.standardapplied.helios.core.common.PaginatedList;
@@ -27,7 +28,6 @@ import com.standardapplied.helios.persistence.sql.AnnotationSql;
 import com.standardapplied.helios.persistence.sql.SpanSql;
 import com.standardapplied.helios.persistence.sql.TraceRollupSql;
 import com.standardapplied.helios.persistence.sql.TraceSql;
-import com.standardapplied.helios.scimsql.ScimEngine;
 import io.helidon.dbclient.DbClient;
 import io.helidon.dbclient.DbRow;
 import io.helidon.dbclient.DbTransaction;

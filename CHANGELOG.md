@@ -32,6 +32,10 @@ with `com.standardapplied.helios.` in imports, `requires` clauses and
 classpath location `com/standardapplied/helios/persistence/schema.sql`. There is no relocation
 pom and no bridging artifact; the 2.x line stays on `ai.singlr`.
 
+One `ai.singlr` name remains: `helios-persistence` depends on the separately released
+`ai.singlr:scim-sql:1.0.0` (JPMS module `ai.singlr.scimsql`), which is not part of this repository
+and keeps its published coordinates until that library is migrated.
+
 Persisted data is not migrated: class-name strings recorded by 2.x (for example
 `SerializedError.kind`) are opaque and may carry `ai.singlr` names. Table names (`helios_*`) do
 not change.
