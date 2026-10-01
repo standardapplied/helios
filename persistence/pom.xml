@@ -51,7 +51,7 @@
             <version>${jackson-tools-version}</version>
         </dependency>
         <dependency>
-            <groupId>com.standardapplied</groupId>
+            <groupId>ai.singlr</groupId>
             <artifactId>scim-sql</artifactId>
             <version>1.0.0</version>
         </dependency>
