@@ -41,12 +41,16 @@
         <helidon-version>4.4.1</helidon-version>
         <testcontainers-version>1.21.4</testcontainers-version>
         <postgresql-driver-version>42.7.7</postgresql-driver-version>
+        <maven-pmd-plugin-version>3.28.0</maven-pmd-plugin-version>
+        <pmd-version>7.28.0</pmd-version>
+        <archunit-version>1.5.1</archunit-version>
 
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <helios.test.native-access>ALL-UNNAMED</helios.test.native-access>
+        <helios.quality.config>${maven.multiModuleProjectDirectory}/config/quality</helios.quality.config>
     </properties>
 
     <modules>
@@ -60,6 +64,7 @@
         <module>onnx</module>
         <module>repl</module>
         <module>testing</module>
+        <module>architecture</module>
         <module>examples/codeact-demo</module>
         <module>examples/rlm-demo</module>
         <module>examples/session-demo</module>
@@ -138,6 +143,114 @@
                         <goals>
                             <goal>check</goal>
                         </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <!--
+                  Quality gate, documented in CLAUDE.md. `check` and `aggregate-cpd-check` fork
+                  their own main-code analysis that reads only this plugin-level configuration,
+                  so the main rule set, the PMD exclusions and the shared settings live here; the
+                  test-code PMD analysis and the main-and-test CPD analysis are the explicit
+                  executions below, each followed by a check pointed at its output directory.
+                  The analysis goals apply the exclusion file too, so both CPD executions name
+                  the CPD file: read as CPD exclusions, the blank lines of the PMD properties
+                  file would silence every duplication inside a single file.
+                -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-pmd-plugin</artifactId>
+                <version>${maven-pmd-plugin-version}</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-core</artifactId>
+                        <version>${pmd-version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-java</artifactId>
+                        <version>${pmd-version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-javascript</artifactId>
+                        <version>${pmd-version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-jsp</artifactId>
+                        <version>${pmd-version}</version>
+                    </dependency>
+                </dependencies>
+                <configuration>
+                    <rulesets>
+                        <ruleset>${helios.quality.config}/pmd-main.xml</ruleset>
+                    </rulesets>
+                    <excludeFromFailureFile>${helios.quality.config}/pmd-exclusions.properties</excludeFromFailureFile>
+                    <targetJdk>${maven.compiler.release}</targetJdk>
+                    <skipPmdError>false</skipPmdError>
+                    <printFailingErrors>true</printFailingErrors>
+                    <analysisCache>true</analysisCache>
+                    <linkXRef>false</linkXRef>
+                    <minimumTokens>100</minimumTokens>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>pmd-main-check</id>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>pmd-test</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>pmd</goal>
+                        </goals>
+                        <configuration>
+                            <includeTests>true</includeTests>
+                            <excludeRoots>
+                                <excludeRoot>${project.build.sourceDirectory}</excludeRoot>
+                            </excludeRoots>
+                            <rulesets>
+                                <ruleset>${helios.quality.config}/pmd-test.xml</ruleset>
+                            </rulesets>
+                            <targetDirectory>${project.build.directory}/pmd-test</targetDirectory>
+                            <analysisCacheLocation>${project.build.directory}/pmd-test/pmd.cache</analysisCacheLocation>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>pmd-test-check</id>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <targetDirectory>${project.build.directory}/pmd-test</targetDirectory>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>cpd</id>
+                        <phase>verify</phase>
+                        <inherited>false</inherited>
+                        <goals>
+                            <goal>aggregate-cpd</goal>
+                        </goals>
+                        <configuration>
+                            <includeTests>true</includeTests>
+                            <targetDirectory>${project.build.directory}/cpd</targetDirectory>
+                            <excludeFromFailureFile>${helios.quality.config}/cpd-exclusions.txt</excludeFromFailureFile>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>cpd-check</id>
+                        <inherited>false</inherited>
+                        <goals>
+                            <goal>aggregate-cpd-check</goal>
+                        </goals>
+                        <configuration>
+                            <targetDirectory>${project.build.directory}/cpd</targetDirectory>
+                            <excludeFromFailureFile>${helios.quality.config}/cpd-exclusions.txt</excludeFromFailureFile>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
