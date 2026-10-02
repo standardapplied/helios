@@ -14,8 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
 import java.time.Duration;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -389,22 +392,37 @@ class FaultToleranceTest {
   @Test
   void operationTimeoutInterruptsVirtualThread() {
     var interrupted = new CountDownLatch(1);
-    var ft = FaultTolerance.newBuilder().withOperationTimeout(Duration.ofMillis(100)).build();
 
-    assertThrows(
-        OperationTimeoutException.class,
-        () ->
-            ft.execute(
-                () -> {
-                  try {
-                    return neverFinishes();
-                  } catch (InterruptedException e) {
-                    interrupted.countDown();
-                    throw e;
-                  }
-                }));
+    try (var executor = new StartedOnSubmit()) {
+      var ft = new FaultTolerance(null, null, Duration.ofMillis(100), executor);
 
-    Await.latch("the timed-out operation to be interrupted", interrupted);
+      assertThrows(
+          OperationTimeoutException.class,
+          () ->
+              ft.execute(
+                  () -> {
+                    try {
+                      return neverFinishes();
+                    } catch (InterruptedException e) {
+                      interrupted.countDown();
+                      throw e;
+                    }
+                  }));
+
+      Await.latch("the timed-out operation to be interrupted", interrupted);
+    }
+  }
+
+  @Test
+  void withoutRetryKeepsTheExecutor() throws Exception {
+    var retryPolicy = RetryPolicy.newBuilder().withMaxAttempts(2).build();
+
+    try (var executor = new StartedOnSubmit()) {
+      var ft = new FaultTolerance(retryPolicy, null, NEVER_REACHED, executor).withoutRetry();
+
+      assertEquals("done", ft.execute(() -> "done"));
+      assertEquals(1, executor.submitted.get());
+    }
   }
 
   @Test
@@ -492,5 +510,32 @@ class FaultToleranceTest {
 
   private static String throwRuntime(String message) {
     throw new RuntimeException(message);
+  }
+
+  /**
+   * Returns from {@code submit} only once the operation is running, so a timeout that starts after
+   * the submission interrupts running work however late the worker was scheduled.
+   */
+  private static final class StartedOnSubmit extends ScheduledThreadPoolExecutor {
+
+    final AtomicInteger submitted = new AtomicInteger();
+
+    StartedOnSubmit() {
+      super(1, Thread.ofVirtual().factory());
+    }
+
+    @Override
+    public <T> Future<T> submit(Callable<T> operation) {
+      var started = new CountDownLatch(1);
+      var future =
+          super.submit(
+              () -> {
+                started.countDown();
+                return operation.call();
+              });
+      Await.latch("the submitted operation to start", started);
+      submitted.incrementAndGet();
+      return future;
+    }
   }
 }
