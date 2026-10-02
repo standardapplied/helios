@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.test.Await;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -38,7 +39,6 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
-import java.util.concurrent.TimeUnit;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
@@ -48,6 +48,8 @@ import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 class GeminiFilesClientTest {
+
+  private static final Duration PROCESSING_NEVER_TIMES_OUT = Duration.ofMinutes(10);
 
   @TempDir Path tempDir;
 
@@ -80,7 +82,7 @@ class GeminiFilesClientTest {
         "{\"name\":\"files/video-1\",\"mimeType\":\"video/mp4\","
             + "\"uri\":\"https://api.example/v1beta/files/video-1\",\"state\":\"ACTIVE\"}");
 
-    var client = client(http, Duration.ofSeconds(5));
+    var client = client(http, PROCESSING_NEVER_TIMES_OUT);
     var reference = client.upload(video, "video/mp4");
 
     assertEquals("https://api.example/v1beta/files/video-1", reference.uri());
@@ -125,7 +127,7 @@ class GeminiFilesClientTest {
         "{\"file\":{\"name\":\"files/video-2\",\"mimeType\":\"video/mp4\","
             + "\"uri\":\"https://api.example/v1beta/files/video-2\",\"state\":\"ACTIVE\"}}");
 
-    client(http, Duration.ofSeconds(5)).upload(video, "video/mp4");
+    client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
 
     assertEquals(2, http.requests.size());
   }
@@ -144,7 +146,7 @@ class GeminiFilesClientTest {
             + "\"uri\":\"https://provider-supplied.example/private/video\",\"state\":\"ACTIVE\"}}");
     http.enqueue(204, Map.of(), "");
 
-    var managed = client(http, Duration.ofSeconds(5)).uploadManaged(video, "video/mp4");
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
 
     assertEquals("files/managed-1", managed.resourceName());
     assertEquals("https://provider-supplied.example/private/video", managed.reference().uri());
@@ -168,7 +170,7 @@ class GeminiFilesClientTest {
     var http = managedUpload(httpClient(), "files/already-absent", "https://files.example/private");
     http.enqueue(404, Map.of(), "{\"error\":{\"message\":\"not found\"}}");
 
-    try (var managed = client(http, Duration.ofSeconds(5)).uploadManaged(video, "video/mp4")) {
+    try (var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4")) {
       managed.delete();
     }
 
@@ -186,7 +188,8 @@ class GeminiFilesClientTest {
         500, Map.of(), "{\"error\":{\"message\":\"failed " + apiKey + " " + fileUri + "\"}}");
     var config =
         ModelConfig.newBuilder().withApiKey(apiKey).withBaseUrl("https://api.example/v1").build();
-    var managed = client(config, http, Duration.ofSeconds(5)).uploadManaged(video, "video/mp4");
+    var managed =
+        client(config, http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
 
     var error = assertThrows(GeminiException.class, managed::delete);
 
@@ -204,7 +207,7 @@ class GeminiFilesClientTest {
     var http = managedUpload(httpClient(), "files/retry-delete", "https://files.example/retry");
     http.enqueue(503, Map.of(), "temporary");
     http.enqueue(204, Map.of(), "");
-    var managed = client(http, Duration.ofSeconds(5)).uploadManaged(video, "video/mp4");
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
 
     assertThrows(GeminiException.class, managed::delete);
     managed.delete();
@@ -221,7 +224,7 @@ class GeminiFilesClientTest {
         managedUpload(httpClient(), "files/redirect-delete", "https://files.example/private");
     http.enqueue(
         302, Map.of("location", List.of("https://attacker.example/collect")), "redirecting");
-    var managed = client(http, Duration.ofSeconds(5)).uploadManaged(video, "video/mp4");
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
 
     var error = assertThrows(GeminiException.class, managed::delete);
 
@@ -241,7 +244,7 @@ class GeminiFilesClientTest {
     var error =
         assertThrows(
             GeminiException.class,
-            () -> client(http, Duration.ofSeconds(5)).uploadManaged(video, "video/mp4"));
+            () -> client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4"));
 
     assertTrue(error.getMessage().contains("invalid file name"));
     assertEquals(2, http.requests.size());
@@ -269,7 +272,7 @@ class GeminiFilesClientTest {
     var error =
         assertThrows(
             GeminiException.class,
-            () -> client(http, Duration.ofSeconds(5)).upload(video, "video/mp4"));
+            () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
 
     assertTrue(error.getMessage().contains("codec rejected"));
   }
@@ -289,15 +292,15 @@ class GeminiFilesClientTest {
     var missingError =
         assertThrows(
             GeminiException.class,
-            () -> client(missing, Duration.ofSeconds(5)).upload(video, "video/mp4"));
+            () -> client(missing, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
     var originError =
         assertThrows(
             GeminiException.class,
-            () -> client(crossOrigin, Duration.ofSeconds(5)).upload(video, "video/mp4"));
+            () -> client(crossOrigin, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
     var invalidError =
         assertThrows(
             GeminiException.class,
-            () -> client(invalid, Duration.ofSeconds(5)).upload(video, "video/mp4"));
+            () -> client(invalid, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
 
     assertTrue(missingError.getMessage().contains("upload URL"));
     assertTrue(originError.getMessage().contains("origin"));
@@ -310,7 +313,7 @@ class GeminiFilesClientTest {
     var empty = tempDir.resolve("empty.mp4");
     Files.createFile(empty);
     var http = new StubHttpClient();
-    var client = client(http, Duration.ofSeconds(5));
+    var client = client(http, PROCESSING_NEVER_TIMES_OUT);
 
     assertThrows(IllegalArgumentException.class, () -> client.upload(tempDir, "video/mp4"));
     assertThrows(IllegalArgumentException.class, () -> client.upload(empty, "video/mp4"));
@@ -334,7 +337,7 @@ class GeminiFilesClientTest {
     var error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> client(http, Duration.ofSeconds(5)).upload(oversized, "video/mp4"));
+            () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(oversized, "video/mp4"));
 
     assertTrue(error.getMessage().contains("2 GB"));
     assertTrue(http.requests.isEmpty());
@@ -350,7 +353,7 @@ class GeminiFilesClientTest {
     var error =
         assertThrows(
             GeminiException.class,
-            () -> client(http, Duration.ofSeconds(5)).upload(video, "video/mp4"));
+            () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
 
     assertEquals(429, error.statusCode());
     assertTrue(error.getMessage().contains("quota exceeded"));
@@ -373,7 +376,8 @@ class GeminiFilesClientTest {
     var error =
         assertThrows(
             GeminiException.class,
-            () -> client(http, Duration.ofSeconds(5)).upload(video, "video/mp4", Duration.ZERO));
+            () ->
+                client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4", Duration.ZERO));
 
     assertTrue(error.getMessage().contains("timed out"));
     assertEquals(2, http.requests.size());
@@ -456,7 +460,7 @@ class GeminiFilesClientTest {
             + "\"state\":\"ACTIVE\"}}");
     var config = ModelConfig.newBuilder().withApiKey("g-key").build();
 
-    var reference = client(config, http, Duration.ofSeconds(5)).upload(video);
+    var reference = client(config, http, PROCESSING_NEVER_TIMES_OUT).upload(video);
 
     assertEquals("video/mp4", reference.mimeType());
     assertEquals(
@@ -472,7 +476,8 @@ class GeminiFilesClientTest {
 
     var error =
         assertThrows(
-            IllegalArgumentException.class, () -> client(http, Duration.ofSeconds(5)).upload(file));
+            IllegalArgumentException.class,
+            () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(file));
 
     assertTrue(error.getMessage().contains("call upload(path, mimeType)"));
     assertTrue(http.requests.isEmpty());
@@ -488,7 +493,7 @@ class GeminiFilesClientTest {
     var ioError =
         assertThrows(
             GeminiException.class,
-            () -> client(ioHttp, Duration.ofSeconds(5)).upload(video, "video/mp4"));
+            () -> client(ioHttp, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
 
     assertEquals("network down", ioError.getCause().getMessage());
 
@@ -498,7 +503,7 @@ class GeminiFilesClientTest {
       var interrupted =
           assertThrows(
               GeminiException.class,
-              () -> client(interruptedHttp, Duration.ofSeconds(5)).upload(video, "video/mp4"));
+              () -> client(interruptedHttp, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
 
       assertTrue(interrupted.getMessage().contains("interrupted"));
       assertTrue(Thread.currentThread().isInterrupted());
@@ -516,7 +521,7 @@ class GeminiFilesClientTest {
         200,
         Map.of("x-goog-upload-url", List.of("https://api.example/upload/session")),
         "x".repeat(1024 * 1024 + 1));
-    var client = client(http, Duration.ofSeconds(5));
+    var client = client(http, PROCESSING_NEVER_TIMES_OUT);
 
     var responseError =
         assertThrows(GeminiException.class, () -> client.upload(video, "video/mp4"));
@@ -538,14 +543,14 @@ class GeminiFilesClientTest {
     var jsonError =
         assertThrows(
             GeminiException.class,
-            () -> client(jsonHttp, Duration.ofSeconds(5)).upload(video, "video/mp4"));
+            () -> client(jsonHttp, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
 
     assertTrue(jsonError.getMessage().contains("JSON response exceeded 1 MB"));
   }
 
   @Test
   void closeSupportsOwnedAndInjectedHttpClients() {
-    client(new StubHttpClient(), Duration.ofSeconds(5)).close();
+    client(new StubHttpClient(), PROCESSING_NEVER_TIMES_OUT).close();
 
     var config =
         ModelConfig.newBuilder()
@@ -577,7 +582,7 @@ class GeminiFilesClientTest {
             .withResponseTimeout(null)
             .build();
 
-    client(config, http, Duration.ofSeconds(5)).upload(video, "video/mp4");
+    client(config, http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
 
     var start = http.requests.getFirst();
     assertEquals("http://api.example:8080/proxy/upload/v1beta/files", start.uri().toString());
@@ -589,7 +594,7 @@ class GeminiFilesClientTest {
   private GeminiException uploadError(StubHttpClient http, Path video) {
     return assertThrows(
         GeminiException.class,
-        () -> client(http, Duration.ofSeconds(5)).upload(video, "video/mp4"));
+        () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
   }
 
   private static StubHttpClient httpClient() {
@@ -679,7 +684,7 @@ class GeminiFilesClientTest {
                 done.complete(null);
               }
             });
-    done.get(5, TimeUnit.SECONDS);
+    Await.value("the request body to be published", done);
     return output.toString(StandardCharsets.UTF_8);
   }
 

@@ -21,10 +21,10 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Flow;
+import java.util.concurrent.RunnableScheduledFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
@@ -50,7 +50,7 @@ final class TurnSubscriberRaceTest {
 
   private static final String SID = "sess-race";
   private static final Clock CLOCK = Clock.fixed(java.time.Instant.EPOCH, ZoneOffset.UTC);
-  private static final Duration IDLE = Duration.ofSeconds(60);
+  private static final Duration IDLE = Duration.ofMinutes(10);
 
   @Test
   void onNextAfterOnCompleteDoesNotReArmIdleTimer() {
@@ -141,8 +141,9 @@ final class TurnSubscriberRaceTest {
   }
 
   /**
-   * Decorates a real single-thread scheduler so tests can assert the number of {@code schedule}
-   * invocations. Real scheduling backs the idle timer in production; we just count, not stub.
+   * A real single-thread scheduler that records every task it accepts, so tests can assert the
+   * number of {@code schedule} invocations. Real scheduling backs the idle timer in production; we
+   * just count, not stub.
    */
   private static final class CountingScheduler extends ScheduledThreadPoolExecutor {
 
@@ -160,11 +161,11 @@ final class TurnSubscriberRaceTest {
     }
 
     @Override
-    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+    protected <V> RunnableScheduledFuture<V> decorateTask(
+        Runnable runnable, RunnableScheduledFuture<V> task) {
       scheduleCount.incrementAndGet();
-      var f = super.schedule(command, delay, unit);
-      futures.add(f);
-      return f;
+      futures.add(task);
+      return task;
     }
 
     int outstandingCount() {

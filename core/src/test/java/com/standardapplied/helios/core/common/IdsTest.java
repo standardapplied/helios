@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.Await;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -19,7 +20,6 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class IdsTest {
@@ -231,7 +231,7 @@ class IdsTest {
 
     var allIds = new HashSet<UUID>();
     for (var future : futures) {
-      for (var id : future.get(10, TimeUnit.SECONDS)) {
+      for (var id : Await.value("the ids a worker generated", future)) {
         assertTrue(allIds.add(id));
       }
     }
@@ -265,7 +265,7 @@ class IdsTest {
 
     var allIds = new ArrayList<UUID>();
     for (var future : futures) {
-      allIds.addAll(future.get(10, TimeUnit.SECONDS));
+      allIds.addAll(Await.value("the ids a worker generated", future));
     }
 
     allIds.sort(

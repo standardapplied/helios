@@ -11,7 +11,6 @@ import com.standardapplied.helios.core.events.EventSink;
 import com.standardapplied.helios.core.events.HeliosEvent;
 import com.standardapplied.helios.core.model.Response.Usage;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -228,7 +227,12 @@ public final class SpanBuilder implements SpanContainer {
     }
     var event =
         new HeliosEvent.SpanOpened(
-            Instant.now(), runId, Optional.empty(), id, Optional.ofNullable(parentSpanId), name);
+            Ids.now().toInstant(),
+            runId,
+            Optional.empty(),
+            id,
+            Optional.ofNullable(parentSpanId),
+            name);
     fanOut(event);
   }
 
@@ -238,7 +242,7 @@ public final class SpanBuilder implements SpanContainer {
     }
     var event =
         new HeliosEvent.SpanClosed(
-            Instant.now(),
+            Ids.now().toInstant(),
             runId,
             Optional.empty(),
             span.id(),

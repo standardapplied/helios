@@ -3,6 +3,7 @@ package com.standardapplied.helios.architecture;
 
 import static com.tngtech.archunit.base.DescribedPredicate.describe;
 import static com.tngtech.archunit.base.DescribedPredicate.not;
+import static com.tngtech.archunit.core.domain.JavaAccess.Predicates.origin;
 import static com.tngtech.archunit.core.domain.JavaAccess.Predicates.target;
 import static com.tngtech.archunit.core.domain.JavaAccess.Predicates.targetOwner;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.assignableTo;
@@ -10,17 +11,23 @@ import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPac
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.type;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
+import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameStartingWith;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noCodeUnits;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
 import static com.tngtech.archunit.library.GeneralCodingRules.ACCESS_STANDARD_STREAMS;
 
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.domain.JavaCodeUnit;
+import com.tngtech.archunit.core.domain.JavaStaticInitializer;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import java.lang.module.ModuleFinder;
 import java.net.http.HttpClient;
+import java.time.Clock;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
@@ -40,6 +47,22 @@ class ArchitectureRulesTest {
 
   /** Burn-down, core-and-tools: the one class that still builds its own client. */
   private static final String OWN_HTTP_CLIENT_BURN_DOWN = HELIOS + ".onnx.OnnxModelDownloader";
+
+  /**
+   * Burn-down, v3-injected-time: the one class that reads the wall clock statically. Thirteen
+   * classes stamp records through {@code Ids.now()}, and {@code Ids.newId()} embeds the millisecond
+   * in a UUID v7.
+   */
+  private static final String STATIC_WALL_CLOCK_BURN_DOWN = HELIOS + ".core.common.Ids";
+
+  private static final String TIME_SEAM =
+      "a class that needs the time takes a java.time.InstantSource through withClock(...) and"
+          + " defaults it to Clock.systemUTC()";
+
+  private static final DescribedPredicate<JavaCodeUnit> A_CONSTRUCTOR_OR_STATIC_INITIALISER =
+      describe(
+          "a constructor or static initialiser",
+          unit -> unit.isConstructor() || unit instanceof JavaStaticInitializer);
 
   private static final Set<String> JDK_PACKAGES =
       ModuleFinder.ofSystem().findAll().stream()
@@ -149,6 +172,58 @@ class ArchitectureRulesTest {
             "library code reports through java.util.logging or the trace API; only repl.sandbox,"
                 + " where capturing the standard streams is the mechanism, and the example"
                 + " modules may use System.out, System.err or printStackTrace")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void theWallClockIsNotReadStatically() {
+    noClasses()
+        .that()
+        .doNotHaveFullyQualifiedName(STATIC_WALL_CLOCK_BURN_DOWN)
+        .should()
+        .accessTargetWhere(
+            targetOwner(resideInAPackage("java.time.."))
+                .and(target(name("now")))
+                .or(targetOwner(type(System.class)).and(target(name("currentTimeMillis")))))
+        .because(
+            "a static now() or currentTimeMillis() read cannot be driven by a test: "
+                + TIME_SEAM
+                + ", then reads clock.instant()")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void theSystemClockIsOnlyADefault() {
+    noClasses()
+        .that()
+        .doNotHaveFullyQualifiedName(STATIC_WALL_CLOCK_BURN_DOWN)
+        .should()
+        .accessTargetWhere(
+            targetOwner(type(Clock.class))
+                .and(target(nameStartingWith("system").or(nameStartingWith("tick"))))
+                .and(not(origin(A_CONSTRUCTOR_OR_STATIC_INITIALISER))))
+        .because(
+            "Clock.system* and Clock.tick* appear only as the initial value of a field, never"
+                + " inline in a method: "
+                + TIME_SEAM)
+        .check(LIBRARY);
+  }
+
+  @Test
+  void aTimeSeamIsAnInstantSource() {
+    noFields()
+        .should()
+        .haveRawType(Clock.class)
+        .because("java.time.Clock is not a field type: " + TIME_SEAM)
+        .check(LIBRARY);
+    noCodeUnits()
+        .should()
+        .haveRawParameterTypes(
+            describe(
+                "containing java.time.Clock", types -> types.stream().anyMatch(type(Clock.class))))
+        .orShould()
+        .haveRawReturnType(Clock.class)
+        .because("java.time.Clock is not a parameter or return type: " + TIME_SEAM)
         .check(LIBRARY);
   }
 }

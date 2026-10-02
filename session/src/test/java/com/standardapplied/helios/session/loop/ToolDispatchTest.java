@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.ConcurrencyLimits;
@@ -25,10 +26,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 final class ToolDispatchTest {
@@ -71,6 +71,19 @@ final class ToolDispatchTest {
 
   private static ToolBinding binding(Tool tool, ToolCategory cat) {
     return ToolBinding.newBuilder(tool).withCategory(cat).build();
+  }
+
+  private static FutureTask<ToolResult> dispatchTask(ToolDispatch d, String tool) {
+    return new FutureTask<>(
+        () ->
+            d.dispatch(
+                new ToolCall("c", tool, Map.of()), new CancellationToken(), DEFAULT_TIMEOUT));
+  }
+
+  private static FutureTask<ToolResult> startDispatch(ToolDispatch d, String tool) {
+    var task = dispatchTask(d, tool);
+    Thread.ofVirtual().start(task);
+    return task;
   }
 
   // ── construction ──────────────────────────────────────────────────────────
@@ -196,66 +209,60 @@ final class ToolDispatchTest {
   // ── per-category semaphore selection ──────────────────────────────────────
 
   @Test
-  void writeCategoryAcquiresFileWritePermits() throws Exception {
+  void writeCategoryAcquiresFileWritePermits() {
     var release = new CountDownLatch(1);
     var entered = new CountDownLatch(1);
     var registry =
         new ToolRegistry(
             List.of(binding(blockingTool("write", entered, release), ToolCategory.WRITE)));
     var d = new ToolDispatch(CTX, registry, new ConcurrencyLimits(8, 1, 1, 8));
-    try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
-      exec.submit(
-          () ->
-              d.dispatch(
-                  new ToolCall("c", "write", Map.of()), new CancellationToken(), DEFAULT_TIMEOUT));
-      assertTrue(entered.await(2, TimeUnit.SECONDS), "tool should be entered");
-      assertEquals(0, d.availableFileWritePermits(), "WRITE took the file-write permit");
-      assertEquals(8, d.availableToolCallPermits(), "tool-call pool unchanged");
-      assertEquals(1, d.availableExecutionPermits(), "execution pool unchanged");
-      release.countDown();
-    }
+
+    var dispatched = startDispatch(d, "write");
+    Await.latch("the write tool to start", entered);
+
+    assertEquals(0, d.availableFileWritePermits(), "WRITE took the file-write permit");
+    assertEquals(8, d.availableToolCallPermits(), "tool-call pool unchanged");
+    assertEquals(1, d.availableExecutionPermits(), "execution pool unchanged");
+    release.countDown();
+    assertEquals("done", Await.value("the write dispatch to return", dispatched).output());
   }
 
   @Test
-  void executionCategoryAcquiresExecutionPermits() throws Exception {
+  void executionCategoryAcquiresExecutionPermits() {
     var release = new CountDownLatch(1);
     var entered = new CountDownLatch(1);
     var registry =
         new ToolRegistry(
             List.of(binding(blockingTool("exec", entered, release), ToolCategory.EXECUTION)));
     var d = new ToolDispatch(CTX, registry, new ConcurrencyLimits(8, 4, 1, 8));
-    try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
-      exec.submit(
-          () ->
-              d.dispatch(
-                  new ToolCall("c", "exec", Map.of()), new CancellationToken(), DEFAULT_TIMEOUT));
-      assertTrue(entered.await(2, TimeUnit.SECONDS));
-      assertEquals(0, d.availableExecutionPermits(), "EXECUTION took the execution permit");
-      assertEquals(8, d.availableToolCallPermits(), "tool-call pool unchanged");
-      assertEquals(4, d.availableFileWritePermits(), "file-write pool unchanged");
-      release.countDown();
-    }
+
+    var dispatched = startDispatch(d, "exec");
+    Await.latch("the execution tool to start", entered);
+
+    assertEquals(0, d.availableExecutionPermits(), "EXECUTION took the execution permit");
+    assertEquals(8, d.availableToolCallPermits(), "tool-call pool unchanged");
+    assertEquals(4, d.availableFileWritePermits(), "file-write pool unchanged");
+    release.countDown();
+    assertEquals("done", Await.value("the execution dispatch to return", dispatched).output());
   }
 
   @Test
-  void readCategoryAcquiresGeneralToolCallPermits() throws Exception {
+  void readCategoryAcquiresGeneralToolCallPermits() {
     var release = new CountDownLatch(1);
     var entered = new CountDownLatch(1);
     var registry =
         new ToolRegistry(
             List.of(binding(blockingTool("read", entered, release), ToolCategory.READ)));
     var d = new ToolDispatch(CTX, registry, new ConcurrencyLimits(2, 4, 1, 8));
-    try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
-      exec.submit(
-          () ->
-              d.dispatch(
-                  new ToolCall("c", "read", Map.of()), new CancellationToken(), DEFAULT_TIMEOUT));
-      assertTrue(entered.await(2, TimeUnit.SECONDS));
-      assertEquals(1, d.availableToolCallPermits(), "READ took a general permit");
-      assertEquals(4, d.availableFileWritePermits(), "file-write pool unchanged");
-      assertEquals(1, d.availableExecutionPermits(), "execution pool unchanged");
-      release.countDown();
-    }
+
+    var dispatched = startDispatch(d, "read");
+    Await.latch("the read tool to start", entered);
+
+    assertEquals(1, d.availableToolCallPermits(), "READ took a general permit");
+    assertEquals(4, d.availableFileWritePermits(), "file-write pool unchanged");
+    assertEquals(1, d.availableExecutionPermits(), "execution pool unchanged");
+    release.countDown();
+    assertEquals("done", Await.value("the read dispatch to return", dispatched).output());
   }
 
   @Test
@@ -271,59 +278,35 @@ final class ToolDispatchTest {
   // ── concurrency cap enforcement ──────────────────────────────────────────
 
   @Test
-  void interruptedAcquireThrowsCancellationException() throws Exception {
-    // Saturate the single-permit pool with a blocking tool; then a second dispatch waits on
-    // acquire. Interrupt the waiter's thread → ToolDispatch surfaces CancellationException.
+  void interruptedAcquireThrowsCancellationException() {
     var release = new CountDownLatch(1);
     var entered = new CountDownLatch(1);
     var registry =
         new ToolRegistry(
             List.of(binding(blockingTool("slow", entered, release), ToolCategory.READ)));
     var d = new ToolDispatch(CTX, registry, new ConcurrencyLimits(1, 1, 1, 1));
-    try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
-      // First dispatch takes the permit and blocks.
-      exec.submit(
-          () ->
-              d.dispatch(
-                  new ToolCall("c1", "slow", Map.of()), new CancellationToken(), DEFAULT_TIMEOUT));
-      assertTrue(entered.await(2, TimeUnit.SECONDS), "first dispatch should acquire");
+    var holder = startDispatch(d, "slow");
+    Await.latch("the first dispatch to take the only permit", entered);
 
-      // Second dispatch will wait for the permit; we interrupt its thread.
-      var waiter = new AtomicReference<Throwable>();
-      var ready = new CountDownLatch(1);
-      var workerRef = new AtomicReference<Thread>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                workerRef.set(Thread.currentThread());
-                ready.countDown();
-                try {
-                  d.dispatch(
-                      new ToolCall("c2", "slow", Map.of()),
-                      new CancellationToken(),
-                      DEFAULT_TIMEOUT);
-                } catch (Throwable t) {
-                  waiter.set(t);
-                }
-              });
-      assertTrue(ready.await(2, TimeUnit.SECONDS));
-      Thread.sleep(50); // let the second dispatch start blocking on acquire
-      workerRef.get().interrupt();
+    var waiter = dispatchTask(d, "slow");
+    var waiterThread = Thread.ofVirtual().start(waiter);
+    Await.until(
+        "the second dispatch to queue for the permit", () -> d.queuedToolCallDispatches() == 1);
+    waiterThread.interrupt();
 
-      // Give the interrupted dispatch a moment to surface the exception.
-      for (int i = 0; i < 200 && waiter.get() == null; i++) {
-        Thread.sleep(10);
-      }
-      assertInstanceOf(CancellationException.class, waiter.get());
-      assertTrue(waiter.get().getMessage().contains("interrupted while acquiring permit"));
-
-      release.countDown();
-    }
+    var thrown =
+        assertInstanceOf(
+            CancellationException.class, Await.failure("the interrupted dispatch", waiter));
+    assertEquals("interrupted while acquiring permit for slow", thrown.getMessage());
+    release.countDown();
+    assertEquals("done", Await.value("the first dispatch to return", holder).output());
+    assertEquals(1, d.availableToolCallPermits(), "the only permit is back in the pool");
   }
 
   @Test
-  void capExactlyBoundsConcurrentDispatch() throws Exception {
+  void capExactlyBoundsConcurrentDispatch() {
     var release = new CountDownLatch(1);
+    var entered = new CountDownLatch(2);
     var inFlight = new AtomicInteger();
     var peak = new AtomicInteger();
     Tool blocking =
@@ -334,6 +317,7 @@ final class ToolDispatchTest {
                 (args, ctx) -> {
                   var current = inFlight.incrementAndGet();
                   peak.updateAndGet(p -> Math.max(p, current));
+                  entered.countDown();
                   try {
                     release.await();
                   } catch (InterruptedException e) {
@@ -344,20 +328,21 @@ final class ToolDispatchTest {
                 })
             .build();
     var registry = new ToolRegistry(List.of(binding(blocking, ToolCategory.READ)));
-    var limits = new ConcurrencyLimits(2, 4, 1, 8);
-    var d = new ToolDispatch(CTX, registry, limits);
+    var d = new ToolDispatch(CTX, registry, new ConcurrencyLimits(2, 4, 1, 8));
 
-    try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
-      for (int i = 0; i < 6; i++) {
-        exec.submit(
-            () ->
-                d.dispatch(
-                    new ToolCall("c", "slow", Map.of()), new CancellationToken(), DEFAULT_TIMEOUT));
-      }
-      // Allow some scheduling churn; only 2 can be inFlight at once.
-      Thread.sleep(150);
-      assertTrue(peak.get() <= 2, "peak in-flight must respect cap; observed=" + peak.get());
-      release.countDown();
+    var dispatches = Stream.generate(() -> startDispatch(d, "slow")).limit(6).toList();
+    Await.latch("two tools to start", entered);
+    Await.until(
+        "the other four dispatches to queue for a permit", () -> d.queuedToolCallDispatches() == 4);
+
+    assertEquals(2, inFlight.get(), "exactly the cap is running while the rest wait");
+    assertEquals(0, d.availableToolCallPermits(), "both permits are held");
+    release.countDown();
+    for (var dispatch : dispatches) {
+      assertEquals("ok", Await.value("a capped dispatch to return", dispatch).output());
     }
+    assertEquals(2, peak.get(), "peak in-flight equals the cap");
+    assertEquals(0, inFlight.get());
+    assertEquals(2, d.availableToolCallPermits(), "every permit is back in the pool");
   }
 }

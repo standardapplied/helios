@@ -11,9 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.Await;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -237,9 +237,9 @@ class SecretRegistryTest {
             }
           });
     }
-    assertTrue(ready.await(5, TimeUnit.SECONDS));
+    Await.latch("every registering thread to be ready", ready);
     go.countDown();
-    assertTrue(done.await(5, TimeUnit.SECONDS));
+    Await.latch("every registering thread to finish", done);
     assertEquals(0, failures.get());
     assertEquals(threads * perThread, registry.size());
   }

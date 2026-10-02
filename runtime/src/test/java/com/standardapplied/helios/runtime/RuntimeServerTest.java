@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Message;
@@ -16,6 +15,8 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.SessionOptions;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
@@ -194,7 +195,7 @@ final class RuntimeServerTest {
   }
 
   @Test
-  void defaultHostIsLoopbackNotAllInterfaces() {
+  void defaultHostIsLoopbackNotAllInterfaces() throws Exception {
     // Fail-secure default: a deployer who forgets withHost(...) should NOT have their service
     // exposed on every interface. POST /sessions is unauthenticated and spends real money on the
     // configured model. Loopback is the conservative default; explicit withHost("0.0.0.0") is
@@ -206,17 +207,10 @@ final class RuntimeServerTest {
             .withOptionsFactory(factory())
             .withPort(0)
             .build();
-    try {
-      assertTimeoutPreemptively(
-          java.time.Duration.ofSeconds(2),
-          () -> {
-            try (var s = new java.net.Socket()) {
-              s.connect(new java.net.InetSocketAddress("127.0.0.1", server.port()), 1000);
-              assertTrue(s.isConnected());
-            }
-          });
-    } finally {
-      server.close();
+    try (server;
+        var socket = new Socket()) {
+      socket.connect(new InetSocketAddress("127.0.0.1", server.port()));
+      assertTrue(socket.isConnected());
     }
   }
 

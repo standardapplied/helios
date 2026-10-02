@@ -6,21 +6,30 @@
 package com.standardapplied.helios.core.fault;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.Await;
 import java.time.Duration;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
+/**
+ * A test that expects the operation timeout gives the code under test a short one and an operation
+ * that cannot finish on its own, so the timeout is the only thing that can end the call. Every
+ * other test that configures a timeout uses {@link #NEVER_REACHED}.
+ */
 class FaultToleranceTest {
+
+  private static final Duration NEVER_REACHED = Duration.ofMinutes(10);
 
   @Test
   void successfulOperation() throws Exception {
@@ -72,13 +81,7 @@ class FaultToleranceTest {
     var ft = FaultTolerance.newBuilder().withOperationTimeout(Duration.ofMillis(100)).build();
 
     assertThrows(
-        OperationTimeoutException.class,
-        () ->
-            ft.execute(
-                () -> {
-                  Thread.sleep(500);
-                  return "too slow";
-                }));
+        OperationTimeoutException.class, () -> ft.execute(FaultToleranceTest::neverFinishes));
   }
 
   @Test
@@ -86,7 +89,7 @@ class FaultToleranceTest {
     var retryPolicy =
         RetryPolicy.newBuilder()
             .withMaxAttempts(10)
-            .withBackoff(Backoff.fixed(Duration.ofMillis(50)))
+            .withBackoff(Backoff.fixed(NEVER_REACHED))
             .build();
     var ft =
         FaultTolerance.newBuilder()
@@ -138,7 +141,7 @@ class FaultToleranceTest {
             ft.execute(
                 () -> {
                   try {
-                    Thread.sleep(500);
+                    neverFinishes();
                   } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                   }
@@ -194,7 +197,7 @@ class FaultToleranceTest {
     var ft =
         FaultTolerance.newBuilder()
             .withCircuitBreaker(cb)
-            .withOperationTimeout(Duration.ofSeconds(10))
+            .withOperationTimeout(NEVER_REACHED)
             .build();
 
     assertThrows(RuntimeException.class, () -> ft.execute(() -> throwRuntime("fail")));
@@ -212,7 +215,7 @@ class FaultToleranceTest {
     var ft =
         FaultTolerance.newBuilder()
             .withRetry(retryPolicy)
-            .withOperationTimeout(Duration.ofSeconds(10))
+            .withOperationTimeout(NEVER_REACHED)
             .build();
 
     var exception =
@@ -229,13 +232,7 @@ class FaultToleranceTest {
 
     var exception =
         assertThrows(
-            OperationTimeoutException.class,
-            () ->
-                ft.execute(
-                    () -> {
-                      Thread.sleep(200);
-                      return "slow";
-                    }));
+            OperationTimeoutException.class, () -> ft.execute(FaultToleranceTest::neverFinishes));
 
     assertEquals(timeout, exception.timeout());
     assertNotNull(exception.getMessage());
@@ -280,7 +277,7 @@ class FaultToleranceTest {
 
   @Test
   void successfulOperationWithTimeout() throws Exception {
-    var ft = FaultTolerance.newBuilder().withOperationTimeout(Duration.ofSeconds(10)).build();
+    var ft = FaultTolerance.newBuilder().withOperationTimeout(NEVER_REACHED).build();
 
     var result = ft.execute(() -> "quick success");
 
@@ -289,7 +286,7 @@ class FaultToleranceTest {
 
   @Test
   void executeRunnableSuccessWithTimeout() throws Exception {
-    var ft = FaultTolerance.newBuilder().withOperationTimeout(Duration.ofSeconds(10)).build();
+    var ft = FaultTolerance.newBuilder().withOperationTimeout(NEVER_REACHED).build();
     var executed = new AtomicInteger(0);
 
     Runnable operation = () -> executed.incrementAndGet();
@@ -300,7 +297,7 @@ class FaultToleranceTest {
 
   @Test
   void runtimeExceptionWithTimeout() {
-    var ft = FaultTolerance.newBuilder().withOperationTimeout(Duration.ofSeconds(10)).build();
+    var ft = FaultTolerance.newBuilder().withOperationTimeout(NEVER_REACHED).build();
 
     var exception =
         assertThrows(RuntimeException.class, () -> ft.execute(() -> throwRuntime("quick fail")));
@@ -327,7 +324,7 @@ class FaultToleranceTest {
 
   @Test
   void interruptedExceptionWithTimeout() {
-    var ft = FaultTolerance.newBuilder().withOperationTimeout(Duration.ofSeconds(10)).build();
+    var ft = FaultTolerance.newBuilder().withOperationTimeout(NEVER_REACHED).build();
 
     assertThrows(
         InterruptedException.class,
@@ -350,7 +347,7 @@ class FaultToleranceTest {
 
   @Test
   void checkedExceptionWithTimeoutWrapped() {
-    var ft = FaultTolerance.newBuilder().withOperationTimeout(Duration.ofSeconds(10)).build();
+    var ft = FaultTolerance.newBuilder().withOperationTimeout(NEVER_REACHED).build();
 
     var exception =
         assertThrows(
@@ -393,26 +390,39 @@ class FaultToleranceTest {
   }
 
   @Test
-  void operationTimeoutInterruptsVirtualThread() throws Exception {
-    var interrupted = new AtomicBoolean(false);
-    var ft = FaultTolerance.newBuilder().withOperationTimeout(Duration.ofMillis(100)).build();
+  void operationTimeoutInterruptsVirtualThread() {
+    var interrupted = new CountDownLatch(1);
 
-    assertThrows(
-        OperationTimeoutException.class,
-        () ->
-            ft.execute(
-                () -> {
-                  try {
-                    Thread.sleep(10_000);
-                  } catch (InterruptedException e) {
-                    interrupted.set(true);
-                    throw e;
-                  }
-                  return "too slow";
-                }));
+    try (var executor = new StartedOnSubmit()) {
+      var ft = new FaultTolerance(null, null, Duration.ofMillis(100), executor);
 
-    Thread.sleep(200);
-    assertTrue(interrupted.get(), "Virtual thread should have been interrupted on timeout");
+      assertThrows(
+          OperationTimeoutException.class,
+          () ->
+              ft.execute(
+                  () -> {
+                    try {
+                      return neverFinishes();
+                    } catch (InterruptedException e) {
+                      interrupted.countDown();
+                      throw e;
+                    }
+                  }));
+
+      Await.latch("the timed-out operation to be interrupted", interrupted);
+    }
+  }
+
+  @Test
+  void withoutRetryKeepsTheExecutor() throws Exception {
+    var retryPolicy = RetryPolicy.newBuilder().withMaxAttempts(2).build();
+
+    try (var executor = new StartedOnSubmit()) {
+      var ft = new FaultTolerance(retryPolicy, null, NEVER_REACHED, executor).withoutRetry();
+
+      assertEquals("done", ft.execute(() -> "done"));
+      assertEquals(1, executor.submitted.get());
+    }
   }
 
   @Test
@@ -444,7 +454,7 @@ class FaultToleranceTest {
     var ft =
         FaultTolerance.newBuilder()
             .withRetry(retryPolicy)
-            .withOperationTimeout(Duration.ofSeconds(10))
+            .withOperationTimeout(NEVER_REACHED)
             .build();
 
     var exception =
@@ -457,46 +467,75 @@ class FaultToleranceTest {
   }
 
   @Test
-  void interruptedCallerCancelsFuture() throws Exception {
+  void interruptedCallerCancelsFuture() {
     var operationStarted = new CountDownLatch(1);
-    var operationInterrupted = new AtomicBoolean(false);
-    var ft = FaultTolerance.newBuilder().withOperationTimeout(Duration.ofSeconds(30)).build();
+    var operationInterrupted = new CountDownLatch(1);
+    var callerOutcome = new CompletableFuture<String>();
+    var ft = FaultTolerance.newBuilder().withOperationTimeout(NEVER_REACHED).build();
 
-    var thread =
+    var caller =
         new Thread(
             () -> {
               try {
-                ft.execute(
-                    () -> {
-                      operationStarted.countDown();
-                      try {
-                        Thread.sleep(30_000);
-                      } catch (InterruptedException e) {
-                        operationInterrupted.set(true);
-                        throw e;
-                      }
-                      return "too slow";
-                    });
-              } catch (InterruptedException e) {
-                // Expected — caller was interrupted
+                callerOutcome.complete(
+                    ft.execute(
+                        () -> {
+                          operationStarted.countDown();
+                          try {
+                            return neverFinishes();
+                          } catch (InterruptedException e) {
+                            operationInterrupted.countDown();
+                            throw e;
+                          }
+                        }));
               } catch (Exception e) {
-                // Other FT exceptions
+                callerOutcome.completeExceptionally(e);
               }
             });
 
-    thread.start();
-    assertTrue(operationStarted.await(5, TimeUnit.SECONDS));
-    Thread.sleep(50);
-    thread.interrupt();
-    thread.join(5000);
-    assertFalse(thread.isAlive());
-    Thread.sleep(200);
-    assertTrue(
-        operationInterrupted.get(),
-        "Virtual thread should have been interrupted when caller was interrupted");
+    caller.start();
+    Await.latch("the operation to start", operationStarted);
+    caller.interrupt();
+
+    assertInstanceOf(
+        InterruptedException.class, Await.failure("the interrupted caller", callerOutcome));
+    Await.latch("the operation of the interrupted caller to be interrupted", operationInterrupted);
+    Await.termination("the caller thread", caller);
+  }
+
+  private static String neverFinishes() throws InterruptedException {
+    new CountDownLatch(1).await();
+    throw new AssertionError("a latch nobody counts down was released");
   }
 
   private static String throwRuntime(String message) {
     throw new RuntimeException(message);
+  }
+
+  /**
+   * Returns from {@code submit} only once the operation is running, so a timeout that starts after
+   * the submission interrupts running work however late the worker was scheduled.
+   */
+  private static final class StartedOnSubmit extends ScheduledThreadPoolExecutor {
+
+    final AtomicInteger submitted = new AtomicInteger();
+
+    StartedOnSubmit() {
+      super(1, Thread.ofVirtual().factory());
+    }
+
+    @Override
+    public <T> Future<T> submit(Callable<T> operation) {
+      var started = new CountDownLatch(1);
+      var future =
+          super.submit(
+              () -> {
+                started.countDown();
+                return operation.call();
+              });
+      Await.latch("the submitted operation to start", started);
+      submitted.incrementAndGet();
+      return future;
+    }
   }
 }

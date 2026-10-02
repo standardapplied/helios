@@ -48,8 +48,6 @@ com.standardapplied.helios.repl.execution.JShellExecutionProvider,com.standardap
 com.standardapplied.helios.repl.protocol.RpcChannelTest
 com.standardapplied.helios.repl.sandbox.HostBridgeTest
 com.standardapplied.helios.repl.sandbox.JvmSandboxTest
-com.standardapplied.helios.session.AgentSessionImplTest
-com.standardapplied.helios.session.AgentSessionStreamIdleTest
 com.standardapplied.helios.session.Phase2AcceptanceTest,com.standardapplied.helios.session.Phase4AcceptanceTest,com.standardapplied.helios.session.Phase5AcceptanceTest
 com.standardapplied.helios.session.Phase4AcceptanceTest
 com.standardapplied.helios.session.Phase4AcceptanceTest,com.standardapplied.helios.session.Phase5AcceptanceTest

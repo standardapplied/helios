@@ -7,7 +7,7 @@ package com.standardapplied.helios.session.loop;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookRegistry;
-import java.time.Clock;
+import java.time.InstantSource;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -33,13 +33,13 @@ final class EventEmitter {
   private final Consumer<QueryEvent> eventSink;
   private final HookRegistry hooks;
   private final Function<SessionState, HookContext> hookContextFactory;
-  private final Clock clock;
+  private final InstantSource clock;
 
   EventEmitter(
       Consumer<QueryEvent> eventSink,
       HookRegistry hooks,
       Function<SessionState, HookContext> hookContextFactory,
-      Clock clock) {
+      InstantSource clock) {
     this.eventSink = Objects.requireNonNull(eventSink, "eventSink must not be null");
     this.hooks = Objects.requireNonNull(hooks, "hooks must not be null");
     this.hookContextFactory =
@@ -48,7 +48,7 @@ final class EventEmitter {
   }
 
   /** The clock backing this emitter — exposed for callers that build event timestamps inline. */
-  Clock clock() {
+  InstantSource clock() {
     return clock;
   }
 

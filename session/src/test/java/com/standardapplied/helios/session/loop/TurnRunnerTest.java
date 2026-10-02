@@ -19,6 +19,7 @@ import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
@@ -30,8 +31,9 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
@@ -600,57 +602,82 @@ final class TurnRunnerTest {
     assertTrue(events.stream().anyMatch(e -> e instanceof QueryEvent.TurnEnded));
   }
 
+  /**
+   * A model whose stream never delivers a chunk or a terminal signal. {@code onRequest} runs on the
+   * runner's thread once it has requested the stream, just before it starts waiting on it.
+   */
+  private static Model stalledModel(Runnable onRequest) {
+    return new Model() {
+      @Override
+      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+        throw new AssertionError("unused");
+      }
+
+      @Override
+      public Flow.Publisher<ModelChunk> chatStream(
+          List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
+        return subscriber ->
+            subscriber.onSubscribe(
+                new Flow.Subscription() {
+                  @Override
+                  public void request(long n) {
+                    onRequest.run();
+                  }
+
+                  @Override
+                  public void cancel() {}
+                });
+      }
+
+      @Override
+      public String id() {
+        return "test";
+      }
+
+      @Override
+      public String provider() {
+        return "test";
+      }
+    };
+  }
+
+  /**
+   * Runs one turn against {@link #stalledModel}. The stream-idle watchdog is set beyond the hang
+   * guard, so only an interrupt can end the turn.
+   */
+  private TurnOutcome runStalledTurn(Runnable onRequest) {
+    var limits = SessionLimits.newBuilder().withStreamIdleTimeout(Duration.ofMinutes(10)).build();
+    return runner(stalledModel(onRequest)).runTurn(freshState(), limits);
+  }
+
+  private void assertTurnEndedByInterrupt(TurnOutcome outcome) {
+    assertEquals(FinishReason.ERROR, outcome.finishReason());
+    assertInstanceOf(InterruptedException.class, outcome.streamError());
+    var ended = assertInstanceOf(QueryEvent.TurnEnded.class, events.get(events.size() - 1));
+    assertEquals(StopReason.ERROR, ended.reason());
+  }
+
   @Test
-  void interruptedAwaitPropagatesAsErrorOutcome() throws Exception {
-    var blockingModel =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            throw new AssertionError("unused");
-          }
+  void interruptedAwaitPropagatesAsErrorOutcome() {
+    var requested = new CountDownLatch(1);
+    var turn = new FutureTask<>(() -> runStalledTurn(requested::countDown));
+    var runnerThread = Thread.ofVirtual().start(turn);
+    Await.latch("the runner to request the model stream", requested);
+    Await.until(
+        "the runner to block on the stalled stream",
+        () -> runnerThread.getState() == Thread.State.WAITING);
 
-          @Override
-          public Flow.Publisher<ModelChunk> chatStream(
-              List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-            return subscriber -> {
-              subscriber.onSubscribe(
-                  new Flow.Subscription() {
-                    @Override
-                    public void request(long n) {}
+    runnerThread.interrupt();
 
-                    @Override
-                    public void cancel() {}
-                  });
-              // never completes
-            };
-          }
+    assertTurnEndedByInterrupt(Await.value("the interrupted turn to return", turn));
+  }
 
-          @Override
-          public String id() {
-            return "test";
-          }
+  @Test
+  void interruptPendingBeforeAwaitPropagatesAsErrorOutcome() {
+    var turn = new FutureTask<>(() -> runStalledTurn(() -> Thread.currentThread().interrupt()));
+    Thread.ofVirtual().start(turn);
 
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
-    var r = runner(blockingModel);
-    var state = freshState();
-    var future = new AtomicReference<TurnOutcome>();
-    var t =
-        Executors.newVirtualThreadPerTaskExecutor()
-            .submit(() -> future.set(r.runTurn(state, SessionLimits.defaults())));
-    Thread.sleep(50);
-    t.cancel(true);
-    Thread.sleep(50);
-    // The runTurn may have completed with ERROR after interrupt; or the future remains pending.
-    // We only assert: if it completed, it produced ERROR finish reason.
-    var outcome = future.get();
-    if (outcome != null) {
-      assertEquals(FinishReason.ERROR, outcome.finishReason());
-    }
-    assertTrue(true);
+    assertTurnEndedByInterrupt(Await.value("the interrupted turn to return", turn));
   }
 
   @Test
