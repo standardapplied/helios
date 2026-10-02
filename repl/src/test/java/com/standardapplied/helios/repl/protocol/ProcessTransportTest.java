@@ -431,7 +431,9 @@ class ProcessTransportTest {
    * Covers the {@code return null} at the end of {@code receive()}, reached only when another
    * thread closes the transport between two read iterations. The test holds the monitor of the
    * internal {@code stdoutBuffer}, so the receiver reads its first line and blocks at the append;
-   * it closes the transport once the receiver is blocked there, then releases the monitor.
+   * it closes the transport once the receiver is blocked there, then releases the monitor. The
+   * monitor is released on every exit path, so a failed wait leaves no platform thread behind to
+   * keep the JVM alive.
    */
   @Test
   void receiveReturnsNullWhenClosedBetweenIterations() throws Exception {
@@ -456,24 +458,26 @@ class ProcessTransportTest {
                     }
                   }
                 });
-    Await.latch("the holder to take the buffer's monitor", monitorHeld);
     var received = new CompletableFuture<RpcMessage>();
-    var receiver =
-        Thread.ofPlatform()
-            .start(
-                () -> {
-                  try {
-                    received.complete(transport.receive());
-                  } catch (IOException e) {
-                    received.completeExceptionally(e);
-                  }
-                });
-    Await.until(
-        "the receiver to block on the buffer's monitor",
-        () -> receiver.getState() == Thread.State.BLOCKED);
-
-    transport.close();
-    releaseMonitor.countDown();
+    try {
+      Await.latch("the holder to take the buffer's monitor", monitorHeld);
+      var receiver =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    try {
+                      received.complete(transport.receive());
+                    } catch (IOException e) {
+                      received.completeExceptionally(e);
+                    }
+                  });
+      Await.until(
+          "the receiver to block on the buffer's monitor",
+          () -> receiver.getState() == Thread.State.BLOCKED);
+      transport.close();
+    } finally {
+      releaseMonitor.countDown();
+    }
 
     assertNull(
         Await.value("receive() to return", received),
