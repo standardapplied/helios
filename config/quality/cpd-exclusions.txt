@@ -18,7 +18,6 @@ com.standardapplied.helios.anthropic.StreamingIteratorTest,com.standardapplied.h
 com.standardapplied.helios.anthropic.StreamingIteratorTest,com.standardapplied.helios.gemini.StreamingIteratorTest,com.standardapplied.helios.openai.StreamingIteratorTest
 com.standardapplied.helios.anthropic.StreamingIteratorTest,com.standardapplied.helios.openai.StreamingIteratorTest
 com.standardapplied.helios.core.common.IdsTest
-com.standardapplied.helios.core.fault.CircuitBreakerTest
 com.standardapplied.helios.core.prompt.InMemoryPromptRegistryTest,com.standardapplied.helios.persistence.PgPromptRegistryTest
 com.standardapplied.helios.core.runtime.InMemoryToolCallJournalTest,com.standardapplied.helios.persistence.PgToolCallJournalTest
 com.standardapplied.helios.core.tool.CommandGrant,com.standardapplied.helios.repl.execution.JShellExecutionProvider,com.standardapplied.helios.session.execution.LocalProcessExecutionProvider

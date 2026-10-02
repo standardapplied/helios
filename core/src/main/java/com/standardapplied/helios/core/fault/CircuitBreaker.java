@@ -5,8 +5,11 @@
 
 package com.standardapplied.helios.core.fault;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.InstantSource;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -35,6 +38,7 @@ public class CircuitBreaker {
   private final int failureThreshold;
   private final int successThreshold;
   private final Duration halfOpenAfter;
+  private final InstantSource clock;
 
   private final AtomicReference<State> state = new AtomicReference<>(State.CLOSED);
   private final AtomicInteger failureCount = new AtomicInteger(0);
@@ -42,10 +46,12 @@ public class CircuitBreaker {
   private final AtomicReference<Instant> lastFailureTime = new AtomicReference<>();
   private final ReentrantLock halfOpenLock = new ReentrantLock();
 
-  private CircuitBreaker(int failureThreshold, int successThreshold, Duration halfOpenAfter) {
+  private CircuitBreaker(
+      int failureThreshold, int successThreshold, Duration halfOpenAfter, InstantSource clock) {
     this.failureThreshold = failureThreshold;
     this.successThreshold = successThreshold;
     this.halfOpenAfter = halfOpenAfter;
+    this.clock = clock;
   }
 
   public static Builder newBuilder() {
@@ -149,7 +155,7 @@ public class CircuitBreaker {
   private void checkAndTransition() {
     if (state.get() == State.OPEN) {
       var lastFailure = lastFailureTime.get();
-      if (lastFailure != null && Instant.now().isAfter(lastFailure.plus(halfOpenAfter))) {
+      if (lastFailure != null && clock.instant().isAfter(lastFailure.plus(halfOpenAfter))) {
         state.compareAndSet(State.OPEN, State.HALF_OPEN);
         successCount.set(0);
       }
@@ -195,7 +201,7 @@ public class CircuitBreaker {
 
   private void onFailure() {
     var failures = failureCount.incrementAndGet();
-    lastFailureTime.set(Instant.now());
+    lastFailureTime.set(clock.instant());
 
     if (failures >= failureThreshold) {
       state.set(State.OPEN);
@@ -212,7 +218,7 @@ public class CircuitBreaker {
 
   private void onHalfOpenFailure() {
     state.set(State.OPEN);
-    lastFailureTime.set(Instant.now());
+    lastFailureTime.set(clock.instant());
     successCount.set(0);
   }
 
@@ -220,6 +226,7 @@ public class CircuitBreaker {
     private int failureThreshold = 5;
     private int successThreshold = 1;
     private Duration halfOpenAfter = Duration.ofSeconds(30);
+    private InstantSource clock = Clock.systemUTC();
 
     private Builder() {}
 
@@ -238,6 +245,20 @@ public class CircuitBreaker {
       return this;
     }
 
+    /**
+     * Source of the current instant, read when a failure is recorded and when the half-open delay
+     * is checked. Defaults to {@link Clock#systemUTC()}; a test passes a source it advances by
+     * hand.
+     *
+     * @param clock non-null instant source
+     * @return this builder
+     * @throws NullPointerException if {@code clock} is null
+     */
+    public Builder withClock(InstantSource clock) {
+      this.clock = Objects.requireNonNull(clock, "clock must not be null");
+      return this;
+    }
+
     public CircuitBreaker build() {
       if (failureThreshold < 1) {
         throw new IllegalStateException("failureThreshold must be >= 1");
@@ -248,7 +269,7 @@ public class CircuitBreaker {
       if (halfOpenAfter == null || halfOpenAfter.isNegative() || halfOpenAfter.isZero()) {
         throw new IllegalStateException("halfOpenAfter must be a positive duration");
       }
-      return new CircuitBreaker(failureThreshold, successThreshold, halfOpenAfter);
+      return new CircuitBreaker(failureThreshold, successThreshold, halfOpenAfter, clock);
     }
   }
 }
