@@ -7,23 +7,23 @@ package com.standardapplied.helios.session.execution;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.test.Await;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Hardening tests for {@link LocalProcessExecutionProvider}: hung-subprocess reaping, abrupt-kill
@@ -33,10 +33,25 @@ import org.junit.jupiter.api.Test;
  * <p>The tests build providers via the explicit Builder with the JVM shutdown hook disabled so the
  * test runtime is not polluted with hook objects, and every provider is wrapped in
  * try-with-resources so {@code close()} reaps any leftover subprocess.
+ *
+ * <p>No test depends on how long a child takes. A request's timeout is {@link #BEYOND_HANG_GUARD}
+ * unless the timeout is what the test exercises, and a child that must be killed is {@link #HANG}:
+ * it cannot end on its own within the hang guard, so a result proves the kill.
  */
 final class LocalProcessExecutionProviderRobustnessTest {
 
   private static final SessionContext CTX = SessionContext.forTesting("robustness-test");
+
+  private static final Duration BEYOND_HANG_GUARD = Await.HANG_GUARD.multipliedBy(5);
+
+  /**
+   * {@code exec} keeps the child a single process. A kill that lands while a shell forks misses the
+   * new process, which then holds the output pipes and the call with them.
+   */
+  private static final String HANG = "exec sleep 600";
+
+  private static final int KILLED_BY_SIGKILL = 128 + 9;
+  private static final int KILLED_BY_SIGTERM = 128 + 15;
 
   private static LocalProcessExecutionProvider testProvider() {
     return LocalProcessExecutionProvider.newBuilder()
@@ -57,54 +72,30 @@ final class LocalProcessExecutionProviderRobustnessTest {
 
   // ── timeout reaps the process tree, including SIGTERM-deaf descendants ───
 
+  /**
+   * The child holds the output pipes for ten minutes, so a result means the provider killed it;
+   * once its trap is set, only SIGKILL can.
+   */
   @Test
-  void timeoutEscalatesFromSigtermToSigkillWhenChildIgnoresTerm() throws Exception {
+  void timeoutEscalatesFromSigtermToSigkillWhenChildIgnoresTerm() {
     assumeBashAvailable();
     try (var provider = testProvider()) {
-      // trap '' TERM disables the bash SIGTERM handler — the parent must escalate to SIGKILL.
-      var req =
-          ExecutionRequest.newBuilder()
-              .withRuntime(Runtime.BASH)
-              .withScript("trap '' TERM; sleep 30")
-              .withTimeout(Duration.ofMillis(200))
-              .build();
-      var start = System.nanoTime();
       var result =
-          provider
-              .execute(CTX, req, new CancellationToken())
-              .toCompletableFuture()
-              .get(10, TimeUnit.SECONDS);
-      var elapsed = Duration.ofNanos(System.nanoTime() - start);
+          run(provider, bash("trap '' TERM; " + HANG).withTimeout(Duration.ofMillis(200)).build());
       assertTrue(result.timedOut(), "expected timedOut=true after SIGKILL escalation");
-      assertTrue(
-          elapsed.compareTo(Duration.ofSeconds(5)) < 0,
-          "expected escalation under 5s, took " + elapsed);
+      assertEquals(-1, result.exitCode());
       assertEquals(0, provider.inflightCount(), "no leftover in-flight processes");
     }
   }
 
   // ── large stdin against non-reading process completes without deadlock ──
 
+  /** 512 KiB of stdin, far past a pipe's buffer, against a script that exits without reading it. */
   @Test
-  void largeStdinAgainstNonReadingProcessDoesNotDeadlock() throws Exception {
+  void largeStdinAgainstNonReadingProcessDoesNotDeadlock() {
     assumeBashAvailable();
     try (var provider = testProvider()) {
-      // 512 KiB of stdin against a script that exits immediately and never reads its input.
-      // OS pipe buffer is typically 64 KiB — without an async writer the parent would block
-      // on out.write(...) and the timeout would fire even though the script finished.
-      var stdin = "x".repeat(512 * 1024);
-      var req =
-          ExecutionRequest.newBuilder()
-              .withRuntime(Runtime.BASH)
-              .withScript("printf done")
-              .withStdin(stdin)
-              .withTimeout(Duration.ofSeconds(5))
-              .build();
-      var result =
-          provider
-              .execute(CTX, req, new CancellationToken())
-              .toCompletableFuture()
-              .get(10, TimeUnit.SECONDS);
+      var result = run(provider, bash("printf done").withStdin("x".repeat(512 * 1024)).build());
       assertEquals(0, result.exitCode());
       assertEquals("done", result.stdout());
       assertFalse(result.timedOut());
@@ -115,112 +106,100 @@ final class LocalProcessExecutionProviderRobustnessTest {
   // ── cancellation during a long sleep kills the process ──────────────────
 
   @Test
-  void cancellationDuringExecutionKillsProcessAndCompletesExceptionally() throws Exception {
+  void cancellationDuringExecutionKillsProcessAndCompletesExceptionally() {
     assumeBashAvailable();
     try (var provider = testProvider()) {
       var token = new CancellationToken();
-      var req =
-          ExecutionRequest.newBuilder()
-              .withRuntime(Runtime.BASH)
-              .withScript("sleep 30")
-              .withTimeout(Duration.ofSeconds(30))
-              .build();
-      var future = provider.execute(CTX, req, token).toCompletableFuture();
-      waitFor(() -> provider.inflightCount() == 1, Duration.ofSeconds(2));
+      var call = start(provider, bash(HANG).build(), token);
+      awaitInflight(provider, 1);
       token.cancel("test-cancel");
-      // CompletableFuture#get unwraps CancellationException — it's thrown directly, not wrapped.
-      // Message may come from throwIfCancelled (if cancel won the race before acquire) or our
-      // post-reap CancellationException — both are correct outcomes; the contract is "future
-      // completes exceptionally with CancellationException" rather than a specific message.
-      assertThrows(CancellationException.class, () -> future.get(5, TimeUnit.SECONDS));
-      waitFor(() -> provider.inflightCount() == 0, Duration.ofSeconds(3));
+      assertEquals(
+          "execution of BASH cancelled: test-cancel",
+          cancellationMessage("the cancelled call to fail", call));
+      assertEquals(0, provider.inflightCount());
     }
   }
 
   // ── cancellation while waiting for a permit unblocks the acquire ────────
 
   @Test
-  void cancellationWhilePermitWaitUnblocksAcquire() throws Exception {
+  void cancellationWhilePermitWaitUnblocksAcquire() {
     assumeBashAvailable();
     try (var provider = testProvider(1)) {
-      // Saturate the single permit with a slow sleeper.
       var hold = new CancellationToken();
-      var heldFuture =
-          provider
-              .execute(
-                  CTX,
-                  ExecutionRequest.newBuilder()
-                      .withRuntime(Runtime.BASH)
-                      .withScript("sleep 30")
-                      .withTimeout(Duration.ofSeconds(30))
-                      .build(),
-                  hold)
-              .toCompletableFuture();
-      waitFor(() -> provider.inflightCount() == 1, Duration.ofSeconds(2));
+      var holder = start(provider, bash(HANG).build(), hold);
+      awaitInflight(provider, 1);
 
-      // Second call must block on the permit.
       var token = new CancellationToken();
-      var waiting =
-          provider
-              .execute(
-                  CTX,
-                  ExecutionRequest.newBuilder()
-                      .withRuntime(Runtime.BASH)
-                      .withScript("printf x")
-                      .withTimeout(Duration.ofSeconds(5))
-                      .build(),
-                  token)
-              .toCompletableFuture();
-
-      // Give it a moment to actually park in acquire().
-      Thread.sleep(150);
+      var waiting = start(provider, bash("printf x").build(), token);
+      awaitPermitRequest(token);
       assertFalse(waiting.isDone(), "second call should be parked in acquire()");
 
       token.cancel("permit-cancel");
-      assertThrows(CancellationException.class, () -> waiting.get(5, TimeUnit.SECONDS));
+      assertEquals(
+          "interrupted while acquiring permit for BASH",
+          cancellationMessage("the waiting call to fail", waiting));
 
-      // Clean up the holder.
       hold.cancel("done");
-      assertThrows(CancellationException.class, () -> heldFuture.get(5, TimeUnit.SECONDS));
+      assertEquals(
+          "execution of BASH cancelled: done",
+          cancellationMessage("the permit holder to fail", holder));
     }
   }
 
   // ── provider.close() reaps in-flight processes ──────────────────────────
 
   @Test
-  void closeForciblyReapsInflightProcesses() throws Exception {
+  void closeForciblyReapsInflightProcesses(@TempDir Path cwd) {
     assumeBashAvailable();
     var provider = testProvider();
-    var futures = new CompletableFuture<?>[3];
-    for (var i = 0; i < futures.length; i++) {
-      futures[i] =
-          provider
-              .execute(
-                  CTX,
-                  ExecutionRequest.newBuilder()
-                      .withRuntime(Runtime.BASH)
-                      .withScript("trap '' TERM; sleep 30")
-                      .withTimeout(Duration.ofSeconds(30))
-                      .build(),
-                  new CancellationToken())
-              .toCompletableFuture();
+    var calls = new ArrayList<CompletableFuture<ExecutionResult>>();
+    for (var i = 0; i < 3; i++) {
+      var script = "trap '' TERM; : > deaf-" + i + "; " + HANG;
+      calls.add(
+          start(provider, bash(script).withWorkingDirectory(cwd).build(), new CancellationToken()));
     }
-    waitFor(() -> provider.inflightCount() == 3, Duration.ofSeconds(2));
-    var start = System.nanoTime();
+    awaitInflight(provider, 3);
+    for (var i = 0; i < calls.size(); i++) {
+      var deaf = cwd.resolve("deaf-" + i);
+      Await.until("child " + i + " to ignore SIGTERM", () -> Files.exists(deaf));
+    }
     provider.close();
-    var elapsed = Duration.ofNanos(System.nanoTime() - start);
     assertTrue(provider.isClosed());
     assertEquals(0, provider.inflightCount(), "close must reap every in-flight subprocess");
-    assertTrue(
-        elapsed.compareTo(Duration.ofSeconds(15)) < 0, "close took unreasonably long: " + elapsed);
-    // Futures eventually complete; we don't depend on the exact terminal.
-    for (var f : futures) {
-      try {
-        f.get(5, TimeUnit.SECONDS);
-      } catch (Exception ignored) {
-        // OK — either a timed-out result or an exceptional completion.
-      }
+    for (var call : calls) {
+      var result = Await.value("the result of a reaped call", call);
+      assertEquals(KILLED_BY_SIGKILL, result.exitCode());
+      assertFalse(result.timedOut());
     }
+  }
+
+  /**
+   * {@code close()} scans the in-flight set once. A call that passed its closed check before {@code
+   * close()} and starts its process after that scan has to reap the process itself; the handler
+   * closes the provider at exactly that point.
+   */
+  @Test
+  void closeWhileACallIsLaunchingReapsItsProcess() {
+    assumeBashAvailable();
+    var bash = LocalProcessExecutionProvider.RuntimeHandler.dashC("bash");
+    var launching = new AtomicReference<LocalProcessExecutionProvider>();
+    var provider =
+        LocalProcessExecutionProvider.newBuilder()
+            .withSecretRegistry(new SecretRegistry())
+            .withRuntime(
+                Runtime.BASH,
+                request -> {
+                  launching.get().close();
+                  return bash.buildArgv(request);
+                })
+            .withShutdownHook(false)
+            .build();
+    launching.set(provider);
+    var result = run(provider, bash(HANG).build());
+    assertEquals(KILLED_BY_SIGTERM, result.exitCode());
+    assertFalse(result.timedOut());
+    assertEquals(0, provider.inflightCount());
   }
 
   @Test
@@ -237,87 +216,49 @@ final class LocalProcessExecutionProviderRobustnessTest {
     assumeBashAvailable();
     var provider = testProvider();
     provider.close();
-    var req = ExecutionRequest.newBuilder().withRuntime(Runtime.BASH).withScript("true").build();
-    var future = provider.execute(CTX, req, new CancellationToken()).toCompletableFuture();
-    var ex =
-        assertThrows(
-            java.util.concurrent.ExecutionException.class, () -> future.get(2, TimeUnit.SECONDS));
-    assertInstanceOf(IllegalStateException.class, ex.getCause());
-    assertEquals("provider is closed", ex.getCause().getMessage());
+    var call = start(provider, bash("true").build(), new CancellationToken());
+    assertTrue(call.isCompletedExceptionally());
+    var failure = Await.failure("the call on a closed provider to fail", call);
+    assertInstanceOf(IllegalStateException.class, failure);
+    assertEquals("provider is closed", failure.getMessage());
   }
 
   @Test
-  void closeDuringPermitWaitAbortsTheQueuedCall() throws Exception {
+  void closeDuringPermitWaitAbortsTheQueuedCall() {
     assumeBashAvailable();
     var provider = testProvider(1);
-    // Hold the only permit.
-    var hold = new CancellationToken();
-    var held =
-        provider
-            .execute(
-                CTX,
-                ExecutionRequest.newBuilder()
-                    .withRuntime(Runtime.BASH)
-                    .withScript("sleep 30")
-                    .withTimeout(Duration.ofSeconds(30))
-                    .build(),
-                hold)
-            .toCompletableFuture();
-    waitFor(() -> provider.inflightCount() == 1, Duration.ofSeconds(2));
+    var holder = start(provider, bash(HANG).build(), new CancellationToken());
+    awaitInflight(provider, 1);
 
-    var queued =
-        provider
-            .execute(
-                CTX,
-                ExecutionRequest.newBuilder()
-                    .withRuntime(Runtime.BASH)
-                    .withScript("printf x")
-                    .build(),
-                new CancellationToken())
-            .toCompletableFuture();
-    Thread.sleep(150);
+    var token = new CancellationToken();
+    var queued = start(provider, bash("printf x").build(), token);
+    awaitPermitRequest(token);
     assertFalse(queued.isDone());
 
     provider.close();
-    // close() reaps the holder and the queued call returns either exceptionally or with a
-    // refusal-shaped result depending on race ordering — both are acceptable.
-    try {
-      held.get(5, TimeUnit.SECONDS);
-    } catch (Exception ignored) {
-      // OK
-    }
-    try {
-      queued.get(5, TimeUnit.SECONDS);
-    } catch (Exception ignored) {
-      // OK
-    }
+    var reaped = Await.value("the reaped permit holder's result", holder);
+    assertEquals(KILLED_BY_SIGTERM, reaped.exitCode());
+    assertFalse(reaped.timedOut());
+    assertEquals(
+        "provider closed before BASH could start",
+        cancellationMessage("the queued call to fail", queued));
     assertTrue(provider.isClosed());
+    assertEquals(0, provider.inflightCount());
   }
 
   // ── concurrency cap — multiple calls queue and complete ─────────────────
 
   @Test
-  void multipleCallsRespectMaxConcurrentAndAllComplete() throws Exception {
+  void multipleCallsRespectMaxConcurrentAndAllComplete() {
     assumeBashAvailable();
     try (var provider = testProvider(2)) {
-      var futures = new CompletableFuture<?>[5];
-      for (var i = 0; i < futures.length; i++) {
-        var idx = i;
-        futures[i] =
-            provider
-                .execute(
-                    CTX,
-                    ExecutionRequest.newBuilder()
-                        .withRuntime(Runtime.BASH)
-                        .withScript("printf '%d' " + idx)
-                        .withTimeout(Duration.ofSeconds(5))
-                        .build(),
-                    new CancellationToken())
-                .toCompletableFuture();
+      var calls = new ArrayList<CompletableFuture<ExecutionResult>>();
+      for (var i = 0; i < 5; i++) {
+        calls.add(start(provider, bash("printf '%d' " + i).build(), new CancellationToken()));
       }
-      for (var i = 0; i < futures.length; i++) {
-        var r = (ExecutionResult) futures[i].get(15, TimeUnit.SECONDS);
-        assertEquals(String.valueOf(i), r.stdout());
+      for (var i = 0; i < calls.size(); i++) {
+        var result = Await.value("the result of call " + i, calls.get(i));
+        assertEquals(String.valueOf(i), result.stdout());
       }
       assertEquals(0, provider.inflightCount());
     }
@@ -326,37 +267,15 @@ final class LocalProcessExecutionProviderRobustnessTest {
   // ── permit released even on exceptional paths ───────────────────────────
 
   @Test
-  void permitReleasedAfterIOErrorLaunchingProcess() throws Exception {
+  void permitReleasedAfterIOErrorLaunchingProcess(@TempDir Path tmp) {
     assumeBashAvailable();
-    // Working directory that doesn't exist forces ProcessBuilder.start() to throw IOException.
     try (var provider = testProvider(1)) {
-      var bogusCwd = Path.of("/tmp/helios-does-not-exist-" + System.nanoTime());
-      var req =
-          ExecutionRequest.newBuilder()
-              .withRuntime(Runtime.BASH)
-              .withScript("true")
-              .withWorkingDirectory(bogusCwd)
-              .build();
-      var result =
-          provider
-              .execute(CTX, req, new CancellationToken())
-              .toCompletableFuture()
-              .get(5, TimeUnit.SECONDS);
+      var missingCwd = tmp.resolve("does-not-exist");
+      var result = run(provider, bash("true").withWorkingDirectory(missingCwd).build());
       assertEquals(-1, result.exitCode());
       assertTrue(result.stderr().contains("I/O error"));
 
-      // A second call must still succeed — the permit was released.
-      var follow =
-          provider
-              .execute(
-                  CTX,
-                  ExecutionRequest.newBuilder()
-                      .withRuntime(Runtime.BASH)
-                      .withScript("printf ok")
-                      .build(),
-                  new CancellationToken())
-              .toCompletableFuture()
-              .get(5, TimeUnit.SECONDS);
+      var follow = run(provider, bash("printf ok").build());
       assertEquals("ok", follow.stdout());
     }
   }
@@ -364,46 +283,30 @@ final class LocalProcessExecutionProviderRobustnessTest {
   // ── cancellation token callback churn does not accumulate ───────────────
 
   @Test
-  void manyExecuteCallsDoNotAccumulateCallbacksOnSharedToken() throws Exception {
+  void manyExecuteCallsDoNotAccumulateCallbacksOnSharedToken() {
     assumeBashAvailable();
     try (var provider = testProvider()) {
       var sharedToken = new CancellationToken();
-      // 100 quick calls against the same token should each install + clear its own kill ref.
       for (var i = 0; i < 100; i++) {
-        provider
-            .execute(
-                CTX,
-                ExecutionRequest.newBuilder()
-                    .withRuntime(Runtime.BASH)
-                    .withScript("printf x")
-                    .withTimeout(Duration.ofSeconds(5))
-                    .build(),
-                sharedToken)
-            .toCompletableFuture()
-            .get(5, TimeUnit.SECONDS);
+        Await.value(
+            "the result of call " + i, start(provider, bash("printf x").build(), sharedToken));
       }
       assertEquals(0, provider.inflightCount());
-      // Cancelling now must not destroy any live process (there are none) and must not throw.
-      sharedToken.cancel("post-hoc");
+      assertEquals(0, sharedToken.activeCallbackCountForTests());
+      assertTrue(sharedToken.cancel("post-hoc"));
     }
   }
 
   // ── pre-cancelled token before acquire returns CancellationException ────
 
   @Test
-  void preCancelledTokenFailsBeforeProcessStarts() throws Exception {
+  void preCancelledTokenFailsBeforeProcessStarts() {
     assumeBashAvailable();
     try (var provider = testProvider()) {
       var token = new CancellationToken();
       token.cancel("up-front");
-      var req =
-          ExecutionRequest.newBuilder()
-              .withRuntime(Runtime.BASH)
-              .withScript("printf should-not-run")
-              .build();
-      assertThrows(
-          CancellationException.class,
-          () -> provider.execute(CTX, req, token).toCompletableFuture().get(2, TimeUnit.SECONDS));
+      var call = start(provider, bash("printf should-not-run").build(), token);
+      assertEquals("up-front", cancellationMessage("the pre-cancelled call to fail", call));
       assertEquals(0, provider.inflightCount());
     }
   }
@@ -411,22 +314,12 @@ final class LocalProcessExecutionProviderRobustnessTest {
   // ── drain handles closed-stream IO error without losing already-read bytes
 
   @Test
-  void drainSurvivesProcessTerminationMidStream() throws Exception {
+  void drainSurvivesProcessTerminationMidStream() {
     assumeBashAvailable();
     try (var provider = testProvider()) {
-      // Print, then immediately self-kill — drain will observe the streams closing.
-      var req =
-          ExecutionRequest.newBuilder()
-              .withRuntime(Runtime.BASH)
-              .withScript("printf partial; kill -9 $$")
-              .withTimeout(Duration.ofSeconds(5))
-              .build();
-      var result =
-          provider
-              .execute(CTX, req, new CancellationToken())
-              .toCompletableFuture()
-              .get(10, TimeUnit.SECONDS);
-      assertTrue(result.stdout().startsWith("partial"), "got: " + result.stdout());
+      var result = run(provider, bash("printf partial; kill -9 $$").build());
+      assertEquals("partial", result.stdout());
+      assertEquals(KILLED_BY_SIGKILL, result.exitCode());
       assertFalse(result.timedOut());
       assertEquals(0, provider.inflightCount());
     }
@@ -440,19 +333,47 @@ final class LocalProcessExecutionProviderRobustnessTest {
         "bash is not available; skipping subprocess robustness tests");
   }
 
-  private static void waitFor(BooleanSupplier cond, Duration budget) throws InterruptedException {
-    var deadline = System.nanoTime() + budget.toNanos();
-    while (!cond.getAsBoolean()) {
-      if (System.nanoTime() > deadline) {
-        return;
-      }
-      Thread.sleep(20);
-    }
+  private static ExecutionRequest.Builder bash(String script) {
+    return ExecutionRequest.newBuilder()
+        .withRuntime(Runtime.BASH)
+        .withScript(script)
+        .withTimeout(BEYOND_HANG_GUARD);
   }
 
-  @FunctionalInterface
-  private interface BooleanSupplier {
-    boolean getAsBoolean();
+  private static CompletableFuture<ExecutionResult> start(
+      LocalProcessExecutionProvider provider, ExecutionRequest request, CancellationToken token) {
+    return provider.execute(CTX, request, token).toCompletableFuture();
+  }
+
+  private static ExecutionResult run(
+      LocalProcessExecutionProvider provider, ExecutionRequest request) {
+    return Await.value(
+        "the result of `" + request.script() + "`",
+        start(provider, request, new CancellationToken()));
+  }
+
+  private static void awaitInflight(LocalProcessExecutionProvider provider, int processes) {
+    Await.until(processes + " in-flight process(es)", () -> provider.inflightCount() == processes);
+  }
+
+  /**
+   * The provider arms a callback on the call's token before it asks for a permit and disarms it
+   * once it has one. While another call holds the last permit, one armed callback therefore means
+   * the call is at the permit wait and cannot get past it.
+   */
+  private static void awaitPermitRequest(CancellationToken token) {
+    Await.until(
+        "the queued call to ask for a permit", () -> token.activeCallbackCountForTests() == 1);
+  }
+
+  /**
+   * The message of the {@link CancellationException} that {@code call} failed with. {@code
+   * CompletableFuture.get} reports such a failure through a fresh {@code CancellationException}
+   * whose cause is the original.
+   */
+  private static String cancellationMessage(String description, CompletableFuture<?> call) {
+    var reported = assertInstanceOf(CancellationException.class, Await.failure(description, call));
+    return assertInstanceOf(CancellationException.class, reported.getCause()).getMessage();
   }
 
   /** Smoke test the shutdown hook lifecycle by registering then removing on close. */
@@ -479,74 +400,32 @@ final class LocalProcessExecutionProviderRobustnessTest {
 
   /** Build a provider with concurrency=1 and verify cancellation chains across calls cleanly. */
   @Test
-  void mixedCancellationAndSuccessSequence() throws Exception {
+  void mixedCancellationAndSuccessSequence() {
     assumeBashAvailable();
     try (var provider = testProvider(1)) {
-      // success
-      var r1 =
-          provider
-              .execute(
-                  CTX,
-                  ExecutionRequest.newBuilder()
-                      .withRuntime(Runtime.BASH)
-                      .withScript("printf a")
-                      .build(),
-                  new CancellationToken())
-              .toCompletableFuture()
-              .get(5, TimeUnit.SECONDS);
-      assertEquals("a", r1.stdout());
+      assertEquals("a", run(provider, bash("printf a").build()).stdout());
 
-      // cancelled mid-run
       var token = new CancellationToken();
-      var sleeper =
-          provider
-              .execute(
-                  CTX,
-                  ExecutionRequest.newBuilder()
-                      .withRuntime(Runtime.BASH)
-                      .withScript("sleep 10")
-                      .withTimeout(Duration.ofSeconds(10))
-                      .build(),
-                  token)
-              .toCompletableFuture();
-      waitFor(() -> provider.inflightCount() == 1, Duration.ofSeconds(2));
+      var sleeper = start(provider, bash(HANG).build(), token);
+      awaitInflight(provider, 1);
       token.cancel("mid-run");
-      assertThrows(CancellationException.class, () -> sleeper.get(5, TimeUnit.SECONDS));
+      assertEquals(
+          "execution of BASH cancelled: mid-run",
+          cancellationMessage("the cancelled sleeper to fail", sleeper));
 
-      // success after cancel — provider is healthy
-      var r3 =
-          provider
-              .execute(
-                  CTX,
-                  ExecutionRequest.newBuilder()
-                      .withRuntime(Runtime.BASH)
-                      .withScript("printf c")
-                      .build(),
-                  new CancellationToken())
-              .toCompletableFuture()
-              .get(5, TimeUnit.SECONDS);
-      assertEquals("c", r3.stdout());
+      assertEquals("c", run(provider, bash("printf c").build()).stdout());
       assertEquals(0, provider.inflightCount());
     }
   }
 
   /** Successful run leaves no orphan threads behind. */
   @Test
-  void successfulRunReleasesAllResources() throws Exception {
+  void successfulRunReleasesAllResources() {
     assumeBashAvailable();
     try (var provider = testProvider()) {
       var initialThreads = Thread.activeCount();
       for (var i = 0; i < 20; i++) {
-        provider
-            .execute(
-                CTX,
-                ExecutionRequest.newBuilder()
-                    .withRuntime(Runtime.BASH)
-                    .withScript("printf hi")
-                    .build(),
-                new CancellationToken())
-            .toCompletableFuture()
-            .get(5, TimeUnit.SECONDS);
+        run(provider, bash("printf hi").build());
       }
       // Virtual threads, so platform thread count must not climb meaningfully.
       var delta = Math.max(0, Thread.activeCount() - initialThreads);
@@ -557,7 +436,7 @@ final class LocalProcessExecutionProviderRobustnessTest {
 
   /** Provider keeps producing structured results even when stderr is large. */
   @Test
-  void largeStderrIsTruncatedAndDoesNotHang() throws Exception {
+  void largeStderrIsTruncatedAndDoesNotHang() {
     assumeBashAvailable();
     try (var provider =
         LocalProcessExecutionProvider.newBuilder()
@@ -566,17 +445,9 @@ final class LocalProcessExecutionProviderRobustnessTest {
             .withMaxOutputBytes(1024)
             .withShutdownHook(false)
             .build()) {
-      var req =
-          ExecutionRequest.newBuilder()
-              .withRuntime(Runtime.BASH)
-              .withScript("yes err 1>&2 | head -c 5000 1>&2")
-              .withTimeout(Duration.ofSeconds(5))
-              .build();
-      var result =
-          provider
-              .execute(CTX, req, new CancellationToken())
-              .toCompletableFuture()
-              .get(10, TimeUnit.SECONDS);
+      var result = run(provider, bash("yes err | head -c 5000 1>&2").build());
+      assertEquals(0, result.exitCode());
+      assertFalse(result.timedOut());
       assertTrue(result.stderr().contains("truncated"));
       assertTrue(result.stderr().length() < 2048);
     }
@@ -584,31 +455,12 @@ final class LocalProcessExecutionProviderRobustnessTest {
 
   /** A simulated abrupt drain failure must not hang the dispatcher (regression guard). */
   @Test
-  void abruptProcessExitWhileDrainIsActiveStillCompletes() throws Exception {
+  void abruptProcessExitWhileDrainIsActiveStillCompletes() {
     assumeBashAvailable();
     try (var provider = testProvider()) {
-      var latch = new CountDownLatch(1);
-      var bg =
-          Thread.startVirtualThread(
-              () -> {
-                try {
-                  provider
-                      .execute(
-                          CTX,
-                          ExecutionRequest.newBuilder()
-                              .withRuntime(Runtime.BASH)
-                              .withScript("printf 'pre'; exit 99")
-                              .build(),
-                          new CancellationToken())
-                      .toCompletableFuture()
-                      .get(5, TimeUnit.SECONDS);
-                  latch.countDown();
-                } catch (Exception e) {
-                  throw new AssertionError(e);
-                }
-              });
-      assertTrue(latch.await(10, TimeUnit.SECONDS), "execute must complete after abrupt exit");
-      bg.join(1000);
+      var result = run(provider, bash("printf 'pre'; exit 99").build());
+      assertEquals(99, result.exitCode());
+      assertEquals("pre", result.stdout());
     }
   }
 
@@ -616,38 +468,25 @@ final class LocalProcessExecutionProviderRobustnessTest {
    * Cancellation after the call is already done must be a no-op (callback gated by AtomicBoolean).
    */
   @Test
-  void cancelAfterSuccessfulCompletionIsNoOp() throws Exception {
+  void cancelAfterSuccessfulCompletionIsNoOp() {
     assumeBashAvailable();
     try (var provider = testProvider()) {
       var token = new CancellationToken();
       var result =
-          provider
-              .execute(
-                  CTX,
-                  ExecutionRequest.newBuilder()
-                      .withRuntime(Runtime.BASH)
-                      .withScript("printf done")
-                      .build(),
-                  token)
-              .toCompletableFuture()
-              .get(5, TimeUnit.SECONDS);
+          Await.value(
+              "the result of `printf done`", start(provider, bash("printf done").build(), token));
       assertEquals("done", result.stdout());
-      // Cancelling now must be safe — no live process to destroy, no exception.
       assertTrue(token.cancel("post-completion"));
     }
   }
 
   /** Builder rejects empty args list (positional args optional, but must not be null elements). */
   @Test
-  void unsupportedRuntimeOnDefaultPosixProviderReturnsRefusalShapedResult() throws Exception {
+  void unsupportedRuntimeOnDefaultPosixProviderReturnsRefusalShapedResult() {
     assumeBashAvailable();
     try (var provider = testProvider()) {
       var req = ExecutionRequest.newBuilder().withRuntime(Runtime.PYTHON).withScript("x").build();
-      var result =
-          provider
-              .execute(CTX, req, new CancellationToken())
-              .toCompletableFuture()
-              .get(2, TimeUnit.SECONDS);
+      var result = run(provider, req);
       assertEquals(-1, result.exitCode());
       assertTrue(result.stderr().contains("not supported"));
       // Inflight should remain 0 — we never launched a process.
@@ -657,7 +496,7 @@ final class LocalProcessExecutionProviderRobustnessTest {
 
   /** Redaction counts merge correctly when a secret appears only in stderr (not stdout). */
   @Test
-  void secretRedactedFromStderrAlsoCounted() throws Exception {
+  void secretRedactedFromStderrAlsoCounted() {
     assumeBashAvailable();
     var registry = new SecretRegistry();
     registry.register("TOKEN", "stderr-secret-12345");
@@ -667,17 +506,7 @@ final class LocalProcessExecutionProviderRobustnessTest {
             .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
             .withShutdownHook(false)
             .build()) {
-      var req =
-          ExecutionRequest.newBuilder()
-              .withRuntime(Runtime.BASH)
-              .withScript("printf clean; printf stderr-secret-12345 >&2")
-              .withTimeout(Duration.ofSeconds(5))
-              .build();
-      var result =
-          provider
-              .execute(CTX, req, new CancellationToken())
-              .toCompletableFuture()
-              .get(10, TimeUnit.SECONDS);
+      var result = run(provider, bash("printf clean; printf stderr-secret-12345 >&2").build());
       assertEquals("clean", result.stdout());
       assertEquals("<redacted:TOKEN>", result.stderr());
       assertEquals(Integer.valueOf(1), result.secretRedactionCounts().get("TOKEN"));
@@ -686,7 +515,7 @@ final class LocalProcessExecutionProviderRobustnessTest {
 
   /** Runtime handler throwing Error must surface through the future, not silently swallow. */
   @Test
-  void handlerThrowingErrorSurfacesThroughFuture() throws Exception {
+  void handlerThrowingErrorSurfacesThroughFuture() {
     try (var provider =
         LocalProcessExecutionProvider.newBuilder()
             .withSecretRegistry(new SecretRegistry())
@@ -697,12 +526,9 @@ final class LocalProcessExecutionProviderRobustnessTest {
                 })
             .withShutdownHook(false)
             .build()) {
-      var req = ExecutionRequest.newBuilder().withRuntime(Runtime.BASH).withScript("x").build();
-      var future = provider.execute(CTX, req, new CancellationToken()).toCompletableFuture();
-      var ex =
-          assertThrows(
-              java.util.concurrent.ExecutionException.class, () -> future.get(2, TimeUnit.SECONDS));
-      assertInstanceOf(OutOfMemoryError.class, ex.getCause());
+      var call = start(provider, bash("x").build(), new CancellationToken());
+      assertInstanceOf(
+          OutOfMemoryError.class, Await.failure("the call with a failing handler to fail", call));
       assertEquals(0, provider.inflightCount());
     }
   }
@@ -725,23 +551,15 @@ final class LocalProcessExecutionProviderRobustnessTest {
 
   /** Args of size N forward as positional arguments to the script. */
   @Test
-  void positionalArgsForwardToBashScript() throws Exception {
+  void positionalArgsForwardToBashScript() {
     assumeBashAvailable();
     try (var provider = testProvider()) {
       var req =
-          ExecutionRequest.newBuilder()
-              .withRuntime(Runtime.BASH)
+          bash("printf '%s %s %s' \"$1\" \"$2\" \"$3\"")
               // bash -c '<script>' SCRIPT_NAME a b c — $0=SCRIPT_NAME, $1=a, $2=b, $3=c.
-              .withScript("printf '%s %s %s' \"$1\" \"$2\" \"$3\"")
               .withArgs(List.of("script", "one", "two", "three"))
-              .withTimeout(Duration.ofSeconds(5))
               .build();
-      var result =
-          provider
-              .execute(CTX, req, new CancellationToken())
-              .toCompletableFuture()
-              .get(5, TimeUnit.SECONDS);
-      assertEquals("one two three", result.stdout());
+      assertEquals("one two three", run(provider, req).stdout());
     }
   }
 }

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
 import java.io.IOException;
 import java.net.URI;
@@ -28,13 +29,11 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -46,6 +45,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 @EnabledOnOs(OS.LINUX)
 final class LinuxFilesTest {
+  private static final int SUBSTITUTION_RACE_ROUNDS = 2_000;
+
   @Test
   void pinnedFileSurvivesReplacementWithoutFollowingTheNewLeaf(@TempDir Path tmp) throws Exception {
     var root = Files.createDirectory(tmp.resolve("workspace"));
@@ -119,13 +120,12 @@ final class LinuxFilesTest {
                     }
                   } catch (Throwable error) {
                     failure.set(error);
+                    ready.countDown();
                   }
                 });
-    int rounds = 0;
     try {
-      assertTrue(ready.await(5, TimeUnit.SECONDS));
-      long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
-      for (; rounds < 2_000 && System.nanoTime() < deadline; rounds++) {
+      Await.latch("the attacker's first substitution", ready);
+      for (var round = 0; round < SUBSTITUTION_RACE_ROUNDS; round++) {
         try (var input = workspace.newInputStream(parent.resolve("file"))) {
           assertEquals(
               "inside", new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
@@ -163,11 +163,9 @@ final class LinuxFilesTest {
       }
     } finally {
       stop.set(true);
-      attacker.join(5_000);
-      assertFalse(attacker.isAlive(), "attacker must terminate");
+      Await.termination("the attacker thread", attacker);
     }
     assertEquals(null, failure.get());
-    assertTrue(rounds > 0);
     assertEquals("sentinel", Files.readString(outside.resolve("file")));
     assertEquals("sentinel", Files.readString(outside.resolve("delete")));
     assertFalse(Files.exists(outside.resolve("created")));
@@ -583,11 +581,11 @@ final class LinuxFilesTest {
     builder.environment().remove("_JAVA_OPTIONS");
     var process = builder.start();
     try {
-      assertTrue(process.waitFor(10, TimeUnit.SECONDS), "native probe must not block");
+      Await.termination("the native probe, which must not block", process);
       assertEquals(0, process.exitValue(), Files.readString(log));
     } finally {
       process.destroyForcibly();
-      assertTrue(process.waitFor(5, TimeUnit.SECONDS));
+      Await.termination("the destroyed native probe", process);
     }
   }
 

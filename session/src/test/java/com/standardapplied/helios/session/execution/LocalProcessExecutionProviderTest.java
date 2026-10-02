@@ -6,7 +6,7 @@ package com.standardapplied.helios.session.execution;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.CommandGrant;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,15 +23,18 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 final class LocalProcessExecutionProviderTest {
 
   private static final SessionContext CTX = SessionContext.forTesting("provider-test");
+
+  /** A request timeout no test can reach: only the mechanism a test exercises ends its wait. */
+  private static final Duration BEYOND_HANG_GUARD = Await.HANG_GUARD.multipliedBy(5);
+
+  /** Cannot end on its own within the hang guard, so a result proves the timeout killed it. */
+  private static final String HANG = "exec sleep 600";
 
   // ── Builder validation ────────────────────────────────────────────────────
 
@@ -178,8 +182,7 @@ final class LocalProcessExecutionProviderTest {
   // ── unsupported runtime returns refusal ──────────────────────────────────
 
   @Test
-  void executeReturnsRefusalForUnsupportedRuntime()
-      throws ExecutionException, InterruptedException, TimeoutException {
+  void executeReturnsRefusalForUnsupportedRuntime() {
     assumeBashAvailable();
     var provider =
         LocalProcessExecutionProvider.newBuilder()
@@ -187,11 +190,7 @@ final class LocalProcessExecutionProviderTest {
             .build();
     var req =
         ExecutionRequest.newBuilder().withRuntime(Runtime.PYTHON).withScript("print(1)").build();
-    var result =
-        provider
-            .execute(CTX, req, new CancellationToken())
-            .toCompletableFuture()
-            .get(5, TimeUnit.SECONDS);
+    var result = run(provider, req);
     assertEquals(-1, result.exitCode());
     assertTrue(result.stderr().contains("not supported"));
     assertFalse(result.timedOut());
@@ -200,20 +199,16 @@ final class LocalProcessExecutionProviderTest {
   // ── successful execution ─────────────────────────────────────────────────
 
   @Test
-  void executeCapturesStdout() throws Exception {
+  void executeCapturesStdout() {
     assumeBashAvailable();
     var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
             .withScript("printf hello")
-            .withTimeout(Duration.ofSeconds(5))
+            .withTimeout(BEYOND_HANG_GUARD)
             .build();
-    var result =
-        provider
-            .execute(CTX, req, new CancellationToken())
-            .toCompletableFuture()
-            .get(10, TimeUnit.SECONDS);
+    var result = run(provider, req);
     assertEquals(0, result.exitCode());
     assertEquals("hello", result.stdout());
     assertEquals("", result.stderr());
@@ -221,45 +216,37 @@ final class LocalProcessExecutionProviderTest {
   }
 
   @Test
-  void executeCapturesStderrAndExitCode() throws Exception {
+  void executeCapturesStderrAndExitCode() {
     assumeBashAvailable();
     var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
             .withScript("echo oops >&2; exit 3")
-            .withTimeout(Duration.ofSeconds(5))
+            .withTimeout(BEYOND_HANG_GUARD)
             .build();
-    var result =
-        provider
-            .execute(CTX, req, new CancellationToken())
-            .toCompletableFuture()
-            .get(10, TimeUnit.SECONDS);
+    var result = run(provider, req);
     assertEquals(3, result.exitCode());
     assertTrue(result.stderr().contains("oops"));
   }
 
   @Test
-  void executeRespectsTimeout() throws Exception {
+  void executeRespectsTimeout() {
     assumeBashAvailable();
     var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
-            .withScript("sleep 5")
+            .withScript(HANG)
             .withTimeout(Duration.ofMillis(150))
             .build();
-    var result =
-        provider
-            .execute(CTX, req, new CancellationToken())
-            .toCompletableFuture()
-            .get(10, TimeUnit.SECONDS);
+    var result = run(provider, req);
     assertTrue(result.timedOut());
     assertEquals(-1, result.exitCode());
   }
 
   @Test
-  void executeClampsRequestTimeoutToCapabilitiesMax() throws Exception {
+  void executeClampsRequestTimeoutToCapabilitiesMax() {
     assumeBashAvailable();
     var provider =
         LocalProcessExecutionProvider.newBuilder()
@@ -269,19 +256,15 @@ final class LocalProcessExecutionProviderTest {
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
-            .withScript("sleep 5")
+            .withScript(HANG)
             .withTimeout(Duration.ofMinutes(10))
             .build();
-    var result =
-        provider
-            .execute(CTX, req, new CancellationToken())
-            .toCompletableFuture()
-            .get(10, TimeUnit.SECONDS);
+    var result = run(provider, req);
     assertTrue(result.timedOut());
   }
 
   @Test
-  void executeRedactsSecretsInStdout() throws Exception {
+  void executeRedactsSecretsInStdout() {
     assumeBashAvailable();
     var registry = new SecretRegistry();
     registry.register("TOKEN", "supersecret123");
@@ -290,19 +273,15 @@ final class LocalProcessExecutionProviderTest {
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
             .withScript("printf supersecret123")
-            .withTimeout(Duration.ofSeconds(5))
+            .withTimeout(BEYOND_HANG_GUARD)
             .build();
-    var result =
-        provider
-            .execute(CTX, req, new CancellationToken())
-            .toCompletableFuture()
-            .get(10, TimeUnit.SECONDS);
+    var result = run(provider, req);
     assertEquals("<redacted:TOKEN>", result.stdout());
     assertEquals(Integer.valueOf(1), result.secretRedactionCounts().get("TOKEN"));
   }
 
   @Test
-  void executeInjectsEnvironment() throws Exception {
+  void executeInjectsEnvironment() {
     assumeBashAvailable();
     var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
     var req =
@@ -310,19 +289,15 @@ final class LocalProcessExecutionProviderTest {
             .withRuntime(Runtime.BASH)
             .withScript("printf '%s' \"$GREETING\"")
             .withEnv("GREETING", "ahoy")
-            .withTimeout(Duration.ofSeconds(5))
+            .withTimeout(BEYOND_HANG_GUARD)
             .build();
-    var result =
-        provider
-            .execute(CTX, req, new CancellationToken())
-            .toCompletableFuture()
-            .get(10, TimeUnit.SECONDS);
+    var result = run(provider, req);
     assertEquals(0, result.exitCode());
     assertEquals("ahoy", result.stdout());
   }
 
   @Test
-  void executeFeedsStdin() throws Exception {
+  void executeFeedsStdin() {
     assumeBashAvailable();
     var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
     var req =
@@ -330,13 +305,9 @@ final class LocalProcessExecutionProviderTest {
             .withRuntime(Runtime.BASH)
             .withScript("cat")
             .withStdin("piped-in")
-            .withTimeout(Duration.ofSeconds(5))
+            .withTimeout(BEYOND_HANG_GUARD)
             .build();
-    var result =
-        provider
-            .execute(CTX, req, new CancellationToken())
-            .toCompletableFuture()
-            .get(10, TimeUnit.SECONDS);
+    var result = run(provider, req);
     assertEquals("piped-in", result.stdout());
   }
 
@@ -350,31 +321,23 @@ final class LocalProcessExecutionProviderTest {
             .withRuntime(Runtime.BASH)
             .withScript("cat hello.txt")
             .withWorkingDirectory(tmp)
-            .withTimeout(Duration.ofSeconds(5))
+            .withTimeout(BEYOND_HANG_GUARD)
             .build();
-    var result =
-        provider
-            .execute(CTX, req, new CancellationToken())
-            .toCompletableFuture()
-            .get(10, TimeUnit.SECONDS);
+    var result = run(provider, req);
     assertEquals("world", result.stdout());
   }
 
   @Test
-  void executeUsesTempCwdWhenWorkingDirectoryOmitted() throws Exception {
+  void executeUsesTempCwdWhenWorkingDirectoryOmitted() {
     assumeBashAvailable();
     var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
             .withScript("pwd")
-            .withTimeout(Duration.ofSeconds(5))
+            .withTimeout(BEYOND_HANG_GUARD)
             .build();
-    var result =
-        provider
-            .execute(CTX, req, new CancellationToken())
-            .toCompletableFuture()
-            .get(10, TimeUnit.SECONDS);
+    var result = run(provider, req);
     assertEquals(0, result.exitCode());
     assertTrue(
         result.stdout().contains("helios-exec-"),
@@ -412,13 +375,17 @@ final class LocalProcessExecutionProviderTest {
             .withScript("true")
             .withTimeout(Duration.ofSeconds(1))
             .build();
-    var future = provider.execute(CTX, req, token).toCompletableFuture();
-    var ex = assertThrows(CancellationException.class, future::join);
-    assertNotNull(ex.getMessage());
+    var reported =
+        Await.failure(
+            "the pre-cancelled call to fail",
+            provider.execute(CTX, req, token).toCompletableFuture());
+    assertInstanceOf(CancellationException.class, reported);
+    var failure = assertInstanceOf(CancellationException.class, reported.getCause());
+    assertEquals("pre-acquired", failure.getMessage());
   }
 
   @Test
-  void executeOutputTruncatedPastCap() throws Exception {
+  void executeOutputTruncatedPastCap() {
     assumeBashAvailable();
     var provider =
         LocalProcessExecutionProvider.newBuilder()
@@ -430,37 +397,29 @@ final class LocalProcessExecutionProviderTest {
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
             .withScript("yes hello | head -c 5000")
-            .withTimeout(Duration.ofSeconds(5))
+            .withTimeout(BEYOND_HANG_GUARD)
             .build();
-    var result =
-        provider
-            .execute(CTX, req, new CancellationToken())
-            .toCompletableFuture()
-            .get(10, TimeUnit.SECONDS);
+    var result = run(provider, req);
     assertTrue(result.stdout().contains("truncated"));
     assertTrue(result.stdout().length() < 2048);
   }
 
   @Test
-  void executeRunsWithEmptyEnvironmentSoJvmSecretsDoNotLeak() throws Exception {
+  void executeRunsWithEmptyEnvironmentSoJvmSecretsDoNotLeak() {
     assumeBashAvailable();
     var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
             .withScript("env | grep -E '^USER=|^HOME=' | wc -l | tr -d ' '")
-            .withTimeout(Duration.ofSeconds(5))
+            .withTimeout(BEYOND_HANG_GUARD)
             .build();
-    var result =
-        provider
-            .execute(CTX, req, new CancellationToken())
-            .toCompletableFuture()
-            .get(10, TimeUnit.SECONDS);
+    var result = run(provider, req);
     assertEquals("0", result.stdout().trim());
   }
 
   @Test
-  void multipleRequestsRunUnderTheSameProvider() throws Exception {
+  void multipleRequestsRunUnderTheSameProvider() {
     assumeBashAvailable();
     var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
     var args = Map.of(1, "first", 2, "second", 3, "third");
@@ -469,18 +428,21 @@ final class LocalProcessExecutionProviderTest {
           ExecutionRequest.newBuilder()
               .withRuntime(Runtime.BASH)
               .withScript("printf '%s' " + e.getValue())
-              .withTimeout(Duration.ofSeconds(5))
+              .withTimeout(BEYOND_HANG_GUARD)
               .build();
-      var r =
-          provider
-              .execute(CTX, req, new CancellationToken())
-              .toCompletableFuture()
-              .get(10, TimeUnit.SECONDS);
+      var r = run(provider, req);
       assertEquals(e.getValue(), r.stdout());
     }
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────
+
+  private static ExecutionResult run(
+      LocalProcessExecutionProvider provider, ExecutionRequest request) {
+    return Await.value(
+        "the result of `" + request.script() + "`",
+        provider.execute(CTX, request, new CancellationToken()).toCompletableFuture());
+  }
 
   private static void assumeBashAvailable() {
     assumeTrue(
