@@ -39,10 +39,11 @@ class CommandGrantTest {
   /**
    * A command that cannot finish on its own: it marks its working directory once it runs, then
    * waits for the test to create {@code release} there. A test that interrupts the invocation
-   * releases the command afterwards, so no child process outlives the test.
+   * releases the command afterwards, and the command also stops once its directory is deleted, so
+   * no child process outlives the test.
    */
   private static final String RUN_UNTIL_RELEASED =
-      ": > started; until [ -e release ]; do sleep 0.02; done";
+      ": > started; until [ -e release ] || [ ! -e started ]; do sleep 0.02; done";
 
   static {
     var p1 = Path.of("/usr/bin/printenv");
