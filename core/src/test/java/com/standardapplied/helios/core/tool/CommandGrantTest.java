@@ -13,27 +13,52 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.test.Await;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 
 @DisabledOnOs(OS.WINDOWS)
 class CommandGrantTest {
 
   private static final Path BASH = Path.of("/bin/bash");
   private static final Path PRINTENV;
+  private static final Duration NEVER_REACHED = Duration.ofMinutes(10);
+
+  /**
+   * A command that cannot finish on its own: it marks its working directory once it runs, then
+   * waits for the test to create {@code release} there. A test that interrupts the invocation
+   * releases the command afterwards, and the command also stops once its directory is deleted, so
+   * no child process outlives the test.
+   */
+  private static final String RUN_UNTIL_RELEASED =
+      ": > started; until [ -e release ] || [ ! -e started ]; do sleep 0.02; done";
 
   static {
     var p1 = Path.of("/usr/bin/printenv");
     var p2 = Path.of("/bin/printenv");
     PRINTENV = Files.isExecutable(p1) ? p1 : (Files.isExecutable(p2) ? p2 : null);
+  }
+
+  /**
+   * A test that fails before its children are reaped must not leave one running; nothing else in
+   * this JVM starts a process while a test of this class runs.
+   */
+  @AfterEach
+  void noChildOutlivesItsTest() {
+    ProcessHandle.current().descendants().forEach(ProcessHandle::destroyForcibly);
   }
 
   @BeforeAll
@@ -43,6 +68,14 @@ class CommandGrantTest {
 
   private static CommandGrant.Builder bash() {
     return CommandGrant.builder(BASH.toString()).withSecretRegistry(new SecretRegistry());
+  }
+
+  private static void awaitStarted(Path cwd) {
+    Await.until("the command to start", () -> Files.exists(cwd.resolve("started")));
+  }
+
+  private static void release(Path cwd) throws IOException {
+    Files.createFile(cwd.resolve("release"));
   }
 
   @Test
@@ -166,12 +199,9 @@ class CommandGrantTest {
   @Test
   void timeoutKillsProcessTree() throws Exception {
     var grant = bash().withTimeout(Duration.ofMillis(300)).build();
-    var start = System.nanoTime();
-    var result = grant.invoke(List.of("-c", "sleep 30"));
-    var elapsedMs = (System.nanoTime() - start) / 1_000_000;
+    var result = grant.invoke(List.of("-c", "exec sleep 600"));
     assertTrue(result.timedOut());
     assertEquals(-1, result.exitCode());
-    assertTrue(elapsedMs < 5_000, "elapsed=" + elapsedMs + "ms");
   }
 
   @Test
@@ -301,7 +331,7 @@ class CommandGrantTest {
   }
 
   @Test
-  void cwdSetExplicitlyHonored(@org.junit.jupiter.api.io.TempDir Path tmp) throws Exception {
+  void cwdSetExplicitlyHonored(@TempDir Path tmp) throws Exception {
     var grant = bash().withCwd(tmp).build();
     var result = grant.invoke(List.of("-c", "pwd"));
     var expected = tmp.toRealPath().toString();
@@ -402,23 +432,20 @@ class CommandGrantTest {
   }
 
   @Test
-  void concurrencyLimitOneEnforced() throws Exception {
-    var grant = bash().withMaxConcurrent(1).withTimeout(Duration.ofSeconds(10)).build();
-    var t1 =
-        Thread.startVirtualThread(
-            () -> {
-              try {
-                grant.invoke(List.of("-c", "sleep 5"));
-              } catch (Exception ignored) {
-              }
-            });
-    Thread.sleep(150);
-    var ex =
-        assertThrows(
-            CommandGrant.RejectedException.class, () -> grant.invoke(List.of("-c", "echo hi")));
-    assertTrue(ex.getMessage().contains("Concurrency"));
-    t1.interrupt();
-    t1.join();
+  void concurrencyLimitOneEnforced(@TempDir Path tmp) throws Exception {
+    var grant = bash().withMaxConcurrent(1).withCwd(tmp).withTimeout(NEVER_REACHED).build();
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var first = executor.submit(() -> grant.invoke(List.of("-c", RUN_UNTIL_RELEASED)));
+      awaitStarted(tmp);
+
+      var ex =
+          assertThrows(
+              CommandGrant.RejectedException.class, () -> grant.invoke(List.of("-c", "echo hi")));
+      assertTrue(ex.getMessage().contains("Concurrency"));
+
+      release(tmp);
+      assertEquals(0, Await.value("the released first invocation", first).exitCode());
+    }
   }
 
   @Test
@@ -471,8 +498,7 @@ class CommandGrantTest {
   }
 
   @Test
-  void binaryRegularFileButNotExecutable(@org.junit.jupiter.api.io.TempDir Path tmp)
-      throws Exception {
+  void binaryRegularFileButNotExecutable(@TempDir Path tmp) throws Exception {
     var notExec = tmp.resolve("notexec");
     Files.writeString(notExec, "not actually executable");
     var ex =
@@ -488,12 +514,9 @@ class CommandGrantTest {
   @Test
   void forciblyKilledProcessIgnoringSigterm() throws Exception {
     var grant = bash().withTimeout(Duration.ofMillis(300)).build();
-    var start = System.nanoTime();
-    var result = grant.invoke(List.of("-c", "trap '' TERM; sleep 30"));
-    var elapsedMs = (System.nanoTime() - start) / 1_000_000;
+    var result = grant.invoke(List.of("-c", "trap '' TERM; exec sleep 600"));
     assertTrue(result.timedOut());
     assertEquals(-1, result.exitCode());
-    assertTrue(elapsedMs < 6_000, "elapsed=" + elapsedMs + "ms");
   }
 
   @Test
@@ -515,8 +538,7 @@ class CommandGrantTest {
   }
 
   @Test
-  void resolveBinaryFallsThroughNonExecutableMatch(@org.junit.jupiter.api.io.TempDir Path tmp)
-      throws Exception {
+  void resolveBinaryFallsThroughNonExecutableMatch(@TempDir Path tmp) throws Exception {
     var fake = tmp.resolve("bash");
     Files.writeString(fake, "not executable");
     var pathEnv = tmp.toString() + ":/bin";
@@ -525,23 +547,25 @@ class CommandGrantTest {
   }
 
   @Test
-  void interruptedDuringInvokeReturnsFailureToTool() throws Exception {
-    var grant = bash().withTimeout(Duration.ofSeconds(10)).build();
+  void interruptedDuringInvokeReturnsFailureToTool(@TempDir Path tmp) throws Exception {
+    var grant = bash().withCwd(tmp).withTimeout(NEVER_REACHED).build();
     var tool = grant.toTool();
-    var result = new java.util.concurrent.atomic.AtomicReference<ToolResult>();
-    var t =
+    var result = new CompletableFuture<ToolResult>();
+    var invoker =
         Thread.startVirtualThread(
-            () -> result.set(tool.execute(Map.of("args", List.of("-c", "sleep 5")))));
-    Thread.sleep(150);
-    t.interrupt();
-    t.join();
-    assertNotNull(result.get());
-    assertFalse(result.get().success());
-    assertTrue(result.get().output().contains("Interrupted"));
+            () -> result.complete(tool.execute(Map.of("args", List.of("-c", RUN_UNTIL_RELEASED)))));
+    awaitStarted(tmp);
+
+    invoker.interrupt();
+
+    var interrupted = Await.value("the interrupted invocation", result);
+    release(tmp);
+    assertFalse(interrupted.success());
+    assertTrue(interrupted.output().contains("Interrupted"));
   }
 
   @Test
-  void invokeWithIOErrorWrapped(@org.junit.jupiter.api.io.TempDir Path tmp) throws Exception {
+  void invokeWithIOErrorWrapped(@TempDir Path tmp) throws Exception {
     var fakeBin = tmp.resolve("ephemeral");
     Files.writeString(fakeBin, "#!/bin/sh\necho hi\n");
     fakeBin.toFile().setExecutable(true);

@@ -15,6 +15,7 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
@@ -33,7 +34,6 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -186,7 +186,7 @@ final class Phase4AcceptanceTest {
               });
 
       var result = session.runBlocking(UserMessage.text("update my preferences"));
-      assertTrue(done.await(5, TimeUnit.SECONDS));
+      Await.latch("the event stream to complete", done);
       assertInstanceOf(ResultMessage.Success.class, result);
     }
 
@@ -355,7 +355,7 @@ final class Phase4AcceptanceTest {
               });
 
       session.runBlocking(UserMessage.text("try to write"));
-      assertTrue(done.await(5, TimeUnit.SECONDS));
+      Await.latch("the event stream to complete", done);
     }
 
     var blocked =
@@ -430,9 +430,9 @@ final class Phase4AcceptanceTest {
               public void onComplete() {}
             });
     session.send(UserMessage.text("trigger write"));
-    assertTrue(questionLatch.await(5, TimeUnit.SECONDS), "agent must reach the ASK question");
+    Await.latch("the agent to reach the ASK question", questionLatch);
     session.close();
-    var terminal = session.result().get(5, TimeUnit.SECONDS);
+    var terminal = Await.value("the closed session to settle its result", session.result());
     assertInstanceOf(ResultMessage.Cancelled.class, terminal);
     var _unused = Optional.empty();
   }

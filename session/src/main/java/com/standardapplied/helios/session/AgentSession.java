@@ -19,7 +19,12 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p>The session loop runs on a virtual thread that begins on the first {@link #send(UserMessage)}
  * call. Subscribe to {@link #events()} BEFORE the first {@code send} so the initial chunks reach
- * the subscriber — late subscribers attach to a publisher that has already advanced.
+ * the subscriber: one that attaches while the session runs receives the events emitted from then
+ * on, and no earlier event is replayed. One that attaches after the session emitted its terminal
+ * {@link QueryEvent.LoopEnded} receives that same event once it requests, then {@code onComplete};
+ * if the session ended without a {@code LoopEnded} (closed before it started, or the loop escaped
+ * with an {@code Error}) it is completed at once. {@code events().subscribe(...)} never throws for
+ * a non-null subscriber, and no subscriber sees {@code LoopEnded} twice.
  *
  * <h2>Lifecycle</h2>
  *

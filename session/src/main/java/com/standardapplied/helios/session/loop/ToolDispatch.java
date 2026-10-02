@@ -123,6 +123,16 @@ public final class ToolDispatch {
   }
 
   /**
+   * Dispatches blocked waiting for a general tool-call permit. Lets a test wait until a dispatch
+   * has queued behind a saturated pool before it acts.
+   *
+   * @return non-negative count
+   */
+  int queuedToolCallDispatches() {
+    return toolCallPermits.getQueueLength();
+  }
+
+  /**
    * Dispatch one tool call. Blocks the calling thread until the appropriate semaphore is available,
    * then runs the tool on a fresh virtual thread bounded by {@code timeout}. Returns the tool's
    * result, a synthetic failure for unknown tools, or a synthetic failure when the timeout fires.

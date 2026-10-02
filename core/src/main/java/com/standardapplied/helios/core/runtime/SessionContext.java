@@ -6,6 +6,7 @@ package com.standardapplied.helios.core.runtime;
 
 import com.standardapplied.helios.core.common.Strings;
 import java.time.Clock;
+import java.time.InstantSource;
 import java.util.Objects;
 
 /**
@@ -28,10 +29,13 @@ import java.util.Objects;
  *     session
  * @param cancellation the session-scoped cancellation token. Fires when the agent loop is asked to
  *     stop (user-initiated, timeout, budget) so per-session resources can clean up. Non-null
- * @param clock the clock the session uses for event timestamps and elapsed-time measurements. Tests
- *     pass a fixed clock for deterministic timing. Non-null
+ * @param clock the time source the session uses for event timestamps and elapsed-time measurements.
+ *     Tests pass one they advance by hand. Non-null
  */
-public record SessionContext(String sessionId, CancellationToken cancellation, Clock clock) {
+public record SessionContext(
+    String sessionId, CancellationToken cancellation, InstantSource clock) {
+
+  private static final InstantSource SYSTEM_CLOCK = Clock.systemUTC();
 
   /**
    * Canonical constructor.
@@ -58,6 +62,6 @@ public record SessionContext(String sessionId, CancellationToken cancellation, C
    * @throws IllegalArgumentException if {@code sessionId} is blank
    */
   public static SessionContext forTesting(String sessionId) {
-    return new SessionContext(sessionId, new CancellationToken(), Clock.systemUTC());
+    return new SessionContext(sessionId, new CancellationToken(), SYSTEM_CLOCK);
   }
 }

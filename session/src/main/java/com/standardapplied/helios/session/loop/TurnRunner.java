@@ -32,8 +32,8 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolVisibilityContext;
-import java.time.Clock;
 import java.time.Duration;
+import java.time.InstantSource;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -88,7 +88,7 @@ public final class TurnRunner {
   private final ToolDispatch toolDispatch;
   private final SteeringQueue steeringQueue;
   private final Function<SessionState, HookContext> hookContextFactory;
-  private final Clock clock;
+  private final InstantSource clock;
   private final EventEmitter emitter;
   private final CostCalculator costCalculator;
   private final OutputSchema<?> outputSchema;
@@ -151,7 +151,7 @@ public final class TurnRunner {
       SteeringQueue steeringQueue,
       Consumer<QueryEvent> eventSink,
       Function<SessionState, HookContext> hookContextFactory,
-      Clock clock,
+      InstantSource clock,
       CostCalculator costCalculator,
       OutputSchema<?> outputSchema) {
     this(
@@ -169,10 +169,10 @@ public final class TurnRunner {
 
   /**
    * Same as {@link #TurnRunner(Model, HookRegistry, ToolDispatch, SteeringQueue, Consumer,
-   * Function, Clock, CostCalculator, OutputSchema)} but supplies an explicit scheduler. Production
-   * callers ({@link com.standardapplied.helios.session.AgentSessionImpl}) pass a session-scoped
-   * scheduler that is shut down with the session; test fixtures use the convenience 9-arg overload
-   * that defaults to a process-wide daemon scheduler.
+   * Function, InstantSource, CostCalculator, OutputSchema)} but supplies an explicit scheduler.
+   * Production callers ({@link com.standardapplied.helios.session.AgentSessionImpl}) pass a
+   * session-scoped scheduler that is shut down with the session; test fixtures use the convenience
+   * 9-arg overload that defaults to a process-wide daemon scheduler.
    *
    * @param model the model providing {@link Model#chatStream(List, List,
    *     com.standardapplied.helios.core.runtime.CancellationToken)}; non-null
@@ -198,7 +198,7 @@ public final class TurnRunner {
       SteeringQueue steeringQueue,
       Consumer<QueryEvent> eventSink,
       Function<SessionState, HookContext> hookContextFactory,
-      Clock clock,
+      InstantSource clock,
       CostCalculator costCalculator,
       OutputSchema<?> outputSchema,
       ScheduledExecutorService scheduler) {

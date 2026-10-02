@@ -40,14 +40,59 @@ Persisted data is not migrated: class-name strings recorded by 2.x (for example
 `SerializedError.kind`) are opaque and may carry `ai.singlr` names. Table names (`helios_*`) do
 not change.
 
+**Every time seam is a `java.time.InstantSource`, never a `java.time.Clock`.** A class that
+needs the time takes an `InstantSource` through `withClock(...)` and defaults it to
+`Clock.systemUTC()`; it only ever calls `instant()`.
+
+| 2.x | 3.0 |
+|---|---|
+| `SessionOptions(..., Clock clock, ...)`, `SessionOptions.clock()` returns `Clock` | the component and accessor are `InstantSource` |
+| `SessionOptions.Builder.withClock(Clock)` | `withClock(InstantSource)` |
+| `SessionContext(String, CancellationToken, Clock)`, `SessionContext.clock()` returns `Clock` | the component and accessor are `InstantSource` |
+| `SessionRegistry.Builder.withClock(Clock)` | `withClock(InstantSource)` |
+| `SessionState(String, CancellationToken, Clock)`, `AgentLoop(..., Clock, ...)`, `TurnRunner(..., Clock, ...)` | the parameter is `InstantSource` |
+
+A caller that passes a `Clock` compiles unchanged, because `Clock` implements `InstantSource`.
+Code that read the returned value as a `Clock` (`options.clock().getZone()`,
+`Instant.now(context.clock())`) calls `clock().instant()` instead. Three architecture rules keep
+it so: no static wall-clock read outside `core.common.Ids`, `Clock.system*` only as a field's
+initial value, and no `Clock` field, parameter or return type.
+
 ### Added
 
+- **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
+  (waits for an event under one 60-second hang guard), `LineSink` and `FeedableInputStream`, in
+  `com.standardapplied.helios.core.test`, are what the Helios test suite uses instead of sleeps,
+  self-chosen timeouts and piped streams. Depend on it with `<type>test-jar</type>` and
+  `<scope>test</scope>`.
 - **`CircuitBreaker.Builder.withClock(InstantSource)`.** The breaker reads the current instant from
   an injectable source (default `Clock.systemUTC()`), so the half-open delay can be driven by hand
   instead of by sleeping. A `java.time.Clock` is an `InstantSource` and can be passed directly.
 
 ### Fixed
 
+- **`AgentSession.events()`: subscribing after the session ended threw, and `GET
+  /sessions/{id}/events` on a terminated session broke the response mid-stream.** The session shut
+  its publisher's executor down at terminal, so a later `subscribe` threw
+  `RejectedExecutionException`; over HTTP that happened after the `200` was sent, and the client
+  saw a truncated chunked body with neither `Ready` nor `LoopEnded`. A subscriber that attaches
+  after the terminal `LoopEnded` was emitted now receives that same event once it requests, then
+  `onComplete`; one that attaches after a session ended without a `LoopEnded` (closed before it
+  started, or the loop escaped with an `Error`) is completed at once. `subscribe` never throws for
+  a non-null subscriber and no subscriber sees `LoopEnded` twice. The SSE route therefore answers
+  `Ready`, `LoopEnded` and a clean end of stream, as `SessionRegistry` always documented.
+- **An event emitted by the thread that attached the session's first subscriber could be held
+  back until the next event.** `java.util.concurrent.SubmissionPublisher` (observed on JDK 25.0.3)
+  gives the first subscribing thread a faster publishing path that can leave an item in the buffer
+  with no consumer task until the next item or the close. A session whose first
+  `events().subscribe(...)` was made on a thread that later emits, such as a hook or a tool
+  running on the agent loop, could therefore hold a `QuestionAsked` back while the session waited
+  for its answer. The session's publisher no longer lets any emitting thread take that path.
+- **`LocalProcessExecutionProvider.close()` could miss a subprocess that a concurrent `execute`
+  was still launching.** `close()` marks the provider closed and scans the in-flight processes
+  once; a call that had passed its closed check and started its process after that scan was never
+  reaped, and the child ran on until its own timeout. The launching call now reaps it and returns
+  the same killed-process result a running call gets when the provider closes.
 - **`CircuitBreaker`: a failed half-open probe could be followed at once by a second probe.** The
   breaker reopened before it recorded the new failure time, so a concurrent caller judged the
   half-open delay against the previous failure and moved the circuit straight back to `HALF_OPEN`.

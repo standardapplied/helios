@@ -6,6 +6,7 @@ package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FileReference;
@@ -16,6 +17,7 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -25,7 +27,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -93,7 +94,7 @@ final class Phase3AcceptanceTest {
       var result = session.runBlocking(userMessage);
       assertInstanceOf(ResultMessage.Success.class, result);
       assertTrue(session.result().isDone());
-      session.result().get(2, TimeUnit.SECONDS);
+      assertSame(result, Await.value("the settled session result", session.result()));
     }
 
     // Find the user message the model saw.

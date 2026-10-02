@@ -45,24 +45,39 @@ import java.util.concurrent.TimeoutException;
  */
 public class FaultTolerance {
 
+  private static final ExecutorService VIRTUAL_EXECUTOR =
+      Executors.newVirtualThreadPerTaskExecutor();
+
   /**
    * A no-op passthrough that executes operations directly without retry, circuit breaker, or
    * timeout.
    */
   public static final FaultTolerance PASSTHROUGH = new FaultTolerance(null, null, null);
 
-  private static final ExecutorService VIRTUAL_EXECUTOR =
-      Executors.newVirtualThreadPerTaskExecutor();
-
   private final RetryPolicy retryPolicy;
   private final CircuitBreaker circuitBreaker;
   private final Duration operationTimeout;
+  private final ExecutorService executor;
 
   private FaultTolerance(
       RetryPolicy retryPolicy, CircuitBreaker circuitBreaker, Duration operationTimeout) {
+    this(retryPolicy, circuitBreaker, operationTimeout, VIRTUAL_EXECUTOR);
+  }
+
+  /**
+   * For tests of the timeout, which starts when {@code executor} has accepted the operation: an
+   * executor that returns from {@code submit} only once the operation runs puts the timeout after
+   * the start, whatever the scheduling.
+   */
+  FaultTolerance(
+      RetryPolicy retryPolicy,
+      CircuitBreaker circuitBreaker,
+      Duration operationTimeout,
+      ExecutorService executor) {
     this.retryPolicy = retryPolicy;
     this.circuitBreaker = circuitBreaker;
     this.operationTimeout = operationTimeout;
+    this.executor = executor;
   }
 
   public static Builder newBuilder() {
@@ -153,7 +168,7 @@ public class FaultTolerance {
     if (retryPolicy == null) {
       return this;
     }
-    return new FaultTolerance(null, circuitBreaker, operationTimeout);
+    return new FaultTolerance(null, circuitBreaker, operationTimeout, executor);
   }
 
   private <T> T executeWithTimeout(Callable<T> operation)
@@ -162,7 +177,7 @@ public class FaultTolerance {
           RetryExhaustedException,
           InterruptedException {
 
-    Future<T> future = VIRTUAL_EXECUTOR.submit(() -> executeWithoutTimeoutUnchecked(operation));
+    Future<T> future = executor.submit(() -> executeWithoutTimeoutUnchecked(operation));
 
     try {
       return future.get(operationTimeout.toMillis(), TimeUnit.MILLISECONDS);

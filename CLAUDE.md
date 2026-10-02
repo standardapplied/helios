@@ -31,6 +31,7 @@ Production-grade agentic framework for Java. Simple, explicit, no magic.
 - Copyright header: `/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */`
 - **SOLID and DRY are non-negotiable.** Single Responsibility (one paragraph of Javadoc per class), Open/Closed (extension via interfaces, not modification), Liskov (enforced by sealed hierarchies), Interface Segregation (no omni-interfaces with optional methods), Dependency Inversion (external collaborators are interfaces). Don't copy-paste — extract a helper.
 - **No God classes.** Hard rule: no class exceeds **1000 lines, excluding Javadoc comments and imports**. Hitting the budget is the signal to extract, not to ask for an exception.
+- **A time seam is a `java.time.InstantSource` set through `withClock(...)`, defaulting to `Clock.systemUTC()`.** Never a `Clock` field, parameter or return type, never a static `now()`. See `CircuitBreaker.Builder`.
 - **Currency is integer micro-USD (long), never BigDecimal on the hot path.** Stripe-style fixed-precision. See `CostEstimate` + `CostCalculator`.
 
 **CRITICAL** Talk to me before making design decisions
@@ -42,7 +43,7 @@ code. Every 3.0 spec's work passes the gate without adding exclusions.
 
 | Tool | Enforces | Where |
 |---|---|---|
-| PMD (`maven-pmd-plugin`, every module) | Per-method and per-class complexity, size and coupling limits; no wildcard imports | `config/quality/pmd-main.xml`, `config/quality/pmd-test.xml` |
+| PMD (`maven-pmd-plugin`, every module) | Per-method and per-class complexity, size and coupling limits; no wildcard imports; in test code, no sleep, piped stream, clock read or self-chosen wait limit | `config/quality/pmd-main.xml`, `config/quality/pmd-test.xml` |
 | CPD (same plugin, aggregated at the reactor root) | No duplicated block of 100 tokens or more, main and test code, within or across modules | plugin configuration in the root `pom.xml` |
 | ArchUnit (`architecture` module) | One way to do each thing: module dependencies, naming, single owners of a pattern | `architecture/src/test/java/.../ArchitectureRulesTest.java` |
 
@@ -71,11 +72,67 @@ A test class is expected to have many methods and a large summed complexity, so 
 code only" rules are absent from `pmd-test.xml`; everything else applies to tests unchanged.
 PMD resolves types against each module's classpath, and a file it cannot analyse fails the build.
 
+Four more rules apply to test code only. Each fails at the first occurrence.
+
+| PMD rule (tests) | Forbids | Do this instead |
+|---|---|---|
+| `SleepInTest` | `Thread.sleep`, `TimeUnit.sleep`, `LockSupport.parkNanos` / `parkUntil` | Wait for the event through `Await` |
+| `PipedStreamInTest` | Constructing `PipedInputStream`, `PipedOutputStream`, `PipedReader`, `PipedWriter` | `LineSink` for what the code under test writes, `FeedableInputStream` for what it reads |
+| `ClockReadInTest` | `System.nanoTime()`, `System.currentTimeMillis()` | Assert the outcome; a test does not measure elapsed time |
+| `TimedWaitInTest` | Any call passing a `TimeUnit`; `Thread.join` or `Object.wait` with an argument; `assertTimeout`, `assertTimeoutPreemptively` | Wait through `Await`, which applies the one hang guard |
+
+`Await` is exempt from the sleep, clock and timed-wait rules by package and class name
+(`com.standardapplied.helios.core.test.Await`); a class named `Await` anywhere else is not. A
+sleep inside a string of sandboxed code is not a Java call and is not flagged.
+Until `v3-deterministic-tests-repl` lands, the `repl` test classes that still break these rules
+are on the burn-down list in `pmd-exclusions.properties`.
+
 ArchUnit rules today: `core` depends on nothing outside the JDK; a provider module depends on
 `core` only; `session` does not depend on a provider, `runtime` or `persistence`; a
 `java.net.http.HttpClient` is built only by `core.common.HttpClientFactory`; no top-level type is
 named `*Util`, `*Utils`, `*Helper`, `*Helpers` or `*Manager`; `System.out`, `System.err` and
-`printStackTrace` are used only in `repl.sandbox` and the example modules.
+`printStackTrace` are used only in `repl.sandbox` and the example modules. Three rules govern
+time: the wall clock is not read statically (no `now()` on a `java.time` type, no
+`System.currentTimeMillis()`); `Clock.system*` / `Clock.tick*` appear only as a field's initial
+value, never inline in a method; and a time seam is an `InstantSource` (no `Clock` field,
+parameter or return type). The one named exception to the first two is `core.common.Ids`,
+burned down by `v3-injected-time`. `System.nanoTime()` for measuring a duration is correct and
+stays.
+
+### Time and waiting in tests
+
+A test passes or fails for the same reason on a machine a hundred times slower, and on one that
+stalls for several seconds at any statement. The fixtures live in
+`com.standardapplied.helios.core.test` (core's test sources, shared through core's `test-jar`;
+the package must never exist in core's main code): `Await`, `LineSink`, `FeedableInputStream`.
+
+- **Wait for an event, never for time.** Wait on what the other thread produces: a latch, a
+  future, a queue element, a state change. Never sleep to let it get somewhere.
+- **Wait only through `Await`.** A wait ends with the event or with `Await.HANG_GUARD` (60 s),
+  whose expiry is a failure. Never choose a timeout for a wait. `Await.until` (polling) is the
+  last resort, for state that offers no event. If `Await` lacks a wait, add it there with a test.
+- **Never assert how long something took.** To prove a timeout or a kill fired, make the awaited
+  thing unable to finish on its own (block until released, `sleep 600` in a child, an unfed
+  `FeedableInputStream`) and assert the outcome. Returning at all is the proof.
+- **To test a timeout,** give the code under test a short one and an operation that blocks until
+  interrupted or released, and set every other limit that could end the same wait above the hang
+  guard.
+- **To prove something does not happen,** wait for the event that closes the window in which it
+  could have happened, then assert. A pause is not such an event.
+- **Drive time-of-day and elapsed-time behaviour with a hand-advanced `InstantSource`.**
+  `CircuitBreakerTest` is the model.
+- **Assert one outcome.** No "either is acceptable", no `if (outcome != null)` around
+  assertions. Force the interleaving; where two interleavings are both correct, write two tests.
+- **Force an interleaving without relying on scheduling:** a latch the other side waits on, a
+  fake that blocks, a hook that runs the second caller at a chosen point.
+- **Collect failures from every thread.** Await the `Future` of each submitted task; no empty
+  `catch` around code under test.
+- **Fakes may block without a limit** (`new CountDownLatch(1).await()`); the test's `Await`
+  bounds the test, and the build-wide JUnit default timeout (10 minutes, root `pom.xml`) turns a
+  deadlock into a failure.
+- **Where a class gives a test nothing to wait on,** give it an event, in this order: an existing
+  method completes its work before returning; a listener or future it already exposes; a
+  package-private accessor.
 
 ### Running it
 
@@ -99,7 +156,7 @@ sources of the modules in the reactor, so only a whole-reactor build checks dupl
 - **No suppression in source.** Neither PMD's suppression comment marker nor a
   `@SuppressWarnings` annotation naming a PMD rule; `git grep` for both stays empty.
 - **`config/quality/pmd-exclusions.properties`** (`fully.qualified.Class=Rule1,Rule2`; a nested
-  class is `Outer.Nested`). Its burn-down section lists what violated when the gate was
+  class is `Outer.Nested`; one line per class, because a repeated key replaces the earlier one). Its burn-down section lists what violated when the gate was
   installed, grouped by the follow-up spec that removes it; entries may only be removed. Its
   accepted section holds only entries a spec names explicitly, each with a comment stating why.
 - **`config/quality/cpd-exclusions.txt`** (one comma-separated group of class names per line, no
@@ -119,7 +176,7 @@ empty `.mvn/maven.config` is checked in. The plugin wiring constraints are comme
 
 ```
 helios/
-├── core/                           # Zero deps - Model + tool + common + fault + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator.
+├── core/                           # Zero deps - Model + tool + common + fault + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream) ship as its test-jar.
 ├── session/                        # v2 SDK - AgentSession, SessionPresets, hooks, permissions, file tools, memory backend, agent loop
 ├── runtime/                        # Helidon HTTP/SSE surface for session — POST /sessions, SSE /events, long-poll /result
 ├── gemini/                         # Gemini Interactions API + Jackson 3.x
@@ -150,7 +207,7 @@ Core exports public API; providers register via ServiceLoader SPI.
 
 | Pattern | Description |
 |---------|-------------|
-| **AgentSession** | Sealed-interface entrypoint in `helios-session`. `AgentSession.create(SessionOptions)` returns a session that runs an agent loop on a virtual thread the first time you `send`. `send(UserMessage)` queues a message (steering queue, drained per-iteration); `events()` returns a `Flow.Publisher<QueryEvent>` for streaming subscribers; `result()` is a `CompletableFuture<ResultMessage>` for blocking await; `runBlocking(msg)` and `runBlocking(msg, OutputSchema)` are sync convenience; `interrupt(reason)` queues a synthetic mid-run user message; `answer(qid, response)` resolves a pending `AskUserQuestion`; `close()` is `AutoCloseable`. Use `try-with-resources`; `close()` cancels the loop, settles the future, and shuts down the per-session publisher executor with a 5s grace period |
+| **AgentSession** | Sealed-interface entrypoint in `helios-session`. `AgentSession.create(SessionOptions)` returns a session that runs an agent loop on a virtual thread the first time you `send`. `send(UserMessage)` queues a message (steering queue, drained per-iteration); `events()` returns a `Flow.Publisher<QueryEvent>` for streaming subscribers (`SessionEventPublisher`: live fan-out while the session runs; a subscriber that attaches after the terminal `LoopEnded` gets that same event then `onComplete`, never an exception); `result()` is a `CompletableFuture<ResultMessage>` for blocking await; `runBlocking(msg)` and `runBlocking(msg, OutputSchema)` are sync convenience; `interrupt(reason)` queues a synthetic mid-run user message; `answer(qid, response)` resolves a pending `AskUserQuestion`; `close()` is `AutoCloseable`. Use `try-with-resources`; `close()` cancels the loop, settles the future, and shuts down the per-session publisher executor with a 5s grace period |
 | **SessionPresets** | Three curated `SessionOptions.Builder` factories: `minimal(model)` (just the model, defaults everywhere), `readOnly(model, path\|root)` (Read/Glob/Grep/LS rooted at workspace + `Permission.planMode()`), `workspace(model, path\|root)` (same read tools + `MemoryWrite` against `FileSystemMemoryBackend` + `Permission.defaultInWorkspace()`). Each returns the Builder so callers chain `.withCostCalculator(...)` / `.withHook(...)` / `.withLimits(...)` before `.build()`. `openEnded(...)` is intentionally absent until Phase 5 ships the Execute tool. Two-level subrecord extraction (`ToolingOptions`, `ObservabilityOptions`) was explicitly rejected — it would trade one ergonomic pain for a worse one. `SessionOptions.Builder` is declared canonical entrypoint; the public canonical record constructor stays only for serialization |
 | **QueryEvent (sealed, 15 subtypes)** | Streamed lifecycle event: `AssistantText`, `AssistantThinking`, `UserMessageReceived`, `MessageBlocked`, `ContextWarning`, `ContextEdited`, `ToolUse`, `ToolResult`, `ToolBlocked`, `ToolMutated`, `HookFired`, `QuestionAsked`, `TurnEnded`, `LoopEnded`, `Error`. Adding a subtype is a deliberate breaking change for `switch` consumers (compiler flags missing branches). `MessageBlocked` fires when an `OnUserMessageHook.Block` drops a user message so UIs/audit can surface the drop — without it the message vanishes invisibly |
 | **Hooks + HookOutcome** | Nine phase-specific non-sealed sub-interfaces of `Hook` (`OnUserMessageHook`, `PreModelTurnHook`, `PostModelTurnHook`, `PreToolUseHook`, `PostToolUseHook`, `PreStopHook`, `PreCompactHook`, `PostCompactHook`, `OnStreamEventHook`) returning a `HookOutcome` (`Continue` / `MutateArgs` / `MutateHistory` / `MutateText` / `MutateResult` / `Block` / `Inject` / `Stop`). Each mutation variant is typed to its phase: `MutateArgs(Map)` at PreToolUse, `MutateHistory(List<Message>)` at PreModelTurn/PreCompact, `MutateText(String)` at OnUserMessage, `MutateResult(String)` at PostToolUse. Returning a mutation variant at the wrong phase is harmless (treated as Continue). `HookRegistry` catches `RuntimeException` from hooks (logs WARNING, treats as Continue), but `Error` subtypes escape — see the Loop crash semantics row |

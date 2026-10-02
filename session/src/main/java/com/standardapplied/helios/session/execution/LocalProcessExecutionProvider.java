@@ -284,6 +284,11 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
     var startNanos = System.nanoTime();
     var proc = pb.start();
     inflight.add(proc);
+    // close() marks the provider closed and then scans the in-flight set once. A process added
+    // after that scan is one close() never saw, so the call that started it reaps it here.
+    if (closed.get()) {
+      reapInflight();
+    }
     // Once-only kill: a successful exit removes the callback's effect so a later cancel after
     // many calls does not iterate an ever-growing list of stale process refs and does not try to
     // destroy an already-reaped process.

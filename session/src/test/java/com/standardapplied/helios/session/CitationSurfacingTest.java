@@ -14,6 +14,7 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import java.time.Clock;
 import java.time.Instant;
@@ -22,7 +23,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -104,8 +104,8 @@ final class CitationSurfacingTest {
       done.countDown();
     }
 
-    void awaitDone() throws InterruptedException {
-      assertTrue(done.await(5, TimeUnit.SECONDS), "event stream did not complete in 5s");
+    void awaitDone() {
+      Await.latch("the event stream to complete", done);
     }
   }
 
@@ -116,7 +116,7 @@ final class CitationSurfacingTest {
       s.events().subscribe(sub);
       s.send(UserMessage.text("What is the capital of Australia?"));
 
-      var result = s.result().get(5, TimeUnit.SECONDS);
+      var result = Await.value("the session result", s.result());
       sub.awaitDone();
 
       // Streaming surface.
@@ -141,7 +141,7 @@ final class CitationSurfacingTest {
       s.events().subscribe(sub);
       s.send(UserMessage.text("hi"));
 
-      var result = s.result().get(5, TimeUnit.SECONDS);
+      var result = Await.value("the session result", s.result());
       sub.awaitDone();
 
       assertTrue(
