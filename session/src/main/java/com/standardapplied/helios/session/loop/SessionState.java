@@ -11,9 +11,9 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.session.ResultMessage;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -44,7 +44,7 @@ public final class SessionState {
 
   private final String sessionId;
   private final CancellationToken cancellation;
-  private final Clock clock;
+  private final InstantSource clock;
   private final Instant startedAt;
   private final CopyOnWriteArrayList<Message> history = new CopyOnWriteArrayList<>();
   private final AtomicLong turnIndex = new AtomicLong(0);
@@ -60,13 +60,13 @@ public final class SessionState {
    *
    * @param sessionId stable session identifier; non-blank
    * @param cancellation the session's cancellation token; non-null
-   * @param clock the clock that drives {@link #elapsed()}; non-null. Tests pass a fixed clock; real
-   *     deployments pass {@link Clock#systemUTC()}
+   * @param clock the time source that drives {@link #elapsed()}; non-null. Tests pass one they
+   *     advance by hand; real deployments pass {@link java.time.Clock#systemUTC()}
    * @throws NullPointerException if {@code sessionId}, {@code cancellation}, or {@code clock} is
    *     null
    * @throws IllegalArgumentException if {@code sessionId} is blank
    */
-  public SessionState(String sessionId, CancellationToken cancellation, Clock clock) {
+  public SessionState(String sessionId, CancellationToken cancellation, InstantSource clock) {
     Objects.requireNonNull(sessionId, "sessionId must not be null");
     if (Strings.isBlank(sessionId)) {
       throw new IllegalArgumentException("sessionId must not be blank");

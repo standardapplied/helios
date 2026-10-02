@@ -22,8 +22,8 @@ import com.standardapplied.helios.session.hooks.CompactionPayload;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookRegistry;
-import java.time.Clock;
 import java.time.Instant;
+import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -120,7 +120,7 @@ public final class AgentLoop {
   private final ToolDispatch toolDispatch;
   private final SteeringQueue steeringQueue;
   private final Function<SessionState, HookContext> hookContextFactory;
-  private final Clock clock;
+  private final InstantSource clock;
   private final EventEmitter emitter;
   private final TokenCounter tokenCounter;
   private final ContextCompactor contextCompactor;
@@ -151,7 +151,7 @@ public final class AgentLoop {
       SteeringQueue steeringQueue,
       Consumer<QueryEvent> eventSink,
       Function<SessionState, HookContext> hookContextFactory,
-      Clock clock,
+      InstantSource clock,
       TokenCounter tokenCounter,
       ContextCompactor contextCompactor) {
     this.turnRunner = Objects.requireNonNull(turnRunner, "turnRunner must not be null");

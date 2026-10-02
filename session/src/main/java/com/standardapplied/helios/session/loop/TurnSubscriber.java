@@ -11,9 +11,9 @@ import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.session.QueryEvent;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +49,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
   private final SessionState state;
   private final EventEmitter emitter;
-  private final Clock clock;
+  private final InstantSource clock;
   private final ScheduledExecutorService scheduler;
   private final Duration idleTimeout;
   private final long idleTimeoutMillis;
@@ -67,7 +67,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   TurnSubscriber(
       SessionState state,
       EventEmitter emitter,
-      Clock clock,
+      InstantSource clock,
       ScheduledExecutorService scheduler,
       Duration idleTimeout) {
     this.state = state;

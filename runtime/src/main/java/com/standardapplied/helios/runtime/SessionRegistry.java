@@ -9,6 +9,7 @@ import com.standardapplied.helios.session.SessionOptions;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.InstantSource;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Map;
@@ -58,7 +59,7 @@ public final class SessionRegistry {
 
   private final ConcurrentHashMap<String, SessionEntry> sessions = new ConcurrentHashMap<>();
   private final Function<SessionOptions, AgentSession> factory;
-  private final Clock clock;
+  private final InstantSource clock;
   private final int maxSessions;
 
   /**
@@ -94,7 +95,7 @@ public final class SessionRegistry {
   }
 
   private SessionRegistry(
-      Function<SessionOptions, AgentSession> factory, Clock clock, int maxSessions) {
+      Function<SessionOptions, AgentSession> factory, InstantSource clock, int maxSessions) {
     this.factory = Objects.requireNonNull(factory, "factory must not be null");
     this.clock = Objects.requireNonNull(clock, "clock must not be null");
     if (maxSessions <= 0) {
@@ -246,7 +247,7 @@ public final class SessionRegistry {
   public static final class Builder {
 
     private Function<SessionOptions, AgentSession> factory = AgentSession::create;
-    private Clock clock = Clock.systemUTC();
+    private InstantSource clock = Clock.systemUTC();
     private int maxSessions = Integer.MAX_VALUE;
 
     private Builder() {}
@@ -271,7 +272,7 @@ public final class SessionRegistry {
      * @return this builder
      * @throws NullPointerException if {@code clock} is null
      */
-    public Builder withClock(Clock clock) {
+    public Builder withClock(InstantSource clock) {
       this.clock = Objects.requireNonNull(clock, "clock must not be null");
       return this;
     }
