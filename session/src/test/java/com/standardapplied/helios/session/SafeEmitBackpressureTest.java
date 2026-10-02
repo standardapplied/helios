@@ -4,135 +4,217 @@
  */
 package com.standardapplied.helios.session;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.tool.Tool;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
-import java.util.concurrent.SubmissionPublisher;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 /**
  * Theme G regression test for the SSE-backpressure wedge. The agent loop emits events via {@code
- * AgentSessionImpl#safeEmit}, which calls {@link SubmissionPublisher#offer(Object, long, TimeUnit,
- * java.util.function.BiPredicate)} with a bounded timeout and a drop handler. Before the fix,
- * {@code publisher.submit(...)} blocked the loop indefinitely when any subscriber filled its
- * 256-item buffer — a slow SSE client could pin the producer forever.
+ * AgentSessionImpl#safeEmit}, which offers each event to the session's {@link
+ * java.util.concurrent.SubmissionPublisher} with a bounded wait and drops it on overflow. Before
+ * the fix, {@code publisher.submit(...)} blocked the loop indefinitely when any subscriber filled
+ * its 256-item buffer — a slow SSE client could pin the producer forever.
  *
- * <p>This test exercises the same call pattern against a deliberately-slow subscriber and asserts
- * the producer never blocks longer than the configured timeout. Coupled with code review of {@code
- * safeEmit}, the wedge prevention is verified.
+ * <p>The tests drive a real session whose model streams a burst of text chunks on the loop thread.
+ * A subscriber that stalls in its first {@code onNext} holds one event and lets the buffer fill, so
+ * the next event can only be dropped; a subscriber that never stalls receives a burst that fits the
+ * buffer whole.
  */
 final class SafeEmitBackpressureTest {
 
+  private static final int SUBSCRIBER_BUFFER = 256;
+
   @Test
-  void offerWithTimeoutDoesNotWedgeOnSlowSubscriber() throws Exception {
-    // Match the publisher shape AgentSessionImpl builds: virtual-thread executor, 256-item
-    // per-subscriber buffer.
-    try (var executor = Executors.newVirtualThreadPerTaskExecutor();
-        var publisher = new SubmissionPublisher<String>(executor, 256)) {
-
-      var blockSubscriber = new CountDownLatch(1);
-      var deliveredAtLeastOne = new CountDownLatch(1);
-      var receivedCount = new AtomicInteger();
-      publisher.subscribe(
-          new Flow.Subscriber<>() {
-            private Flow.Subscription subscription;
-
-            @Override
-            public void onSubscribe(Flow.Subscription s) {
-              this.subscription = s;
-              s.request(Long.MAX_VALUE);
-            }
-
-            @Override
-            public void onNext(String item) {
-              deliveredAtLeastOne.countDown();
-              receivedCount.incrementAndGet();
-              try {
-                blockSubscriber.await(30, TimeUnit.SECONDS);
-              } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+  void offerWithTimeoutDoesNotWedgeOnSlowSubscriber() {
+    var stalled = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var backlogDelivered = new CountDownLatch(1 + SUBSCRIBER_BUFFER);
+    var overflowEmitted = new CountDownLatch(1);
+    var subscriber =
+        new RecordingSubscriber(
+            event -> {
+              if (event instanceof QueryEvent.UserMessageReceived) {
+                stalled.countDown();
+                block(release);
               }
-            }
+              backlogDelivered.countDown();
+            });
+    var model =
+        burstModel(
+            SUBSCRIBER_BUFFER + 1,
+            () -> block(stalled),
+            () -> {
+              overflowEmitted.countDown();
+              block(backlogDelivered);
+            });
 
-            @Override
-            public void onError(Throwable t) {}
+    try (var session = session("sess-backpressure-slow", model)) {
+      session.events().subscribe(subscriber);
+      session.send(UserMessage.text("go"));
 
-            @Override
-            public void onComplete() {}
-          });
+      Await.latch("the loop to emit past the stalled subscriber's full buffer", overflowEmitted);
+      release.countDown();
+      var terminal = Await.value("the session to finish", session.result());
+      subscriber.awaitCompletion();
 
-      // Burst-fill past the 256-item buffer. We use a 50 ms timeout here (safeEmit uses 1 s in
-      // production); the test only verifies the bounded-timeout *contract*, not the production
-      // value. With 256 slots and 50 events overflowing, the test runs in well under 5 s instead
-      // of the 50+ s a 1 s timeout would produce.
-      var startNanos = System.nanoTime();
-      var droppedAny = false;
-      for (var i = 0; i < 306; i++) {
-        var result = publisher.offer("evt-" + i, 50, TimeUnit.MILLISECONDS, (sub, e) -> false);
-        if (result < 0) {
-          droppedAny = true;
-        }
-      }
-      var elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;
-
-      assertTrue(
-          deliveredAtLeastOne.await(2, TimeUnit.SECONDS),
-          "test precondition: subscriber must have received at least one event before blocking");
-      assertTrue(
-          droppedAny,
-          "expected at least one offer to drop on the slow subscriber; without the bounded timeout"
-              + " the producer would wedge here instead. Received="
-              + receivedCount.get());
-      assertTrue(
-          elapsedMs < 10_000L,
-          "306 offers against a slow subscriber must not pin the producer (took "
-              + elapsedMs
-              + " ms); the bounded-timeout contract is broken");
-
-      // Unblock the subscriber so the publisher.close() in try-with-resources can flush.
-      blockSubscriber.countDown();
+      var success = assertInstanceOf(ResultMessage.Success.class, terminal);
+      assertEquals(
+          String.join("", chunks(SUBSCRIBER_BUFFER + 1)),
+          success.result(),
+          "the dropped event must not cost the turn its content");
+      assertEquals(
+          chunks(SUBSCRIBER_BUFFER),
+          subscriber.texts(),
+          "exactly the one event offered to the full buffer is dropped");
+      var last = assertInstanceOf(QueryEvent.LoopEnded.class, subscriber.events.getLast());
+      assertEquals(terminal, last.result());
     }
   }
 
   @Test
-  void offerSucceedsForFastSubscriber() throws Exception {
-    // Sanity check the inverse: a subscriber that drains promptly never sees drops.
-    try (var executor = Executors.newVirtualThreadPerTaskExecutor();
-        var publisher = new SubmissionPublisher<String>(executor, 256)) {
+  void offerSucceedsForFastSubscriber() {
+    var burst = 100;
+    var subscriber = new RecordingSubscriber(event -> {});
 
-      var received = new AtomicInteger();
-      publisher.subscribe(
-          new Flow.Subscriber<>() {
-            @Override
-            public void onSubscribe(Flow.Subscription s) {
-              s.request(Long.MAX_VALUE);
-            }
+    try (var session = session("sess-backpressure-fast", burstModel(burst, () -> {}, () -> {}))) {
+      session.events().subscribe(subscriber);
+      session.send(UserMessage.text("go"));
 
-            @Override
-            public void onNext(String item) {
-              received.incrementAndGet();
-            }
+      assertInstanceOf(
+          ResultMessage.Success.class, Await.value("the session to finish", session.result()));
+      subscriber.awaitCompletion();
 
-            @Override
-            public void onError(Throwable t) {}
+      assertEquals(chunks(burst), subscriber.texts(), "fast subscriber should not see drops");
+    }
+  }
 
-            @Override
-            public void onComplete() {}
-          });
+  private static AgentSession session(String sessionId, Model model) {
+    return AgentSession.create(
+        SessionOptions.newBuilder().withModel(model).withSessionId(sessionId).build());
+  }
 
-      var droppedAny = false;
-      for (var i = 0; i < 100; i++) {
-        var result = publisher.offer("evt-" + i, 50, TimeUnit.MILLISECONDS, (sub, e) -> false);
-        if (result < 0) {
-          droppedAny = true;
-        }
+  private static List<String> chunks(int count) {
+    return IntStream.range(0, count).mapToObj(i -> "c" + i + " ").toList();
+  }
+
+  private static void block(CountDownLatch latch) {
+    try {
+      latch.await();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("interrupted while blocked on a test latch", e);
+    }
+  }
+
+  /**
+   * Model whose stream emits {@code count} text chunks on the caller's thread — the agent loop —
+   * running {@code beforeBurst} ahead of the first chunk and {@code afterBurst} behind the last.
+   */
+  private static Model burstModel(int count, Runnable beforeBurst, Runnable afterBurst) {
+    return new Model() {
+      @Override
+      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+        throw new UnsupportedOperationException("chat() not used by the streaming loop");
       }
-      assertFalse(droppedAny, "fast subscriber should not see drops");
+
+      @Override
+      public Flow.Publisher<ModelChunk> chatStream(
+          List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
+        return subscriber ->
+            subscriber.onSubscribe(
+                new Flow.Subscription() {
+                  @Override
+                  public void request(long n) {
+                    beforeBurst.run();
+                    chunks(count)
+                        .forEach(text -> subscriber.onNext(new ModelChunk.TextDelta(text)));
+                    afterBurst.run();
+                    subscriber.onNext(
+                        new ModelChunk.MessageStop(
+                            FinishReason.STOP.name(), Usage.of(1, 1), Map.of()));
+                    subscriber.onComplete();
+                  }
+
+                  @Override
+                  public void cancel() {}
+                });
+      }
+
+      @Override
+      public String id() {
+        return "test-burst";
+      }
+
+      @Override
+      public String provider() {
+        return "test";
+      }
+    };
+  }
+
+  /** Records every event, running {@code afterEach} on the delivery thread once it has. */
+  private static final class RecordingSubscriber implements Flow.Subscriber<QueryEvent> {
+
+    final List<QueryEvent> events = new ArrayList<>();
+    private final CountDownLatch finished = new CountDownLatch(1);
+    private final AtomicReference<Throwable> failure = new AtomicReference<>();
+    private final Consumer<QueryEvent> afterEach;
+
+    RecordingSubscriber(Consumer<QueryEvent> afterEach) {
+      this.afterEach = afterEach;
+    }
+
+    @Override
+    public void onSubscribe(Flow.Subscription subscription) {
+      subscription.request(Long.MAX_VALUE);
+    }
+
+    @Override
+    public void onNext(QueryEvent event) {
+      events.add(event);
+      afterEach.accept(event);
+    }
+
+    @Override
+    public void onError(Throwable throwable) {
+      failure.set(throwable);
+      finished.countDown();
+    }
+
+    @Override
+    public void onComplete() {
+      finished.countDown();
+    }
+
+    void awaitCompletion() {
+      Await.latch("the event stream to complete", finished);
+      assertNull(failure.get(), "the event stream must complete without an error");
+    }
+
+    List<String> texts() {
+      return events.stream()
+          .filter(QueryEvent.AssistantText.class::isInstance)
+          .map(event -> ((QueryEvent.AssistantText) event).text())
+          .toList();
     }
   }
 }

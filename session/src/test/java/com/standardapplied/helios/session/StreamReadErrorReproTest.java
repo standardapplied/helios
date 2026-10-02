@@ -17,12 +17,15 @@ import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -310,59 +313,62 @@ class StreamReadErrorReproTest {
 
   // ----------------------------------------------------------------------------------------------
   // Bug claim #5 — cancellation during the back-off sleep aborts the loop cleanly, producing
-  // ResultMessage.Cancelled instead of burning the remaining retries.
+  // ResultMessage.Cancelled instead of burning the remaining retries. The back-off is an hour, so
+  // only the cancellation can end it.
   // ----------------------------------------------------------------------------------------------
 
   @Test
-  void cancellationDuringBackoffShortCircuitsRetryAndProducesCancelledTerminal() throws Exception {
+  void cancellationDuringBackoffShortCircuitsRetryAndProducesCancelledTerminal() {
     var model = new TransientStreamFailureModel(providerStyleException());
-    var slowBackoff = new StreamRetryPolicy(5, Backoff.fixed(Duration.ofSeconds(30)), 0.0);
+    var unreachableBackoff = new StreamRetryPolicy(5, Backoff.fixed(Duration.ofHours(1)), 0.0);
     try (var session =
         AgentSession.create(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withSessionId("repro-cancel-during-backoff")
-                .withLimits(SessionLimits.newBuilder().withStreamRetryPolicy(slowBackoff).build())
+                .withLimits(
+                    SessionLimits.newBuilder().withStreamRetryPolicy(unreachableBackoff).build())
                 .build())) {
-      // Fire-and-forget the run on a virtual thread so the test thread can interrupt mid-backoff.
-      var done = new java.util.concurrent.CountDownLatch(1);
-      var terminalRef = new java.util.concurrent.atomic.AtomicReference<ResultMessage>();
-      Thread.startVirtualThread(
-          () -> {
-            try {
-              terminalRef.set(session.runBlocking(UserMessage.text("emit JSON")));
-            } finally {
-              done.countDown();
-            }
-          });
+      var retryAnnounced = new CountDownLatch(1);
+      session.events().subscribe(new RetryWatcher(retryAnnounced));
+      var run = new FutureTask<>(() -> session.runBlocking(UserMessage.text("emit JSON")));
+      Thread.startVirtualThread(run);
 
-      // Wait for the first attempt to fail and the loop to enter the back-off sleep.
-      var observedFirstAttempt = false;
-      for (int i = 0; i < 100; i++) {
-        if (model.chatStreamInvocations.get() >= 1) {
-          observedFirstAttempt = true;
-          break;
-        }
-        Thread.sleep(10);
-      }
-      assertTrue(observedFirstAttempt, "first attempt must fire before cancellation");
-
-      // Cancel during the long back-off sleep; the loop's CountDownLatch.await unblocks.
+      Await.latch("the loop to announce the retry it is about to back off for", retryAnnounced);
       session.interrupt("operator cancellation during retry back-off");
       session.close();
 
-      assertTrue(done.await(5, java.util.concurrent.TimeUnit.SECONDS), "session must terminate");
-      var terminal = terminalRef.get();
-      assertNotNull(terminal, "terminal must be set");
-      assertTrue(
-          terminal instanceof ResultMessage.Cancelled
-              || terminal instanceof ResultMessage.ErrorTransientStream,
-          "expected Cancelled or ErrorTransientStream (1 attempt), got " + terminal.getClass());
-      // The retry budget was 5 attempts; cancellation must have prevented all five.
-      assertTrue(
-          model.chatStreamInvocations.get() < 5,
-          "cancellation must have short-circuited the retry loop; attempts="
-              + model.chatStreamInvocations.get());
+      var cancelled =
+          assertInstanceOf(
+              ResultMessage.Cancelled.class, Await.value("the cancelled run to return", run));
+      assertEquals("session closed", cancelled.reason());
+      assertEquals(
+          1,
+          model.chatStreamInvocations.get(),
+          "cancellation must short-circuit the retry loop before a second attempt");
     }
+  }
+
+  /** Counts down when the loop emits {@link QueryEvent.TurnRetried}, just before it backs off. */
+  private record RetryWatcher(CountDownLatch retryAnnounced)
+      implements Flow.Subscriber<QueryEvent> {
+
+    @Override
+    public void onSubscribe(Flow.Subscription subscription) {
+      subscription.request(Long.MAX_VALUE);
+    }
+
+    @Override
+    public void onNext(QueryEvent event) {
+      if (event instanceof QueryEvent.TurnRetried) {
+        retryAnnounced.countDown();
+      }
+    }
+
+    @Override
+    public void onError(Throwable throwable) {}
+
+    @Override
+    public void onComplete() {}
   }
 }
