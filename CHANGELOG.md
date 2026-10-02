@@ -40,8 +40,31 @@ Persisted data is not migrated: class-name strings recorded by 2.x (for example
 `SerializedError.kind`) are opaque and may carry `ai.singlr` names. Table names (`helios_*`) do
 not change.
 
+**Every time seam is a `java.time.InstantSource`, never a `java.time.Clock`.** A class that
+needs the time takes an `InstantSource` through `withClock(...)` and defaults it to
+`Clock.systemUTC()`; it only ever calls `instant()`.
+
+| 2.x | 3.0 |
+|---|---|
+| `SessionOptions(..., Clock clock, ...)`, `SessionOptions.clock()` returns `Clock` | the component and accessor are `InstantSource` |
+| `SessionOptions.Builder.withClock(Clock)` | `withClock(InstantSource)` |
+| `SessionContext(String, CancellationToken, Clock)`, `SessionContext.clock()` returns `Clock` | the component and accessor are `InstantSource` |
+| `SessionRegistry.Builder.withClock(Clock)` | `withClock(InstantSource)` |
+| `SessionState(String, CancellationToken, Clock)`, `AgentLoop(..., Clock, ...)`, `TurnRunner(..., Clock, ...)` | the parameter is `InstantSource` |
+
+A caller that passes a `Clock` compiles unchanged, because `Clock` implements `InstantSource`.
+Code that read the returned value as a `Clock` (`options.clock().getZone()`,
+`Instant.now(context.clock())`) calls `clock().instant()` instead. Three architecture rules keep
+it so: no static wall-clock read outside `core.common.Ids`, `Clock.system*` only as a field's
+initial value, and no `Clock` field, parameter or return type.
+
 ### Added
 
+- **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
+  (waits for an event under one 60-second hang guard), `LineSink` and `FeedableInputStream`, in
+  `com.standardapplied.helios.core.test`, are what the Helios test suite uses instead of sleeps,
+  self-chosen timeouts and piped streams. Depend on it with `<type>test-jar</type>` and
+  `<scope>test</scope>`.
 - **`CircuitBreaker.Builder.withClock(InstantSource)`.** The breaker reads the current instant from
   an injectable source (default `Clock.systemUTC()`), so the half-open delay can be driven by hand
   instead of by sleeping. A `java.time.Clock` is an `InstantSource` and can be passed directly.
