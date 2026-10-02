@@ -71,6 +71,16 @@ initial value, and no `Clock` field, parameter or return type.
 
 ### Fixed
 
+- **`AgentSession.events()`: subscribing after the session ended threw, and `GET
+  /sessions/{id}/events` on a terminated session broke the response mid-stream.** The session shut
+  its publisher's executor down at terminal, so a later `subscribe` threw
+  `RejectedExecutionException`; over HTTP that happened after the `200` was sent, and the client
+  saw a truncated chunked body with neither `Ready` nor `LoopEnded`. A subscriber that attaches
+  after the terminal `LoopEnded` was emitted now receives that same event once it requests, then
+  `onComplete`; one that attaches after a session ended without a `LoopEnded` (closed before it
+  started, or the loop escaped with an `Error`) is completed at once. `subscribe` never throws for
+  a non-null subscriber and no subscriber sees `LoopEnded` twice. The SSE route therefore answers
+  `Ready`, `LoopEnded` and a clean end of stream, as `SessionRegistry` always documented.
 - **`CircuitBreaker`: a failed half-open probe could be followed at once by a second probe.** The
   breaker reopened before it recorded the new failure time, so a concurrent caller judged the
   half-open delay against the previous failure and moved the circuit straight back to `HALF_OPEN`.

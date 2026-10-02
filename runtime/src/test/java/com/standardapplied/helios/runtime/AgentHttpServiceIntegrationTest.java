@@ -178,6 +178,29 @@ final class AgentHttpServiceIntegrationTest {
     }
   }
 
+  @Test
+  void eventsOfATerminatedSessionAreReadyThenLoopEndedThenACleanEnd() throws Exception {
+    try (var server = startServer(textModel("the answer"))) {
+      var http = httpClient();
+      var base = baseUrl(server);
+      var sessionId = createSession(http, base);
+      sendMessage(http, base, sessionId, "go");
+      var result =
+          http.send(
+              HttpRequest.newBuilder(URI.create(base + "/sessions/" + sessionId + "/result"))
+                  .timeout(HTTP_TIMEOUT)
+                  .GET()
+                  .build(),
+              BodyHandlers.ofString());
+      assertEquals(200, result.statusCode(), "the session must be terminal before subscribing");
+
+      var collected = startEventReader(http, base, sessionId).awaitTerminal();
+
+      assertEquals(List.of("Ready", "LoopEnded"), collected.stream().map(SseLog::event).toList());
+      assertTrue(collected.getLast().data().contains("the answer"));
+    }
+  }
+
   // ── 404 paths ────────────────────────────────────────────────────────────
 
   @Test

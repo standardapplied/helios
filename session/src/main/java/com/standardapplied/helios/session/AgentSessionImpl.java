@@ -41,7 +41,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.SubmissionPublisher;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
@@ -59,9 +58,9 @@ import java.util.logging.Logger;
  *
  * <h2>Event delivery</h2>
  *
- * Events flow through a {@link SubmissionPublisher} sized at the JDK default 256-item buffer per
- * subscriber. Subscriber delivery uses a per-session virtual-thread executor; a slow subscriber
- * back-pressures the agent loop via {@code submit} rather than silently dropping events.
+ * Events flow through the session's {@link SessionEventPublisher}: live fan-out with a bounded wait
+ * on a slow subscriber, and replay of the terminal {@link QueryEvent.LoopEnded} to a subscriber
+ * that attaches after the session ended.
  *
  * <h2>Thread-safety</h2>
  *
@@ -74,7 +73,6 @@ import java.util.logging.Logger;
 public final class AgentSessionImpl implements AgentSession {
 
   private static final Logger LOGGER = Logger.getLogger(AgentSessionImpl.class.getName());
-  private static final int PUBLISHER_BUFFER = 256;
 
   private final String sessionId;
   private final SessionState state;
@@ -83,8 +81,7 @@ public final class AgentSessionImpl implements AgentSession {
   private final boolean providerAccepted;
   private final SteeringQueue steeringQueue;
   private final SessionLimits limits;
-  private final SubmissionPublisher<QueryEvent> publisher;
-  private final ExecutorService publisherExecutor;
+  private final SessionEventPublisher events;
   private final ScheduledExecutorService deadlineScheduler;
   private volatile ScheduledFuture<?> wallClockDeadline;
   private final AgentLoop loop;
@@ -115,8 +112,7 @@ public final class AgentSessionImpl implements AgentSession {
     options.systemPrompt().ifPresent(prompt -> this.state.appendMessage(Message.system(prompt)));
     this.sessionContext = new SessionContext(sessionId, cancellation, clock);
     this.steeringQueue = new SteeringQueue(concurrency.maxQueuedUserMessages());
-    this.publisherExecutor = Executors.newVirtualThreadPerTaskExecutor();
-    this.publisher = new SubmissionPublisher<>(publisherExecutor, PUBLISHER_BUFFER);
+    this.events = new SessionEventPublisher(sessionId);
     this.deadlineScheduler =
         Executors.newSingleThreadScheduledExecutor(
             r -> {
@@ -148,7 +144,7 @@ public final class AgentSessionImpl implements AgentSession {
             hookRegistry,
             toolDispatch,
             steeringQueue,
-            this::safeEmit,
+            events::emit,
             contextFactory,
             clock,
             options.costCalculator(),
@@ -161,7 +157,7 @@ public final class AgentSessionImpl implements AgentSession {
             hookRegistry,
             toolDispatch,
             steeringQueue,
-            this::safeEmit,
+            events::emit,
             contextFactory,
             clock,
             options.tokenCounter(),
@@ -172,45 +168,6 @@ public final class AgentSessionImpl implements AgentSession {
   public RawOutputCapturePolicy rawOutputCapturePolicy() {
     return rawOutputCapturePolicy;
   }
-
-  /**
-   * Bounded-blocking publish for events emitted by the agent loop and turn runner. A slow or
-   * unresponsive subscriber (e.g. a paused SSE client) fills its 256-item buffer and would
-   * otherwise pin the agent loop on the next {@code publisher.submit(...)} indefinitely. {@link
-   * SubmissionPublisher#offer(Object, long, TimeUnit, java.util.function.BiPredicate)} replaces the
-   * blocking submit with a bounded wait that drops the event on overflow.
-   *
-   * <p>Critical control events (terminal {@link QueryEvent.LoopEnded}, {@link
-   * QueryEvent.QuestionAsked}) get a longer wait — they MUST reach subscribers for the session to
-   * be useful. Routine events ({@link QueryEvent.AssistantText}, {@link QueryEvent.ToolUse}, etc.)
-   * get a shorter wait and are dropped on overflow with a FINE log so operators can correlate gaps
-   * in their event stream to slow consumers.
-   */
-  private void safeEmit(QueryEvent event) {
-    var timeoutMs = isCriticalEvent(event) ? CRITICAL_EMIT_TIMEOUT_MS : ROUTINE_EMIT_TIMEOUT_MS;
-    var dropped = publisher.offer(event, timeoutMs, TimeUnit.MILLISECONDS, (sub, e) -> false);
-    if (dropped < 0) {
-      var level = isCriticalEvent(event) ? Level.WARNING : Level.FINE;
-      LOGGER.log(
-          level,
-          () ->
-              "dropped "
-                  + event.getClass().getSimpleName()
-                  + " for "
-                  + Math.abs(dropped)
-                  + " slow subscriber(s) on session "
-                  + sessionId);
-    }
-  }
-
-  private static boolean isCriticalEvent(QueryEvent event) {
-    return event instanceof QueryEvent.LoopEnded
-        || event instanceof QueryEvent.QuestionAsked
-        || event instanceof QueryEvent.Error;
-  }
-
-  private static final long ROUTINE_EMIT_TIMEOUT_MS = 1_000L;
-  private static final long CRITICAL_EMIT_TIMEOUT_MS = 30_000L;
 
   /**
    * Fire {@code executionProvider.onSessionStart(sessionContext)} and react to its outcome. When
@@ -297,7 +254,7 @@ public final class AgentSessionImpl implements AgentSession {
 
   @Override
   public Flow.Publisher<QueryEvent> events() {
-    return publisher;
+    return events;
   }
 
   @Override
@@ -341,19 +298,14 @@ public final class AgentSessionImpl implements AgentSession {
   }
 
   /**
-   * Shut down the publisher and its per-session executor with a bounded grace period. Called from
-   * exactly one of two mutually-exclusive paths — {@link #close()}'s pre-start branch, or {@link
-   * #runLoop()} (after the loop returns, BEFORE the result future settles) — and never both,
-   * because the {@code started} CAS gates entry.
+   * End the session's runtime: notify the execution provider, close the event stream and stop the
+   * wall-clock deadline. Called from exactly one of two mutually-exclusive paths — {@link
+   * #close()}'s pre-start branch, or {@link #runLoop()} (after the loop returns, BEFORE the result
+   * future settles) — and never both, because the {@code started} CAS gates entry.
    *
-   * <p>The 5-second grace mirrors the model-close pattern in CLAUDE.md: enough time for a
-   * cooperative subscriber to drain its {@code onComplete} task, short enough that a wedged
-   * subscriber does not pin session shutdown. {@link
-   * java.util.concurrent.SubmissionPublisher#close()} signals an orderly shutdown that submits a
-   * final {@code onComplete} to every subscriber after their pending {@code onNext} tasks; {@link
-   * java.util.concurrent.ExecutorService#awaitTermination} then waits for those tasks to drain, so
-   * by the time this method returns every responsive subscriber has observed every emitted event
-   * including the terminal {@link QueryEvent.LoopEnded}.
+   * <p>{@link SessionEventPublisher#close()} waits a bounded grace period for live subscribers to
+   * drain, so by the time this method returns every responsive subscriber has observed every
+   * emitted event including the terminal {@link QueryEvent.LoopEnded}.
    */
   private void closeRuntime() {
     if (providerAccepted) {
@@ -363,16 +315,7 @@ public final class AgentSessionImpl implements AgentSession {
         LOGGER.log(Level.WARNING, "onSessionEnd threw — continuing shutdown", e);
       }
     }
-    publisher.close();
-    publisherExecutor.shutdown();
-    try {
-      if (!publisherExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-        publisherExecutor.shutdownNow();
-      }
-    } catch (InterruptedException e) {
-      publisherExecutor.shutdownNow();
-      Thread.currentThread().interrupt();
-    }
+    events.close();
     var deadline = wallClockDeadline;
     if (deadline != null) {
       deadline.cancel(false);
@@ -382,7 +325,7 @@ public final class AgentSessionImpl implements AgentSession {
 
   /** Package-private accessor for tests that need to assert executor shutdown. */
   ExecutorService publisherExecutorForTests() {
-    return publisherExecutor;
+    return events.executor();
   }
 
   @Override
@@ -472,7 +415,7 @@ public final class AgentSessionImpl implements AgentSession {
                           new CancellationException(
                               state.cancellation().reason().orElse("session cancelled"))));
       try {
-        safeEmit(
+        events.emit(
             new QueryEvent.QuestionAsked(
                 sessionId, state.currentTurnIndex(), clock.instant(), request));
         return future.get();
