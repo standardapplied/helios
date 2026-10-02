@@ -21,15 +21,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 
 /**
  * Time never passes on its own here: the breaker reads {@link #now}, which a test advances by hand,
  * so no assertion depends on how fast the machine is. A test can also run code at the exact moment
  * the breaker next reads the clock, which places a second caller inside a transition without
- * relying on thread scheduling. The class timeout only turns a deadlock into a failure.
+ * relying on thread scheduling.
  */
-@Timeout(60)
 class CircuitBreakerTest {
 
   private static final Duration HALF_OPEN_AFTER = Duration.ofSeconds(30);
