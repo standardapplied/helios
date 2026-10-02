@@ -181,8 +181,9 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
    * The subscription of a subscriber that attached after the session ended. It delivers the
    * terminal event once the subscriber has both returned from {@code onSubscribe} and requested,
    * then completes; with no terminal event to deliver it completes as soon as {@code onSubscribe}
-   * returns. Signals are issued on the thread that satisfies the last condition, never
-   * concurrently.
+   * returns. A non-positive request fails it with {@code onError} instead, likewise only after
+   * {@code onSubscribe} has returned. Signals are issued on the thread that satisfies the last
+   * condition, never concurrently.
    */
   private static final class TerminalReplay implements Flow.Subscription {
 
@@ -190,6 +191,7 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
     private final QueryEvent.LoopEnded terminal;
     private boolean subscribed;
     private boolean requested;
+    private IllegalArgumentException invalidRequest;
     private boolean finished;
 
     TerminalReplay(Flow.Subscriber<? super QueryEvent> subscriber, QueryEvent.LoopEnded terminal) {
@@ -200,22 +202,19 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
 
     @Override
     public void request(long n) {
-      if (n <= 0) {
-        if (finish()) {
-          subscriber.onError(
-              new IllegalArgumentException("non-positive subscription request: " + n));
-        }
-        return;
-      }
       synchronized (this) {
-        requested = true;
+        if (n > 0) {
+          requested = true;
+        } else if (invalidRequest == null) {
+          invalidRequest = new IllegalArgumentException("non-positive subscription request: " + n);
+        }
       }
       deliver();
     }
 
     @Override
-    public void cancel() {
-      finish();
+    public synchronized void cancel() {
+      finished = true;
     }
 
     void subscribed() {
@@ -226,25 +225,22 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
     }
 
     private void deliver() {
+      IllegalArgumentException failure;
       synchronized (this) {
-        if (!subscribed || !requested) {
+        if (finished || !subscribed || !requested && invalidRequest == null) {
           return;
         }
+        finished = true;
+        failure = invalidRequest;
       }
-      if (finish()) {
-        if (terminal != null) {
-          subscriber.onNext(terminal);
-        }
-        subscriber.onComplete();
+      if (failure != null) {
+        subscriber.onError(failure);
+        return;
       }
-    }
-
-    private synchronized boolean finish() {
-      if (finished) {
-        return false;
+      if (terminal != null) {
+        subscriber.onNext(terminal);
       }
-      finished = true;
-      return true;
+      subscriber.onComplete();
     }
   }
 }

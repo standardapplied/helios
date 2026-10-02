@@ -145,6 +145,41 @@ final class SessionEventPublisherTest {
   }
 
   @Test
+  void aNonPositiveRequestMadeDuringOnSubscribeFailsTheReplayOnlyAfterOnSubscribeReturns() {
+    var publisher = endedPublisher();
+    var signals = new CopyOnWriteArrayList<String>();
+
+    publisher.subscribe(
+        new Flow.Subscriber<QueryEvent>() {
+          @Override
+          public void onSubscribe(Flow.Subscription subscription) {
+            var requesting = new FutureTask<Void>(() -> subscription.request(0), null);
+            Thread.ofVirtual().start(requesting);
+            Await.value("request(0) from another thread to return", requesting);
+            signals.add("onSubscribe returned");
+          }
+
+          @Override
+          public void onNext(QueryEvent event) {
+            signals.add("onNext");
+          }
+
+          @Override
+          public void onError(Throwable throwable) {
+            signals.add("onError: " + throwable.getMessage());
+          }
+
+          @Override
+          public void onComplete() {
+            signals.add("onComplete");
+          }
+        });
+
+    assertEquals(
+        List.of("onSubscribe returned", "onError: non-positive subscription request: 0"), signals);
+  }
+
+  @Test
   void aSubscriberAttachedAfterACloseWithoutATerminalIsCompletedAtOnce() {
     var publisher = new SessionEventPublisher(SID);
     emit(publisher, TEXT);
