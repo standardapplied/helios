@@ -29,8 +29,7 @@ import com.standardapplied.helios.session.memory.MemoryWriteTool;
 import com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolRegistry;
-import java.time.Clock;
-import java.time.Instant;
+import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
@@ -94,7 +93,7 @@ public final class AgentSessionImpl implements AgentSession {
   private final AtomicBoolean closed = new AtomicBoolean(false);
   private final ConcurrentHashMap<String, CompletableFuture<AskUserQuestionResponse>>
       pendingQuestions = new ConcurrentHashMap<>();
-  private final Clock clock;
+  private final InstantSource clock;
   private final RawOutputCapturePolicy rawOutputCapturePolicy;
 
   /**
@@ -475,7 +474,7 @@ public final class AgentSessionImpl implements AgentSession {
       try {
         safeEmit(
             new QueryEvent.QuestionAsked(
-                sessionId, state.currentTurnIndex(), Instant.now(clock), request));
+                sessionId, state.currentTurnIndex(), clock.instant(), request));
         return future.get();
       } catch (ExecutionException e) {
         var cause = e.getCause();

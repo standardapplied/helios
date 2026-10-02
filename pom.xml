@@ -107,6 +107,14 @@
                         --add-opens java.base/java.util=ALL-UNNAMED
                         --add-opens java.base/java.lang=ALL-UNNAMED
                     </argLine>
+                    <!--
+                      Turns a deadlocked test into a failure instead of a hung CI job. It is not
+                      a wait limit: a test waits through core.test.Await, whose hang guard fails
+                      it long before this.
+                    -->
+                    <properties>
+                        <configurationParameters>junit.jupiter.execution.timeout.default = 10 m</configurationParameters>
+                    </properties>
                 </configuration>
             </plugin>
             <plugin>

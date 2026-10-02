@@ -17,6 +17,7 @@ import com.standardapplied.helios.session.memory.MemoryBackend;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Clock;
+import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -42,7 +43,7 @@ import java.util.Optional;
  * @param sessionId stable, non-blank session id; auto-generated UUID if not set on the builder
  * @param limits per-session ceilings; non-null
  * @param concurrency per-session concurrency caps; non-null
- * @param clock clock supplying event timestamps and elapsed; non-null
+ * @param clock time source supplying event timestamps and elapsed; non-null
  * @param tools the tool registry the loop advertises to the model and dispatches against; non-null,
  *     defaults to {@link ToolRegistry#empty()}
  * @param hooks the hooks fired at lifecycle phases (pre/post-model-turn, pre/post-tool-use,
@@ -90,7 +91,7 @@ public record SessionOptions(
     String sessionId,
     SessionLimits limits,
     ConcurrencyLimits concurrency,
-    Clock clock,
+    InstantSource clock,
     ToolRegistry tools,
     List<Hook> hooks,
     Optional<Permission> permission,
@@ -175,7 +176,7 @@ public record SessionOptions(
     private String sessionId;
     private SessionLimits limits = SessionLimits.defaults();
     private ConcurrencyLimits concurrency = ConcurrencyLimits.defaults();
-    private Clock clock = Clock.systemUTC();
+    private InstantSource clock = Clock.systemUTC();
     private ToolRegistry tools = ToolRegistry.empty();
     private final ArrayList<Hook> hooks = new ArrayList<>();
     private Permission permission;
@@ -250,7 +251,7 @@ public record SessionOptions(
      * @return this builder
      * @throws NullPointerException if {@code clock} is null
      */
-    public Builder withClock(Clock clock) {
+    public Builder withClock(InstantSource clock) {
       this.clock = Objects.requireNonNull(clock, "clock must not be null");
       return this;
     }
