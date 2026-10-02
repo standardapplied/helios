@@ -81,6 +81,11 @@ initial value, and no `Clock` field, parameter or return type.
   started, or the loop escaped with an `Error`) is completed at once. `subscribe` never throws for
   a non-null subscriber and no subscriber sees `LoopEnded` twice. The SSE route therefore answers
   `Ready`, `LoopEnded` and a clean end of stream, as `SessionRegistry` always documented.
+- **`LocalProcessExecutionProvider.close()` could miss a subprocess that a concurrent `execute`
+  was still launching.** `close()` marks the provider closed and scans the in-flight processes
+  once; a call that had passed its closed check and started its process after that scan was never
+  reaped, and the child ran on until its own timeout. The launching call now reaps it and returns
+  the same killed-process result a running call gets when the provider closes.
 - **`CircuitBreaker`: a failed half-open probe could be followed at once by a second probe.** The
   breaker reopened before it recorded the new failure time, so a concurrent caller judged the
   half-open delay against the previous failure and moved the circuit straight back to `HALF_OPEN`.

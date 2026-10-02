@@ -366,14 +366,9 @@ final class LocalProcessExecutionProviderRobustnessTest {
         "the queued call to ask for a permit", () -> token.activeCallbackCountForTests() == 1);
   }
 
-  /**
-   * The message of the {@link CancellationException} that {@code call} failed with. {@code
-   * CompletableFuture.get} reports such a failure through a fresh {@code CancellationException}
-   * whose cause is the original.
-   */
   private static String cancellationMessage(String description, CompletableFuture<?> call) {
-    var reported = assertInstanceOf(CancellationException.class, Await.failure(description, call));
-    return assertInstanceOf(CancellationException.class, reported.getCause()).getMessage();
+    return assertInstanceOf(CancellationException.class, Await.failure(description, call))
+        .getMessage();
   }
 
   /** Smoke test the shutdown hook lifecycle by registering then removing on close. */

@@ -14,6 +14,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -103,6 +104,22 @@ class AwaitTest {
     future.cancel(true);
 
     assertInstanceOf(CancellationException.class, Await.failure("the rejection", future));
+  }
+
+  @Test
+  void failureReturnsTheCancellationAFutureWasFailedWith() {
+    var cancellation = new CancellationException("stopped by the caller");
+
+    assertSame(
+        cancellation, Await.failure("the rejection", CompletableFuture.failedFuture(cancellation)));
+  }
+
+  @Test
+  void failureReturnsTheCancellationOfACancelledFutureTask() {
+    var task = new FutureTask<>(() -> "never run");
+    task.cancel(true);
+
+    assertInstanceOf(CancellationException.class, Await.failure("the rejection", task));
   }
 
   @Test

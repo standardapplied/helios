@@ -60,7 +60,8 @@ public final class Await {
 
   /**
    * Returns the exception {@code future} completes with: the cause it failed with, or the {@link
-   * CancellationException} of a cancelled future. A future that completes with a value fails.
+   * CancellationException} of a cancelled future. Where the JDK reports a cancellation through a
+   * fresh wrapper, the original it wraps is returned. A future that completes with a value fails.
    */
   public static Throwable failure(String description, Future<?> future) {
     return failure(description, future, HANG_GUARD);
@@ -77,7 +78,7 @@ public final class Await {
           } catch (ExecutionException e) {
             return e.getCause();
           } catch (CancellationException e) {
-            return e;
+            return e.getCause() instanceof CancellationException original ? original : e;
           }
           throw new AssertionError(
               description + " completed with " + value + " instead of failing");
