@@ -46,6 +46,17 @@ not change.
   an injectable source (default `Clock.systemUTC()`), so the half-open delay can be driven by hand
   instead of by sleeping. A `java.time.Clock` is an `InstantSource` and can be passed directly.
 
+### Fixed
+
+- **`CircuitBreaker`: a failed half-open probe could be followed at once by a second probe.** The
+  breaker reopened before it recorded the new failure time, so a concurrent caller judged the
+  half-open delay against the previous failure and moved the circuit straight back to `HALF_OPEN`.
+  The failure time is now recorded first.
+- **`CircuitBreaker`: a successful probe could be forgotten.** A caller that lost the race to move
+  the circuit to `HALF_OPEN` still reset the success count, discarding a probe that had already
+  succeeded when `successThreshold` is above 1. Only the caller that makes the transition resets
+  it.
+
 ## [2.12.0] — 2026-10-01 — Claude Opus 5.5, Sonnet 5.5, the GPT-6 family and hardened confinement
 
 The last 2.x feature release. 3.0 renames the root package and removes the compatibility
