@@ -58,7 +58,7 @@
     <rule name="SleepInTest"
           language="java"
           class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
-          message="A test does not sleep: wait for the event through com.standardapplied.helios.core.test.Await.">
+          message="A test does not sleep: wait for the event through com.standardapplied.helios.core.test.Await">
         <description>A test waits for an event, never for time.</description>
         <priority>3</priority>
         <properties>
@@ -80,7 +80,7 @@
     <rule name="PipedStreamInTest"
           language="java"
           class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
-          message="A piped stream fails when its writer thread exits: use LineSink and FeedableInputStream from com.standardapplied.helios.core.test.">
+          message="A piped stream fails when its writer thread exits: use LineSink and FeedableInputStream from com.standardapplied.helios.core.test">
         <description>What the code under test writes goes to a LineSink; what it reads comes from a FeedableInputStream.</description>
         <priority>3</priority>
         <properties>
@@ -100,7 +100,7 @@
     <rule name="ClockReadInTest"
           language="java"
           class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
-          message="A test does not measure elapsed time: assert the outcome.">
+          message="A test does not measure elapsed time: assert the outcome">
         <description>A test never asserts how long something took.</description>
         <priority>3</priority>
         <properties>
@@ -120,7 +120,7 @@
     <rule name="TimedWaitInTest"
           language="java"
           class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
-          message="A test does not choose its own timeout: wait through com.standardapplied.helios.core.test.Await, which applies the one hang guard.">
+          message="A test does not choose its own timeout: wait through com.standardapplied.helios.core.test.Await, which applies the one hang guard">
         <description>A wait ends with the event or with the hang guard shared by every test.</description>
         <priority>3</priority>
         <properties>
