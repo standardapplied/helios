@@ -23,6 +23,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -37,6 +38,15 @@ final class LocalProcessExecutionProviderTest {
   private static final String HANG = "exec sleep 600";
 
   // ── Builder validation ────────────────────────────────────────────────────
+
+  /**
+   * A test that fails before its children are reaped must not leave one running; nothing else in
+   * this JVM starts a process while a test of this class runs.
+   */
+  @AfterEach
+  void noChildOutlivesItsTest() {
+    ProcessHandle.current().descendants().forEach(ProcessHandle::destroyForcibly);
+  }
 
   @Test
   void builderRequiresAtLeastOneRuntime() {
