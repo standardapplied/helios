@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.session;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -29,11 +30,14 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
 
   private static final Logger LOGGER = Logger.getLogger(SessionEventPublisher.class.getName());
   private static final int SUBSCRIBER_BUFFER = 256;
-  private static final long ROUTINE_EMIT_TIMEOUT_MS = 1_000L;
-  private static final long CRITICAL_EMIT_TIMEOUT_MS = 30_000L;
-  private static final long DRAIN_GRACE_SECONDS = 5;
+  private static final Duration ROUTINE_EMIT_TIMEOUT = Duration.ofSeconds(1);
+  private static final Duration CRITICAL_EMIT_TIMEOUT = Duration.ofSeconds(30);
+  private static final Duration DRAIN_GRACE = Duration.ofSeconds(5);
 
   private final String sessionId;
+  private final Duration routineEmitTimeout;
+  private final Duration criticalEmitTimeout;
+  private final Duration drainGrace;
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
   private final SubmissionPublisher<QueryEvent> live =
       new SubmissionPublisher<>(executor, SUBSCRIBER_BUFFER);
@@ -42,7 +46,19 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
   private boolean closed;
 
   SessionEventPublisher(String sessionId) {
+    this(sessionId, ROUTINE_EMIT_TIMEOUT, CRITICAL_EMIT_TIMEOUT, DRAIN_GRACE);
+  }
+
+  /** For tests of the drop and drain paths, which the production limits put seconds away. */
+  SessionEventPublisher(
+      String sessionId,
+      Duration routineEmitTimeout,
+      Duration criticalEmitTimeout,
+      Duration drainGrace) {
     this.sessionId = sessionId;
+    this.routineEmitTimeout = routineEmitTimeout;
+    this.criticalEmitTimeout = criticalEmitTimeout;
+    this.drainGrace = drainGrace;
   }
 
   @Override
@@ -75,8 +91,8 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
       }
     }
     var critical = isCritical(event);
-    var timeoutMs = critical ? CRITICAL_EMIT_TIMEOUT_MS : ROUTINE_EMIT_TIMEOUT_MS;
-    var dropped = live.offer(event, timeoutMs, TimeUnit.MILLISECONDS, (sub, e) -> false);
+    var timeout = critical ? criticalEmitTimeout : routineEmitTimeout;
+    var dropped = live.offer(event, timeout.toNanos(), TimeUnit.NANOSECONDS, (sub, e) -> false);
     if (dropped < 0) {
       LOGGER.log(
           critical ? Level.WARNING : Level.FINE,
@@ -102,7 +118,7 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
     live.close();
     executor.shutdown();
     try {
-      if (!executor.awaitTermination(DRAIN_GRACE_SECONDS, TimeUnit.SECONDS)) {
+      if (!executor.awaitTermination(drainGrace.toNanos(), TimeUnit.NANOSECONDS)) {
         executor.shutdownNow();
       }
     } catch (InterruptedException e) {
