@@ -14,10 +14,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.FeedableInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
@@ -34,6 +34,7 @@ import tools.jackson.databind.json.JsonMapper;
 class StreamingIteratorTest {
 
   private static final Duration SHORT_IDLE_TIMEOUT = Duration.ofMillis(200);
+  private static final Duration NEVER_IDLE = Duration.ofMinutes(10);
 
   private static String stepStart(int index, String stepJson) {
     return "data: {\"event_type\":\"step.start\",\"index\":"
@@ -96,7 +97,7 @@ class StreamingIteratorTest {
 
   @org.junit.jupiter.api.Test
   void textDeltaEvents() {
-    try (var iterator = createIterator(TEXT_FLOW, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(TEXT_FLOW, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -121,7 +122,7 @@ class StreamingIteratorTest {
             + stepArgumentsDelta(1, "NYC\\\"}")
             + stepStop(1)
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -148,7 +149,7 @@ class StreamingIteratorTest {
                     + "\"arguments\":{\"city\":\"NYC\"}}")
             + stepStop(1)
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -168,7 +169,7 @@ class StreamingIteratorTest {
             + stepArgumentsDelta(1, "{not json")
             + stepStop(1)
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -184,7 +185,7 @@ class StreamingIteratorTest {
         stepStart(1, "{\"type\":\"function_call\",\"id\":\"call_1\",\"name\":\"get_weather\"}")
             + stepStop(1)
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -200,7 +201,7 @@ class StreamingIteratorTest {
         "{\"type\":\"thought\",\"signature\":\"sig123\","
             + "\"summary\":[{\"type\":\"text\",\"text\":\"thinking...\"}]}";
     var sse = stepStart(0, thought) + stepStop(0) + TEXT_FLOW;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -225,7 +226,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -253,7 +254,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -277,7 +278,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -299,7 +300,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -334,7 +335,7 @@ class StreamingIteratorTest {
 
   @org.junit.jupiter.api.Test
   void usageFromCompleteEvent() {
-    try (var iterator = createIterator(TEXT_FLOW, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(TEXT_FLOW, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -349,7 +350,7 @@ class StreamingIteratorTest {
   @org.junit.jupiter.api.Test
   void usageOmittedDoesNotPopulateResponseUsage() {
     var sse = MODEL_OUTPUT_START + HELLO_DELTA + MODEL_OUTPUT_STOP + INTERACTION_COMPLETED_NO_USAGE;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -361,7 +362,7 @@ class StreamingIteratorTest {
 
   @org.junit.jupiter.api.Test
   void failedInteractionSetsErrorFinishReason() {
-    try (var iterator = createIterator(INTERACTION_FAILED, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(INTERACTION_FAILED, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -381,7 +382,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -398,7 +399,7 @@ class StreamingIteratorTest {
   @org.junit.jupiter.api.Test
   void emptyAndDoneDataLinesAreSkipped() {
     var sse = "data: \n\ndata: [DONE]\n\n" + TEXT_FLOW;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -411,7 +412,7 @@ class StreamingIteratorTest {
   @org.junit.jupiter.api.Test
   void nonDataLinesAreIgnored() {
     var sse = "event: step.delta\n" + TEXT_FLOW;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -423,7 +424,7 @@ class StreamingIteratorTest {
   @org.junit.jupiter.api.Test
   void malformedJsonEmitsErrorEvent() {
     var sse = "data: {not valid json}\n\n" + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -438,7 +439,7 @@ class StreamingIteratorTest {
   void unknownEventTypeIsTolerated() {
     var unknown = "data: {\"event_type\":\"interaction.unknown\"}\n\n";
     var sse = unknown + TEXT_FLOW;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -453,7 +454,7 @@ class StreamingIteratorTest {
     var sse =
         "data: {\"event_type\":\"step.start\",\"step\":{\"type\":\"model_output\"}}\n\n"
             + TEXT_FLOW;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -465,7 +466,7 @@ class StreamingIteratorTest {
   @org.junit.jupiter.api.Test
   void stepStartWithoutStepIsIgnored() {
     var sse = "data: {\"event_type\":\"step.start\",\"index\":0}\n\n" + TEXT_FLOW;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -479,7 +480,7 @@ class StreamingIteratorTest {
     var sse =
         "data: {\"event_type\":\"step.delta\",\"delta\":{\"type\":\"text\",\"text\":\"x\"}}\n\n"
             + TEXT_FLOW;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -496,7 +497,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -509,7 +510,7 @@ class StreamingIteratorTest {
   @org.junit.jupiter.api.Test
   void stepStopWithoutIndexIsIgnored() {
     var sse = "data: {\"event_type\":\"step.stop\"}\n\n" + TEXT_FLOW;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -521,7 +522,7 @@ class StreamingIteratorTest {
   @org.junit.jupiter.api.Test
   void stepStopForUnknownIndexIsIgnored() {
     var sse = "data: {\"event_type\":\"step.stop\",\"index\":42}\n\n" + TEXT_FLOW;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -538,7 +539,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -555,7 +556,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -567,13 +568,12 @@ class StreamingIteratorTest {
   }
 
   @org.junit.jupiter.api.Test
-  void idleTimeoutEmitsErrorEvent() throws Exception {
-    var pipedIn = new PipedInputStream();
-    var pipedOut = new PipedOutputStream(pipedIn);
+  void idleTimeoutEmitsErrorEvent() {
+    var neverDelivers = new FeedableInputStream();
 
     try (var iterator =
         new GeminiModel.StreamingIterator(
-            fakeResponse(pipedIn), objectMapper, SHORT_IDLE_TIMEOUT)) {
+            fakeResponse(neverDelivers), objectMapper, SHORT_IDLE_TIMEOUT)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
@@ -582,12 +582,11 @@ class StreamingIteratorTest {
       assertInstanceOf(GeminiException.class, error.cause());
       assertTrue(((GeminiException) error.cause()).isRetryable());
     }
-    pipedOut.close();
   }
 
   @org.junit.jupiter.api.Test
   void closeIsIdempotent() {
-    var iterator = createIterator(TEXT_FLOW, Duration.ofSeconds(5));
+    var iterator = createIterator(TEXT_FLOW, NEVER_IDLE);
     iterator.close();
     iterator.close();
     assertFalse(iterator.hasNext());
@@ -597,7 +596,7 @@ class StreamingIteratorTest {
   void closeAfterPartialConsumption() {
     var sse =
         MODEL_OUTPUT_START + HELLO_DELTA + HELLO_DELTA + MODEL_OUTPUT_STOP + INTERACTION_COMPLETED;
-    var iterator = createIterator(sse, Duration.ofSeconds(5));
+    var iterator = createIterator(sse, NEVER_IDLE);
     assertTrue(iterator.hasNext());
     iterator.next();
     iterator.close();
@@ -612,7 +611,7 @@ class StreamingIteratorTest {
             + stepDelta(0, "{\"type\":\"text\",\"text\":\"World\"}")
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -625,7 +624,7 @@ class StreamingIteratorTest {
 
   @org.junit.jupiter.api.Test
   void emptyStreamProducesDoneWithEmptyContent() {
-    try (var iterator = createIterator(INTERACTION_COMPLETED, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(INTERACTION_COMPLETED, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -652,7 +651,7 @@ class StreamingIteratorTest {
                 + "\"title\":\"forbes.com\",\"start_index\":121,\"end_index\":240}]}");
     var sse =
         MODEL_OUTPUT_START + HELLO_DELTA + annotated + MODEL_OUTPUT_STOP + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -682,7 +681,7 @@ class StreamingIteratorTest {
                 + "{\"type\":\"url_citation\",\"url\":\"https://b\",\"title\":\"b.com\"}]}");
     var sse =
         MODEL_OUTPUT_START + HELLO_DELTA + annotated + MODEL_OUTPUT_STOP + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -705,7 +704,7 @@ class StreamingIteratorTest {
             + stepDelta(0, deltaJson)
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -743,7 +742,7 @@ class StreamingIteratorTest {
             + annotated
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -769,7 +768,7 @@ class StreamingIteratorTest {
                     + "\"arguments\":{\"queries\":[\"x\"]},\"search_type\":\"web_search\"}")
             + stepStop(1)
             + TEXT_FLOW;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -802,7 +801,7 @@ class StreamingIteratorTest {
                 + "\"title\":\"britannica.com\",\"start_index\":0,\"end_index\":20}]}");
     var sse =
         MODEL_OUTPUT_START + jsonText + annotationDelta + MODEL_OUTPUT_STOP + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -824,7 +823,7 @@ class StreamingIteratorTest {
   @org.junit.jupiter.api.Test
   void interactionCompletedWithoutInteractionFieldIsTolerated() {
     var emptyEnvelope = "data: {\"event_type\":\"interaction.completed\"}\n\n";
-    try (var iterator = createIterator(emptyEnvelope, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(emptyEnvelope, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -839,7 +838,7 @@ class StreamingIteratorTest {
   @org.junit.jupiter.api.Test
   void interactionCompletedWithoutIdOrStatusDoesNotPopulateMetadata() {
     var envelope = "data: {\"event_type\":\"interaction.completed\",\"interaction\":{}}\n\n";
-    try (var iterator = createIterator(envelope, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(envelope, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -854,7 +853,7 @@ class StreamingIteratorTest {
     var envelope =
         "data: {\"event_type\":\"interaction.completed\","
             + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\",\"usage\":{}}}\n\n";
-    try (var iterator = createIterator(envelope, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(envelope, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -880,7 +879,7 @@ class StreamingIteratorTest {
             + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\","
             + "\"usage\":{\"total_input_tokens\":2006,\"total_output_tokens\":150,"
             + "\"total_tokens\":2156,\"total_cached_tokens\":1920}}}\n\n";
-    try (var iterator = createIterator(envelope, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(envelope, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -917,7 +916,7 @@ class StreamingIteratorTest {
             + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\","
             + "\"usage\":{\"total_input_tokens\":50,\"total_output_tokens\":15,"
             + "\"total_tokens\":65,\"total_cached_tokens\":0}}}\n\n";
-    try (var iterator = createIterator(envelope, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(envelope, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -941,7 +940,7 @@ class StreamingIteratorTest {
             + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\","
             + "\"usage\":{\"total_input_tokens\":25,\"total_output_tokens\":15,"
             + "\"total_tokens\":40}}}\n\n";
-    try (var iterator = createIterator(envelope, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(envelope, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -963,7 +962,7 @@ class StreamingIteratorTest {
             + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\","
             + "\"usage\":{\"total_input_tokens\":100,\"total_output_tokens\":20,"
             + "\"total_tokens\":120,\"total_cached_tokens\":500}}}\n\n";
-    try (var iterator = createIterator(envelope, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(envelope, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -985,7 +984,7 @@ class StreamingIteratorTest {
             + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\","
             + "\"usage\":{\"total_input_tokens\":0,\"total_output_tokens\":0,"
             + "\"total_tokens\":1234,\"total_cached_tokens\":1234}}}\n\n";
-    try (var iterator = createIterator(envelope, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(envelope, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1005,7 +1004,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1029,7 +1028,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1051,7 +1050,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1071,7 +1070,7 @@ class StreamingIteratorTest {
             + stepArgumentsDelta(1, "null")
             + stepStop(1)
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1085,7 +1084,7 @@ class StreamingIteratorTest {
   void textDeltaWithMissingTextFieldIsSilent() {
     var noText = stepDelta(0, "{\"type\":\"text\"}");
     var sse = MODEL_OUTPUT_START + noText + MODEL_OUTPUT_STOP + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1099,7 +1098,7 @@ class StreamingIteratorTest {
   @org.junit.jupiter.api.Test
   void nextWithoutHasNextStillReadsAhead() {
     // Exercises StreamingIterator.next() when nextEvent is not pre-buffered by hasNext().
-    try (var iterator = createIterator(TEXT_FLOW, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(TEXT_FLOW, NEVER_IDLE)) {
       var first = iterator.next();
       assertInstanceOf(StreamEvent.TextDelta.class, first);
       var second = iterator.next();
@@ -1113,7 +1112,7 @@ class StreamingIteratorTest {
     // step.delta without a matching step.start — state==null. Text still accumulates onto
     // contentBuilder rather than being silently dropped.
     var sse = HELLO_DELTA + MODEL_OUTPUT_STOP + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1134,7 +1133,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1156,7 +1155,7 @@ class StreamingIteratorTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1168,7 +1167,7 @@ class StreamingIteratorTest {
 
   @org.junit.jupiter.api.Test
   void hasNextIsIdempotentAcrossRepeatedCalls() {
-    try (var iterator = createIterator(TEXT_FLOW, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(TEXT_FLOW, NEVER_IDLE)) {
       assertTrue(iterator.hasNext());
       // Second call must short-circuit through the already-buffered nextEvent path.
       assertTrue(iterator.hasNext());
@@ -1195,8 +1194,7 @@ class StreamingIteratorTest {
           }
         };
     var iterator =
-        new GeminiModel.StreamingIterator(
-            fakeResponse(failingClose), objectMapper, Duration.ofSeconds(5));
+        new GeminiModel.StreamingIterator(fakeResponse(failingClose), objectMapper, NEVER_IDLE);
     // Drain so the iterator reaches Done and then closes itself.
     while (iterator.hasNext()) {
       iterator.next();
@@ -1212,7 +1210,7 @@ class StreamingIteratorTest {
             + "\"interaction\":{\"id\":\"int_xyz\",\"status\":\"incomplete\","
             + "\"usage\":{\"total_input_tokens\":10,\"total_output_tokens\":5,"
             + "\"total_tokens\":15}}}\n\n";
-    try (var iterator = createIterator(incomplete, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(incomplete, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1230,7 +1228,7 @@ class StreamingIteratorTest {
             + "\"interaction\":{\"id\":\"int_xyz\",\"status\":\"budget_exceeded\","
             + "\"usage\":{\"total_input_tokens\":10,\"total_output_tokens\":5,"
             + "\"total_tokens\":15}}}\n\n";
-    try (var iterator = createIterator(exceeded, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(exceeded, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1246,7 +1244,7 @@ class StreamingIteratorTest {
     var errorEvent =
         "data: {\"event_type\":\"error\","
             + "\"error\":{\"code\":500,\"message\":\"Internal server error\"}}\n\n";
-    try (var iterator = createIterator(errorEvent, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(errorEvent, NEVER_IDLE)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
@@ -1265,7 +1263,7 @@ class StreamingIteratorTest {
     var errorEvent =
         "data: {\"event_type\":\"error\","
             + "\"error\":{\"code\":429,\"message\":\"Rate limit exceeded\"}}\n\n";
-    try (var iterator = createIterator(errorEvent, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(errorEvent, NEVER_IDLE)) {
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
       var ge = (GeminiException) ((StreamEvent.Error) event).cause();
@@ -1279,7 +1277,7 @@ class StreamingIteratorTest {
     var errorEvent =
         "data: {\"event_type\":\"error\","
             + "\"error\":{\"code\":400,\"message\":\"Bad request\"}}\n\n";
-    try (var iterator = createIterator(errorEvent, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(errorEvent, NEVER_IDLE)) {
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
       var ge = (GeminiException) ((StreamEvent.Error) event).cause();
@@ -1291,7 +1289,7 @@ class StreamingIteratorTest {
   @org.junit.jupiter.api.Test
   void sseErrorEventWithoutPayloadSurfacesGenericMessage() {
     var errorEvent = "data: {\"event_type\":\"error\"}\n\n";
-    try (var iterator = createIterator(errorEvent, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(errorEvent, NEVER_IDLE)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
@@ -1308,7 +1306,7 @@ class StreamingIteratorTest {
         "data: {\"event_type\":\"interaction.status_update\","
             + "\"interaction_id\":\"int_status\",\"status\":\"requires_action\"}\n\n";
     var sse = INTERACTION_CREATED + statusUpdate;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1326,7 +1324,7 @@ class StreamingIteratorTest {
     var statusUpdate =
         "data: {\"event_type\":\"interaction.status_update\","
             + "\"interaction_id\":\"int_f\",\"status\":\"failed\"}\n\n";
-    try (var iterator = createIterator(statusUpdate, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(statusUpdate, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1344,7 +1342,7 @@ class StreamingIteratorTest {
     var inputStream = new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8));
     try (var iterator =
         new GeminiModel.StreamingIterator(
-            fakeResponse(inputStream), objectMapper, Duration.ofSeconds(5), false, "v1beta")) {
+            fakeResponse(inputStream), objectMapper, NEVER_IDLE, false, "v1beta")) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1369,7 +1367,7 @@ class StreamingIteratorTest {
             + stepDelta(2, "{\"type\":\"text\",\"text\":\"Hello\"}")
             + stepStop(2)
             + INTERACTION_COMPLETED;
-    try (var iterator = createIterator(sse, Duration.ofSeconds(5))) {
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
@@ -1390,8 +1388,7 @@ class StreamingIteratorTest {
           }
         };
     try (var iterator =
-        new GeminiModel.StreamingIterator(
-            fakeResponse(failingStream), objectMapper, Duration.ofSeconds(5))) {
+        new GeminiModel.StreamingIterator(fakeResponse(failingStream), objectMapper, NEVER_IDLE)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
@@ -1410,8 +1407,7 @@ class StreamingIteratorTest {
           }
         };
     try (var iterator =
-        new GeminiModel.StreamingIterator(
-            fakeResponse(failingStream), objectMapper, Duration.ofSeconds(5))) {
+        new GeminiModel.StreamingIterator(fakeResponse(failingStream), objectMapper, NEVER_IDLE)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
@@ -1421,28 +1417,26 @@ class StreamingIteratorTest {
   }
 
   @org.junit.jupiter.api.Test
-  void interruptedThreadEmitsErrorEvent() throws Exception {
-    var pipedIn = new PipedInputStream();
-    var pipedOut = new PipedOutputStream(pipedIn);
+  void interruptedThreadEmitsErrorEvent() {
+    var neverDelivers = new FeedableInputStream();
     var events = new java.util.ArrayList<StreamEvent>();
     var thread =
         new Thread(
             () -> {
               try (var iterator =
                   new GeminiModel.StreamingIterator(
-                      fakeResponse(pipedIn), objectMapper, Duration.ofSeconds(30))) {
+                      fakeResponse(neverDelivers), objectMapper, NEVER_IDLE)) {
                 while (iterator.hasNext()) {
                   events.add(iterator.next());
                 }
               }
             });
     thread.start();
-    Thread.sleep(100);
+    neverDelivers.awaitBlockedRead();
     thread.interrupt();
-    thread.join(5000);
+    Await.termination("the interrupted consumer thread", thread);
     assertFalse(events.isEmpty());
     assertInstanceOf(StreamEvent.Error.class, events.getFirst());
-    pipedOut.close();
   }
 
   private GeminiModel.StreamingIterator createIterator(String sseData, Duration idleTimeout) {

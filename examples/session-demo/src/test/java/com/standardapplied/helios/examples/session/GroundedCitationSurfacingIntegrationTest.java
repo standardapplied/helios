@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
 import com.standardapplied.helios.session.AgentSession;
@@ -20,7 +21,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -102,7 +102,7 @@ final class GroundedCitationSurfacingIntegrationTest {
                   "What were the major AI announcements at Google I/O 2025? Summarize with"
                       + " specific facts and cite where each came from."));
 
-      assertTrue(sub.done.await(5, TimeUnit.SECONDS), "event stream did not complete");
+      Await.latch("the event stream to complete", sub.done);
 
       // Terminal surface — the run's accumulated grounding sources.
       var success = assertInstanceOf(ResultMessage.Success.class, terminal);

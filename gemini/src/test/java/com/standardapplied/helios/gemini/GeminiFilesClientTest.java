@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.test.Await;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -38,7 +39,6 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
-import java.util.concurrent.TimeUnit;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
@@ -679,7 +679,7 @@ class GeminiFilesClientTest {
                 done.complete(null);
               }
             });
-    done.get(5, TimeUnit.SECONDS);
+    Await.value("the request body to be published", done);
     return output.toString(StandardCharsets.UTF_8);
   }
 

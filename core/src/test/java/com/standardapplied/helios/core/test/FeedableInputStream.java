@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Objects;
 import java.util.Queue;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * An {@link InputStream} the test feeds. A read blocks, without a limit, until the test feeds
@@ -19,6 +20,7 @@ import java.util.Queue;
 public final class FeedableInputStream extends InputStream {
 
   private final Queue<byte[]> fed = new ArrayDeque<>();
+  private final CountDownLatch readBlocked = new CountDownLatch(1);
   private byte[] current = new byte[0];
   private int position;
   private boolean ended;
@@ -49,6 +51,14 @@ public final class FeedableInputStream extends InputStream {
   public synchronized void fail(IOException cause) {
     failure = Objects.requireNonNull(cause);
     notifyAll();
+  }
+
+  /**
+   * Waits, through {@link Await}, until a read has found nothing to deliver and is blocked: the
+   * event a test needs before it interrupts, cancels or times out the reader.
+   */
+  public void awaitBlockedRead() {
+    Await.latch("a read to block on the stream", readBlocked);
   }
 
   @Override
@@ -99,6 +109,7 @@ public final class FeedableInputStream extends InputStream {
   }
 
   private void awaitFeeding() throws InterruptedIOException {
+    readBlocked.countDown();
     try {
       wait();
     } catch (InterruptedException e) {
