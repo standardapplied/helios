@@ -21,11 +21,13 @@ import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.logging.Handler;
@@ -74,8 +76,7 @@ final class SessionEventPublisherTest {
     var subscriber = Recorder.requestingAll();
     publisher.subscribe(subscriber);
 
-    publisher.emit(TEXT);
-    publisher.emit(ENDED);
+    emit(publisher, TEXT, ENDED);
     publisher.close();
 
     assertEquals(List.of(TEXT, ENDED), subscriber.eventsOnceCompleted());
@@ -85,8 +86,7 @@ final class SessionEventPublisherTest {
   @Test
   void aSubscriberAttachedAfterTheTerminalReceivesOnlyThatEventThenCompletes() {
     var publisher = new SessionEventPublisher(SID);
-    publisher.emit(TEXT);
-    publisher.emit(ENDED);
+    emit(publisher, TEXT, ENDED);
     var beforeClose = Recorder.requestingAll();
     publisher.subscribe(beforeClose);
     publisher.close();
@@ -145,7 +145,7 @@ final class SessionEventPublisherTest {
   @Test
   void aSubscriberAttachedAfterACloseWithoutATerminalIsCompletedAtOnce() {
     var publisher = new SessionEventPublisher(SID);
-    publisher.emit(TEXT);
+    emit(publisher, TEXT);
     publisher.close();
     var subscriber = Recorder.requestingNothing();
     publisher.subscribe(subscriber);
@@ -173,18 +173,18 @@ final class SessionEventPublisherTest {
               awaitUninterrupted(release);
             });
     publisher.subscribe(subscriber);
-    publisher.emit(TEXT);
+    emit(publisher, TEXT);
     Await.latch("the subscriber to stall in its first onNext", stalled);
-    for (var i = 0; i < SUBSCRIBER_BUFFER; i++) {
-      publisher.emit(TEXT);
-    }
+    emit(publisher, Collections.nCopies(SUBSCRIBER_BUFFER, TEXT).toArray(QueryEvent[]::new));
 
     var logged = new CopyOnWriteArrayList<LogRecord>();
     try (var ignored = capturingLog(logged)) {
-      publisher.emit(TEXT);
-      publisher.emit(new QueryEvent.Error(SID, 0, AT, SerializedError.of("Boom", "boom")));
-      publisher.emit(QUESTION);
-      publisher.emit(ENDED);
+      emit(
+          publisher,
+          TEXT,
+          new QueryEvent.Error(SID, 0, AT, SerializedError.of("Boom", "boom")),
+          QUESTION,
+          ENDED);
     }
     release.countDown();
     publisher.close();
@@ -204,7 +204,7 @@ final class SessionEventPublisherTest {
     var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED, Duration.ofMillis(20));
     var interrupted = new CountDownLatch(1);
     publisher.subscribe(Recorder.requestingAll(event -> blockUntilInterrupted(interrupted)));
-    publisher.emit(TEXT);
+    emit(publisher, TEXT);
 
     publisher.close();
 
@@ -223,7 +223,7 @@ final class SessionEventPublisherTest {
               stalled.countDown();
               blockUntilInterrupted(interrupted);
             }));
-    publisher.emit(TEXT);
+    emit(publisher, TEXT);
     Await.latch("the subscriber to stall in onNext", stalled);
 
     Thread.currentThread().interrupt();
@@ -347,9 +347,28 @@ final class SessionEventPublisherTest {
     };
   }
 
+  /**
+   * Emits from a thread other than the one that attached the subscriber, as a session does: its
+   * agent loop emits, its caller subscribes. {@code SubmissionPublisher} (JDK 25.0.3) can strand an
+   * item offered by the thread that attached its first subscriber, with no consumer running, until
+   * the next signal; a test that waits for that one event would then wait for ever.
+   */
+  private static void emit(SessionEventPublisher publisher, QueryEvent... events) {
+    var emitting =
+        new FutureTask<Void>(
+            () -> {
+              for (var event : events) {
+                publisher.emit(event);
+              }
+              return null;
+            });
+    Thread.ofVirtual().start(emitting);
+    Await.value("the emitting thread to finish", emitting);
+  }
+
   private static SessionEventPublisher endedPublisher() {
     var publisher = new SessionEventPublisher(SID);
-    publisher.emit(ENDED);
+    emit(publisher, ENDED);
     publisher.close();
     return publisher;
   }
