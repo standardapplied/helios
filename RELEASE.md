@@ -24,6 +24,12 @@ This project publishes to Maven Central via the [Central Publishing Portal](http
 | `com.standardapplied:helios-repl` | Sandboxed JShell execution substrate |
 | `com.standardapplied:helios-testing` | `ScriptedModel` test double for deterministic evals |
 
+`helios-core` also publishes its test fixtures as an attached artifact with the `tests`
+classifier, `helios-core-<version>-tests.jar` (`Await`, `LineSink`, `FeedableInputStream`,
+`MockModel`, `TraceCollector` in `com.standardapplied.helios.core.test`). This is intended: every
+other module's tests depend on it as a `test-jar`, and `mvn deploy -Prelease` uploads it alongside
+the main jar. `release.yml` needs no change for it.
+
 ## One-Time Setup
 
 ### 1. Central Portal Account
