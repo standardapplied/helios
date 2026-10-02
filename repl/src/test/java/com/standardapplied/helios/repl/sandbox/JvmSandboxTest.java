@@ -352,14 +352,11 @@ class JvmSandboxTest {
     var parentPb = new ProcessBuilder("sh", "-c", "sleep 600 & echo $! ; wait");
     parentPb.redirectErrorStream(true);
     var parent = parentPb.start();
-    long childPid;
-    try (var reader =
-        new BufferedReader(
-            new InputStreamReader(parent.getInputStream(), StandardCharsets.UTF_8))) {
-      var line = reader.readLine();
-      assertNotNull(line, "shell did not echo child PID");
-      childPid = Long.parseLong(line.trim());
-    }
+    var firstLine =
+        new BufferedReader(new InputStreamReader(parent.getInputStream(), StandardCharsets.UTF_8))
+            .readLine();
+    assertNotNull(firstLine, "shell did not echo child PID");
+    var childPid = Long.parseLong(firstLine.trim());
     var child = ProcessHandle.of(childPid).orElseThrow();
     try {
       assertTrue(child.isAlive(), "the descendant must be alive before the shutdown hook runs");
