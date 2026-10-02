@@ -25,8 +25,9 @@ import org.junit.jupiter.api.Timeout;
 
 /**
  * Time never passes on its own here: the breaker reads {@link #now}, which a test advances by hand,
- * so no assertion depends on how fast the machine is. The class timeout only turns a deadlock into
- * a failure.
+ * so no assertion depends on how fast the machine is. A test can also run code at the exact moment
+ * the breaker next reads the clock, which places a second caller inside a transition without
+ * relying on thread scheduling. The class timeout only turns a deadlock into a failure.
  */
 @Timeout(60)
 class CircuitBreakerTest {
@@ -35,6 +36,9 @@ class CircuitBreakerTest {
 
   private final AtomicReference<Instant> now =
       new AtomicReference<>(Instant.parse("2026-01-01T00:00:00Z"));
+
+  private final AtomicReference<Callable<?>> beforeNextClockRead =
+      new AtomicReference<>(() -> null);
 
   @Test
   void closedStateAllowsCalls() throws Exception {
@@ -55,7 +59,7 @@ class CircuitBreakerTest {
 
   @Test
   void tripOpenAfterFailureThreshold() {
-    var cb = CircuitBreaker.newBuilder().withFailureThreshold(3).withClock(now::get).build();
+    var cb = CircuitBreaker.newBuilder().withFailureThreshold(3).withClock(this::readClock).build();
 
     for (int i = 0; i < 3; i++) {
       assertThrows(RuntimeException.class, () -> cb.execute(() -> throwRuntime("fail")));
@@ -277,9 +281,30 @@ class CircuitBreakerTest {
     assertThrows(NullPointerException.class, () -> CircuitBreaker.newBuilder().withClock(null));
   }
 
+  @Test
+  void stateReadWhileAFailedProbeIsRecordedDoesNotReopenTheCircuit() {
+    var cb = halfOpenBreaker(1);
+
+    beforeNextClockRead.set(cb::state);
+    assertThrows(RuntimeException.class, () -> cb.execute(() -> throwRuntime("probe fail")));
+
+    assertEquals(CircuitBreaker.State.OPEN, cb.state());
+  }
+
+  @Test
+  void probeSuccessCountedWhileAnotherCallerEntersHalfOpenIsNotLost() throws Exception {
+    var cb = trippedBreaker(2);
+    advance(HALF_OPEN_AFTER.plusNanos(1));
+
+    beforeNextClockRead.set(() -> cb.execute(() -> "first success"));
+    cb.execute(() -> "second success");
+
+    assertEquals(CircuitBreaker.State.CLOSED, cb.state());
+  }
+
   @RepeatedTest(5)
   void concurrentFailuresTripsCircuit() throws Exception {
-    var cb = CircuitBreaker.newBuilder().withFailureThreshold(5).withClock(now::get).build();
+    var cb = CircuitBreaker.newBuilder().withFailureThreshold(5).withClock(this::readClock).build();
 
     runConcurrently(
         20,
@@ -380,7 +405,7 @@ class CircuitBreakerTest {
         .withFailureThreshold(2)
         .withSuccessThreshold(successThreshold)
         .withHalfOpenAfter(HALF_OPEN_AFTER)
-        .withClock(now::get)
+        .withClock(this::readClock)
         .build();
   }
 
@@ -399,6 +424,15 @@ class CircuitBreakerTest {
 
   private void advance(Duration by) {
     now.updateAndGet(instant -> instant.plus(by));
+  }
+
+  private Instant readClock() {
+    try {
+      beforeNextClockRead.getAndSet(() -> null).call();
+    } catch (Exception e) {
+      throw new AssertionError(e);
+    }
+    return now.get();
   }
 
   private static void trip(CircuitBreaker cb) {

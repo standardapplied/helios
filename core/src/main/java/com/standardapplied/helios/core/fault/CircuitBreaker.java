@@ -155,8 +155,9 @@ public class CircuitBreaker {
   private void checkAndTransition() {
     if (state.get() == State.OPEN) {
       var lastFailure = lastFailureTime.get();
-      if (lastFailure != null && clock.instant().isAfter(lastFailure.plus(halfOpenAfter))) {
-        state.compareAndSet(State.OPEN, State.HALF_OPEN);
+      if (lastFailure != null
+          && clock.instant().isAfter(lastFailure.plus(halfOpenAfter))
+          && state.compareAndSet(State.OPEN, State.HALF_OPEN)) {
         successCount.set(0);
       }
     }
@@ -216,10 +217,15 @@ public class CircuitBreaker {
     }
   }
 
+  /**
+   * Records the failure time before reopening: a caller that sees {@code OPEN} must also see the
+   * new failure time, or it would judge the delay against the previous one and let a second probe
+   * through at once.
+   */
   private void onHalfOpenFailure() {
-    state.set(State.OPEN);
-    lastFailureTime.set(clock.instant());
     successCount.set(0);
+    lastFailureTime.set(clock.instant());
+    state.set(State.OPEN);
   }
 
   public static class Builder {
