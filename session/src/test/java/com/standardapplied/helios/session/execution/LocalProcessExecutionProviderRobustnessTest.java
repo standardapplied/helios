@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -76,6 +77,15 @@ final class LocalProcessExecutionProviderRobustnessTest {
    * The child holds the output pipes for ten minutes, so a result means the provider killed it;
    * once its trap is set, only SIGKILL can.
    */
+  /**
+   * A test that fails before its children are reaped must not leave one running; nothing else in
+   * this JVM starts a process while a test of this class runs.
+   */
+  @AfterEach
+  void noChildOutlivesItsTest() {
+    ProcessHandle.current().descendants().forEach(ProcessHandle::destroyForcibly);
+  }
+
   @Test
   void timeoutEscalatesFromSigtermToSigkillWhenChildIgnoresTerm() {
     assumeBashAvailable();
@@ -152,25 +162,27 @@ final class LocalProcessExecutionProviderRobustnessTest {
   @Test
   void closeForciblyReapsInflightProcesses(@TempDir Path cwd) {
     assumeBashAvailable();
-    var provider = testProvider();
-    var calls = new ArrayList<CompletableFuture<ExecutionResult>>();
-    for (var i = 0; i < 3; i++) {
-      var script = "trap '' TERM; : > deaf-" + i + "; " + HANG;
-      calls.add(
-          start(provider, bash(script).withWorkingDirectory(cwd).build(), new CancellationToken()));
-    }
-    awaitInflight(provider, 3);
-    for (var i = 0; i < calls.size(); i++) {
-      var deaf = cwd.resolve("deaf-" + i);
-      Await.until("child " + i + " to ignore SIGTERM", () -> Files.exists(deaf));
-    }
-    provider.close();
-    assertTrue(provider.isClosed());
-    assertEquals(0, provider.inflightCount(), "close must reap every in-flight subprocess");
-    for (var call : calls) {
-      var result = Await.value("the result of a reaped call", call);
-      assertEquals(KILLED_BY_SIGKILL, result.exitCode());
-      assertFalse(result.timedOut());
+    try (var provider = testProvider()) {
+      var calls = new ArrayList<CompletableFuture<ExecutionResult>>();
+      for (var i = 0; i < 3; i++) {
+        var script = "trap '' TERM; : > deaf-" + i + "; " + HANG;
+        calls.add(
+            start(
+                provider, bash(script).withWorkingDirectory(cwd).build(), new CancellationToken()));
+      }
+      awaitInflight(provider, 3);
+      for (var i = 0; i < calls.size(); i++) {
+        var deaf = cwd.resolve("deaf-" + i);
+        Await.until("child " + i + " to ignore SIGTERM", () -> Files.exists(deaf));
+      }
+      provider.close();
+      assertTrue(provider.isClosed());
+      assertEquals(0, provider.inflightCount(), "close must reap every in-flight subprocess");
+      for (var call : calls) {
+        var result = Await.value("the result of a reaped call", call);
+        assertEquals(KILLED_BY_SIGKILL, result.exitCode());
+        assertFalse(result.timedOut());
+      }
     }
   }
 
@@ -226,24 +238,25 @@ final class LocalProcessExecutionProviderRobustnessTest {
   @Test
   void closeDuringPermitWaitAbortsTheQueuedCall() {
     assumeBashAvailable();
-    var provider = testProvider(1);
-    var holder = start(provider, bash(HANG).build(), new CancellationToken());
-    awaitInflight(provider, 1);
+    try (var provider = testProvider(1)) {
+      var holder = start(provider, bash(HANG).build(), new CancellationToken());
+      awaitInflight(provider, 1);
 
-    var token = new CancellationToken();
-    var queued = start(provider, bash("printf x").build(), token);
-    awaitPermitRequest(token);
-    assertFalse(queued.isDone());
+      var token = new CancellationToken();
+      var queued = start(provider, bash("printf x").build(), token);
+      awaitPermitRequest(token);
+      assertFalse(queued.isDone());
 
-    provider.close();
-    var reaped = Await.value("the reaped permit holder's result", holder);
-    assertEquals(KILLED_BY_SIGTERM, reaped.exitCode());
-    assertFalse(reaped.timedOut());
-    assertEquals(
-        "provider closed before BASH could start",
-        cancellationMessage("the queued call to fail", queued));
-    assertTrue(provider.isClosed());
-    assertEquals(0, provider.inflightCount());
+      provider.close();
+      var reaped = Await.value("the reaped permit holder's result", holder);
+      assertEquals(KILLED_BY_SIGTERM, reaped.exitCode());
+      assertFalse(reaped.timedOut());
+      assertEquals(
+          "provider closed before BASH could start",
+          cancellationMessage("the queued call to fail", queued));
+      assertTrue(provider.isClosed());
+      assertEquals(0, provider.inflightCount());
+    }
   }
 
   // ── concurrency cap — multiple calls queue and complete ─────────────────

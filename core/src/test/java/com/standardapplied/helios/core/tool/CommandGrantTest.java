@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -49,6 +50,15 @@ class CommandGrantTest {
     var p1 = Path.of("/usr/bin/printenv");
     var p2 = Path.of("/bin/printenv");
     PRINTENV = Files.isExecutable(p1) ? p1 : (Files.isExecutable(p2) ? p2 : null);
+  }
+
+  /**
+   * A test that fails before its children are reaped must not leave one running; nothing else in
+   * this JVM starts a process while a test of this class runs.
+   */
+  @AfterEach
+  void noChildOutlivesItsTest() {
+    ProcessHandle.current().descendants().forEach(ProcessHandle::destroyForcibly);
   }
 
   @BeforeAll
@@ -189,7 +199,7 @@ class CommandGrantTest {
   @Test
   void timeoutKillsProcessTree() throws Exception {
     var grant = bash().withTimeout(Duration.ofMillis(300)).build();
-    var result = grant.invoke(List.of("-c", "sleep 600"));
+    var result = grant.invoke(List.of("-c", "exec sleep 600"));
     assertTrue(result.timedOut());
     assertEquals(-1, result.exitCode());
   }
@@ -504,7 +514,7 @@ class CommandGrantTest {
   @Test
   void forciblyKilledProcessIgnoringSigterm() throws Exception {
     var grant = bash().withTimeout(Duration.ofMillis(300)).build();
-    var result = grant.invoke(List.of("-c", "trap '' TERM; sleep 600"));
+    var result = grant.invoke(List.of("-c", "trap '' TERM; exec sleep 600"));
     assertTrue(result.timedOut());
     assertEquals(-1, result.exitCode());
   }

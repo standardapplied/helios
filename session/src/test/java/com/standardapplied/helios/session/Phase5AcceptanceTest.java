@@ -37,6 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -88,6 +89,15 @@ final class Phase5AcceptanceTest {
     public String provider() {
       return "test";
     }
+  }
+
+  /**
+   * A test that fails before its children are reaped must not leave one running; nothing else in
+   * this JVM starts a process while a test of this class runs.
+   */
+  @AfterEach
+  void noChildOutlivesItsTest() {
+    ProcessHandle.current().descendants().forEach(ProcessHandle::destroyForcibly);
   }
 
   @Test
@@ -212,7 +222,8 @@ final class Phase5AcceptanceTest {
                     new ToolCall(
                         "c1",
                         ExecuteTool.NAME,
-                        Map.of("runtime", "BASH", "script", "sleep 600", "timeoutSeconds", 1))),
+                        Map.of(
+                            "runtime", "BASH", "script", "exec sleep 600", "timeoutSeconds", 1))),
                 new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))),
             List.of(
                 new ModelChunk.TextDelta("done"),
