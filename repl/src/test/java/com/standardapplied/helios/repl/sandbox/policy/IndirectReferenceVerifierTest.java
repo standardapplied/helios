@@ -18,8 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
+import com.standardapplied.helios.core.test.Await;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.constantpool.ConstantDynamicEntry;
 import java.lang.classfile.constantpool.LoadableConstantEntry;
@@ -32,9 +32,9 @@ import java.lang.constant.DynamicCallSiteDesc;
 import java.lang.constant.DynamicConstantDesc;
 import java.lang.constant.MethodHandleDesc;
 import java.lang.constant.MethodTypeDesc;
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -304,11 +304,19 @@ class IndirectReferenceVerifierTest {
     assertEquals("dynamicConstantDepth", ex.rule());
   }
 
+  /**
+   * Each constant refers twice to the next, so a verifier that revisited shared constants would
+   * need two to the power of the depth bound steps and never finish. Returning is the proof it does
+   * not; the work runs on a daemon thread so a regression fails the wait, not the build JVM.
+   */
   @Test
   void sharedDynamicConstantsAreVerifiedWithoutExponentialWork() {
     var bytes = sharedConstants(PolicyBytecodeVerifier.MAX_CONSTANT_DEPTH, false);
-    assertTimeoutPreemptively(
-        Duration.ofSeconds(2), () -> assertAccepted(SandboxPolicy.noEgress(), bytes));
+    var verified =
+        CompletableFuture.runAsync(
+            () -> assertAccepted(SandboxPolicy.noEgress(), bytes),
+            Thread.ofPlatform().daemon()::start);
+    Await.value("verification of the shared dynamic constants", verified);
   }
 
   @Test

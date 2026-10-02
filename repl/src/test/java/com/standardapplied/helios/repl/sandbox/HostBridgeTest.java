@@ -6,33 +6,24 @@
 package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.repl.protocol.ProcessTransport;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.repl.protocol.RpcMessage;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
-import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-import jdk.jshell.JShell;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+/**
+ * Each delegation test calls the bridge on its own thread, as sandbox code would, takes the request
+ * the bootstrap wrote for the host, answers it, and asserts what the bridge returned.
+ */
 class HostBridgeTest {
-
-  @AfterEach
-  void tearDown() {
-    JvmSandboxBootstrap.setInstance(null);
-  }
 
   @Test
   void predictWithNoBootstrapThrows() {
@@ -42,178 +33,6 @@ class HostBridgeTest {
   @Test
   void submitWithNoBootstrapThrows() {
     assertThrows(IllegalStateException.class, () -> HostBridge.submit("value"));
-  }
-
-  @Test
-  void predictDelegatesToBootstrap() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture = new CompletableFuture<String>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.predict("Be concise", "2+2?"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
-
-      var line = env.readLine();
-      assertTrue(line.startsWith(ProcessTransport.RPC_PREFIX));
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      assertInstanceOf(RpcMessage.Request.class, msg);
-      var req = (RpcMessage.Request) msg;
-      assertEquals("predict", req.method());
-
-      env.writeLine(
-          ProcessTransport.serializeMessage(
-              new RpcMessage.Response(req.id(), Map.of("output", "4"))));
-
-      assertEquals("4", resultFuture.get(5, TimeUnit.SECONDS));
-    }
-  }
-
-  @Test
-  void predictWithNonMapResult() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture = new CompletableFuture<String>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.predict("instruct", "input"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
-
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
-
-      env.writeLine(ProcessTransport.serializeMessage(new RpcMessage.Response(req.id(), "plain")));
-
-      assertEquals("plain", resultFuture.get(5, TimeUnit.SECONDS));
-    }
-  }
-
-  @Test
-  void submitDelegatesToBootstrap() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture = new CompletableFuture<Void>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  HostBridge.submit("answer");
-                  resultFuture.complete(null);
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
-
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
-      assertEquals("submit", req.method());
-
-      env.writeLine(
-          ProcessTransport.serializeMessage(
-              new RpcMessage.Response(req.id(), Map.of("status", "accepted"))));
-
-      resultFuture.get(5, TimeUnit.SECONDS);
-    }
-  }
-
-  @Test
-  void submitStoresValue() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture = new CompletableFuture<Void>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  HostBridge.submit("stored-value");
-                  resultFuture.complete(null);
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
-
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
-
-      env.writeLine(
-          ProcessTransport.serializeMessage(
-              new RpcMessage.Response(req.id(), Map.of("status", "accepted"))));
-
-      resultFuture.get(5, TimeUnit.SECONDS);
-
-      assertEquals("stored-value", env.bootstrap.submittedValue());
-    }
-  }
-
-  @Test
-  void predictWithNullOutputInMap() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture = new CompletableFuture<String>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.predict("instruct", "input"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
-
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
-
-      env.writeLine(
-          ProcessTransport.serializeMessage(
-              new RpcMessage.Response(
-                  req.id(),
-                  new java.util.HashMap<String, Object>() {
-                    {
-                      put("output", null);
-                    }
-                  })));
-
-      assertEquals("", resultFuture.get(5, TimeUnit.SECONDS));
-    }
-  }
-
-  @Test
-  void predictWithNullResult() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture = new CompletableFuture<String>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.predict("instruct", "input"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
-
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
-
-      env.writeLine(ProcessTransport.serializeMessage(new RpcMessage.Response(req.id(), null)));
-
-      assertEquals("", resultFuture.get(5, TimeUnit.SECONDS));
-    }
   }
 
   @Test
@@ -227,35 +46,87 @@ class HostBridgeTest {
   }
 
   @Test
-  void fetchDelegatesToBootstrap() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture = new CompletableFuture<Map<String, Object>>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.fetch("https://api.example.com/x"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
+  void predictDelegatesToBootstrap() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var result = env.inSandbox(() -> HostBridge.predict("Be concise", "2+2?"));
 
-      var line = env.readLine();
-      assertTrue(line.startsWith(ProcessTransport.RPC_PREFIX));
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      assertInstanceOf(RpcMessage.Request.class, msg);
-      var req = (RpcMessage.Request) msg;
-      assertEquals("fetch", req.method());
-      assertEquals("https://api.example.com/x", ((Map<?, ?>) req.params()).get("url"));
+      var request = answer(env, Map.of("output", "4"));
 
-      env.writeLine(
-          ProcessTransport.serializeMessage(
-              new RpcMessage.Response(
-                  req.id(),
-                  Map.of("status", 200, "body", "payload", "contentType", "application/json"))));
+      assertEquals("predict", request.method());
+      assertEquals("4", Await.value("predict's result", result));
+    }
+  }
 
-      var result = resultFuture.get(5, TimeUnit.SECONDS);
+  @Test
+  void predictWithNonMapResult() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var result = env.inSandbox(() -> HostBridge.predict("instruct", "input"));
+
+      answer(env, "plain");
+
+      assertEquals("plain", Await.value("predict's result", result));
+    }
+  }
+
+  @Test
+  void predictWithNullOutputInMap() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var result = env.inSandbox(() -> HostBridge.predict("instruct", "input"));
+      var nullOutput = new HashMap<String, Object>();
+      nullOutput.put("output", null);
+
+      answer(env, nullOutput);
+
+      assertEquals("", Await.value("predict's result", result));
+    }
+  }
+
+  @Test
+  void predictWithNullResult() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var result = env.inSandbox(() -> HostBridge.predict("instruct", "input"));
+
+      answer(env, null);
+
+      assertEquals("", Await.value("predict's result", result));
+    }
+  }
+
+  @Test
+  void submitDelegatesToBootstrap() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var submitted = submitInSandbox(env, "answer");
+
+      var request = answer(env, Map.of("status", "accepted"));
+
+      assertEquals("submit", request.method());
+      Await.value("submit to return", submitted);
+    }
+  }
+
+  @Test
+  void submitStoresValue() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var submitted = submitInSandbox(env, "stored-value");
+
+      answer(env, Map.of("status", "accepted"));
+
+      Await.value("submit to return", submitted);
+      assertEquals("stored-value", env.bootstrap().submittedValue());
+    }
+  }
+
+  @Test
+  void fetchDelegatesToBootstrap() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var fetched = env.inSandbox(() -> HostBridge.fetch("https://api.example.com/x"));
+
+      var request =
+          answer(env, Map.of("status", 200, "body", "payload", "contentType", "application/json"));
+
+      assertEquals("fetch", request.method());
+      assertEquals("https://api.example.com/x", ((Map<?, ?>) request.params()).get("url"));
+      var result = Await.value("fetch's result", fetched);
       assertEquals(200, result.get("status"));
       assertEquals("payload", result.get("body"));
       assertEquals("application/json", result.get("contentType"));
@@ -263,102 +134,17 @@ class HostBridgeTest {
   }
 
   @Test
-  void queryDelegatesToBootstrap() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture =
-          new java.util.concurrent.CompletableFuture<java.util.List<Map<String, Object>>>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.query("SELECT region, total FROM sales"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
-
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
-      assertEquals("query", req.method());
-      assertEquals("SELECT region, total FROM sales", ((Map<?, ?>) req.params()).get("sql"));
-
-      env.writeLine(
-          ProcessTransport.serializeMessage(
-              new RpcMessage.Response(
-                  req.id(),
-                  java.util.List.of(
-                      Map.of("region", "US", "total", 100), Map.of("region", "EU", "total", 50)))));
-
-      var rows = resultFuture.get(5, TimeUnit.SECONDS);
-      assertEquals(2, rows.size());
-      assertEquals("US", rows.get(0).get("region"));
-      assertEquals(50, rows.get(1).get("total"));
-    }
-  }
-
-  @Test
-  void queryRowsToleratesNullColumnValues() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture =
-          new java.util.concurrent.CompletableFuture<java.util.List<Map<String, Object>>>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.query("SELECT name, age FROM users"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
-
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
-
-      var rowWithNull = new java.util.LinkedHashMap<String, Object>();
-      rowWithNull.put("name", "alice");
-      rowWithNull.put("age", null);
-      env.writeLine(
-          ProcessTransport.serializeMessage(
-              new RpcMessage.Response(req.id(), java.util.List.of(rowWithNull))));
-
-      var rows = resultFuture.get(5, TimeUnit.SECONDS);
-      assertEquals(1, rows.size());
-      assertEquals("alice", rows.get(0).get("name"));
-      assertNull(rows.get(0).get("age"));
-    }
-  }
-
-  @Test
-  void fetchToleratesNullValues() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture = new CompletableFuture<Map<String, Object>>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.fetch("https://api.example.com/x"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
-
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
-
-      var mapWithNull = new java.util.LinkedHashMap<String, Object>();
+  void fetchToleratesNullValues() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var fetched = env.inSandbox(() -> HostBridge.fetch("https://api.example.com/x"));
+      var mapWithNull = new LinkedHashMap<String, Object>();
       mapWithNull.put("status", 204);
       mapWithNull.put("body", null);
       mapWithNull.put("contentType", null);
-      env.writeLine(
-          ProcessTransport.serializeMessage(new RpcMessage.Response(req.id(), mapWithNull)));
 
-      var result = resultFuture.get(5, TimeUnit.SECONDS);
+      answer(env, mapWithNull);
+
+      var result = Await.value("fetch's result", fetched);
       assertEquals(204, result.get("status"));
       assertNull(result.get("body"));
       assertNull(result.get("contentType"));
@@ -366,185 +152,111 @@ class HostBridgeTest {
   }
 
   @Test
-  void queryRowsAreUnmodifiable() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture =
-          new java.util.concurrent.CompletableFuture<java.util.List<Map<String, Object>>>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.query("SELECT 1"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
+  void fetchResultIsUnmodifiable() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var fetched = env.inSandbox(() -> HostBridge.fetch("https://api.example.com/x"));
 
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
+      answer(env, Map.of("status", 200, "body", "x"));
 
-      env.writeLine(
-          ProcessTransport.serializeMessage(
-              new RpcMessage.Response(req.id(), java.util.List.of(Map.of("x", 1)))));
+      var result = Await.value("fetch's result", fetched);
+      assertThrows(UnsupportedOperationException.class, () -> result.put("evil", "yes"));
+    }
+  }
 
-      var rows = resultFuture.get(5, TimeUnit.SECONDS);
+  @Test
+  void fetchWithNonMapResultReturnsEmpty() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var fetched = env.inSandbox(() -> HostBridge.fetch("https://api.example.com/x"));
+
+      answer(env, "not-a-map");
+
+      assertTrue(Await.value("fetch's result", fetched).isEmpty());
+    }
+  }
+
+  @Test
+  void queryDelegatesToBootstrap() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var queried = env.inSandbox(() -> HostBridge.query("SELECT region, total FROM sales"));
+
+      var request =
+          answer(
+              env,
+              List.of(Map.of("region", "US", "total", 100), Map.of("region", "EU", "total", 50)));
+
+      assertEquals("query", request.method());
+      assertEquals("SELECT region, total FROM sales", ((Map<?, ?>) request.params()).get("sql"));
+      var rows = Await.value("query's rows", queried);
+      assertEquals(2, rows.size());
+      assertEquals("US", rows.get(0).get("region"));
+      assertEquals(50, rows.get(1).get("total"));
+    }
+  }
+
+  @Test
+  void queryRowsToleratesNullColumnValues() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var queried = env.inSandbox(() -> HostBridge.query("SELECT name, age FROM users"));
+      var rowWithNull = new LinkedHashMap<String, Object>();
+      rowWithNull.put("name", "alice");
+      rowWithNull.put("age", null);
+
+      answer(env, List.of(rowWithNull));
+
+      var rows = Await.value("query's rows", queried);
+      assertEquals(1, rows.size());
+      assertEquals("alice", rows.get(0).get("name"));
+      assertNull(rows.get(0).get("age"));
+    }
+  }
+
+  @Test
+  void queryRowsAreUnmodifiable() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var queried = env.inSandbox(() -> HostBridge.query("SELECT 1"));
+
+      answer(env, List.of(Map.of("x", 1)));
+
+      var rows = Await.value("query's rows", queried);
       assertThrows(UnsupportedOperationException.class, () -> rows.add(Map.of()));
       assertThrows(UnsupportedOperationException.class, () -> rows.get(0).put("y", 2));
     }
   }
 
   @Test
-  void fetchResultIsUnmodifiable() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture = new CompletableFuture<Map<String, Object>>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.fetch("https://api.example.com/x"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
+  void queryWithNonListResultReturnsEmpty() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var queried = env.inSandbox(() -> HostBridge.query("SELECT 1"));
 
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
+      answer(env, "scalar-result");
 
-      env.writeLine(
-          ProcessTransport.serializeMessage(
-              new RpcMessage.Response(req.id(), Map.of("status", 200, "body", "x"))));
-
-      var result = resultFuture.get(5, TimeUnit.SECONDS);
-      assertThrows(UnsupportedOperationException.class, () -> result.put("evil", "yes"));
+      assertTrue(Await.value("query's rows", queried).isEmpty());
     }
   }
 
   @Test
-  void fetchWithNonMapResultReturnsEmpty() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture = new CompletableFuture<Map<String, Object>>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.fetch("https://api.example.com/x"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
+  void queryWithEmptyResultListReturnsEmpty() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var queried = env.inSandbox(() -> HostBridge.query("SELECT * FROM empty"));
 
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
+      answer(env, List.of());
 
-      env.writeLine(
-          ProcessTransport.serializeMessage(new RpcMessage.Response(req.id(), "not-a-map")));
-
-      assertTrue(resultFuture.get(5, TimeUnit.SECONDS).isEmpty());
+      assertTrue(Await.value("query's rows", queried).isEmpty());
     }
   }
 
-  @Test
-  void queryWithNonListResultReturnsEmpty() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture =
-          new java.util.concurrent.CompletableFuture<java.util.List<Map<String, Object>>>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.query("SELECT 1"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
-
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
-
-      env.writeLine(
-          ProcessTransport.serializeMessage(new RpcMessage.Response(req.id(), "scalar-result")));
-
-      assertTrue(resultFuture.get(5, TimeUnit.SECONDS).isEmpty());
-    }
+  private static CompletableFuture<Void> submitInSandbox(BootstrapEnvironment env, Object value) {
+    return env.inSandbox(
+        () -> {
+          HostBridge.submit(value);
+          return null;
+        });
   }
 
-  @Test
-  void queryWithEmptyResultListReturnsEmpty() throws Exception {
-    try (var env = new BootstrapEnv()) {
-      var resultFuture =
-          new java.util.concurrent.CompletableFuture<java.util.List<Map<String, Object>>>();
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  resultFuture.complete(HostBridge.query("SELECT * FROM empty"));
-                } catch (Exception e) {
-                  resultFuture.completeExceptionally(e);
-                }
-              });
-
-      var line = env.readLine();
-      var msg =
-          ProcessTransport.deserializeMessage(line.substring(ProcessTransport.RPC_PREFIX.length()));
-      var req = (RpcMessage.Request) msg;
-
-      env.writeLine(
-          ProcessTransport.serializeMessage(
-              new RpcMessage.Response(req.id(), java.util.List.of())));
-
-      assertTrue(resultFuture.get(5, TimeUnit.SECONDS).isEmpty());
-    }
-  }
-
-  private static class BootstrapEnv implements AutoCloseable {
-    final JShell jshell;
-    final JvmSandboxBootstrap bootstrap;
-    final PipedOutputStream stdinWriter;
-    final BufferedReader stdoutBufReader;
-    final Thread readLoopThread;
-
-    BootstrapEnv() throws Exception {
-      jshell = JShell.builder().executionEngine("local").build();
-      var targetClasses = java.nio.file.Path.of("target", "classes").toAbsolutePath();
-      if (java.nio.file.Files.isDirectory(targetClasses)) {
-        jshell.addToClasspath(targetClasses.toString());
-      }
-      stdinWriter = new PipedOutputStream();
-      var stdinPipe = new PipedInputStream(stdinWriter);
-      var stdoutPipe = new PipedOutputStream();
-      var stdoutReader = new PipedInputStream(stdoutPipe);
-      var realOut = new PrintStream(stdoutPipe, true, StandardCharsets.UTF_8);
-      var stdinBufReader =
-          new BufferedReader(new InputStreamReader(stdinPipe, StandardCharsets.UTF_8));
-      bootstrap = new JvmSandboxBootstrap(jshell, stdinBufReader, realOut);
-      JvmSandboxBootstrap.setInstance(bootstrap);
-      stdoutBufReader =
-          new BufferedReader(new InputStreamReader(stdoutReader, StandardCharsets.UTF_8));
-      readLoopThread = Thread.ofVirtual().name("test-readloop").start(bootstrap::readLoop);
-    }
-
-    String readLine() throws Exception {
-      return stdoutBufReader.readLine();
-    }
-
-    void writeLine(String json) throws Exception {
-      stdinWriter.write((json + "\n").getBytes(StandardCharsets.UTF_8));
-      stdinWriter.flush();
-    }
-
-    @Override
-    public void close() throws Exception {
-      stdinWriter.close();
-      readLoopThread.join(Duration.ofSeconds(2));
-      jshell.close();
-    }
+  /** Takes the request the bridge call sent to the host and answers it with {@code result}. */
+  private static RpcMessage.Request answer(BootstrapEnvironment env, Object result) {
+    var request = env.nextRequest();
+    env.feed(new RpcMessage.Response(request.id(), result));
+    return request;
   }
 }
