@@ -23,11 +23,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.logging.Handler;
@@ -158,6 +160,39 @@ final class SessionEventPublisherTest {
     var publisher = new SessionEventPublisher(SID);
 
     assertThrows(NullPointerException.class, () -> publisher.subscribe(null));
+  }
+
+  /**
+   * Guards the owner placeholder. Without it the JDK publisher treats this thread, which attached
+   * the first subscriber, as its owner and can leave the event in the buffer with no consumer task,
+   * about once in 40,000 runs; with it the event is always delivered.
+   */
+  @Test
+  void anEventEmittedByTheThreadThatAttachedTheFirstSubscriberIsDelivered() {
+    var publisher = new SessionEventPublisher(SID);
+    var subscriber = Recorder.requestingAll();
+    publisher.subscribe(subscriber);
+
+    publisher.emit(TEXT);
+
+    assertSame(
+        TEXT, Await.next("the event emitted by the subscribing thread", subscriber.received));
+    publisher.close();
+    assertEquals(List.of(TEXT), subscriber.eventsOnceCompleted());
+  }
+
+  @Test
+  void anEmitWithNoSubscriberNeitherWaitsNorReportsADrop() {
+    var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED, NOT_REACHED);
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+
+    try (var ignored = capturingLog(logged)) {
+      emit(publisher, TEXT, ENDED);
+    }
+    publisher.close();
+
+    assertEquals(List.of(), logged);
+    assertTrue(publisher.executor().isTerminated());
   }
 
   @Test
@@ -349,9 +384,7 @@ final class SessionEventPublisherTest {
 
   /**
    * Emits from a thread other than the one that attached the subscriber, as a session does: its
-   * agent loop emits, its caller subscribes. {@code SubmissionPublisher} (JDK 25.0.3) can strand an
-   * item offered by the thread that attached its first subscriber, with no consumer running, until
-   * the next signal; a test that waits for that one event would then wait for ever.
+   * agent loop emits, its caller subscribes.
    */
   private static void emit(SessionEventPublisher publisher, QueryEvent... events) {
     var emitting =
@@ -416,6 +449,7 @@ final class SessionEventPublisherTest {
   private static final class Recorder implements Flow.Subscriber<QueryEvent> {
 
     final List<QueryEvent> events = new CopyOnWriteArrayList<>();
+    final BlockingQueue<QueryEvent> received = new LinkedBlockingQueue<>();
     final AtomicInteger completions = new AtomicInteger();
     final CompletableFuture<Void> done = new CompletableFuture<>();
     private final CompletableFuture<Flow.Subscription> subscription = new CompletableFuture<>();
@@ -450,6 +484,7 @@ final class SessionEventPublisherTest {
     @Override
     public void onNext(QueryEvent event) {
       events.add(event);
+      received.add(event);
       afterEach.accept(event);
     }
 

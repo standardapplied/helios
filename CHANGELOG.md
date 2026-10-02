@@ -81,6 +81,13 @@ initial value, and no `Clock` field, parameter or return type.
   started, or the loop escaped with an `Error`) is completed at once. `subscribe` never throws for
   a non-null subscriber and no subscriber sees `LoopEnded` twice. The SSE route therefore answers
   `Ready`, `LoopEnded` and a clean end of stream, as `SessionRegistry` always documented.
+- **An event emitted by the thread that attached the session's first subscriber could be held
+  back until the next event.** `java.util.concurrent.SubmissionPublisher` (observed on JDK 25.0.3)
+  gives the first subscribing thread a faster publishing path that can leave an item in the buffer
+  with no consumer task until the next item or the close. A session whose first
+  `events().subscribe(...)` was made on a thread that later emits, such as a hook or a tool
+  running on the agent loop, could therefore deliver a `QuestionAsked` only after the answer it
+  was waiting for. The session's publisher no longer lets any emitting thread take that path.
 - **`LocalProcessExecutionProvider.close()` could miss a subprocess that a concurrent `execute`
   was still launching.** `close()` marks the provider closed and scans the in-flight processes
   once; a call that had passed its closed check and started its process after that scan was never
