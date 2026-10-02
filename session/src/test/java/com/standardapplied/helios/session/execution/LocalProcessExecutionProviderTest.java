@@ -375,12 +375,11 @@ final class LocalProcessExecutionProviderTest {
             .withScript("true")
             .withTimeout(Duration.ofSeconds(1))
             .build();
-    var reported =
+    var failure =
         Await.failure(
             "the pre-cancelled call to fail",
             provider.execute(CTX, req, token).toCompletableFuture());
-    assertInstanceOf(CancellationException.class, reported);
-    var failure = assertInstanceOf(CancellationException.class, reported.getCause());
+    assertInstanceOf(CancellationException.class, failure);
     assertEquals("pre-acquired", failure.getMessage());
   }
 
