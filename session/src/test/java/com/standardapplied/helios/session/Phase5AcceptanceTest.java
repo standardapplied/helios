@@ -18,6 +18,7 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.CommandGrant;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.execution.ExecuteTool;
@@ -36,7 +37,6 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -126,10 +126,12 @@ final class Phase5AcceptanceTest {
             .build();
 
     var events = new CopyOnWriteArrayList<QueryEvent>();
+    var done = new CountDownLatch(1);
     try (var session = AgentSession.create(options)) {
-      session.events().subscribe(collectingSubscriber(events, null));
+      session.events().subscribe(collectingSubscriber(events, done));
       var result = session.runBlocking(UserMessage.text("run a python script"));
       assertInstanceOf(ResultMessage.Success.class, result);
+      Await.latch("the event stream to complete", done);
     }
 
     var toolResults =
@@ -183,7 +185,7 @@ final class Phase5AcceptanceTest {
     try (var session = AgentSession.create(options)) {
       session.events().subscribe(collectingSubscriber(events, done));
       session.runBlocking(UserMessage.text("try a forbidden command"));
-      assertTrue(done.await(5, TimeUnit.SECONDS));
+      Await.latch("the event stream to complete", done);
     }
 
     var blocked =
@@ -201,8 +203,8 @@ final class Phase5AcceptanceTest {
     assumeBashAvailable();
     var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
 
-    // Model asks for a sleep that exceeds the per-execution timeout; ExecuteTool surfaces
-    // timedOut=true in the structured tool result.
+    // The script cannot finish on its own before the hang guard, so only the one-second execution
+    // timeout can end it; ExecuteTool surfaces timedOut=true in the structured tool result.
     var turns =
         List.<List<ModelChunk>>of(
             List.of(
@@ -210,7 +212,7 @@ final class Phase5AcceptanceTest {
                     new ToolCall(
                         "c1",
                         ExecuteTool.NAME,
-                        Map.of("runtime", "BASH", "script", "sleep 5", "timeoutSeconds", 1))),
+                        Map.of("runtime", "BASH", "script", "sleep 600", "timeoutSeconds", 1))),
                 new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))),
             List.of(
                 new ModelChunk.TextDelta("done"),
@@ -233,10 +235,12 @@ final class Phase5AcceptanceTest {
             .build();
 
     var events = new CopyOnWriteArrayList<QueryEvent>();
+    var done = new CountDownLatch(1);
     try (var session = AgentSession.create(options)) {
-      session.events().subscribe(collectingSubscriber(events, null));
+      session.events().subscribe(collectingSubscriber(events, done));
       var result = session.runBlocking(UserMessage.text("trigger timeout"));
       assertInstanceOf(ResultMessage.Success.class, result);
+      Await.latch("the event stream to complete", done);
     }
 
     var toolResult =
@@ -268,16 +272,12 @@ final class Phase5AcceptanceTest {
 
       @Override
       public void onError(Throwable t) {
-        if (done != null) {
-          done.countDown();
-        }
+        done.countDown();
       }
 
       @Override
       public void onComplete() {
-        if (done != null) {
-          done.countDown();
-        }
+        done.countDown();
       }
     };
   }

@@ -17,6 +17,7 @@ import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.loop.SessionState;
 import java.time.Clock;
@@ -25,7 +26,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -496,16 +496,15 @@ final class DropMiddleToolResultsCompactorTest {
 
   @Test
   void summaryTimeoutLeavesHistoryUnchanged() {
-    var inFlight = new CountDownLatch(1);
+    var interrupted = new CountDownLatch(1);
     Model slow =
         new Model() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             try {
-              // Hang well past the configured timeout to force expiration.
-              inFlight.await(5, TimeUnit.SECONDS);
+              new CountDownLatch(1).await();
             } catch (InterruptedException e) {
-              Thread.currentThread().interrupt();
+              interrupted.countDown();
             }
             return Response.newBuilder().withContent("never").build();
           }
@@ -530,7 +529,7 @@ final class DropMiddleToolResultsCompactorTest {
     var out = compactor.compact(history, freshState());
     assertSame(history, out.history(), "timeout must yield no-op");
     assertEquals(0, out.usage().inputTokens());
-    inFlight.countDown();
+    Await.latch("the timed-out summary call to be interrupted", interrupted);
   }
 
   @Test

@@ -16,7 +16,9 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.files.GlobTool;
@@ -43,7 +45,8 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -105,9 +108,18 @@ final class Phase2AcceptanceTest {
     }
   }
 
+  /**
+   * Collects every event and hands each {@link QueryEvent.QuestionAsked} to {@code onQuestion} on
+   * the delivery thread, while the agent loop is blocked on that question.
+   */
   private static final class CollectingSubscriber implements Flow.Subscriber<QueryEvent> {
     final List<QueryEvent> events = new CopyOnWriteArrayList<>();
     final CountDownLatch done = new CountDownLatch(1);
+    private final Consumer<AskUserQuestionRequest> onQuestion;
+
+    CollectingSubscriber(Consumer<AskUserQuestionRequest> onQuestion) {
+      this.onQuestion = onQuestion;
+    }
 
     @Override
     public void onSubscribe(Flow.Subscription subscription) {
@@ -117,6 +129,9 @@ final class Phase2AcceptanceTest {
     @Override
     public void onNext(QueryEvent event) {
       events.add(event);
+      if (event instanceof QueryEvent.QuestionAsked asked) {
+        onQuestion.accept(asked.request());
+      }
     }
 
     @Override
@@ -214,45 +229,20 @@ final class Phase2AcceptanceTest {
             .withMemoryBackend(memoryBackend)
             .build();
 
-    var sub = new CollectingSubscriber();
     try (var session = AgentSession.create(options)) {
+      var answered = new AtomicBoolean(false);
+      var sub =
+          new CollectingSubscriber(
+              request -> {
+                session.answer(
+                    request.questionId(),
+                    AskUserQuestionResponse.single(request.questionId(), "Yes"));
+                answered.set(true);
+              });
       session.events().subscribe(sub);
 
-      // Answer the question as soon as the session emits it. A small worker thread watches the
-      // event list — the agent loop is blocked on the future until we answer.
-      //
-      // Set the `answered` flag BEFORE calling session.answer(...). Otherwise the main thread can
-      // observe a sequence where session.answer() completes the loop's future, the loop runs to
-      // termination, the publisher closes, sub.done counts down, and the main thread's
-      // sub.done.await(...) returns — all before the worker thread is scheduled back to run the
-      // assignment. Setting the flag first means observers can't see a terminated session with
-      // the flag still false.
-      var answered = new java.util.concurrent.atomic.AtomicBoolean(false);
-      Thread.ofVirtual()
-          .name("phase2-answerer")
-          .start(
-              () -> {
-                while (!answered.get()) {
-                  for (var ev : sub.events) {
-                    if (ev instanceof QueryEvent.QuestionAsked qa) {
-                      answered.set(true);
-                      session.answer(
-                          qa.request().questionId(),
-                          AskUserQuestionResponse.single(qa.request().questionId(), "Yes"));
-                      break;
-                    }
-                  }
-                  try {
-                    Thread.sleep(10);
-                  } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                  }
-                }
-              });
-
       var result = session.runBlocking(UserMessage.text("explore the repo"));
-      assertTrue(sub.done.await(5, TimeUnit.SECONDS), "stream did not complete in 5s");
+      Await.latch("the event stream to complete", sub.done);
       assertTrue(answered.get(), "AskUserQuestion was never answered");
 
       // Verify terminal Success.

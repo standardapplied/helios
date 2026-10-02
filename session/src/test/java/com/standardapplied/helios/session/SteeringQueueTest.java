@@ -9,11 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.Await;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -105,28 +107,27 @@ final class SteeringQueueTest {
     var rejected = new AtomicInteger();
 
     try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
+      var producing = new ArrayList<Future<Void>>();
       for (int p = 0; p < producers; p++) {
         final int pid = p;
-        exec.submit(
-            () -> {
-              try {
-                start.await();
-              } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-              }
-              for (int i = 0; i < perProducer; i++) {
-                if (q.offer(UserMessage.text("p" + pid + ":" + i))) {
-                  accepted.incrementAndGet();
-                } else {
-                  rejected.incrementAndGet();
-                }
-              }
-            });
+        producing.add(
+            exec.submit(
+                () -> {
+                  start.await();
+                  for (int i = 0; i < perProducer; i++) {
+                    if (q.offer(UserMessage.text("p" + pid + ":" + i))) {
+                      accepted.incrementAndGet();
+                    } else {
+                      rejected.incrementAndGet();
+                    }
+                  }
+                  return null;
+                }));
       }
       start.countDown();
-      exec.shutdown();
-      assertTrue(exec.awaitTermination(10, TimeUnit.SECONDS), "producers must finish");
+      for (var producer : producing) {
+        Await.value("a producer to finish", producer);
+      }
     }
 
     int total = producers * perProducer;
