@@ -16,15 +16,22 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.ask.AskUserQuestionOption;
+import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -37,7 +44,22 @@ final class SessionEventPublisherTest {
 
   private static final String SID = "sess-events";
   private static final Instant AT = Instant.parse("2026-10-02T00:00:00Z");
+  private static final Duration NOT_REACHED = Duration.ofMinutes(10);
+  private static final int SUBSCRIBER_BUFFER = 256;
   private static final QueryEvent TEXT = new QueryEvent.AssistantText(SID, 0, AT, "hello");
+  private static final QueryEvent QUESTION =
+      new QueryEvent.QuestionAsked(
+          SID,
+          0,
+          AT,
+          new AskUserQuestionRequest(
+              "q1",
+              "Pick",
+              "Which one?",
+              List.of(
+                  new AskUserQuestionOption("a", "first"),
+                  new AskUserQuestionOption("b", "second")),
+              false));
   private static final QueryEvent.LoopEnded ENDED =
       new QueryEvent.LoopEnded(
           SID,
@@ -139,6 +161,79 @@ final class SessionEventPublisherTest {
   }
 
   @Test
+  void aFullSubscriberBufferDropsTheEventAfterTheEmitTimeoutAndLogsIt() {
+    var publisher =
+        new SessionEventPublisher(SID, Duration.ofMillis(20), Duration.ofMillis(20), NOT_REACHED);
+    var stalled = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var subscriber =
+        Recorder.requestingAll(
+            event -> {
+              stalled.countDown();
+              awaitUninterrupted(release);
+            });
+    publisher.subscribe(subscriber);
+    publisher.emit(TEXT);
+    Await.latch("the subscriber to stall in its first onNext", stalled);
+    for (var i = 0; i < SUBSCRIBER_BUFFER; i++) {
+      publisher.emit(TEXT);
+    }
+
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+    try (var ignored = capturingLog(logged)) {
+      publisher.emit(TEXT);
+      publisher.emit(new QueryEvent.Error(SID, 0, AT, SerializedError.of("Boom", "boom")));
+      publisher.emit(QUESTION);
+      publisher.emit(ENDED);
+    }
+    release.countDown();
+    publisher.close();
+
+    assertEquals(1 + SUBSCRIBER_BUFFER, subscriber.eventsOnceCompleted().size());
+    assertEquals(
+        List.of(
+            "FINE dropped AssistantText for 1 slow subscriber(s) on session " + SID,
+            "WARNING dropped Error for 1 slow subscriber(s) on session " + SID,
+            "WARNING dropped QuestionAsked for 1 slow subscriber(s) on session " + SID,
+            "WARNING dropped LoopEnded for 1 slow subscriber(s) on session " + SID),
+        logged.stream().map(r -> r.getLevel() + " " + r.getMessage()).toList());
+  }
+
+  @Test
+  void closeInterruptsASubscriberThatOutlastsTheDrainGrace() {
+    var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED, Duration.ofMillis(20));
+    var interrupted = new CountDownLatch(1);
+    publisher.subscribe(Recorder.requestingAll(event -> blockUntilInterrupted(interrupted)));
+    publisher.emit(TEXT);
+
+    publisher.close();
+
+    Await.latch("the wedged subscriber to be interrupted", interrupted);
+    assertTrue(publisher.executor().isShutdown());
+  }
+
+  @Test
+  void anInterruptedCloseStopsTheDrainAndStaysInterrupted() {
+    var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED, NOT_REACHED);
+    var stalled = new CountDownLatch(1);
+    var interrupted = new CountDownLatch(1);
+    publisher.subscribe(
+        Recorder.requestingAll(
+            event -> {
+              stalled.countDown();
+              blockUntilInterrupted(interrupted);
+            }));
+    publisher.emit(TEXT);
+    Await.latch("the subscriber to stall in onNext", stalled);
+
+    Thread.currentThread().interrupt();
+    publisher.close();
+
+    assertTrue(Thread.interrupted(), "close leaves the caller's interrupt set");
+    Await.latch("the stalled subscriber to be interrupted", interrupted);
+  }
+
+  @Test
   void aSubscriberAttachedAfterTheResultSettledReceivesTheLoopEndedTheEarlyOneSaw() {
     try (var session = session()) {
       var early = Recorder.requestingAll();
@@ -210,6 +305,48 @@ final class SessionEventPublisherTest {
     }
   }
 
+  private static void awaitUninterrupted(CountDownLatch latch) {
+    try {
+      latch.await();
+    } catch (InterruptedException e) {
+      throw new IllegalStateException("interrupted while stalled on a test latch", e);
+    }
+  }
+
+  private static void blockUntilInterrupted(CountDownLatch interrupted) {
+    try {
+      new CountDownLatch(1).await();
+    } catch (InterruptedException e) {
+      interrupted.countDown();
+    }
+  }
+
+  /** Collects what the publisher logs, at every level, until closed. */
+  private static LogCapture capturingLog(List<LogRecord> records) {
+    var logger = Logger.getLogger(SessionEventPublisher.class.getName());
+    var level = logger.getLevel();
+    var handler =
+        new Handler() {
+          @Override
+          public void publish(LogRecord logRecord) {
+            records.add(logRecord);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    handler.setLevel(Level.ALL);
+    logger.setLevel(Level.ALL);
+    logger.addHandler(handler);
+    return () -> {
+      logger.removeHandler(handler);
+      logger.setLevel(level);
+    };
+  }
+
   private static SessionEventPublisher endedPublisher() {
     var publisher = new SessionEventPublisher(SID);
     publisher.emit(ENDED);
@@ -226,6 +363,12 @@ final class SessionEventPublisherTest {
     var events = subscriber.eventsOnceCompleted();
     assertEquals(1, events.size(), () -> "expected exactly one event, got " + events);
     return events.getFirst();
+  }
+
+  @FunctionalInterface
+  private interface LogCapture extends AutoCloseable {
+    @Override
+    void close();
   }
 
   private static final class OneReplyModel implements Model {
