@@ -86,8 +86,8 @@ initial value, and no `Clock` field, parameter or return type.
   gives the first subscribing thread a faster publishing path that can leave an item in the buffer
   with no consumer task until the next item or the close. A session whose first
   `events().subscribe(...)` was made on a thread that later emits, such as a hook or a tool
-  running on the agent loop, could therefore deliver a `QuestionAsked` only after the answer it
-  was waiting for. The session's publisher no longer lets any emitting thread take that path.
+  running on the agent loop, could therefore hold a `QuestionAsked` back while the session waited
+  for its answer. The session's publisher no longer lets any emitting thread take that path.
 - **`LocalProcessExecutionProvider.close()` could miss a subprocess that a concurrent `execute`
   was still launching.** `close()` marks the provider closed and scans the in-flight processes
   once; a call that had passed its closed check and started its process after that scan was never

@@ -71,12 +71,6 @@ final class LocalProcessExecutionProviderRobustnessTest {
         .build();
   }
 
-  // ── timeout reaps the process tree, including SIGTERM-deaf descendants ───
-
-  /**
-   * The child holds the output pipes for ten minutes, so a result means the provider killed it;
-   * once its trap is set, only SIGKILL can.
-   */
   /**
    * A test that fails before its children are reaped must not leave one running; nothing else in
    * this JVM starts a process while a test of this class runs.
@@ -86,6 +80,12 @@ final class LocalProcessExecutionProviderRobustnessTest {
     ProcessHandle.current().descendants().forEach(ProcessHandle::destroyForcibly);
   }
 
+  // ── timeout reaps the process tree, including SIGTERM-deaf descendants ───
+
+  /**
+   * The child holds the output pipes for ten minutes, so a result means the provider killed it;
+   * once its trap is set, only SIGKILL can.
+   */
   @Test
   void timeoutEscalatesFromSigtermToSigkillWhenChildIgnoresTerm() {
     assumeBashAvailable();
