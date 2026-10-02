@@ -10,13 +10,15 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.Await;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -89,20 +91,23 @@ final class CancellationTokenTest {
     var start = new CountDownLatch(1);
     var winners = new AtomicInteger(0);
     try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
+      var cancellers = new ArrayList<Future<Void>>();
       for (int i = 0; i < threadCount; i++) {
         final int id = i;
-        exec.submit(
-            () -> {
-              ready.countDown();
-              start.await();
-              if (t.cancel("thread-" + id)) {
-                winners.incrementAndGet();
-              }
-              return null;
-            });
+        cancellers.add(
+            exec.submit(
+                () -> {
+                  ready.countDown();
+                  start.await();
+                  if (t.cancel("thread-" + id)) {
+                    winners.incrementAndGet();
+                  }
+                  return null;
+                }));
       }
-      assertTrue(ready.await(2, TimeUnit.SECONDS), "threads must arrive at start barrier");
+      Await.latch("every thread to arrive at the start barrier", ready);
       start.countDown();
+      cancellers.forEach(canceller -> Await.value("a concurrent cancel", canceller));
     }
     assertEquals(1, winners.get(), "exactly one cancel must report winning the race");
     assertTrue(t.isCancelled());
@@ -298,13 +303,13 @@ final class CancellationTokenTest {
     t.onCancel(
         () -> {
           midFire.countDown();
-          await(release);
+          Await.latch("the test to release callback A", release);
         });
     var claimed = t.onCancel(claimedFired::incrementAndGet);
     t.onCancel(removedBeforeCancelFired::incrementAndGet).remove();
 
     var canceller = Thread.ofVirtual().start(() -> t.cancel("mid-fire"));
-    assertTrue(midFire.await(2, TimeUnit.SECONDS), "cancelling thread must reach callback A");
+    Await.latch("the cancelling thread to reach callback A", midFire);
 
     var late = t.onCancel(lateFired::incrementAndGet);
     assertSame(CancellationToken.Registration.NOOP, late);
@@ -314,8 +319,7 @@ final class CancellationTokenTest {
     assertEquals(0, t.activeCallbackCountForTests(), "claimed registrations already drained");
 
     release.countDown();
-    canceller.join(2_000);
-    assertFalse(canceller.isAlive());
+    Await.termination("the cancelling thread", canceller);
     assertEquals(1, claimedFired.get(), "remove after claim is a no-op; callback still fires once");
     assertEquals(0, removedBeforeCancelFired.get(), "remove before cancel never fires");
     assertEquals(1, lateFired.get());
@@ -334,14 +338,8 @@ final class CancellationTokenTest {
               t.onCancel(nested::incrementAndGet);
               secondCancel.set(t.cancel("reentrant"));
             }));
-    var done = new CountDownLatch(1);
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              t.cancel("outer");
-              done.countDown();
-            });
-    assertTrue(done.await(2, TimeUnit.SECONDS), "reentrant callback must not deadlock");
+    var canceller = Thread.ofVirtual().start(() -> t.cancel("outer"));
+    Await.termination("the cancel whose callback re-enters the token", canceller);
     assertEquals(1, nested.get(), "nested registration fires immediately");
     assertEquals(Boolean.FALSE, secondCancel.get(), "reentrant cancel loses to the outer one");
     assertEquals(Optional.of("outer"), t.reason());
@@ -450,22 +448,13 @@ final class CancellationTokenTest {
                   t.cancel("race");
                   return null;
                 });
-        register.get(2, TimeUnit.SECONDS);
-        remove.get(2, TimeUnit.SECONDS);
-        cancel.get(2, TimeUnit.SECONDS);
+        Await.value("the racing registration", register);
+        Await.value("the racing removal", remove);
+        Await.value("the racing cancel", cancel);
         assertEquals(1, kept.get(), "round " + round + ": kept callback fired " + kept.get());
         assertTrue(removed.get() <= 1, "round " + round + ": removed callback fired twice");
         assertEquals(0, t.activeCallbackCountForTests(), "round " + round + " retained callbacks");
       }
-    }
-  }
-
-  private static void await(CountDownLatch latch) {
-    try {
-      assertTrue(latch.await(5, TimeUnit.SECONDS), "latch timed out");
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new IllegalStateException(e);
     }
   }
 }

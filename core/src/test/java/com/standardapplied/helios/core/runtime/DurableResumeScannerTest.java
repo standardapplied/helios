@@ -11,10 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.common.Result;
+import com.standardapplied.helios.core.test.Await;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -175,11 +178,12 @@ class DurableResumeScannerTest {
   }
 
   @Test
-  void boundedConcurrencyByMaxConcurrent() throws Exception {
+  void boundedConcurrencyByMaxConcurrent() {
     var d = Durability.inMemory();
     for (int i = 0; i < 10; i++) {
       d.runStore().checkpoint(staleRunning("research-bot"));
     }
+    var threeInFlight = new CountDownLatch(3);
     var concurrent = new AtomicInteger();
     var maxObserved = new AtomicInteger();
     var scanner =
@@ -188,20 +192,20 @@ class DurableResumeScannerTest {
             .register(
                 "research-bot",
                 runId -> {
-                  var c = concurrent.incrementAndGet();
-                  maxObserved.updateAndGet(prev -> Math.max(prev, c));
-                  try {
-                    Thread.sleep(20);
-                  } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                  }
+                  maxObserved.accumulateAndGet(concurrent.incrementAndGet(), Math::max);
+                  threeInFlight.countDown();
+                  Await.latch("three handlers to be in flight at once", threeInFlight);
                   concurrent.decrementAndGet();
                   return Result.success("ok");
                 })
             .build();
-    scanner.scan();
-    assertTrue(
-        maxObserved.get() <= 3, "maxConcurrent=3 must hold (observed " + maxObserved.get() + ")");
+
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var result = Await.value("the scan to finish", executor.submit(scanner::scan));
+      assertEquals(10, result.resumed());
+    }
+
+    assertEquals(3, maxObserved.get(), "maxConcurrent=3 is reached and never exceeded");
   }
 
   @Test
