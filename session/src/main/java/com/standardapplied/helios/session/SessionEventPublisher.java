@@ -4,6 +4,7 @@ package com.standardapplied.helios.session;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
@@ -59,6 +60,15 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
     this.routineEmitTimeout = routineEmitTimeout;
     this.criticalEmitTimeout = criticalEmitTimeout;
     this.drainGrace = drainGrace;
+    attachOwnerPlaceholder();
+  }
+
+  private void attachOwnerPlaceholder() {
+    var placeholder = new OwnerPlaceholder();
+    try (var attaching = Executors.newVirtualThreadPerTaskExecutor()) {
+      attaching.execute(() -> live.subscribe(placeholder));
+    }
+    placeholder.cancelled.join();
   }
 
   @Override
@@ -135,6 +145,36 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
     return event instanceof QueryEvent.LoopEnded
         || event instanceof QueryEvent.QuestionAsked
         || event instanceof QueryEvent.Error;
+  }
+
+  /**
+   * Works around a defect in {@link SubmissionPublisher}, observed on JDK 25.0.3. The publisher
+   * records the thread of its first {@code subscribe} call as its owner, and {@code
+   * BufferedSubscription.offer} lets that thread publish with a release-mode store and no fence
+   * before it reads the consumer's keep-alive bit. A consumer task that exits at that moment misses
+   * the item and the owner misses that the consumer left, so the item stays in the buffer with no
+   * consumer task until the next offer or close. This subscriber is attached first, from a thread
+   * that has ended, and cancels at once: no thread that emits can be the owner, and nothing is ever
+   * buffered for it. Delete it once the JDK has no owner path.
+   */
+  private static final class OwnerPlaceholder implements Flow.Subscriber<QueryEvent> {
+
+    private final CompletableFuture<Void> cancelled = new CompletableFuture<>();
+
+    @Override
+    public void onSubscribe(Flow.Subscription subscription) {
+      subscription.cancel();
+      cancelled.complete(null);
+    }
+
+    @Override
+    public void onNext(QueryEvent event) {}
+
+    @Override
+    public void onError(Throwable throwable) {}
+
+    @Override
+    public void onComplete() {}
   }
 
   /**
