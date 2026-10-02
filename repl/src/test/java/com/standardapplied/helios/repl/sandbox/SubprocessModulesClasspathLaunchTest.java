@@ -8,6 +8,7 @@ package com.standardapplied.helios.repl.sandbox;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import com.standardapplied.helios.repl.protocol.RpcChannel;
@@ -20,7 +21,6 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -182,19 +182,18 @@ class SubprocessModulesClasspathLaunchTest {
         process.getOutputStream().close();
 
         try {
-          var acceptedSocket = JvmSandbox.acceptWithTimeout(listener, Duration.ofSeconds(15));
+          var acceptedSocket = JvmSandbox.acceptWithTimeout(listener, Await.HANG_GUARD);
           try {
             Files.deleteIfExists(socketPath);
             var transport =
                 new ProcessTransport(
                     Channels.newInputStream(acceptedSocket),
                     Channels.newOutputStream(acceptedSocket));
-            var channel =
-                new RpcChannel(transport, new HostFunctionRegistry(), Duration.ofSeconds(30));
+            var channel = new RpcChannel(transport, new HostFunctionRegistry(), Await.HANG_GUARD);
             var params = new java.util.LinkedHashMap<String, Object>();
             params.put("code", snippet);
             params.put("language", "java");
-            params.put("timeoutMs", 15_000L);
+            params.put("timeoutMs", Await.HANG_GUARD.multipliedBy(5).toMillis());
             params.put("captureBindings", false);
             params.put("maxBindingValueChars", 0);
             params.put("maxBindingSnapshotChars", 0);
@@ -213,7 +212,7 @@ class SubprocessModulesClasspathLaunchTest {
           }
         } finally {
           process.destroyForcibly();
-          process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+          Await.termination("the bootstrap subprocess to exit", process);
         }
       }
     } finally {

@@ -11,15 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import com.standardapplied.helios.repl.protocol.RpcChannel;
-import com.standardapplied.helios.repl.protocol.RpcMessage;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
 import java.lang.management.ManagementFactory;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
@@ -32,12 +30,34 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 
+/**
+ * No test depends on how long a subprocess takes. A sandbox launched for real gets {@link
+ * #END_TO_END}: the hang guard bounds its startup and each call, and a snippet's own timeout is
+ * {@link #BEYOND_HANG_GUARD} unless the timeout is what the test exercises. A child that stands in
+ * for a subprocess is {@code sleep 600}, which cannot end on its own within the hang guard, so its
+ * death proves the kill.
+ */
 class JvmSandboxTest {
+
+  private static final Duration BEYOND_HANG_GUARD = Await.HANG_GUARD.multipliedBy(5);
+
+  private static final String FORGED_FRAME_ID = "\"id\":\"forged\"";
+
+  private static final JvmSandboxConfig END_TO_END =
+      JvmSandboxConfig.newBuilder()
+          .withSubprocessStartupTimeout(Await.HANG_GUARD)
+          .withCallTimeout(Await.HANG_GUARD)
+          .withExecutionTimeout(BEYOND_HANG_GUARD)
+          .build();
+
+  @AfterEach
+  void leaveNoProcessBehind() {
+    ProcessHandle.current().descendants().forEach(ProcessHandle::destroyForcibly);
+  }
 
   @Test
   void buildLaunchCommandIncludesMainClassAndClasspath() {
@@ -236,9 +256,8 @@ class JvmSandboxTest {
 
   @Test
   void executeOnDeadSandboxReturnsFailure() throws Exception {
-    var pb = new ProcessBuilder("true");
-    var process = pb.start();
-    process.waitFor();
+    var process = new ProcessBuilder("true").start();
+    Await.termination("the process that exits at once", process);
     var transport = new ProcessTransport(process.getInputStream(), process.getOutputStream());
     var registry = new HostFunctionRegistry();
     var channel = new RpcChannel(transport, registry, Duration.ofSeconds(1));
@@ -255,8 +274,7 @@ class JvmSandboxTest {
 
   @Test
   void closeDestroysProcess() throws Exception {
-    var pb = new ProcessBuilder("sleep", "5");
-    var process = pb.start();
+    var process = new ProcessBuilder("sleep", "600").start();
     var transport = new ProcessTransport(process.getInputStream(), process.getOutputStream());
     var registry = new HostFunctionRegistry();
     var channel = new RpcChannel(transport, registry, Duration.ofSeconds(1));
@@ -268,13 +286,12 @@ class JvmSandboxTest {
     sandbox.close();
 
     assertFalse(sandbox.isAlive());
-    assertFalse(process.isAlive());
+    Await.termination("the process close() destroys", process);
   }
 
   @Test
   void shutdownHookKillsLeakedProcess() throws Exception {
-    var pb = new ProcessBuilder("sleep", "30");
-    var process = pb.start();
+    var process = new ProcessBuilder("sleep", "600").start();
     var transport = new ProcessTransport(process.getInputStream(), process.getOutputStream());
     var registry = new HostFunctionRegistry();
     var channel = new RpcChannel(transport, registry, Duration.ofSeconds(1));
@@ -283,14 +300,12 @@ class JvmSandboxTest {
 
     assertTrue(process.isAlive());
     sandbox.destroyOnJvmShutdown();
-    assertTrue(process.waitFor(5, TimeUnit.SECONDS));
-    assertFalse(process.isAlive());
+    Await.termination("the leaked process the shutdown hook kills", process);
 
     sandbox.close();
   }
 
   @Test
-  @Timeout(value = 90, unit = TimeUnit.SECONDS)
   void closeKillsSubprocessDescendantsNotJustTheParent() throws Exception {
     // Theme E regression test: snippets can call Runtime.exec(...) and spawn descendants. Without
     // process.descendants().forEach(::destroyForcibly) the parent dies on sandbox.close() but its
@@ -308,70 +323,33 @@ class JvmSandboxTest {
               descendantPidHolder.set(Long.parseLong(raw.toString()));
               return null;
             }));
-    var config =
-        JvmSandboxConfig.newBuilder()
-            .withCallTimeout(Duration.ofSeconds(45))
-            .withExecutionTimeout(Duration.ofSeconds(30))
-            .build();
-
-    JvmSandbox sandbox = null;
-    try {
-      sandbox = JvmSandbox.create(config, registry);
-      var request =
-          ExecutionRequest.newBuilder()
-              .withCode(
-                  // 300s sleep — well beyond test timeout so we know any survival is a leak.
-                  "var grandchild = new ProcessBuilder(\"sleep\", \"300\").start();\n"
-                      + "submit(String.valueOf(grandchild.pid()));")
-              .withTimeout(Duration.ofSeconds(30))
-              .build();
-      var result = sandbox.execute(request);
+    try (var sandbox = JvmSandbox.create(END_TO_END, registry)) {
+      var result =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  "var grandchild = new ProcessBuilder(\"sleep\", \"600\").start();\n"
+                      + "submit(String.valueOf(grandchild.pid()));"));
       assertEquals(0, result.exitCode(), "snippet failed; stderr was:\n" + result.stderr());
-      var descendantPid = descendantPidHolder.get();
-      assertNotNull(descendantPid, "snippet did not submit a PID");
-      assertTrue(
-          ProcessHandle.of(descendantPid).map(ProcessHandle::isAlive).orElse(false),
-          "test precondition: descendant should be alive after the snippet runs");
+      var descendant = ProcessHandle.of(descendantPidHolder.get()).orElseThrow();
+      try {
+        assertTrue(descendant.isAlive(), "the descendant must be alive before the sandbox closes");
 
-      sandbox.close();
-      sandbox = null;
-
-      // Allow the OS a moment to deliver SIGKILL to the descendant.
-      var deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
-      boolean dead = false;
-      while (System.nanoTime() < deadline) {
-        if (!ProcessHandle.of(descendantPid).map(ProcessHandle::isAlive).orElse(false)) {
-          dead = true;
-          break;
-        }
-        Thread.sleep(50);
-      }
-      assertTrue(
-          dead,
-          "descendant PID "
-              + descendantPid
-              + " survived sandbox.close() — process.descendants() walk did not reap it");
-    } finally {
-      if (sandbox != null) {
         sandbox.close();
-      }
-      // Belt-and-braces: if the descendant is somehow still alive, kill it so the test machine
-      // doesn't leak processes.
-      var pid = descendantPidHolder.get();
-      if (pid != null) {
-        ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
+
+        Await.value("the descendant to die with the sandbox", descendant.onExit());
+      } finally {
+        descendant.destroyForcibly();
       }
     }
   }
 
   @Test
-  @Timeout(value = 30, unit = TimeUnit.SECONDS)
   void destroyOnJvmShutdownKillsDescendantsAsWellAsParent() throws Exception {
     // Same hardening, different entry point: destroyOnJvmShutdown is fired by the JVM shutdown
     // hook to reap a sandbox the application forgot to close(). It must walk descendants too.
     // The existing shutdownHookKillsLeakedProcess test covers parent-only termination via this
     // path — here we extend it to a parent-with-child shape.
-    var parentPb = new ProcessBuilder("sh", "-c", "sleep 60 & echo $! ; wait");
+    var parentPb = new ProcessBuilder("sh", "-c", "sleep 600 & echo $! ; wait");
     parentPb.redirectErrorStream(true);
     var parent = parentPb.start();
     long childPid;
@@ -382,47 +360,26 @@ class JvmSandboxTest {
       assertNotNull(line, "shell did not echo child PID");
       childPid = Long.parseLong(line.trim());
     }
+    var child = ProcessHandle.of(childPid).orElseThrow();
     try {
-      assertTrue(parent.isAlive());
-      assertTrue(
-          ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false),
-          "test precondition: descendant should be alive before we trigger the shutdown hook");
-
+      assertTrue(child.isAlive(), "the descendant must be alive before the shutdown hook runs");
       var transport = new ProcessTransport(parent.getInputStream(), parent.getOutputStream());
-      var registry = new HostFunctionRegistry();
-      var channel = new RpcChannel(transport, registry, Duration.ofSeconds(1));
+      var channel = new RpcChannel(transport, new HostFunctionRegistry(), BEYOND_HANG_GUARD);
       var sandbox = new JvmSandbox(parent, transport, channel, JvmSandboxConfig.defaults());
 
       sandbox.destroyOnJvmShutdown();
 
-      assertTrue(parent.waitFor(5, TimeUnit.SECONDS));
-      assertFalse(parent.isAlive(), "parent should be dead");
-
-      var deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
-      boolean childDead = false;
-      while (System.nanoTime() < deadline) {
-        if (!ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false)) {
-          childDead = true;
-          break;
-        }
-        Thread.sleep(50);
-      }
-      assertTrue(
-          childDead,
-          "descendant PID " + childPid + " survived destroyOnJvmShutdown — walk did not reap it");
+      Await.termination("the parent the shutdown hook kills", parent);
+      Await.value("the descendant to die with its parent", child.onExit());
       sandbox.close();
     } finally {
-      ProcessHandle.of(childPid).ifPresent(ProcessHandle::destroyForcibly);
-      if (parent.isAlive()) {
-        parent.destroyForcibly();
-      }
+      child.destroyForcibly();
     }
   }
 
   @Test
   void shutdownHookIsNoopAfterClose() throws Exception {
-    var pb = new ProcessBuilder("sleep", "30");
-    var process = pb.start();
+    var process = new ProcessBuilder("sleep", "600").start();
     var transport = new ProcessTransport(process.getInputStream(), process.getOutputStream());
     var registry = new HostFunctionRegistry();
     var channel = new RpcChannel(transport, registry, Duration.ofSeconds(1));
@@ -430,15 +387,14 @@ class JvmSandboxTest {
     var sandbox = new JvmSandbox(process, transport, channel, config);
 
     sandbox.close();
-    assertFalse(process.isAlive());
+    Await.termination("the process close() destroys", process);
     sandbox.destroyOnJvmShutdown();
     assertFalse(process.isAlive());
   }
 
   @Test
   void doubleCloseIsSafe() throws Exception {
-    var pb = new ProcessBuilder("sleep", "5");
-    var process = pb.start();
+    var process = new ProcessBuilder("sleep", "600").start();
     var transport = new ProcessTransport(process.getInputStream(), process.getOutputStream());
     var registry = new HostFunctionRegistry();
     var channel = new RpcChannel(transport, registry, Duration.ofSeconds(1));
@@ -453,8 +409,7 @@ class JvmSandboxTest {
 
   @Test
   void accessors() throws Exception {
-    var pb = new ProcessBuilder("sleep", "5");
-    var process = pb.start();
+    var process = new ProcessBuilder("sleep", "600").start();
     var transport = new ProcessTransport(process.getInputStream(), process.getOutputStream());
     var registry = new HostFunctionRegistry();
     var channel = new RpcChannel(transport, registry, Duration.ofSeconds(1));
@@ -470,8 +425,7 @@ class JvmSandboxTest {
 
   @Test
   void executeWithRequestTimeout() throws Exception {
-    var pb = new ProcessBuilder("sleep", "5");
-    var process = pb.start();
+    var process = new ProcessBuilder("sleep", "600").start();
     var transport = new ProcessTransport(process.getInputStream(), process.getOutputStream());
     var registry = new HostFunctionRegistry();
     var channel = new RpcChannel(transport, registry, Duration.ofMillis(100));
@@ -486,6 +440,7 @@ class JvmSandboxTest {
                 .build());
 
     assertEquals(1, result.exitCode());
+    assertTrue(result.stderr().contains("timed out"), result.stderr());
 
     sandbox.close();
   }
@@ -493,408 +448,121 @@ class JvmSandboxTest {
   @Test
   void executeWithDefaultTimeout() throws Exception {
     // When request has no timeout, the sandbox config timeout is used
-    var pb = new ProcessBuilder("sleep", "5");
-    var process = pb.start();
+    var process = new ProcessBuilder("sleep", "600").start();
     var transport = new ProcessTransport(process.getInputStream(), process.getOutputStream());
     var registry = new HostFunctionRegistry();
     var channel = new RpcChannel(transport, registry, Duration.ofMillis(100));
     var config = JvmSandboxConfig.newBuilder().withExecutionTimeout(Duration.ofMillis(100)).build();
     var sandbox = new JvmSandbox(process, transport, channel, config);
 
-    // Request with null timeout — should use config default
     var result = sandbox.execute(ExecutionRequest.java("1+1"));
 
     assertEquals(1, result.exitCode());
+    assertTrue(result.stderr().contains("timed out"), result.stderr());
 
     sandbox.close();
   }
 
   @Test
   void executeSuccessWithMapResult() throws Exception {
-    // Simulate a process that responds with a proper RPC response containing a Map result
-    var pipedToTransport = new PipedInputStream();
-    var processStdout = new PipedOutputStream(pipedToTransport);
-    var pipedFromTransport = new PipedOutputStream();
-    var processStdin = new PipedInputStream(pipedFromTransport);
+    try (var fake = new FakeSandboxProcess()) {
+      fake.answerNext(Map.of("stdout", "hello world", "stderr", "", "exitCode", 0));
 
-    var transport = new ProcessTransport(pipedToTransport, pipedFromTransport);
-    var registry = new HostFunctionRegistry();
-    var channel = new RpcChannel(transport, registry, Duration.ofSeconds(5));
-    var config = JvmSandboxConfig.defaults();
-    var process = new ProcessBuilder("sleep", "5").start();
-    var sandbox = new JvmSandbox(process, transport, channel, config);
+      var result = fake.sandbox().execute(ExecutionRequest.java("println(\"hello world\")"));
 
-    // Virtual thread to simulate the sandbox responding
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                // Read the request from stdin (we need to consume it to unblock)
-                var reader =
-                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
-                var line = reader.readLine();
-                if (line != null) {
-                  // Parse the request to get the id
-                  var reqJson = ProcessTransport.deserializeMessage(line);
-                  if (reqJson instanceof RpcMessage.Request req) {
-                    // Write a response with RPC prefix
-                    var respJson =
-                        ProcessTransport.serializeMessage(
-                            new RpcMessage.Response(
-                                req.id(),
-                                Map.of("stdout", "hello world", "stderr", "", "exitCode", 0)));
-                    processStdout.write(
-                        (ProcessTransport.RPC_PREFIX + respJson + "\n")
-                            .getBytes(StandardCharsets.UTF_8));
-                    processStdout.flush();
-                  }
-                }
-              } catch (IOException e) {
-                // Test may close streams
-              }
-            });
-
-    var result = sandbox.execute(ExecutionRequest.java("println(\"hello world\")"));
-
-    assertEquals(0, result.exitCode());
-    assertTrue(result.stdout().contains("hello world"));
-
-    sandbox.close();
-  }
-
-  @Test
-  void executeSuccessWithNonMapResult() throws Exception {
-    var pipedToTransport = new PipedInputStream();
-    var processStdout = new PipedOutputStream(pipedToTransport);
-    var pipedFromTransport = new PipedOutputStream();
-    var processStdin = new PipedInputStream(pipedFromTransport);
-
-    var transport = new ProcessTransport(pipedToTransport, pipedFromTransport);
-    var registry = new HostFunctionRegistry();
-    var channel = new RpcChannel(transport, registry, Duration.ofSeconds(5));
-    var config = JvmSandboxConfig.defaults();
-    var process = new ProcessBuilder("sleep", "5").start();
-    var sandbox = new JvmSandbox(process, transport, channel, config);
-
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                var reader =
-                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
-                var line = reader.readLine();
-                if (line != null) {
-                  var reqJson = ProcessTransport.deserializeMessage(line);
-                  if (reqJson instanceof RpcMessage.Request req) {
-                    var respJson =
-                        ProcessTransport.serializeMessage(
-                            new RpcMessage.Response(req.id(), "just a string"));
-                    processStdout.write(
-                        (ProcessTransport.RPC_PREFIX + respJson + "\n")
-                            .getBytes(StandardCharsets.UTF_8));
-                    processStdout.flush();
-                  }
-                }
-              } catch (IOException e) {
-                // Test may close streams
-              }
-            });
-
-    var result = sandbox.execute(ExecutionRequest.java("x"));
-
-    assertEquals(0, result.exitCode());
-    assertEquals("just a string", result.stdout());
-
-    sandbox.close();
-  }
-
-  @Test
-  void executeSuccessWithCapturedStdoutAndMapResult() throws Exception {
-    var pipedToTransport = new PipedInputStream();
-    var processStdout = new PipedOutputStream(pipedToTransport);
-    var pipedFromTransport = new PipedOutputStream();
-    var processStdin = new PipedInputStream(pipedFromTransport);
-
-    var transport = new ProcessTransport(pipedToTransport, pipedFromTransport);
-    var registry = new HostFunctionRegistry();
-    var channel = new RpcChannel(transport, registry, Duration.ofSeconds(5));
-    var config = JvmSandboxConfig.defaults();
-    var process = new ProcessBuilder("sleep", "5").start();
-    var sandbox = new JvmSandbox(process, transport, channel, config);
-
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                var reader =
-                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
-                var line = reader.readLine();
-                if (line != null) {
-                  var reqJson = ProcessTransport.deserializeMessage(line);
-                  if (reqJson instanceof RpcMessage.Request req) {
-                    // Write some non-RPC output first (captured stdout), then the RPC response
-                    processStdout.write("print output\n".getBytes(StandardCharsets.UTF_8));
-                    var respJson =
-                        ProcessTransport.serializeMessage(
-                            new RpcMessage.Response(
-                                req.id(),
-                                Map.of("stdout", "rpc stdout", "stderr", "", "exitCode", 0)));
-                    processStdout.write(
-                        (ProcessTransport.RPC_PREFIX + respJson + "\n")
-                            .getBytes(StandardCharsets.UTF_8));
-                    processStdout.flush();
-                  }
-                }
-              } catch (IOException e) {
-                // Test may close streams
-              }
-            });
-
-    var result = sandbox.execute(ExecutionRequest.java("println()"));
-
-    assertEquals(0, result.exitCode());
-    // Combined: captured stdout + rpc stdout
-    assertTrue(result.stdout().contains("print output"));
-    assertTrue(result.stdout().contains("rpc stdout"));
-
-    sandbox.close();
-  }
-
-  @Test
-  void executeSuccessMapWithSubmitted() throws Exception {
-    var pipedToTransport = new PipedInputStream();
-    var processStdout = new PipedOutputStream(pipedToTransport);
-    var pipedFromTransport = new PipedOutputStream();
-    var processStdin = new PipedInputStream(pipedFromTransport);
-
-    var transport = new ProcessTransport(pipedToTransport, pipedFromTransport);
-    var registry = new HostFunctionRegistry();
-    var channel = new RpcChannel(transport, registry, Duration.ofSeconds(5));
-    var config = JvmSandboxConfig.defaults();
-    var process = new ProcessBuilder("sleep", "5").start();
-    var sandbox = new JvmSandbox(process, transport, channel, config);
-
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                var reader =
-                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
-                var line = reader.readLine();
-                if (line != null) {
-                  var reqJson = ProcessTransport.deserializeMessage(line);
-                  if (reqJson instanceof RpcMessage.Request req) {
-                    var respJson =
-                        ProcessTransport.serializeMessage(
-                            new RpcMessage.Response(
-                                req.id(),
-                                Map.of(
-                                    "stdout",
-                                    "",
-                                    "stderr",
-                                    "warning",
-                                    "exitCode",
-                                    1,
-                                    "submitted",
-                                    "answer")));
-                    processStdout.write(
-                        (ProcessTransport.RPC_PREFIX + respJson + "\n")
-                            .getBytes(StandardCharsets.UTF_8));
-                    processStdout.flush();
-                  }
-                }
-              } catch (IOException e) {
-                // expected on close
-              }
-            });
-
-    var result = sandbox.execute(ExecutionRequest.java("code"));
-
-    assertEquals(1, result.exitCode());
-    assertEquals("warning", result.stderr());
-    assertEquals("answer", result.submitted());
-
-    sandbox.close();
-  }
-
-  @Test
-  void executeSuccessWithCapturedStdoutOnlyEmptyMapStdout() throws Exception {
-    var pipedToTransport = new PipedInputStream();
-    var processStdout = new PipedOutputStream(pipedToTransport);
-    var pipedFromTransport = new PipedOutputStream();
-    var processStdin = new PipedInputStream(pipedFromTransport);
-
-    var transport = new ProcessTransport(pipedToTransport, pipedFromTransport);
-    var registry = new HostFunctionRegistry();
-    var channel = new RpcChannel(transport, registry, Duration.ofSeconds(5));
-    var config = JvmSandboxConfig.defaults();
-    var process = new ProcessBuilder("sleep", "5").start();
-    var sandbox = new JvmSandbox(process, transport, channel, config);
-
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                var reader =
-                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
-                var line = reader.readLine();
-                if (line != null) {
-                  var reqJson = ProcessTransport.deserializeMessage(line);
-                  if (reqJson instanceof RpcMessage.Request req) {
-                    processStdout.write("captured line\n".getBytes(StandardCharsets.UTF_8));
-                    var respJson =
-                        ProcessTransport.serializeMessage(
-                            new RpcMessage.Response(
-                                req.id(), Map.of("stdout", "", "stderr", "", "exitCode", 0)));
-                    processStdout.write(
-                        (ProcessTransport.RPC_PREFIX + respJson + "\n")
-                            .getBytes(StandardCharsets.UTF_8));
-                    processStdout.flush();
-                  }
-                }
-              } catch (IOException e) {
-                // expected
-              }
-            });
-
-    var result = sandbox.execute(ExecutionRequest.java("x"));
-
-    assertEquals(0, result.exitCode());
-    assertEquals("captured line", result.stdout());
-
-    sandbox.close();
-  }
-
-  @Test
-  void executeSuccessMapWithNonStringFields() throws Exception {
-    // Cover branches where map values are NOT String/Number (fallback to defaults)
-    var pipedToTransport = new PipedInputStream();
-    var processStdout = new PipedOutputStream(pipedToTransport);
-    var pipedFromTransport = new PipedOutputStream();
-    var processStdin = new PipedInputStream(pipedFromTransport);
-
-    var transport = new ProcessTransport(pipedToTransport, pipedFromTransport);
-    var registry = new HostFunctionRegistry();
-    var channel = new RpcChannel(transport, registry, Duration.ofSeconds(5));
-    var config = JvmSandboxConfig.defaults();
-    var process = new ProcessBuilder("sleep", "5").start();
-    var sandbox = new JvmSandbox(process, transport, channel, config);
-
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                var reader =
-                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
-                var line = reader.readLine();
-                if (line != null) {
-                  var reqJson = ProcessTransport.deserializeMessage(line);
-                  if (reqJson instanceof RpcMessage.Request req) {
-                    // Return a map with non-standard types for stdout/stderr/exitCode
-                    var respJson =
-                        ProcessTransport.serializeMessage(
-                            new RpcMessage.Response(
-                                req.id(),
-                                Map.of("stdout", 123, "stderr", true, "exitCode", "not-a-number")));
-                    processStdout.write(
-                        (ProcessTransport.RPC_PREFIX + respJson + "\n")
-                            .getBytes(StandardCharsets.UTF_8));
-                    processStdout.flush();
-                  }
-                }
-              } catch (IOException e) {
-                // expected on close
-              }
-            });
-
-    var result = sandbox.execute(ExecutionRequest.java("x"));
-
-    // Non-string stdout/stderr should default to ""
-    assertEquals("", result.stdout());
-    assertEquals("", result.stderr());
-    // Non-number exitCode should default to 0
-    assertEquals(0, result.exitCode());
-
-    sandbox.close();
-  }
-
-  @Test
-  void executeSuccessNonMapResultWithCapturedStdout() throws Exception {
-    // Cover the branch: capturedStdout is not empty AND result is not a Map
-    var pipedToTransport = new PipedInputStream();
-    var processStdout = new PipedOutputStream(pipedToTransport);
-    var pipedFromTransport = new PipedOutputStream();
-    var processStdin = new PipedInputStream(pipedFromTransport);
-
-    var transport = new ProcessTransport(pipedToTransport, pipedFromTransport);
-    var registry = new HostFunctionRegistry();
-    var channel = new RpcChannel(transport, registry, Duration.ofSeconds(5));
-    var config = JvmSandboxConfig.defaults();
-    var process = new ProcessBuilder("sleep", "5").start();
-    var sandbox = new JvmSandbox(process, transport, channel, config);
-
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                var reader =
-                    new BufferedReader(new InputStreamReader(processStdin, StandardCharsets.UTF_8));
-                var line = reader.readLine();
-                if (line != null) {
-                  var reqJson = ProcessTransport.deserializeMessage(line);
-                  if (reqJson instanceof RpcMessage.Request req) {
-                    // Write captured stdout first
-                    processStdout.write("captured output\n".getBytes(StandardCharsets.UTF_8));
-                    // Return a non-map result (a string)
-                    var respJson =
-                        ProcessTransport.serializeMessage(
-                            new RpcMessage.Response(req.id(), "plain result"));
-                    processStdout.write(
-                        (ProcessTransport.RPC_PREFIX + respJson + "\n")
-                            .getBytes(StandardCharsets.UTF_8));
-                    processStdout.flush();
-                  }
-                }
-              } catch (IOException e) {
-                // expected on close
-              }
-            });
-
-    var result = sandbox.execute(ExecutionRequest.java("x"));
-
-    // When captured stdout is not empty and result is not a Map, capturedStdout wins
-    assertEquals("captured output", result.stdout());
-    assertEquals(0, result.exitCode());
-
-    sandbox.close();
-  }
-
-  @Test
-  void createStaticMethodLaunchesSubprocess() {
-    // The create() method tries to start a JVM subprocess with the bootstrap class
-    // which doesn't exist yet, so it will fail - but we exercise the code path
-    var config = JvmSandboxConfig.defaults();
-    var registry = new HostFunctionRegistry();
-
-    // The bootstrap class doesn't exist, so this will either:
-    // 1. Start the process but it will fail immediately (no main class)
-    // 2. The channel reader will detect the process died
-    // Either way, we cover the create() code path
-    JvmSandbox sandbox = null;
-    try {
-      sandbox = JvmSandbox.create(config, registry);
-      // If it gets here, the process started (but may die soon)
-      assertNotNull(sandbox);
-      assertTrue(registry.isFrozen());
-    } finally {
-      if (sandbox != null) {
-        sandbox.close();
-      }
+      assertEquals(0, result.exitCode());
+      assertTrue(result.stdout().contains("hello world"));
     }
   }
 
   @Test
-  @Timeout(value = 90, unit = TimeUnit.SECONDS)
+  void executeSuccessWithNonMapResult() throws Exception {
+    try (var fake = new FakeSandboxProcess()) {
+      fake.answerNext("just a string");
+
+      var result = fake.sandbox().execute(ExecutionRequest.java("x"));
+
+      assertEquals(0, result.exitCode());
+      assertEquals("just a string", result.stdout());
+    }
+  }
+
+  @Test
+  void executeSuccessWithCapturedStdoutAndMapResult() throws Exception {
+    try (var fake = new FakeSandboxProcess()) {
+      fake.answerNext(Map.of("stdout", "rpc stdout", "stderr", "", "exitCode", 0), "print output");
+
+      var result = fake.sandbox().execute(ExecutionRequest.java("println()"));
+
+      assertEquals(0, result.exitCode());
+      assertEquals("print output\nrpc stdout", result.stdout());
+    }
+  }
+
+  @Test
+  void executeSuccessMapWithSubmitted() throws Exception {
+    try (var fake = new FakeSandboxProcess()) {
+      fake.answerNext(
+          Map.of("stdout", "", "stderr", "warning", "exitCode", 1, "submitted", "answer"));
+
+      var result = fake.sandbox().execute(ExecutionRequest.java("code"));
+
+      assertEquals(1, result.exitCode());
+      assertEquals("warning", result.stderr());
+      assertEquals("answer", result.submitted());
+    }
+  }
+
+  @Test
+  void executeSuccessWithCapturedStdoutOnlyEmptyMapStdout() throws Exception {
+    try (var fake = new FakeSandboxProcess()) {
+      fake.answerNext(Map.of("stdout", "", "stderr", "", "exitCode", 0), "captured line");
+
+      var result = fake.sandbox().execute(ExecutionRequest.java("x"));
+
+      assertEquals(0, result.exitCode());
+      assertEquals("captured line", result.stdout());
+    }
+  }
+
+  /** Map values of the wrong type fall back to an empty string and exit code 0. */
+  @Test
+  void executeSuccessMapWithNonStringFields() throws Exception {
+    try (var fake = new FakeSandboxProcess()) {
+      fake.answerNext(Map.of("stdout", 123, "stderr", true, "exitCode", "not-a-number"));
+
+      var result = fake.sandbox().execute(ExecutionRequest.java("x"));
+
+      assertEquals("", result.stdout());
+      assertEquals("", result.stderr());
+      assertEquals(0, result.exitCode());
+    }
+  }
+
+  /** With captured output and a result that is not a map, the captured output wins. */
+  @Test
+  void executeSuccessNonMapResultWithCapturedStdout() throws Exception {
+    try (var fake = new FakeSandboxProcess()) {
+      fake.answerNext("plain result", "captured output");
+
+      var result = fake.sandbox().execute(ExecutionRequest.java("x"));
+
+      assertEquals("captured output", result.stdout());
+      assertEquals(0, result.exitCode());
+    }
+  }
+
+  @Test
+  void createStaticMethodLaunchesSubprocess() {
+    var registry = new HostFunctionRegistry();
+
+    try (var sandbox = JvmSandbox.create(END_TO_END, registry)) {
+      assertNotNull(sandbox);
+      assertTrue(registry.isFrozen());
+    }
+  }
+
+  @Test
   void endToEndSubprocessCallsHostBridgeAndSubmits() {
     // Real end-to-end: launch a sandbox subprocess, evaluate JShell code that calls
     // HostBridge.submit, confirm the submitted value flows back. This is the regression test
@@ -909,22 +577,13 @@ class JvmSandboxTest {
               submittedHolder.set(params.get("output"));
               return null;
             }));
-    var config =
-        JvmSandboxConfig.newBuilder()
-            .withCallTimeout(Duration.ofSeconds(45))
-            .withExecutionTimeout(Duration.ofSeconds(30))
-            .build();
-
     JvmSandbox sandbox = null;
     try {
-      sandbox = JvmSandbox.create(config, registry);
+      sandbox = JvmSandbox.create(END_TO_END, registry);
       assertTrue(sandbox.isAlive(), "subprocess should be running after create");
 
       var request =
-          ExecutionRequest.newBuilder()
-              .withCode("submit(\"hello-from-sandbox\");")
-              .withTimeout(Duration.ofSeconds(30))
-              .build();
+          ExecutionRequest.newBuilder().withCode("submit(\"hello-from-sandbox\");").build();
       var result = sandbox.execute(request);
 
       assertEquals(0, result.exitCode(), "exitCode != 0; stderr was:\n" + result.stderr());
@@ -933,13 +592,12 @@ class JvmSandboxTest {
       if (sandbox != null) {
         var proc = sandbox.process();
         sandbox.close();
-        assertFalse(proc.isAlive(), "subprocess should be dead after sandbox.close()");
+        Await.termination("the subprocess to die after sandbox.close()", proc);
       }
     }
   }
 
   @Test
-  @Timeout(value = 90, unit = TimeUnit.SECONDS)
   void endToEndSubprocessInvokesSynthesizedCustomHostFunction() {
     // The full Skill-host-function path under one test: register a custom HostFunction with
     // declared parameters, launch a subprocess, have it execute Java that calls the synthesized
@@ -964,15 +622,9 @@ class JvmSandboxTest {
               capturedArgs.set(params);
               return Map.of("price", 234.56, "ticker", params.get("ticker"));
             }));
-    var config =
-        JvmSandboxConfig.newBuilder()
-            .withCallTimeout(Duration.ofSeconds(45))
-            .withExecutionTimeout(Duration.ofSeconds(30))
-            .build();
-
     JvmSandbox sandbox = null;
     try {
-      sandbox = JvmSandbox.create(config, registry);
+      sandbox = JvmSandbox.create(END_TO_END, registry);
       assertTrue(sandbox.isAlive(), "subprocess should be running after create");
 
       // Sandbox code calls the synthesized typed wrapper. Note we deliberately do NOT pass an
@@ -984,7 +636,6 @@ class JvmSandboxTest {
                   var q = marketQuote("AAPL", 5L);
                   println(q);
                   """)
-              .withTimeout(Duration.ofSeconds(30))
               .build();
       var result = sandbox.execute(request);
 
@@ -999,26 +650,19 @@ class JvmSandboxTest {
       if (sandbox != null) {
         var proc = sandbox.process();
         sandbox.close();
-        assertFalse(proc.isAlive(), "subprocess should be dead after sandbox.close()");
+        Await.termination("the subprocess to die after sandbox.close()", proc);
       }
     }
   }
 
   @Test
-  @Timeout(value = 90, unit = TimeUnit.SECONDS)
   void endToEndSubprocessReturnsBindingsSnapshot() {
     // Variables bound during execute_code should come back in ExecutionResult.bindings(),
     // filtered to exclude __-prefixed harness internals and capped per-value.
     var registry = new HostFunctionRegistry();
-    var config =
-        JvmSandboxConfig.newBuilder()
-            .withCallTimeout(Duration.ofSeconds(45))
-            .withExecutionTimeout(Duration.ofSeconds(30))
-            .build();
-
     JvmSandbox sandbox = null;
     try {
-      sandbox = JvmSandbox.create(config, registry);
+      sandbox = JvmSandbox.create(END_TO_END, registry);
       var request =
           ExecutionRequest.newBuilder()
               .withCode(
@@ -1027,7 +671,6 @@ class JvmSandboxTest {
                   var count = 42;
                   var __internal = "should be hidden";
                   """)
-              .withTimeout(Duration.ofSeconds(30))
               .build();
       var result = sandbox.execute(request, ExecuteParams.DEFAULT);
 
@@ -1048,18 +691,11 @@ class JvmSandboxTest {
   }
 
   @Test
-  @Timeout(value = 90, unit = TimeUnit.SECONDS)
   void endToEndSubprocessRespectsBindingValueCap() {
     var registry = new HostFunctionRegistry();
-    var config =
-        JvmSandboxConfig.newBuilder()
-            .withCallTimeout(Duration.ofSeconds(45))
-            .withExecutionTimeout(Duration.ofSeconds(30))
-            .build();
-
     JvmSandbox sandbox = null;
     try {
-      sandbox = JvmSandbox.create(config, registry);
+      sandbox = JvmSandbox.create(END_TO_END, registry);
       var request =
           ExecutionRequest.newBuilder()
               .withCode(
@@ -1067,7 +703,6 @@ class JvmSandboxTest {
                   var huge = "x".repeat(5000);
                   var small = 7;
                   """)
-              .withTimeout(Duration.ofSeconds(30))
               .build();
       var executeParams = new ExecuteParams(true, /* perValue= */ 50, 16 * 1024);
       var result = sandbox.execute(request, executeParams);
@@ -1090,23 +725,12 @@ class JvmSandboxTest {
   }
 
   @Test
-  @Timeout(value = 90, unit = TimeUnit.SECONDS)
   void endToEndSubprocessOmitsBindingsWhenDisabled() {
     var registry = new HostFunctionRegistry();
-    var config =
-        JvmSandboxConfig.newBuilder()
-            .withCallTimeout(Duration.ofSeconds(45))
-            .withExecutionTimeout(Duration.ofSeconds(30))
-            .build();
-
     JvmSandbox sandbox = null;
     try {
-      sandbox = JvmSandbox.create(config, registry);
-      var request =
-          ExecutionRequest.newBuilder()
-              .withCode("var x = 1;")
-              .withTimeout(Duration.ofSeconds(30))
-              .build();
+      sandbox = JvmSandbox.create(END_TO_END, registry);
+      var request = ExecutionRequest.newBuilder().withCode("var x = 1;").build();
       var result = sandbox.execute(request, ExecuteParams.DISABLED);
 
       assertEquals(0, result.exitCode());
@@ -1119,28 +743,17 @@ class JvmSandboxTest {
   }
 
   @Test
-  @Timeout(value = 90, unit = TimeUnit.SECONDS)
   void endToEndSubprocessReturnsExecutedCodeOnResult() {
     // 1.1.5 ask #3: ExecutionResult carries the source code that ran. Capture is parent-side
     // (no protocol change) — JvmSandbox sets executedCode from ExecutionRequest.code() before
     // returning. This is the substrate for live "user watches the agent think" UX panels that
     // show code + bindings side-by-side.
     var registry = new HostFunctionRegistry();
-    var config =
-        JvmSandboxConfig.newBuilder()
-            .withCallTimeout(Duration.ofSeconds(45))
-            .withExecutionTimeout(Duration.ofSeconds(30))
-            .build();
-
     JvmSandbox sandbox = null;
     try {
-      sandbox = JvmSandbox.create(config, registry);
+      sandbox = JvmSandbox.create(END_TO_END, registry);
       var snippet = "var x = 42; var y = \"hello\"; println(x + \" \" + y);";
-      var request =
-          ExecutionRequest.newBuilder()
-              .withCode(snippet)
-              .withTimeout(Duration.ofSeconds(30))
-              .build();
+      var request = ExecutionRequest.newBuilder().withCode(snippet).build();
       var result = sandbox.execute(request);
 
       assertEquals(0, result.exitCode(), "stderr was:\n" + result.stderr());
@@ -1155,7 +768,6 @@ class JvmSandboxTest {
   }
 
   @Test
-  @Timeout(value = 90, unit = TimeUnit.SECONDS)
   void endToEndSubprocessHandlesZeroArgCustomFunction() {
     // Zero-param functions synthesize as bare-call wrappers like listSymbols(). Verify the
     // synthesis produces something a model can actually invoke from JShell.
@@ -1163,15 +775,9 @@ class JvmSandboxTest {
     registry.register(
         new com.standardapplied.helios.repl.host.HostFunction(
             "listSymbols", "All known tickers", params -> List.of("AAPL", "GOOG", "MSFT")));
-    var config =
-        JvmSandboxConfig.newBuilder()
-            .withCallTimeout(Duration.ofSeconds(45))
-            .withExecutionTimeout(Duration.ofSeconds(30))
-            .build();
-
     JvmSandbox sandbox = null;
     try {
-      sandbox = JvmSandbox.create(config, registry);
+      sandbox = JvmSandbox.create(END_TO_END, registry);
       var request =
           ExecutionRequest.newBuilder()
               .withCode(
@@ -1183,7 +789,6 @@ class JvmSandboxTest {
                   println(symbols.size());
                   println(symbols);
                   """)
-              .withTimeout(Duration.ofSeconds(30))
               .build();
       var result = sandbox.execute(request);
       assertEquals(0, result.exitCode(), "exitCode != 0; stderr was:\n" + result.stderr());
@@ -1196,66 +801,35 @@ class JvmSandboxTest {
     }
   }
 
+  /**
+   * A CPU-bound snippet that never checks its interrupt flag cannot end on its own, so a result at
+   * all proves the timeout's escalation (interrupt, then {@code jshell.stop()}) ended it. The
+   * follow-up call proves the stopped snippet did not leave the sandbox unusable.
+   */
   @Test
-  @Timeout(value = 90, unit = TimeUnit.SECONDS)
-  void uninterruptibleSnippetTimesOutWithoutWedgingTheSandbox() throws Exception {
-    // Theme E regression test: a CPU-bound snippet that doesn't check Thread.interrupt() used to
-    // outlive the timeout — Thread.interrupt() + 1 s join returned with the thread still running,
-    // and the dispatch path completed, but the snippet thread persisted as a zombie holding
-    // refs to capture streams. The escalation chain now goes interrupt → 1 s join → jshell.stop()
-    // → 1 s join. This test runs a CPU loop with a short execution timeout, asserts the dispatch
-    // returns promptly with the "timed out" stderr marker, and asserts the same sandbox is still
-    // usable for a follow-up call (proving the zombie thread didn't break it).
-    var registry = new HostFunctionRegistry();
-    var config =
-        JvmSandboxConfig.newBuilder()
-            .withCallTimeout(Duration.ofSeconds(45))
-            .withExecutionTimeout(Duration.ofSeconds(2))
-            .build();
-
-    JvmSandbox sandbox = null;
-    try {
-      sandbox = JvmSandbox.create(config, registry);
+  void uninterruptibleSnippetTimesOutWithoutWedgingTheSandbox() {
+    try (var sandbox = JvmSandbox.create(END_TO_END, new HostFunctionRegistry())) {
       var tightLoop =
           ExecutionRequest.newBuilder()
               .withCode("long count = 0; while (true) { count++; }")
               .withTimeout(Duration.ofMillis(800))
               .build();
-      var startNanos = System.nanoTime();
+
       var result = sandbox.execute(tightLoop);
-      var elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;
 
       assertEquals(1, result.exitCode(), "uninterruptible loop should exit 1");
       assertTrue(
           result.stderr().contains("Execution timed out"),
           "expected timeout marker; stderr was:\n" + result.stderr());
-      assertTrue(
-          elapsedMs < 10_000L,
-          "dispatch should return within ~10 s (interrupt + jshell.stop ladder); took "
-              + elapsedMs
-              + " ms");
-
-      // The sandbox must still be usable — the zombie thread, if any, must not corrupt subsequent
-      // executes. Without jshell.stop the underlying JShell engine could be left in a bad state.
-      var followup =
-          ExecutionRequest.newBuilder()
-              .withCode("var x = 1 + 1;")
-              .withTimeout(Duration.ofSeconds(5))
-              .build();
-      var followupResult = sandbox.execute(followup);
+      var followupResult = sandbox.execute(ExecutionRequest.java("var x = 1 + 1;"));
       assertEquals(
           0,
           followupResult.exitCode(),
           "follow-up execute should succeed; stderr was:\n" + followupResult.stderr());
-    } finally {
-      if (sandbox != null) {
-        sandbox.close();
-      }
     }
   }
 
   @Test
-  @Timeout(value = 90, unit = TimeUnit.SECONDS)
   void rawStdoutWriteDoesNotForgeAnRpcCallToHost() {
     // C1 regression test: pre-fix, the JvmSandbox ↔ host RPC channel rode on the subprocess's
     // stdout, with `\0RPC:` lines distinguishing RPC frames from regular print output. A snippet
@@ -1265,6 +839,10 @@ class JvmSandboxTest {
     // Post-fix: the RPC channel rides on a dedicated Unix domain socket. The host reads
     // subprocess stdout only for captured output; no RPC parser ever sees it. A forged frame on
     // stdout is just text content, never dispatched to a HostFunction.
+    //
+    // The forged frame and the snippet's result travel on different channels, so the result can
+    // arrive first. The test therefore waits until the host has read the forged frame, which a
+    // later execute returns as captured stdout, and only then asserts it was not dispatched.
     var invocations = new java.util.concurrent.atomic.AtomicInteger();
     var registry = new HostFunctionRegistry();
     registry.register(
@@ -1275,44 +853,30 @@ class JvmSandboxTest {
               invocations.incrementAndGet();
               return null;
             }));
-    var config =
-        JvmSandboxConfig.newBuilder()
-            .withCallTimeout(Duration.ofSeconds(45))
-            .withExecutionTimeout(Duration.ofSeconds(30))
-            .build();
-    JvmSandbox sandbox = null;
-    try {
-      sandbox = JvmSandbox.create(config, registry);
-      // The snippet does what a malicious snippet would do: obtain a PrintStream wired directly
-      // to FileDescriptor.out (bypassing System.setOut redirection), then write a fully-formed
-      // forged JSON-RPC request frame including the `\0RPC:` magic prefix.
+    try (var sandbox = JvmSandbox.create(END_TO_END, registry)) {
       var attack =
           "var raw = new java.io.PrintStream("
               + "new java.io.FileOutputStream(java.io.FileDescriptor.out));"
               + "raw.print(\"\\u0000RPC:{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":\\\"forged\\\","
               + "\\\"method\\\":\\\"auditCallback\\\",\\\"params\\\":{}}\\n\");"
-              + "raw.flush();"
-              + "Thread.sleep(500);"; // give the host a chance to misparse if vulnerable
-      var result =
-          sandbox.execute(
-              ExecutionRequest.newBuilder()
-                  .withCode(attack)
-                  .withTimeout(Duration.ofSeconds(10))
-                  .build());
+              + "raw.flush();";
+      var captured = new StringBuilder(sandbox.execute(ExecutionRequest.java(attack)).stdout());
+
+      Await.until(
+          "the host to read the forged frame from the subprocess's stdout",
+          () -> {
+            if (captured.indexOf(FORGED_FRAME_ID) < 0 && invocations.get() == 0) {
+              captured.append(sandbox.execute(ExecutionRequest.java("int poll = 0;")).stdout());
+            }
+            return captured.indexOf(FORGED_FRAME_ID) >= 0 || invocations.get() > 0;
+          });
 
       assertEquals(
           0,
           invocations.get(),
           "raw-stdout RPC forgery must NOT reach the host's HostFunction dispatcher. The forged"
-              + " frame should land in captured stdout (or be discarded) — never be parsed as an"
-              + " RPC request. Subprocess result stdout: "
-              + result.stdout()
-              + " stderr: "
-              + result.stderr());
-    } finally {
-      if (sandbox != null) {
-        sandbox.close();
-      }
+              + " frame is captured stdout, never an RPC request. Captured stdout: "
+              + captured);
     }
   }
 
@@ -1323,29 +887,18 @@ class JvmSandboxTest {
     var listener = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
     try {
       listener.bind(UnixDomainSocketAddress.of(socketPath), 1);
-      var clientConnected = new CountDownLatch(1);
-      Thread.ofVirtual()
-          .start(
-              () -> {
-                try {
-                  Thread.sleep(50);
-                  var client = SocketChannel.open(StandardProtocolFamily.UNIX);
-                  client.connect(UnixDomainSocketAddress.of(socketPath));
-                  clientConnected.countDown();
-                  Thread.sleep(200);
-                  client.close();
-                } catch (Exception ignored) {
-                }
-              });
-      var accepted = JvmSandbox.acceptWithTimeout(listener, Duration.ofSeconds(5));
-      assertTrue(
-          clientConnected.await(5, TimeUnit.SECONDS), "client must connect within test budget");
-      assertNotNull(accepted, "successful accept must return the client channel");
-      assertFalse(
-          listener.isOpen(),
-          "acceptWithTimeout owns the listener: it must close on the success path so the caller"
-              + " does not double-close from a downstream cleanup");
-      accepted.close();
+      try (var client = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+        client.connect(UnixDomainSocketAddress.of(socketPath));
+
+        var accepted = JvmSandbox.acceptWithTimeout(listener, BEYOND_HANG_GUARD);
+
+        assertNotNull(accepted, "successful accept must return the client channel");
+        assertFalse(
+            listener.isOpen(),
+            "acceptWithTimeout owns the listener: it must close on the success path so the caller"
+                + " does not double-close from a downstream cleanup");
+        accepted.close();
+      }
     } finally {
       if (listener.isOpen()) {
         listener.close();
@@ -1377,11 +930,18 @@ class JvmSandboxTest {
     }
   }
 
+  /**
+   * The subprocess is given a heap too small for a JVM to start, so it exits without ever
+   * connecting and only the startup timeout can end the wait for it.
+   */
   @Test
-  @Timeout(value = 30, unit = TimeUnit.SECONDS)
   void subprocessStartupTimeoutHonoursConfigAndSurfacesDurationInError() {
-    var startupTimeout = Duration.ofMillis(1);
-    var config = JvmSandboxConfig.newBuilder().withSubprocessStartupTimeout(startupTimeout).build();
+    var startupTimeout = Duration.ofMillis(50);
+    var config =
+        JvmSandboxConfig.newBuilder()
+            .withMaxHeapMb(1)
+            .withSubprocessStartupTimeout(startupTimeout)
+            .build();
     var registry = new HostFunctionRegistry();
     var thrown =
         assertThrows(
@@ -1399,7 +959,6 @@ class JvmSandboxTest {
   }
 
   @Test
-  @Timeout(value = 90, unit = TimeUnit.SECONDS)
   void reflectionForgesAnRpcCallToHost() {
     // EXPLOIT regression test for the limit C1 does NOT close:
     //
@@ -1427,25 +986,18 @@ class JvmSandboxTest {
     // (precise C1 javadoc) plus a one-time WARNING at bootstrap startup when the module is
     // unnamed — NOT closing the reflection gap, which is unreachable from inside a single-JVM
     // sandbox without OS-level isolation (Incus is the load-bearing boundary). If a future
-    // change ever does close this gap, flip this test to assertEquals(0, ...).
-    var invocations = new java.util.concurrent.atomic.AtomicInteger();
+    // change ever does close this gap, flip this test to assert the callback is never invoked.
+    var forgedCallArrived = new CountDownLatch(1);
     var registry = new HostFunctionRegistry();
     registry.register(
         new com.standardapplied.helios.repl.host.HostFunction(
             "auditCallback",
             "test capture for forged RPC invocations",
             params -> {
-              invocations.incrementAndGet();
+              forgedCallArrived.countDown();
               return null;
             }));
-    var config =
-        JvmSandboxConfig.newBuilder()
-            .withCallTimeout(Duration.ofSeconds(45))
-            .withExecutionTimeout(Duration.ofSeconds(30))
-            .build();
-    JvmSandbox sandbox = null;
-    try {
-      sandbox = JvmSandbox.create(config, registry);
+    try (var sandbox = JvmSandbox.create(END_TO_END, registry)) {
       // The attack: Class.forName the bootstrap (its location is on the JShell classpath via
       // addHostBridgeToJShellClasspath, since HostBridge sits in the same jar), grab the static
       // `instance` field reflectively, then pull `realOut` (which IS the RPC socket PrintStream
@@ -1463,30 +1015,14 @@ class JvmSandboxTest {
               + "\\\"id\\\":\\\"forged-refl-1\\\","
               + "\\\"method\\\":\\\"auditCallback\\\",\\\"params\\\":{}}\\n\");"
               + "  out.flush();"
-              + "}"
-              + "Thread.sleep(500);";
-      var result =
-          sandbox.execute(
-              ExecutionRequest.newBuilder()
-                  .withCode(attack)
-                  .withTimeout(Duration.ofSeconds(15))
-                  .build());
+              + "}";
 
-      assertTrue(
-          invocations.get() >= 1,
-          "Reflection-based RPC forgery should reach the host's HostFunction dispatcher in"
-              + " classpath launch mode. invocations="
-              + invocations.get()
-              + " result.exitCode="
-              + result.exitCode()
-              + " stdout="
-              + result.stdout()
-              + " stderr="
-              + result.stderr());
-    } finally {
-      if (sandbox != null) {
-        sandbox.close();
-      }
+      var result = sandbox.execute(ExecutionRequest.java(attack));
+
+      assertEquals(0, result.exitCode(), "the attack snippet failed; stderr:\n" + result.stderr());
+      Await.latch(
+          "the reflection-forged RPC call to reach the host's HostFunction dispatcher",
+          forgedCallArrived);
     }
   }
 

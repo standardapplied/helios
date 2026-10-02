@@ -7,26 +7,24 @@ package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.standardapplied.helios.core.test.Await;
 import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
-import java.net.ServerSocket;
-import java.net.SocketTimeoutException;
+import java.net.InetSocketAddress;
+import java.nio.channels.ServerSocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -62,23 +60,31 @@ class IsolatedDeploymentTest {
           "--memory",
           "1g");
 
+  /**
+   * The shell exits at once and leaves a child holding its output open for ten minutes. Getting the
+   * outcome at all proves {@code run} waits for the process, not for its output to close.
+   */
   @Test
-  void processTimeoutDoesNotWaitForOutputToClose() {
-    var sleep = findOnPath("sleep");
-    assumeTrue(sleep != null, "sleep is not on PATH; process timeout probe unavailable");
-    assertTimeoutPreemptively(
-        Duration.ofSeconds(5),
-        () -> {
-          var ex = assertThrows(IllegalStateException.class, () -> run(List.of(sleep, "3"), 1));
-          assertTrue(ex.getMessage().startsWith("timed out after 1s:"), ex::getMessage);
-        });
+  void processRunDoesNotWaitForOutputToClose() throws Exception {
+    var shell = findOnPath("sh");
+    assumeTrue(shell != null, "sh is not on PATH; process output probe unavailable");
+
+    var outcome = run(List.of(shell, "-c", "sleep 600 & echo $!"));
+
+    var outputHolder = ProcessHandle.of(Long.parseLong(outcome.output().strip())).orElseThrow();
+    try {
+      assertEquals(0, outcome.exitCode());
+      assertTrue(outputHolder.isAlive(), "the child holding the output must still be running");
+    } finally {
+      outputHolder.destroyForcibly();
+    }
   }
 
   @Test
   void processOutputLargerThanAPipeBufferIsCaptured() throws Exception {
     var shell = findOnPath("sh");
     assumeTrue(shell != null, "sh is not on PATH; process output probe unavailable");
-    var outcome = run(List.of(shell, "-c", "printf '%131072s' x; printf 'stderr' >&2"), 5);
+    var outcome = run(List.of(shell, "-c", "printf '%131072s' x; printf 'stderr' >&2"));
     assertEquals(0, outcome.exitCode());
     assertEquals(" ".repeat(131071) + "xstderr", outcome.output());
   }
@@ -97,7 +103,7 @@ class IsolatedDeploymentTest {
     baseCommand.addAll(RECIPE);
     baseCommand.addAll(mountsForHostUserland(rootfs));
 
-    var preflight = run(concat(baseCommand, "--rootfs", rootfs + ":O", "/usr/bin/true"), 90);
+    var preflight = run(concat(baseCommand, "--rootfs", rootfs + ":O", "/usr/bin/true"));
     assumeTrue(
         preflight.exitCode() == 0,
         "rootless podman cannot start a rootfs container here; isolated deployment not verified: "
@@ -106,7 +112,9 @@ class IsolatedDeploymentTest {
     var marker = "SENTINEL-" + UUID.randomUUID();
     var sentinel = hostDir.resolve("sentinel.txt");
     Files.writeString(sentinel, marker);
-    try (var listener = new ServerSocket(0, 1, InetAddress.ofLiteral("127.0.0.1"))) {
+    try (var listener = ServerSocketChannel.open()) {
+      listener.bind(new InetSocketAddress(InetAddress.ofLiteral("127.0.0.1"), 0), 1);
+      listener.configureBlocking(false);
       var command = new ArrayList<>(baseCommand);
       var javaBin = System.getProperty("java.home") + "/bin/java";
       var launch = JvmSandbox.buildLaunchCommand(javaBin, JvmSandboxConfig.defaults());
@@ -120,18 +128,17 @@ class IsolatedDeploymentTest {
           List.of(
               IsolatedDeploymentProbe.class.getName(),
               sentinel.toString(),
-              String.valueOf(listener.getLocalPort())));
+              String.valueOf(listener.socket().getLocalPort())));
 
-      var outcome = run(command, 300);
+      var outcome = run(command);
       assertEquals(0, outcome.exitCode(), () -> "container run failed: " + outcome.output());
       assertTrue(outcome.output().contains("FS:DENIED"), outcome::output);
       assertTrue(outcome.output().contains("NET:DENIED"), outcome::output);
       assertFalse(outcome.output().contains(marker), outcome::output);
-      listener.setSoTimeout(500);
-      assertThrows(
-          SocketTimeoutException.class,
-          listener::accept,
-          "host listener must never receive a connection from the isolated sandbox");
+      assertNull(
+          listener.accept(),
+          "the container has exited, so a connection it made would be waiting on the host"
+              + " listener; the isolated sandbox must never reach it");
     }
   }
 
@@ -205,8 +212,7 @@ class IsolatedDeploymentTest {
 
   private record Outcome(int exitCode, String output) {}
 
-  private static Outcome run(List<String> command, int timeoutSeconds)
-      throws IOException, InterruptedException {
+  private static Outcome run(List<String> command) throws IOException {
     var output = Files.createTempFile("podman-probe-", ".log");
     try {
       var process =
@@ -216,9 +222,7 @@ class IsolatedDeploymentTest {
               .start();
       try {
         process.getOutputStream().close();
-        if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-          throw new IllegalStateException("timed out after " + timeoutSeconds + "s: " + command);
-        }
+        Await.termination("the process to exit: " + command, process);
         return new Outcome(process.exitValue(), Files.readString(output, StandardCharsets.UTF_8));
       } finally {
         process.descendants().forEach(ProcessHandle::destroyForcibly);
