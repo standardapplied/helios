@@ -186,7 +186,7 @@ class ArchitectureRulesTest {
                 .and(target(name("now")))
                 .or(targetOwner(type(System.class)).and(target(name("currentTimeMillis")))))
         .because(
-            "a static now() or System.currentTimeMillis() cannot be driven by a test: "
+            "a static now() or currentTimeMillis() read cannot be driven by a test: "
                 + TIME_SEAM
                 + ", then reads clock.instant()")
         .check(LIBRARY);
