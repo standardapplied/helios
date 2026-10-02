@@ -12,25 +12,30 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.SessionOptions;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse.BodyHandlers;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
 final class AgentHttpServiceIntegrationTest {
 
-  private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(10);
+  private static final Duration HTTP_TIMEOUT = Await.HANG_GUARD;
   private final JsonMapper mapper = JsonMapper.builder().build();
 
   /** Default model used by tests — returns a fixed response on every chat call. */
@@ -103,8 +108,8 @@ final class AgentHttpServiceIntegrationTest {
 
   @Test
   void midRunInterruptIsObservedAsUserMessageReceived() throws Exception {
-    // Model whose first call enqueues steering pressure (does NOT terminate), then succeeds.
     var calls = new AtomicInteger();
+    var firstChatEntered = new CountDownLatch(1);
     var modelLatch = new CountDownLatch(1);
     Model adaptive =
         new Model() {
@@ -112,9 +117,9 @@ final class AgentHttpServiceIntegrationTest {
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             var call = calls.incrementAndGet();
             if (call == 1) {
-              // Block long enough for the test to issue the interrupt
+              firstChatEntered.countDown();
               try {
-                modelLatch.await(2, TimeUnit.SECONDS);
+                modelLatch.await();
               } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
               }
@@ -158,10 +163,8 @@ final class AgentHttpServiceIntegrationTest {
       var sessionId = createSession(http, base);
       var events = startEventReader(http, base, sessionId);
       sendMessage(http, base, sessionId, "first");
-      // Allow the first chat() to start blocking.
-      Thread.sleep(100);
+      Await.latch("the model's first chat to be entered", firstChatEntered);
       interruptSession(http, base, sessionId, "rethink");
-      // Release the first turn.
       modelLatch.countDown();
       var collected = events.awaitTerminal();
       assertTrue(
@@ -237,11 +240,9 @@ final class AgentHttpServiceIntegrationTest {
       var http = httpClient();
       var base = baseUrl(server);
       var sessionId = createSession(http, base);
-      // Drive to terminal
+      var events = startEventReader(http, base, sessionId);
       sendMessage(http, base, sessionId, "go");
-      // Wait for terminal by reading the stream
-      startEventReader(http, base, sessionId).awaitTerminal();
-      // Now send: session is terminal → 409
+      events.awaitTerminal();
       var resp =
           http.send(
               postJson(base + "/sessions/" + sessionId + "/messages", Map.of("text", "again")),
@@ -256,8 +257,9 @@ final class AgentHttpServiceIntegrationTest {
       var http = httpClient();
       var base = baseUrl(server);
       var sessionId = createSession(http, base);
+      var events = startEventReader(http, base, sessionId);
       sendMessage(http, base, sessionId, "go");
-      startEventReader(http, base, sessionId).awaitTerminal();
+      events.awaitTerminal();
       var resp =
           http.send(
               postJson(base + "/sessions/" + sessionId + "/interrupt", Map.of("reason", "late")),
@@ -465,14 +467,13 @@ final class AgentHttpServiceIntegrationTest {
 
   @Test
   void resultLongPollOnLiveSessionTimesOutWith204() throws Exception {
-    // Model that blocks forever — session never terminates within the poll window.
     var blockLatch = new CountDownLatch(1);
     Model blocking =
         new Model() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             try {
-              blockLatch.await(10, TimeUnit.SECONDS);
+              blockLatch.await();
             } catch (InterruptedException e) {
               Thread.currentThread().interrupt();
             }
@@ -500,7 +501,6 @@ final class AgentHttpServiceIntegrationTest {
       var sessionId = createSession(http, base);
       sendMessage(http, base, sessionId, "go");
 
-      // 1 s long-poll on a session that will not terminate for 10 s.
       var resp =
           http.send(
               HttpRequest.newBuilder(
@@ -603,71 +603,69 @@ final class AgentHttpServiceIntegrationTest {
   /** Captured SSE event {name, data}. */
   private record SseLog(String event, String data) {}
 
-  /** Async SSE reader that collects events until the stream closes. */
+  /**
+   * Reads one SSE stream on its own thread and collects every event until the server ends the
+   * stream, which it does once the session's publisher has closed. A failed read fails the test
+   * that waits on the reader.
+   */
   private static final class SseEventReader {
 
-    private final List<SseLog> collected = new ArrayList<>();
-    private final CountDownLatch terminal = new CountDownLatch(1);
-    private final CountDownLatch ready = new CountDownLatch(1);
-    private final Thread worker;
+    private final List<SseLog> collected = new CopyOnWriteArrayList<>();
+    private final CompletableFuture<Void> ready = new CompletableFuture<>();
+    private final CompletableFuture<Void> ended = new CompletableFuture<>();
 
     SseEventReader(HttpClient http, URI uri) {
-      this.worker =
-          Thread.ofVirtual()
-              .name("sse-reader")
-              .start(
-                  () -> {
-                    try {
-                      var resp =
-                          http.send(
-                              HttpRequest.newBuilder(uri)
-                                  .timeout(Duration.ofSeconds(15))
-                                  .header("Accept", "text/event-stream")
-                                  .GET()
-                                  .build(),
-                              BodyHandlers.ofInputStream());
-                      if (resp.statusCode() != 200) {
-                        ready.countDown();
-                        terminal.countDown();
-                        return;
-                      }
-                      try (var reader =
-                          new java.io.BufferedReader(
-                              new java.io.InputStreamReader(
-                                  resp.body(), java.nio.charset.StandardCharsets.UTF_8))) {
-                        String line;
-                        String currentEvent = null;
-                        var currentData = new StringBuilder();
-                        while ((line = reader.readLine()) != null) {
-                          if (line.isEmpty()) {
-                            if (currentEvent != null) {
-                              var log = new SseLog(currentEvent, currentData.toString());
-                              synchronized (collected) {
-                                collected.add(log);
-                              }
-                              if ("Ready".equals(currentEvent)) {
-                                ready.countDown();
-                              }
-                              if ("LoopEnded".equals(currentEvent)) {
-                                terminal.countDown();
-                              }
-                            }
-                            currentEvent = null;
-                            currentData.setLength(0);
-                          } else if (line.startsWith("event:")) {
-                            currentEvent = line.substring("event:".length()).trim();
-                          } else if (line.startsWith("data:")) {
-                            currentData.append(line.substring("data:".length()).trim());
-                          }
-                        }
-                      }
-                    } catch (Exception ignored) {
-                      // network failures end the stream; terminal latch may already have fired
-                    } finally {
-                      ready.countDown();
-                      terminal.countDown();
-                    }
-                  });
+      Thread.ofVirtual()
+          .name("sse-reader")
+          .start(
+              () -> {
+                try {
+                  read(http, uri);
+                  ended.complete(null);
+                } catch (Exception e) {
+                  ended.completeExceptionally(e);
+                  ready.completeExceptionally(e);
+                }
+              });
+    }
+
+    private void read(HttpClient http, URI uri) throws IOException, InterruptedException {
+      var resp =
+          http.send(
+              HttpRequest.newBuilder(uri)
+                  .timeout(HTTP_TIMEOUT)
+                  .header("Accept", "text/event-stream")
+                  .GET()
+                  .build(),
+              BodyHandlers.ofInputStream());
+      if (resp.statusCode() != 200) {
+        throw new IOException("SSE subscription answered " + resp.statusCode());
+      }
+      try (var reader =
+          new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8))) {
+        String line;
+        String currentEvent = null;
+        var currentData = new StringBuilder();
+        while ((line = reader.readLine()) != null) {
+          if (line.startsWith("event:")) {
+            currentEvent = line.substring("event:".length()).trim();
+          } else if (line.startsWith("data:")) {
+            currentData.append(line.substring("data:".length()).trim());
+          } else if (line.isEmpty() && currentEvent != null) {
+            record(new SseLog(currentEvent, currentData.toString()));
+            currentEvent = null;
+            currentData.setLength(0);
+          }
+        }
+      }
+      ready.completeExceptionally(new IOException("The SSE stream ended without a Ready event"));
+    }
+
+    private void record(SseLog log) {
+      collected.add(log);
+      if ("Ready".equals(log.event())) {
+        ready.complete(null);
+      }
     }
 
     /**
@@ -675,21 +673,17 @@ final class AgentHttpServiceIntegrationTest {
      * SSE event. Closes the race between Helidon writing 200 OK and the subscriber actually
      * registering on the publisher — without this, events submitted in the window get lost.
      */
-    void awaitReady() throws InterruptedException {
-      assertTrue(ready.await(5, TimeUnit.SECONDS), "SSE subscription Ready event not received");
+    void awaitReady() {
+      Await.value("the SSE Ready event", ready);
     }
 
-    List<SseLog> awaitTerminal() throws InterruptedException {
-      assertTrue(terminal.await(10, TimeUnit.SECONDS), "SSE stream did not terminate in 10s");
-      worker.join(Duration.ofSeconds(2));
-      synchronized (collected) {
-        return List.copyOf(collected);
-      }
+    List<SseLog> awaitTerminal() {
+      Await.value("the server to end the SSE stream", ended);
+      return List.copyOf(collected);
     }
   }
 
-  private SseEventReader startEventReader(HttpClient http, String base, String sessionId)
-      throws InterruptedException {
+  private SseEventReader startEventReader(HttpClient http, String base, String sessionId) {
     var reader = new SseEventReader(http, URI.create(base + "/sessions/" + sessionId + "/events"));
     reader.awaitReady();
     return reader;

@@ -143,11 +143,8 @@ final class OpenAIAzureIntegrationTest {
 
       System.out.println(
           "Prompt size: ~" + (userMsg.length() / 4) + " tokens. Sending to Azure...");
-      var start = System.currentTimeMillis();
       var schema = OutputSchema.of(ResponseWithMaps.class);
       var response = model.chat(List.of(Message.user(userMsg)), List.of(), schema);
-      var elapsed = (System.currentTimeMillis() - start) / 1000.0;
-      System.out.println("Completed in " + elapsed + "s");
       assertNotNull(response.parsed(), "structured output must parse even with large prompt");
     } finally {
       try {

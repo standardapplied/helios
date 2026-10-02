@@ -81,7 +81,6 @@ class PgRunStoreTest {
         AgentRun.newBuilder(newRun(older, AgentRunStatus.RUNNING))
             .withLastCheckpointAt(OffsetDateTime.now().minusMinutes(10))
             .build());
-    Thread.sleep(5);
     store.checkpoint(
         AgentRun.newBuilder(newRun(newer, AgentRunStatus.RUNNING))
             .withLastCheckpointAt(OffsetDateTime.now())

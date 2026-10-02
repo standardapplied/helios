@@ -15,7 +15,6 @@ import java.io.InputStreamReader;
 import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
@@ -161,14 +160,12 @@ class FeedableInputStreamTest {
   @Test
   void anInterruptReleasesABlockedReadAndStaysSet() {
     var stream = new FeedableInputStream();
-    var reading = new CountDownLatch(1);
     var interruptStillSet = new AtomicBoolean();
     var outcome = new CompletableFuture<Integer>();
     var reader =
         Thread.ofVirtual()
             .start(
                 () -> {
-                  reading.countDown();
                   try {
                     outcome.complete(stream.read());
                   } catch (IOException e) {
@@ -176,7 +173,7 @@ class FeedableInputStreamTest {
                     outcome.completeExceptionally(e);
                   }
                 });
-    Await.latch("the reader thread to start", reading);
+    stream.awaitBlockedRead();
 
     reader.interrupt();
 

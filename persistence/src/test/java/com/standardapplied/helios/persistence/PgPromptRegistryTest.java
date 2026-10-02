@@ -12,12 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.Await;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -292,7 +292,7 @@ class PgPromptRegistryTest {
     latch.countDown();
 
     for (var future : futures) {
-      future.get(30, TimeUnit.SECONDS);
+      Await.value("a registering worker", future);
     }
 
     for (int t = 0; t < threadCount; t++) {
