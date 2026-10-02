@@ -30,6 +30,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -37,6 +38,7 @@ final class AgentHttpServiceIntegrationTest {
 
   private static final Duration HTTP_TIMEOUT = Await.HANG_GUARD;
   private final JsonMapper mapper = JsonMapper.builder().build();
+  private final HttpClient http = HttpClient.newBuilder().connectTimeout(HTTP_TIMEOUT).build();
 
   /** Default model used by tests — returns a fixed response on every chat call. */
   private static Model textModel(String reply) {
@@ -74,7 +76,12 @@ final class AgentHttpServiceIntegrationTest {
   }
 
   private HttpClient httpClient() {
-    return HttpClient.newBuilder().connectTimeout(HTTP_TIMEOUT).build();
+    return http;
+  }
+
+  @AfterEach
+  void shutDownHttpClient() {
+    http.shutdownNow();
   }
 
   private String baseUrl(RuntimeServer server) {
