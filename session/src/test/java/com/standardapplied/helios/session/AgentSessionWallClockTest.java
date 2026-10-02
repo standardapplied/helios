@@ -5,19 +5,17 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
-import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.Flow;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -29,33 +27,30 @@ import org.junit.jupiter.api.Test;
  * indefinitely waiting for a provider stream that may never deliver {@code onComplete} / {@code
  * onError} (silent socket, hung proxy, mid-stream stall).
  *
- * <p>The tests in this class construct an inline {@link Model} whose {@code chatStream} returns a
- * publisher that calls {@code onSubscribe} and then never emits another signal — the bare-minimum
- * hang. A short {@code maxWallClock} (500 ms) combined with a {@code result().get(5 s)} cap on the
- * test side proves the bug deterministically: pre-fix the {@code get} call throws {@link
- * java.util.concurrent.TimeoutException}; post-fix the terminal is {@link
- * ResultMessage.ErrorMaxWallClock} within ~500 ms.
+ * <p>The test constructs an inline {@link Model} whose {@code chatStream} returns a publisher that
+ * calls {@code onSubscribe} and then never emits another signal — the bare-minimum hang. The only
+ * limit short enough to end that wait is the 500 ms {@code maxWallClock}; the stream-idle timeout
+ * is an hour. Pre-fix the result never settles and the hang guard fails the test; post-fix the
+ * terminal is {@link ResultMessage.ErrorMaxWallClock}.
  */
 final class AgentSessionWallClockTest {
 
-  /**
-   * The "main" reproduction. An inline Model whose chatStream is forever silent must still let the
-   * session terminate with {@link ResultMessage.ErrorMaxWallClock} once {@code maxWallClock}
-   * elapses — not hang.
-   */
   @Test
-  void maxWallClockTerminatesHangingChatStream() throws Exception {
+  void maxWallClockTerminatesHangingChatStream() {
     var options =
         SessionOptions.newBuilder()
             .withModel(hangingChatStreamModel())
             .withSessionId("sess-hang-wallclock")
-            .withClock(Clock.systemUTC())
-            .withLimits(SessionLimits.newBuilder().withMaxWallClock(Duration.ofMillis(500)).build())
+            .withLimits(
+                SessionLimits.newBuilder()
+                    .withMaxWallClock(Duration.ofMillis(500))
+                    .withStreamIdleTimeout(Duration.ofHours(1))
+                    .build())
             .build();
 
     try (var session = AgentSession.create(options)) {
       session.send(UserMessage.text("hi"));
-      var terminal = session.result().get(5, TimeUnit.SECONDS);
+      var terminal = Await.value("the wall-clock terminal", session.result());
       assertInstanceOf(
           ResultMessage.ErrorMaxWallClock.class,
           terminal,
@@ -65,38 +60,6 @@ final class AgentSessionWallClockTest {
                   + terminal.getClass().getSimpleName()
                   + ": "
                   + terminal);
-    }
-  }
-
-  /**
-   * Variant that bounds the test from above with {@link java.util.concurrent.Future#get(long,
-   * TimeUnit)}: ensures the actual terminal lands close to {@code maxWallClock}, not minutes later.
-   * Catches a partial fix that produces the right terminal type but only after, say, the implicit
-   * 1-hour default fires.
-   */
-  @Test
-  void maxWallClockTerminationHappensNearTheDeadline() throws Exception {
-    var maxWallClock = Duration.ofMillis(500);
-    var options =
-        SessionOptions.newBuilder()
-            .withModel(hangingChatStreamModel())
-            .withSessionId("sess-hang-wallclock-deadline")
-            .withClock(Clock.systemUTC())
-            .withLimits(SessionLimits.newBuilder().withMaxWallClock(maxWallClock).build())
-            .build();
-
-    try (var session = AgentSession.create(options)) {
-      session.send(UserMessage.text("hi"));
-      var t0 = System.nanoTime();
-      var terminal = session.result().get(5, TimeUnit.SECONDS);
-      var elapsedMs = Duration.ofNanos(System.nanoTime() - t0).toMillis();
-      assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, terminal);
-      assertTrue(
-          elapsedMs < 3_000,
-          () ->
-              "terminal must land within a few seconds of the 500 ms deadline; saw "
-                  + elapsedMs
-                  + " ms");
     }
   }
 
@@ -116,14 +79,10 @@ final class AgentSessionWallClockTest {
             subscriber.onSubscribe(
                 new Flow.Subscription() {
                   @Override
-                  public void request(long n) {
-                    // Drop the demand on the floor — never emit a chunk.
-                  }
+                  public void request(long n) {}
 
                   @Override
-                  public void cancel() {
-                    // No-op; the subscriber has no way to wake up the runner from here.
-                  }
+                  public void cancel() {}
                 });
       }
 

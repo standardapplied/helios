@@ -24,6 +24,7 @@ import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.execution.ExecutionCapabilities;
@@ -33,19 +34,15 @@ import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -119,9 +116,17 @@ final class AgentSessionImplTest {
       done.countDown();
     }
 
-    void awaitDone() throws InterruptedException {
-      assertTrue(done.await(5, TimeUnit.SECONDS), "stream did not complete in 5s");
+    void awaitDone() {
+      Await.latch("the event stream to complete", done);
     }
+
+    List<Class<?>> eventTypes() {
+      return events.stream().<Class<?>>map(QueryEvent::getClass).toList();
+    }
+  }
+
+  private static ResultMessage terminalOf(AgentSession session) {
+    return Await.value("the session to reach its terminal", session.result());
   }
 
   // ── construction validation ───────────────────────────────────────────────
@@ -196,7 +201,7 @@ final class AgentSessionImplTest {
   void sendOnTerminalSessionThrows() throws Exception {
     var s = buildSession(textOnceModel("done", FinishReason.STOP));
     s.send(UserMessage.text("hi"));
-    s.result().get(5, TimeUnit.SECONDS);
+    terminalOf(s);
     var ex = assertThrows(IllegalStateException.class, () -> s.send(UserMessage.text("again")));
     assertEquals("session is terminal", ex.getMessage());
     s.close();
@@ -211,7 +216,7 @@ final class AgentSessionImplTest {
     var s = buildSession(latched, tinyConcurrency);
     try {
       s.send(UserMessage.text("first"));
-      assertTrue(entered.await(5, TimeUnit.SECONDS), "loop must reach chat()");
+      Await.latch("the loop to reach chat()", entered);
       s.send(UserMessage.text("second"));
       s.send(UserMessage.text("third"));
       var ex = assertThrows(IllegalStateException.class, () -> s.send(UserMessage.text("fourth")));
@@ -231,7 +236,7 @@ final class AgentSessionImplTest {
     var s = buildSession(latched, tinyConcurrency);
     try {
       s.send(UserMessage.text("first"));
-      assertTrue(entered.await(5, TimeUnit.SECONDS));
+      Await.latch("the loop to reach chat()", entered);
       s.send(UserMessage.text("second"));
       var ex = assertThrows(IllegalStateException.class, () -> s.interrupt("nope"));
       assertTrue(ex.getMessage().contains("cannot enqueue interrupt"));
@@ -270,7 +275,7 @@ final class AgentSessionImplTest {
   void interruptOnTerminalSessionThrows() throws Exception {
     var s = buildSession(textOnceModel("done", FinishReason.STOP));
     s.send(UserMessage.text("hi"));
-    s.result().get(5, TimeUnit.SECONDS);
+    terminalOf(s);
     assertThrows(IllegalStateException.class, () -> s.interrupt("late"));
     s.close();
   }
@@ -284,7 +289,7 @@ final class AgentSessionImplTest {
       s.events().subscribe(sub);
       s.send(UserMessage.text("hi"));
 
-      var result = s.result().get(5, TimeUnit.SECONDS);
+      var result = terminalOf(s);
       sub.awaitDone();
 
       var success = assertInstanceOf(ResultMessage.Success.class, result);
@@ -317,9 +322,8 @@ final class AgentSessionImplTest {
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             var call = calls.incrementAndGet();
             if (call == 1) {
-              // Hold the first turn until the test has had a chance to queue interrupt().
-              // Otherwise CI-fast runners can complete the first turn before interrupt arrives,
-              // which sends the session terminal and makes interrupt() throw "session is terminal".
+              // Hold the first turn until interrupt() is queued: a first turn that completes
+              // with an empty queue sends the session terminal, and interrupt() then throws.
               firstTurnEntered.countDown();
               try {
                 firstTurnRelease.await();
@@ -348,12 +352,10 @@ final class AgentSessionImplTest {
       var sub = new CollectingSubscriber();
       s.events().subscribe(sub);
       s.send(UserMessage.text("first"));
-      assertTrue(
-          firstTurnEntered.await(5, TimeUnit.SECONDS),
-          "expected the first model.chat to be reached within 5s");
+      Await.latch("the first turn to reach chat()", firstTurnEntered);
       s.interrupt("rethink");
       firstTurnRelease.countDown();
-      var result = s.result().get(5, TimeUnit.SECONDS);
+      var result = terminalOf(s);
       sub.awaitDone();
 
       var success = assertInstanceOf(ResultMessage.Success.class, result);
@@ -363,7 +365,8 @@ final class AgentSessionImplTest {
               .map(e -> (QueryEvent.UserMessageReceived) e)
               .anyMatch(u -> u.message().text().contains("[interrupted by user: rethink]"));
       assertTrue(interruptedReceived, "interrupt synthetic message must be received");
-      assertEquals("turn-" + calls.get(), success.result());
+      assertEquals("turn-2", success.result());
+      assertEquals(2, calls.get());
     }
   }
 
@@ -373,7 +376,7 @@ final class AgentSessionImplTest {
   void closeBeforeAnySendProducesCancelledTerminal() throws Exception {
     var s = buildSession(textOnceModel("never", FinishReason.STOP));
     s.close();
-    var result = s.result().get(2, TimeUnit.SECONDS);
+    var result = terminalOf(s);
     var c = assertInstanceOf(ResultMessage.Cancelled.class, result);
     assertEquals("session closed", c.reason());
   }
@@ -384,25 +387,29 @@ final class AgentSessionImplTest {
     s.close();
     s.close();
     s.close();
-    assertNotNull(s.result().get(1, TimeUnit.SECONDS));
+    assertInstanceOf(ResultMessage.Cancelled.class, terminalOf(s));
   }
 
   @Test
   void closeAfterTerminalDoesNotBreak() throws Exception {
     var s = buildSession(textOnceModel("done", FinishReason.STOP));
     s.send(UserMessage.text("hi"));
-    var first = s.result().get(5, TimeUnit.SECONDS);
+    var first = terminalOf(s);
     s.close();
-    assertEquals(first, s.result().get(0, TimeUnit.MILLISECONDS));
+    assertEquals(first, terminalOf(s));
   }
 
   @Test
-  void closeDuringRunningLoopProducesCancelled() throws Exception {
-    try (var s = buildSession(blockingModel())) {
+  void closeDuringRunningLoopProducesCancelled() {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    try (var s = buildSession(latchedModel(entered, release, "too late"))) {
       s.send(UserMessage.text("hi"));
-      Thread.sleep(50);
+      Await.latch("the loop to reach chat()", entered);
       s.close();
-      assertNotNull(s.result());
+      release.countDown();
+      var cancelled = assertInstanceOf(ResultMessage.Cancelled.class, terminalOf(s));
+      assertEquals("session closed", cancelled.reason());
     }
   }
 
@@ -421,9 +428,9 @@ final class AgentSessionImplTest {
     var s = (AgentSessionImpl) buildSession(textOnceModel("done", FinishReason.STOP));
     var executor = s.publisherExecutorForTests();
     s.send(UserMessage.text("hi"));
-    s.result().get(5, TimeUnit.SECONDS);
+    terminalOf(s);
     // closeRuntime() runs BEFORE resultFuture settles (hv2-bug2 Issue 2 fix), so the executor is
-    // already terminated by the time result().get() returns. No polling needed.
+    // already terminated by the time the result is available.
     assertTrue(executor.isShutdown(), "executor shut down after natural termination");
     assertTrue(executor.isTerminated(), "executor terminated after natural termination");
   }
@@ -459,7 +466,7 @@ final class AgentSessionImplTest {
       var sub = new CollectingSubscriber();
       s.events().subscribe(sub);
       s.send(UserMessage.text("hi"));
-      var result = s.result().get(5, TimeUnit.SECONDS);
+      var result = terminalOf(s);
       assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result);
     }
   }
@@ -483,11 +490,9 @@ final class AgentSessionImplTest {
                 .withHook(erroring)
                 .build())) {
       s.send(UserMessage.text("hi"));
-      var ex =
-          assertThrows(
-              CompletionException.class, () -> s.result().orTimeout(5, TimeUnit.SECONDS).join());
-      assertInstanceOf(AssertionError.class, ex.getCause());
-      assertEquals("simulated unrecoverable error", ex.getCause().getMessage());
+      var failure = Await.failure("the result future to settle exceptionally", s.result());
+      assertInstanceOf(AssertionError.class, failure);
+      assertEquals("simulated unrecoverable error", failure.getMessage());
     }
   }
 
@@ -543,7 +548,7 @@ final class AgentSessionImplTest {
                 .withExecutionProvider(provider)
                 .build())) {
       assertTrue(provider.startSeen.get());
-      var terminal = s.result().get(2, TimeUnit.SECONDS);
+      var terminal = terminalOf(s);
       var err = assertInstanceOf(ResultMessage.ErrorProviderUnavailable.class, terminal);
       assertEquals("pool saturated", err.reason());
       assertEquals("LifecycleProvider", err.providerName());
@@ -566,7 +571,7 @@ final class AgentSessionImplTest {
                 .withClock(CLOCK)
                 .withExecutionProvider(provider)
                 .build())) {
-      var terminal = s.result().get(2, TimeUnit.SECONDS);
+      var terminal = terminalOf(s);
       var err = assertInstanceOf(ResultMessage.ErrorProviderUnavailable.class, terminal);
       assertTrue(err.reason().contains("auth failed"));
       assertTrue(err.reason().contains("RuntimeException"));
@@ -601,7 +606,7 @@ final class AgentSessionImplTest {
                 .withClock(CLOCK)
                 .withExecutionProvider(provider)
                 .build())) {
-      var terminal = s.result().get(2, TimeUnit.SECONDS);
+      var terminal = terminalOf(s);
       var err = assertInstanceOf(ResultMessage.ErrorProviderUnavailable.class, terminal);
       assertEquals("failed to spawn sandbox", err.reason());
 
@@ -631,10 +636,9 @@ final class AgentSessionImplTest {
                 .build())) {
       assertTrue(provider.startSeen.get());
       s.send(UserMessage.text("hi"));
-      assertInstanceOf(ResultMessage.Success.class, s.result().get(5, TimeUnit.SECONDS));
+      assertInstanceOf(ResultMessage.Success.class, terminalOf(s));
+      assertTrue(provider.endSeen.get(), "onSessionEnd must fire before the result settles");
     }
-    awaitOnSessionEnd(provider);
-    assertTrue(provider.endSeen.get(), "onSessionEnd must fire after successful terminal");
   }
 
   @Test
@@ -669,146 +673,103 @@ final class AgentSessionImplTest {
                 .build())) {
       s.send(UserMessage.text("hi"));
       // Terminal must still be Success — onSessionEnd exception swallowed and logged.
-      assertInstanceOf(ResultMessage.Success.class, s.result().get(5, TimeUnit.SECONDS));
+      assertInstanceOf(ResultMessage.Success.class, terminalOf(s));
+      assertTrue(provider.endSeen.get());
     }
-    awaitOnSessionEnd(provider);
-    assertTrue(provider.endSeen.get());
   }
 
   // ── publisher-drain happens-before result settling (hv2-bug2 Issue 2) ────
 
+  /**
+   * Subscriber that is slow exactly where the hv2-bug2 Issue 2 race lives: it holds {@code
+   * LoopEnded} until the session has begun draining its publisher, records whether the result had
+   * already settled by then, and only then captures the terminal. Pre-fix the session settled the
+   * result before draining, so {@link #resultSettledFirst} is deterministically {@code true}.
+   */
+  private static final class DrainObservingSubscriber implements Flow.Subscriber<QueryEvent> {
+
+    final AtomicReference<ResultMessage> captured = new AtomicReference<>();
+    final AtomicBoolean resultSettledFirst = new AtomicBoolean();
+    private final AgentSessionImpl session;
+
+    DrainObservingSubscriber(AgentSession session) {
+      this.session = (AgentSessionImpl) session;
+    }
+
+    @Override
+    public void onSubscribe(Flow.Subscription subscription) {
+      subscription.request(Long.MAX_VALUE);
+    }
+
+    @Override
+    public void onNext(QueryEvent event) {
+      if (event instanceof QueryEvent.LoopEnded ended) {
+        Await.until(
+            "the session to begin draining its publisher",
+            session.publisherExecutorForTests()::isShutdown);
+        resultSettledFirst.set(session.result().isDone());
+        captured.set(ended.result());
+      }
+    }
+
+    @Override
+    public void onError(Throwable throwable) {}
+
+    @Override
+    public void onComplete() {}
+
+    void assertObservedLoopEndedBeforeResult(ResultMessage terminal) {
+      assertEquals(
+          terminal,
+          captured.get(),
+          "subscriber must observe LoopEnded happens-before the result is available — without "
+              + "this guarantee deployer-side usage/cost capture races and silently drops data");
+      assertFalse(
+          resultSettledFirst.get(), "the result must not settle while a subscriber is draining");
+    }
+  }
+
   @Test
-  void subscriberObservesLoopEndedBeforeRunBlockingReturns() throws Exception {
+  void subscriberObservesLoopEndedBeforeRunBlockingReturns() {
     // Regression for hv2-bug2 Issue 2: a subscriber that captures LoopEnded for usage/cost
     // observability must see the event BEFORE any caller of runBlocking / result().get()
     // unblocks. Pre-fix the publisher executor drained asynchronously after the result future
     // resolved, so an immediate read of the AtomicReference would still observe null. 3 of 24
     // viewers in the Light Grid matchmaking baseline silently dropped cost data this way.
-    // A slow subscriber widens the race window so the bug is deterministic, not flaky.
-    var captured = new AtomicReference<ResultMessage>();
-    var subscribed = new CountDownLatch(1);
-    var slowSubscriber =
-        new Flow.Subscriber<QueryEvent>() {
-          @Override
-          public void onSubscribe(Flow.Subscription s) {
-            s.request(Long.MAX_VALUE);
-            subscribed.countDown();
-          }
-
-          @Override
-          public void onNext(QueryEvent event) {
-            try {
-              Thread.sleep(200);
-            } catch (InterruptedException e) {
-              Thread.currentThread().interrupt();
-            }
-            if (event instanceof QueryEvent.LoopEnded ended) {
-              captured.set(ended.result());
-            }
-          }
-
-          @Override
-          public void onError(Throwable t) {}
-
-          @Override
-          public void onComplete() {}
-        };
     try (var s = buildSession(textOnceModel("done", FinishReason.STOP))) {
-      s.events().subscribe(slowSubscriber);
-      assertTrue(subscribed.await(2, TimeUnit.SECONDS), "subscriber must register");
+      var subscriber = new DrainObservingSubscriber(s);
+      s.events().subscribe(subscriber);
       var terminal = s.runBlocking(UserMessage.text("hi"));
-      assertNotNull(
-          captured.get(),
-          "subscriber must observe LoopEnded happens-before runBlocking returns — without "
-              + "this guarantee deployer-side usage/cost capture races and silently drops data");
-      assertEquals(terminal, captured.get());
+      subscriber.assertObservedLoopEndedBeforeResult(terminal);
     }
   }
 
   @Test
-  void subscriberObservesLoopEndedBeforeResultFutureCompletes() throws Exception {
-    // Same happens-before contract from the result()-future side. A subscriber that captures the
-    // terminal and a separate thread polling result().get() must observe the same order: the
-    // subscriber sees LoopEnded BEFORE result().get() returns to its caller. Asserted from the
+  void subscriberObservesLoopEndedBeforeResultFutureCompletes() {
+    // Same happens-before contract from the result()-future side. Asserted from the
     // result-future code path because runBlocking is a thin default; some deployers call
     // result().get() directly (e.g. when wrapping the session in their own runtime).
-    var captured = new AtomicReference<ResultMessage>();
-    var slowSubscriber =
-        new Flow.Subscriber<QueryEvent>() {
-          @Override
-          public void onSubscribe(Flow.Subscription s) {
-            s.request(Long.MAX_VALUE);
-          }
-
-          @Override
-          public void onNext(QueryEvent event) {
-            try {
-              Thread.sleep(200);
-            } catch (InterruptedException e) {
-              Thread.currentThread().interrupt();
-            }
-            if (event instanceof QueryEvent.LoopEnded ended) {
-              captured.set(ended.result());
-            }
-          }
-
-          @Override
-          public void onError(Throwable t) {}
-
-          @Override
-          public void onComplete() {}
-        };
     try (var s = buildSession(textOnceModel("done", FinishReason.STOP))) {
-      s.events().subscribe(slowSubscriber);
+      var subscriber = new DrainObservingSubscriber(s);
+      s.events().subscribe(subscriber);
       s.send(UserMessage.text("hi"));
-      var terminal = s.result().get(5, TimeUnit.SECONDS);
-      assertNotNull(captured.get(), "subscriber must see LoopEnded before result().get() returns");
-      assertEquals(terminal, captured.get());
+      var terminal = terminalOf(s);
+      subscriber.assertObservedLoopEndedBeforeResult(terminal);
     }
   }
 
   @Test
-  void multipleSlowSubscribersAllObserveLoopEndedBeforeRunBlockingReturns() throws Exception {
+  void multipleSlowSubscribersAllObserveLoopEndedBeforeRunBlockingReturns() {
     // Two subscribers both slow. The drain must wait for ALL of them, not just the first.
-    var c1 = new AtomicReference<ResultMessage>();
-    var c2 = new AtomicReference<ResultMessage>();
-    Flow.Subscriber<QueryEvent> s1 = slowSubscriberCapturing(c1, 150);
-    Flow.Subscriber<QueryEvent> s2 = slowSubscriberCapturing(c2, 150);
     try (var s = buildSession(textOnceModel("done", FinishReason.STOP))) {
-      s.events().subscribe(s1);
-      s.events().subscribe(s2);
-      s.runBlocking(UserMessage.text("hi"));
-      assertNotNull(c1.get(), "first subscriber must see LoopEnded");
-      assertNotNull(c2.get(), "second subscriber must see LoopEnded");
+      var first = new DrainObservingSubscriber(s);
+      var second = new DrainObservingSubscriber(s);
+      s.events().subscribe(first);
+      s.events().subscribe(second);
+      var terminal = s.runBlocking(UserMessage.text("hi"));
+      first.assertObservedLoopEndedBeforeResult(terminal);
+      second.assertObservedLoopEndedBeforeResult(terminal);
     }
-  }
-
-  private static Flow.Subscriber<QueryEvent> slowSubscriberCapturing(
-      AtomicReference<ResultMessage> sink, long perEventSleepMs) {
-    return new Flow.Subscriber<QueryEvent>() {
-      @Override
-      public void onSubscribe(Flow.Subscription s) {
-        s.request(Long.MAX_VALUE);
-      }
-
-      @Override
-      public void onNext(QueryEvent event) {
-        try {
-          Thread.sleep(perEventSleepMs);
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-        }
-        if (event instanceof QueryEvent.LoopEnded ended) {
-          sink.set(ended.result());
-        }
-      }
-
-      @Override
-      public void onError(Throwable t) {}
-
-      @Override
-      public void onComplete() {}
-    };
   }
 
   @Test
@@ -819,19 +780,31 @@ final class AgentSessionImplTest {
       s.events().subscribe(sub1);
       s.events().subscribe(sub2);
       s.send(UserMessage.text("hi"));
-      s.result().get(5, TimeUnit.SECONDS);
+      terminalOf(s);
       sub1.awaitDone();
       sub2.awaitDone();
-      assertTrue(sub1.events.size() > 0);
-      assertEquals(sub1.events.size(), sub2.events.size(), "both subscribers see the same stream");
+      assertEquals(
+          List.of(
+              QueryEvent.UserMessageReceived.class,
+              QueryEvent.AssistantText.class,
+              QueryEvent.TurnEnded.class,
+              QueryEvent.LoopEnded.class),
+          sub1.eventTypes());
+      assertEquals(sub1.events, sub2.events, "both subscribers see the same stream");
     }
   }
 
   @Test
-  void resultGetWithTimeoutWorks() throws Exception {
-    try (var s = buildSession(blockingModel())) {
+  void resultStaysPendingWhileTheModelIsBlocked() {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    try (var s = buildSession(latchedModel(entered, release, "late"))) {
       s.send(UserMessage.text("hi"));
-      assertThrows(TimeoutException.class, () -> s.result().get(100, TimeUnit.MILLISECONDS));
+      Await.latch("the loop to reach chat()", entered);
+      assertFalse(s.result().isDone(), "the result cannot settle while the model call is open");
+      release.countDown();
+      var success = assertInstanceOf(ResultMessage.Success.class, terminalOf(s));
+      assertEquals("late", success.result());
     }
   }
 
@@ -841,7 +814,7 @@ final class AgentSessionImplTest {
       var sub = new CollectingSubscriber();
       s.events().subscribe(sub);
       s.send(UserMessage.text("hi"));
-      s.result().get(5, TimeUnit.SECONDS);
+      terminalOf(s);
       sub.awaitDone();
       for (var e : sub.events) {
         assertEquals(FIXED, e.timestamp());
@@ -1004,7 +977,7 @@ final class AgentSessionImplTest {
       var sub = new CollectingSubscriber();
       s.events().subscribe(sub);
       s.send(UserMessage.text("match me"));
-      s.result().get(5, TimeUnit.SECONDS);
+      terminalOf(s);
       sub.awaitDone();
 
       var kinds =
@@ -1148,18 +1121,6 @@ final class AgentSessionImplTest {
 
   // ── helpers ───────────────────────────────────────────────────────────────
 
-  /**
-   * Post-fix {@code closeRuntime()} runs BEFORE {@code resultFuture} settles, so {@code
-   * onSessionEnd} has fired by the time {@code result().get()} returns. The poll is now a no-op
-   * fast path that exists solely as defense-in-depth if the ordering ever regresses.
-   */
-  private static void awaitOnSessionEnd(LifecycleProvider provider) throws InterruptedException {
-    var deadlineNanos = System.nanoTime() + Duration.ofSeconds(2).toNanos();
-    while (!provider.endSeen.get() && System.nanoTime() < deadlineNanos) {
-      Thread.sleep(5);
-    }
-  }
-
   /** Model whose chat() awaits {@code release} after signalling {@code entered}. */
   private static Model latchedModel(CountDownLatch entered, CountDownLatch release, String reply) {
     return new Model() {
@@ -1176,31 +1137,6 @@ final class AgentSessionImplTest {
             .withFinishReason(FinishReason.STOP)
             .withUsage(Usage.of(1, 1))
             .build();
-      }
-
-      @Override
-      public String id() {
-        return "test";
-      }
-
-      @Override
-      public String provider() {
-        return "test";
-      }
-    };
-  }
-
-  /** Model whose chat() never returns — useful for verifying queue-full and close paths. */
-  private static Model blockingModel() {
-    return new Model() {
-      @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        try {
-          Thread.sleep(Duration.ofMinutes(10).toMillis());
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-        }
-        return Response.newBuilder().withContent("").withFinishReason(FinishReason.STOP).build();
       }
 
       @Override
