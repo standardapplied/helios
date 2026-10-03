@@ -70,8 +70,8 @@ public record TurnOutcome(
   }
 
   /**
-   * Convenience for callers that have no provider metadata, no stream error, and a single attempt.
-   * Mirrors the pre-retry shape so existing call sites don't have to thread defaults.
+   * Convenience for a turn with no provider metadata, no stream error, and a single attempt — the
+   * shape of an outcome the loop synthesises itself.
    */
   public TurnOutcome(FinishReason finishReason, String assistantContent, Usage usage) {
     this(finishReason, assistantContent, usage, Map.of(), null, 1);

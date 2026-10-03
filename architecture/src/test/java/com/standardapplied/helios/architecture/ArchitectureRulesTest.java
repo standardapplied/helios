@@ -16,6 +16,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noCodeUnits;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMembers;
 import static com.tngtech.archunit.library.GeneralCodingRules.ACCESS_STANDARD_STREAMS;
 
 import com.tngtech.archunit.base.DescribedPredicate;
@@ -173,6 +174,15 @@ class ArchitectureRulesTest {
                 + " where capturing the standard streams is the mechanism, and the example"
                 + " modules may use System.out, System.err or printStackTrace")
         .check(LIBRARY);
+  }
+
+  @Test
+  void nothingInMainCodeIsDeprecated() {
+    var oneWay =
+        "there is one way to do each thing: a superseded type or member is deleted and its"
+            + " replacement recorded under Breaking in CHANGELOG.md, never kept behind @Deprecated";
+    noClasses().should().beAnnotatedWith(Deprecated.class).because(oneWay).check(LIBRARY);
+    noMembers().should().beAnnotatedWith(Deprecated.class).because(oneWay).check(LIBRARY);
   }
 
   @Test

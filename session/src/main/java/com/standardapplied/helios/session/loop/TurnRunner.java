@@ -38,7 +38,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -95,28 +94,6 @@ public final class TurnRunner {
   private final ScheduledExecutorService scheduler;
 
   /**
-   * Lazily-initialised process-wide daemon scheduler used by the 9-arg convenience constructor.
-   * Production callers ({@link com.standardapplied.helios.session.AgentSessionImpl}) construct a
-   * session-scoped scheduler and pass it via the 10-arg constructor so resource lifetime is
-   * bounded; this default exists only so test fixtures don't have to wire one. Daemon threads never
-   * block JVM exit.
-   */
-  private static volatile ScheduledExecutorService DEFAULT_SCHEDULER;
-
-  private static synchronized ScheduledExecutorService sharedDefaultScheduler() {
-    if (DEFAULT_SCHEDULER == null) {
-      DEFAULT_SCHEDULER =
-          Executors.newSingleThreadScheduledExecutor(
-              r -> {
-                var t = new Thread(r, "helios-turnrunner-default-scheduler");
-                t.setDaemon(true);
-                return t;
-              });
-    }
-    return DEFAULT_SCHEDULER;
-  }
-
-  /**
    * Build a turn runner.
    *
    * @param model the model providing {@link Model#chatStream(List, List,
@@ -142,54 +119,11 @@ public final class TurnRunner {
    *     on text-output turns. When {@code null}, the loop dispatches {@link Model#chatStream(List,
    *     List, com.standardapplied.helios.core.runtime.CancellationToken)} and the model is free to
    *     produce arbitrary text
-   * @throws NullPointerException if any non-{@code outputSchema} argument is null
-   */
-  public TurnRunner(
-      Model model,
-      HookRegistry hooks,
-      ToolDispatch toolDispatch,
-      SteeringQueue steeringQueue,
-      Consumer<QueryEvent> eventSink,
-      Function<SessionState, HookContext> hookContextFactory,
-      InstantSource clock,
-      CostCalculator costCalculator,
-      OutputSchema<?> outputSchema) {
-    this(
-        model,
-        hooks,
-        toolDispatch,
-        steeringQueue,
-        eventSink,
-        hookContextFactory,
-        clock,
-        costCalculator,
-        outputSchema,
-        sharedDefaultScheduler());
-  }
-
-  /**
-   * Same as {@link #TurnRunner(Model, HookRegistry, ToolDispatch, SteeringQueue, Consumer,
-   * Function, InstantSource, CostCalculator, OutputSchema)} but supplies an explicit scheduler.
-   * Production callers ({@link com.standardapplied.helios.session.AgentSessionImpl}) pass a
-   * session-scoped scheduler that is shut down with the session; test fixtures use the convenience
-   * 9-arg overload that defaults to a process-wide daemon scheduler.
-   *
-   * @param model the model providing {@link Model#chatStream(List, List,
-   *     com.standardapplied.helios.core.runtime.CancellationToken)}; non-null
-   * @param hooks priority-sorted hook registry; non-null
-   * @param toolDispatch dispatcher for tool calls the model emits; non-null
-   * @param steeringQueue per-session inbox into which Inject-outcome hooks enqueue synthetic
-   *     messages; non-null
-   * @param eventSink consumer for {@link QueryEvent}s emitted during the turn; non-null
-   * @param hookContextFactory builds a per-fire {@link HookContext} from the session state;
-   *     non-null
-   * @param clock clock supplying event timestamps; non-null
-   * @param costCalculator converts per-turn {@link Usage} into a {@link
-   *     com.standardapplied.helios.core.common.CostEstimate}; non-null
-   * @param outputSchema the schema the model's text output must conform to, or {@code null} when
-   *     the session has no structured-output constraint
    * @param scheduler shared per-session scheduler used by {@link TurnSubscriber} to enforce the
-   *     per-chunk {@code streamIdleTimeout}; non-null
+   *     per-chunk {@code streamIdleTimeout}; non-null. The caller owns its lifetime — {@link
+   *     com.standardapplied.helios.session.AgentSessionImpl} passes a session-scoped scheduler it
+   *     shuts down with the session
+   * @throws NullPointerException if any non-{@code outputSchema} argument is null
    */
   public TurnRunner(
       Model model,

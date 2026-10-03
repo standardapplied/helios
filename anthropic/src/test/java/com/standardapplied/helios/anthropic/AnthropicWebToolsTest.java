@@ -6,6 +6,7 @@
 package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -15,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -333,6 +335,105 @@ class AnthropicWebToolsTest {
         "server_tool_use", mergedBlocks.getFirst().get("type"), "paused segment blocks retained");
     assertEquals("text", mergedBlocks.getLast().get("type"), "final segment blocks merged in");
     assertEquals("Done.", mergedBlocks.getLast().get("text"));
+  }
+
+  private static final String PAUSED_SEGMENT_WITH_THINKING_SSE =
+      """
+      event: message_start
+      data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1}}}
+
+      event: content_block_start
+      data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+      event: content_block_delta
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Search first."}}
+
+      event: content_block_delta
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"SIG-A"}}
+
+      event: content_block_stop
+      data: {"type":"content_block_stop","index":0}
+
+      event: content_block_start
+      data: {"type":"content_block_start","index":1,"content_block":{"type":"server_tool_use","id":"srv1","name":"web_search"}}
+
+      event: content_block_delta
+      data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\":\\"q\\"}"}}
+
+      event: content_block_stop
+      data: {"type":"content_block_stop","index":1}
+
+      event: message_delta
+      data: {"type":"message_delta","delta":{"stop_reason":"pause_turn","stop_sequence":null},"usage":{"output_tokens":4}}
+
+      event: message_stop
+      data: {"type":"message_stop"}
+
+      """;
+
+  private static final String FINAL_SEGMENT_WITH_THINKING_SSE =
+      """
+      event: message_start
+      data: {"type":"message_start","message":{"id":"m2","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":20,"output_tokens":1}}}
+
+      event: content_block_start
+      data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+      event: content_block_delta
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Now answer."}}
+
+      event: content_block_delta
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"SIG-B"}}
+
+      event: content_block_stop
+      data: {"type":"content_block_stop","index":0}
+
+      event: content_block_start
+      data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+      event: content_block_delta
+      data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Done."}}
+
+      event: content_block_stop
+      data: {"type":"content_block_stop","index":1}
+
+      event: message_delta
+      data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":3}}
+
+      event: message_stop
+      data: {"type":"message_stop"}
+
+      """;
+
+  private Response<Void> drainPausedTurn(String pausedSegment, String finalSegment) {
+    var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
+    var m = model(config);
+    var initial = m.buildRequest(List.of(Message.user("research this")), List.of(), null);
+    var segments = new ArrayList<>(List.of(pausedSegment, finalSegment));
+    return m.drainWithContinuation(initial, request -> iterator(segments.removeFirst()));
+  }
+
+  @Test
+  void pausedTurnConcatenatesThinkingBlocksOfBothSegmentsInOrder() {
+    var response =
+        drainPausedTurn(PAUSED_SEGMENT_WITH_THINKING_SSE, FINAL_SEGMENT_WITH_THINKING_SSE);
+
+    assertEquals(
+        List.of(
+            new AnthropicModel.ThinkingBlock("Search first.", "SIG-A"),
+            new AnthropicModel.ThinkingBlock("Now answer.", "SIG-B")),
+        AnthropicModel.decodeThinkingBlocks(response.metadata()));
+  }
+
+  @Test
+  void pausedTurnKeepsThePausedSegmentsThinkingWhenTheContinuationHasNone() {
+    var response = drainPausedTurn(PAUSED_SEGMENT_WITH_THINKING_SSE, FINAL_SEGMENT_SSE);
+
+    assertEquals(
+        List.of(new AnthropicModel.ThinkingBlock("Search first.", "SIG-A")),
+        AnthropicModel.decodeThinkingBlocks(response.metadata()));
+    assertFalse(response.metadata().containsKey("anthropic.thinking"));
+    assertFalse(response.metadata().containsKey("anthropic.thinkingSignature"));
   }
 
   @Test

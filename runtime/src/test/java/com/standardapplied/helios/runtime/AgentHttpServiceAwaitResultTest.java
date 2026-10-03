@@ -13,6 +13,7 @@ import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SerializedError;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
@@ -27,7 +28,7 @@ final class AgentHttpServiceAwaitResultTest {
 
   private static ResultMessage stubSuccess() {
     return new ResultMessage.Success(
-        "sess-1", "the result", Usage.of(1, 1), CostEstimate.zero(), Duration.ZERO);
+        "sess-1", "the result", Usage.of(1, 1), CostEstimate.zero(), Duration.ZERO, List.of());
   }
 
   @Test

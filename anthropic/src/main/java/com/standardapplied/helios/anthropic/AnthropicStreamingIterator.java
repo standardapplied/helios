@@ -449,13 +449,7 @@ final class AnthropicStreamingIterator implements CloseableIterator<StreamEvent>
         }
         metadata.put(AnthropicModel.THINKING_BLOCKS_KEY, objectMapper.writeValueAsString(arr));
       } catch (Exception ignored) {
-        // Encoding failure is non-fatal; the legacy single-block keys below are the fallback.
-      }
-      // Legacy single-block keys — preserved when exactly one thinking block was seen, so older
-      // consumers (and tests) continue to observe the same metadata shape.
-      if (thinkingBlocks.size() == 1) {
-        metadata.put(AnthropicModel.THINKING_KEY, thinkingBlocks.getFirst().text());
-        metadata.put(AnthropicModel.THINKING_SIGNATURE_KEY, thinkingBlocks.getFirst().signature());
+        // Encoding failure is non-fatal: the turn completes without thinking metadata.
       }
     }
     if (stopReason != null) {

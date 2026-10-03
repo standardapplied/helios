@@ -70,10 +70,10 @@ final class UserMessageTest {
   }
 
   @Test
-  void canonicalConstructorDefaultsNullFileReferencesToEmpty() {
-    var message = new UserMessage("hi", List.of(), null);
+  void nullFileReferencesRejected() {
+    var ex = assertThrows(NullPointerException.class, () -> new UserMessage("hi", List.of(), null));
 
-    assertTrue(message.fileReferences().isEmpty());
+    assertEquals("fileReferences must not be null", ex.getMessage());
   }
 
   @Test

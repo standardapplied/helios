@@ -26,6 +26,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import javax.net.ssl.SSLSession;
@@ -187,9 +188,11 @@ class StreamingIteratorTest {
       assertTrue(done.response().thinking().contains("Let me think..."));
 
       var metadata = done.response().metadata();
-      assertTrue(metadata.containsKey(AnthropicModel.THINKING_KEY));
-      assertTrue(metadata.containsKey(AnthropicModel.THINKING_SIGNATURE_KEY));
-      assertEquals("EqoB123", metadata.get(AnthropicModel.THINKING_SIGNATURE_KEY));
+      assertEquals(
+          List.of(new AnthropicModel.ThinkingBlock("Let me think...", "EqoB123")),
+          AnthropicModel.decodeThinkingBlocks(metadata));
+      assertFalse(metadata.containsKey("anthropic.thinking"));
+      assertFalse(metadata.containsKey("anthropic.thinkingSignature"));
 
       // Streaming surface: each thinking_delta arrives as ThinkingDelta, and the closing
       // content_block_stop emits ThinkingComplete with the assembled text + signature.
@@ -422,8 +425,7 @@ class StreamingIteratorTest {
       }
       var done = (StreamEvent.Done) events.getLast();
       assertNull(done.response().thinking());
-      assertFalse(done.response().metadata().containsKey(AnthropicModel.THINKING_KEY));
-      assertFalse(done.response().metadata().containsKey(AnthropicModel.THINKING_SIGNATURE_KEY));
+      assertFalse(done.response().metadata().containsKey(AnthropicModel.THINKING_BLOCKS_KEY));
     }
   }
 

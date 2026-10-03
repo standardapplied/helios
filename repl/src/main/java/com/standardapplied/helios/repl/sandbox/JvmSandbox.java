@@ -843,7 +843,7 @@ public final class JvmSandbox implements Sandbox {
               ? stdout
               : stdout.isEmpty() ? capturedStdout : capturedStdout + "\n" + stdout;
       return new ExecutionResult(
-          executedCode, combinedStdout, stderr, exitCode, submitted, bindings);
+          executedCode, combinedStdout, stderr, exitCode, submitted, bindings, Duration.ZERO);
     }
     return new ExecutionResult(
         executedCode,
@@ -851,6 +851,7 @@ public final class JvmSandbox implements Sandbox {
         "",
         0,
         null,
-        Map.of());
+        Map.of(),
+        Duration.ZERO);
   }
 }

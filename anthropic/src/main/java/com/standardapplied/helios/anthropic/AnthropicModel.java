@@ -69,15 +69,10 @@ public class AnthropicModel implements Model {
    */
   static final int DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
 
-  static final String THINKING_KEY = "anthropic.thinking";
-  static final String THINKING_SIGNATURE_KEY = "anthropic.thinkingSignature";
-
   /**
    * Metadata key carrying every thinking block in the message as a JSON array of {@code
-   * [{"text":"…","signature":"…"}, …]}. Single-block messages also set the legacy {@link
-   * #THINKING_KEY} / {@link #THINKING_SIGNATURE_KEY} for backward compatibility. Multi-block
-   * messages set this key only; round-tripping any other shape would require fabricating a single
-   * signature across blocks, which the Anthropic API rejects.
+   * [{"text":"…","signature":"…"}, …]}, one entry per block whatever their number. Each block keeps
+   * its own signature: the Anthropic API rejects a signature fabricated across blocks.
    */
   static final String THINKING_BLOCKS_KEY = "anthropic.thinkingBlocks";
 
@@ -585,8 +580,7 @@ public class AnthropicModel implements Model {
 
   /**
    * Fold the first segment's thinking metadata into the merged map (which is seeded from the second
-   * segment): {@link #THINKING_BLOCKS_KEY} arrays concatenate in segment order, and the legacy
-   * single-block keys survive only when the combined turn has exactly one thinking block.
+   * segment): {@link #THINKING_BLOCKS_KEY} arrays concatenate in segment order.
    */
   @SuppressWarnings("unchecked")
   private void mergeThinkingMetadata(Map<String, String> firstMeta, Map<String, String> merged) {
@@ -595,8 +589,7 @@ public class AnthropicModel implements Model {
       return;
     }
     var combined = new ArrayList<ThinkingBlock>(firstBlocks);
-    combined.addAll(
-        decodeThinkingBlocks(merged.containsKey(THINKING_BLOCKS_KEY) ? merged : Map.of()));
+    combined.addAll(decodeThinkingBlocks(merged));
     try {
       var arr = new ArrayList<Map<String, String>>(combined.size());
       for (var tb : combined) {
@@ -605,13 +598,6 @@ public class AnthropicModel implements Model {
       merged.put(THINKING_BLOCKS_KEY, objectMapper.writeValueAsString(arr));
     } catch (Exception e) {
       throw new AnthropicException("Failed to merge thinking metadata", e);
-    }
-    if (combined.size() == 1) {
-      merged.put(THINKING_KEY, combined.getFirst().text());
-      merged.put(THINKING_SIGNATURE_KEY, combined.getFirst().signature());
-    } else {
-      merged.remove(THINKING_KEY);
-      merged.remove(THINKING_SIGNATURE_KEY);
     }
   }
 
@@ -632,8 +618,8 @@ public class AnthropicModel implements Model {
    *       retry can re-issue the turn; the {@link IOException} is preserved as {@link
    *       Throwable#getCause()} so the session terminal can walk the chain.
    *   <li>Cause is anything else, or {@code null} (the API-side {@code event: error} path carries
-   *       {@code null}) — rewrapped in {@link AnthropicException} with the original cause for
-   *       backwards compatibility with non-stream error paths.
+   *       {@code null}) — rewrapped in {@link AnthropicException} with the original cause, the type
+   *       the non-stream error paths throw.
    * </ul>
    */
   @SuppressWarnings("unchecked")
@@ -706,7 +692,10 @@ public class AnthropicModel implements Model {
     if (tools != null && !tools.isEmpty()) {
       clientToolDefs =
           tools.stream()
-              .map(t -> new ToolDefinition(t.name(), t.description(), t.parametersAsJsonSchema()))
+              .map(
+                  t ->
+                      new ToolDefinition(
+                          null, t.name(), t.description(), t.parametersAsJsonSchema(), null))
               .toList();
     }
     var serverToolDefs = new ArrayList<ToolDefinition>();
@@ -984,39 +973,32 @@ public class AnthropicModel implements Model {
   }
 
   /**
-   * Recover every thinking block recorded on the message. Prefers the {@link #THINKING_BLOCKS_KEY}
-   * JSON-array shape (used by 1.4+ multi-block messages), then falls back to the legacy single
-   * {@link #THINKING_KEY} / {@link #THINKING_SIGNATURE_KEY} pair. Returns an empty list when no
-   * thinking signature is present.
+   * Recover every thinking block recorded on the message under {@link #THINKING_BLOCKS_KEY}.
+   * Returns an empty list when the key is absent or unreadable, or no entry carries a signature.
    */
   static List<ThinkingBlock> decodeThinkingBlocks(Map<String, String> metadata) {
     if (metadata == null) {
       return List.of();
     }
     var encoded = metadata.get(THINKING_BLOCKS_KEY);
-    if (encoded != null && !encoded.isEmpty()) {
-      try {
-        @SuppressWarnings("unchecked")
-        var raw = (List<Map<String, Object>>) SHARED_MAPPER.readValue(encoded, List.class);
-        var out = new ArrayList<ThinkingBlock>(raw.size());
-        for (var entry : raw) {
-          var text = entry.get("text") == null ? "" : entry.get("text").toString();
-          var signature = entry.get("signature") == null ? "" : entry.get("signature").toString();
-          if (!signature.isEmpty()) {
-            out.add(new ThinkingBlock(text, signature));
-          }
+    if (encoded == null || encoded.isEmpty()) {
+      return List.of();
+    }
+    try {
+      @SuppressWarnings("unchecked")
+      var raw = (List<Map<String, Object>>) SHARED_MAPPER.readValue(encoded, List.class);
+      var out = new ArrayList<ThinkingBlock>(raw.size());
+      for (var entry : raw) {
+        var text = entry.get("text") == null ? "" : entry.get("text").toString();
+        var signature = entry.get("signature") == null ? "" : entry.get("signature").toString();
+        if (!signature.isEmpty()) {
+          out.add(new ThinkingBlock(text, signature));
         }
-        return out;
-      } catch (Exception ignored) {
-        // Fall through to legacy single-block path.
       }
+      return out;
+    } catch (Exception ignored) {
+      return List.of();
     }
-    var signature = metadata.get(THINKING_SIGNATURE_KEY);
-    if (signature != null && !signature.isEmpty()) {
-      var text = metadata.getOrDefault(THINKING_KEY, "");
-      return List.of(new ThinkingBlock(text, signature));
-    }
-    return List.of();
   }
 
   /** One thinking content block — text plus its content-block-scoped Anthropic signature. */

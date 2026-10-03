@@ -115,7 +115,7 @@ final class Phase4AcceptanceTest {
             List.of(
                 new ModelChunk.ToolUseStop(
                     new ToolCall("c1", MemoryReadTool.NAME, Map.of("path", "/memories/INDEX.md"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.ToolUseStop(
                     new ToolCall(
@@ -128,7 +128,7 @@ final class Phase4AcceptanceTest {
                             "/memories/user/preferences.md",
                             "content",
                             "User prefers terse responses.\n"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.ToolUseStop(
                     new ToolCall(
@@ -143,10 +143,10 @@ final class Phase4AcceptanceTest {
                             "- nothing yet",
                             "newString",
                             "- /memories/user/preferences.md"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.TextDelta("done"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1))));
+                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
 
     var options =
         SessionOptions.newBuilder()
@@ -231,10 +231,10 @@ final class Phase4AcceptanceTest {
                         "c1",
                         MemoryWriteTool.NAME,
                         Map.of("op", "create", "path", "/memories/x.md", "content", "permitted"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.TextDelta("ok"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1))));
+                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
 
     var options =
         SessionOptions.newBuilder()
@@ -307,10 +307,10 @@ final class Phase4AcceptanceTest {
                         "c1",
                         MemoryWriteTool.NAME,
                         Map.of("op", "create", "path", "/memories/x.md", "content", "x"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.TextDelta("ok"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1))));
+                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
 
     var options =
         SessionOptions.newBuilder()
@@ -395,7 +395,7 @@ final class Phase4AcceptanceTest {
                         "c1",
                         MemoryWriteTool.NAME,
                         Map.of("op", "create", "path", "/memories/x.md", "content", "x"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))));
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())));
 
     var options =
         SessionOptions.newBuilder()

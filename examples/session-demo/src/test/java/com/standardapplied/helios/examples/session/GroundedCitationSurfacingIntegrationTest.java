@@ -45,7 +45,7 @@ final class GroundedCitationSurfacingIntegrationTest {
     var config =
         ModelConfig.newBuilder()
             .withApiKey(System.getenv("GEMINI_API_KEY"))
-            .withGoogleSearch(true)
+            .withWebSearch(true)
             .build();
     model = new GeminiProvider().create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
   }

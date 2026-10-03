@@ -211,60 +211,6 @@ class TraceBuilderTest {
   }
 
   @Test
-  void computesTotalTokensFromModelCallSpans() {
-    var builder = TraceBuilder.start("agent-run");
-    var span1 = builder.span("model.chat", SpanKind.MODEL_CALL);
-    span1.attribute("inputTokens", "100").attribute("outputTokens", "50");
-    span1.end();
-
-    var span2 = builder.span("model.chat", SpanKind.MODEL_CALL);
-    span2.attribute("inputTokens", "80").attribute("outputTokens", "30");
-    span2.end();
-
-    var trace = builder.end();
-
-    assertEquals(260, trace.totalTokens());
-  }
-
-  @Test
-  void totalTokensIgnoresNonModelCallSpans() {
-    var builder = TraceBuilder.start("agent-run");
-    var toolSpan = builder.span("tool.search", SpanKind.TOOL_EXECUTION);
-    toolSpan.attribute("inputTokens", "999").attribute("outputTokens", "999");
-    toolSpan.end();
-
-    var modelSpan = builder.span("model.chat", SpanKind.MODEL_CALL);
-    modelSpan.attribute("inputTokens", "10").attribute("outputTokens", "5");
-    modelSpan.end();
-
-    var trace = builder.end();
-
-    assertEquals(15, trace.totalTokens());
-  }
-
-  @Test
-  void malformedTokenAttributeDoesNotAbandonTrace() {
-    // A custom span emitter might write a non-integer "inputTokens" attribute (debugging
-    // annotation, mistake, etc). computeTotalTokens used to throw NumberFormatException at
-    // end-of-trace, abandoning the whole trace artifact for what should be a soft error.
-    var builder = TraceBuilder.start("agent-run");
-
-    var validSpan = builder.span("model.chat", SpanKind.MODEL_CALL);
-    validSpan.attribute("inputTokens", "10").attribute("outputTokens", "5");
-    validSpan.end();
-
-    var malformedSpan = builder.span("model.chat", SpanKind.MODEL_CALL);
-    malformedSpan.attribute("inputTokens", "not-a-number").attribute("outputTokens", "also-bad");
-    malformedSpan.end();
-
-    var trace = builder.end();
-
-    assertEquals(2, trace.spans().size());
-    assertEquals(
-        15, trace.totalTokens(), "malformed attributes contribute 0, valid spans still aggregate");
-  }
-
-  @Test
   void totalTokensDefaultsToZeroWhenNoSpans() {
     var trace = TraceBuilder.start("agent-run").end();
 
@@ -312,7 +258,7 @@ class TraceBuilderTest {
   }
 
   @Test
-  void usageAndCostNullWhenNoSpanCarriesThem() {
+  void usageCostAndTotalTokensAbsentWhenNoSpanCarriesTypedUsage() {
     var builder = TraceBuilder.start("agent-run");
     var span = builder.span("model.chat", SpanKind.MODEL_CALL);
     span.attribute("inputTokens", "100").attribute("outputTokens", "50");
@@ -322,49 +268,21 @@ class TraceBuilderTest {
 
     assertNull(trace.usage());
     assertNull(trace.cost());
-    assertEquals(150, trace.totalTokens(), "legacy attribute fallback still totals tokens");
+    assertEquals(0, trace.totalTokens(), "token attributes are not a source of totals");
   }
 
   @Test
-  void typedUsageWinsOverAttributesForTotalTokens() {
+  void totalTokensCountsOnlyTypedUsage() {
     var builder = TraceBuilder.start("agent-run");
-    var span = builder.span("model.chat", SpanKind.MODEL_CALL);
-    span.attribute("inputTokens", "999").attribute("outputTokens", "999");
-    span.usage(Usage.of(10, 5));
-    span.end();
+    builder.span("model.chat", SpanKind.MODEL_CALL).usage(Usage.of(10, 5)).end();
+    var attributed = builder.span("model.chat", SpanKind.MODEL_CALL);
+    attributed.attribute("inputTokens", "100").attribute("outputTokens", "50");
+    attributed.end();
 
     var trace = builder.end();
 
     assertEquals(Usage.of(10, 5), trace.usage());
     assertEquals(15, trace.totalTokens());
-  }
-
-  @Test
-  void mixedTypedAndAttributeSpansBothCountTowardTotalTokens() {
-    var builder = TraceBuilder.start("agent-run");
-    builder.span("model.chat", SpanKind.MODEL_CALL).usage(Usage.of(10, 5)).end();
-    var legacy = builder.span("model.chat", SpanKind.MODEL_CALL);
-    legacy.attribute("inputTokens", "100").attribute("outputTokens", "50");
-    legacy.end();
-
-    var trace = builder.end();
-
-    assertEquals(Usage.of(10, 5), trace.usage());
-    assertEquals(165, trace.totalTokens(), "typed and legacy spans both count");
-  }
-
-  @Test
-  void nestedLegacyAttributeSpansCountTowardTotalTokens() {
-    var builder = TraceBuilder.start("agent-run");
-    var turnSpan = builder.span("turn", SpanKind.AGENT);
-    var nested = turnSpan.span("model.chat", SpanKind.MODEL_CALL);
-    nested.attribute("inputTokens", "100").attribute("outputTokens", "50");
-    nested.end();
-    turnSpan.end();
-
-    var trace = builder.end();
-
-    assertEquals(150, trace.totalTokens(), "attribute tokens on nested spans are counted");
   }
 
   @Test

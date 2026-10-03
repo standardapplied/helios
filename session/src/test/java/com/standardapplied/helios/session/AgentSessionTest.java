@@ -85,7 +85,7 @@ final class AgentSessionTest {
     var s = new StubSession();
     var expected =
         new ResultMessage.Success(
-            "stub", "done", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO);
+            "stub", "done", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO, List.of());
     s.future.complete(expected);
     var result = s.runBlocking(UserMessage.text("hi"));
     assertSame(expected, result);
