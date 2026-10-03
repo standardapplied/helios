@@ -23,7 +23,7 @@ final class PgTestSupport {
 
   static {
     CONTAINER.start();
-    DB_CLIENT = createDbClient();
+    DB_CLIENT = dbClient(CONTAINER.getJdbcUrl(), CONTAINER.getUsername(), CONTAINER.getPassword());
     initSchema();
     initTriggers();
   }
@@ -159,16 +159,16 @@ final class PgTestSupport {
             """);
   }
 
-  private static DbClient createDbClient() {
+  static DbClient dbClient(String url, String username, String password) {
     var config =
         Config.builder()
             .addSource(
                 ConfigSources.create(
                     Map.of(
                         "source", "jdbc",
-                        "connection.url", CONTAINER.getJdbcUrl(),
-                        "connection.username", CONTAINER.getUsername(),
-                        "connection.password", CONTAINER.getPassword())))
+                        "connection.url", url,
+                        "connection.username", username,
+                        "connection.password", password)))
             .disableEnvironmentVariablesSource()
             .disableSystemPropertiesSource()
             .build();

@@ -1,0 +1,14 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "components": [
+    {
+      "type": "library",
+      "group": "org.postgresql",
+      "name": "postgresql",
+      "version": "42.7.7",
+      "purl": "pkg:maven/org.postgresql/postgresql@42.7.7?type=jar"
+    }
+  ]
+}
