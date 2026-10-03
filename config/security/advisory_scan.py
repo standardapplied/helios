@@ -14,6 +14,7 @@ Exit status:
 The policy this enforces is documented in CLAUDE.md, "Supply-chain gate".
 """
 
+import collections
 import datetime
 import hashlib
 import json
@@ -43,6 +44,8 @@ CONFIG_DIR = pathlib.Path(__file__).resolve().parent
 CANARY = CONFIG_DIR / "canary.cdx.json"
 CANARY_ADVISORIES = {"GHSA-98qh-xjc8-98pq", "GHSA-j92g-9f8w-j867"}
 MAX_EXCEPTION_DAYS = 90
+# OSV-Scanner reads this date as Go's zero time, which it treats as an exception without expiry.
+DATE_WITHOUT_EXPIRY = datetime.date.min
 EXCEPTION_KEYS = {"id", "reason", "ignoreUntil"}
 MAVEN_PURL = re.compile(r"pkg:maven/([^/@?#\s]+)/([^/@?#\s]+)@([^/@?#\s]+)(?:\?[^#\s]*)?")
 CREDENTIAL_IN_URL = re.compile(r"[a-z][a-z0-9+.-]*://[^/\s\"@]*:[^/\s\"@]*@")
@@ -101,7 +104,11 @@ def validated_exceptions(path):
         if not entry.get("id") or not str(entry.get("reason", "")).strip():
             problems.append(f"{advisory}: id and reason are required")
         until = entry.get("ignoreUntil")
-        if type(until) is not datetime.date or until > latest:
+        if until == DATE_WITHOUT_EXPIRY:
+            problems.append(
+                f"{advisory}: ignoreUntil {until} never expires, the scanner reads it as no date"
+            )
+        elif type(until) is not datetime.date or until > latest:
             problems.append(
                 f"{advisory}: ignoreUntil must be a date at most {MAX_EXCEPTION_DAYS} days ahead"
             )
@@ -188,7 +195,7 @@ def prove_scanner_detects_canary(scanner, environment):
 
 
 def scan(scanner, inventory, exceptions, environment):
-    command = [scanner, "scan", "source", "--format", "json"]
+    command = [scanner, "scan", "source", "--format", "json", "--all-packages"]
     command += ["--config", exceptions, "-L", inventory]
     try:
         completed = subprocess.run(
@@ -202,11 +209,16 @@ def scan(scanner, inventory, exceptions, environment):
             + (completed.stderr.strip().splitlines() or ["no diagnostic"])[-1]
         )
     try:
-        findings = [
-            finding(package, group)
+        packages = [
+            package
             for result in json.loads(completed.stdout)["results"]
             for package in result["packages"]
-            for group in package["groups"]
+        ]
+        looked_up = collections.Counter(
+            (package["package"]["name"], package["package"]["version"]) for package in packages
+        )
+        findings = [
+            finding(package, group) for package in packages for group in package.get("groups", [])
         ]
     except (ValueError, KeyError, TypeError) as error:
         raise ScanError(f"scanner output for {inventory} is not a result: {error!r}") from error
@@ -215,7 +227,22 @@ def scan(scanner, inventory, exceptions, environment):
             f"scanner exited {completed.returncode} on {inventory}"
             f" but listed {len(findings)} advisories"
         )
+    prove_every_component_was_looked_up(pathlib.Path(inventory), looked_up)
     return findings
+
+
+def prove_every_component_was_looked_up(inventory, looked_up):
+    listed = collections.Counter(
+        (component["name"], component["version"])
+        for component in json.loads(inventory.read_text(encoding="utf-8"))["components"]
+    )
+    if looked_up != listed:
+        skipped = sorted((listed - looked_up).elements())
+        raise ScanError(
+            f"inventory {inventory} lists {listed.total()} components and the scanner looked up"
+            f" {looked_up.total()}; not looked up: "
+            + (", ".join(f"{name} {version}" for name, version in skipped) or "none")
+        )
 
 
 def finding(package, group):
