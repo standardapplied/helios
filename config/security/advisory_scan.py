@@ -48,6 +48,9 @@ MAX_EXCEPTION_DAYS = 90
 DATE_WITHOUT_EXPIRY = datetime.date.min
 EXCEPTION_KEYS = {"id", "reason", "ignoreUntil"}
 MAVEN_PURL = re.compile(r"pkg:maven/([^/@?#\s]+)/([^/@?#\s]+)@([^/@?#\s]+)(?:\?[^#\s]*)?")
+# The scanner's filter drops what it cannot look up before matching, then adds it back to the
+# --all-packages listing; this info-level line is the only trace of the drop.
+UNSCANNABLE_COUNT = re.compile(r"Filtered (\d+) local/unscannable package")
 CREDENTIAL_IN_URL = re.compile(r"[a-z][a-z0-9+.-]*://[^/\s\"@]*:[^/\s\"@]*@")
 
 
@@ -196,7 +199,7 @@ def prove_scanner_detects_canary(scanner, environment):
 
 def scan(scanner, inventory, exceptions, environment):
     command = [scanner, "scan", "source", "--format", "json", "--all-packages"]
-    command += ["--config", exceptions, "-L", inventory]
+    command += ["--verbosity", "info", "--config", exceptions, "-L", inventory]
     try:
         completed = subprocess.run(
             command, env=dict(environment), capture_output=True, text=True, check=False
@@ -207,6 +210,13 @@ def scan(scanner, inventory, exceptions, environment):
         raise ScanError(
             f"scanner exited {completed.returncode} on {inventory}: "
             + (completed.stderr.strip().splitlines() or ["no diagnostic"])[-1]
+        )
+    unscannable = UNSCANNABLE_COUNT.search(completed.stderr)
+    if unscannable:
+        raise ScanError(
+            f"the scanner listed {unscannable.group(1)} components of {inventory} without looking"
+            " them up: its filter found them unscannable (no ecosystem, name or version, or a"
+            " Maven artifact named unknown)"
         )
     try:
         packages = [

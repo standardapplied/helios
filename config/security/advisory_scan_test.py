@@ -229,6 +229,27 @@ class AdvisoryScanTest(unittest.TestCase):
                     " not looked up: postgresql 42.7.7",
                 )
 
+    def test_live_component_the_scanner_lists_but_never_looks_up_is_not_a_clean_scan(self):
+        unscannable = component("1.0", name="unknown")
+        partial = self.write("unknown.cdx.json", inventory(pgjdbc("42.7.12"), unscannable))
+
+        outcome = self.scan(partial)
+
+        self.assert_untrusted(
+            outcome, f"the scanner listed 1 components of {partial} without looking them up"
+        )
+
+    def test_scanner_that_reports_filtering_a_component_is_not_a_clean_scan(self):
+        reply = self.replying(NO_ADVISORY, 0)
+        scanner = self.detecting_scanner(
+            f"echo 'Filtered 2 local/unscannable package/s from the scan.' >&2; {reply}"
+        )
+
+        outcome = self.scan(self.inventory, OSV_SCANNER=scanner)
+
+        self.assert_untrusted(outcome, "listed 2 components")
+        self.assert_untrusted(outcome, "found them unscannable")
+
     def test_scanner_failure_is_reported_with_its_last_diagnostic(self):
         scanner = self.detecting_scanner("echo first >&2; echo database unavailable >&2; exit 127")
 

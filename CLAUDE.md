@@ -220,7 +220,12 @@ in the second is never shipped. CI uploads both, and the per-module pairs, as th
   group, name and version, and nests no component; and after each scan it compares the packages
   the scanner reports having looked up (`--all-packages`) with the inventory's components, name
   and version, one for one. Any difference exits 2 and names the components not looked up, so two
-  components with the same package URL are rejected too.
+  components with the same package URL are rejected too. The listing is not enough on its own:
+  OSV-Scanner's filter drops a component it deems unscannable (no ecosystem, name or version, or
+  a Maven artifact named `unknown`) before matching and then adds it back to the `--all-packages`
+  listing, so the scan runs the scanner at `--verbosity info` and exits 2 when it reports having
+  filtered any package. Both checks rely on the pinned 2.6.0 behaviour; a scanner upgrade is where
+  they are re-verified.
 - **A daily scheduled CI run** finds an advisory published against an unchanged dependency.
 
 ### Blind spots
