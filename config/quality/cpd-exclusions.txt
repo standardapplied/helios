@@ -45,9 +45,6 @@ com.standardapplied.helios.onnx.EmbeddingHarrierTest,com.standardapplied.helios.
 com.standardapplied.helios.repl.codeact.CodeActStrategy,com.standardapplied.helios.repl.codeact.RlmStrategy
 com.standardapplied.helios.repl.codeact.RequireExecuteCodeHookTest,com.standardapplied.helios.session.hooks.RequireSignatureHookTest
 com.standardapplied.helios.repl.execution.JShellExecutionProvider,com.standardapplied.helios.session.execution.LocalProcessExecutionProvider
-com.standardapplied.helios.repl.protocol.RpcChannelTest
-com.standardapplied.helios.repl.sandbox.HostBridgeTest
-com.standardapplied.helios.repl.sandbox.JvmSandboxTest
 com.standardapplied.helios.session.Phase2AcceptanceTest,com.standardapplied.helios.session.Phase4AcceptanceTest,com.standardapplied.helios.session.Phase5AcceptanceTest
 com.standardapplied.helios.session.Phase4AcceptanceTest
 com.standardapplied.helios.session.Phase4AcceptanceTest,com.standardapplied.helios.session.Phase5AcceptanceTest
