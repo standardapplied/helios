@@ -172,6 +172,76 @@ which Maven sets to the nearest ancestor directory holding `.mvn/` — that is w
 empty `.mvn/maven.config` is checked in. The plugin wiring constraints are commented in the root
 `pom.xml`.
 
+## Supply-chain gate
+
+CI inventories every dependency the build resolves and fails on a known advisory against one.
+
+| Piece | Does | Where |
+|---|---|---|
+| Inventory (`cyclonedx-maven-plugin`, `verify` phase) | Writes two aggregate CycloneDX files at the reactor root, plus the same pair per module | plugin configuration in the root `pom.xml` |
+| Scan (OSV-Scanner, pinned and checksum-verified) | Looks every inventoried component up in osv.dev | `config/security/advisory_scan.py`, tested by `advisory_scan_test.py` |
+| Exceptions | Silences one advisory until a date | `config/security/advisory-exceptions.toml` |
+
+`target/helios-runtime.cdx.json` is what the deployed modules ship: compile- and runtime-scope
+dependencies, direct and transitive, with hashes and licenses. `target/helios-build.cdx.json` adds
+test scope and the undeployed `architecture` and example modules. A component that appears only
+in the second is never shipped. CI uploads both, and the per-module pairs, as the
+`dependency-inventory-<os>` artifact.
+
+### Policy
+
+- **Severity: every advisory fails, whatever its score, scored or not.** There is no threshold to
+  tune; an advisory that does not matter to Helios is recorded as an exception that says why.
+- **Reachability: not analysed.** OSV-Scanner has no call analysis for Java, so an advisory counts
+  whether or not Helios calls the affected code. Unreachability is an argument made in an
+  exception's `reason`, reviewed in the pull request that adds it.
+- **Scope: both inventories fail the build.** A finding in `helios-runtime` is shipped exposure
+  and is fixed by upgrading. A finding only in `helios-build` is exposure of the build and of
+  developer machines, fixed the same way or pinned in the module that resolves it.
+- **Fix by upgrading to the lowest release outside the affected range**, in its own commit, with
+  a row under Security in `CHANGELOG.md` naming the advisories and the resolved version.
+- **Exceptions expire.** An entry needs an `id`, a `reason` and an `ignoreUntil` date at most 90
+  days ahead; the scan rejects the file otherwise, and rejects anything but `IgnoredVulns`. After
+  the date the advisory fails the scan again. Entries are removed, never extended without a new
+  review.
+- **A scan that could not run is not a clean scan.** `advisory_scan.py` exits 0 (clean), 1
+  (advisories, each printed with package, version, severity, fixed versions and URL) or 2 (the
+  result cannot be trusted: scanner, network, advisory data, inventory or exception file). Before
+  every scan it scans `config/security/canary.cdx.json`, which lists pgJDBC 42.7.7, and exits 2
+  unless both of that version's advisories come back. The canary is a file, never a dependency.
+- **A daily scheduled CI run** finds an advisory published against an unchanged dependency.
+
+### Blind spots
+
+The scan matches Maven coordinates against osv.dev. It does not prove the absence of
+vulnerabilities, and it cannot see:
+
+- **Native code inside a jar.** `onnxruntime`, DJL `tokenizers` and `jna` carry native libraries.
+  The inventory records those jars and their hashes, but an advisory filed against the native
+  project rather than the Maven coordinate is not matched.
+- **Code shaded into a dependency**, such as the SCRAM client inside pgJDBC, unless the advisory
+  is filed against the outer artifact.
+- **The JDK** (including `jdk.jshell` and `jdk.compiler`, which the REPL sandbox runs on) and the
+  host's libc, which `helios-session` calls through the foreign-function API.
+- **Build tooling**: Maven plugins and their dependencies, GitHub Actions, the OSV-Scanner binary
+  itself, and the container images tests start (`postgres:17-alpine`).
+- **Embedding models** `helios-onnx` downloads at run time.
+- **Advisories osv.dev does not hold yet.** The canary proves the service answers and knows two
+  2026 advisories, not that it is complete.
+
+### Running it
+
+```bash
+mvn -B verify -DskipTests                                                                                 # writes both inventories
+python3 config/security/advisory_scan.py target/helios-runtime.cdx.json target/helios-build.cdx.json      # the scan, as CI runs it
+python3 config/security/advisory_scan_test.py                                                             # the scan's own tests
+```
+
+Needs Python 3.11 or later and network access to `api.osv.dev`; the first run downloads the
+scanner from the OSV-Scanner GitHub release into `~/.cache/helios` (Linux x86-64 and AArch64 are
+pinned; elsewhere point `OSV_SCANNER` at a binary of the pinned version). Upgrading the scanner
+means changing `SCANNER_VERSION` and both checksums in `advisory_scan.py` together.
+
 ## Architecture
 
 ```
@@ -188,6 +258,7 @@ helios/
 ├── testing/                        # helios-testing — ScriptedModel test double for deterministic CI evals
 ├── architecture/                   # helios-architecture — ArchUnit rules over every library module; build-only, never deployed
 ├── config/quality/                 # PMD rule sets + PMD/CPD exclusion files shared by every module
+├── config/security/                # Advisory scan (OSV-Scanner wrapper + tests), its canary inventory and the exception file
 └── examples/
     ├── session-demo/               # Reference: full session run against Gemini with a real workspace
     ├── codeact-demo/               # AgentSession + CodeActPreset — Java-as-action loop against Gemini

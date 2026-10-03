@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT
+"""Behaviour of advisory_scan.py. The tests marked "live" query api.osv.dev.
+
+Run: python3 config/security/advisory_scan_test.py
+"""
+
+import contextlib
+import datetime
+import io
+import json
+import os
+import pathlib
+import socket
+import tempfile
+import unittest
+from unittest import mock
+
+import advisory_scan
+
+CANARY = str(advisory_scan.CANARY)
+PGJDBC_ITERATIONS = "GHSA-98qh-xjc8-98pq"
+PGJDBC_DOWNGRADE = "GHSA-j92g-9f8w-j867"
+CANARY_RESULT = {
+    "results": [
+        {
+            "packages": [
+                {
+                    "package": {"name": "postgresql", "version": "42.7.7"},
+                    "vulnerabilities": [{"id": PGJDBC_ITERATIONS}, {"id": PGJDBC_DOWNGRADE}],
+                    "groups": [{"ids": [PGJDBC_ITERATIONS]}, {"ids": [PGJDBC_DOWNGRADE]}],
+                }
+            ]
+        }
+    ]
+}
+NO_ADVISORY = {"results": []}
+REVIEWED = '"Reviewed."'
+
+
+def entry(**fields):
+    return "[[IgnoredVulns]]\n" + "".join(f"{key} = {value}\n" for key, value in fields.items())
+
+
+class AdvisoryScanTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.directory = pathlib.Path(directory.name)
+        self.inventory = self.write(
+            "clean.cdx.json", json.dumps({"components": [{"name": "anything", "version": "1"}]})
+        )
+
+    def write(self, name, text):
+        path = self.directory / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def scan(self, *inventories, **environment):
+        output, diagnostics = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(diagnostics):
+            status = advisory_scan.main(list(inventories), {**os.environ, **environment})
+        return status, output.getvalue(), diagnostics.getvalue()
+
+    def assert_untrusted(self, outcome, diagnostic):
+        status, output, diagnostics = outcome
+        self.assertEqual(advisory_scan.UNTRUSTED, status, diagnostics)
+        self.assertIn("SCAN ERROR", diagnostics)
+        self.assertIn(diagnostic, diagnostics)
+        self.assertNotIn("CLEAN", output)
+
+    def scanner(self, canary_reply, inventory_reply):
+        """A stand-in scanner: each reply is the shell that answers that kind of scan."""
+        path = self.directory / "scanner"
+        path.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            f"*canary.cdx.json) {canary_reply};;\n*) {inventory_reply};;\nesac\n"
+        )
+        path.chmod(0o755)
+        return str(path)
+
+    def replying(self, result, status):
+        reply = self.write(f"reply-{len(list(self.directory.iterdir()))}.json", json.dumps(result))
+        return f"cat {reply}; exit {status}"
+
+    def detecting_scanner(self, inventory_reply):
+        return self.scanner(self.replying(CANARY_RESULT, 1), inventory_reply)
+
+    def exceptions(self, text):
+        return self.write("exceptions.toml", text)
+
+    def exception(self, advisory, until):
+        return self.exceptions(entry(id=f'"{advisory}"', ignoreUntil=until, reason=REVIEWED))
+
+    def test_live_vulnerable_fixture_fails_and_names_each_advisory_with_its_fix(self):
+        status, output, _ = self.scan(CANARY)
+
+        self.assertEqual(advisory_scan.VULNERABLE, status)
+        self.assertIn(f"VULNERABLE: {CANARY}", output)
+        self.assertIn("org.postgresql:postgresql 42.7.7: " + PGJDBC_ITERATIONS, output)
+        self.assertIn("CVE-2026-42198, severity 7.5, fixed in 42.7.11, https://osv.dev/", output)
+        self.assertIn("org.postgresql:postgresql 42.7.7: " + PGJDBC_DOWNGRADE, output)
+        self.assertIn("CVE-2026-54291, severity 8.2, fixed in 42.7.12, https://osv.dev/", output)
+
+    def test_live_unreachable_advisory_service_is_not_a_clean_scan(self):
+        with socket.socket() as unused:
+            unused.bind(("127.0.0.1", 0))
+            closed_port = unused.getsockname()[1]
+
+        outcome = self.scan(self.inventory, HTTPS_PROXY=f"http://127.0.0.1:{closed_port}")
+
+        self.assert_untrusted(outcome, "scanner exited 127")
+
+    def test_live_exception_silences_only_its_own_advisory(self):
+        in_force = datetime.date.today() + datetime.timedelta(days=30)
+
+        status, output, _ = self.scan(
+            CANARY, ADVISORY_EXCEPTIONS=self.exception(PGJDBC_ITERATIONS, in_force)
+        )
+
+        self.assertEqual(advisory_scan.VULNERABLE, status)
+        self.assertNotIn(PGJDBC_ITERATIONS, output)
+        self.assertIn(PGJDBC_DOWNGRADE, output)
+
+    def test_live_expired_exception_no_longer_silences_its_advisory(self):
+        expired = datetime.date.today() - datetime.timedelta(days=1)
+
+        status, output, _ = self.scan(
+            CANARY, ADVISORY_EXCEPTIONS=self.exception(PGJDBC_ITERATIONS, expired)
+        )
+
+        self.assertEqual(advisory_scan.VULNERABLE, status)
+        self.assertIn(PGJDBC_ITERATIONS, output)
+
+    def test_inventory_without_advisories_is_clean(self):
+        scanner = self.detecting_scanner(self.replying(NO_ADVISORY, 0))
+
+        status, output, diagnostics = self.scan(self.inventory, OSV_SCANNER=scanner)
+
+        self.assertEqual(advisory_scan.CLEAN, status, diagnostics)
+        self.assertEqual(f"CLEAN: {self.inventory}: no known advisory\n", output)
+
+    def test_one_vulnerable_inventory_fails_the_scan_of_several(self):
+        other = self.write("other.cdx.json", json.dumps({"components": [{"name": "other"}]}))
+        scanner = self.scanner(
+            self.replying(CANARY_RESULT, 1),
+            f'case "$*" in *other.cdx.json) {self.replying(CANARY_RESULT, 1)};;'
+            f" *) {self.replying(NO_ADVISORY, 0)};; esac",
+        )
+
+        status, output, _ = self.scan(self.inventory, other, OSV_SCANNER=scanner)
+
+        self.assertEqual(advisory_scan.VULNERABLE, status)
+        self.assertIn(f"CLEAN: {self.inventory}", output)
+        self.assertIn(f"VULNERABLE: {other}: 2 advisories", output)
+        self.assertIn("postgresql 42.7.7: " + PGJDBC_ITERATIONS + ", severity unscored", output)
+        self.assertIn("fixed in no fixed version published", output)
+
+    def test_scanner_that_misses_a_canary_advisory_is_not_a_clean_scan(self):
+        scanner = self.scanner(self.replying(NO_ADVISORY, 0), self.replying(NO_ADVISORY, 0))
+
+        outcome = self.scan(self.inventory, OSV_SCANNER=scanner)
+
+        self.assert_untrusted(outcome, "advisory data is missing or stale")
+        self.assert_untrusted(outcome, f"{PGJDBC_ITERATIONS}, {PGJDBC_DOWNGRADE}")
+
+    def test_scanner_failure_is_reported_with_its_last_diagnostic(self):
+        scanner = self.detecting_scanner("echo first >&2; echo database unavailable >&2; exit 127")
+
+        outcome = self.scan(self.inventory, OSV_SCANNER=scanner)
+
+        self.assert_untrusted(
+            outcome, f"scanner exited 127 on {self.inventory}: database unavailable"
+        )
+
+    def test_silent_scanner_failure_is_not_a_clean_scan(self):
+        outcome = self.scan(self.inventory, OSV_SCANNER=self.detecting_scanner("exit 3"))
+
+        self.assert_untrusted(outcome, "scanner exited 3")
+        self.assert_untrusted(outcome, "no diagnostic")
+
+    def test_unreadable_scanner_output_is_not_a_clean_scan(self):
+        for reply in ("echo not json", "echo '{}'", "echo '{\"results\": null}'"):
+            with self.subTest(reply):
+                outcome = self.scan(self.inventory, OSV_SCANNER=self.detecting_scanner(reply))
+
+                self.assert_untrusted(outcome, "is not a result")
+
+    def test_exit_status_that_contradicts_the_findings_is_not_a_clean_scan(self):
+        contradictions = {
+            self.replying(NO_ADVISORY, 1): "exited 1 on",
+            self.replying(CANARY_RESULT, 0): "but listed 2 advisories",
+        }
+        for reply, diagnostic in contradictions.items():
+            with self.subTest(reply):
+                outcome = self.scan(self.inventory, OSV_SCANNER=self.detecting_scanner(reply))
+
+                self.assert_untrusted(outcome, diagnostic)
+
+    def test_scanner_that_cannot_be_started_is_not_a_clean_scan(self):
+        outcome = self.scan(self.inventory, OSV_SCANNER=str(self.directory / "absent"))
+
+        self.assert_untrusted(outcome, "cannot run")
+
+    def test_cached_scanner_with_wrong_checksum_is_removed_and_not_run(self):
+        target = advisory_scan.SCANNER_PLATFORMS[("Linux", os.uname().machine)]
+        binary = self.directory / "helios" / f"osv-scanner-{advisory_scan.SCANNER_VERSION}-{target}"
+        binary.parent.mkdir()
+        binary.write_text("#!/bin/sh\necho '{\"results\": []}'\n")
+
+        outcome = self.scan(self.inventory, XDG_CACHE_HOME=str(self.directory))
+
+        self.assert_untrusted(outcome, "did not match its pinned checksum")
+        self.assertFalse(binary.exists())
+
+    def test_live_scanner_release_that_cannot_be_downloaded_is_not_a_clean_scan(self):
+        with mock.patch.object(advisory_scan, "SCANNER_VERSION", "0.0.0"):
+            outcome = self.scan(self.inventory, XDG_CACHE_HOME=str(self.directory))
+
+        self.assert_untrusted(outcome, "cannot download OSV-Scanner")
+
+    def test_platform_without_a_pinned_scanner_is_not_a_clean_scan(self):
+        with mock.patch.object(advisory_scan, "SCANNER_PLATFORMS", {}):
+            outcome = self.scan(self.inventory, OSV_SCANNER="")
+
+        self.assert_untrusted(outcome, "no pinned OSV-Scanner")
+
+    def test_inventory_that_cannot_prove_what_was_scanned_is_rejected(self):
+        credential = '{"components": [{"url": "https://deploy:hunter2@repo.example.com/maven"}]}'
+        rejected = {
+            str(self.directory / "absent.cdx.json"): "cannot read inventory",
+            self.write("broken.cdx.json", "not json"): "cannot read inventory",
+            self.write("list.cdx.json", "[]"): "cannot read inventory",
+            self.write("empty.cdx.json", '{"components": []}'): "lists no component",
+            self.write("credential.cdx.json", credential): "embedded credentials",
+        }
+        for inventory, diagnostic in rejected.items():
+            with self.subTest(diagnostic):
+                self.assert_untrusted(self.scan(inventory), diagnostic)
+
+    def test_exception_file_that_is_not_reviewable_and_expiring_is_rejected(self):
+        soon = datetime.date.today() + datetime.timedelta(days=30)
+        too_late = datetime.date.today() + datetime.timedelta(days=91)
+        unbounded = "ignoreUntil must be a date at most 90 days ahead"
+        rejected = {
+            "not toml [": "cannot read exception file",
+            '[[PackageOverrides]]\nname = "lib"\n': "unsupported key PackageOverrides",
+            entry(ignoreUntil=soon, reason=REVIEWED): "an entry without id: id and reason are",
+            entry(id='"GHSA-1"', ignoreUntil=soon, reason='" "'): "GHSA-1: id and reason are",
+            entry(id='"GHSA-2"', reason=REVIEWED): "GHSA-2: " + unbounded,
+            entry(id='"GHSA-3"', ignoreUntil=too_late, reason=REVIEWED): "GHSA-3: " + unbounded,
+            entry(id='"GHSA-4"', ignoreUntil=f"{soon}T00:00:00", reason=REVIEWED): "GHSA-4: "
+            + unbounded,
+        }
+        for text, diagnostic in rejected.items():
+            with self.subTest(diagnostic):
+                outcome = self.scan(self.inventory, ADVISORY_EXCEPTIONS=self.exceptions(text))
+
+                self.assert_untrusted(outcome, diagnostic)
+
+    def test_missing_exception_file_is_not_a_clean_scan(self):
+        absent = str(self.directory / "absent.toml")
+
+        outcome = self.scan(self.inventory, ADVISORY_EXCEPTIONS=absent)
+
+        self.assert_untrusted(outcome, "cannot read exception file")
+
+    def test_checked_in_exception_file_is_accepted(self):
+        scanner = self.detecting_scanner(self.replying(NO_ADVISORY, 0))
+
+        with mock.patch.dict(os.environ):
+            os.environ.pop("ADVISORY_EXCEPTIONS", None)
+            status, _, diagnostics = self.scan(self.inventory, OSV_SCANNER=scanner)
+
+        self.assertEqual(advisory_scan.CLEAN, status, diagnostics)
+
+    def test_no_inventory_is_a_usage_error(self):
+        status, output, diagnostics = self.scan()
+
+        self.assertEqual(advisory_scan.UNTRUSTED, status)
+        self.assertIn("Usage: advisory_scan.py", diagnostics)
+        self.assertEqual("", output)
+
+
+if __name__ == "__main__":
+    unittest.main()
