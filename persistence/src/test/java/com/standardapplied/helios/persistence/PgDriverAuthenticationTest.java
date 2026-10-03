@@ -1,0 +1,187 @@
+/*
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
+ * SPDX-License-Identifier: MIT
+ */
+
+package com.standardapplied.helios.persistence;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.util.Base64;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+import org.testcontainers.DockerClientFactory;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.images.builder.Transferable;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+/**
+ * The PostgreSQL driver against the authentication configurations Helios supports: PostgreSQL 17, a
+ * verified TLS connection and SCRAM-SHA-256 with channel binding. Every key, certificate and
+ * password is generated for the run. The two refusal tests fail on a driver inside the affected
+ * range of GHSA-98qh-xjc8-98pq or GHSA-j92g-9f8w-j867.
+ */
+@Testcontainers
+class PgDriverAuthenticationTest {
+
+  private static final int ITERATIONS_ABOVE_DRIVER_LIMIT = 200_000;
+  private static final String CONNECTION_REJECTED = "08004";
+
+  private static final ServerIdentity ECDSA = ServerIdentity.generate("EC");
+  private static final ServerIdentity ED25519 = ServerIdentity.generate("Ed25519");
+
+  @Container private static final PostgreSQLContainer<?> POSTGRES = tlsPostgres(ECDSA);
+
+  @Container
+  private static final PostgreSQLContainer<?> POSTGRES_WITHOUT_BINDING_HASH = tlsPostgres(ED25519);
+
+  @Test
+  void queriesOverVerifiedTlsWithChannelBoundScram() {
+    var dbClient =
+        PgTestSupport.dbClient(
+            channelBoundUrl(POSTGRES, ECDSA), POSTGRES.getUsername(), POSTGRES.getPassword());
+    try (dbClient) {
+      var encrypted =
+          dbClient
+              .execute()
+              .get("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()")
+              .orElseThrow()
+              .column("ssl")
+              .getBoolean();
+      var passwordHash =
+          dbClient
+              .execute()
+              .get("SELECT rolpassword FROM pg_authid WHERE rolname = current_user")
+              .orElseThrow()
+              .column("rolpassword")
+              .getString();
+
+      assertTrue(encrypted);
+      assertTrue(passwordHash.startsWith("SCRAM-SHA-256$"), passwordHash);
+    }
+  }
+
+  @Test
+  void refusesAScramIterationCountAboveTheDriverLimit() throws SQLException {
+    var password = UUID.randomUUID().toString();
+    try (var admin =
+            DriverManager.getConnection(
+                channelBoundUrl(POSTGRES, ECDSA), POSTGRES.getUsername(), POSTGRES.getPassword());
+        var statement = admin.createStatement()) {
+      statement.execute("SET scram_iterations = " + ITERATIONS_ABOVE_DRIVER_LIMIT);
+      statement.execute("CREATE ROLE costly_login LOGIN PASSWORD '" + password + "'");
+    }
+
+    var refusal =
+        assertThrows(
+            SQLException.class,
+            () ->
+                DriverManager.getConnection(
+                    channelBoundUrl(POSTGRES, ECDSA), "costly_login", password));
+
+    assertEquals(CONNECTION_REJECTED, refusal.getSQLState());
+  }
+
+  @Test
+  void failsClosedWhenTheServerCertificateHasNoChannelBindingHash() {
+    var refusal =
+        assertThrows(
+            SQLException.class,
+            () ->
+                DriverManager.getConnection(
+                    channelBoundUrl(POSTGRES_WITHOUT_BINDING_HASH, ED25519),
+                    POSTGRES_WITHOUT_BINDING_HASH.getUsername(),
+                    POSTGRES_WITHOUT_BINDING_HASH.getPassword()));
+
+    assertEquals(CONNECTION_REJECTED, refusal.getSQLState());
+  }
+
+  private static PostgreSQLContainer<?> tlsPostgres(ServerIdentity identity) {
+    return new PostgreSQLContainer<>("postgres:17-alpine")
+        .withPassword(UUID.randomUUID().toString())
+        .withCopyToContainer(Transferable.of(identity.certificatePem()), "/tls/server.crt")
+        .withCopyToContainer(Transferable.of(identity.privateKeyPem()), "/tls/server.key")
+        .withCommand(
+            "sh",
+            "-c",
+            "install -o postgres -g postgres -m 600 /tls/server.key /run/server.key"
+                + " && exec docker-entrypoint.sh postgres -c ssl=on"
+                + " -c ssl_cert_file=/tls/server.crt -c ssl_key_file=/run/server.key");
+  }
+
+  private static String channelBoundUrl(PostgreSQLContainer<?> postgres, ServerIdentity identity) {
+    return postgres.getJdbcUrl()
+        + "&sslmode=verify-full&channelBinding=require&sslrootcert="
+        + identity.certificateFile();
+  }
+
+  /** A self-signed server certificate and its private key, generated by the JDK's keytool. */
+  private record ServerIdentity(Path certificateFile, String certificatePem, String privateKeyPem) {
+
+    static ServerIdentity generate(String keyAlgorithm) {
+      try {
+        var directory = Files.createTempDirectory("helios-pg-tls");
+        var keyStoreFile = directory.resolve("server.p12");
+        var storePassword = UUID.randomUUID().toString();
+        var host = DockerClientFactory.instance().dockerHostIpAddress();
+        var subjectAlternativeName = (host.matches("[0-9.]+|.*:.*") ? "ip:" : "dns:") + host;
+        var keytool =
+            new ProcessBuilder(
+                    Path.of(System.getProperty("java.home"), "bin", "keytool").toString(),
+                    "-genkeypair",
+                    "-alias",
+                    "server",
+                    "-keyalg",
+                    keyAlgorithm,
+                    "-dname",
+                    "CN=" + host,
+                    "-ext",
+                    "SAN=" + subjectAlternativeName,
+                    "-validity",
+                    "2",
+                    "-storetype",
+                    "PKCS12",
+                    "-keystore",
+                    keyStoreFile.toString(),
+                    "-storepass",
+                    storePassword)
+                .inheritIO()
+                .start();
+        if (keytool.waitFor() != 0) {
+          throw new IllegalStateException("keytool could not generate a " + keyAlgorithm + " key");
+        }
+        var keyStore = KeyStore.getInstance(keyStoreFile.toFile(), storePassword.toCharArray());
+        var certificatePem = pem("CERTIFICATE", keyStore.getCertificate("server").getEncoded());
+        var privateKeyPem =
+            pem("PRIVATE KEY", keyStore.getKey("server", storePassword.toCharArray()).getEncoded());
+        Files.delete(keyStoreFile);
+        var certificateFile = Files.writeString(directory.resolve("server.crt"), certificatePem);
+        directory.toFile().deleteOnExit();
+        certificateFile.toFile().deleteOnExit();
+        return new ServerIdentity(certificateFile, certificatePem, privateKeyPem);
+      } catch (IOException | GeneralSecurityException | InterruptedException e) {
+        throw new IllegalStateException("Could not generate a TLS server identity", e);
+      }
+    }
+
+    private static String pem(String label, byte[] der) {
+      return "-----BEGIN "
+          + label
+          + "-----\n"
+          + Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(der)
+          + "\n-----END "
+          + label
+          + "-----\n";
+    }
+  }
+}

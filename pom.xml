@@ -36,14 +36,15 @@
 
     <properties>
         <junit-version>6.0.2</junit-version>
-        <jackson-tools-version>3.0.4</jackson-tools-version>
+        <jackson-tools-version>3.1.7</jackson-tools-version>
         <jackson-old-version>2.18.2</jackson-old-version>
         <helidon-version>4.4.1</helidon-version>
         <testcontainers-version>1.21.4</testcontainers-version>
-        <postgresql-driver-version>42.7.7</postgresql-driver-version>
+        <postgresql-driver-version>42.7.12</postgresql-driver-version>
         <maven-pmd-plugin-version>3.28.0</maven-pmd-plugin-version>
         <pmd-version>7.28.0</pmd-version>
         <archunit-version>1.5.1</archunit-version>
+        <cyclonedx-maven-plugin-version>2.9.3</cyclonedx-maven-plugin-version>
 
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
@@ -258,6 +259,49 @@
                         <configuration>
                             <targetDirectory>${project.build.directory}/cpd</targetDirectory>
                             <excludeFromFailureFile>${helios.quality.config}/cpd-exclusions.txt</excludeFromFailureFile>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <!--
+                  Dependency inventory, documented in CLAUDE.md, "Supply-chain gate". Two
+                  aggregate CycloneDX files at the reactor root: helios-runtime holds what the
+                  deployed modules ship (compile and runtime scope), helios-build adds test scope
+                  and the undeployed architecture and example modules, so a component only in
+                  the second is never shipped. The files are CI evidence, not release artifacts,
+                  hence skipAttach.
+                -->
+                <groupId>org.cyclonedx</groupId>
+                <artifactId>cyclonedx-maven-plugin</artifactId>
+                <version>${cyclonedx-maven-plugin-version}</version>
+                <configuration>
+                    <outputFormat>json</outputFormat>
+                    <skipAttach>true</skipAttach>
+                    <includeProvidedScope>false</includeProvidedScope>
+                    <includeSystemScope>false</includeSystemScope>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>inventory-runtime</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>makeAggregateBom</goal>
+                        </goals>
+                        <configuration>
+                            <outputName>helios-runtime.cdx</outputName>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>inventory-build</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>makeAggregateBom</goal>
+                        </goals>
+                        <configuration>
+                            <outputName>helios-build.cdx</outputName>
+                            <includeTestScope>true</includeTestScope>
+                            <skipNotDeployed>false</skipNotDeployed>
                         </configuration>
                     </execution>
                 </executions>
