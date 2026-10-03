@@ -209,13 +209,29 @@ final class OnnxModelDownloader implements AutoCloseable {
         throw new IOException(
             "Failed to download file %s: HTTP %d".formatted(url, response.statusCode()));
       }
-      Files.createDirectories(destination.getParent());
       try (InputStream inputStream = response.body()) {
-        Files.copy(inputStream, destination, StandardCopyOption.REPLACE_EXISTING);
+        writeAtomically(inputStream, destination);
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new IOException("Interrupted while downloading file", e);
+    }
+  }
+
+  /**
+   * Copies {@code content} to a temporary sibling of {@code destination} and renames it into place
+   * only once the copy is complete, so an interrupted download never leaves a partial file where
+   * the next run would take it for a finished one. Visible for tests.
+   */
+  static void writeAtomically(InputStream content, Path destination) throws IOException {
+    var directory = destination.getParent();
+    Files.createDirectories(directory);
+    var partial = Files.createTempFile(directory, destination.getFileName().toString(), ".part");
+    try {
+      Files.copy(content, partial, StandardCopyOption.REPLACE_EXISTING);
+      Files.move(partial, destination, StandardCopyOption.ATOMIC_MOVE);
+    } finally {
+      Files.deleteIfExists(partial);
     }
   }
 
