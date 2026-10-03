@@ -2,8 +2,9 @@
 #
 # An entry silences one advisory until its date, after which the finding fails the scan again.
 # advisory_scan.py rejects the whole file if an entry lacks an id, a reason or an ignoreUntil
-# date, if the date is more than 90 days ahead, if the file holds anything but IgnoredVulns, or
-# if an entry holds any other key (the scanner reads IgnoreUntil as a second expiry).
+# date, if the date is more than 90 days ahead or is 0001-01-01 (the scanner reads that as no
+# expiry), if the file holds anything but IgnoredVulns, or if an entry holds any other key (the
+# scanner reads IgnoreUntil as a second expiry).
 # The reason states why the advisory does not apply to Helios as resolved (not reachable, test
 # scope only, no fixed version yet) and what removes the entry.
 #

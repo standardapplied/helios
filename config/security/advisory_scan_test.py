@@ -34,17 +34,29 @@ CANARY_RESULT = {
         }
     ]
 }
-NO_ADVISORY = {"results": []}
 REVIEWED = '"Reviewed."'
 
 
-def component(version="1.0", **overrides):
-    purl = f"pkg:maven/org.example/lib@{version}?type=jar"
-    return {"group": "org.example", "name": "lib", "version": version, "purl": purl, **overrides}
+def component(version="1.0", group="org.example", name="lib", **overrides):
+    purl = f"pkg:maven/{group}/{name}@{version}?type=jar"
+    return {"group": group, "name": name, "version": version, "purl": purl, **overrides}
+
+
+def pgjdbc(version, **overrides):
+    return component(version, "org.postgresql", "postgresql", **overrides)
 
 
 def inventory(*components):
     return json.dumps({"components": list(components)})
+
+
+def looked_up(*components):
+    """What the scanner prints after looking these components up and finding no advisory."""
+    packages = [{"package": {"name": c["name"], "version": c["version"]}} for c in components]
+    return {"results": [{"packages": packages}]}
+
+
+NO_ADVISORY = looked_up(component(), component("2.0+build"))
 
 
 def entry(**fields):
@@ -151,7 +163,7 @@ class AdvisoryScanTest(unittest.TestCase):
         self.assertEqual(f"CLEAN: {self.inventory}: no known advisory\n", output)
 
     def test_one_vulnerable_inventory_fails_the_scan_of_several(self):
-        other = self.write("other.cdx.json", inventory(component("2.0")))
+        other = self.write("other.cdx.json", inventory(pgjdbc("42.7.7")))
         scanner = self.scanner(
             self.replying(CANARY_RESULT, 1),
             f'case "$*" in *other.cdx.json) {self.replying(CANARY_RESULT, 1)};;'
@@ -167,12 +179,55 @@ class AdvisoryScanTest(unittest.TestCase):
         self.assertIn("fixed in no fixed version published", output)
 
     def test_scanner_that_misses_a_canary_advisory_is_not_a_clean_scan(self):
-        scanner = self.scanner(self.replying(NO_ADVISORY, 0), self.replying(NO_ADVISORY, 0))
+        scanner = self.scanner(
+            self.replying(looked_up(pgjdbc("42.7.7")), 0), self.replying(NO_ADVISORY, 0)
+        )
 
         outcome = self.scan(self.inventory, OSV_SCANNER=scanner)
 
         self.assert_untrusted(outcome, "advisory data is missing or stale")
         self.assert_untrusted(outcome, f"{PGJDBC_ITERATIONS}, {PGJDBC_DOWNGRADE}")
+
+    def test_scanner_that_does_not_look_up_every_component_is_not_a_clean_scan(self):
+        scanner = self.detecting_scanner(self.replying(looked_up(component()), 0))
+
+        outcome = self.scan(self.inventory, OSV_SCANNER=scanner)
+
+        self.assert_untrusted(
+            outcome,
+            f"inventory {self.inventory} lists 2 components and the scanner looked up 1;"
+            " not looked up: lib 2.0+build",
+        )
+
+    def test_live_inventory_whose_every_component_is_looked_up_is_clean(self):
+        status, output, diagnostics = self.scan(self.inventory)
+
+        self.assertEqual(advisory_scan.CLEAN, status, diagnostics)
+        self.assertEqual(f"CLEAN: {self.inventory}: no known advisory\n", output)
+
+    def test_live_vulnerable_component_the_scanner_skips_is_not_a_clean_scan(self):
+        coordinates = "pkg:maven/org.postgresql/postgresql@42.7.7"
+        skipped = {
+            "repeated qualifier": (pgjdbc("42.7.12"), coordinates + "?type=jar&type=jar"),
+            "undecodable qualifier": (pgjdbc("42.7.12"), coordinates + "?type=%ZZ"),
+            "namesake that is looked up": (
+                component("42.7.7", name="postgresql"),
+                coordinates + "?type=%ZZ",
+            ),
+        }
+        for name, (scanned, purl) in skipped.items():
+            with self.subTest(name):
+                partial = self.write(
+                    f"{name}.cdx.json", inventory(scanned, pgjdbc("42.7.7", purl=purl))
+                )
+
+                outcome = self.scan(partial)
+
+                self.assert_untrusted(
+                    outcome,
+                    f"inventory {partial} lists 2 components and the scanner looked up 1;"
+                    " not looked up: postgresql 42.7.7",
+                )
 
     def test_scanner_failure_is_reported_with_its_last_diagnostic(self):
         scanner = self.detecting_scanner("echo first >&2; echo database unavailable >&2; exit 127")
@@ -325,6 +380,15 @@ class AdvisoryScanTest(unittest.TestCase):
                 outcome = self.scan(CANARY, ADVISORY_EXCEPTIONS=self.exceptions(text))
 
                 self.assert_untrusted(outcome, f"{PGJDBC_ITERATIONS}: unsupported key {spelling}")
+
+    def test_exception_dated_what_the_scanner_reads_as_no_expiry_is_rejected(self):
+        unlimited = self.exception(PGJDBC_ITERATIONS, "0001-01-01")
+
+        outcome = self.scan(CANARY, ADVISORY_EXCEPTIONS=unlimited)
+
+        self.assert_untrusted(
+            outcome, f"{PGJDBC_ITERATIONS}: ignoreUntil 0001-01-01 never expires"
+        )
 
     def test_missing_exception_file_is_not_a_clean_scan(self):
         absent = str(self.directory / "absent.toml")
