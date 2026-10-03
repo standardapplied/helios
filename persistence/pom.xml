@@ -14,6 +14,23 @@
     <name>helios-persistence</name>
     <description>PostgreSQL persistence for prompts and traces via Helidon DbClient</description>
 
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <!--
+                  Test scope only: Testcontainers 1.21.4 asks for commons-compress 1.24.0, which
+                  is inside GHSA-4265-ccf5-phj5 and GHSA-4g9r-vxhx-9pgx (both fixed in 1.26.0).
+                  1.28.0 is the first release that does not in turn bring a commons-lang3 inside
+                  GHSA-j288-q9x7-2f5v. Remove with the move to a Testcontainers release that asks
+                  for a patched commons-compress itself.
+                -->
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-compress</artifactId>
+                <version>1.28.0</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
         <dependency>
             <groupId>com.standardapplied</groupId>
