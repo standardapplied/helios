@@ -207,7 +207,7 @@ public final class TraceBuilder implements SpanContainer {
     var duration = Duration.between(startTime, endTime);
     var usage = rollUp(completedSpans, Span::usage, Usage::plus);
     var cost = rollUp(completedSpans, Span::cost, CostEstimate::plus);
-    var totalTokens = computeTotalTokens(completedSpans);
+    var totalTokens = usage == null ? 0 : usage.totalTokens();
     return new Trace(
         id,
         name,
@@ -246,37 +246,6 @@ public final class TraceBuilder implements SpanContainer {
       }
     }
     return total;
-  }
-
-  /**
-   * Sums tokens per span, recursively: a span's typed {@link Span#usage()} wins when present;
-   * otherwise the legacy {@code inputTokens}/{@code outputTokens} attributes count for model-call
-   * spans. Per-span resolution keeps partially migrated instrumentation (some spans typed, some
-   * attribute-based) summing every span instead of dropping the legacy ones.
-   */
-  private static int computeTotalTokens(List<Span> spans) {
-    int total = 0;
-    for (var span : spans) {
-      if (span.usage() != null) {
-        total += span.usage().totalTokens();
-      } else if (span.kind() == SpanKind.MODEL_CALL) {
-        total += parseTokenAttribute(span.attributes().get("inputTokens"));
-        total += parseTokenAttribute(span.attributes().get("outputTokens"));
-      }
-      total += computeTotalTokens(span.children());
-    }
-    return total;
-  }
-
-  private static int parseTokenAttribute(String value) {
-    if (value == null) {
-      return 0;
-    }
-    try {
-      return Integer.parseInt(value);
-    } catch (NumberFormatException ignored) {
-      return 0;
-    }
   }
 
   private void collectCompletedSpans() {

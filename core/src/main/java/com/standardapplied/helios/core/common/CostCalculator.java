@@ -96,10 +96,6 @@ public interface CostCalculator {
     /** Anthropic's published premium ratio for five-minute prompt-cache writes. */
     public static final double ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER = 1.25d;
 
-    /** Backward-compatible alias for {@link #ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER}. */
-    public static final double ANTHROPIC_CACHE_WRITE_MULTIPLIER =
-        ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER;
-
     /** Anthropic's published premium ratio for one-hour prompt-cache writes. */
     public static final double ANTHROPIC_1H_CACHE_WRITE_MULTIPLIER = 2.00d;
 
@@ -183,17 +179,6 @@ public interface CostCalculator {
           Math.round(outputUsdPerMillion * CostEstimate.MICRO_USD_PER_USD),
           Math.round(cacheWriteUsdPerMillion * CostEstimate.MICRO_USD_PER_USD),
           Math.round(cacheReadUsdPerMillion * CostEstimate.MICRO_USD_PER_USD));
-    }
-
-    /**
-     * Backward-compatible alias for {@link #anthropicCaching5m(double, double)}.
-     *
-     * @param inputUsdPerMillion USD per million uncached input tokens; non-negative
-     * @param outputUsdPerMillion USD per million output tokens; non-negative
-     * @return pricing for Anthropic's default five-minute cache
-     */
-    public static Pricing anthropicCaching(double inputUsdPerMillion, double outputUsdPerMillion) {
-      return anthropicCaching5m(inputUsdPerMillion, outputUsdPerMillion);
     }
 
     /**

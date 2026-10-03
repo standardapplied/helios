@@ -144,10 +144,10 @@ final class Phase6AcceptanceTest {
                             "script",
                             "var total = numbers.stream().mapToInt(Integer::intValue).sum();\n"
                                 + "println(total);"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.TextDelta("{\"value\": 10}"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1))));
+                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
 
     var options =
         SessionOptions.newBuilder()
@@ -176,7 +176,7 @@ final class Phase6AcceptanceTest {
         List.<List<ModelChunk>>of(
             List.of(
                 new ModelChunk.TextDelta("{\"value\": 5}"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1))),
+                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.ToolUseStop(
                     new ToolCall(
@@ -188,10 +188,10 @@ final class Phase6AcceptanceTest {
                             "script",
                             "var total = numbers.stream().mapToInt(Integer::intValue).sum();\n"
                                 + "println(total);"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.TextDelta("{\"value\": 5}"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1))));
+                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
 
     var options =
         SessionOptions.newBuilder()
@@ -227,7 +227,7 @@ final class Phase6AcceptanceTest {
                             "script",
                             "var summary = predict(\"Summarize in one sentence\", topic);\n"
                                 + "submit(java.util.Map.of(\"headline\", summary));"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))));
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())));
 
     var options =
         SessionOptions.newBuilder()
@@ -350,7 +350,7 @@ final class Phase6AcceptanceTest {
                             "JSHELL",
                             "script",
                             "submit(java.util.Map.of(\"headline\", \"excellent widgets\"));"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))));
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())));
 
     var options =
         SessionOptions.newBuilder()

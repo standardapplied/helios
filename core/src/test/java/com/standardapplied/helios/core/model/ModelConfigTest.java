@@ -193,24 +193,6 @@ class ModelConfigTest {
   }
 
   @Test
-  @SuppressWarnings("deprecation")
-  void deprecatedGoogleSearchAliasesWebSearch() {
-    var config = ModelConfig.newBuilder().withApiKey("key").withGoogleSearch(true).build();
-
-    assertTrue(config.webSearch());
-    assertTrue(config.googleSearch());
-  }
-
-  @Test
-  @SuppressWarnings("deprecation")
-  void deprecatedUrlContextAliasesWebFetch() {
-    var config = ModelConfig.newBuilder().withApiKey("key").withUrlContext(true).build();
-
-    assertTrue(config.webFetch());
-    assertTrue(config.urlContext());
-  }
-
-  @Test
   void promptCacheKeyDefaultsNullAndRoundTrips() {
     assertNull(ModelConfig.of("key").promptCacheKey());
 

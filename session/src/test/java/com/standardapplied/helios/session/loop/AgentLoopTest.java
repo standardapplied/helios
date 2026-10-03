@@ -34,10 +34,20 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 final class AgentLoopTest {
+
+  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+  @AfterEach
+  void shutDownScheduler() {
+    scheduler.shutdownNow();
+  }
 
   private static final String SID = "sess-1";
   private static final Instant FIXED = Instant.parse("2026-05-14T19:00:00Z");
@@ -124,7 +134,8 @@ final class AgentLoopTest {
             CTX_FACTORY,
             CLOCK,
             CostCalculator.ZERO,
-            null);
+            null,
+            scheduler);
     return new AgentLoop(
         runner,
         new StopClassifier(),
@@ -153,7 +164,8 @@ final class AgentLoopTest {
             CTX_FACTORY,
             CLOCK,
             CostCalculator.ZERO,
-            null);
+            null,
+            scheduler);
     var classifier = new StopClassifier();
     var counter = TokenCounter.charBased();
     var compactor = ContextCompactor.disabled();
@@ -496,7 +508,8 @@ final class AgentLoopTest {
             CTX_FACTORY,
             CLOCK,
             CostCalculator.ZERO,
-            null);
+            null,
+            scheduler);
     java.util.function.Consumer<QueryEvent> throwingSink =
         e -> {
           throw new RuntimeException("sink boom");
@@ -838,7 +851,8 @@ final class AgentLoopTest {
             CTX_FACTORY,
             CLOCK,
             CostCalculator.ZERO,
-            null);
+            null,
+            scheduler);
     var loop =
         new AgentLoop(
             runner,
@@ -1118,7 +1132,16 @@ final class AgentLoopTest {
     var model = fixedModel("ok", FinishReason.STOP, Usage.of(0, 0));
     var runner =
         new TurnRunner(
-            model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, calculator, null);
+            model,
+            hooks,
+            dispatch,
+            queue,
+            events::add,
+            CTX_FACTORY,
+            CLOCK,
+            calculator,
+            null,
+            scheduler);
     var loop =
         new AgentLoop(
             runner,
@@ -1194,7 +1217,8 @@ final class AgentLoopTest {
             CTX_FACTORY,
             CLOCK,
             CostCalculator.ZERO,
-            null);
+            null,
+            scheduler);
     return new AgentLoop(
         runner,
         new StopClassifier(),

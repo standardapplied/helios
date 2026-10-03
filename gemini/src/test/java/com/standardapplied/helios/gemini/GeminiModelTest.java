@@ -282,7 +282,7 @@ class GeminiModelTest {
 
   @Test
   void urlContextWithFunctionToolsThrows() {
-    var config = ModelConfig.newBuilder().withApiKey("test-key").withUrlContext(true).build();
+    var config = ModelConfig.newBuilder().withApiKey("test-key").withWebFetch(true).build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
 
     var tool =

@@ -137,12 +137,6 @@ public sealed interface ResultMessage
       Objects.requireNonNull(citations, "citations must not be null");
       citations = List.copyOf(citations);
     }
-
-    /** Convenience for a success with no grounding citations. */
-    public Success(
-        String sessionId, String result, Usage usage, CostEstimate cost, Duration duration) {
-      this(sessionId, result, usage, cost, duration, List.of());
-    }
   }
 
   /**
@@ -374,12 +368,6 @@ public sealed interface ResultMessage
       if (Strings.isBlank(refusalText)) {
         throw new IllegalArgumentException("refusalText must not be blank");
       }
-    }
-
-    /** Convenience for a refusal the provider did not categorise. */
-    public Refusal(
-        String sessionId, String refusalText, Usage usage, CostEstimate cost, Duration duration) {
-      this(sessionId, refusalText, usage, cost, duration, null);
     }
 
     /**

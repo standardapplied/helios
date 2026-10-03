@@ -27,7 +27,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
  * google_search_call} step whose {@code arguments} ship as a JSON object on the {@code step.delta}
  * surface. The streaming delta carrier {@code ContentItem.arguments} was a bare {@code String}, so
  * the object aborted the whole stream with {@code "Failed to parse stream event"} before any
- * structured output could surface. No test combined {@code googleSearch(true)} with {@code
+ * structured output could surface. No test combined {@code withWebSearch(true)} with {@code
  * OutputSchema}, which is why it shipped broken.
  *
  * <p><strong>Citation behaviour, confirmed against the live wire.</strong> Grounded structured
@@ -56,7 +56,7 @@ class GeminiGroundedStructuredOutputIntegrationTest {
   @BeforeAll
   static void setUp() {
     var apiKey = System.getenv("GEMINI_API_KEY");
-    var config = ModelConfig.newBuilder().withApiKey(apiKey).withGoogleSearch(true).build();
+    var config = ModelConfig.newBuilder().withApiKey(apiKey).withWebSearch(true).build();
     model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
   }
 

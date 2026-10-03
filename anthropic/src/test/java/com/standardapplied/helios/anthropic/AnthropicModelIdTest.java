@@ -28,7 +28,8 @@ class AnthropicModelIdTest {
 
   @Test
   void opus48UsesAdaptiveThinking() {
-    assertTrue(AnthropicModelId.CLAUDE_OPUS_4_8.usesAdaptiveThinking());
+    assertEquals(
+        AnthropicModelId.ThinkingShape.ADAPTIVE, AnthropicModelId.CLAUDE_OPUS_4_8.thinkingShape());
     assertEquals(128_000, AnthropicModelId.CLAUDE_OPUS_4_8.maxOutputTokens());
   }
 
@@ -259,15 +260,6 @@ class AnthropicModelIdTest {
     assertFalse(AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON.acceptsSamplingParameters());
     assertFalse(AnthropicModelId.ThinkingShape.ADAPTIVE_BETWEEN_TOOLS.acceptsSamplingParameters());
     assertFalse(AnthropicModelId.ThinkingShape.ALWAYS_ON.acceptsSamplingParameters());
-  }
-
-  @Test
-  @SuppressWarnings("deprecation")
-  void deprecatedAdaptiveFlagDerivesFromShape() {
-    assertTrue(AnthropicModelId.CLAUDE_FABLE_5.usesAdaptiveThinking());
-    assertTrue(AnthropicModelId.CLAUDE_OPUS_4_8.usesAdaptiveThinking());
-    assertTrue(AnthropicModelId.CLAUDE_SONNET_4_6.usesAdaptiveThinking());
-    assertFalse(AnthropicModelId.CLAUDE_HAIKU_4_5.usesAdaptiveThinking());
   }
 
   @Test

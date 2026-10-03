@@ -361,7 +361,7 @@ final class QueryEventTest {
   void loopEndedConstructsAndExposesFields() {
     var result =
         new ResultMessage.Success(
-            SID, "done", Usage.of(10, 5), CostEstimate.zero(), Duration.ofSeconds(1));
+            SID, "done", Usage.of(10, 5), CostEstimate.zero(), Duration.ofSeconds(1), List.of());
     var e = new QueryEvent.LoopEnded(SID, TURN, TS, result);
     assertSame(result, e.result());
   }
@@ -430,7 +430,8 @@ final class QueryEventTest {
   @Test
   void switchPatternHandlesEverySubtype() {
     var result =
-        new ResultMessage.Success(SID, "ok", Usage.of(1, 1), CostEstimate.zero(), Duration.ZERO);
+        new ResultMessage.Success(
+            SID, "ok", Usage.of(1, 1), CostEstimate.zero(), Duration.ZERO, List.of());
     List<QueryEvent> all =
         List.of(
             new QueryEvent.AssistantText(SID, TURN, TS, "t"),

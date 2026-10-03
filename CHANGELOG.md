@@ -58,6 +58,38 @@ Code that read the returned value as a `Clock` (`options.clock().getZone()`,
 it so: no static wall-clock read outside `core.common.Ids`, `Clock.system*` only as a field's
 initial value, and no `Clock` field, parameter or return type.
 
+**Every 2.x compatibility shim, deprecated member and legacy alias is removed.** 3.0 keeps one
+way to do each thing; an architecture rule now fails the build on any `@Deprecated` type or member
+in main code.
+
+| Removed | Replacement |
+|---|---|
+| `ModelConfig(...)` 17-argument constructor | `ModelConfig.newBuilder()`, or the canonical constructor with `providerContinuation`, `apiVersion` and `rawOutputCapturePolicy` |
+| `ModelConfig.googleSearch()`, `ModelConfig.Builder.withGoogleSearch(boolean)` | `webSearch()`, `withWebSearch(boolean)` |
+| `ModelConfig.urlContext()`, `ModelConfig.Builder.withUrlContext(boolean)` | `webFetch()`, `withWebFetch(boolean)` |
+| `Tool(name, description, parameters, executor, idempotent)` | `Tool.newBuilder()`, or the canonical constructor with a `resultCompactor` (`Tool.DEFAULT_RESULT_COMPACTOR` for the previous behaviour) |
+| `CostCalculator.Pricing.ANTHROPIC_CACHE_WRITE_MULTIPLIER` | `Pricing.ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER` |
+| `CostCalculator.Pricing.anthropicCaching(input, output)` | `Pricing.anthropicCaching5m(input, output)` |
+| `JsonlEventSink.open(Path)` | `JsonlEventSink.openFull(Path)` (same behaviour) or `openMetadataOnly(Path)` |
+| `Trace.totalTokens` summed from the `inputTokens` / `outputTokens` span attributes when a span had no typed usage | record `SpanBuilder.usage(Usage)`; a span without typed usage contributes 0 and its token attributes are plain attributes |
+| `ModelChunk.MessageStop(stopReason, usage)` | `MessageStop(stopReason, usage, Map.of(), List.of())` |
+| `AnthropicModelId.usesAdaptiveThinking()` | `thinkingShape() != ThinkingShape.LEGACY_BUDGET` |
+| Anthropic metadata keys `anthropic.thinking` and `anthropic.thinkingSignature`, and the decode fallback that read them | `anthropic.thinkingBlocks`, a JSON array of `{"text", "signature"}` with one entry per thinking block |
+| `anthropic.api.ToolDefinition(name, description, inputSchema)` | `ToolDefinition(null, name, description, inputSchema, null)` |
+| `OpenAIModelId.supportsXhighEffort()` | `effortSupport() != EffortSupport.STANDARD` |
+| `StopClassifier.classify(state, limits, finishReason, assistantContent, streamError, streamAttempts, hasPendingMessages)` | `classify(state, limits, new TurnOutcome(finishReason, assistantContent, usage, metadata, streamError, streamAttempts), hasPendingMessages)` |
+| `ResultMessage.Success(sessionId, result, usage, cost, duration)` | `Success(sessionId, result, usage, cost, duration, List.of())` |
+| `ResultMessage.Refusal(sessionId, refusalText, usage, cost, duration)` | `Refusal(sessionId, refusalText, usage, cost, duration, null)` |
+| `TurnRunner(...)` nine-argument constructor and its process-wide default scheduler | the ten-argument constructor with a `ScheduledExecutorService` the caller owns and shuts down |
+| `UserMessage(text, attachments, null)` read as "no file references" | pass `List.of()`, or use `UserMessage(text, attachments)`; a null `fileReferences` throws `NullPointerException` |
+| `repl.sandbox.ExecutionResult` four-, five- and six-argument constructors | `ExecutionResult.newBuilder()`, or the canonical seven-component constructor |
+
+Persisted data is not migrated: a conversation written by 2.x whose assistant messages carry only
+the single-block keys `anthropic.thinking` / `anthropic.thinkingSignature` is not read by 3.0.
+Such a message is replayed without its thinking block; re-run the conversation on 3.0, or rewrite
+the stored metadata to `anthropic.thinkingBlocks`
+(`[{"text": <anthropic.thinking>, "signature": <anthropic.thinkingSignature>}]`) before loading it.
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`

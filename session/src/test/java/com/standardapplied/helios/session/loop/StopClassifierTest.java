@@ -345,34 +345,13 @@ final class StopClassifierTest {
     assertEquals(420_000L, result.cost().microUsd());
   }
 
-  // ── deprecated loose-field overload ───────────────────────────────────────
-
   @Test
-  @SuppressWarnings("deprecation")
-  void looseFieldOverloadRejectsNonPositiveStreamAttempts() {
+  void outcomeRejectsNonPositiveStreamAttempts() {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> classifier.classify(state(), defaults(), FinishReason.STOP, "x", null, 0, false));
+            () -> new TurnOutcome(FinishReason.STOP, "x", Usage.of(0, 0), Map.of(), null, 0));
     assertTrue(ex.getMessage().contains("streamAttempts"));
-  }
-
-  @Test
-  @SuppressWarnings("deprecation")
-  void looseFieldOverloadClassifiesLikeTheOutcomeOverload() {
-    var tse = new TransientStreamException("Stream read error", null, "anthropic");
-
-    var success =
-        classifier.classify(state(), defaults(), FinishReason.STOP, "done", null, 1, false);
-    var transientFailure =
-        classifier.classify(state(), defaults(), FinishReason.ERROR, "", tse, 2, false);
-
-    assertEquals(
-        "done", assertInstanceOf(ResultMessage.Success.class, success.orElseThrow()).result());
-    assertEquals(
-        2,
-        assertInstanceOf(ResultMessage.ErrorTransientStream.class, transientFailure.orElseThrow())
-            .attemptsMade());
   }
 
   @Test
@@ -380,7 +359,7 @@ final class StopClassifierTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> classifier.classify(state(), defaults(), (TurnOutcome) null, false));
+            () -> classifier.classify(state(), defaults(), null, false));
     assertEquals("outcome must not be null", ex.getMessage());
   }
 

@@ -194,7 +194,8 @@ class SerializationTest {
             .build();
 
     var toolDef =
-        new ToolDefinition(tool.name(), tool.description(), tool.parametersAsJsonSchema());
+        new ToolDefinition(
+            null, tool.name(), tool.description(), tool.parametersAsJsonSchema(), null);
     var json = objectMapper.writeValueAsString(toolDef);
     assertTrue(json.contains("\"name\":\"search_people\""));
     assertTrue(json.contains("\"description\":\"Finds people using semantic search\""));
@@ -261,7 +262,11 @@ class SerializationTest {
     var toolDefs =
         List.of(
             new ToolDefinition(
-                searchTool.name(), searchTool.description(), searchTool.parametersAsJsonSchema()));
+                null,
+                searchTool.name(),
+                searchTool.description(),
+                searchTool.parametersAsJsonSchema(),
+                null));
 
     var request =
         MessagesRequest.newBuilder()
@@ -724,7 +729,7 @@ class SerializationTest {
   @Test
   void toolDefinitionWithCacheControlRoundTrips() throws Exception {
     var def =
-        new ToolDefinition("calc", "compute", Map.of("type", "object"))
+        new ToolDefinition(null, "calc", "compute", Map.of("type", "object"), null)
             .withCacheControl(CacheControl.ephemeral());
     var json = objectMapper.writeValueAsString(def);
     assertTrue(json.contains("\"name\":\"calc\""));
@@ -733,7 +738,7 @@ class SerializationTest {
 
   @Test
   void toolDefinitionWithCacheControlRejectsNull() {
-    var def = new ToolDefinition("calc", "compute", Map.of());
+    var def = new ToolDefinition(null, "calc", "compute", Map.of(), null);
     org.junit.jupiter.api.Assertions.assertThrows(
         NullPointerException.class, () -> def.withCacheControl(null));
   }

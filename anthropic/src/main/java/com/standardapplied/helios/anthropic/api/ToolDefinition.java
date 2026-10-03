@@ -46,18 +46,6 @@ public record ToolDefinition(
   public static final String WEB_FETCH_TYPE = "web_fetch_20260318";
 
   /**
-   * Convenience constructor for a client tool without a cache breakpoint. Preserves the prior call
-   * sites that predate prompt caching and server tools.
-   *
-   * @param name the tool name
-   * @param description description of what the tool does
-   * @param inputSchema JSON Schema for tool parameters
-   */
-  public ToolDefinition(String name, String description, Map<String, Object> inputSchema) {
-    this(null, name, description, inputSchema, null);
-  }
-
-  /**
    * The web-search server tool. Executed by Anthropic during the request; results arrive as content
    * blocks with citations.
    *

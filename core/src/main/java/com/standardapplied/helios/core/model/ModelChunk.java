@@ -157,11 +157,6 @@ public sealed interface ModelChunk
     public MessageStop(String stopReason, Usage usage, Map<String, String> metadata) {
       this(stopReason, usage, metadata, List.of());
     }
-
-    /** Back-compat convenience for callers that don't supply metadata or citations. */
-    public MessageStop(String stopReason, Usage usage) {
-      this(stopReason, usage, Map.of(), List.of());
-    }
   }
 
   /**

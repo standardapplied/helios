@@ -206,19 +206,19 @@ final class Phase2AcceptanceTest {
         List.<List<ModelChunk>>of(
             List.of(
                 new ModelChunk.ToolUseStop(grepCall),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.ToolUseStop(readAllowed),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.ToolUseStop(readDenied),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.ToolUseStop(askCall),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.TextDelta("all done"),
-                new ModelChunk.MessageStop("STOP", Usage.of(2, 1))));
+                new ModelChunk.MessageStop("STOP", Usage.of(2, 1), Map.of(), List.of())));
 
     var options =
         SessionOptions.newBuilder()
