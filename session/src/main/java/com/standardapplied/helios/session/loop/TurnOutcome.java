@@ -13,7 +13,7 @@ import java.util.Objects;
  * Outcome of one model turn, produced by {@link TurnRunner#runTurn(SessionState,
  * com.standardapplied.helios.session.SessionLimits)} and consumed by {@link
  * StopClassifier#classify(SessionState, com.standardapplied.helios.session.SessionLimits,
- * FinishReason, String, Throwable, int, boolean)}.
+ * TurnOutcome, boolean)}.
  *
  * <p>{@code assistantContent} is the fully-assembled assistant text accumulated from every {@link
  * com.standardapplied.helios.core.model.ModelChunk.TextDelta TextDelta} chunk during the turn —
