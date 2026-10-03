@@ -263,7 +263,8 @@ final class SessionStateTest {
   void setTerminalIsFirstWins() {
     var state = build();
     var first =
-        new ResultMessage.Success(SID, "ok", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO);
+        new ResultMessage.Success(
+            SID, "ok", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO, List.of());
     var second =
         new ResultMessage.Cancelled(
             SID, "user-stop", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO);

@@ -124,14 +124,13 @@ final class ModelChunkTest {
   @Test
   void messageStopCarriesFields() {
     var u = Usage.of(10, 5);
-    var c = new ModelChunk.MessageStop("end_turn", u);
+    var c = new ModelChunk.MessageStop("end_turn", u, Map.of(), List.of());
     assertEquals("end_turn", c.stopReason());
     assertEquals(u, c.usage());
   }
 
   @Test
   void messageStopDefaultsCitationsToEmpty() {
-    assertTrue(new ModelChunk.MessageStop("end_turn", Usage.of(0, 0)).citations().isEmpty());
     assertTrue(
         new ModelChunk.MessageStop("end_turn", Usage.of(0, 0), Map.of("k", "v"))
             .citations()
@@ -168,7 +167,8 @@ final class ModelChunkTest {
   void messageStopRejectsNullStopReason() {
     var ex =
         assertThrows(
-            NullPointerException.class, () -> new ModelChunk.MessageStop(null, Usage.of(0, 0)));
+            NullPointerException.class,
+            () -> new ModelChunk.MessageStop(null, Usage.of(0, 0), Map.of(), List.of()));
     assertEquals("stopReason must not be null", ex.getMessage());
   }
 
@@ -177,7 +177,7 @@ final class ModelChunkTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new ModelChunk.MessageStop("   ", Usage.of(0, 0)));
+            () -> new ModelChunk.MessageStop("   ", Usage.of(0, 0), Map.of(), List.of()));
     assertEquals("stopReason must not be blank", ex.getMessage());
   }
 
@@ -185,7 +185,8 @@ final class ModelChunkTest {
   void messageStopRejectsNullUsage() {
     var ex =
         assertThrows(
-            NullPointerException.class, () -> new ModelChunk.MessageStop("end_turn", null));
+            NullPointerException.class,
+            () -> new ModelChunk.MessageStop("end_turn", null, Map.of(), List.of()));
     assertEquals("usage must not be null", ex.getMessage());
   }
 

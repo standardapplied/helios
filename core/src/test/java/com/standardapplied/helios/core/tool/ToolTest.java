@@ -66,15 +66,6 @@ class ToolTest {
   }
 
   @Test
-  void legacyFiveArgConstructorUsesDefaultCompactor() {
-    // Pre-1.3 callers that constructed Tool via the canonical record constructor used a 5-arg
-    // shape. The convenience ctor must keep working and supply the default compactor.
-    var tool = new Tool("legacy", "legacy", List.of(), (args, ctx) -> ToolResult.success(""), true);
-    assertEquals(Tool.DEFAULT_RESULT_COMPACTOR, tool.resultCompactor());
-    assertTrue(tool.idempotent());
-  }
-
-  @Test
   void buildSimpleTool() {
     var tool =
         Tool.newBuilder()

@@ -34,8 +34,8 @@ import java.util.Objects;
  *
  * @param text the message text; non-null, may be empty (callers attaching files often skip prose)
  * @param attachments inline file attachments; non-null, defensively copied, may be empty
- * @param fileReferences provider-accessible file references; defensively copied, null is treated as
- *     empty for serialized backward compatibility
+ * @param fileReferences provider-accessible file references; non-null, defensively copied, may be
+ *     empty
  */
 public record UserMessage(
     String text, List<InlineFile> attachments, List<FileReference> fileReferences) {
@@ -47,13 +47,13 @@ public record UserMessage(
   /**
    * Canonical constructor.
    *
-   * @throws NullPointerException if text or attachments is null
+   * @throws NullPointerException if text, attachments or fileReferences is null
    * @throws IllegalArgumentException if the message has no text, attachments, or file references
    */
   public UserMessage {
     Objects.requireNonNull(text, "text must not be null");
     Objects.requireNonNull(attachments, "attachments must not be null");
-    fileReferences = fileReferences == null ? List.of() : fileReferences;
+    Objects.requireNonNull(fileReferences, "fileReferences must not be null");
     for (var a : attachments) {
       Objects.requireNonNull(a, "attachments must not contain null");
     }

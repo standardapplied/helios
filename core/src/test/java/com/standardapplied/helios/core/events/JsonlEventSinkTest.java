@@ -35,7 +35,7 @@ class JsonlEventSinkTest {
   void writesOneLinePerEvent(@TempDir Path tmp) throws Exception {
     var file = tmp.resolve("events.jsonl");
     var runId = Ids.newId();
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       var trace = Trace.newBuilder().withDuration(Duration.ofMillis(7)).build();
       sink.onEvent(new HeliosEvent.RunStarted(NOW, runId, Optional.empty(), "agent", Map.of()));
       sink.onEvent(new HeliosEvent.RunCompleted(NOW, runId, Optional.empty(), trace));
@@ -53,7 +53,7 @@ class JsonlEventSinkTest {
   void everyEventVariantSerializes(@TempDir Path tmp) throws Exception {
     var file = tmp.resolve("all.jsonl");
     var runId = Ids.newId();
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(
           new HeliosEvent.RunStarted(NOW, runId, Optional.empty(), "agent", Map.of("k", "v")));
       sink.onEvent(
@@ -252,7 +252,7 @@ class JsonlEventSinkTest {
   void escapesSpecialCharactersInStrings(@TempDir Path tmp) throws Exception {
     var file = tmp.resolve("escape.jsonl");
     var runId = Ids.newId();
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(
           new HeliosEvent.AssistantTextDelta(
               NOW, runId, Optional.empty(), "line1\nline2\t\"quoted\"\\back"));
@@ -271,7 +271,7 @@ class JsonlEventSinkTest {
   void escapesControlCharacters(@TempDir Path tmp) throws Exception {
     var file = tmp.resolve("ctrl.jsonl");
     var runId = Ids.newId();
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(new HeliosEvent.AssistantTextDelta(NOW, runId, Optional.empty(), "xy"));
     }
     var line = Files.readAllLines(file).get(0);
@@ -281,7 +281,7 @@ class JsonlEventSinkTest {
   @Test
   void onEventAfterCloseThrows(@TempDir Path tmp) {
     var file = tmp.resolve("closed.jsonl");
-    var sink = JsonlEventSink.open(file);
+    var sink = JsonlEventSink.openFull(file);
     sink.close();
     assertTrue(sink.isClosed());
     assertThrows(
@@ -294,7 +294,7 @@ class JsonlEventSinkTest {
   @Test
   void doubleCloseIsIdempotent(@TempDir Path tmp) {
     var file = tmp.resolve("idem.jsonl");
-    var sink = JsonlEventSink.open(file);
+    var sink = JsonlEventSink.openFull(file);
     sink.close();
     sink.close();
     assertTrue(sink.isClosed());
@@ -302,12 +302,12 @@ class JsonlEventSinkTest {
 
   @Test
   void openRejectsNullPath() {
-    assertThrows(NullPointerException.class, () -> JsonlEventSink.open(null));
+    assertThrows(NullPointerException.class, () -> JsonlEventSink.openFull(null));
   }
 
   @Test
   void onEventRejectsNullEvent(@TempDir Path tmp) {
-    try (var sink = JsonlEventSink.open(tmp.resolve("x.jsonl"))) {
+    try (var sink = JsonlEventSink.openFull(tmp.resolve("x.jsonl"))) {
       assertThrows(NullPointerException.class, () -> sink.onEvent(null));
     }
   }
@@ -316,7 +316,7 @@ class JsonlEventSinkTest {
   void openFailsOnInvalidPath() {
     // Parent directory does not exist
     var path = Path.of("/this/path/should/not/exist/event.jsonl");
-    assertThrows(UncheckedIOException.class, () -> JsonlEventSink.open(path));
+    assertThrows(UncheckedIOException.class, () -> JsonlEventSink.openFull(path));
   }
 
   @Test
@@ -325,7 +325,7 @@ class JsonlEventSinkTest {
     var threads = 16;
     var perThread = 50;
     var latch = new CountDownLatch(threads);
-    try (var sink = JsonlEventSink.open(file);
+    try (var sink = JsonlEventSink.openFull(file);
         var pool = Executors.newVirtualThreadPerTaskExecutor()) {
       for (var t = 0; t < threads; t++) {
         pool.submit(
@@ -357,7 +357,7 @@ class JsonlEventSinkTest {
     var file = tmp.resolve("custom.jsonl");
     var data = Map.<String, Object>of("count", 42, "rate", 0.99, "name", "alpha", "active", true);
 
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(
           new HeliosEvent.Custom(NOW, Ids.newId(), Optional.empty(), "kubera.event", data));
     }
@@ -372,7 +372,7 @@ class JsonlEventSinkTest {
   @Test
   void nonFiniteNumberValuesAreCoercedToString(@TempDir Path tmp) throws Exception {
     var file = tmp.resolve("nonfinite.jsonl");
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(
           new HeliosEvent.Custom(
               NOW, Ids.newId(), Optional.empty(), "x.y", Map.of("v", Double.POSITIVE_INFINITY)));
@@ -384,7 +384,7 @@ class JsonlEventSinkTest {
   @Test
   void spanIdEmitsNullWhenAbsent(@TempDir Path tmp) throws Exception {
     var file = tmp.resolve("spanid.jsonl");
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(new HeliosEvent.IterationStarted(NOW, Ids.newId(), Optional.empty(), 0, 10));
     }
     var line = Files.readAllLines(file).get(0);
@@ -404,7 +404,7 @@ class JsonlEventSinkTest {
                     return "custom-obj";
                   }
                 });
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(new HeliosEvent.Custom(NOW, Ids.newId(), Optional.empty(), "x.y", data));
     }
     var line = Files.readAllLines(file).get(0);
@@ -415,7 +415,7 @@ class JsonlEventSinkTest {
   @Test
   void customDataWithIntegerNumberSerializesAsFinite(@TempDir Path tmp) throws Exception {
     var file = tmp.resolve("int.jsonl");
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(
           new HeliosEvent.Custom(NOW, Ids.newId(), Optional.empty(), "x.y", Map.of("n", 42L)));
     }
@@ -426,7 +426,7 @@ class JsonlEventSinkTest {
   @Test
   void customDataWithNaNNumberIsCoercedToString(@TempDir Path tmp) throws Exception {
     var file = tmp.resolve("nan.jsonl");
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(
           new HeliosEvent.Custom(
               NOW, Ids.newId(), Optional.empty(), "x.y", Map.of("v", Double.NaN)));
@@ -438,7 +438,7 @@ class JsonlEventSinkTest {
   @Test
   void toolCallStartedWithEmptyArgsProducesEmptyJsonObject(@TempDir Path tmp) throws Exception {
     var file = tmp.resolve("empty-args.jsonl");
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(
           new HeliosEvent.ToolCallStarted(NOW, Ids.newId(), Optional.empty(), "c", "n", Map.of()));
     }
@@ -449,7 +449,7 @@ class JsonlEventSinkTest {
   @Test
   void runStartedWithEmptyAttributesProducesEmptyJsonObject(@TempDir Path tmp) throws Exception {
     var file = tmp.resolve("empty-attrs.jsonl");
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(
           new HeliosEvent.RunStarted(NOW, Ids.newId(), Optional.empty(), "agent", Map.of()));
     }
@@ -461,7 +461,7 @@ class JsonlEventSinkTest {
   void optimizerCandidateProposedWithoutParentEmitsNullParentJson(@TempDir Path tmp)
       throws Exception {
     var file = tmp.resolve("orphan.jsonl");
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(
           new HeliosEvent.OptimizerCandidateProposed(
               NOW, Ids.newId(), Optional.empty(), Ids.newId(), Optional.empty(), "seed"));
@@ -473,7 +473,7 @@ class JsonlEventSinkTest {
   @Test
   void spanClosedSuccessEmitsNullError(@TempDir Path tmp) throws Exception {
     var file = tmp.resolve("ok.jsonl");
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(
           new HeliosEvent.SpanClosed(
               NOW,
@@ -493,7 +493,7 @@ class JsonlEventSinkTest {
   void spanIdEmitsValueWhenPresent(@TempDir Path tmp) throws Exception {
     var file = tmp.resolve("spanid2.jsonl");
     var spanId = Ids.newId();
-    try (var sink = JsonlEventSink.open(file)) {
+    try (var sink = JsonlEventSink.openFull(file)) {
       sink.onEvent(new HeliosEvent.IterationStarted(NOW, Ids.newId(), Optional.of(spanId), 0, 10));
     }
     var line = Files.readAllLines(file).get(0);

@@ -7,12 +7,10 @@ package com.standardapplied.helios.session.loop;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SerializedError;
 import com.standardapplied.helios.session.SessionLimits;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -147,39 +145,6 @@ public final class StopClassifier {
                   state.elapsed()));
       case TOOL_CALLS -> Optional.empty();
     };
-  }
-
-  /**
-   * Classify a turn described by its loose fields.
-   *
-   * @param state the session state at the moment of the call; non-null
-   * @param limits the session limits in force; non-null
-   * @param finishReason the provider-reported finish reason for the just-completed turn; non-null
-   * @param assistantContent the assistant text the turn produced; non-null but may be empty
-   * @param streamError the throwable that terminated the final stream attempt, or {@code null}
-   * @param streamAttempts the total number of stream attempts made for this turn; {@code >= 1}
-   * @param hasPendingMessages {@code true} if the steering queue still has user messages
-   * @return a terminal {@code ResultMessage} when one applies, or empty to continue
-   * @throws NullPointerException if any non-nullable argument is null
-   * @throws IllegalArgumentException if {@code streamAttempts < 1}
-   * @deprecated use {@link #classify(SessionState, SessionLimits, TurnOutcome, boolean)}; the loose
-   *     fields cannot carry the provider metadata a refusal's category rides on
-   */
-  @Deprecated(since = "2.12.0")
-  public Optional<ResultMessage> classify(
-      SessionState state,
-      SessionLimits limits,
-      FinishReason finishReason,
-      String assistantContent,
-      Throwable streamError,
-      int streamAttempts,
-      boolean hasPendingMessages) {
-    return classify(
-        state,
-        limits,
-        new TurnOutcome(
-            finishReason, assistantContent, Usage.of(0, 0), Map.of(), streamError, streamAttempts),
-        hasPendingMessages);
   }
 
   /**

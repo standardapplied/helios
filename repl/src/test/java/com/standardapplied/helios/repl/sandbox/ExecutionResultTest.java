@@ -19,7 +19,10 @@ class ExecutionResultTest {
 
   @Test
   void constructorSetsFields() {
-    var result = new ExecutionResult("out", "err", 1, "submitted");
+    var result =
+        new ExecutionResult(
+            "code", "out", "err", 1, "submitted", java.util.Map.of(), Duration.ZERO);
+    assertEquals("code", result.executedCode());
     assertEquals("out", result.stdout());
     assertEquals("err", result.stderr());
     assertEquals(1, result.exitCode());
@@ -28,13 +31,13 @@ class ExecutionResultTest {
 
   @Test
   void nullStdoutDefaultsToEmpty() {
-    var result = new ExecutionResult(null, "err", 0, null);
+    var result = new ExecutionResult("c", null, "err", 0, null, java.util.Map.of(), Duration.ZERO);
     assertEquals("", result.stdout());
   }
 
   @Test
   void nullStderrDefaultsToEmpty() {
-    var result = new ExecutionResult("out", null, 0, null);
+    var result = new ExecutionResult("c", "out", null, 0, null, java.util.Map.of(), Duration.ZERO);
     assertEquals("", result.stderr());
   }
 
@@ -116,19 +119,6 @@ class ExecutionResultTest {
   }
 
   @Test
-  void durationDefaultsToZeroForLegacyConstructors() {
-    assertEquals(Duration.ZERO, new ExecutionResult("o", "e", 0, null).duration());
-    assertEquals(
-        Duration.ZERO,
-        new ExecutionResult("o", "e", 0, null, java.util.Map.of()).duration(),
-        "the 5-arg convenience must default duration to ZERO");
-    assertEquals(
-        Duration.ZERO,
-        new ExecutionResult("code", "o", "e", 0, null, java.util.Map.of()).duration(),
-        "the 6-arg convenience must default duration to ZERO");
-  }
-
-  @Test
   void durationDefaultsToZeroWhenCanonicalReceivesNull() {
     var result = new ExecutionResult("c", "o", "e", 0, null, java.util.Map.of(), null);
     assertEquals(Duration.ZERO, result.duration());
@@ -183,14 +173,14 @@ class ExecutionResultTest {
 
   @Test
   void withDurationNormalizesNullToZero() {
-    var original = new ExecutionResult("o", "e", 0, null);
+    var original = ExecutionResult.newBuilder().withStdout("o").withStderr("e").build();
     var copy = original.withDuration(null);
     assertEquals(Duration.ZERO, copy.duration());
   }
 
   @Test
   void withDurationOnZeroDurationIsBenign() {
-    var original = new ExecutionResult("o", "e", 0, null);
+    var original = ExecutionResult.newBuilder().withStdout("o").withStderr("e").build();
     var copy = original.withDuration(Duration.ZERO);
     // The instance is new (records have value semantics — withDuration always rebuilds), but
     // both share Duration.ZERO. The point of this test is that the rebuild doesn't blow up on

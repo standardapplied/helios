@@ -24,24 +24,33 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.StopReason;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
+import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 final class TurnRunnerTest {
 
+  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+  @AfterEach
+  void shutDownScheduler() {
+    scheduler.shutdownNow();
+  }
+
   private static final String SID = "sess-1";
-  private static final Instant FIXED = Instant.parse("2026-05-14T19:00:00Z");
-  private static final Clock CLOCK = Clock.fixed(FIXED, ZoneOffset.UTC);
+  private static final InstantSource CLOCK =
+      InstantSource.fixed(Instant.parse("2026-05-14T19:00:00Z"));
 
   private final List<QueryEvent> events = new ArrayList<>();
   private final com.standardapplied.helios.session.hooks.HookRegistry hooks =
@@ -111,7 +120,16 @@ final class TurnRunnerTest {
 
   private TurnRunner runner(Model model) {
     return new TurnRunner(
-        model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, CostCalculator.ZERO, null);
+        model,
+        hooks,
+        dispatch,
+        queue,
+        events::add,
+        CTX_FACTORY,
+        CLOCK,
+        CostCalculator.ZERO,
+        null,
+        scheduler);
   }
 
   @Test
@@ -129,7 +147,8 @@ final class TurnRunnerTest {
                     CTX_FACTORY,
                     CLOCK,
                     CostCalculator.ZERO,
-                    null));
+                    null,
+                    scheduler));
     assertEquals("model must not be null", ex.getMessage());
   }
 
@@ -149,7 +168,8 @@ final class TurnRunnerTest {
                     CTX_FACTORY,
                     CLOCK,
                     CostCalculator.ZERO,
-                    null));
+                    null,
+                    scheduler));
     assertEquals("hooks must not be null", ex.getMessage());
   }
 
@@ -169,7 +189,8 @@ final class TurnRunnerTest {
                     CTX_FACTORY,
                     CLOCK,
                     CostCalculator.ZERO,
-                    null));
+                    null,
+                    scheduler));
     assertEquals("toolDispatch must not be null", ex.getMessage());
   }
 
@@ -189,7 +210,8 @@ final class TurnRunnerTest {
                     CTX_FACTORY,
                     CLOCK,
                     CostCalculator.ZERO,
-                    null));
+                    null,
+                    scheduler));
     assertEquals("steeringQueue must not be null", ex.getMessage());
   }
 
@@ -209,7 +231,8 @@ final class TurnRunnerTest {
                     CTX_FACTORY,
                     CLOCK,
                     CostCalculator.ZERO,
-                    null));
+                    null,
+                    scheduler));
     assertEquals("eventSink must not be null", ex.getMessage());
   }
 
@@ -229,7 +252,8 @@ final class TurnRunnerTest {
                     null,
                     CLOCK,
                     CostCalculator.ZERO,
-                    null));
+                    null,
+                    scheduler));
     assertEquals("hookContextFactory must not be null", ex.getMessage());
   }
 
@@ -249,7 +273,8 @@ final class TurnRunnerTest {
                     CTX_FACTORY,
                     null,
                     CostCalculator.ZERO,
-                    null));
+                    null,
+                    scheduler));
     assertEquals("clock must not be null", ex.getMessage());
   }
 
@@ -261,8 +286,38 @@ final class TurnRunnerTest {
             NullPointerException.class,
             () ->
                 new TurnRunner(
-                    model, hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK, null, null));
+                    model,
+                    hooks,
+                    dispatch,
+                    queue,
+                    events::add,
+                    CTX_FACTORY,
+                    CLOCK,
+                    null,
+                    null,
+                    scheduler));
     assertEquals("costCalculator must not be null", ex.getMessage());
+  }
+
+  @Test
+  void nullSchedulerRejected() {
+    var model = textModel("x", FinishReason.STOP, Usage.of(1, 1));
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new TurnRunner(
+                    model,
+                    hooks,
+                    dispatch,
+                    queue,
+                    events::add,
+                    CTX_FACTORY,
+                    CLOCK,
+                    CostCalculator.ZERO,
+                    null,
+                    null));
+    assertEquals("scheduler must not be null", ex.getMessage());
   }
 
   @Test
@@ -406,7 +461,7 @@ final class TurnRunnerTest {
             List.of(
                 new ModelChunk.ThinkingDelta("planning..."),
                 new ModelChunk.TextDelta("answer"),
-                new ModelChunk.MessageStop("STOP", Usage.of(4, 2))));
+                new ModelChunk.MessageStop("STOP", Usage.of(4, 2), Map.of(), List.of())));
     var outcome = runner(model).runTurn(freshState(), SessionLimits.defaults());
     assertEquals("answer", outcome.assistantContent());
     var thinking =
@@ -455,7 +510,7 @@ final class TurnRunnerTest {
                 new ModelChunk.ToolUseDelta("c", "{}"),
                 new ModelChunk.ToolUseStop(call),
                 new ModelChunk.TextDelta("done"),
-                new ModelChunk.MessageStop("STOP", Usage.of(7, 2))));
+                new ModelChunk.MessageStop("STOP", Usage.of(7, 2), Map.of(), List.of())));
     var outcome = runner(model).runTurn(freshState(), SessionLimits.defaults());
     assertEquals("done", outcome.assistantContent());
     assertEquals(Usage.of(7, 2), outcome.usage(), "MessageStop usage wins; UsageDelta ignored");
@@ -569,7 +624,8 @@ final class TurnRunnerTest {
                     public void request(long n) {
                       subscriber.onNext(new ModelChunk.TextDelta("hi"));
                       subscriber.onNext(
-                          new ModelChunk.MessageStop("unknown_reason", Usage.of(1, 1)));
+                          new ModelChunk.MessageStop(
+                              "unknown_reason", Usage.of(1, 1), Map.of(), List.of()));
                       subscriber.onComplete();
                     }
 
@@ -785,7 +841,8 @@ final class TurnRunnerTest {
             CTX_FACTORY,
             CLOCK,
             CostCalculator.ZERO,
-            null);
+            null,
+            scheduler);
     runner.runTurn(freshState(), SessionLimits.defaults());
     assertTrue(model.untypedDispatch.get(), "no outputSchema configured: must use untyped path");
     assertEquals(false, model.typedDispatch.get(), "typed dispatch must not fire");
@@ -805,7 +862,8 @@ final class TurnRunnerTest {
             CTX_FACTORY,
             CLOCK,
             CostCalculator.ZERO,
-            schema);
+            schema,
+            scheduler);
     runner.runTurn(freshState(), SessionLimits.defaults());
     assertTrue(model.typedDispatch.get(), "outputSchema set: must use typed-with-schema path");
     assertEquals(
@@ -878,7 +936,8 @@ final class TurnRunnerTest {
             CTX_FACTORY,
             CLOCK,
             CostCalculator.ZERO,
-            schema);
+            schema,
+            scheduler);
     var outcome = runner.runTurn(freshState(), SessionLimits.defaults());
     assertEquals(
         FinishReason.ERROR,

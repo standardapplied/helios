@@ -86,8 +86,11 @@ final class JShellExecutionProviderTest {
       if (throwOnExecute) {
         throw new RuntimeException("sandbox boom");
       }
-      return new com.standardapplied.helios.repl.sandbox.ExecutionResult(
-          stdoutPerCall, stderrPerCall, exitCodePerCall, null);
+      return com.standardapplied.helios.repl.sandbox.ExecutionResult.newBuilder()
+          .withStdout(stdoutPerCall)
+          .withStderr(stderrPerCall)
+          .withExitCode(exitCodePerCall)
+          .build();
     }
 
     @Override

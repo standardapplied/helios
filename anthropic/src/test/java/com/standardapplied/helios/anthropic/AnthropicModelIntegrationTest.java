@@ -187,10 +187,9 @@ class AnthropicModelIntegrationTest {
     assertTrue(response.hasThinking(), "Expected thinking content");
     assertFalse(response.thinking().isBlank(), "Thinking should not be empty");
 
-    var metadata = response.metadata();
-    assertTrue(
-        metadata.containsKey(AnthropicModel.THINKING_SIGNATURE_KEY),
-        "Expected thinking signature in metadata");
+    assertFalse(
+        AnthropicModel.decodeThinkingBlocks(response.metadata()).isEmpty(),
+        "Expected a signed thinking block in metadata");
   }
 
   // ── Opus 5.5 / Sonnet 5.5 / always-on models ──────────────────────────────

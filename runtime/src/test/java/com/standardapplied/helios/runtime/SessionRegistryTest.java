@@ -404,7 +404,8 @@ final class SessionRegistryTest {
         "ok",
         com.standardapplied.helios.core.model.Response.Usage.of(0, 0),
         com.standardapplied.helios.core.common.CostEstimate.zero(),
-        java.time.Duration.ZERO);
+        java.time.Duration.ZERO,
+        java.util.List.of());
   }
 
   /** Test clock that lets us advance time by hand. */

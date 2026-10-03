@@ -29,17 +29,12 @@ final class ResultMessageTest {
 
   @Test
   void successConstructsAndExposesFields() {
-    var r = new ResultMessage.Success(SID, "answer", USAGE, COST, DUR);
+    var r = new ResultMessage.Success(SID, "answer", USAGE, COST, DUR, List.of());
     assertEquals(SID, r.sessionId());
     assertEquals("answer", r.result());
     assertSame(USAGE, r.usage());
     assertSame(COST, r.cost());
     assertEquals(DUR, r.duration());
-  }
-
-  @Test
-  void successConvenienceConstructorDefaultsCitationsToEmpty() {
-    assertTrue(new ResultMessage.Success(SID, "answer", USAGE, COST, DUR).citations().isEmpty());
   }
 
   @Test
@@ -73,7 +68,7 @@ final class ResultMessageTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ResultMessage.Success(SID, null, USAGE, COST, DUR));
+            () -> new ResultMessage.Success(SID, null, USAGE, COST, DUR, List.of()));
     assertEquals("result must not be null", ex.getMessage());
   }
 
@@ -81,7 +76,7 @@ final class ResultMessageTest {
   void successAllowsEmptyResult() {
     // The empty assistant message is a legal terminal state (e.g. tool-only flow with no
     // final summary). Validation rejects null but not empty.
-    var r = new ResultMessage.Success(SID, "", USAGE, COST, DUR);
+    var r = new ResultMessage.Success(SID, "", USAGE, COST, DUR, List.of());
     assertEquals("", r.result());
   }
 
@@ -92,7 +87,7 @@ final class ResultMessageTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ResultMessage.Success(null, "a", USAGE, COST, DUR));
+            () -> new ResultMessage.Success(null, "a", USAGE, COST, DUR, List.of()));
     assertEquals("sessionId must not be null", ex.getMessage());
   }
 
@@ -101,7 +96,7 @@ final class ResultMessageTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new ResultMessage.Success("  ", "a", USAGE, COST, DUR));
+            () -> new ResultMessage.Success("  ", "a", USAGE, COST, DUR, List.of()));
     assertEquals("sessionId must not be blank", ex.getMessage());
   }
 
@@ -109,7 +104,8 @@ final class ResultMessageTest {
   void nullUsageRejected() {
     var ex =
         assertThrows(
-            NullPointerException.class, () -> new ResultMessage.Success(SID, "a", null, COST, DUR));
+            NullPointerException.class,
+            () -> new ResultMessage.Success(SID, "a", null, COST, DUR, List.of()));
     assertEquals("usage must not be null", ex.getMessage());
   }
 
@@ -118,7 +114,7 @@ final class ResultMessageTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ResultMessage.Success(SID, "a", USAGE, null, DUR));
+            () -> new ResultMessage.Success(SID, "a", USAGE, null, DUR, List.of()));
     assertEquals("cost must not be null", ex.getMessage());
   }
 
@@ -127,7 +123,7 @@ final class ResultMessageTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ResultMessage.Success(SID, "a", USAGE, COST, null));
+            () -> new ResultMessage.Success(SID, "a", USAGE, COST, null, List.of()));
     assertEquals("duration must not be null", ex.getMessage());
   }
 
@@ -137,13 +133,13 @@ final class ResultMessageTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new ResultMessage.Success(SID, "a", USAGE, COST, bad));
+            () -> new ResultMessage.Success(SID, "a", USAGE, COST, bad, List.of()));
     assertTrue(ex.getMessage().startsWith("duration must not be negative"));
   }
 
   @Test
   void zeroDurationAllowed() {
-    var r = new ResultMessage.Success(SID, "a", USAGE, COST, Duration.ZERO);
+    var r = new ResultMessage.Success(SID, "a", USAGE, COST, Duration.ZERO, List.of());
     assertEquals(Duration.ZERO, r.duration());
   }
 
@@ -298,7 +294,7 @@ final class ResultMessageTest {
 
   @Test
   void refusalConstructsAndExposesFields() {
-    var r = new ResultMessage.Refusal(SID, "cannot help with that", USAGE, COST, DUR);
+    var r = new ResultMessage.Refusal(SID, "cannot help with that", USAGE, COST, DUR, null);
     assertEquals("cannot help with that", r.refusalText());
     assertNull(r.category());
     assertEquals(Optional.empty(), r.categoryOpt());
@@ -316,7 +312,7 @@ final class ResultMessageTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ResultMessage.Refusal(SID, null, USAGE, COST, DUR));
+            () -> new ResultMessage.Refusal(SID, null, USAGE, COST, DUR, null));
     assertEquals("refusalText must not be null", ex.getMessage());
   }
 
@@ -325,7 +321,7 @@ final class ResultMessageTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new ResultMessage.Refusal(SID, "   ", USAGE, COST, DUR));
+            () -> new ResultMessage.Refusal(SID, "   ", USAGE, COST, DUR, null));
     assertEquals("refusalText must not be blank", ex.getMessage());
   }
 
@@ -419,7 +415,7 @@ final class ResultMessageTest {
   void switchPatternHandlesEverySubtype() {
     List<ResultMessage> all =
         List.of(
-            new ResultMessage.Success(SID, "ok", USAGE, COST, DUR),
+            new ResultMessage.Success(SID, "ok", USAGE, COST, DUR, List.of()),
             new ResultMessage.ErrorMaxTurns(SID, 5, USAGE, COST, DUR),
             new ResultMessage.ErrorMaxBudgetUsd(SID, 1_000_000L, USAGE, COST, DUR),
             new ResultMessage.ErrorMaxWallClock(SID, USAGE, COST, DUR),
@@ -429,7 +425,7 @@ final class ResultMessageTest {
                 SID, "anthropic", 3, SerializedError.of("kind", "msg"), USAGE, COST, DUR),
             new ResultMessage.ErrorProviderUnavailable(
                 SID, "TestProvider", "pool saturated", null, USAGE, COST, DUR),
-            new ResultMessage.Refusal(SID, "no", USAGE, COST, DUR),
+            new ResultMessage.Refusal(SID, "no", USAGE, COST, DUR, null),
             new ResultMessage.Cancelled(SID, "stop", USAGE, COST, DUR));
     for (var r : all) {
       var tag =
@@ -469,7 +465,7 @@ final class ResultMessageTest {
 
   @Test
   void withoutStackTracesIsIdentityWhenNoError() {
-    var success = new ResultMessage.Success(SID, "ok", USAGE, COST, DUR);
+    var success = new ResultMessage.Success(SID, "ok", USAGE, COST, DUR, List.of());
     assertSame(
         success,
         success.withoutStackTraces(),

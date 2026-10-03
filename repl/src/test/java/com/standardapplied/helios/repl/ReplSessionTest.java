@@ -326,7 +326,7 @@ class ReplSessionTest {
   private static class EchoSandbox implements Sandbox {
     @Override
     public ExecutionResult execute(ExecutionRequest request) {
-      return new ExecutionResult(request.code(), "ok", "", 0, null, java.util.Map.of());
+      return ExecutionResult.newBuilder().withExecutedCode(request.code()).withStdout("ok").build();
     }
 
     @Override
@@ -355,7 +355,7 @@ class ReplSessionTest {
       if (registry != null) {
         behavior.accept(registry);
       }
-      return new ExecutionResult("", "", 0, null, java.util.Map.of());
+      return ExecutionResult.newBuilder().build();
     }
 
     @Override
