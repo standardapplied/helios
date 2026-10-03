@@ -38,6 +38,15 @@ NO_ADVISORY = {"results": []}
 REVIEWED = '"Reviewed."'
 
 
+def component(version="1.0", **overrides):
+    purl = f"pkg:maven/org.example/lib@{version}?type=jar"
+    return {"group": "org.example", "name": "lib", "version": version, "purl": purl, **overrides}
+
+
+def inventory(*components):
+    return json.dumps({"components": list(components)})
+
+
 def entry(**fields):
     return "[[IgnoredVulns]]\n" + "".join(f"{key} = {value}\n" for key, value in fields.items())
 
@@ -47,8 +56,9 @@ class AdvisoryScanTest(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.directory = pathlib.Path(directory.name)
+        classified = "pkg:maven/org.example/lib@2.0%2Bbuild?classifier=tests&type=test-jar"
         self.inventory = self.write(
-            "clean.cdx.json", json.dumps({"components": [{"name": "anything", "version": "1"}]})
+            "clean.cdx.json", inventory(component(), component("2.0+build", purl=classified))
         )
 
     def write(self, name, text):
@@ -141,7 +151,7 @@ class AdvisoryScanTest(unittest.TestCase):
         self.assertEqual(f"CLEAN: {self.inventory}: no known advisory\n", output)
 
     def test_one_vulnerable_inventory_fails_the_scan_of_several(self):
-        other = self.write("other.cdx.json", json.dumps({"components": [{"name": "other"}]}))
+        other = self.write("other.cdx.json", inventory(component("2.0")))
         scanner = self.scanner(
             self.replying(CANARY_RESULT, 1),
             f'case "$*" in *other.cdx.json) {self.replying(CANARY_RESULT, 1)};;'
@@ -219,6 +229,21 @@ class AdvisoryScanTest(unittest.TestCase):
 
         self.assert_untrusted(outcome, "cannot download OSV-Scanner")
 
+    def test_unusable_scanner_cache_is_not_reported_as_an_advisory(self):
+        not_a_directory = self.write("cache", "")
+
+        outcome = self.scan(self.inventory, XDG_CACHE_HOME=not_a_directory)
+
+        self.assert_untrusted(outcome, f"Not a directory: '{not_a_directory}/helios'")
+
+    def test_failure_nobody_anticipated_is_not_reported_as_an_advisory(self):
+        scanner = self.detecting_scanner("printf '\\377'")
+
+        outcome = self.scan(self.inventory, OSV_SCANNER=scanner)
+
+        self.assert_untrusted(outcome, "the scan failed")
+        self.assert_untrusted(outcome, "UnicodeDecodeError")
+
     def test_platform_without_a_pinned_scanner_is_not_a_clean_scan(self):
         with mock.patch.object(advisory_scan, "SCANNER_PLATFORMS", {}):
             outcome = self.scan(self.inventory, OSV_SCANNER="")
@@ -226,17 +251,42 @@ class AdvisoryScanTest(unittest.TestCase):
         self.assert_untrusted(outcome, "no pinned OSV-Scanner")
 
     def test_inventory_that_cannot_prove_what_was_scanned_is_rejected(self):
-        credential = '{"components": [{"url": "https://deploy:hunter2@repo.example.com/maven"}]}'
+        credential = inventory({"url": "https://deploy:hunter2@repo.example.com/maven"})
         rejected = {
             str(self.directory / "absent.cdx.json"): "cannot read inventory",
             self.write("broken.cdx.json", "not json"): "cannot read inventory",
             self.write("list.cdx.json", "[]"): "cannot read inventory",
             self.write("empty.cdx.json", '{"components": []}'): "lists no component",
+            self.write("table.cdx.json", '{"components": {"lib": 1}}'): "lists no component",
             self.write("credential.cdx.json", credential): "embedded credentials",
         }
-        for inventory, diagnostic in rejected.items():
-            with self.subTest(diagnostic):
-                self.assert_untrusted(self.scan(inventory), diagnostic)
+        for rejected_inventory, diagnostic in rejected.items():
+            with self.subTest(rejected_inventory):
+                outcome = self.scan(rejected_inventory)
+
+                self.assert_untrusted(outcome, diagnostic)
+                self.assertNotIn("hunter2", outcome[2])
+
+    def test_inventory_with_a_component_the_scanner_would_not_look_up_is_rejected(self):
+        without_purl = component("42.7.7")
+        del without_purl["purl"]
+        unproven = {
+            "without purl": without_purl,
+            "versionless purl": component(purl="pkg:maven/org.example/lib"),
+            "purl of another version": component(purl="pkg:maven/org.example/lib@1.1?type=jar"),
+            "purl of another artifact": component(purl="pkg:maven/org.example/other@1.0"),
+            "purl of another ecosystem": component(purl="pkg:npm/lib@1.0"),
+            "nested": component(components=[component("2.0")]),
+            "not an object": "pkg:maven/org.example/lib@1.0",
+        }
+        for name, unscanned in unproven.items():
+            with self.subTest(name):
+                partial = self.write(f"{name}.cdx.json", inventory(component(), unscanned))
+
+                outcome = self.scan(partial)
+
+                self.assert_untrusted(outcome, "the scanner would skip 1 of 2 components")
+                self.assert_untrusted(outcome, f"First: {json.dumps(unscanned)[:300]}")
 
     def test_exception_file_that_is_not_reviewable_and_expiring_is_rejected(self):
         soon = datetime.date.today() + datetime.timedelta(days=30)
@@ -251,12 +301,30 @@ class AdvisoryScanTest(unittest.TestCase):
             entry(id='"GHSA-3"', ignoreUntil=too_late, reason=REVIEWED): "GHSA-3: " + unbounded,
             entry(id='"GHSA-4"', ignoreUntil=f"{soon}T00:00:00", reason=REVIEWED): "GHSA-4: "
             + unbounded,
+            'IgnoredVulns = "GHSA-5"\n': "IgnoredVulns must be an array of tables",
+            'IgnoredVulns = ["GHSA-6"]\n': "IgnoredVulns must be an array of tables",
+            '[IgnoredVulns]\nid = "GHSA-7"\n': "IgnoredVulns must be an array of tables",
         }
         for text, diagnostic in rejected.items():
             with self.subTest(diagnostic):
                 outcome = self.scan(self.inventory, ADVISORY_EXCEPTIONS=self.exceptions(text))
 
                 self.assert_untrusted(outcome, diagnostic)
+
+    def test_exception_cannot_carry_a_second_expiry_the_scanner_would_honour(self):
+        expired = datetime.date.today() - datetime.timedelta(days=1)
+        for spelling in ("IgnoreUntil", "ignoreuntil", "IGNOREUNTIL", "ID", "Reason", "note"):
+            with self.subTest(spelling):
+                text = entry(
+                    id=f'"{PGJDBC_ITERATIONS}"',
+                    ignoreUntil=expired,
+                    reason=REVIEWED,
+                    **{spelling: "2099-01-01"},
+                )
+
+                outcome = self.scan(CANARY, ADVISORY_EXCEPTIONS=self.exceptions(text))
+
+                self.assert_untrusted(outcome, f"{PGJDBC_ITERATIONS}: unsupported key {spelling}")
 
     def test_missing_exception_file_is_not_a_clean_scan(self):
         absent = str(self.directory / "absent.toml")

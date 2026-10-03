@@ -201,14 +201,22 @@ in the second is never shipped. CI uploads both, and the per-module pairs, as th
 - **Fix by upgrading to the lowest release outside the affected range**, in its own commit, with
   a row under Security in `CHANGELOG.md` naming the advisories and the resolved version.
 - **Exceptions expire.** An entry needs an `id`, a `reason` and an `ignoreUntil` date at most 90
-  days ahead; the scan rejects the file otherwise, and rejects anything but `IgnoredVulns`. After
-  the date the advisory fails the scan again. Entries are removed, never extended without a new
-  review.
+  days ahead; the scan rejects the file otherwise, and rejects anything but `IgnoredVulns` and any
+  other key in an entry, however it is spelled (OSV-Scanner matches keys without regard to case,
+  so `IgnoreUntil` would be a second, unchecked expiry). After the date the advisory fails the
+  scan again. Entries are removed, never extended without a new review.
 - **A scan that could not run is not a clean scan.** `advisory_scan.py` exits 0 (clean), 1
   (advisories, each printed with package, version, severity, fixed versions and URL) or 2 (the
-  result cannot be trusted: scanner, network, advisory data, inventory or exception file). Before
-  every scan it scans `config/security/canary.cdx.json`, which lists pgJDBC 42.7.7, and exits 2
-  unless both of that version's advisories come back. The canary is a file, never a dependency.
+  result cannot be trusted: scanner, network, advisory data, inventory or exception file, or an
+  unexpected failure inside the scan, which is printed with its traceback and never exits 1).
+  Before every scan it scans `config/security/canary.cdx.json`, which lists pgJDBC 42.7.7, and
+  exits 2 unless both of that version's advisories come back. The canary is a file, never a
+  dependency.
+- **Every inventoried component is looked up, or the scan is not clean.** OSV-Scanner skips a
+  component without a package URL or a version without saying so in its result, and looks up
+  whatever the package URL names. The scan therefore rejects an inventory unless every component
+  carries a `pkg:maven` package URL equal to its own group, name and version, and nests no
+  component.
 - **A daily scheduled CI run** finds an advisory published against an unchanged dependency.
 
 ### Blind spots
