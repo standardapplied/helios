@@ -12,13 +12,13 @@ import com.standardapplied.helios.repl.sandbox.ExecutionRequest;
 import com.standardapplied.helios.repl.sandbox.ExecutionResult;
 import com.standardapplied.helios.repl.sandbox.Sandbox;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,7 +39,7 @@ public final class ReplSession implements AutoCloseable {
   private final Sandbox sandbox;
   private final HostFunctionRegistry registry;
   private final Map<String, AtomicInteger> hostFnCounts;
-  private final List<ExecutionResult> history = new ArrayList<>();
+  private final List<ExecutionResult> history = new CopyOnWriteArrayList<>();
   private final Semaphore semaphore;
   private final AtomicBoolean closed = new AtomicBoolean(false);
 
