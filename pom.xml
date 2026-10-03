@@ -40,7 +40,7 @@
         <jackson-old-version>2.18.2</jackson-old-version>
         <helidon-version>4.4.1</helidon-version>
         <testcontainers-version>1.21.4</testcontainers-version>
-        <postgresql-driver-version>42.7.7</postgresql-driver-version>
+        <postgresql-driver-version>42.7.12</postgresql-driver-version>
         <maven-pmd-plugin-version>3.28.0</maven-pmd-plugin-version>
         <pmd-version>7.28.0</pmd-version>
         <archunit-version>1.5.1</archunit-version>

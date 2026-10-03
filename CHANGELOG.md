@@ -134,6 +134,24 @@ the stored metadata to `anthropic.thinkingBlocks`
   succeeded when `successThreshold` is above 1. Only the caller that makes the transition resets
   it.
 
+### Security
+
+- **`helios-persistence` resolves the PostgreSQL JDBC driver `org.postgresql:postgresql` 42.7.12
+  (was 42.7.7).** 42.7.7 is inside the affected range of two pgJDBC advisories:
+  [GHSA-98qh-xjc8-98pq](https://github.com/pgjdbc/pgjdbc/security/advisories/GHSA-98qh-xjc8-98pq)
+  (CVE-2026-42198, affected 42.2.0 up to but not including 42.7.11: a server can demand an
+  unbounded SCRAM-SHA-256 PBKDF2 iteration count and exhaust client CPU) and
+  [GHSA-j92g-9f8w-j867](https://github.com/pgjdbc/pgjdbc/security/advisories/GHSA-j92g-9f8w-j867)
+  (CVE-2026-54291, affected 42.7.4 through 42.7.11: `channelBinding=require` is silently
+  downgraded to SCRAM-SHA-256 without channel binding when the server certificate's signature
+  algorithm has no `tls-server-end-point` hash). 42.7.12 is the first release outside both ranges
+  and changes nothing else. Two connections that 42.7.7 accepted are now refused with SQLState
+  `08004`: a role whose SCRAM iteration count exceeds 100,000 (raise the driver's
+  `scramMaxIterations` connection property for a server you trust), and `channelBinding=require`
+  against a server certificate signed with Ed25519, Ed448 or another algorithm without a
+  channel-binding hash (use an RSA or ECDSA certificate). An application that pins its own driver
+  version must move to 42.7.12 or later itself.
+
 ## [2.12.0] — 2026-10-01 — Claude Opus 5.5, Sonnet 5.5, the GPT-6 family and hardened confinement
 
 The last 2.x feature release. 3.0 renames the root package and removes the compatibility
