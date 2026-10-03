@@ -9,7 +9,7 @@ Exit status:
   1  at least one advisory applies; each is printed with its package, version, severity,
      fixed versions and URL
   2  the result cannot be trusted: the scanner, the network, the advisory data, an inventory or
-     the exception file is at fault. Never a clean scan.
+     the exception file is at fault, or the scan itself failed. Never a clean scan, and never 1.
 
 The policy this enforces is documented in CLAUDE.md, "Supply-chain gate".
 """
@@ -24,6 +24,8 @@ import re
 import subprocess
 import sys
 import tomllib
+import traceback
+import urllib.parse
 import urllib.request
 
 CLEAN, VULNERABLE, UNTRUSTED = 0, 1, 2
@@ -41,6 +43,8 @@ CONFIG_DIR = pathlib.Path(__file__).resolve().parent
 CANARY = CONFIG_DIR / "canary.cdx.json"
 CANARY_ADVISORIES = {"GHSA-98qh-xjc8-98pq", "GHSA-j92g-9f8w-j867"}
 MAX_EXCEPTION_DAYS = 90
+EXCEPTION_KEYS = {"id", "reason", "ignoreUntil"}
+MAVEN_PURL = re.compile(r"pkg:maven/([^/@?#\s]+)/([^/@?#\s]+)@([^/@?#\s]+)(?:\?[^#\s]*)?")
 CREDENTIAL_IN_URL = re.compile(r"[a-z][a-z0-9+.-]*://[^/\s\"@]*:[^/\s\"@]*@")
 
 
@@ -65,11 +69,14 @@ def main(arguments, environment):
             inventory: scan(scanner, inventory, exceptions, environment)
             for inventory in inventories
         }
-    except ScanError as error:
+        for inventory, found in findings.items():
+            report(inventory, found)
+    except (ScanError, OSError) as error:
         print(f"SCAN ERROR: {error}", file=sys.stderr)
         return UNTRUSTED
-    for inventory, found in findings.items():
-        report(inventory, found)
+    except Exception:
+        print(f"SCAN ERROR: the scan failed\n{traceback.format_exc()}", file=sys.stderr)
+        return UNTRUSTED
     return VULNERABLE if any(findings.values()) else CLEAN
 
 
@@ -80,9 +87,17 @@ def validated_exceptions(path):
     except (OSError, tomllib.TOMLDecodeError) as error:
         raise ScanError(f"cannot read exception file {path}: {error}") from error
     problems = [f"unsupported key {key}" for key in config if key != "IgnoredVulns"]
+    entries = config.get("IgnoredVulns", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+        raise ScanError(
+            f"exception file {path} is rejected: IgnoredVulns must be an array of tables"
+        )
     latest = datetime.date.today() + datetime.timedelta(days=MAX_EXCEPTION_DAYS)
-    for entry in config.get("IgnoredVulns", []):
+    for entry in entries:
         advisory = entry.get("id") or "an entry without id"
+        problems += [
+            f"{advisory}: unsupported key {key}" for key in sorted(entry.keys() - EXCEPTION_KEYS)
+        ]
         if not entry.get("id") or not str(entry.get("reason", "")).strip():
             problems.append(f"{advisory}: id and reason are required")
         until = entry.get("ignoreUntil")
@@ -101,11 +116,27 @@ def validated_inventory(path):
         components = json.loads(text).get("components", [])
     except (OSError, ValueError, AttributeError) as error:
         raise ScanError(f"cannot read inventory {path}: {error}") from error
-    if not components:
-        raise ScanError(f"inventory {path} lists no component")
     if CREDENTIAL_IN_URL.search(text):
         raise ScanError(f"inventory {path} carries a URL with embedded credentials")
+    if not isinstance(components, list) or not components:
+        raise ScanError(f"inventory {path} lists no component")
+    unproven = [component for component in components if not names_what_is_scanned(component)]
+    if unproven:
+        raise ScanError(
+            f"inventory {path}: the scanner would skip {len(unproven)} of {len(components)}"
+            " components or look them up as something else; each needs a pkg:maven purl equal"
+            " to its group, name and version, and no nested components."
+            f" First: {json.dumps(unproven[0])[:300]}"
+        )
     return path
+
+
+def names_what_is_scanned(component):
+    if not isinstance(component, dict) or component.get("components"):
+        return False
+    purl = MAVEN_PURL.fullmatch(str(component.get("purl")))
+    coordinates = tuple(component.get(key) for key in ("group", "name", "version"))
+    return bool(purl) and tuple(map(urllib.parse.unquote, purl.groups())) == coordinates
 
 
 def resolved_scanner(environment):
