@@ -12,11 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.Await;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import org.junit.jupiter.api.Test;
 
 class ProcessTransportTest {
@@ -425,26 +428,25 @@ class ProcessTransportTest {
   }
 
   /**
-   * Covers the {@code return null} at the end of {@code receive()} — reached only when the
-   * transport is closed by another thread <em>between</em> read iterations. We engineer the timing
-   * deterministically by holding the internal {@code stdoutBuffer} monitor while the receive loop
-   * blocks at the append step, calling {@code close()} during the wait, then releasing.
+   * Covers the {@code return null} at the end of {@code receive()}, reached only when another
+   * thread closes the transport between two read iterations. The test holds the monitor of the
+   * internal {@code stdoutBuffer}, so the receiver reads its first line and blocks at the append;
+   * it closes the transport once the receiver is blocked there, then releases the monitor. The
+   * monitor is released on every exit path, so a failed wait leaves no platform thread behind to
+   * keep the JVM alive.
    */
   @Test
   void receiveReturnsNullWhenClosedBetweenIterations() throws Exception {
     var input =
-        new java.io.ByteArrayInputStream(
-            "first-line\nsecond-line\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        new ByteArrayInputStream("first-line\nsecond-line\n".getBytes(StandardCharsets.UTF_8));
     var transport = new ProcessTransport(input, new ByteArrayOutputStream());
-
     var bufferField = ProcessTransport.class.getDeclaredField("stdoutBuffer");
     bufferField.setAccessible(true);
     var buffer = bufferField.get(transport);
-
-    var monitorHeld = new java.util.concurrent.CountDownLatch(1);
-    var releaseMonitor = new java.util.concurrent.CountDownLatch(1);
+    var monitorHeld = new CountDownLatch(1);
+    var releaseMonitor = new CountDownLatch(1);
     var holder =
-        Thread.ofVirtual()
+        Thread.ofPlatform()
             .start(
                 () -> {
                   synchronized (buffer) {
@@ -456,34 +458,32 @@ class ProcessTransportTest {
                     }
                   }
                 });
-    assertTrue(monitorHeld.await(2, java.util.concurrent.TimeUnit.SECONDS));
+    var received = new CompletableFuture<RpcMessage>();
+    try {
+      Await.latch("the holder to take the buffer's monitor", monitorHeld);
+      var receiver =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    try {
+                      received.complete(transport.receive());
+                    } catch (IOException e) {
+                      received.completeExceptionally(e);
+                    }
+                  });
+      Await.until(
+          "the receiver to block on the buffer's monitor",
+          () -> receiver.getState() == Thread.State.BLOCKED);
+      transport.close();
+    } finally {
+      releaseMonitor.countDown();
+    }
 
-    var result = new java.util.concurrent.atomic.AtomicReference<RpcMessage>();
-    var receiver =
-        Thread.ofVirtual()
-            .start(
-                () -> {
-                  try {
-                    result.set(transport.receive());
-                  } catch (IOException ignored) {
-                    // not expected — receive should return null cleanly
-                  }
-                });
-
-    // Give the receiver time to read the first line and block at the synchronized append.
-    Thread.sleep(100);
-
-    // Flip the transport closed while the receiver is blocked on the monitor; release the
-    // monitor so the receiver finishes its append, loops back, and exits at the trailing
-    // `return null;`.
-    transport.close();
-    releaseMonitor.countDown();
-
-    receiver.join(2000);
-    holder.join(2000);
-
-    assertNull(result.get(), "receive must return null after external close between iterations");
+    assertNull(
+        Await.value("receive() to return", received),
+        "receive must return null after external close between iterations");
     assertFalse(transport.isOpen());
+    Await.termination("the monitor holder", holder);
   }
 
   @Test

@@ -84,8 +84,6 @@ Four more rules apply to test code only. Each fails at the first occurrence.
 `Await` is exempt from the sleep, clock and timed-wait rules by package and class name
 (`com.standardapplied.helios.core.test.Await`); a class named `Await` anywhere else is not. A
 sleep inside a string of sandboxed code is not a Java call and is not flagged.
-Until `v3-deterministic-tests-repl` lands, the `repl` test classes that still break these rules
-are on the burn-down list in `pmd-exclusions.properties`.
 
 ArchUnit rules today: `core` depends on nothing outside the JDK; a provider module depends on
 `core` only; `session` does not depend on a provider, `runtime` or `persistence`; a
