@@ -22,5 +22,12 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
+      - name: Cache ONNX models
+        uses: actions/cache@v4
+        with:
+          path: ~/.helios/models
+          key: onnx-models-${{ hashFiles('onnx/src/main/java/com/standardapplied/helios/onnx/OnnxModelId.java', 'onnx/src/main/java/com/standardapplied/helios/onnx/OnnxModelSpec.java') }}
+          restore-keys: onnx-models-
+
       - name: Build, test, gate coverage
         run: mvn -B clean verify javadoc:jar
