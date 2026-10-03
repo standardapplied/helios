@@ -151,6 +151,17 @@ the stored metadata to `anthropic.thinkingBlocks`
   against a server certificate signed with Ed25519, Ed448 or another algorithm without a
   channel-binding hash (use an RSA or ECDSA certificate). An application that pins its own driver
   version must move to 42.7.12 or later itself.
+- **Every module that maps JSON resolves Jackson `tools.jackson.core:jackson-databind` and
+  `jackson-core` 3.1.7 (was 3.0.4), with `jackson-annotations` 2.21 (was 2.20).** The advisory scan
+  added below reported 20 advisories against 3.0.4, six on `jackson-core` and fourteen on
+  `jackson-databind`, the highest scored 8.7 (GHSA-6v53-7c9g-w56r and GHSA-r7wm-3cxj-wff9, parser
+  constraint bypasses) and 8.1 (GHSA-j3rv-43j4-c7qm and GHSA-rmj7-2vxq-3g9f, polymorphic type
+  validator bypasses). The 3.0 line has no later release; the fixes shipped in 3.1.x and 3.2.x,
+  and 3.1.7 is the lowest release outside every range. Jackson 3.1 keeps JDK 17 as its floor and
+  the Apache-2.0 license, and changes three defaults an application sharing Helios's Jackson may
+  notice: `StreamReadConstraints.maxStringLength` rises from 20M to 100M, a missing
+  `AtomicReference<T>` property deserializes to an empty reference instead of `null`, and
+  `JsonNode.asXxx(defaultValue)` returns the default for a JSON `null`.
 
 ## [2.12.0] — 2026-10-01 — Claude Opus 5.5, Sonnet 5.5, the GPT-6 family and hardened confinement
 
