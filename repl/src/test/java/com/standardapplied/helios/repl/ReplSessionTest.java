@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.sandbox.ExecutionRequest;
 import com.standardapplied.helios.repl.sandbox.ExecutionResult;
@@ -19,8 +20,12 @@ import com.standardapplied.helios.repl.sandbox.Sandbox;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 class ReplSessionTest {
@@ -426,6 +431,36 @@ class ReplSessionTest {
 
     assertEquals(3, session.history().size());
 
+    session.close();
+  }
+
+  @Test
+  void concurrentExecutesAllLandInHistory() {
+    var callers = 256;
+    var allInsideTheSandbox = new CyclicBarrier(callers);
+    var sandbox =
+        new FakeSandbox() {
+          @Override
+          public ExecutionResult execute(ExecutionRequest request) {
+            try {
+              allInsideTheSandbox.await();
+            } catch (InterruptedException | BrokenBarrierException e) {
+              throw new IllegalStateException(e);
+            }
+            return super.execute(request);
+          }
+        };
+    var session = ReplSession.create(configWith(sandbox), new Semaphore(1));
+
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var executions =
+          IntStream.range(0, callers)
+              .mapToObj(i -> executor.submit(() -> session.execute("call " + i)))
+              .toList();
+      executions.forEach(execution -> Await.value("a concurrent execute", execution));
+    }
+
+    assertEquals(callers, session.history().size());
     session.close();
   }
 
