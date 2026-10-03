@@ -153,7 +153,7 @@ the stored metadata to `anthropic.thinkingBlocks`
   version must move to 42.7.12 or later itself.
 - **Every module that maps JSON resolves Jackson `tools.jackson.core:jackson-databind` and
   `jackson-core` 3.1.7 (was 3.0.4), with `jackson-annotations` 2.21 (was 2.20).** The advisory scan
-  added below reported 20 advisories against 3.0.4, six on `jackson-core` and fourteen on
+  described below reported 20 advisories against 3.0.4, six on `jackson-core` and fourteen on
   `jackson-databind`, the highest scored 8.7 (GHSA-6v53-7c9g-w56r and GHSA-r7wm-3cxj-wff9, parser
   constraint bypasses) and 8.1 (GHSA-j3rv-43j4-c7qm and GHSA-rmj7-2vxq-3g9f, polymorphic type
   validator bypasses). The 3.0 line has no later release; the fixes shipped in 3.1.x and 3.2.x,
@@ -162,6 +162,13 @@ the stored metadata to `anthropic.thinkingBlocks`
   notice: `StreamReadConstraints.maxStringLength` rises from 20M to 100M, a missing
   `AtomicReference<T>` property deserializes to an empty reference instead of `null`, and
   `JsonNode.asXxx(defaultValue)` returns the default for a JSON `null`.
+- **The build inventories its resolved dependencies and CI fails on a known advisory.** `mvn
+  verify` writes two CycloneDX files at the reactor root, `target/helios-runtime.cdx.json` (what
+  the deployed modules ship) and `target/helios-build.cdx.json` (the same plus test scope and the
+  example modules). CI scans both with OSV-Scanner on every push, pull request and once a day;
+  any advisory fails the build unless `config/security/advisory-exceptions.toml` holds a reasoned
+  exception that expires within 90 days, and a scan that could not run fails distinctly from one
+  that found something. Policy and blind spots: `CLAUDE.md`, "Supply-chain gate".
 
 ## [2.12.0] — 2026-10-01 — Claude Opus 5.5, Sonnet 5.5, the GPT-6 family and hardened confinement
 

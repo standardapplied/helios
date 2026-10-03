@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # An advisory published against an unchanged dependency is found by the next daily run.
+  schedule:
+    - cron: '23 5 * * *'
 
 jobs:
   build:
@@ -31,3 +34,16 @@ jobs:
 
       - name: Build, test, gate coverage
         run: mvn -B clean verify javadoc:jar
+
+      - name: Upload dependency inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-inventory-${{ matrix.os }}
+          path: '**/target/helios-*.cdx.json'
+          if-no-files-found: error
+
+      - name: Test the advisory scan
+        run: python3 config/security/advisory_scan_test.py
+
+      - name: Scan resolved dependencies for known advisories
+        run: python3 config/security/advisory_scan.py target/helios-runtime.cdx.json target/helios-build.cdx.json
