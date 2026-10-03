@@ -822,8 +822,8 @@ class AnthropicModelTest {
   void convertAssistantMessageWithThinkingSignature() {
     var metadata =
         Map.of(
-            AnthropicModel.THINKING_KEY, "I need to think about this",
-            AnthropicModel.THINKING_SIGNATURE_KEY, "sig123");
+            AnthropicModel.THINKING_BLOCKS_KEY,
+            "[{\"text\":\"I need to think about this\",\"signature\":\"sig123\"}]");
     var message = Message.assistant("Answer", List.of(), metadata);
 
     var entry = AnthropicModel.convertAssistantMessage(message);
@@ -841,7 +841,8 @@ class AnthropicModelTest {
 
   @Test
   void convertAssistantMessageWithEmptyThinkingSignatureUsesString() {
-    var metadata = Map.of(AnthropicModel.THINKING_SIGNATURE_KEY, "");
+    var metadata =
+        Map.of(AnthropicModel.THINKING_BLOCKS_KEY, "[{\"text\":\"unsigned\",\"signature\":\"\"}]");
     var message = Message.assistant("Answer", List.of(), metadata);
 
     var entry = AnthropicModel.convertAssistantMessage(message);
@@ -1474,25 +1475,6 @@ class AnthropicModelTest {
   // --- Multi-thinking-block round-trip (audit H2) ----------------------------------------------
 
   @Test
-  void decodeThinkingBlocksFallsBackToLegacySingleBlockKeys() {
-    var msg =
-        Message.newBuilder()
-            .withRole(com.standardapplied.helios.core.model.Role.ASSISTANT)
-            .withContent("response")
-            .withMetadata(
-                Map.of(
-                    AnthropicModel.THINKING_KEY, "I am thinking",
-                    AnthropicModel.THINKING_SIGNATURE_KEY, "sig-1"))
-            .build();
-
-    var blocks = AnthropicModel.decodeThinkingBlocks(msg.metadata());
-
-    assertEquals(1, blocks.size());
-    assertEquals("I am thinking", blocks.getFirst().text());
-    assertEquals("sig-1", blocks.getFirst().signature());
-  }
-
-  @Test
   void decodeThinkingBlocksReadsMultiBlockJson() {
     var json =
         "[{\"text\":\"first thought\",\"signature\":\"sig-1\"},"
@@ -1514,44 +1496,32 @@ class AnthropicModelTest {
   }
 
   @Test
-  void decodeThinkingBlocksPrefersJsonOverLegacyKeys() {
-    var json = "[{\"text\":\"new format\",\"signature\":\"sig-new\"}]";
-    var msg =
-        Message.newBuilder()
-            .withRole(com.standardapplied.helios.core.model.Role.ASSISTANT)
-            .withContent("r")
-            .withMetadata(
-                Map.of(
-                    AnthropicModel.THINKING_BLOCKS_KEY, json,
-                    AnthropicModel.THINKING_KEY, "old text",
-                    AnthropicModel.THINKING_SIGNATURE_KEY, "old-sig"))
-            .build();
+  void decodeThinkingBlocksReadsASingleBlock() {
+    var blocks =
+        AnthropicModel.decodeThinkingBlocks(
+            Map.of(
+                AnthropicModel.THINKING_BLOCKS_KEY,
+                "[{\"text\":\"I am thinking\",\"signature\":\"sig-1\"}]"));
 
-    var blocks = AnthropicModel.decodeThinkingBlocks(msg.metadata());
-
-    assertEquals(1, blocks.size());
-    assertEquals("new format", blocks.getFirst().text());
-    assertEquals("sig-new", blocks.getFirst().signature());
+    assertEquals(List.of(new AnthropicModel.ThinkingBlock("I am thinking", "sig-1")), blocks);
   }
 
   @Test
-  void decodeThinkingBlocksMalformedJsonFallsBackToLegacy() {
-    var msg =
-        Message.newBuilder()
-            .withRole(com.standardapplied.helios.core.model.Role.ASSISTANT)
-            .withContent("r")
-            .withMetadata(
-                Map.of(
-                    AnthropicModel.THINKING_BLOCKS_KEY, "not-json",
-                    AnthropicModel.THINKING_KEY, "legacy text",
-                    AnthropicModel.THINKING_SIGNATURE_KEY, "legacy-sig"))
-            .build();
+  void decodeThinkingBlocksIgnoresTheRemovedSingleBlockKeys() {
+    var blocks =
+        AnthropicModel.decodeThinkingBlocks(
+            Map.of("anthropic.thinking", "2.x text", "anthropic.thinkingSignature", "2.x-sig"));
 
-    var blocks = AnthropicModel.decodeThinkingBlocks(msg.metadata());
+    assertTrue(
+        blocks.isEmpty(), "a 2.x conversation carrying only the single-block keys is not read");
+  }
 
-    assertEquals(1, blocks.size());
-    assertEquals("legacy text", blocks.getFirst().text());
-    assertEquals("legacy-sig", blocks.getFirst().signature());
+  @Test
+  void decodeThinkingBlocksMalformedJsonYieldsNoBlocks() {
+    var blocks =
+        AnthropicModel.decodeThinkingBlocks(Map.of(AnthropicModel.THINKING_BLOCKS_KEY, "not-json"));
+
+    assertTrue(blocks.isEmpty());
   }
 
   @Test

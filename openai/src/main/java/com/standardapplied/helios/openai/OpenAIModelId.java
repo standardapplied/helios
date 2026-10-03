@@ -98,18 +98,6 @@ public enum OpenAIModelId {
   }
 
   /**
-   * Whether this model accepts {@code reasoning.effort=xhigh}.
-   *
-   * @return true for {@link EffortSupport#EXTENDED} and {@link EffortSupport#FULL} models
-   * @deprecated use {@link #effortSupport()}; the boolean cannot express the gpt-5.6 family's
-   *     {@code none}/{@code max} support
-   */
-  @Deprecated(since = "2.8.0")
-  public boolean supportsXhighEffort() {
-    return effortSupport != EffortSupport.STANDARD;
-  }
-
-  /**
    * Returns the API model identifier string.
    *
    * @return the model ID used in API requests

@@ -64,12 +64,14 @@ import java.util.Objects;
  *     the same name. Common use: set {@code api-key} when pointing {@link #baseUrl} at Azure OpenAI
  *     (which uses {@code api-key} rather than {@code Authorization: Bearer})
  * @param providerContinuation whether providers may use server-side conversation continuation.
- *     Enabled by default for compatibility. When disabled, providers that support continuation
+ *     Enabled by default, so a provider that supports continuation sends only the new turns and
+ *     references the server-held conversation. When disabled, providers that support continuation
  *     resend local message history and must not propagate provider conversation identifiers
  * @param apiVersion provider API version override. {@code null} selects the provider default;
  *     providers that support version selection validate their values at model construction
  * @param rawOutputCapturePolicy whether structured-output exceptions retain raw model responses.
- *     Defaults to {@link RawOutputCapturePolicy#ENABLED} for compatibility
+ *     Defaults to {@link RawOutputCapturePolicy#ENABLED}, so the exception carries the raw response
+ *     for diagnosis
  */
 public record ModelConfig(
     String apiKey,
@@ -96,70 +98,6 @@ public record ModelConfig(
   public ModelConfig {
     headers = headers == null ? Map.of() : Map.copyOf(headers);
     Objects.requireNonNull(rawOutputCapturePolicy, "rawOutputCapturePolicy must not be null");
-  }
-
-  /**
-   * Binary-compatible constructor for configurations compiled against Helios 2.10.0 and earlier.
-   */
-  public ModelConfig(
-      String apiKey,
-      ThinkingLevel thinkingLevel,
-      Duration connectTimeout,
-      Duration responseTimeout,
-      Double temperature,
-      Double topP,
-      Integer maxOutputTokens,
-      Integer contextWindow,
-      List<String> stopSequences,
-      Long seed,
-      ToolChoice toolChoice,
-      boolean webSearch,
-      boolean webFetch,
-      String promptCacheKey,
-      Duration streamIdleTimeout,
-      String baseUrl,
-      Map<String, String> headers) {
-    this(
-        apiKey,
-        thinkingLevel,
-        connectTimeout,
-        responseTimeout,
-        temperature,
-        topP,
-        maxOutputTokens,
-        contextWindow,
-        stopSequences,
-        seed,
-        toolChoice,
-        webSearch,
-        webFetch,
-        promptCacheKey,
-        streamIdleTimeout,
-        baseUrl,
-        headers,
-        true,
-        null,
-        RawOutputCapturePolicy.ENABLED);
-  }
-
-  /**
-   * Legacy alias for {@link #webSearch()}.
-   *
-   * @deprecated use {@link #webSearch()}; the toggle is provider-neutral since 2.8.0
-   */
-  @Deprecated(since = "2.8.0")
-  public boolean googleSearch() {
-    return webSearch;
-  }
-
-  /**
-   * Legacy alias for {@link #webFetch()}.
-   *
-   * @deprecated use {@link #webFetch()}; the toggle is provider-neutral since 2.8.0
-   */
-  @Deprecated(since = "2.8.0")
-  public boolean urlContext() {
-    return webFetch;
   }
 
   /**
@@ -395,26 +333,6 @@ public record ModelConfig(
     public Builder withPromptCacheKey(String promptCacheKey) {
       this.promptCacheKey = promptCacheKey;
       return this;
-    }
-
-    /**
-     * Legacy alias for {@link #withWebSearch(boolean)}.
-     *
-     * @deprecated use {@link #withWebSearch(boolean)}; the toggle is provider-neutral since 2.8.0
-     */
-    @Deprecated(since = "2.8.0")
-    public Builder withGoogleSearch(boolean googleSearch) {
-      return withWebSearch(googleSearch);
-    }
-
-    /**
-     * Legacy alias for {@link #withWebFetch(boolean)}.
-     *
-     * @deprecated use {@link #withWebFetch(boolean)}; the toggle is provider-neutral since 2.8.0
-     */
-    @Deprecated(since = "2.8.0")
-    public Builder withUrlContext(boolean urlContext) {
-      return withWebFetch(urlContext);
     }
 
     public Builder withStreamIdleTimeout(Duration streamIdleTimeout) {

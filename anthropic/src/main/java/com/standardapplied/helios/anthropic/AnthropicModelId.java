@@ -154,19 +154,6 @@ public enum AnthropicModelId {
   }
 
   /**
-   * Whether this model uses an adaptive-family thinking shape rather than legacy {@code
-   * budget_tokens}.
-   *
-   * @return true for every shape except {@link ThinkingShape#LEGACY_BUDGET}
-   * @deprecated use {@link #thinkingShape()}; the boolean cannot express newer models'
-   *     adaptive-by-default or always-on semantics
-   */
-  @Deprecated(since = "2.8.0")
-  public boolean usesAdaptiveThinking() {
-    return thinkingShape != ThinkingShape.LEGACY_BUDGET;
-  }
-
-  /**
    * Returns the API model identifier string.
    *
    * @return the model ID used in API requests

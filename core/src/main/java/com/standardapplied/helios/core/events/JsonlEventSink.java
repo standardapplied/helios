@@ -39,20 +39,6 @@ public final class JsonlEventSink implements EventSink, AutoCloseable {
   }
 
   /**
-   * Opens (or creates, appending) a JSONL file for writing events.
-   *
-   * @param path destination file; parent directory must exist
-   * @return an open sink; close with {@link #close()} or try-with-resources
-   * @throws UncheckedIOException if the file cannot be opened for writing
-   * @deprecated use {@link #openFull(Path)} or {@link #openMetadataOnly(Path)} so persistence of
-   *     sensitive content is explicit
-   */
-  @Deprecated(since = "2.10.1")
-  public static JsonlEventSink open(Path path) {
-    return openFull(path);
-  }
-
-  /**
    * Opens a full-content JSONL sink.
    *
    * <p><strong>Sensitive:</strong> full mode persists assistant text, thinking, tool arguments,

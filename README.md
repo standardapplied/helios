@@ -451,8 +451,7 @@ wire them via your own hook or stream subscriber.
 counts, API version, tool names, outcomes, and redacted error categories. It omits message history,
 assistant text, thinking and signatures, tool arguments and results, file URIs, arbitrary
 attributes, and custom-data values. `JsonlEventSink.openFull(path)` is the explicit replay/debugging
-mode and persists sensitive content verbatim; it is unsuitable for customer-media workflows. The
-legacy `open(path)` method remains as a deprecated compatibility alias for full mode.
+mode and persists sensitive content verbatim; it is unsuitable for customer-media workflows.
 
 ## Sandboxed Code Execution (`helios-repl`)
 

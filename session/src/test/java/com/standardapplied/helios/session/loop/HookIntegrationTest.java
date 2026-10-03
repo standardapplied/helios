@@ -49,13 +49,23 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /** End-to-end tests covering the hook outcome handling wired through AgentLoop + TurnRunner. */
 final class HookIntegrationTest {
+
+  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+  @AfterEach
+  void shutDownScheduler() {
+    scheduler.shutdownNow();
+  }
 
   private static final String SID = "sess-hook";
   private static final Instant FIXED = Instant.parse("2026-05-15T09:00:00Z");
@@ -140,7 +150,7 @@ final class HookIntegrationTest {
 
   private static List<QueryEvent> events = new ArrayList<>();
 
-  private static AgentLoop buildLoop(
+  private AgentLoop buildLoop(
       Model model, ToolRegistry toolRegistry, HookRegistry hooks, SteeringQueue queue) {
     events = new ArrayList<>();
     var dispatch =
@@ -158,7 +168,8 @@ final class HookIntegrationTest {
             contextFactory(),
             CLOCK,
             CostCalculator.ZERO,
-            null);
+            null,
+            scheduler);
     return new AgentLoop(
         runner,
         new StopClassifier(),
@@ -190,7 +201,7 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.TextDelta("never"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0)))));
+                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0), Map.of(), List.of()))));
     var result =
         buildLoop(model, ToolRegistry.empty(), hooks, queue)
             .run(freshState(), SessionLimits.defaults());
@@ -226,7 +237,7 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.TextDelta("ok"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0)))));
+                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0), Map.of(), List.of()))));
     var state = freshState();
     buildLoop(model, ToolRegistry.empty(), hooks, queue).run(state, SessionLimits.defaults());
     // History's user message should carry the rewritten text.
@@ -240,7 +251,10 @@ final class HookIntegrationTest {
     var hooks = new HookRegistry(List.of(stopper));
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
-    var model = scriptedModel(List.of(List.of(new ModelChunk.MessageStop("STOP", Usage.of(0, 0)))));
+    var model =
+        scriptedModel(
+            List.of(
+                List.of(new ModelChunk.MessageStop("STOP", Usage.of(0, 0), Map.of(), List.of()))));
     var result =
         buildLoop(model, ToolRegistry.empty(), hooks, queue)
             .run(freshState(), SessionLimits.defaults());
@@ -264,10 +278,10 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.TextDelta("draft"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(1, 1))),
+                    new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())),
                 List.of(
                     new ModelChunk.TextDelta("final"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(1, 1)))));
+                    new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of()))));
     var result =
         buildLoop(model, ToolRegistry.empty(), hooks, queue)
             .run(freshState(), SessionLimits.defaults());
@@ -286,7 +300,7 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.TextDelta("draft"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(1, 1)))));
+                    new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of()))));
     var result =
         buildLoop(model, ToolRegistry.empty(), hooks, queue)
             .run(freshState(), SessionLimits.defaults());
@@ -323,7 +337,9 @@ final class HookIntegrationTest {
                       @Override
                       public void request(long n) {
                         subscriber.onNext(new ModelChunk.TextDelta("ok"));
-                        subscriber.onNext(new ModelChunk.MessageStop("STOP", Usage.of(0, 0)));
+                        subscriber.onNext(
+                            new ModelChunk.MessageStop(
+                                "STOP", Usage.of(0, 0), Map.of(), List.of()));
                         subscriber.onComplete();
                       }
 
@@ -355,7 +371,10 @@ final class HookIntegrationTest {
     var hooks = new HookRegistry(List.of(stopper));
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
-    var model = scriptedModel(List.of(List.of(new ModelChunk.MessageStop("STOP", Usage.of(0, 0)))));
+    var model =
+        scriptedModel(
+            List.of(
+                List.of(new ModelChunk.MessageStop("STOP", Usage.of(0, 0), Map.of(), List.of()))));
     var result =
         buildLoop(model, ToolRegistry.empty(), hooks, queue)
             .run(freshState(), SessionLimits.defaults());
@@ -379,10 +398,10 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.TextDelta("v1"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(1, 1))),
+                    new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())),
                 List.of(
                     new ModelChunk.TextDelta("v2"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(1, 1)))));
+                    new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of()))));
     var result =
         buildLoop(model, ToolRegistry.empty(), hooks, queue)
             .run(freshState(), SessionLimits.defaults());
@@ -405,10 +424,10 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.ToolUseStop(call),
-                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0))),
+                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of())),
                 List.of(
                     new ModelChunk.TextDelta("after-block"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0)))));
+                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0), Map.of(), List.of()))));
     var result = buildLoop(model, tools, hooks, queue).run(freshState(), SessionLimits.defaults());
     var success = assertInstanceOf(ResultMessage.Success.class, result);
     assertEquals("after-block", success.result());
@@ -441,10 +460,10 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.ToolUseStop(call),
-                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0))),
+                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of())),
                 List.of(
                     new ModelChunk.TextDelta("done"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0)))));
+                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0), Map.of(), List.of()))));
     var result = buildLoop(model, tools, hooks, queue).run(freshState(), SessionLimits.defaults());
     assertInstanceOf(ResultMessage.Success.class, result);
     var mutated =
@@ -477,7 +496,8 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.ToolUseStop(call),
-                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0)))));
+                    new ModelChunk.MessageStop(
+                        "TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of()))));
     var result = buildLoop(model, tools, hooks, queue).run(freshState(), SessionLimits.defaults());
     var success = assertInstanceOf(ResultMessage.Success.class, result);
     assertEquals("pre-tool-stop", success.result());
@@ -498,10 +518,10 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.ToolUseStop(call),
-                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0))),
+                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of())),
                 List.of(
                     new ModelChunk.TextDelta("done"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0)))));
+                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0), Map.of(), List.of()))));
     var state = freshState();
     buildLoop(model, tools, hooks, queue).run(state, SessionLimits.defaults());
 
@@ -528,10 +548,10 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.ToolUseStop(call),
-                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0))),
+                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of())),
                 List.of(
                     new ModelChunk.TextDelta("after-inject"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0)))));
+                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0), Map.of(), List.of()))));
     var result = buildLoop(model, tools, hooks, queue).run(freshState(), SessionLimits.defaults());
     var success = assertInstanceOf(ResultMessage.Success.class, result);
     assertEquals("after-inject", success.result());
@@ -560,10 +580,10 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.ToolUseStop(call),
-                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0))),
+                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of())),
                 List.of(
                     new ModelChunk.TextDelta("done"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0)))));
+                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0), Map.of(), List.of()))));
     var result = buildLoop(model, tools, hooks, queue).run(freshState(), SessionLimits.defaults());
     assertInstanceOf(ResultMessage.Success.class, result);
   }
@@ -581,7 +601,8 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.ToolUseStop(call),
-                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0)))));
+                    new ModelChunk.MessageStop(
+                        "TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of()))));
     var state = freshState();
     var result = buildLoop(model, tools, hooks, queue).run(state, SessionLimits.defaults());
     var success = assertInstanceOf(ResultMessage.Success.class, result);
@@ -621,10 +642,10 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.ToolUseStop(call),
-                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0))),
+                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of())),
                 List.of(
                     new ModelChunk.TextDelta("done"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0)))));
+                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0), Map.of(), List.of()))));
     buildLoop(model, tools, hooks, queue).run(freshState(), SessionLimits.defaults());
     var hookFired =
         events.stream()
@@ -656,7 +677,7 @@ final class HookIntegrationTest {
             List.of(
                 List.of(
                     new ModelChunk.TextDelta("ok"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0)))));
+                    new ModelChunk.MessageStop("STOP", Usage.of(0, 0), Map.of(), List.of()))));
     buildLoop(model, ToolRegistry.empty(), hooks, queue)
         .run(freshState(), SessionLimits.defaults());
     assertFalse(

@@ -113,10 +113,10 @@ final class Phase5AcceptanceTest {
                         "c1",
                         ExecuteTool.NAME,
                         Map.of("runtime", "PYTHON", "script", "print('phase-5')"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.TextDelta("done"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1))));
+                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
 
     // Permission policy must allow Execute — DEFAULT mode otherwise routes to ASK and blocks.
     var permission =
@@ -169,10 +169,10 @@ final class Phase5AcceptanceTest {
                         "c1",
                         ExecuteTool.NAME,
                         Map.of("runtime", "BASH", "script", "rm -rf /tmp/should-not-happen"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.TextDelta("done"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1))));
+                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
 
     var permission =
         new Permission(
@@ -224,10 +224,10 @@ final class Phase5AcceptanceTest {
                         ExecuteTool.NAME,
                         Map.of(
                             "runtime", "BASH", "script", "exec sleep 600", "timeoutSeconds", 1))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1))),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
             List.of(
                 new ModelChunk.TextDelta("done"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1))));
+                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
 
     var permission =
         new Permission(

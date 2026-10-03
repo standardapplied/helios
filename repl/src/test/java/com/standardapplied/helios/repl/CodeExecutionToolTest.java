@@ -56,7 +56,10 @@ class CodeExecutionToolTest {
 
   @Test
   void executeCodeWithStderr() {
-    var session = createSession(new StubSandbox(new ExecutionResult("out", "warn", 0, null)));
+    var session =
+        createSession(
+            new StubSandbox(
+                ExecutionResult.newBuilder().withStdout("out").withStderr("warn").build()));
     var tool = CodeExecutionTool.create(session);
 
     var result = tool.execute(Map.of("code", "code"));

@@ -45,8 +45,8 @@ public record Tool(
     Function<String, String> resultCompactor) {
 
   /**
-   * Default compactor used when callers don't supply one — preserves pre-1.3 behavior where every
-   * tool's old result was replaced with a constant placeholder.
+   * Default compactor used when callers don't supply one: every old result is replaced with a
+   * constant placeholder.
    */
   public static final Function<String, String> DEFAULT_RESULT_COMPACTOR =
       content -> "[result omitted]";
@@ -55,20 +55,6 @@ public record Tool(
     if (resultCompactor == null) {
       resultCompactor = DEFAULT_RESULT_COMPACTOR;
     }
-  }
-
-  /**
-   * Convenience constructor that delegates to the canonical with the {@link
-   * #DEFAULT_RESULT_COMPACTOR}. Preserves the pre-1.3 record shape for callers that constructed a
-   * {@code Tool} directly without going through the builder.
-   */
-  public Tool(
-      String name,
-      String description,
-      List<ToolParameter> parameters,
-      ToolExecutor executor,
-      boolean idempotent) {
-    this(name, description, parameters, executor, idempotent, DEFAULT_RESULT_COMPACTOR);
   }
 
   public static Builder newBuilder() {
