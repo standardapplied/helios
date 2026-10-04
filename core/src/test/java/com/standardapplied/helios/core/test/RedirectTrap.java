@@ -44,6 +44,10 @@ public final class RedirectTrap implements AutoCloseable {
   /** The prompt a trapped provider sends; it must never reach a redirect target. */
   public static final String PROMPT = "confidential-prompt-body-4242";
 
+  /** The {@code @MethodSource} naming {@link #scenarios()}. */
+  public static final String SCENARIOS =
+      "com.standardapplied.helios.core.test.RedirectTrap#scenarios";
+
   /** Where the origin's {@code Location} header points, or what is wrong with it. */
   public enum Shape {
     /** Another loopback host on the origin's port. */
@@ -64,10 +68,6 @@ public final class RedirectTrap implements AutoCloseable {
 
   /** One redirect status with one {@link Shape}. */
   public record Scenario(int status, Shape shape) {}
-
-  /** The {@code @MethodSource} naming {@link #scenarios()}. */
-  public static final String SCENARIOS =
-      "com.standardapplied.helios.core.test.RedirectTrap#scenarios";
 
   private static final List<Integer> STATUSES = List.of(301, 302, 303, 307, 308);
   private static final InetAddress HOST = loopback(1);
