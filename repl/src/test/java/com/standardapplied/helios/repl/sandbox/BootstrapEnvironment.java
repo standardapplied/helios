@@ -22,9 +22,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import jdk.jshell.JShell;
+import jdk.jshell.execution.LocalExecutionControl;
+import jdk.jshell.execution.LocalExecutionControlProvider;
+import jdk.jshell.spi.ExecutionControl;
+import jdk.jshell.spi.ExecutionControlProvider;
+import jdk.jshell.spi.ExecutionEnv;
 
 /**
  * A {@link JvmSandboxBootstrap} standing in for the sandbox subprocess, installed as the instance
@@ -34,7 +40,7 @@ import jdk.jshell.JShell;
  */
 final class BootstrapEnvironment implements AutoCloseable {
 
-  private final JShell jshell = newJShell();
+  private final JShell jshell;
   private final FeedableInputStream fromHost = new FeedableInputStream();
   private final LineSink toHost = new LineSink();
   private final CompletableFuture<Integer> exitStatus = new CompletableFuture<>();
@@ -51,6 +57,11 @@ final class BootstrapEnvironment implements AutoCloseable {
    * exiting the JVM, completes {@link #exitStatus()}.
    */
   BootstrapEnvironment(Duration stopGrace) {
+    this(stopGrace, new LocalExecutionControlProvider());
+  }
+
+  private BootstrapEnvironment(Duration stopGrace, ExecutionControlProvider engine) {
+    jshell = newJShell(engine);
     bootstrap =
         new JvmSandboxBootstrap(
             jshell,
@@ -59,6 +70,27 @@ final class BootstrapEnvironment implements AutoCloseable {
             stopGrace,
             exitStatus::complete);
     JvmSandboxBootstrap.setInstance(bootstrap);
+  }
+
+  /**
+   * An environment whose JShell throws {@code failure} from every {@link JShell#stop()}, as a
+   * defect in the execution engine would.
+   */
+  static BootstrapEnvironment failingStop(Duration stopGrace, RuntimeException failure) {
+    return new BootstrapEnvironment(
+        stopGrace,
+        new LocalExecutionControlProvider() {
+          @Override
+          public ExecutionControl createExecutionControl(
+              ExecutionEnv env, Map<String, String> parameters) {
+            return new LocalExecutionControl() {
+              @Override
+              public void stop() {
+                throw failure;
+              }
+            };
+          }
+        });
   }
 
   /** An environment whose bootstrap is already reading what the test feeds. */
@@ -141,8 +173,8 @@ final class BootstrapEnvironment implements AutoCloseable {
    * In the test JVM the module's classes are not on JShell's own classpath, so snippets that call
    * {@link HostBridge} need the build output added to it.
    */
-  private static JShell newJShell() {
-    var jshell = JShell.builder().executionEngine("local").build();
+  private static JShell newJShell(ExecutionControlProvider engine) {
+    var jshell = JShell.builder().executionEngine(engine, Map.of()).build();
     var targetClasses = Path.of("target", "classes").toAbsolutePath();
     if (Files.isDirectory(targetClasses)) {
       jshell.addToClasspath(targetClasses.toString());

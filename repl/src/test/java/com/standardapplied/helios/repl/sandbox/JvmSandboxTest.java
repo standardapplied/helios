@@ -36,10 +36,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * No test depends on how long a subprocess takes. A sandbox launched for real gets {@link
- * #END_TO_END}: the hang guard bounds its startup and each call, and a snippet's own timeout is
- * {@link #BEYOND_HANG_GUARD} unless the timeout is what the test exercises. A child that stands in
- * for a subprocess is {@code sleep 600}, which cannot end on its own within the hang guard, so its
- * death proves the kill.
+ * #END_TO_END}: the hang guard bounds its startup and each call, and a snippet's own timeout and a
+ * stopped snippet's grace are {@link #BEYOND_HANG_GUARD} unless their expiry is what the test
+ * exercises. A child that stands in for a subprocess is {@code sleep 600}, which cannot end on its
+ * own within the hang guard, so its death proves the kill.
  */
 class JvmSandboxTest {
 
@@ -47,12 +47,7 @@ class JvmSandboxTest {
 
   private static final String FORGED_FRAME_ID = "\"id\":\"forged\"";
 
-  private static final JvmSandboxConfig END_TO_END =
-      JvmSandboxConfig.newBuilder()
-          .withSubprocessStartupTimeout(Await.HANG_GUARD)
-          .withCallTimeout(Await.HANG_GUARD)
-          .withExecutionTimeout(BEYOND_HANG_GUARD)
-          .build();
+  private static final JvmSandboxConfig END_TO_END = endToEnd(BEYOND_HANG_GUARD);
 
   @AfterEach
   void leaveNoProcessBehind() {
@@ -843,16 +838,21 @@ class JvmSandboxTest {
   /**
    * A snippet blocked entering a monitor that a thread outside its thread group holds cannot be
    * stopped, so the sandbox answers the execute and then exits with code 3. The holder is a virtual
-   * thread, never a member of the snippet's group, blocked on a latch nothing releases.
+   * thread, never a member of the snippet's group, blocked on a latch nothing releases. The
+   * shutdown hook blocks on the same monitor running JDK code alone, which JShell's stop check
+   * never reaches, so the sandbox exits only if it runs no hook. The monitor is a {@code Vector}
+   * for that reason, and the bindings snapshot is off because the vector's {@code toString} needs
+   * it too.
    */
   @Test
   void unstoppableSnippetExitsTheSandboxAfterAnswering() {
-    try (var sandbox = JvmSandbox.create(END_TO_END, new HostFunctionRegistry())) {
+    try (var sandbox =
+        JvmSandbox.create(endToEnd(Duration.ofMillis(300)), new HostFunctionRegistry())) {
       var holdMonitor =
           sandbox.execute(
               ExecutionRequest.java(
                   """
-                  Object monitor = new Object();
+                  var monitor = new java.util.Vector<Object>();
                   var entered = new java.util.concurrent.CountDownLatch(1);
                   Thread.startVirtualThread(() -> {
                     synchronized (monitor) {
@@ -864,7 +864,9 @@ class JvmSandboxTest {
                     }
                   });
                   entered.await();
-                  """));
+                  Runtime.getRuntime().addShutdownHook(new Thread(monitor::clear));
+                  """),
+              ExecuteParams.DISABLED);
       assertEquals(0, holdMonitor.exitCode(), "stderr was:\n" + holdMonitor.stderr());
 
       var result =
@@ -1116,5 +1118,14 @@ class JvmSandboxTest {
         "collectBindings should not narrow to Exception — that's the regression we're guarding"
             + " against; current body:\n"
             + body);
+  }
+
+  private static JvmSandboxConfig endToEnd(Duration stopGrace) {
+    return JvmSandboxConfig.newBuilder()
+        .withSubprocessStartupTimeout(Await.HANG_GUARD)
+        .withCallTimeout(Await.HANG_GUARD)
+        .withExecutionTimeout(BEYOND_HANG_GUARD)
+        .withStopGrace(stopGrace)
+        .build();
   }
 }

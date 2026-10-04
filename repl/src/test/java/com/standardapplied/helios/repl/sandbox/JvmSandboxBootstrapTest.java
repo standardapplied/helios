@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
@@ -21,11 +22,13 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import jdk.jshell.JShell;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
@@ -184,6 +187,115 @@ class JvmSandboxBootstrapTest {
 
     assertTimedOut(result);
     assertEquals(List.of(), liveSnippetThreads());
+  }
+
+  /**
+   * A timeout this short usually lands while JShell is still compiling the statement, when {@link
+   * JShell#stop()} does nothing and before JShell clears its stop flag to start the statement. The
+   * snippet must be stopped all the same once it runs; if the timeout lands first, the statement
+   * never starts. Either way round, the outcome is the same.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {LOOP_FOREVER, BLOCK_UNTIL_INTERRUPTED})
+  void timeoutBeforeTheSnippetRunsStillStopsIt(String snippet) {
+    var result = bootstrap.handleExecute(Map.of("code", snippet, "timeoutMs", 1));
+
+    assertTimedOut(result);
+    assertEquals(List.of(), liveSnippetThreads());
+  }
+
+  /**
+   * A stop that fails cannot end the snippet, so the snippet is given up as unstoppable, and the
+   * failure is reported once rather than on every retry. The host call proves the snippet is
+   * running before the timeout can act.
+   */
+  @Test
+  void failingStopIsReportedOnceAndTheSnippetGivenUp() {
+    env.close();
+    env =
+        BootstrapEnvironment.failingStop(
+            SHORT_STOP_GRACE, new IllegalStateException("the engine failed to stop"));
+    bootstrap = env.bootstrap();
+
+    bootstrap.dispatch(
+        new RpcMessage.Request(
+            "1",
+            "execute",
+            Map.of(
+                "code",
+                "predict(\"running\", \"now\"); " + BLOCK_UNTIL_INTERRUPTED,
+                "timeoutMs",
+                TIMEOUT_MS)));
+    var running = env.nextRequest();
+    bootstrap.dispatch(new RpcMessage.Response(running.id(), Map.of("output", "go on")));
+
+    var result = responseResult(env.nextMessage());
+    assertUnstoppable(result);
+    assertEquals(
+        1,
+        Pattern.compile("the engine failed to stop")
+            .matcher((String) result.get("stderr"))
+            .results()
+            .count());
+    assertEquals(3, Await.value("the sandbox's exit", env.exitStatus()));
+    liveSnippetThreads()
+        .forEach(
+            thread -> {
+              thread.interrupt();
+              Await.termination("a snippet thread the failed stop left behind", thread);
+            });
+  }
+
+  @Test
+  void installPreludeIsAnsweredThroughTheDispatcher() {
+    bootstrap.dispatch(
+        new RpcMessage.Request("1", "installPrelude", Map.of("snippet", "int fromPrelude = 7;")));
+
+    var response = assertInstanceOf(RpcMessage.Response.class, env.nextMessage());
+    assertEquals("1", response.id());
+    assertEquals(Map.of("success", true), response.result());
+  }
+
+  /** A closed JShell makes the handler throw; the host still gets an answer to its request. */
+  @Test
+  void requestWhoseHandlerThrowsIsAnsweredWithAnInternalError() {
+    env.close();
+
+    bootstrap.dispatch(
+        new RpcMessage.Request("1", "installPrelude", Map.of("snippet", "int fromPrelude = 7;")));
+
+    var error = assertInstanceOf(RpcMessage.ErrorResponse.class, env.nextMessage());
+    assertEquals("1", error.id());
+    assertEquals(RpcError.INTERNAL_ERROR, error.error().code());
+  }
+
+  @Test
+  void stopGraceTravelsThroughTheLaunchCommand() {
+    var grace = Duration.ofNanos(1_500_001);
+    var config = JvmSandboxConfig.newBuilder().withStopGrace(grace).build();
+
+    var command = JvmSandbox.buildLaunchCommand("/fake/java", config, "/tmp/rpc.sock");
+
+    assertEquals(grace, JvmSandboxBootstrap.parseStopGraceArg(command.toArray(String[]::new)));
+  }
+
+  @Test
+  void stopGraceDefaultsWhenTheLaunchCommandHasNone() {
+    var parsed = JvmSandboxBootstrap.parseStopGraceArg(new String[] {"--rpc-socket=/x"});
+
+    assertEquals(JvmSandboxConfig.DEFAULT_STOP_GRACE, parsed);
+  }
+
+  @ParameterizedTest
+  @CsvSource({"PT0S, is not positive", "-PT1S, is not positive", "5s, is not a duration"})
+  void stopGraceThatIsNotAPositiveDurationIsRejected(String value, String problem) {
+    var args = new String[] {"--stop-grace=" + value};
+
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class, () -> JvmSandboxBootstrap.parseStopGraceArg(args));
+
+    assertEquals("--stop-grace=" + value + " " + problem, thrown.getMessage());
   }
 
   /** The follow-up execute that reads the variable is what shows the second statement never ran. */
