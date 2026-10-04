@@ -112,8 +112,10 @@ it, not retryable); point `baseUrl` at the final endpoint.
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
   (waits for an event under one 60-second hang guard), `LineSink` and `FeedableInputStream`, in
   `com.standardapplied.helios.core.test`, are what the Helios test suite uses instead of sleeps,
-  self-chosen timeouts and piped streams. Depend on it with `<type>test-jar</type>` and
-  `<scope>test</scope>`.
+  self-chosen timeouts and piped streams. `StubHttpServer` (a loopback HTTP/1.1 server that
+  records each request before answering it) and `RedirectTrap` (the redirect contract a
+  credentialed provider client is held to) test HTTP clients. Depend on it with
+  `<type>test-jar</type>` and `<scope>test</scope>`.
 - **`CircuitBreaker.Builder.withClock(InstantSource)`.** The breaker reads the current instant from
   an injectable source (default `Clock.systemUTC()`), so the half-open delay can be driven by hand
   instead of by sleeping. A `java.time.Clock` is an `InstantSource` and can be passed directly.

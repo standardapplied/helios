@@ -79,15 +79,21 @@ public final class RedirectTrap implements AutoCloseable {
   private final StubHttpServer hop;
   private final StubHttpServer origin;
 
+  /**
+   * The origin takes its port first, from the kernel, so the host-change target can listen on the
+   * same port on {@link #OTHER_HOST}, where nothing else binds. Taking the target's port first
+   * would ask for a port on {@link #HOST} that a loopback client connection may be using.
+   */
   private RedirectTrap(Scenario scenario) {
     this.scenario = scenario;
+    this.origin = StubHttpServer.start(HOST, 0, request -> redirect(location(scenario.shape())));
     var hostChange = scenario.shape() == Shape.HOST_CHANGE;
     this.target =
-        StubHttpServer.start(hostChange ? OTHER_HOST : HOST, 0, request -> reply(200, Map.of()));
-    this.hop = StubHttpServer.start(HOST, 0, request -> redirect(target.uri() + PATH));
-    this.origin =
         StubHttpServer.start(
-            HOST, hostChange ? target.port() : 0, request -> redirect(location(scenario.shape())));
+            hostChange ? OTHER_HOST : HOST,
+            hostChange ? origin.port() : 0,
+            request -> reply(200, Map.of()));
+    this.hop = StubHttpServer.start(HOST, 0, request -> redirect(target.uri() + PATH));
   }
 
   /** Every redirect status with every {@link Shape}. */
