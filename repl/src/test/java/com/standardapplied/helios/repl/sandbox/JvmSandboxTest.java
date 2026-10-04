@@ -811,14 +811,17 @@ class JvmSandboxTest {
    * A CPU-bound snippet that never checks its interrupt flag cannot end on its own. A result at all
    * proves only that the call returned; the loop's counter reading the same in two follow-up calls
    * proves the timeout ended the snippet, and the follow-up calls succeeding prove the stopped
-   * snippet did not leave the sandbox unusable.
+   * snippet did not leave the sandbox unusable. The counter is declared by an execute of its own,
+   * so it exists whether the stop ends the loop before or after the loop starts.
    */
   @Test
   void uninterruptibleSnippetTimesOutWithoutWedgingTheSandbox() {
     try (var sandbox = JvmSandbox.create(END_TO_END, new HostFunctionRegistry())) {
+      var declared = sandbox.execute(ExecutionRequest.java("long count = 0;"));
+      assertEquals(0, declared.exitCode(), "stderr was:\n" + declared.stderr());
       var tightLoop =
           ExecutionRequest.newBuilder()
-              .withCode("long count = 0; while (true) { count++; }")
+              .withCode("while (true) { count++; }")
               .withTimeout(Duration.ofMillis(800))
               .build();
 
@@ -842,7 +845,8 @@ class JvmSandboxTest {
    * shutdown hook blocks on the same monitor running JDK code alone, which JShell's stop check
    * never reaches, so the sandbox exits only if it runs no hook. The monitor is a {@code Vector}
    * for that reason, and the bindings snapshot is off because the vector's {@code toString} needs
-   * it too.
+   * it too. The timeout outlasts compiling the statement by far: a stop that landed before the
+   * snippet started would end it at its first stop check instead.
    */
   @Test
   void unstoppableSnippetExitsTheSandboxAfterAnswering() {
@@ -873,8 +877,9 @@ class JvmSandboxTest {
           sandbox.execute(
               ExecutionRequest.newBuilder()
                   .withCode("synchronized (monitor) { }")
-                  .withTimeout(Duration.ofMillis(800))
-                  .build());
+                  .withTimeout(Await.HANG_GUARD.dividedBy(6))
+                  .build(),
+              ExecuteParams.DISABLED);
 
       assertEquals(1, result.exitCode());
       assertTrue(result.stderr().contains("Execution timed out"), result.stderr());

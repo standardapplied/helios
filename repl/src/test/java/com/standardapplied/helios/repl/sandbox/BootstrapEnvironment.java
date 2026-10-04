@@ -45,36 +45,51 @@ final class BootstrapEnvironment implements AutoCloseable {
   private final LineSink toHost = new LineSink();
   private final CompletableFuture<Integer> exitStatus = new CompletableFuture<>();
   private final JvmSandboxBootstrap bootstrap;
+  private volatile CompletableFuture<Void> nextTimeout = new CompletableFuture<>();
   private Thread readLoop;
 
-  /** An environment in which a stopped snippet always ends within the grace it is given. */
+  /**
+   * An environment whose executes time out by the clock and in which a stopped snippet always ends
+   * within the grace it is given.
+   */
   BootstrapEnvironment() {
-    this(Await.HANG_GUARD.multipliedBy(5));
+    this(Await.HANG_GUARD.multipliedBy(5), new LocalExecutionControlProvider(), false);
   }
 
   /**
-   * An environment whose bootstrap gives a stopped snippet {@code stopGrace} to end and, instead of
-   * exiting the JVM, completes {@link #exitStatus()}.
+   * The bootstrap never exits the JVM; it completes {@link #exitStatus()} instead.
+   *
+   * @param timedOutByTheTest whether an execute times out only when the test calls {@link
+   *     #timeOut()}, whatever its {@code timeoutMs}
    */
-  BootstrapEnvironment(Duration stopGrace) {
-    this(stopGrace, new LocalExecutionControlProvider());
-  }
-
-  private BootstrapEnvironment(Duration stopGrace, ExecutionControlProvider engine) {
+  private BootstrapEnvironment(
+      Duration stopGrace, ExecutionControlProvider engine, boolean timedOutByTheTest) {
     jshell = newJShell(engine);
+    JvmSandboxBootstrap.ExecutionTimer timer =
+        timedOutByTheTest ? this::endsBeforeTheTestTimesItOut : Thread::join;
     bootstrap =
         new JvmSandboxBootstrap(
             jshell,
             new BufferedReader(new InputStreamReader(fromHost, StandardCharsets.UTF_8)),
             new PrintStream(toHost, true, StandardCharsets.UTF_8),
+            timer,
             stopGrace,
             exitStatus::complete);
     JvmSandboxBootstrap.setInstance(bootstrap);
   }
 
   /**
-   * An environment whose JShell throws {@code failure} from every {@link JShell#stop()}, as a
-   * defect in the execution engine would.
+   * An environment whose executes time out when the test calls {@link #timeOut()}, so a test can
+   * let a snippet reach the point it blocks at first, and whose bootstrap gives a stopped snippet
+   * {@code stopGrace} to end.
+   */
+  static BootstrapEnvironment timedOutByTheTest(Duration stopGrace) {
+    return new BootstrapEnvironment(stopGrace, new LocalExecutionControlProvider(), true);
+  }
+
+  /**
+   * Like {@link #timedOutByTheTest}, with a JShell that throws {@code failure} from every {@link
+   * JShell#stop()}, as a defect in the execution engine would.
    */
   static BootstrapEnvironment failingStop(Duration stopGrace, RuntimeException failure) {
     return new BootstrapEnvironment(
@@ -90,7 +105,8 @@ final class BootstrapEnvironment implements AutoCloseable {
               }
             };
           }
-        });
+        },
+        true);
   }
 
   /** An environment whose bootstrap is already reading what the test feeds. */
@@ -102,6 +118,14 @@ final class BootstrapEnvironment implements AutoCloseable {
 
   JvmSandboxBootstrap bootstrap() {
     return bootstrap;
+  }
+
+  /**
+   * Times out the execute waiting for its eval thread, or else the next one to wait, in an
+   * environment from {@link #timedOutByTheTest} or {@link #failingStop}.
+   */
+  void timeOut() {
+    nextTimeout.complete(null);
   }
 
   /** The status the bootstrap exited the sandbox with; incomplete while it has not. */
@@ -167,6 +191,25 @@ final class BootstrapEnvironment implements AutoCloseable {
     }
     JvmSandboxBootstrap.setInstance(null);
     jshell.close();
+  }
+
+  private boolean endsBeforeTheTestTimesItOut(Thread evalThread, Duration ignoredTimeout) {
+    var timeout = nextTimeout;
+    var ended = CompletableFuture.runAsync(() -> join(evalThread), Thread.ofVirtual()::start);
+    CompletableFuture.anyOf(ended, timeout).join();
+    if (!timeout.isDone()) {
+      return true;
+    }
+    nextTimeout = new CompletableFuture<>();
+    return false;
+  }
+
+  private static void join(Thread thread) {
+    try {
+      thread.join();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   /**

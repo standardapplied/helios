@@ -34,9 +34,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 /**
  * No test depends on how long an evaluation takes. An execute's timeout is {@link
  * #BEYOND_HANG_GUARD_MS} unless the timeout is what the test exercises, and a stopped snippet's
- * grace is beyond the hang guard unless its expiry is what the test exercises. A test that answers
- * a host call first takes the request line: the bootstrap writes it after registering the pending
- * call, so the answer cannot arrive too early to be matched.
+ * grace is beyond the hang guard unless its expiry is what the test exercises. A timeout that must
+ * not act before the snippet blocks, which JShell's compilation would otherwise race, is fired by
+ * the test ({@link BootstrapEnvironment#timedOutByTheTest}) once a host call has shown the
+ * snippet's code running. A stop that lands earlier ends the snippet at its first stop check, a
+ * different outcome that the clock-driven tests cover. A test that answers a host call first takes
+ * the request line: the bootstrap writes it after registering the pending call, so the answer
+ * cannot arrive too early to be matched.
  */
 class JvmSandboxBootstrapTest {
 
@@ -206,8 +210,8 @@ class JvmSandboxBootstrapTest {
 
   /**
    * A stop that fails cannot end the snippet, so the snippet is given up as unstoppable, and the
-   * failure is reported once rather than on every retry. The host call proves the snippet is
-   * running before the timeout can act.
+   * failure is reported once rather than on every retry. The test times the execute out once the
+   * host call shows the snippet is running.
    */
   @Test
   void failingStopIsReportedOnceAndTheSnippetGivenUp() {
@@ -222,12 +226,9 @@ class JvmSandboxBootstrapTest {
             "1",
             "execute",
             Map.of(
-                "code",
-                "predict(\"running\", \"now\"); " + BLOCK_UNTIL_INTERRUPTED,
-                "timeoutMs",
-                TIMEOUT_MS)));
-    var running = env.nextRequest();
-    bootstrap.dispatch(new RpcMessage.Response(running.id(), Map.of("output", "go on")));
+                "code", runningThen(BLOCK_UNTIL_INTERRUPTED), "timeoutMs", BEYOND_HANG_GUARD_MS)));
+    answer(env.nextRequest());
+    env.timeOut();
 
     var result = responseResult(env.nextMessage());
     assertUnstoppable(result);
@@ -316,7 +317,9 @@ class JvmSandboxBootstrapTest {
    * A snippet blocked entering a monitor held by a thread outside its thread group is out of reach
    * of {@link JShell#stop()}: the group interrupt misses the holder and a thread blocked on monitor
    * entry passes no stop check. A snippet that also holds the monitor of a captured system stream
-   * must not keep the timeout handling from deciding and answering.
+   * must not keep the timeout handling from deciding and answering. Nothing between the host call
+   * returning and the monitor entry passes a stop check either, so once the test has answered the
+   * call, the snippet blocks however soon the timeout acts.
    */
   @ParameterizedTest
   @ValueSource(
@@ -326,12 +329,16 @@ class JvmSandboxBootstrapTest {
         "synchronized (System.out) { synchronized (monitor) { } }"
       })
   void unstoppableSnippetTerminatesTheSandbox(String unstoppable) {
-    useShortStopGrace();
+    timeoutsFiredByTheTest();
     var holding = holdMonitorOutsideTheSnippetGroup();
 
     bootstrap.dispatch(
         new RpcMessage.Request(
-            "2", "execute", Map.of("code", unstoppable, "timeoutMs", TIMEOUT_MS)));
+            "2",
+            "execute",
+            Map.of("code", runningThen(unstoppable), "timeoutMs", BEYOND_HANG_GUARD_MS)));
+    answer(env.nextRequest());
+    env.timeOut();
 
     assertUnstoppable(responseResult(env.nextMessage()));
     assertEquals(3, Await.value("the sandbox's exit", env.exitStatus()));
@@ -340,12 +347,12 @@ class JvmSandboxBootstrapTest {
 
   /**
    * JShell joins only the snippet threads it saw right after starting the snippet, so the eval
-   * thread ends while a thread the snippet starts on being stopped is still blocked. The park is a
-   * host call, answered at the end in case the stop came before the snippet reached it.
+   * thread ends while a thread the snippet starts on being stopped is still blocked. The test times
+   * the execute out once the snippet is parked in the host call.
    */
   @Test
   void threadStartedAfterJShellsSnapshotMustAlsoEnd() {
-    useShortStopGrace();
+    timeoutsFiredByTheTest();
     var holding = holdMonitorOutsideTheSnippetGroup();
 
     bootstrap.dispatch(
@@ -362,14 +369,15 @@ class JvmSandboxBootstrapTest {
                 }
                 """,
                 "timeoutMs",
-                TIMEOUT_MS,
+                BEYOND_HANG_GUARD_MS,
                 "captureBindings",
                 false)));
     var parked = env.nextRequest();
+    env.timeOut();
 
     assertUnstoppable(responseResult(env.nextMessage()));
     assertEquals(3, Await.value("the sandbox's exit", env.exitStatus()));
-    bootstrap.dispatch(new RpcMessage.Response(parked.id(), Map.of("output", "released")));
+    answer(parked);
     releaseMonitor(holding);
   }
 
@@ -379,11 +387,20 @@ class JvmSandboxBootstrapTest {
    */
   @Test
   void onlyTheExecuteThatFoundTheSnippetUnstoppableExits() {
-    useShortStopGrace();
+    timeoutsFiredByTheTest();
     var holding = holdMonitorOutsideTheSnippetGroup();
-    assertUnstoppable(
-        bootstrap.handleExecute(
-            Map.of("code", "synchronized (monitor) { }", "timeoutMs", TIMEOUT_MS)));
+    var unstoppable =
+        env.inSandbox(
+            () ->
+                bootstrap.handleExecute(
+                    Map.of(
+                        "code",
+                        runningThen("synchronized (monitor) { }"),
+                        "timeoutMs",
+                        BEYOND_HANG_GUARD_MS)));
+    answer(env.nextRequest());
+    env.timeOut();
+    assertUnstoppable(Await.value("the unstoppable execute", unstoppable));
 
     Await.value(
         "another execute served",
@@ -640,10 +657,26 @@ class JvmSandboxBootstrapTest {
     assertEquals(0, Await.value("the first execute", first).get("exitCode"));
   }
 
-  private void useShortStopGrace() {
+  /**
+   * One statement that makes a host call the test answers, which shows the snippet's own code is
+   * running, and then runs {@code code}. The stop can interrupt the call before the snippet takes
+   * the answer, so the snippet goes on to {@code code} either way: a catch block passes no stop
+   * check, and a later statement of a timed-out request would never run.
+   */
+  private static String runningThen(String code) {
+    return "{ try { predict(\"running\", \"now\"); } catch (RuntimeException stopped) { } "
+        + code
+        + " }";
+  }
+
+  private void timeoutsFiredByTheTest() {
     env.close();
-    env = new BootstrapEnvironment(SHORT_STOP_GRACE);
+    env = BootstrapEnvironment.timedOutByTheTest(SHORT_STOP_GRACE);
     bootstrap = env.bootstrap();
+  }
+
+  private void answer(RpcMessage.Request hostCall) {
+    bootstrap.dispatch(new RpcMessage.Response(hostCall.id(), Map.of("output", "answered")));
   }
 
   /**
