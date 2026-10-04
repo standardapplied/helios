@@ -24,8 +24,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,7 +54,8 @@ import jdk.jshell.SourceCodeAnalysis;
  *
  * <ul>
  *   <li>Main thread runs {@link #readLoop()} — reads stdin, dispatches requests, routes responses
- *   <li>Virtual thread per execute — JShell eval with stdout/stderr capture
+ *   <li>Virtual thread per execute — captures stdout/stderr and runs the JShell eval on a platform
+ *       thread in a thread group of its own, so a timeout can find every thread the snippet started
  *   <li>Sandbox code calling {@link HostBridge#predict} blocks on a {@link CompletableFuture} until
  *       the main thread routes the host response
  * </ul>
@@ -69,9 +70,11 @@ public final class JvmSandboxBootstrap {
 
   private static final long CALL_TIMEOUT_MS = 300_000;
 
-  private static final Duration STOP_GRACE = Duration.ofSeconds(5);
+  private static final long STOP_RETRY_NANOS = Duration.ofMillis(20).toNanos();
 
   static final int UNSTOPPABLE_SNIPPET_EXIT_CODE = 3;
+
+  static final String STOP_GRACE_ARG = "--stop-grace=";
 
   private static volatile JvmSandboxBootstrap instance;
 
@@ -90,7 +93,9 @@ public final class JvmSandboxBootstrap {
   /**
    * @param stopGrace how long a timed-out snippet has to end after {@link JShell#stop()} before the
    *     sandbox gives it up as unstoppable
-   * @param exit terminates the sandbox JVM with the given status once a snippet proved unstoppable
+   * @param exit terminates the sandbox JVM with the given status once a snippet proved unstoppable,
+   *     without running shutdown hooks: a hook the snippet registered could block the exit and
+   *     leave the sandbox serving requests after it said it was shutting down
    */
   JvmSandboxBootstrap(
       JShell jshell,
@@ -157,6 +162,14 @@ public final class JvmSandboxBootstrap {
     warnIfReducedIsolation(System.err);
     var socketPath = parseRpcSocketArg(args);
     var policy = parseSandboxPolicyArg(args);
+    Duration stopGrace;
+    try {
+      stopGrace = parseStopGraceArg(args);
+    } catch (IllegalArgumentException e) {
+      System.err.println("JvmSandboxBootstrap: " + e.getMessage());
+      System.exit(2);
+      return;
+    }
     SocketChannel rpcSocket;
     try {
       rpcSocket = SocketChannel.open(StandardProtocolFamily.UNIX);
@@ -182,7 +195,8 @@ public final class JvmSandboxBootstrap {
     jshell.eval("import com.standardapplied.helios.repl.sandbox.HostBridge;");
     SandboxPrelude.install(jshell);
 
-    var bootstrap = new JvmSandboxBootstrap(jshell, rpcIn, rpcOut, STOP_GRACE, System::exit);
+    var bootstrap =
+        new JvmSandboxBootstrap(jshell, rpcIn, rpcOut, stopGrace, Runtime.getRuntime()::halt);
     setInstance(bootstrap);
 
     bootstrap.readLoop();
@@ -265,6 +279,35 @@ public final class JvmSandboxBootstrap {
       }
     }
     return SandboxPolicy.permissive();
+  }
+
+  /**
+   * Parse the optional {@code --stop-grace=<ISO-8601 duration>} argument, how long a stopped
+   * snippet has to end before the sandbox exits. The host always passes {@link
+   * JvmSandboxConfig#stopGrace()}; absent means {@link JvmSandboxConfig#DEFAULT_STOP_GRACE}.
+   *
+   * @throws IllegalArgumentException if the value is not a positive duration
+   */
+  static Duration parseStopGraceArg(String[] args) {
+    for (var arg : args) {
+      if (arg.startsWith(STOP_GRACE_ARG)) {
+        return positiveDuration(arg.substring(STOP_GRACE_ARG.length()));
+      }
+    }
+    return JvmSandboxConfig.DEFAULT_STOP_GRACE;
+  }
+
+  private static Duration positiveDuration(String value) {
+    Duration duration;
+    try {
+      duration = Duration.parse(value);
+    } catch (DateTimeParseException e) {
+      throw new IllegalArgumentException(STOP_GRACE_ARG + value + " is not a duration", e);
+    }
+    if (duration.isNegative() || duration.isZero()) {
+      throw new IllegalArgumentException(STOP_GRACE_ARG + value + " is not positive");
+    }
+    return duration;
   }
 
   /**
@@ -587,12 +630,12 @@ public final class JvmSandboxBootstrap {
   }
 
   /**
-   * Ends a snippet that outlived its timeout. {@link JShell#stop()} only acts while the eval thread
-   * is inside the snippet's invocation, so it comes first; interrupting the eval thread instead
-   * would end the wait and leave the snippet running. The eval thread ending proves nothing about a
-   * thread the snippet started after JShell took its one snapshot of the snippet's threads, so
-   * every thread of the execution must end within {@link #stopGrace}. One still running is blocked
-   * where neither the interrupt nor JShell's stop check reaches it, and marks the sandbox for exit.
+   * Ends a snippet that outlived its timeout. Interrupting the eval thread would end the wait and
+   * leave the snippet running, so the snippet is stopped through {@link JShell#stop()} instead. The
+   * eval thread ending proves nothing about a thread the snippet started after JShell took its one
+   * snapshot of the snippet's threads, so every thread of the execution must end within {@link
+   * #stopGrace}. One still running is blocked where neither the interrupt nor JShell's stop check
+   * reaches it, and marks the sandbox for exit.
    *
    * @param err a stream of its own: the snippet may hold the monitor of its captured streams
    */
@@ -600,44 +643,49 @@ public final class JvmSandboxBootstrap {
       ThreadGroup executionThreads, AtomicBoolean timedOut, PrintStream err)
       throws InterruptedException {
     timedOut.set(true);
-    try {
-      jshell.stop();
-    } catch (RuntimeException jshellStopErr) {
-      jshellStopErr.printStackTrace(err);
-    }
     err.println("Execution timed out");
-    if (!awaitTermination(executionThreads)) {
+    if (!stopWithinGrace(executionThreads, err)) {
       err.println("The timed-out snippet could not be stopped; the sandbox is shutting down");
       unstoppableExecution = Thread.currentThread();
     }
   }
 
-  /** Rescans after every round of joins, because a thread being joined can start another. */
-  private boolean awaitTermination(ThreadGroup threads) throws InterruptedException {
+  /**
+   * {@link JShell#stop()} does nothing while the statement in flight is still compiling or
+   * starting, and starting a statement clears the stop JShell may already have requested, so a
+   * single stop can be lost. It is repeated until every thread of the execution has ended,
+   * rescanning each round because a thread can start another. A stop that fails is reported once
+   * and not retried.
+   */
+  private boolean stopWithinGrace(ThreadGroup threads, PrintStream err)
+      throws InterruptedException {
     var deadline = System.nanoTime() + stopGrace.toNanos();
-    for (var live = liveThreads(threads); live.length > 0; live = liveThreads(threads)) {
-      if (System.nanoTime() - deadline >= 0) {
+    var stopping = true;
+    for (var live = anyLiveThread(threads); live != null; live = anyLiveThread(threads)) {
+      var remaining = deadline - System.nanoTime();
+      if (remaining <= 0) {
         return false;
       }
-      for (var thread : live) {
-        thread.join(Duration.ofNanos(deadline - System.nanoTime()));
-      }
+      stopping = stopping && requestStop(err);
+      live.join(Duration.ofNanos(Math.min(remaining, STOP_RETRY_NANOS)));
     }
     return true;
   }
 
-  /**
-   * Enumerates rather than taking {@link Thread#getAllStackTraces()}, which leaves out a thread
-   * that has been started but has not run yet.
-   */
-  private static Thread[] liveThreads(ThreadGroup threads) {
-    Thread[] live;
-    int count;
-    do {
-      live = new Thread[threads.activeCount() + 1];
-      count = threads.enumerate(live);
-    } while (count == live.length);
-    return Arrays.copyOf(live, count);
+  private boolean requestStop(PrintStream err) {
+    try {
+      jshell.stop();
+      return true;
+    } catch (RuntimeException jshellStopErr) {
+      jshellStopErr.printStackTrace(err);
+      return false;
+    }
+  }
+
+  /** A live thread of the group or any of its subgroups, or {@code null} once none is left. */
+  private static Thread anyLiveThread(ThreadGroup threads) {
+    var live = new Thread[1];
+    return threads.enumerate(live) == 0 ? null : live[0];
   }
 
   /**

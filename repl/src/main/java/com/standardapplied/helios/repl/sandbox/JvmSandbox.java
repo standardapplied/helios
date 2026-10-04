@@ -569,7 +569,8 @@ public final class JvmSandbox implements Sandbox {
    * <p>A non-permissive {@link JvmSandboxConfig#sandboxPolicy()} is encoded via {@link
    * SandboxPolicySerialization#encode(com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy)}
    * and appended as {@code --sandbox-policy=<encoded>}. A permissive policy is the bootstrap's own
-   * default, so it is not propagated — keeping the command line stable for the common case.
+   * default, so it is not propagated — keeping the command line stable for the common case. {@link
+   * JvmSandboxConfig#stopGrace()} always travels, as {@code --stop-grace=<ISO-8601 duration>}.
    */
   static List<String> buildLaunchCommand(
       String javaBin, JvmSandboxConfig config, String rpcSocketPath) {
@@ -608,6 +609,7 @@ public final class JvmSandbox implements Sandbox {
     if (rpcSocketPath != null) {
       command.add("--rpc-socket=" + rpcSocketPath);
     }
+    command.add(JvmSandboxBootstrap.STOP_GRACE_ARG + config.stopGrace());
     if (!config.sandboxPolicy().enforcesNothing()) {
       command.add("--sandbox-policy=" + SandboxPolicySerialization.encode(config.sandboxPolicy()));
     }
