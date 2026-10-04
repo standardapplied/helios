@@ -267,9 +267,23 @@ class JvmSandboxTest {
     var result = sandbox.execute(ExecutionRequest.java("1+1"));
 
     assertFalse(result.succeeded());
-    assertTrue(result.stderr().contains("not alive"));
+    assertTrue(
+        result.stderr().contains("not alive: it exited with code 0"),
+        "stderr was: " + result.stderr());
 
     sandbox.close();
+  }
+
+  @Test
+  void executeOnClosedSandboxReturnsFailure() {
+    var sandbox = JvmSandbox.create(END_TO_END, new HostFunctionRegistry());
+    sandbox.close();
+
+    var result = sandbox.execute(ExecutionRequest.java("1+1"));
+
+    assertTrue(
+        result.stderr().contains("not alive: the sandbox is closed"),
+        "stderr was: " + result.stderr());
   }
 
   @Test
@@ -799,9 +813,10 @@ class JvmSandboxTest {
   }
 
   /**
-   * A CPU-bound snippet that never checks its interrupt flag cannot end on its own, so a result at
-   * all proves the timeout's escalation (interrupt, then {@code jshell.stop()}) ended it. The
-   * follow-up call proves the stopped snippet did not leave the sandbox unusable.
+   * A CPU-bound snippet that never checks its interrupt flag cannot end on its own. A result at all
+   * proves only that the call returned; the loop's counter reading the same in two follow-up calls
+   * proves the timeout ended the snippet, and the follow-up calls succeeding prove the stopped
+   * snippet did not leave the sandbox unusable.
    */
   @Test
   void uninterruptibleSnippetTimesOutWithoutWedgingTheSandbox() {
@@ -818,11 +833,61 @@ class JvmSandboxTest {
       assertTrue(
           result.stderr().contains("Execution timed out"),
           "expected timeout marker; stderr was:\n" + result.stderr());
-      var followupResult = sandbox.execute(ExecutionRequest.java("var x = 1 + 1;"));
-      assertEquals(
-          0,
-          followupResult.exitCode(),
-          "follow-up execute should succeed; stderr was:\n" + followupResult.stderr());
+      var firstRead = sandbox.execute(ExecutionRequest.java("count"));
+      var secondRead = sandbox.execute(ExecutionRequest.java("count"));
+      assertEquals(0, firstRead.exitCode(), "stderr was:\n" + firstRead.stderr());
+      assertEquals(firstRead.stdout(), secondRead.stdout());
+    }
+  }
+
+  /**
+   * A snippet blocked entering a monitor that a thread outside its thread group holds cannot be
+   * stopped, so the sandbox answers the execute and then exits with code 3. The holder is a virtual
+   * thread, never a member of the snippet's group, blocked on a latch nothing releases.
+   */
+  @Test
+  void unstoppableSnippetExitsTheSandboxAfterAnswering() {
+    try (var sandbox = JvmSandbox.create(END_TO_END, new HostFunctionRegistry())) {
+      var holdMonitor =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  """
+                  Object monitor = new Object();
+                  var entered = new java.util.concurrent.CountDownLatch(1);
+                  Thread.startVirtualThread(() -> {
+                    synchronized (monitor) {
+                      entered.countDown();
+                      try {
+                        new java.util.concurrent.CountDownLatch(1).await();
+                      } catch (InterruptedException e) {
+                      }
+                    }
+                  });
+                  entered.await();
+                  """));
+      assertEquals(0, holdMonitor.exitCode(), "stderr was:\n" + holdMonitor.stderr());
+
+      var result =
+          sandbox.execute(
+              ExecutionRequest.newBuilder()
+                  .withCode("synchronized (monitor) { }")
+                  .withTimeout(Duration.ofMillis(800))
+                  .build());
+
+      assertEquals(1, result.exitCode());
+      assertTrue(result.stderr().contains("Execution timed out"), result.stderr());
+      assertTrue(result.stderr().contains("could not be stopped"), result.stderr());
+      Await.termination("the sandbox exiting", sandbox.process());
+      assertEquals(3, sandbox.process().exitValue());
+      var afterExit = sandbox.execute(ExecutionRequest.java("1 + 1"));
+      assertTrue(
+          afterExit
+              .stderr()
+              .contains(
+                  "it exited with code 3; the sandbox exited because a timed-out snippet could not"
+                      + " be stopped"),
+          afterExit.stderr());
+      assertFalse(sandbox.isAlive());
     }
   }
 

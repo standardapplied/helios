@@ -34,8 +34,11 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
+import java.util.function.IntConsumer;
 import jdk.jshell.JShell;
 import jdk.jshell.Snippet;
 import jdk.jshell.SourceCodeAnalysis;
@@ -65,6 +68,10 @@ public final class JvmSandboxBootstrap {
 
   private static final long CALL_TIMEOUT_MS = 300_000;
 
+  private static final Duration STOP_GRACE = Duration.ofSeconds(5);
+
+  static final int UNSTOPPABLE_SNIPPET_EXIT_CODE = 3;
+
   private static volatile JvmSandboxBootstrap instance;
 
   private final JShell jshell;
@@ -74,12 +81,27 @@ public final class JvmSandboxBootstrap {
       new ConcurrentHashMap<>();
   private final AtomicLong idCounter = new AtomicLong(0);
   private final Semaphore executeLock = new Semaphore(1);
+  private final Duration stopGrace;
+  private final IntConsumer exit;
   private volatile Object submittedValue;
+  private volatile boolean snippetUnstoppable;
 
-  JvmSandboxBootstrap(JShell jshell, BufferedReader stdinReader, PrintStream realOut) {
+  /**
+   * @param stopGrace how long a timed-out snippet has to end after {@link JShell#stop()} before the
+   *     sandbox gives it up as unstoppable
+   * @param exit terminates the sandbox JVM with the given status once a snippet proved unstoppable
+   */
+  JvmSandboxBootstrap(
+      JShell jshell,
+      BufferedReader stdinReader,
+      PrintStream realOut,
+      Duration stopGrace,
+      IntConsumer exit) {
     this.jshell = jshell;
     this.stdinReader = stdinReader;
     this.realOut = realOut;
+    this.stopGrace = stopGrace;
+    this.exit = exit;
   }
 
   /**
@@ -159,7 +181,7 @@ public final class JvmSandboxBootstrap {
     jshell.eval("import com.standardapplied.helios.repl.sandbox.HostBridge;");
     SandboxPrelude.install(jshell);
 
-    var bootstrap = new JvmSandboxBootstrap(jshell, rpcIn, rpcOut);
+    var bootstrap = new JvmSandboxBootstrap(jshell, rpcIn, rpcOut, STOP_GRACE, System::exit);
     setInstance(bootstrap);
 
     bootstrap.readLoop();
@@ -426,7 +448,6 @@ public final class JvmSandboxBootstrap {
     return submittedValue;
   }
 
-  @SuppressWarnings("unchecked")
   void dispatch(RpcMessage message) {
     switch (message) {
       case RpcMessage.Request req -> {
@@ -436,43 +457,13 @@ public final class JvmSandboxBootstrap {
                   .name("jshell-execute")
                   .start(
                       () -> {
-                        try {
-                          var params =
-                              req.params() instanceof Map<?, ?> m
-                                  ? (Map<String, Object>) m
-                                  : Map.<String, Object>of();
-                          var result = handleExecute(params);
-                          sendRpc(new RpcMessage.Response(req.id(), result));
-                        } catch (Exception e) {
-                          try {
-                            sendRpc(
-                                new RpcMessage.ErrorResponse(
-                                    req.id(), RpcError.internalError(e.getMessage())));
-                          } catch (IOException sendErr) {
-                          }
-                        }
+                        respond(req, this::handleExecute);
+                        exitIfSnippetUnstoppable();
                       });
           case "installPrelude" ->
               Thread.ofVirtual()
                   .name("jshell-install-prelude")
-                  .start(
-                      () -> {
-                        try {
-                          var params =
-                              req.params() instanceof Map<?, ?> m
-                                  ? (Map<String, Object>) m
-                                  : Map.<String, Object>of();
-                          var result = handleInstallPrelude(params);
-                          sendRpc(new RpcMessage.Response(req.id(), result));
-                        } catch (Exception e) {
-                          try {
-                            sendRpc(
-                                new RpcMessage.ErrorResponse(
-                                    req.id(), RpcError.internalError(e.getMessage())));
-                          } catch (IOException sendErr) {
-                          }
-                        }
-                      });
+                  .start(() -> respond(req, this::handleInstallPrelude));
           default -> {
             try {
               sendRpc(
@@ -500,6 +491,32 @@ public final class JvmSandboxBootstrap {
     }
   }
 
+  @SuppressWarnings("unchecked")
+  private void respond(
+      RpcMessage.Request req, Function<Map<String, Object>, Map<String, Object>> handler) {
+    try {
+      var params =
+          req.params() instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.<String, Object>of();
+      sendRpc(new RpcMessage.Response(req.id(), handler.apply(params)));
+    } catch (Exception e) {
+      try {
+        sendRpc(new RpcMessage.ErrorResponse(req.id(), RpcError.internalError(e.getMessage())));
+      } catch (IOException sendErr) {
+      }
+    }
+  }
+
+  /**
+   * A snippet that outlived {@link JShell#stop()} still holds the captured system streams and runs
+   * on, so no later execute can be trusted. Called only after the execute's response has been sent,
+   * so the host learns why the sandbox is going away before the process ends.
+   */
+  private void exitIfSnippetUnstoppable() {
+    if (snippetUnstoppable) {
+      exit.accept(UNSTOPPABLE_SNIPPET_EXIT_CODE);
+    }
+  }
+
   private Map<String, Object> doExecute(Map<String, Object> params) {
     var code = params.get("code") instanceof String s ? s : "";
     var timeoutMs = params.get("timeoutMs") instanceof Number n ? n.longValue() : 30000L;
@@ -519,6 +536,7 @@ public final class JvmSandboxBootstrap {
     var originalOut = System.out;
     var originalErr = System.err;
     var exitCode = new AtomicInteger(0);
+    var timedOut = new AtomicBoolean();
 
     System.setOut(captureOut);
     System.setErr(captureErr);
@@ -529,7 +547,7 @@ public final class JvmSandboxBootstrap {
               .start(
                   () -> {
                     try {
-                      if (!evalCode(code, captureOut, captureErr)) {
+                      if (!evalCode(code, timedOut, captureOut, captureErr)) {
                         exitCode.set(1);
                       }
                     } catch (Exception e) {
@@ -539,26 +557,8 @@ public final class JvmSandboxBootstrap {
                   });
 
       try {
-        evalThread.join(Duration.ofMillis(timeoutMs));
-        if (evalThread.isAlive()) {
-          // First try cooperative interrupt — fast for snippets that block on IO or sleep.
-          evalThread.interrupt();
-          evalThread.join(Duration.ofMillis(1000));
-          if (evalThread.isAlive()) {
-            // The snippet ignored the interrupt (tight CPU loop, native call, etc.). Without
-            // jshell.stop() the thread keeps running, holding references to captureOut/captureErr
-            // and slowly accumulating. JShell's stop() asks the engine to interrupt the in-flight
-            // snippet at engine level, which the JShell evaluator honours promptly.
-            try {
-              jshell.stop();
-            } catch (RuntimeException jshellStopErr) {
-              // jshell.stop() is documented best-effort; failure here just means we leak this
-              // one thread. Log and proceed so the outer dispatch path doesn't wedge.
-              jshellStopErr.printStackTrace(captureErr);
-            }
-            evalThread.join(Duration.ofMillis(1000));
-          }
-          captureErr.println("Execution timed out");
+        if (!evalThread.join(Duration.ofMillis(timeoutMs))) {
+          stopTimedOutSnippet(evalThread, timedOut, captureErr);
           exitCode.set(1);
         }
       } catch (InterruptedException e) {
@@ -578,10 +578,33 @@ public final class JvmSandboxBootstrap {
     result.put("stderr", stderrCapture.toString(StandardCharsets.UTF_8));
     result.put("exitCode", exitCode.get());
     result.put("submitted", submittedValue);
-    if (Boolean.TRUE.equals(captureBindings)) {
+    if (Boolean.TRUE.equals(captureBindings) && !snippetUnstoppable) {
       result.put("bindings", collectBindings(maxBindingValueChars, maxBindingSnapshotChars));
     }
     return result;
+  }
+
+  /**
+   * Ends a snippet that outlived its timeout. {@link JShell#stop()} only acts while the eval thread
+   * is inside the snippet's invocation, so it comes first; interrupting the eval thread instead
+   * would end the wait and leave the snippet running. The eval thread ending is the proof the
+   * snippet ended, because the invocation joins the snippet's thread before returning. A snippet
+   * still running after {@link #stopGrace} is blocked where neither the interrupt nor JShell's stop
+   * check reaches it, and marks the sandbox for exit.
+   */
+  private void stopTimedOutSnippet(Thread evalThread, AtomicBoolean timedOut, PrintStream err)
+      throws InterruptedException {
+    timedOut.set(true);
+    try {
+      jshell.stop();
+    } catch (RuntimeException jshellStopErr) {
+      jshellStopErr.printStackTrace(err);
+    }
+    err.println("Execution timed out");
+    if (!evalThread.join(stopGrace)) {
+      err.println("The timed-out snippet could not be stopped; the sandbox is shutting down");
+      snippetUnstoppable = true;
+    }
   }
 
   /**
@@ -629,12 +652,12 @@ public final class JvmSandboxBootstrap {
     return snapshot;
   }
 
-  private boolean evalCode(String code, PrintStream out, PrintStream err) {
+  private boolean evalCode(String code, AtomicBoolean timedOut, PrintStream out, PrintStream err) {
     var analysis = jshell.sourceCodeAnalysis();
     var remaining = code;
     var success = true;
 
-    while (!remaining.isEmpty()) {
+    while (!remaining.isEmpty() && !timedOut.get()) {
       var info = analysis.analyzeCompletion(remaining);
       if (info.completeness() == SourceCodeAnalysis.Completeness.EMPTY) {
         break;

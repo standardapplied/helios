@@ -21,6 +21,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import jdk.jshell.JShell;
@@ -36,14 +37,27 @@ final class BootstrapEnvironment implements AutoCloseable {
   private final JShell jshell = newJShell();
   private final FeedableInputStream fromHost = new FeedableInputStream();
   private final LineSink toHost = new LineSink();
-  private final JvmSandboxBootstrap bootstrap =
-      new JvmSandboxBootstrap(
-          jshell,
-          new BufferedReader(new InputStreamReader(fromHost, StandardCharsets.UTF_8)),
-          new PrintStream(toHost, true, StandardCharsets.UTF_8));
+  private final CompletableFuture<Integer> exitStatus = new CompletableFuture<>();
+  private final JvmSandboxBootstrap bootstrap;
   private Thread readLoop;
 
+  /** An environment in which a stopped snippet always ends within the grace it is given. */
   BootstrapEnvironment() {
+    this(Await.HANG_GUARD.multipliedBy(5));
+  }
+
+  /**
+   * An environment whose bootstrap gives a stopped snippet {@code stopGrace} to end and, instead of
+   * exiting the JVM, completes {@link #exitStatus()}.
+   */
+  BootstrapEnvironment(Duration stopGrace) {
+    bootstrap =
+        new JvmSandboxBootstrap(
+            jshell,
+            new BufferedReader(new InputStreamReader(fromHost, StandardCharsets.UTF_8)),
+            new PrintStream(toHost, true, StandardCharsets.UTF_8),
+            stopGrace,
+            exitStatus::complete);
     JvmSandboxBootstrap.setInstance(bootstrap);
   }
 
@@ -56,6 +70,11 @@ final class BootstrapEnvironment implements AutoCloseable {
 
   JvmSandboxBootstrap bootstrap() {
     return bootstrap;
+  }
+
+  /** The status the bootstrap exited the sandbox with; incomplete while it has not. */
+  CompletableFuture<Integer> exitStatus() {
+    return exitStatus;
   }
 
   void startReadLoop() {

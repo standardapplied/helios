@@ -697,7 +697,7 @@ public final class JvmSandbox implements Sandbox {
   @Override
   public ExecutionResult execute(ExecutionRequest request, ExecuteParams executeParams) {
     if (!isAlive()) {
-      return ExecutionResult.failure("Sandbox process is not alive");
+      return ExecutionResult.failure(notAliveReason());
     }
     var timeout = request.timeout() != null ? request.timeout() : config.executionTimeout();
     try {
@@ -720,6 +720,18 @@ public final class JvmSandbox implements Sandbox {
           .withExitCode(1)
           .build();
     }
+  }
+
+  private String notAliveReason() {
+    if (closed.get()) {
+      return "Sandbox process is not alive: the sandbox is closed";
+    }
+    var exitCode = process.exitValue();
+    var reason = "Sandbox process is not alive: it exited with code " + exitCode;
+    if (exitCode == JvmSandboxBootstrap.UNSTOPPABLE_SNIPPET_EXIT_CODE) {
+      return reason + "; the sandbox exited because a timed-out snippet could not be stopped";
+    }
+    return reason;
   }
 
   /**

@@ -133,6 +133,17 @@ the stored metadata to `anthropic.thinkingBlocks`
   the circuit to `HALF_OPEN` still reset the success count, discarding a probe that had already
   succeeded when `successThreshold` is above 1. Only the caller that makes the transition resets
   it.
+- **`JvmSandbox`: a snippet that outlived its timeout kept running inside the sandbox until the
+  sandbox exited.** On timeout the bootstrap interrupted its own eval thread before calling
+  `JShell.stop()`. That ended the wait but never reached the snippet, and by the time `stop()` ran
+  it no longer did anything. A blocked snippet stayed parked, a looping one kept spinning, and the
+  request's remaining statements ran after the timeout. Now `stop()` runs first. It ends a snippet
+  that blocks interruptibly or loops, and no later statement of the request runs. A snippet that
+  is still running after `stop()` plus a 5 s grace is blocked where nothing in the JVM can reach
+  it, for example entering a monitor held by a thread outside the snippet. The sandbox answers
+  that execute with `exitCode 1`, `Execution timed out` and a line saying the snippet could not be
+  stopped, then exits with code 3. A later `execute` fails, and its message gives the exit code
+  and, for code 3, the cause.
 
 ### Security
 
