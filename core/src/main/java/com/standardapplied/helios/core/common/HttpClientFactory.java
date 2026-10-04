@@ -11,7 +11,6 @@ import java.io.InputStream;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Objects;
 
 /**
  * Factory and shared utilities for {@link HttpClient} instances used by provider modules.
@@ -26,23 +25,18 @@ public final class HttpClientFactory {
   private HttpClientFactory() {}
 
   /**
-   * Create an HttpClient configured with timeouts from ModelConfig.
+   * Create an HttpClient configured with timeouts from ModelConfig that never follows a redirect.
    *
-   * @param config the model configuration containing timeout settings
-   * @return a new HttpClient instance
+   * <p>Every client this factory builds carries, or may carry, a provider credential in a header
+   * the JDK's redirect filter does not strip ({@code x-api-key}, {@code x-goog-api-key}, any {@link
+   * ModelConfig#headers()} entry) together with the prompt as request body. Following a redirect
+   * would hand both to whatever origin the {@code Location} names, so a 3xx response is returned to
+   * the caller like any other non-200 status.
+   *
+   * @param config the model configuration containing timeout settings; null for defaults
+   * @return a new HttpClient instance with {@link HttpClient.Redirect#NEVER}
    */
   public static HttpClient create(ModelConfig config) {
-    return create(config, HttpClient.Redirect.NORMAL);
-  }
-
-  /**
-   * Create an HttpClient with an explicit redirect policy.
-   *
-   * @param config the model configuration containing timeout settings
-   * @param redirectPolicy redirect policy for the client
-   * @return a new HttpClient instance
-   */
-  public static HttpClient create(ModelConfig config, HttpClient.Redirect redirectPolicy) {
     Duration connectTimeout =
         config != null && config.connectTimeout() != null
             ? config.connectTimeout()
@@ -50,7 +44,7 @@ public final class HttpClientFactory {
 
     return HttpClient.newBuilder()
         .connectTimeout(connectTimeout)
-        .followRedirects(Objects.requireNonNull(redirectPolicy, "redirectPolicy must not be null"))
+        .followRedirects(HttpClient.Redirect.NEVER)
         .build();
   }
 
