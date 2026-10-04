@@ -413,7 +413,7 @@ public final class GeminiFilesClient implements AutoCloseable {
   static HttpClient createHttpClient(ModelConfig config) {
     var validated = requireConfig(config);
     apiRoot(validated);
-    return HttpClientFactory.create(validated, HttpClient.Redirect.NEVER);
+    return HttpClientFactory.create(validated);
   }
 
   private static URI apiRoot(ModelConfig config) {
