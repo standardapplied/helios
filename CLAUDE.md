@@ -87,7 +87,8 @@ sleep inside a string of sandboxed code is not a Java call and is not flagged.
 
 ArchUnit rules today: `core` depends on nothing outside the JDK; a provider module depends on
 `core` only; `session` does not depend on a provider, `runtime` or `persistence`; a
-`java.net.http.HttpClient` is built only by `core.common.HttpClientFactory`; no top-level type is
+`java.net.http.HttpClient` is built only by `core.common.HttpClientFactory`, whose clients never
+follow a redirect; no top-level type is
 named `*Util`, `*Utils`, `*Helper`, `*Helpers` or `*Manager`; `System.out`, `System.err` and
 `printStackTrace` are used only in `repl.sandbox` and the example modules; nothing in main code
 is `@Deprecated` (a superseded type or member is deleted and its replacement recorded under
@@ -104,7 +105,8 @@ stays.
 A test passes or fails for the same reason on a machine a hundred times slower, and on one that
 stalls for several seconds at any statement. The fixtures live in
 `com.standardapplied.helios.core.test` (core's test sources, shared through core's `test-jar`;
-the package must never exist in core's main code): `Await`, `LineSink`, `FeedableInputStream`.
+the package must never exist in core's main code): `Await`, `LineSink`, `FeedableInputStream`,
+and for HTTP clients `StubHttpServer` and `RedirectTrap`.
 
 - **Wait for an event, never for time.** Wait on what the other thread produces: a latch, a
   future, a queue element, a state change. Never sleep to let it get somewhere.
@@ -263,7 +265,7 @@ means changing `SCANNER_VERSION` and both checksums in `advisory_scan.py` togeth
 
 ```
 helios/
-├── core/                           # Zero deps - Model + tool + common + fault + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream) ship as its test-jar.
+├── core/                           # Zero deps - Model + tool + common + fault + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream, StubHttpServer, RedirectTrap) ship as its test-jar.
 ├── session/                        # v2 SDK - AgentSession, SessionPresets, hooks, permissions, file tools, memory backend, agent loop
 ├── runtime/                        # Helidon HTTP/SSE surface for session — POST /sessions, SSE /events, long-poll /result
 ├── gemini/                         # Gemini Interactions API + Jackson 3.x

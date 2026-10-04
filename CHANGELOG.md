@@ -95,13 +95,27 @@ timed-out snippet has, once stopped, to end before the sandbox exits with code 3
 are unaffected (`withStopGrace(Duration)` overrides the 5 s default); canonical-constructor callers
 pass `JvmSandboxConfig.DEFAULT_STOP_GRACE` for the previous behaviour.
 
+**Provider clients no longer follow redirects; a 3xx is a provider error.** Every client
+`HttpClientFactory.create(...)` builds uses `HttpClient.Redirect.NEVER`. The JDK strips
+`Authorization` on a redirect but not `x-api-key`, `x-goog-api-key` or a `ModelConfig.withHeader`
+credential, so a 307 from the endpoint or a gateway forwarded the key and the prompt to whatever
+origin `Location` named. `AnthropicModel`, `OpenAIModel` and `GeminiModel` now report a 3xx from
+`chat` and `chatStream` like any other non-200 status (`ProviderException.statusCode()` carries
+it, not retryable); point `baseUrl` at the final endpoint.
+
+| 2.x | 3.0 |
+|---|---|
+| `HttpClientFactory.create(ModelConfig, HttpClient.Redirect)` | `HttpClientFactory.create(ModelConfig)`, which never follows a redirect; there is no policy to choose |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
   (waits for an event under one 60-second hang guard), `LineSink` and `FeedableInputStream`, in
   `com.standardapplied.helios.core.test`, are what the Helios test suite uses instead of sleeps,
-  self-chosen timeouts and piped streams. Depend on it with `<type>test-jar</type>` and
-  `<scope>test</scope>`.
+  self-chosen timeouts and piped streams. `StubHttpServer` (a loopback HTTP/1.1 server that
+  records each request before answering it) and `RedirectTrap` (the redirect contract a
+  credentialed provider client is held to) test HTTP clients. Depend on it with
+  `<type>test-jar</type>` and `<scope>test</scope>`.
 - **`CircuitBreaker.Builder.withClock(InstantSource)`.** The breaker reads the current instant from
   an injectable source (default `Clock.systemUTC()`), so the half-open delay can be driven by hand
   instead of by sleeping. A `java.time.Clock` is an `InstantSource` and can be passed directly.

@@ -10,10 +10,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.test.RedirectTrap;
 import java.io.ByteArrayInputStream;
+import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 class HttpClientFactoryTest {
 
@@ -58,19 +65,37 @@ class HttpClientFactoryTest {
   }
 
   @Test
-  void followsRedirects() {
-    var client = HttpClientFactory.create();
+  void neverFollowsRedirects() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
 
-    assertEquals(HttpClient.Redirect.NORMAL, client.followRedirects());
+    assertEquals(HttpClient.Redirect.NEVER, HttpClientFactory.create().followRedirects());
+    assertEquals(HttpClient.Redirect.NEVER, HttpClientFactory.create(config).followRedirects());
   }
 
-  @Test
-  void supportsExplicitRedirectPolicy() {
-    var client = HttpClientFactory.create(null, HttpClient.Redirect.NEVER);
+  static Stream<RedirectTrap.Scenario> redirectScenarios() {
+    return RedirectTrap.scenarios();
+  }
 
-    assertEquals(HttpClient.Redirect.NEVER, client.followRedirects());
+  @ParameterizedTest
+  @MethodSource("redirectScenarios")
+  void returnsEveryRedirectToTheCallerWithoutForwarding(RedirectTrap.Scenario scenario)
+      throws Exception {
+    var client = HttpClientFactory.create();
+    try (var trap = RedirectTrap.open(scenario)) {
+      var request =
+          HttpRequest.newBuilder(URI.create(trap.originUrl()))
+              .header("x-api-key", RedirectTrap.API_KEY)
+              .header(RedirectTrap.CUSTOM_HEADER, RedirectTrap.CUSTOM_CREDENTIAL)
+              .POST(HttpRequest.BodyPublishers.ofString(RedirectTrap.PROMPT))
+              .build();
 
-    HttpClientFactory.shutdownGracefully(client);
+      var response = client.send(request, HttpResponse.BodyHandlers.discarding());
+
+      assertEquals(scenario.status(), response.statusCode());
+      trap.assertNothingForwarded();
+    } finally {
+      HttpClientFactory.shutdownGracefully(client);
+    }
   }
 
   @Test
