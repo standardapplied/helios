@@ -14,6 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class JvmSandboxConfigTest {
 
@@ -24,6 +27,7 @@ class JvmSandboxConfigTest {
   void defaultsFactory() {
     var config = JvmSandboxConfig.defaults();
     assertEquals(Duration.ofSeconds(30), config.executionTimeout());
+    assertEquals(Duration.ofSeconds(5), config.stopGrace());
     assertEquals(256, config.maxHeapMb());
     assertEquals(Duration.ofSeconds(60), config.callTimeout());
     assertNotNull(config.sandboxPolicy());
@@ -39,6 +43,7 @@ class JvmSandboxConfigTest {
     var config =
         new JvmSandboxConfig(
             Duration.ofSeconds(10),
+            Duration.ofMillis(750),
             512,
             Duration.ofSeconds(30),
             Duration.ofSeconds(20),
@@ -46,6 +51,7 @@ class JvmSandboxConfigTest {
             modules,
             null);
     assertEquals(Duration.ofSeconds(10), config.executionTimeout());
+    assertEquals(Duration.ofMillis(750), config.stopGrace());
     assertEquals(512, config.maxHeapMb());
     assertEquals(Duration.ofSeconds(30), config.callTimeout());
     assertEquals(Duration.ofSeconds(20), config.subprocessStartupTimeout());
@@ -60,6 +66,7 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 null,
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 256,
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
@@ -75,6 +82,7 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 Duration.ZERO,
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 256,
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
@@ -90,12 +98,24 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 Duration.ofSeconds(-1),
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 256,
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
                 PERMISSIVE,
                 UNRESTRICTED,
                 null));
+  }
+
+  @ParameterizedTest
+  @NullSource
+  @ValueSource(strings = {"PT0S", "-PT0.000000001S"})
+  void stopGraceThatIsNotPositiveThrows(Duration stopGrace) {
+    var builder = JvmSandboxConfig.newBuilder().withStopGrace(stopGrace);
+
+    var thrown = assertThrows(IllegalArgumentException.class, builder::build);
+
+    assertEquals("Stop grace must be positive", thrown.getMessage());
   }
 
   @Test
@@ -105,6 +125,7 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 Duration.ofSeconds(30),
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 0,
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
@@ -120,6 +141,7 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 Duration.ofSeconds(30),
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 -1,
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
@@ -135,6 +157,7 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 Duration.ofSeconds(30),
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 256,
                 null,
                 Duration.ofSeconds(10),
@@ -150,6 +173,7 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 Duration.ofSeconds(30),
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 256,
                 Duration.ZERO,
                 Duration.ofSeconds(10),
@@ -165,6 +189,7 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 Duration.ofSeconds(30),
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 256,
                 Duration.ofSeconds(-1),
                 Duration.ofSeconds(10),
@@ -177,6 +202,7 @@ class JvmSandboxConfigTest {
   void builderDefaults() {
     var config = JvmSandboxConfig.newBuilder().build();
     assertEquals(JvmSandboxConfig.DEFAULT_EXECUTION_TIMEOUT, config.executionTimeout());
+    assertEquals(JvmSandboxConfig.DEFAULT_STOP_GRACE, config.stopGrace());
     assertEquals(JvmSandboxConfig.DEFAULT_MAX_HEAP_MB, config.maxHeapMb());
     assertEquals(JvmSandboxConfig.DEFAULT_CALL_TIMEOUT, config.callTimeout());
     assertTrue(config.sandboxPolicy().enforcesNothing());
@@ -206,12 +232,14 @@ class JvmSandboxConfigTest {
     var config =
         JvmSandboxConfig.newBuilder()
             .withExecutionTimeout(Duration.ofMinutes(2))
+            .withStopGrace(Duration.ofMillis(750))
             .withMaxHeapMb(1024)
             .withCallTimeout(Duration.ofMinutes(5))
             .withSandboxPolicy(policy)
             .withSubprocessModules(modules)
             .build();
     assertEquals(Duration.ofMinutes(2), config.executionTimeout());
+    assertEquals(Duration.ofMillis(750), config.stopGrace());
     assertEquals(1024, config.maxHeapMb());
     assertEquals(Duration.ofMinutes(5), config.callTimeout());
     assertSame(policy, config.sandboxPolicy());
@@ -221,6 +249,7 @@ class JvmSandboxConfigTest {
   @Test
   void defaultConstants() {
     assertEquals(Duration.ofSeconds(30), JvmSandboxConfig.DEFAULT_EXECUTION_TIMEOUT);
+    assertEquals(Duration.ofSeconds(5), JvmSandboxConfig.DEFAULT_STOP_GRACE);
     assertEquals(256, JvmSandboxConfig.DEFAULT_MAX_HEAP_MB);
     assertEquals(Duration.ofSeconds(60), JvmSandboxConfig.DEFAULT_CALL_TIMEOUT);
     assertEquals(Duration.ofSeconds(10), JvmSandboxConfig.DEFAULT_SUBPROCESS_STARTUP_TIMEOUT);
@@ -246,6 +275,7 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 Duration.ofSeconds(30),
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 256,
                 Duration.ofSeconds(60),
                 Duration.ZERO,
@@ -261,6 +291,7 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 Duration.ofSeconds(30),
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 256,
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(-1),
@@ -276,6 +307,7 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 Duration.ofSeconds(30),
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 256,
                 Duration.ofSeconds(60),
                 null,
@@ -291,6 +323,7 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 Duration.ofSeconds(30),
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 256,
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),
@@ -306,6 +339,7 @@ class JvmSandboxConfigTest {
         () ->
             new JvmSandboxConfig(
                 Duration.ofSeconds(30),
+                JvmSandboxConfig.DEFAULT_STOP_GRACE,
                 256,
                 Duration.ofSeconds(60),
                 Duration.ofSeconds(10),

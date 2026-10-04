@@ -13,6 +13,11 @@ import java.time.Duration;
  * Configuration for the JVM subprocess sandbox.
  *
  * @param executionTimeout default timeout for code execution
+ * @param stopGrace how long a snippet that outlived its execution timeout has, once stopped, to end
+ *     together with every thread it started. A snippet still running after the grace is blocked
+ *     where nothing in the JVM reaches it, so the sandbox answers the execute and exits with code
+ *     3. Default {@link #DEFAULT_STOP_GRACE}; travels to the subprocess as a {@code
+ *     --stop-grace=<ISO-8601 duration>} argv flag.
  * @param maxHeapMb maximum heap size for the subprocess in MB
  * @param callTimeout timeout for JSON-RPC calls (host function responses)
  * @param subprocessStartupTimeout maximum wait for the subprocess to connect back on the RPC socket
@@ -49,6 +54,7 @@ import java.time.Duration;
  */
 public record JvmSandboxConfig(
     Duration executionTimeout,
+    Duration stopGrace,
     int maxHeapMb,
     Duration callTimeout,
     Duration subprocessStartupTimeout,
@@ -58,6 +64,9 @@ public record JvmSandboxConfig(
 
   /** Default execution timeout: 30 seconds. */
   public static final Duration DEFAULT_EXECUTION_TIMEOUT = Duration.ofSeconds(30);
+
+  /** Default stop grace: 5 seconds. */
+  public static final Duration DEFAULT_STOP_GRACE = Duration.ofSeconds(5);
 
   /** Default max heap: 256 MB. */
   public static final int DEFAULT_MAX_HEAP_MB = 256;
@@ -74,6 +83,9 @@ public record JvmSandboxConfig(
   public JvmSandboxConfig {
     if (executionTimeout == null || executionTimeout.isNegative() || executionTimeout.isZero()) {
       throw new IllegalArgumentException("Execution timeout must be positive");
+    }
+    if (stopGrace == null || stopGrace.isNegative() || stopGrace.isZero()) {
+      throw new IllegalArgumentException("Stop grace must be positive");
     }
     if (maxHeapMb <= 0) {
       throw new IllegalArgumentException("Max heap must be positive");
@@ -101,6 +113,7 @@ public record JvmSandboxConfig(
   public static JvmSandboxConfig defaults() {
     return new JvmSandboxConfig(
         DEFAULT_EXECUTION_TIMEOUT,
+        DEFAULT_STOP_GRACE,
         DEFAULT_MAX_HEAP_MB,
         DEFAULT_CALL_TIMEOUT,
         DEFAULT_SUBPROCESS_STARTUP_TIMEOUT,
@@ -115,6 +128,7 @@ public record JvmSandboxConfig(
 
   public static class Builder {
     private Duration executionTimeout = DEFAULT_EXECUTION_TIMEOUT;
+    private Duration stopGrace = DEFAULT_STOP_GRACE;
     private int maxHeapMb = DEFAULT_MAX_HEAP_MB;
     private Duration callTimeout = DEFAULT_CALL_TIMEOUT;
     private Duration subprocessStartupTimeout = DEFAULT_SUBPROCESS_STARTUP_TIMEOUT;
@@ -126,6 +140,15 @@ public record JvmSandboxConfig(
 
     public Builder withExecutionTimeout(Duration executionTimeout) {
       this.executionTimeout = executionTimeout;
+      return this;
+    }
+
+    /**
+     * Override the {@link #DEFAULT_STOP_GRACE} a stopped snippet has to end before the sandbox
+     * exits. See the {@link JvmSandboxConfig record javadoc}.
+     */
+    public Builder withStopGrace(Duration stopGrace) {
+      this.stopGrace = stopGrace;
       return this;
     }
 
@@ -191,6 +214,7 @@ public record JvmSandboxConfig(
     public JvmSandboxConfig build() {
       return new JvmSandboxConfig(
           executionTimeout,
+          stopGrace,
           maxHeapMb,
           callTimeout,
           subprocessStartupTimeout,

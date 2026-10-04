@@ -90,6 +90,11 @@ Such a message is replayed without its thinking block; re-run the conversation o
 the stored metadata to `anthropic.thinkingBlocks`
 (`[{"text": <anthropic.thinking>, "signature": <anthropic.thinkingSignature>}]`) before loading it.
 
+**`JvmSandboxConfig` gains a `stopGrace` component**, second after `executionTimeout`: how long a
+timed-out snippet has, once stopped, to end before the sandbox exits with code 3. Builder callers
+are unaffected (`withStopGrace(Duration)` overrides the 5 s default); canonical-constructor callers
+pass `JvmSandboxConfig.DEFAULT_STOP_GRACE` for the previous behaviour.
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
@@ -133,6 +138,20 @@ the stored metadata to `anthropic.thinkingBlocks`
   the circuit to `HALF_OPEN` still reset the success count, discarding a probe that had already
   succeeded when `successThreshold` is above 1. Only the caller that makes the transition resets
   it.
+- **`JvmSandbox`: a snippet that outlived its timeout kept running inside the sandbox until the
+  sandbox exited.** On timeout the bootstrap interrupted its own eval thread before calling
+  `JShell.stop()`. That ended the wait but never reached the snippet, and by the time `stop()` ran
+  it no longer did anything. A blocked snippet stayed parked, a looping one kept spinning, and the
+  request's remaining statements ran after the timeout. Now the snippet is stopped through
+  `stop()`, repeated until the snippet and every thread it started have ended, because a stop
+  issued while JShell is still compiling or starting the statement is lost. No later statement
+  of the request runs. A snippet still running once the stop grace has passed
+  (`JvmSandboxConfig.stopGrace`, 5 s by default) is blocked where nothing in the JVM can reach it,
+  for example entering a monitor held by a thread outside the snippet. The sandbox answers that
+  execute with `exitCode 1`, `Execution timed out` and a line saying the snippet could not be
+  stopped, then halts with exit code 3 without running shutdown hooks, so a hook the snippet
+  registered cannot keep it alive. A later `execute` fails, and its message gives the exit code
+  and, for code 3, the cause.
 
 ### Security
 

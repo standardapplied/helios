@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
@@ -17,24 +18,44 @@ import com.standardapplied.helios.repl.protocol.RpcMessage;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import jdk.jshell.JShell;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * No test depends on how long an evaluation takes. An execute's timeout is {@link
- * #BEYOND_HANG_GUARD_MS} unless the timeout is what the test exercises, and a test that answers a
- * host call first takes the request line: the bootstrap writes it after registering the pending
- * call, so the answer cannot arrive too early to be matched.
+ * #BEYOND_HANG_GUARD_MS} unless the timeout is what the test exercises, and a stopped snippet's
+ * grace is beyond the hang guard unless its expiry is what the test exercises. A timeout that must
+ * not act before the snippet blocks, which JShell's compilation would otherwise race, is fired by
+ * the test ({@link BootstrapEnvironment#timedOutByTheTest}) once a host call has shown the
+ * snippet's code running. A stop that lands earlier ends the snippet at its first stop check, a
+ * different outcome that the clock-driven tests cover. A test that answers a host call first takes
+ * the request line: the bootstrap writes it after registering the pending call, so the answer
+ * cannot arrive too early to be matched.
  */
 class JvmSandboxBootstrapTest {
 
   private static final long BEYOND_HANG_GUARD_MS = Await.HANG_GUARD.multipliedBy(5).toMillis();
 
+  private static final long TIMEOUT_MS = 300;
+
+  private static final Duration SHORT_STOP_GRACE = Duration.ofMillis(300);
+
   private static final String BLOCK_UNTIL_INTERRUPTED =
       "new java.util.concurrent.CountDownLatch(1).await();";
+
+  private static final String LOOP_FOREVER = "while (true) { }";
+
+  private static final String SNIPPET_THREAD_GROUP = "JShell process local execution";
 
   private BootstrapEnvironment env;
   private JvmSandboxBootstrap bootstrap;
@@ -156,11 +177,244 @@ class JvmSandboxBootstrapTest {
   }
 
   @Test
-  void executeTimeout() {
-    var result = bootstrap.handleExecute(Map.of("code", BLOCK_UNTIL_INTERRUPTED, "timeoutMs", 500));
+  void blockedSnippetIsStoppedAtTimeout() {
+    var result =
+        bootstrap.handleExecute(Map.of("code", BLOCK_UNTIL_INTERRUPTED, "timeoutMs", TIMEOUT_MS));
 
-    assertEquals(1, result.get("exitCode"));
-    assertTrue(((String) result.get("stderr")).contains("Execution timed out"));
+    assertTimedOut(result);
+    assertEquals(List.of(), liveSnippetThreads());
+  }
+
+  @Test
+  void loopingSnippetIsStoppedAtTimeout() {
+    var result = bootstrap.handleExecute(Map.of("code", LOOP_FOREVER, "timeoutMs", TIMEOUT_MS));
+
+    assertTimedOut(result);
+    assertEquals(List.of(), liveSnippetThreads());
+  }
+
+  /**
+   * A timeout this short usually lands while JShell is still compiling the statement, when {@link
+   * JShell#stop()} does nothing and before JShell clears its stop flag to start the statement. The
+   * snippet must be stopped all the same once it runs; if the timeout lands first, the statement
+   * never starts. Either way round, the outcome is the same.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {LOOP_FOREVER, BLOCK_UNTIL_INTERRUPTED})
+  void timeoutBeforeTheSnippetRunsStillStopsIt(String snippet) {
+    var result = bootstrap.handleExecute(Map.of("code", snippet, "timeoutMs", 1));
+
+    assertTimedOut(result);
+    assertEquals(List.of(), liveSnippetThreads());
+  }
+
+  /**
+   * A stop that fails cannot end the snippet, so the snippet is given up as unstoppable, and the
+   * failure is reported once rather than on every retry. The test times the execute out once the
+   * host call shows the snippet is running.
+   */
+  @Test
+  void failingStopIsReportedOnceAndTheSnippetGivenUp() {
+    env.close();
+    env =
+        BootstrapEnvironment.failingStop(
+            SHORT_STOP_GRACE, new IllegalStateException("the engine failed to stop"));
+    bootstrap = env.bootstrap();
+
+    bootstrap.dispatch(
+        new RpcMessage.Request(
+            "1",
+            "execute",
+            Map.of(
+                "code", runningThen(BLOCK_UNTIL_INTERRUPTED), "timeoutMs", BEYOND_HANG_GUARD_MS)));
+    answer(env.nextRequest());
+    env.timeOut();
+
+    var result = responseResult(env.nextMessage());
+    assertUnstoppable(result);
+    assertEquals(
+        1,
+        Pattern.compile("the engine failed to stop")
+            .matcher((String) result.get("stderr"))
+            .results()
+            .count());
+    assertEquals(3, Await.value("the sandbox's exit", env.exitStatus()));
+    liveSnippetThreads()
+        .forEach(
+            thread -> {
+              thread.interrupt();
+              Await.termination("a snippet thread the failed stop left behind", thread);
+            });
+  }
+
+  @Test
+  void installPreludeIsAnsweredThroughTheDispatcher() {
+    bootstrap.dispatch(
+        new RpcMessage.Request("1", "installPrelude", Map.of("snippet", "int fromPrelude = 7;")));
+
+    var response = assertInstanceOf(RpcMessage.Response.class, env.nextMessage());
+    assertEquals("1", response.id());
+    assertEquals(Map.of("success", true), response.result());
+  }
+
+  /** A closed JShell makes the handler throw; the host still gets an answer to its request. */
+  @Test
+  void requestWhoseHandlerThrowsIsAnsweredWithAnInternalError() {
+    env.close();
+
+    bootstrap.dispatch(
+        new RpcMessage.Request("1", "installPrelude", Map.of("snippet", "int fromPrelude = 7;")));
+
+    var error = assertInstanceOf(RpcMessage.ErrorResponse.class, env.nextMessage());
+    assertEquals("1", error.id());
+    assertEquals(RpcError.INTERNAL_ERROR, error.error().code());
+  }
+
+  @Test
+  void stopGraceTravelsThroughTheLaunchCommand() {
+    var grace = Duration.ofNanos(1_500_001);
+    var config = JvmSandboxConfig.newBuilder().withStopGrace(grace).build();
+
+    var command = JvmSandbox.buildLaunchCommand("/fake/java", config, "/tmp/rpc.sock");
+
+    assertEquals(grace, JvmSandboxBootstrap.parseStopGraceArg(command.toArray(String[]::new)));
+  }
+
+  @Test
+  void stopGraceDefaultsWhenTheLaunchCommandHasNone() {
+    var parsed = JvmSandboxBootstrap.parseStopGraceArg(new String[] {"--rpc-socket=/x"});
+
+    assertEquals(JvmSandboxConfig.DEFAULT_STOP_GRACE, parsed);
+  }
+
+  @ParameterizedTest
+  @CsvSource({"PT0S, is not positive", "-PT1S, is not positive", "5s, is not a duration"})
+  void stopGraceThatIsNotAPositiveDurationIsRejected(String value, String problem) {
+    var args = new String[] {"--stop-grace=" + value};
+
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class, () -> JvmSandboxBootstrap.parseStopGraceArg(args));
+
+    assertEquals("--stop-grace=" + value + " " + problem, thrown.getMessage());
+  }
+
+  /** The follow-up execute that reads the variable is what shows the second statement never ran. */
+  @Test
+  void noStatementAfterTheTimedOutOneRuns() {
+    bootstrap.handleExecute(Map.of("code", "int after = 0;", "timeoutMs", BEYOND_HANG_GUARD_MS));
+    var timedOut =
+        bootstrap.handleExecute(
+            Map.of("code", BLOCK_UNTIL_INTERRUPTED + " after = 1;", "timeoutMs", TIMEOUT_MS));
+    assertTimedOut(timedOut);
+
+    var read = bootstrap.handleExecute(Map.of("code", "after", "timeoutMs", BEYOND_HANG_GUARD_MS));
+
+    assertEquals("0", ((String) read.get("stdout")).strip());
+  }
+
+  /**
+   * A snippet blocked entering a monitor held by a thread outside its thread group is out of reach
+   * of {@link JShell#stop()}: the group interrupt misses the holder and a thread blocked on monitor
+   * entry passes no stop check. A snippet that also holds the monitor of a captured system stream
+   * must not keep the timeout handling from deciding and answering. Nothing between the host call
+   * returning and the monitor entry passes a stop check either, so once the test has answered the
+   * call, the snippet blocks however soon the timeout acts.
+   */
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "synchronized (monitor) { }",
+        "synchronized (System.err) { synchronized (monitor) { } }",
+        "synchronized (System.out) { synchronized (monitor) { } }"
+      })
+  void unstoppableSnippetTerminatesTheSandbox(String unstoppable) {
+    timeoutsFiredByTheTest();
+    var holding = holdMonitorOutsideTheSnippetGroup();
+
+    bootstrap.dispatch(
+        new RpcMessage.Request(
+            "2",
+            "execute",
+            Map.of("code", runningThen(unstoppable), "timeoutMs", BEYOND_HANG_GUARD_MS)));
+    answer(env.nextRequest());
+    env.timeOut();
+
+    assertUnstoppable(responseResult(env.nextMessage()));
+    assertEquals(3, Await.value("the sandbox's exit", env.exitStatus()));
+    releaseMonitor(holding);
+  }
+
+  /**
+   * JShell joins only the snippet threads it saw right after starting the snippet, so the eval
+   * thread ends while a thread the snippet starts on being stopped is still blocked. The test times
+   * the execute out once the snippet is parked in the host call.
+   */
+  @Test
+  void threadStartedAfterJShellsSnapshotMustAlsoEnd() {
+    timeoutsFiredByTheTest();
+    var holding = holdMonitorOutsideTheSnippetGroup();
+
+    bootstrap.dispatch(
+        new RpcMessage.Request(
+            "2",
+            "execute",
+            Map.of(
+                "code",
+                """
+                try {
+                  predict("park", "until stopped");
+                } catch (RuntimeException stopped) {
+                  new Thread(monitor::clear).start();
+                }
+                """,
+                "timeoutMs",
+                BEYOND_HANG_GUARD_MS,
+                "captureBindings",
+                false)));
+    var parked = env.nextRequest();
+    env.timeOut();
+
+    assertUnstoppable(responseResult(env.nextMessage()));
+    assertEquals(3, Await.value("the sandbox's exit", env.exitStatus()));
+    answer(parked);
+    releaseMonitor(holding);
+  }
+
+  /**
+   * Any other request exiting the sandbox, a concurrent one rejected while the unstoppable execute
+   * is still answering included, could end the process before that execute's response is sent.
+   */
+  @Test
+  void onlyTheExecuteThatFoundTheSnippetUnstoppableExits() {
+    timeoutsFiredByTheTest();
+    var holding = holdMonitorOutsideTheSnippetGroup();
+    var unstoppable =
+        env.inSandbox(
+            () ->
+                bootstrap.handleExecute(
+                    Map.of(
+                        "code",
+                        runningThen("synchronized (monitor) { }"),
+                        "timeoutMs",
+                        BEYOND_HANG_GUARD_MS)));
+    answer(env.nextRequest());
+    env.timeOut();
+    assertUnstoppable(Await.value("the unstoppable execute", unstoppable));
+
+    Await.value(
+        "another execute served",
+        env.inSandbox(
+            () -> {
+              bootstrap.serveExecute(
+                  new RpcMessage.Request(
+                      "3", "execute", Map.of("code", "1 + 1", "timeoutMs", BEYOND_HANG_GUARD_MS)));
+              return null;
+            }));
+
+    assertEquals(0, responseResult(env.nextMessage()).get("exitCode"));
+    assertFalse(env.exitStatus().isDone());
+    releaseMonitor(holding);
   }
 
   @Test
@@ -370,8 +624,7 @@ class JvmSandboxBootstrapTest {
     var before = System.out;
     var beforeErr = System.err;
 
-    bootstrap.handleExecute(
-        Map.of("code", "while (!Thread.currentThread().isInterrupted()) {}", "timeoutMs", 200));
+    bootstrap.handleExecute(Map.of("code", LOOP_FOREVER, "timeoutMs", TIMEOUT_MS));
 
     assertEquals(before, System.out);
     assertEquals(beforeErr, System.err);
@@ -402,5 +655,98 @@ class JvmSandboxBootstrapTest {
     assertTrue(((String) result.get("stderr")).contains("Concurrent execution rejected"));
     bootstrap.dispatch(new RpcMessage.Response(heldBy.id(), Map.of("output", "released")));
     assertEquals(0, Await.value("the first execute", first).get("exitCode"));
+  }
+
+  /**
+   * One statement that makes a host call the test answers, which shows the snippet's own code is
+   * running, and then runs {@code code}. The stop can interrupt the call before the snippet takes
+   * the answer, so the snippet goes on to {@code code} either way: a catch block passes no stop
+   * check, and a later statement of a timed-out request would never run.
+   */
+  private static String runningThen(String code) {
+    return "{ try { predict(\"running\", \"now\"); } catch (RuntimeException stopped) { } "
+        + code
+        + " }";
+  }
+
+  private void timeoutsFiredByTheTest() {
+    env.close();
+    env = BootstrapEnvironment.timedOutByTheTest(SHORT_STOP_GRACE);
+    bootstrap = env.bootstrap();
+  }
+
+  private void answer(RpcMessage.Request hostCall) {
+    bootstrap.dispatch(new RpcMessage.Response(hostCall.id(), Map.of("output", "answered")));
+  }
+
+  /**
+   * The holder is a virtual thread, never a member of a snippet's thread group, and it holds the
+   * monitor until the host call the returned request stands for is answered. The monitor is a
+   * {@code Vector} so a thread can block on it running JDK code alone, where no stop check is
+   * woven; the bindings snapshot is off because the vector's {@code toString} needs it too.
+   */
+  private RpcMessage.Request holdMonitorOutsideTheSnippetGroup() {
+    bootstrap.handleExecute(
+        Map.of(
+            "code",
+            """
+            var monitor = new java.util.Vector<Object>();
+            Thread.startVirtualThread(() -> { synchronized (monitor) { predict("hold", "monitor"); } });
+            """,
+            "timeoutMs",
+            BEYOND_HANG_GUARD_MS,
+            "captureBindings",
+            false));
+    return env.nextRequest();
+  }
+
+  /** Lets every snippet thread blocked on the monitor end, so none is left for the next test. */
+  private void releaseMonitor(RpcMessage.Request holding) {
+    var stuck = liveSnippetThreads();
+    bootstrap.dispatch(new RpcMessage.Response(holding.id(), Map.of("output", "released")));
+    stuck.forEach(thread -> Await.termination("a snippet thread let into the monitor", thread));
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> responseResult(RpcMessage message) {
+    return (Map<String, Object>) assertInstanceOf(RpcMessage.Response.class, message).result();
+  }
+
+  private static void assertUnstoppable(Map<String, Object> result) {
+    assertTimedOut(result);
+    assertTrue(
+        ((String) result.get("stderr")).contains("could not be stopped"),
+        "stderr was: " + result.get("stderr"));
+  }
+
+  private static void assertTimedOut(Map<String, Object> result) {
+    assertEquals(1, result.get("exitCode"));
+    assertTrue(
+        ((String) result.get("stderr")).contains("Execution timed out"),
+        "stderr was: " + result.get("stderr"));
+  }
+
+  /**
+   * Enumerates rather than taking {@link Thread#getAllStackTraces()}, which leaves out a thread
+   * that has been started but has not run yet.
+   */
+  private static List<Thread> liveSnippetThreads() {
+    var root = Thread.currentThread().getThreadGroup();
+    while (root.getParent() != null) {
+      root = root.getParent();
+    }
+    Thread[] live;
+    int count;
+    do {
+      live = new Thread[root.activeCount() + 1];
+      count = root.enumerate(live);
+    } while (count == live.length);
+    return Arrays.stream(live, 0, count)
+        .filter(
+            thread -> {
+              var group = thread.getThreadGroup();
+              return group != null && SNIPPET_THREAD_GROUP.equals(group.getName());
+            })
+        .toList();
   }
 }
