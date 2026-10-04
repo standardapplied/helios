@@ -85,12 +85,22 @@ public final class JvmSandboxBootstrap {
       new ConcurrentHashMap<>();
   private final AtomicLong idCounter = new AtomicLong(0);
   private final Semaphore executeLock = new Semaphore(1);
+  private final ExecutionTimer timer;
   private final Duration stopGrace;
   private final IntConsumer exit;
   private volatile Object submittedValue;
   private volatile Thread unstoppableExecution;
 
+  /** Waits for an execute's eval thread, the one wait that ends an execute by its timeout. */
+  @FunctionalInterface
+  interface ExecutionTimer {
+
+    /** {@code true} if {@code evalThread} ended within {@code timeout}. */
+    boolean awaitEnd(Thread evalThread, Duration timeout) throws InterruptedException;
+  }
+
   /**
+   * @param timer waits for each execute's eval thread; {@link Thread#join(Duration)} outside tests
    * @param stopGrace how long a timed-out snippet has to end after {@link JShell#stop()} before the
    *     sandbox gives it up as unstoppable
    * @param exit terminates the sandbox JVM with the given status once a snippet proved unstoppable,
@@ -101,11 +111,13 @@ public final class JvmSandboxBootstrap {
       JShell jshell,
       BufferedReader stdinReader,
       PrintStream realOut,
+      ExecutionTimer timer,
       Duration stopGrace,
       IntConsumer exit) {
     this.jshell = jshell;
     this.stdinReader = stdinReader;
     this.realOut = realOut;
+    this.timer = timer;
     this.stopGrace = stopGrace;
     this.exit = exit;
   }
@@ -196,7 +208,8 @@ public final class JvmSandboxBootstrap {
     SandboxPrelude.install(jshell);
 
     var bootstrap =
-        new JvmSandboxBootstrap(jshell, rpcIn, rpcOut, stopGrace, Runtime.getRuntime()::halt);
+        new JvmSandboxBootstrap(
+            jshell, rpcIn, rpcOut, Thread::join, stopGrace, Runtime.getRuntime()::halt);
     setInstance(bootstrap);
 
     bootstrap.readLoop();
@@ -602,7 +615,7 @@ public final class JvmSandboxBootstrap {
                   });
 
       try {
-        if (!evalThread.join(Duration.ofMillis(timeoutMs))) {
+        if (!timer.awaitEnd(evalThread, Duration.ofMillis(timeoutMs))) {
           stopTimedOutSnippet(executionThreads, timedOut, timeoutErr);
           exitCode.set(1);
         }

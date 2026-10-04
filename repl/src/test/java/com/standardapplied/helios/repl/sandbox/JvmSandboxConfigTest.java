@@ -13,10 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy;
 import java.time.Duration;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class JvmSandboxConfigTest {
 
@@ -108,17 +108,14 @@ class JvmSandboxConfigTest {
   }
 
   @ParameterizedTest
-  @MethodSource("notPositive")
+  @NullSource
+  @ValueSource(strings = {"PT0S", "-PT0.000000001S"})
   void stopGraceThatIsNotPositiveThrows(Duration stopGrace) {
     var builder = JvmSandboxConfig.newBuilder().withStopGrace(stopGrace);
 
     var thrown = assertThrows(IllegalArgumentException.class, builder::build);
 
     assertEquals("Stop grace must be positive", thrown.getMessage());
-  }
-
-  static Stream<Duration> notPositive() {
-    return Stream.of(null, Duration.ZERO, Duration.ofNanos(-1));
   }
 
   @Test
