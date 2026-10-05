@@ -58,13 +58,7 @@ public record RetryPolicy(
     throw new RetryExhaustedException(maxAttempts, lastException);
   }
 
-  /**
-   * Execute an operation without returning a value.
-   *
-   * @param operation the operation to execute
-   * @throws RetryExhaustedException if all retries are exhausted
-   * @throws InterruptedException if the thread is interrupted while waiting
-   */
+  /** Whether {@code failure} retries; a predicate that throws is suppressed onto it and stops. */
   private boolean shouldRetry(Exception failure) {
     try {
       return retryOn.test(failure);
@@ -83,6 +77,13 @@ public record RetryPolicy(
     }
   }
 
+  /**
+   * Execute an operation without returning a value.
+   *
+   * @param operation the operation to execute
+   * @throws RetryExhaustedException if all retries are exhausted
+   * @throws InterruptedException if the thread is interrupted while waiting
+   */
   public void execute(Runnable operation) throws RetryExhaustedException, InterruptedException {
     execute(
         () -> {
