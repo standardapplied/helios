@@ -112,6 +112,10 @@ method on a `*Builder` type that returns that builder is now named `withX(...)`;
 rule fails the build on one that is not. `Tool.execute(Map)`, which substituted
 `ToolContext.noop()`, is gone, so every call takes the production path. Binary pinning moves to the
 new `core.process` package.
+`CommandGrant` and `LocalProcessExecutionProvider` now share one runner, so the provider treats an
+interrupt that lands after the wait as a cancellation, as it already did during the wait. Both
+remove the per-call working directory before they release the concurrency permit.
+`Tool.parametersAsJsonSchema()` returns its `required` list unmodifiable.
 
 | 2.x | 3.0 |
 |---|---|
@@ -149,6 +153,15 @@ new `core.process` package.
 
 ### Fixed
 
+- **`CommandGrant`: a timed-out process could leave a descendant running and stall the call.** On
+  timeout the grant terminated the child before looking up its descendants. If the child died
+  first, its descendants were no longer listed, so a grandchild that held stdout survived, and the
+  call waited for it to exit on its own. Descendants are now signalled before the child, as
+  `LocalProcessExecutionProvider` already did.
+- **Cleaning up a process's working directory could throw.** A child that left a directory it
+  could not read (mode `000`) made `CommandGrant` and `LocalProcessExecutionProvider` throw
+  `UncheckedIOException` from cleanup, losing the call's result. Cleanup is best-effort and no
+  longer throws.
 - **`AgentSession.events()`: subscribing after the session ended threw, and `GET
   /sessions/{id}/events` on a terminated session broke the response mid-stream.** The session shut
   its publisher's executor down at terminal, so a later `subscribe` threw
