@@ -48,26 +48,10 @@ public record RetryPolicy(
         throw e;
       } catch (Exception t) {
         lastException = t;
-
-        boolean shouldRetry;
-        try {
-          shouldRetry = retryOn.test(t);
-        } catch (Exception predicateEx) {
-          t.addSuppressed(predicateEx);
+        if (!shouldRetry(t) || attempt == maxAttempts) {
           break;
         }
-
-        if (attempt == maxAttempts || !shouldRetry) {
-          break;
-        }
-
-        try {
-          var delay = backoff.delay(attempt, jitter);
-          Thread.sleep(delay.toMillis());
-        } catch (InterruptedException ie) {
-          Thread.currentThread().interrupt();
-          throw ie;
-        }
+        pause(attempt);
       }
     }
 
@@ -81,6 +65,24 @@ public record RetryPolicy(
    * @throws RetryExhaustedException if all retries are exhausted
    * @throws InterruptedException if the thread is interrupted while waiting
    */
+  private boolean shouldRetry(Exception failure) {
+    try {
+      return retryOn.test(failure);
+    } catch (Exception predicateEx) {
+      failure.addSuppressed(predicateEx);
+      return false;
+    }
+  }
+
+  private void pause(int attempt) throws InterruptedException {
+    try {
+      Thread.sleep(backoff.delay(attempt, jitter).toMillis());
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      throw ie;
+    }
+  }
+
   public void execute(Runnable operation) throws RetryExhaustedException, InterruptedException {
     execute(
         () -> {
