@@ -117,12 +117,8 @@ final class OnnxModelDownloader implements AutoCloseable {
   }
 
   private void writeFinishedMarker() throws IOException {
-    var marker = localModelDir.resolve(FINISHED_MARKER);
-    if (Files.exists(marker)) {
-      return;
-    }
     try {
-      Files.createFile(marker);
+      Files.createFile(localModelDir.resolve(FINISHED_MARKER));
     } catch (FileAlreadyExistsException ignored) {
       // A concurrent downloader for the same model won the race. Both downloaded the same
       // content; the marker is a flag, not state, so either creator is fine.
