@@ -20,15 +20,11 @@ com.standardapplied.helios.anthropic.StreamingIteratorTest,com.standardapplied.h
 com.standardapplied.helios.core.common.IdsTest
 com.standardapplied.helios.core.prompt.InMemoryPromptRegistryTest,com.standardapplied.helios.persistence.PgPromptRegistryTest
 com.standardapplied.helios.core.runtime.InMemoryToolCallJournalTest,com.standardapplied.helios.persistence.PgToolCallJournalTest
-com.standardapplied.helios.examples.codeact.CodeActDemoMain,com.standardapplied.helios.examples.rlm.RlmDemoMain
-com.standardapplied.helios.examples.codeact.CodeActDemoMain,com.standardapplied.helios.examples.session.SessionDemoMain
-com.standardapplied.helios.examples.rlm.RlmDemoMain,com.standardapplied.helios.examples.session.SessionDemoMain
 com.standardapplied.helios.examples.session.CompactionIntegrationTest
 com.standardapplied.helios.examples.session.GroundedCitationSurfacingIntegrationTest,com.standardapplied.helios.session.CitationSurfacingTest
 com.standardapplied.helios.examples.session.ReadToolMultimodalAnthropicIntegrationTest,com.standardapplied.helios.examples.session.ReadToolMultimodalThroughLoopIntegrationTest
 com.standardapplied.helios.examples.session.ReadToolMultimodalAnthropicIntegrationTest,com.standardapplied.helios.session.files.ReadToolTest
 com.standardapplied.helios.examples.session.ReadToolMultimodalThroughLoopIntegrationTest,com.standardapplied.helios.session.files.ReadToolTest
-com.standardapplied.helios.examples.session.SessionDemoIntegrationTest,com.standardapplied.helios.examples.session.SessionDemoMain
 com.standardapplied.helios.examples.session.SessionDemoIntegrationTest,com.standardapplied.helios.session.Phase4AcceptanceTest
 com.standardapplied.helios.examples.session.WorkspaceReadOnlyRedactionAgentSessionAnthropicIntegrationTest,com.standardapplied.helios.examples.session.WorkspaceReadOnlyRedactionAgentSessionIntegrationTest
 com.standardapplied.helios.gemini.GeminiModel,com.standardapplied.helios.openai.OpenAIModel
@@ -46,7 +42,6 @@ com.standardapplied.helios.session.Phase2AcceptanceTest,com.standardapplied.heli
 com.standardapplied.helios.session.Phase4AcceptanceTest
 com.standardapplied.helios.session.Phase4AcceptanceTest,com.standardapplied.helios.session.Phase5AcceptanceTest
 com.standardapplied.helios.session.Phase5AcceptanceTest
-com.standardapplied.helios.session.files.GlobTool,com.standardapplied.helios.session.files.GrepTool
 com.standardapplied.helios.session.hooks.HookRegistryTest,com.standardapplied.helios.session.hooks.HookSubtypesTest
 com.standardapplied.helios.session.loop.AgentLoopTest
 com.standardapplied.helios.session.loop.AgentLoopTest,com.standardapplied.helios.session.loop.TurnRunnerTest

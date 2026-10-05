@@ -150,6 +150,11 @@ remove the per-call working directory before they release the concurrency permit
   path once. An architecture rule keeps `java.lang.ProcessBuilder` inside `core.process` and the
   REPL sandbox launcher.
 - **`RedactionResult.mergeCounts(other)`** sums two streams' per-secret counts in encounter order.
+- **`session.ConsoleEventPrinter`** prints a session's event stream for a command-line host:
+  `session.events().subscribe(new ConsoleEventPrinter(System.out))`. Assistant text is written as
+  it streams and flushed at once; citations, tool use, tool results, blocked tools, turn ends, the
+  loop end and a stream error are written one line each. It writes only to the `PrintStream` it is
+  given. The session, CodeAct and RLM demos use it in place of their own copies.
 
 ### Fixed
 
