@@ -192,6 +192,23 @@ class ToolTest {
   }
 
   @Test
+  void arrayWithoutItemShapeRendersPermissiveObjectItems() {
+    var tool =
+        Tool.newBuilder()
+            .withName("collect")
+            .withParameter(
+                ToolParameter.newBuilder().withName("values").withType(ParameterType.ARRAY).build())
+            .withExecutor((args, ctx) -> ToolResult.success("ok"))
+            .build();
+
+    @SuppressWarnings("unchecked")
+    var properties = (Map<String, Object>) tool.parametersAsJsonSchema().get("properties");
+
+    assertEquals(
+        Map.of("type", "array", "items", Map.of("type", "object")), properties.get("values"));
+  }
+
+  @Test
   void parametersAsJsonSchema() {
     var tool =
         Tool.newBuilder()

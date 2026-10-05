@@ -555,6 +555,12 @@ class StructuredContentParserTest {
   }
 
   @Test
+  void extractFirstJsonObjectReturnsNullForUnterminatedString() {
+    assertNull(StructuredContentParser.extractFirstJsonObject("{\"a"));
+    assertNull(StructuredContentParser.extractFirstJsonObject("{\"a\\"));
+  }
+
+  @Test
   void parseRecoversFromProseWrappedJson() {
     var bagJson = "{\"name\":\"x\",\"count\":1}";
     var content = "The map is built correctly. Here is the final answer:\n\n" + bagJson;
