@@ -527,7 +527,7 @@ Operations:
 durability.runStore().purgeOlderThan(Duration.ofDays(30));   // cascade-deletes journal entries
 
 DurableResumeScanner.builder(durability)
-    .register(...)
+    .withResolver(...)
     .build()
     .scan();  // sweep stale runs and resume; wire into io.helidon.scheduling
 ```

@@ -9,6 +9,7 @@ import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.common.Result;
 import com.standardapplied.helios.core.common.Strings;
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -28,8 +29,8 @@ import java.util.logging.Logger;
  *
  * <pre>{@code
  * var scanner = DurableResumeScanner.builder(durability)
- *     .registerAgent("research-bot", researchAgent)
- *     .registerWorkflow("ingest-pipeline", ingestWorkflow)
+ *     .withAgent("research-bot", researchAgent)
+ *     .withWorkflow("ingest-pipeline", ingestWorkflow)
  *     .withStaleAfter(Duration.ofMinutes(5))
  *     .withMaxConcurrent(4)
  *     .build();
@@ -89,72 +90,82 @@ public class DurableResumeScanner {
 
   /** Run a single sweep. Inspects RUNNING runs first, then SUSPENDED. */
   public ScanResult scan() {
-    var scanned = new AtomicInteger();
-    var resumed = new AtomicInteger();
-    var recovered = new AtomicInteger();
-    var failed = new AtomicInteger();
-    var skippedFresh = new AtomicInteger();
-    var skippedUnknownAgent = new AtomicInteger();
-
+    var tally = new Tally();
     var semaphore = new Semaphore(maxConcurrent);
     var cutoff = Ids.now().minus(staleAfter);
 
     try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
       for (var status : new AgentRunStatus[] {AgentRunStatus.RUNNING, AgentRunStatus.SUSPENDED}) {
         for (var run : durability.runStore().findByStatus(status)) {
-          scanned.incrementAndGet();
-          if (run.lastCheckpointAt() != null && run.lastCheckpointAt().isAfter(cutoff)) {
-            skippedFresh.incrementAndGet();
-            continue;
+          var resolver = resolverFor(run, cutoff, tally);
+          if (resolver != null) {
+            executor.submit(() -> resume(run, resolver, semaphore, tally));
           }
-          var resolver = resolvers.get(run.agentId());
-          if (resolver == null) {
-            skippedUnknownAgent.incrementAndGet();
-            LOG.log(
-                Level.FINE,
-                () ->
-                    "DurableResumeScanner: no resolver registered for agentId='"
-                        + run.agentId()
-                        + "', skipping run "
-                        + run.runId());
-            continue;
-          }
-          executor.submit(
-              () -> {
-                try {
-                  semaphore.acquire();
-                } catch (InterruptedException ie) {
-                  Thread.currentThread().interrupt();
-                  return;
-                }
-                try {
-                  resumed.incrementAndGet();
-                  var result = resolver.apply(run.runId());
-                  if (result.isSuccess()) {
-                    recovered.incrementAndGet();
-                  } else {
-                    failed.incrementAndGet();
-                  }
-                } catch (RuntimeException e) {
-                  failed.incrementAndGet();
-                  LOG.log(
-                      Level.WARNING,
-                      "DurableResumeScanner: resume threw for run " + run.runId(),
-                      e);
-                } finally {
-                  semaphore.release();
-                }
-              });
         }
       }
     }
-    return new ScanResult(
-        scanned.get(),
-        resumed.get(),
-        recovered.get(),
-        failed.get(),
-        skippedFresh.get(),
-        skippedUnknownAgent.get());
+    return tally.result();
+  }
+
+  /** The resolver that resumes {@code run}, or null when the run is fresh or its agent unknown. */
+  private Function<UUID, Result<?>> resolverFor(AgentRun run, OffsetDateTime cutoff, Tally tally) {
+    tally.scanned.incrementAndGet();
+    if (run.lastCheckpointAt() != null && run.lastCheckpointAt().isAfter(cutoff)) {
+      tally.skippedFresh.incrementAndGet();
+      return null;
+    }
+    var resolver = resolvers.get(run.agentId());
+    if (resolver == null) {
+      tally.skippedUnknownAgent.incrementAndGet();
+      LOG.log(
+          Level.FINE,
+          () ->
+              "DurableResumeScanner: no resolver registered for agentId='"
+                  + run.agentId()
+                  + "', skipping run "
+                  + run.runId());
+    }
+    return resolver;
+  }
+
+  private static void resume(
+      AgentRun run, Function<UUID, Result<?>> resolver, Semaphore semaphore, Tally tally) {
+    try {
+      semaphore.acquire();
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      return;
+    }
+    try {
+      tally.resumed.incrementAndGet();
+      var outcome = resolver.apply(run.runId()).isSuccess() ? tally.recovered : tally.failed;
+      outcome.incrementAndGet();
+    } catch (RuntimeException e) {
+      tally.failed.incrementAndGet();
+      LOG.log(Level.WARNING, "DurableResumeScanner: resume threw for run " + run.runId(), e);
+    } finally {
+      semaphore.release();
+    }
+  }
+
+  /** The counters one {@link #scan()} accumulates across its resume threads. */
+  private static final class Tally {
+    private final AtomicInteger scanned = new AtomicInteger();
+    private final AtomicInteger resumed = new AtomicInteger();
+    private final AtomicInteger recovered = new AtomicInteger();
+    private final AtomicInteger failed = new AtomicInteger();
+    private final AtomicInteger skippedFresh = new AtomicInteger();
+    private final AtomicInteger skippedUnknownAgent = new AtomicInteger();
+
+    ScanResult result() {
+      return new ScanResult(
+          scanned.get(),
+          resumed.get(),
+          recovered.get(),
+          failed.get(),
+          skippedFresh.get(),
+          skippedUnknownAgent.get());
+    }
   }
 
   public static Builder builder(Durability durability) {
@@ -175,7 +186,7 @@ public class DurableResumeScanner {
      * Register a custom resume resolver for runs with the given {@code agentId}. The resolver
      * receives the runId and returns a {@link Result}.
      */
-    public Builder register(String agentId, Function<UUID, Result<?>> resolver) {
+    public Builder withResolver(String agentId, Function<UUID, Result<?>> resolver) {
       if (Strings.isBlank(agentId)) {
         throw new IllegalArgumentException("agentId must not be blank");
       }
@@ -188,9 +199,9 @@ public class DurableResumeScanner {
      * Convenience: register an {@code Agent}-shaped resumable. The {@code agentId} must match the
      * agent's {@code config.name()}; otherwise scanned runs won't route to this resolver.
      */
-    public Builder registerAgent(String agentId, AgentResumable agent) {
+    public Builder withAgent(String agentId, AgentResumable agent) {
       Objects.requireNonNull(agent, "agent");
-      return register(agentId, agent::resume);
+      return withResolver(agentId, agent::resume);
     }
 
     /**
@@ -198,9 +209,9 @@ public class DurableResumeScanner {
      * "workflow." + workflowName} — workflows that journal under this naming convention surface
      * here on resume.
      */
-    public Builder registerWorkflow(String workflowName, WorkflowResumable workflow) {
+    public Builder withWorkflow(String workflowName, WorkflowResumable workflow) {
       Objects.requireNonNull(workflow, "workflow");
-      return register("workflow." + workflowName, workflow::resume);
+      return withResolver("workflow." + workflowName, workflow::resume);
     }
 
     /**
@@ -228,7 +239,7 @@ public class DurableResumeScanner {
     public DurableResumeScanner build() {
       if (resolvers.isEmpty()) {
         throw new IllegalStateException(
-            "At least one resumable must be registered (register / registerAgent / registerWorkflow)");
+            "At least one resumable must be registered (withResolver / withAgent / withWorkflow)");
       }
       return new DurableResumeScanner(durability, resolvers, staleAfter, maxConcurrent);
     }
