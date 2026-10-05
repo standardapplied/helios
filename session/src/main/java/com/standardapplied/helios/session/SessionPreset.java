@@ -19,7 +19,7 @@ package com.standardapplied.helios.session;
  *       <pre>{@code
  * SessionPreset withTracing(Tracer t) { return b -> b.withHook(new TracingHook(t)); }
  * }</pre>
- *   <li><b>Composable.</b> {@link SessionOptions.Builder#apply(SessionPreset)} stacks them
+ *   <li><b>Composable.</b> {@link SessionOptions.Builder#withPreset(SessionPreset)} stacks them
  *       associatively; later presets overwrite earlier presets when they touch the same field.
  *       Building the same options twice always produces the same result.
  *   <li><b>Uniform.</b> Every built-in preset in {@link SessionPresets} returns a {@code
@@ -36,7 +36,7 @@ package com.standardapplied.helios.session;
  * <pre>{@code
  * var opts = SessionOptions.newBuilder()
  *     .withModel(model)
- *     .apply(SessionPresets.workspace(workspaceRoot))
+ *     .withPreset(SessionPresets.workspace(workspaceRoot))
  *     .apply(myCustomTracingPreset)
  *     .withCostCalculator(calc)
  *     .build();

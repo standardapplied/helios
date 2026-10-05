@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -359,6 +360,25 @@ class FaultToleranceTest {
                     }));
 
     assertInstanceOf(java.io.IOException.class, exception.getCause());
+  }
+
+  @Test
+  void errorWithTimeoutWrappedInRuntimeException() {
+    var ft = FaultTolerance.newBuilder().withOperationTimeout(NEVER_REACHED).build();
+    var error = new AssertionError("broken invariant");
+
+    var exception =
+        assertThrows(
+            RuntimeException.class,
+            () ->
+                ft.execute(
+                    () -> {
+                      throw error;
+                    }));
+
+    assertEquals(RuntimeException.class, exception.getClass());
+    assertSame(error, exception.getCause());
+    assertEquals("java.lang.AssertionError: broken invariant", exception.getMessage());
   }
 
   @Test

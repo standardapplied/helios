@@ -5,6 +5,10 @@
 
 package com.standardapplied.helios.core.tool;
 
+import com.standardapplied.helios.core.schema.SchemaGenerator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * Definition of a tool parameter (JSON Schema style).
  *
@@ -35,6 +39,43 @@ public record ToolParameter(
 
   public static Builder newBuilder() {
     return new Builder();
+  }
+
+  Map<String, Object> jsonSchema() {
+    var schema = typeAndDescription();
+    if (defaultValue != null) {
+      schema.put("default", defaultValue);
+    }
+    if (type == ParameterType.ARRAY) {
+      schema.put("items", itemsSchema());
+    }
+    return schema;
+  }
+
+  private LinkedHashMap<String, Object> typeAndDescription() {
+    var schema = new LinkedHashMap<String, Object>();
+    schema.put("type", type.jsonType());
+    if (description != null) {
+      schema.put("description", description);
+    }
+    return schema;
+  }
+
+  /**
+   * Record-shaped items derive their schema from the record. An array without a declared item shape
+   * gets a permissive object item, because provider APIs (Gemini in particular) reject an array
+   * property with no {@code items} schema.
+   */
+  private Map<String, Object> itemsSchema() {
+    if (itemsClass != null) {
+      return SchemaGenerator.generate(itemsClass).toMap();
+    }
+    if (items != null) {
+      return items.typeAndDescription();
+    }
+    var fallback = new LinkedHashMap<String, Object>();
+    fallback.put("type", "object");
+    return fallback;
   }
 
   public static class Builder {

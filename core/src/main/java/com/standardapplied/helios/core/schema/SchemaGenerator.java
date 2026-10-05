@@ -5,8 +5,6 @@
 
 package com.standardapplied.helios.core.schema;
 
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.lang.reflect.WildcardType;
@@ -14,9 +12,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,18 +42,6 @@ public final class SchemaGenerator {
       Set.of(double.class, Double.class, float.class, Float.class, BigDecimal.class);
 
   private static final Set<Class<?>> BOOLEAN_TYPES = Set.of(boolean.class, Boolean.class);
-
-  private static final Set<String> EXCLUDED_METHODS =
-      Set.of(
-          "hashCode",
-          "toString",
-          "getClass",
-          "equals",
-          "notify",
-          "notifyAll",
-          "wait",
-          "clone",
-          "finalize");
 
   private SchemaGenerator() {}
 
@@ -95,41 +79,12 @@ public final class SchemaGenerator {
               + " Consider breaking the cycle with a non-record wrapper type.");
     }
     try {
-      var components = recordClass.getRecordComponents();
-      var properties = new LinkedHashMap<String, JsonSchema>();
-      var required = new ArrayList<String>();
-
-      for (var component : components) {
-        var name = component.getName();
-        var type = component.getGenericType();
-        var schema = generateForType(type, visited);
-
-        var descAnnotation = component.getAnnotation(Description.class);
-        if (descAnnotation != null) {
-          schema = schema.withDescription(descAnnotation.value());
-        }
-
-        properties.put(name, schema);
-
-        if (component.getAnnotation(Nullable.class) == null) {
-          required.add(name);
-        }
+      var properties = new ObjectProperties();
+      for (var component : recordClass.getRecordComponents()) {
+        properties.add(
+            component.getName(), generateForType(component.getGenericType(), visited), component);
       }
-
-      var typeDescription =
-          recordClass.isAnnotationPresent(Description.class)
-              ? recordClass.getAnnotation(Description.class).value()
-              : null;
-
-      return new JsonSchema(
-          "object",
-          Map.copyOf(properties),
-          null,
-          required.isEmpty() ? null : List.copyOf(required),
-          null,
-          typeDescription,
-          null,
-          null);
+      return properties.toSchema(recordClass, Map::copyOf);
     } finally {
       visited.remove(recordClass);
     }
@@ -143,110 +98,52 @@ public final class SchemaGenerator {
               + ". Types cannot reference themselves directly or transitively.");
     }
     try {
-      var accessors = discoverAccessors(clazz);
-      var properties = new LinkedHashMap<String, JsonSchema>();
-      var required = new ArrayList<String>();
-
-      for (var method : accessors) {
-        var propertyName = derivePropertyName(method);
-        if (properties.containsKey(propertyName)) continue;
-
-        var schema = generateForType(method.getGenericReturnType(), visited);
-
-        var descAnnotation = method.getAnnotation(Description.class);
-        if (descAnnotation != null) {
-          schema = schema.withDescription(descAnnotation.value());
-        }
-
-        properties.put(propertyName, schema);
-
-        if (method.getAnnotation(Nullable.class) == null) {
-          required.add(propertyName);
+      var properties = new ObjectProperties();
+      for (var method : BeanAccessors.discover(clazz)) {
+        var name = BeanAccessors.propertyName(method);
+        if (!properties.contains(name)) {
+          properties.add(name, generateForType(method.getGenericReturnType(), visited), method);
         }
       }
-
-      var typeDescription =
-          clazz.isAnnotationPresent(Description.class)
-              ? clazz.getAnnotation(Description.class).value()
-              : null;
-
-      return new JsonSchema(
-          "object",
-          Collections.unmodifiableMap(properties),
-          null,
-          required.isEmpty() ? null : List.copyOf(required),
-          null,
-          typeDescription,
-          null,
-          null);
+      return properties.toSchema(clazz, Collections::unmodifiableMap);
     } finally {
       visited.remove(clazz);
     }
   }
 
-  private static List<Method> discoverAccessors(Class<?> clazz) {
-    var accessors = new ArrayList<Method>();
-    for (var method : clazz.getMethods()) {
-      if (method.getParameterCount() != 0) continue;
-      if (method.getReturnType() == void.class) continue;
-      if (Modifier.isStatic(method.getModifiers())) continue;
-      if (method.isSynthetic()) continue;
-      if (EXCLUDED_METHODS.contains(method.getName())) continue;
-      accessors.add(method);
-    }
-    accessors.sort(Comparator.comparing(SchemaGenerator::derivePropertyName));
-    return accessors;
-  }
-
-  private static String derivePropertyName(Method method) {
-    var name = method.getName();
-
-    if (name.startsWith("get") && name.length() > 3) {
-      return Character.toLowerCase(name.charAt(3)) + name.substring(4);
-    }
-
-    if (name.startsWith("is")
-        && name.length() > 2
-        && (method.getReturnType() == boolean.class || method.getReturnType() == Boolean.class)) {
-      return Character.toLowerCase(name.charAt(2)) + name.substring(3);
-    }
-
-    return name;
-  }
-
   private static JsonSchema generateForType(Type type, Set<Class<?>> visited) {
-    if (type instanceof Class<?> clazz) {
-      return generateForClass(clazz, visited);
-    }
-
-    if (type instanceof ParameterizedType paramType) {
-      var rawType = (Class<?>) paramType.getRawType();
-
-      if (List.class.isAssignableFrom(rawType)) {
-        var itemType = paramType.getActualTypeArguments()[0];
-        return JsonSchema.array(generateForType(itemType, visited));
-      }
-
-      if (Map.class.isAssignableFrom(rawType)) {
-        var keyType = paramType.getActualTypeArguments()[0];
-        if (keyType != String.class) {
+    return switch (type) {
+      case Class<?> clazz -> generateForClass(clazz, visited);
+      case ParameterizedType paramType -> generateForParameterized(paramType, visited);
+      case WildcardType w ->
           throw new IllegalArgumentException(
-              "Map key type must be String for JSON Schema generation, got: "
-                  + keyType.getTypeName());
-        }
-        var valueType = paramType.getActualTypeArguments()[1];
-        var valueSchema = generateForType(valueType, visited);
-        return JsonSchema.map(valueSchema);
+              "Wildcard types (?) are not supported for schema generation."
+                  + " Use a concrete type instead, e.g., Map<String, String> instead of Map<String,"
+                  + " ?>.");
+      default -> throw unsupported(type);
+    };
+  }
+
+  private static JsonSchema generateForParameterized(
+      ParameterizedType paramType, Set<Class<?>> visited) {
+    var rawType = (Class<?>) paramType.getRawType();
+    var arguments = paramType.getActualTypeArguments();
+    if (List.class.isAssignableFrom(rawType)) {
+      return JsonSchema.array(generateForType(arguments[0], visited));
+    }
+    if (Map.class.isAssignableFrom(rawType)) {
+      if (arguments[0] != String.class) {
+        throw new IllegalArgumentException(
+            "Map key type must be String for JSON Schema generation, got: "
+                + arguments[0].getTypeName());
       }
+      return JsonSchema.map(generateForType(arguments[1], visited));
     }
+    throw unsupported(paramType);
+  }
 
-    if (type instanceof WildcardType) {
-      throw new IllegalArgumentException(
-          "Wildcard types (?) are not supported for schema generation."
-              + " Use a concrete type instead, e.g., Map<String, String> instead of Map<String, ?>.");
-    }
-
-    throw new IllegalArgumentException(
+  private static IllegalArgumentException unsupported(Type type) {
+    return new IllegalArgumentException(
         "Unsupported generic type for schema generation: " + type.getTypeName());
   }
 

@@ -20,8 +20,6 @@ com.standardapplied.helios.anthropic.StreamingIteratorTest,com.standardapplied.h
 com.standardapplied.helios.core.common.IdsTest
 com.standardapplied.helios.core.prompt.InMemoryPromptRegistryTest,com.standardapplied.helios.persistence.PgPromptRegistryTest
 com.standardapplied.helios.core.runtime.InMemoryToolCallJournalTest,com.standardapplied.helios.persistence.PgToolCallJournalTest
-com.standardapplied.helios.core.tool.CommandGrant,com.standardapplied.helios.repl.execution.JShellExecutionProvider,com.standardapplied.helios.session.execution.LocalProcessExecutionProvider
-com.standardapplied.helios.core.tool.CommandGrant,com.standardapplied.helios.session.execution.LocalProcessExecutionProvider
 com.standardapplied.helios.examples.codeact.CodeActDemoMain,com.standardapplied.helios.examples.rlm.RlmDemoMain
 com.standardapplied.helios.examples.codeact.CodeActDemoMain,com.standardapplied.helios.examples.session.SessionDemoMain
 com.standardapplied.helios.examples.rlm.RlmDemoMain,com.standardapplied.helios.examples.session.SessionDemoMain
@@ -44,7 +42,6 @@ com.standardapplied.helios.onnx.EmbeddingHarrier06bTest,com.standardapplied.heli
 com.standardapplied.helios.onnx.EmbeddingHarrierTest,com.standardapplied.helios.onnx.EmbeddingNomicTest
 com.standardapplied.helios.repl.codeact.CodeActStrategy,com.standardapplied.helios.repl.codeact.RlmStrategy
 com.standardapplied.helios.repl.codeact.RequireExecuteCodeHookTest,com.standardapplied.helios.session.hooks.RequireSignatureHookTest
-com.standardapplied.helios.repl.execution.JShellExecutionProvider,com.standardapplied.helios.session.execution.LocalProcessExecutionProvider
 com.standardapplied.helios.session.Phase2AcceptanceTest,com.standardapplied.helios.session.Phase4AcceptanceTest,com.standardapplied.helios.session.Phase5AcceptanceTest
 com.standardapplied.helios.session.Phase4AcceptanceTest
 com.standardapplied.helios.session.Phase4AcceptanceTest,com.standardapplied.helios.session.Phase5AcceptanceTest

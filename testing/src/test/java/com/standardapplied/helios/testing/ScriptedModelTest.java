@@ -24,11 +24,20 @@ import org.junit.jupiter.api.Test;
 
 class ScriptedModelTest {
 
+  @Test
+  void toolCallsTurnWithoutACallIsRejected() {
+    var builder = ScriptedModel.newBuilder();
+
+    var thrown = assertThrows(IllegalArgumentException.class, () -> builder.withToolCallsTurn());
+
+    assertEquals("withToolCallsTurn requires at least one tool call", thrown.getMessage());
+  }
+
   public record Verdict(String answer, int score) {}
 
   @Test
   void textTurnReturnsContentWithStopFinish() {
-    var model = ScriptedModel.newBuilder().thenText("hello").build();
+    var model = ScriptedModel.newBuilder().withTextTurn("hello").build();
 
     var response = model.chat(List.of(Message.user("hi")));
 
@@ -40,7 +49,7 @@ class ScriptedModelTest {
 
   @Test
   void textTurnCarriesScriptedUsage() {
-    var model = ScriptedModel.newBuilder().thenText("hello", Usage.of(100, 50, 20, 10)).build();
+    var model = ScriptedModel.newBuilder().withTextTurn("hello", Usage.of(100, 50, 20, 10)).build();
 
     var response = model.chat(List.of(Message.user("hi")));
 
@@ -55,7 +64,7 @@ class ScriptedModelTest {
             .withName("search")
             .withArguments(Map.of("query", "helios"))
             .build();
-    var model = ScriptedModel.newBuilder().thenToolCalls(call).thenText("done").build();
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(call).withTextTurn("done").build();
 
     var first = model.chat(List.of(Message.user("go")));
     assertEquals(FinishReason.TOOL_CALLS, first.finishReason());
@@ -67,7 +76,8 @@ class ScriptedModelTest {
 
   @Test
   void structuredTurnParsesThroughRealParser() {
-    var model = ScriptedModel.newBuilder().thenText("{\"answer\": \"yes\", \"score\": 4}").build();
+    var model =
+        ScriptedModel.newBuilder().withTextTurn("{\"answer\": \"yes\", \"score\": 4}").build();
 
     var response = model.chat(List.of(Message.user("judge")), OutputSchema.of(Verdict.class));
 
@@ -76,7 +86,7 @@ class ScriptedModelTest {
 
   @Test
   void structuredTurnWithSchemaMismatchThrowsParseException() {
-    var model = ScriptedModel.newBuilder().thenText("{\"unexpected\": true}").build();
+    var model = ScriptedModel.newBuilder().withTextTurn("{\"unexpected\": true}").build();
 
     assertThrows(
         StructuredOutputParseException.class,
@@ -86,7 +96,7 @@ class ScriptedModelTest {
   @Test
   void toolCallTurnSkipsStructuredParse() {
     var call = ToolCall.newBuilder().withId("tc-1").withName("search").build();
-    var model = ScriptedModel.newBuilder().thenToolCalls(call).build();
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(call).build();
 
     var response =
         model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class));
@@ -97,7 +107,7 @@ class ScriptedModelTest {
 
   @Test
   void refusalTurnCarriesRefusalFinishReason() {
-    var model = ScriptedModel.newBuilder().thenRefusal("I can't help with that.").build();
+    var model = ScriptedModel.newBuilder().withRefusalTurn("I can't help with that.").build();
 
     var response = model.chat(List.of(Message.user("do the thing")));
 
@@ -108,7 +118,7 @@ class ScriptedModelTest {
 
   @Test
   void exhaustedScriptFailsFast() {
-    var model = ScriptedModel.newBuilder().thenText("only").build();
+    var model = ScriptedModel.newBuilder().withTextTurn("only").build();
     model.chat(List.of(Message.user("one")));
 
     var ex =
@@ -118,7 +128,7 @@ class ScriptedModelTest {
 
   @Test
   void capturesEveryCallForAssertions() {
-    var model = ScriptedModel.newBuilder().thenText("a").thenText("b").build();
+    var model = ScriptedModel.newBuilder().withTextTurn("a").withTextTurn("b").build();
 
     model.chat(List.of(Message.user("first")));
     model.chat(List.of(Message.system("sys"), Message.user("second")));
@@ -130,15 +140,15 @@ class ScriptedModelTest {
 
   @Test
   void identityDefaultsAndOverride() {
-    assertEquals("scripted", ScriptedModel.newBuilder().thenText("x").build().id());
-    assertEquals("testing", ScriptedModel.newBuilder().thenText("x").build().provider());
+    assertEquals("scripted", ScriptedModel.newBuilder().withTextTurn("x").build().id());
+    assertEquals("testing", ScriptedModel.newBuilder().withTextTurn("x").build().provider());
     assertEquals(
-        "my-model", ScriptedModel.newBuilder().withId("my-model").thenText("x").build().id());
+        "my-model", ScriptedModel.newBuilder().withId("my-model").withTextTurn("x").build().id());
   }
 
   @Test
   void worksThroughDefaultStreamingPath() {
-    var model = ScriptedModel.newBuilder().thenText("streamed").build();
+    var model = ScriptedModel.newBuilder().withTextTurn("streamed").build();
 
     try (var stream = model.chatStream(List.of(Message.user("hi")))) {
       var event = stream.next();

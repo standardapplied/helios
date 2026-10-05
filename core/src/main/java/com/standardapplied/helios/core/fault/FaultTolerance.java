@@ -177,7 +177,7 @@ public class FaultTolerance {
           RetryExhaustedException,
           InterruptedException {
 
-    Future<T> future = executor.submit(() -> executeWithoutTimeoutUnchecked(operation));
+    Future<T> future = executor.submit(() -> executeWithoutTimeout(operation));
 
     try {
       return future.get(operationTimeout.toMillis(), TimeUnit.MILLISECONDS);
@@ -188,71 +188,51 @@ public class FaultTolerance {
       future.cancel(true);
       throw e;
     } catch (ExecutionException e) {
-      var cause = e.getCause();
-      if (cause instanceof WrappedException we) {
-        cause = we.getCause();
-      }
-      if (cause instanceof CircuitBreakerOpenException cbe) {
-        throw cbe;
-      }
-      if (cause instanceof RetryExhaustedException ree) {
-        throw ree;
-      }
-      if (cause instanceof InterruptedException ie) {
+      throw rethrow(e.getCause());
+    }
+  }
+
+  /** Re-throws what the timed operation failed with, unwrapping its checked exceptions. */
+  private static RuntimeException rethrow(Throwable cause)
+      throws CircuitBreakerOpenException, RetryExhaustedException, InterruptedException {
+    switch (cause) {
+      case CircuitBreakerOpenException cbe -> throw cbe;
+      case RetryExhaustedException ree -> throw ree;
+      case InterruptedException ie -> {
         Thread.currentThread().interrupt();
         throw ie;
       }
-      if (cause instanceof RuntimeException re) {
-        throw re;
-      }
-      throw new RuntimeException(cause);
+      case RuntimeException re -> throw re;
+      case null, default -> throw new RuntimeException(cause);
     }
   }
 
   private <T> T executeWithoutTimeout(Callable<T> operation)
       throws CircuitBreakerOpenException, RetryExhaustedException, InterruptedException {
-
-    Callable<T> wrappedOperation = operation;
-
-    if (retryPolicy != null) {
-      final Callable<T> toRetry = wrappedOperation;
-      wrappedOperation = () -> retryPolicy.execute(toRetry);
+    Callable<T> attempt = retryPolicy == null ? operation : () -> retryPolicy.execute(operation);
+    if (circuitBreaker == null) {
+      return call(attempt);
     }
-
-    if (circuitBreaker != null) {
-      try {
-        return circuitBreaker.execute(wrappedOperation);
-      } catch (CircuitBreakerOpenException | RetryExhaustedException | InterruptedException e) {
-        throw e;
-      } catch (RuntimeException e) {
-        throw e;
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-
     try {
-      return wrappedOperation.call();
-    } catch (RetryExhaustedException | InterruptedException e) {
-      throw e;
-    } catch (RuntimeException e) {
+      return circuitBreaker.execute(attempt);
+    } catch (CircuitBreakerOpenException
+        | RetryExhaustedException
+        | InterruptedException
+        | RuntimeException e) {
       throw e;
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
   }
 
-  private <T> T executeWithoutTimeoutUnchecked(Callable<T> operation) {
+  private static <T> T call(Callable<T> operation)
+      throws RetryExhaustedException, InterruptedException {
     try {
-      return executeWithoutTimeout(operation);
-    } catch (CircuitBreakerOpenException | RetryExhaustedException | InterruptedException e) {
-      throw new WrappedException(e);
-    }
-  }
-
-  private static class WrappedException extends RuntimeException {
-    WrappedException(Exception cause) {
-      super(cause);
+      return operation.call();
+    } catch (RetryExhaustedException | InterruptedException | RuntimeException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new RuntimeException(e);
     }
   }
 

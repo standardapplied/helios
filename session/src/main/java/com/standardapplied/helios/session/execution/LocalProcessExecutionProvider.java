@@ -4,22 +4,19 @@
  */
 package com.standardapplied.helios.session.execution;
 
-import com.standardapplied.helios.core.common.RedactionResult;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Validate;
+import com.standardapplied.helios.core.process.BinaryResolver;
+import com.standardapplied.helios.core.process.BoundedProcess;
+import com.standardapplied.helios.core.process.ProcessOutcome;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.CommandGrant;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,7 +34,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Host-process {@link ExecutionProvider} backed by direct {@link ProcessBuilder} dispatch. Each
+ * Host-process {@link ExecutionProvider} backed by direct {@link BoundedProcess} dispatch. Each
  * supported {@link Runtime} pins a binary path at build time (resolved against the supplied {@code
  * PATH}) and is invoked with an argv shape configured by a {@link RuntimeHandler}.
  *
@@ -49,7 +46,7 @@ import java.util.logging.Logger;
  *   <li><b>Binary path pinned at build time.</b> A hostile {@code PATH} change later cannot shadow
  *       the resolved binary.
  *   <li><b>Always argv array, never shell.</b> {@code bash -c '<script>'} runs in an argv slot
- *       under {@code ProcessBuilder} — no surrounding shell interprets metacharacters.
+ *       under {@link BoundedProcess} — no surrounding shell interprets metacharacters.
  *   <li><b>Environment cleared then injected.</b> The child does not inherit the JVM's environment;
  *       only the granted {@code PATH} plus the request's {@link ExecutionRequest#environment()} is
  *       visible.
@@ -106,8 +103,6 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
   private static final int DEFAULT_MAX_CONCURRENT = 4;
   private static final Duration DEFAULT_MAX_TIMEOUT = Duration.ofMinutes(5);
   private static final String DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin";
-  private static final byte[] TRUNCATION_MARKER =
-      "\n[truncated: output exceeded cap]".getBytes(StandardCharsets.US_ASCII);
 
   private final Map<Runtime, RuntimeHandler> handlers;
   private final SecretRegistry secretRegistry;
@@ -242,47 +237,44 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
       // one entry per execute call.
       acquireRegistration.remove();
     }
-    Path effectiveCwd = null;
-    boolean ownCwd = false;
     try {
       if (closed.get()) {
         throw new CancellationException(
             "provider closed before " + request.runtime() + " could start");
       }
-      if (request.workingDirectory() != null) {
-        effectiveCwd = request.workingDirectory();
-      } else {
-        effectiveCwd = Files.createTempDirectory("helios-exec-");
-        ownCwd = true;
-      }
-      return runProcess(request, handler, effectiveCwd, effectiveTimeout, cancellation);
+      return runProcess(request, handler, effectiveTimeout, cancellation);
     } catch (IOException e) {
       return ExecutionResult.refusal(
           "I/O error launching " + request.runtime() + ": " + e.getMessage());
     } finally {
       concurrency.release();
-      if (ownCwd) {
-        deleteRecursively(effectiveCwd);
-      }
     }
   }
 
   private ExecutionResult runProcess(
       ExecutionRequest request,
       RuntimeHandler handler,
-      Path cwd,
       Duration timeout,
       CancellationToken cancellation)
       throws IOException {
-    var argv = handler.buildArgv(request);
-    var pb = new ProcessBuilder(argv);
-    pb.environment().clear();
-    pb.environment().put("PATH", path);
-    pb.environment().putAll(request.environment());
-    pb.directory(cwd.toFile());
-    pb.redirectInput(ProcessBuilder.Redirect.PIPE);
-    var startNanos = System.nanoTime();
-    var proc = pb.start();
+    var environment = new LinkedHashMap<String, String>();
+    environment.put("PATH", path);
+    environment.putAll(request.environment());
+    try (var process =
+        BoundedProcess.newBuilder(handler.buildArgv(request))
+            .withEnvironment(environment)
+            .withWorkingDirectory(request.workingDirectory())
+            .withTempDirectoryPrefix("helios-exec-")
+            .withTimeout(timeout)
+            .withMaxOutputBytes(maxOutputBytes)
+            .start()) {
+      return awaitProcess(request, process, cancellation);
+    }
+  }
+
+  private ExecutionResult awaitProcess(
+      ExecutionRequest request, BoundedProcess process, CancellationToken cancellation) {
+    var proc = process.process();
     inflight.add(proc);
     // close() marks the provider closed and then scans the in-flight set once. A process added
     // after that scan is one close() never saw, so the call that started it reaps it here.
@@ -296,39 +288,24 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
     Runnable killCallback =
         () -> {
           if (killed.compareAndSet(false, true)) {
-            proc.descendants().forEach(ProcessHandle::destroy);
-            proc.destroy();
+            process.kill();
           }
         };
     var killRegistration = cancellation.onCancel(killCallback);
-    var stdinThread = startStdinFeeder(proc, request.stdin().orElse(null));
-    var stdoutSink = new BoundedSink(maxOutputBytes);
-    var stderrSink = new BoundedSink(maxOutputBytes);
-    var t1 = Thread.startVirtualThread(() -> drain(proc.getInputStream(), stdoutSink));
-    var t2 = Thread.startVirtualThread(() -> drain(proc.getErrorStream(), stderrSink));
-    boolean exited;
+    var stdinThread = startStdinFeeder(process, request.stdin().orElse(null));
+    ProcessOutcome outcome;
     try {
-      exited = proc.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+      outcome = process.await();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       killCallback.run();
-      reapForcibly(proc);
       joinQuietly(stdinThread);
-      joinQuietly(t1);
-      joinQuietly(t2);
       inflight.remove(proc);
       killRegistration.remove();
       throw new CancellationException(
           "interrupted while waiting for " + request.runtime() + " process");
     }
-    var timedOut = !exited;
-    if (timedOut) {
-      killCallback.run();
-      reapForcibly(proc);
-    }
     joinQuietly(stdinThread);
-    joinQuietly(t1);
-    joinQuietly(t2);
     inflight.remove(proc);
     // Mark the per-call kill callback inert so any later token cancellation does not retain or
     // act on this now-reaped process, then detach from the (possibly long-lived) token's list so
@@ -339,28 +316,26 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
     // process was killed by cancellation — surface that as a CancellationException rather than a
     // misleading "normal exit 143" ExecutionResult. Timed-out runs still return a result
     // (timedOut=true) so callers can distinguish the two terminal causes.
-    if (!timedOut && cancellation.isCancelled()) {
+    if (!outcome.timedOut() && cancellation.isCancelled()) {
       throw new CancellationException(
           "execution of " + request.runtime() + " cancelled: " + cancellation.reason().orElse(""));
     }
-    var elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
-    var exitCode = timedOut ? -1 : proc.exitValue();
     var redactor = secretRegistry.redactor();
-    var stdoutResult = redactor.redact(stdoutSink.bytes());
-    var stderrResult = redactor.redact(stderrSink.bytes());
+    var stdoutResult = redactor.redact(outcome.stdout());
+    var stderrResult = redactor.redact(outcome.stderr());
     return new ExecutionResult(
-        exitCode,
+        outcome.exitCode(),
         stdoutResult.text(),
         stderrResult.text(),
-        elapsed,
-        timedOut,
-        mergeCounts(stdoutResult, stderrResult));
+        outcome.elapsed(),
+        outcome.timedOut(),
+        stdoutResult.mergeCounts(stderrResult));
   }
 
-  private static Thread startStdinFeeder(Process proc, String stdin) {
+  private static Thread startStdinFeeder(BoundedProcess process, String stdin) {
     return Thread.startVirtualThread(
         () -> {
-          try (OutputStream out = proc.getOutputStream()) {
+          try (OutputStream out = process.stdin()) {
             if (stdin != null) {
               out.write(stdin.getBytes(StandardCharsets.UTF_8));
               out.flush();
@@ -369,30 +344,6 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
             // Child closed its stdin or exited before we finished writing — both expected.
           }
         });
-  }
-
-  private static void reapForcibly(Process proc) {
-    try {
-      if (!proc.waitFor(2, TimeUnit.SECONDS)) {
-        proc.descendants().forEach(ProcessHandle::destroyForcibly);
-        proc.destroyForcibly();
-        proc.waitFor(1, TimeUnit.SECONDS);
-      }
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    }
-  }
-
-  private static void drain(InputStream in, BoundedSink sink) {
-    var buf = new byte[8192];
-    try (in) {
-      int n;
-      while ((n = in.read(buf)) >= 0) {
-        sink.write(buf, 0, n);
-      }
-    } catch (IOException ignored) {
-      // Stream closed by process termination.
-    }
   }
 
   private static void joinQuietly(Thread t) {
@@ -463,33 +414,6 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
     }
   }
 
-  private static Map<String, Integer> mergeCounts(RedactionResult a, RedactionResult b) {
-    if (a.counts().isEmpty() && b.counts().isEmpty()) {
-      return Map.of();
-    }
-    var merged = new LinkedHashMap<String, Integer>();
-    a.counts().forEach((k, v) -> merged.merge(k, v, Integer::sum));
-    b.counts().forEach((k, v) -> merged.merge(k, v, Integer::sum));
-    return Map.copyOf(merged);
-  }
-
-  private static void deleteRecursively(Path root) {
-    try (var stream = Files.walk(root)) {
-      stream
-          .sorted(Comparator.reverseOrder())
-          .forEach(
-              p -> {
-                try {
-                  Files.deleteIfExists(p);
-                } catch (IOException ignored) {
-                  // Best-effort cleanup.
-                }
-              });
-    } catch (IOException ignored) {
-      // Best-effort cleanup.
-    }
-  }
-
   /**
    * Per-runtime argv shape. Implementations pin a binary at construction time and translate an
    * {@link ExecutionRequest} into the argv list the host process is invoked with.
@@ -502,7 +426,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
 
     /**
      * Build the argv for one invocation. The returned list is passed verbatim to {@link
-     * ProcessBuilder}.
+     * BoundedProcess}.
      *
      * @param request the request; non-null
      * @return non-empty list whose first element is the absolute binary path
@@ -522,7 +446,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
      */
     static RuntimeHandler dashC(String binarySpec) {
       Validate.notBlank("binarySpec", binarySpec);
-      var resolved = CommandGrant.resolveBinary(binarySpec, System.getenv("PATH"));
+      var resolved = BinaryResolver.resolve(binarySpec, System.getenv("PATH"));
       return request -> {
         var argv = new ArrayList<String>(3 + request.args().size());
         argv.add(resolved.toString());
@@ -531,41 +455,6 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
         argv.addAll(request.args());
         return List.copyOf(argv);
       };
-    }
-  }
-
-  /** Bounded output sink — drops bytes past the cap and appends a truncation marker. */
-  private static final class BoundedSink {
-    private final ByteArrayOutputStream out = new ByteArrayOutputStream();
-    private final int max;
-    private boolean truncated;
-
-    BoundedSink(int max) {
-      this.max = max;
-    }
-
-    synchronized void write(byte[] buf, int off, int len) {
-      var remaining = max - out.size();
-      if (remaining <= 0) {
-        truncated = true;
-        return;
-      }
-      var toWrite = Math.min(len, remaining);
-      out.write(buf, off, toWrite);
-      if (toWrite < len) {
-        truncated = true;
-      }
-    }
-
-    synchronized byte[] bytes() {
-      var raw = out.toByteArray();
-      if (!truncated) {
-        return raw;
-      }
-      var combined = new byte[raw.length + TRUNCATION_MARKER.length];
-      System.arraycopy(raw, 0, combined, 0, raw.length);
-      System.arraycopy(TRUNCATION_MARKER, 0, combined, raw.length, TRUNCATION_MARKER.length);
-      return combined;
     }
   }
 

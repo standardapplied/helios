@@ -5,16 +5,13 @@
 
 package com.standardapplied.helios.core.tool;
 
-import com.standardapplied.helios.core.common.RedactionResult;
 import com.standardapplied.helios.core.common.Redactor;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
+import com.standardapplied.helios.core.process.BinaryResolver;
+import com.standardapplied.helios.core.process.BoundedProcess;
+import com.standardapplied.helios.core.process.ProcessOutcome;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -25,7 +22,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 /**
@@ -41,13 +37,13 @@ import java.util.function.Function;
  *   <li><b>Binary is pinned at build time.</b> {@code "gh"} is resolved against {@code PATH} once,
  *       the absolute path stored, and a later hostile {@code PATH} cannot shadow the binary at
  *       invocation time.
- *   <li><b>Always argv array, never shell.</b> {@link ProcessBuilder} is invoked with an explicit
- *       list — no {@code /bin/sh -c}, no shell metacharacter expansion.
+ *   <li><b>Always argv array, never shell.</b> The process is started through {@link
+ *       BoundedProcess} with an explicit list — no {@code /bin/sh -c}, no shell metacharacter
+ *       expansion.
  *   <li><b>Environment is cleared then injected.</b> The child does not inherit the JVM's
  *       environment. Only secrets/PATH the operator explicitly granted are visible.
  *   <li><b>Argv pre-scan refuses secrets in argv.</b> A registered secret value appearing in any
- *       argv slot fails the call before {@link ProcessBuilder#start()}; secrets must arrive via
- *       env-only.
+ *       argv slot fails the call before the process starts; secrets must arrive via env-only.
  *   <li><b>Output redaction is mandatory.</b> Both stdout and stderr are scrubbed against the
  *       {@link SecretRegistry} before they leave the host process.
  *   <li><b>Stdin is empty.</b> The child's stdin is closed immediately after fork.
@@ -80,14 +76,12 @@ public final class CommandGrant {
   private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
   private static final int DEFAULT_MAX_OUTPUT_BYTES = 50_000;
   private static final int DEFAULT_MAX_CONCURRENT = 4;
-  private static final byte[] TRUNCATION_MARKER =
-      "\n[truncated: output exceeded cap]".getBytes(StandardCharsets.US_ASCII);
 
   private final String toolName;
   private final String description;
   private final Path binaryPath;
   private final Map<String, String> env;
-  private final String path;
+  private final Map<String, String> environment;
   private final Path cwd;
   private final Duration timeout;
   private final int maxOutputBytes;
@@ -104,7 +98,7 @@ public final class CommandGrant {
             : "Invoke the " + binaryPath.getFileName() + " command-line tool";
     this.binaryPath = binaryPath;
     this.env = Map.copyOf(b.env);
-    this.path = b.path != null ? b.path : DEFAULT_PATH;
+    this.environment = childEnvironment(b.path != null ? b.path : DEFAULT_PATH, b.env);
     this.cwd = b.cwd;
     this.timeout = b.timeout;
     this.maxOutputBytes = b.maxOutputBytes;
@@ -112,6 +106,13 @@ public final class CommandGrant {
     this.stderrToModel = b.stderrToModel;
     this.secretRegistry = registry;
     this.concurrency = new Semaphore(b.maxConcurrent);
+  }
+
+  private static Map<String, String> childEnvironment(String path, Map<String, String> env) {
+    var environment = new LinkedHashMap<String, String>();
+    environment.put("PATH", path);
+    environment.putAll(env);
+    return Collections.unmodifiableMap(environment);
   }
 
   /**
@@ -142,61 +143,7 @@ public final class CommandGrant {
    * args} parameter (array of strings).
    */
   public Tool toTool() {
-    return Tool.newBuilder()
-        .withName(toolName)
-        .withDescription(description)
-        .withParameter(
-            ToolParameter.newBuilder()
-                .withName("args")
-                .withType(ParameterType.ARRAY)
-                .withDescription(
-                    "Arguments passed to %s (excluding the binary itself)"
-                        .formatted(binaryPath.getFileName()))
-                .withRequired(true)
-                .withItems(ToolParameter.newBuilder().withType(ParameterType.STRING).build())
-                .build())
-        .withExecutor(this::executeAsTool)
-        .build();
-  }
-
-  private ToolResult executeAsTool(Map<String, Object> args, ToolContext ctx) {
-    ctx.cancellation().throwIfCancelled();
-    var raw = args.get("args");
-    if (!(raw instanceof List<?> list)) {
-      return ToolResult.failure("Parameter 'args' is required and must be an array of strings");
-    }
-    var argv = new ArrayList<String>(list.size());
-    for (var entry : list) {
-      if (!(entry instanceof String s)) {
-        return ToolResult.failure("Every entry in 'args' must be a string");
-      }
-      argv.add(s);
-    }
-    InvocationResult result;
-    try {
-      result = invoke(argv);
-    } catch (RejectedException e) {
-      return ToolResult.failure(e.getMessage());
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return ToolResult.failure("Interrupted while invoking " + toolName);
-    } catch (IOException e) {
-      return ToolResult.failure("I/O error invoking " + toolName + ": " + e.getMessage());
-    }
-    var sb = new StringBuilder();
-    sb.append("[exit ").append(result.exitCode());
-    if (result.timedOut()) {
-      sb.append(" TIMEOUT");
-    }
-    if (result.truncated()) {
-      sb.append(" TRUNCATED");
-    }
-    sb.append("]\n");
-    sb.append(result.stdout());
-    if (stderrToModel && !result.stderr().isEmpty()) {
-      sb.append("\n[stderr]\n").append(result.stderr());
-    }
-    return ToolResult.success(sb.toString(), result);
+    return new CommandGrantTool(this, description, stderrToModel).toTool();
   }
 
   /**
@@ -208,6 +155,19 @@ public final class CommandGrant {
    */
   public InvocationResult invoke(List<String> userArgs) throws InterruptedException, IOException {
     var argsList = List.copyOf(userArgs);
+    checkArgs(argsList);
+    if (!concurrency.tryAcquire()) {
+      throw new RejectedException(
+          "Concurrency limit reached for " + toolName + "; try again later");
+    }
+    try {
+      return run(argsList);
+    } finally {
+      concurrency.release();
+    }
+  }
+
+  private void checkArgs(List<String> argsList) {
     if (argValidator != null) {
       var rejection = argValidator.apply(argsList);
       if (rejection.isPresent()) {
@@ -221,164 +181,35 @@ public final class CommandGrant {
                 + " argv");
       }
     }
-    if (!concurrency.tryAcquire()) {
-      throw new RejectedException(
-          "Concurrency limit reached for " + toolName + "; try again later");
-    }
-    Path effectiveCwd = null;
-    boolean ownCwd = false;
-    try {
-      if (cwd != null) {
-        effectiveCwd = cwd;
-      } else {
-        effectiveCwd = Files.createTempDirectory("helios-grant-");
-        ownCwd = true;
-      }
-      return runProcess(argsList, effectiveCwd);
-    } finally {
-      concurrency.release();
-      if (ownCwd) {
-        deleteRecursively(effectiveCwd);
-      }
-    }
   }
 
-  private InvocationResult runProcess(List<String> userArgs, Path effectiveCwd)
-      throws IOException, InterruptedException {
+  private InvocationResult run(List<String> userArgs) throws IOException, InterruptedException {
     var argv = new ArrayList<String>(userArgs.size() + 1);
     argv.add(binaryPath.toString());
     argv.addAll(userArgs);
-    var pb = new ProcessBuilder(argv);
-    pb.environment().clear();
-    pb.environment().put("PATH", path);
-    pb.environment().putAll(env);
-    pb.directory(effectiveCwd.toFile());
-    pb.redirectInput(ProcessBuilder.Redirect.PIPE);
-    var startNanos = System.nanoTime();
-    var proc = pb.start();
-    proc.getOutputStream().close();
-    var stdoutSink = new BoundedSink(maxOutputBytes);
-    var stderrSink = new BoundedSink(maxOutputBytes);
-    var t1 = Thread.startVirtualThread(() -> drain(proc.getInputStream(), stdoutSink));
-    var t2 = Thread.startVirtualThread(() -> drain(proc.getErrorStream(), stderrSink));
-    var exited = proc.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-    var timedOut = !exited;
-    if (timedOut) {
-      proc.destroy();
-      proc.descendants().forEach(ProcessHandle::destroy);
-      if (!proc.waitFor(2, TimeUnit.SECONDS)) {
-        proc.destroyForcibly();
-        proc.descendants().forEach(ProcessHandle::destroyForcibly);
-        proc.waitFor(1, TimeUnit.SECONDS);
-      }
+    ProcessOutcome outcome;
+    try (var process =
+        BoundedProcess.newBuilder(argv)
+            .withEnvironment(environment)
+            .withWorkingDirectory(cwd)
+            .withTempDirectoryPrefix("helios-grant-")
+            .withTimeout(timeout)
+            .withMaxOutputBytes(maxOutputBytes)
+            .start()) {
+      process.stdin().close();
+      outcome = process.await();
     }
-    t1.join();
-    t2.join();
-    var elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
-    var exitCode = timedOut ? -1 : proc.exitValue();
     var redactor = secretRegistry.redactor();
-    var stdoutResult = redactor.redact(stdoutSink.bytes());
-    var stderrResult = redactor.redact(stderrSink.bytes());
-    var counts = mergeCounts(stdoutResult, stderrResult);
+    var stdoutResult = redactor.redact(outcome.stdout());
+    var stderrResult = redactor.redact(outcome.stderr());
     return new InvocationResult(
-        exitCode,
+        outcome.exitCode(),
         stdoutResult.text(),
         stderrResult.text(),
-        timedOut,
-        stdoutSink.truncated() || stderrSink.truncated(),
-        elapsed,
-        counts);
-  }
-
-  private static Map<String, Integer> mergeCounts(RedactionResult a, RedactionResult b) {
-    if (a.counts().isEmpty() && b.counts().isEmpty()) {
-      return Map.of();
-    }
-    var merged = new LinkedHashMap<String, Integer>();
-    a.counts().forEach((k, v) -> merged.merge(k, v, Integer::sum));
-    b.counts().forEach((k, v) -> merged.merge(k, v, Integer::sum));
-    return Collections.unmodifiableMap(merged);
-  }
-
-  private static void drain(InputStream in, BoundedSink sink) {
-    var buf = new byte[8192];
-    try (in) {
-      int n;
-      while ((n = in.read(buf)) >= 0) {
-        sink.write(buf, 0, n);
-      }
-    } catch (IOException ignored) {
-      // Stream closed by process termination.
-    }
-  }
-
-  private static void deleteRecursively(Path root) {
-    try (var stream = Files.walk(root)) {
-      stream
-          .sorted(java.util.Comparator.reverseOrder())
-          .forEach(
-              p -> {
-                try {
-                  Files.deleteIfExists(p);
-                } catch (IOException ignored) {
-                  // Best-effort cleanup.
-                }
-              });
-    } catch (IOException ignored) {
-      // Best-effort cleanup.
-    }
-  }
-
-  private static Path resolveBinary(String spec) {
-    return resolveBinary(spec, System.getenv("PATH"));
-  }
-
-  /**
-   * Resolve {@code spec} against {@code pathEnv}, returning the absolute, executable binary path.
-   * Accepts either an absolute path (which is checked for executability) or a basename (which is
-   * looked up against the supplied {@code pathEnv}, using {@link java.io.File#pathSeparator} to
-   * split entries).
-   *
-   * <p>Exposed for reuse by other subprocess primitives that also need pin-at-build-time semantics
-   * (e.g. {@code LocalProcessExecutionProvider} in {@code helios-session}). The lookup is
-   * deliberately deterministic — no caching, no fallbacks beyond the supplied {@code PATH}.
-   *
-   * @param spec absolute path or basename; non-blank
-   * @param pathEnv the {@code PATH} environment variable to search; non-null, non-empty for
-   *     basename lookups
-   * @return the absolute path to an executable file
-   * @throws IllegalArgumentException if {@code spec} is blank or contains separators without being
-   *     absolute
-   * @throws IllegalStateException if the binary cannot be located on the supplied {@code PATH}
-   */
-  public static Path resolveBinary(String spec, String pathEnv) {
-    if (Strings.isBlank(spec)) {
-      throw new IllegalArgumentException("Binary spec must not be blank");
-    }
-    var direct = Path.of(spec);
-    if (direct.isAbsolute()) {
-      if (!Files.isRegularFile(direct) || !Files.isExecutable(direct)) {
-        throw new IllegalStateException("Binary not executable at " + direct);
-      }
-      return direct.toAbsolutePath();
-    }
-    if (spec.contains(File.separator)) {
-      throw new IllegalArgumentException(
-          "Binary spec must be an absolute path or a basename (no separators): " + spec);
-    }
-    if (pathEnv == null || pathEnv.isEmpty()) {
-      throw new IllegalStateException("PATH is empty; cannot resolve '" + spec + "'");
-    }
-    for (var dir : pathEnv.split(File.pathSeparator)) {
-      if (dir.isEmpty()) {
-        continue;
-      }
-      var candidate = Path.of(dir, spec);
-      if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
-        return candidate.toAbsolutePath();
-      }
-    }
-    throw new IllegalStateException("Binary '" + spec + "' not found on PATH");
+        outcome.timedOut(),
+        outcome.truncated(),
+        outcome.elapsed(),
+        stdoutResult.mergeCounts(stderrResult));
   }
 
   /**
@@ -418,44 +249,6 @@ public final class CommandGrant {
 
     public RejectedException(String message) {
       super(message);
-    }
-  }
-
-  private static final class BoundedSink {
-    private final ByteArrayOutputStream out = new ByteArrayOutputStream();
-    private final int max;
-    private boolean truncated;
-
-    BoundedSink(int max) {
-      this.max = max;
-    }
-
-    synchronized void write(byte[] buf, int off, int len) {
-      var remaining = max - out.size();
-      if (remaining <= 0) {
-        truncated = true;
-        return;
-      }
-      var toWrite = Math.min(len, remaining);
-      out.write(buf, off, toWrite);
-      if (toWrite < len) {
-        truncated = true;
-      }
-    }
-
-    synchronized byte[] bytes() {
-      var raw = out.toByteArray();
-      if (!truncated) {
-        return raw;
-      }
-      var combined = new byte[raw.length + TRUNCATION_MARKER.length];
-      System.arraycopy(raw, 0, combined, 0, raw.length);
-      System.arraycopy(TRUNCATION_MARKER, 0, combined, raw.length, TRUNCATION_MARKER.length);
-      return combined;
-    }
-
-    boolean truncated() {
-      return truncated;
     }
   }
 
@@ -577,7 +370,7 @@ public final class CommandGrant {
     }
 
     public CommandGrant build() {
-      var resolved = resolveBinary(spec);
+      var resolved = BinaryResolver.resolve(spec, System.getenv("PATH"));
       var registry = secretRegistry != null ? secretRegistry : new SecretRegistry();
       for (var entry : env.entrySet()) {
         registry.register(entry.getKey(), entry.getValue());

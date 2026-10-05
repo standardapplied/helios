@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.io.IOException;
@@ -51,7 +52,9 @@ final class MemoryWriteToolTest {
     var result =
         MemoryWriteTool.binding(backend)
             .tool()
-            .execute(Map.of("op", "create", "path", "/memories/n.md", "content", "hello"));
+            .execute(
+                Map.of("op", "create", "path", "/memories/n.md", "content", "hello"),
+                ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals("hello", backend.view("/memories/n.md"));
     assertTrue(result.output().contains("created /memories/n.md"));
@@ -63,7 +66,9 @@ final class MemoryWriteToolTest {
     var result =
         MemoryWriteTool.binding(backend)
             .tool()
-            .execute(Map.of("op", "create", "path", "/memories/n.md", "content", "new"));
+            .execute(
+                Map.of("op", "create", "path", "/memories/n.md", "content", "new"),
+                ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("already exists"), result.output());
   }
@@ -73,7 +78,7 @@ final class MemoryWriteToolTest {
     var result =
         MemoryWriteTool.binding(backend(tmp))
             .tool()
-            .execute(Map.of("op", "create", "path", "/memories/n.md"));
+            .execute(Map.of("op", "create", "path", "/memories/n.md"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("requires 'content'"), result.output());
   }
@@ -91,7 +96,8 @@ final class MemoryWriteToolTest {
                     "op", "str_replace",
                     "path", "/memories/n.md",
                     "oldString", "quick",
-                    "newString", "slow"));
+                    "newString", "slow"),
+                ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals("the slow brown fox", backend.view("/memories/n.md"));
   }
@@ -102,7 +108,9 @@ final class MemoryWriteToolTest {
     var result =
         MemoryWriteTool.binding(backend)
             .tool()
-            .execute(Map.of("op", "str_replace", "path", "/memories/n.md", "oldString", "x"));
+            .execute(
+                Map.of("op", "str_replace", "path", "/memories/n.md", "oldString", "x"),
+                ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("requires both"), result.output());
   }
@@ -118,7 +126,8 @@ final class MemoryWriteToolTest {
                     "op", "str_replace",
                     "path", "/memories/n.md",
                     "oldString", "a",
-                    "newString", "Z"));
+                    "newString", "Z"),
+                ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("more than once"), result.output());
   }
@@ -136,7 +145,8 @@ final class MemoryWriteToolTest {
                     "op", "insert",
                     "path", "/memories/n.md",
                     "lineNumber", 2,
-                    "content", "two"));
+                    "content", "two"),
+                ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals("one\ntwo\nthree\n", backend.view("/memories/n.md"));
   }
@@ -147,7 +157,9 @@ final class MemoryWriteToolTest {
     var result =
         MemoryWriteTool.binding(backend)
             .tool()
-            .execute(Map.of("op", "insert", "path", "/memories/n.md", "lineNumber", 1));
+            .execute(
+                Map.of("op", "insert", "path", "/memories/n.md", "lineNumber", 1),
+                ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("requires 'content'"), result.output());
   }
@@ -158,7 +170,9 @@ final class MemoryWriteToolTest {
     var result =
         MemoryWriteTool.binding(backend)
             .tool()
-            .execute(Map.of("op", "insert", "path", "/memories/n.md", "content", "y"));
+            .execute(
+                Map.of("op", "insert", "path", "/memories/n.md", "content", "y"),
+                ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("requires 'lineNumber'"), result.output());
   }
@@ -174,7 +188,8 @@ final class MemoryWriteToolTest {
                     "op", "insert",
                     "path", "/memories/n.md",
                     "lineNumber", 1L,
-                    "content", "y"));
+                    "content", "y"),
+                ToolContext.noop());
     assertTrue(result.success(), result.output());
   }
 
@@ -186,7 +201,7 @@ final class MemoryWriteToolTest {
     var result =
         MemoryWriteTool.binding(backend)
             .tool()
-            .execute(Map.of("op", "delete", "path", "/memories/n.md"));
+            .execute(Map.of("op", "delete", "path", "/memories/n.md"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertFalse(Files.exists(tmp.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR + "/n.md")));
   }
@@ -196,7 +211,7 @@ final class MemoryWriteToolTest {
     var result =
         MemoryWriteTool.binding(backend(tmp))
             .tool()
-            .execute(Map.of("op", "delete", "path", "/memories/nope.md"));
+            .execute(Map.of("op", "delete", "path", "/memories/nope.md"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("no such memory entry"), result.output());
   }
@@ -208,7 +223,7 @@ final class MemoryWriteToolTest {
     var result =
         MemoryWriteTool.binding(backend(tmp))
             .tool()
-            .execute(Map.of("path", "/memories/n.md", "content", "x"));
+            .execute(Map.of("path", "/memories/n.md", "content", "x"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("missing required 'op'"), result.output());
   }
@@ -218,7 +233,7 @@ final class MemoryWriteToolTest {
     var result =
         MemoryWriteTool.binding(backend(tmp))
             .tool()
-            .execute(Map.of("op", "create", "content", "x"));
+            .execute(Map.of("op", "create", "content", "x"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("missing required 'path'"), result.output());
   }
@@ -228,7 +243,7 @@ final class MemoryWriteToolTest {
     var result =
         MemoryWriteTool.binding(backend(tmp))
             .tool()
-            .execute(Map.of("op", "destroy", "path", "/memories/n.md"));
+            .execute(Map.of("op", "destroy", "path", "/memories/n.md"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("unknown op 'destroy'"), result.output());
   }
@@ -238,7 +253,9 @@ final class MemoryWriteToolTest {
     var result =
         MemoryWriteTool.binding(backend(tmp))
             .tool()
-            .execute(Map.of("op", "create", "path", "/etc/passwd", "content", "h@x"));
+            .execute(
+                Map.of("op", "create", "path", "/etc/passwd", "content", "h@x"),
+                ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("MemoryWrite:"), result.output());
   }
