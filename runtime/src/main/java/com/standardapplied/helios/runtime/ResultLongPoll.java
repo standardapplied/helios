@@ -92,7 +92,7 @@ final class ResultLongPoll {
       LOGGER.log(
           Level.WARNING, "session " + sessionIdForLog + " result future failed exceptionally", e);
       var cause = e.getCause();
-      var msg = cause == null || cause.getMessage() == null ? "unknown" : cause.getMessage();
+      var msg = cause.getMessage() == null ? "unknown" : cause.getMessage();
       return new Outcome(
           Status.INTERNAL_SERVER_ERROR_500,
           Map.of("error", "session terminated abnormally: " + msg));
