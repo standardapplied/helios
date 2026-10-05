@@ -13,6 +13,7 @@ import static com.tngtech.archunit.core.domain.JavaClass.Predicates.type;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameStartingWith;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noCodeUnits;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
@@ -23,6 +24,7 @@ import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
+import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaStaticInitializer;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -55,6 +57,9 @@ class ArchitectureRulesTest {
    * in a UUID v7.
    */
   private static final String STATIC_WALL_CLOCK_BURN_DOWN = HELIOS + ".core.common.Ids";
+
+  /** The one launcher outside core.process: the REPL sandbox starts its own JVM. */
+  private static final String SANDBOX_LAUNCHER = HELIOS + ".repl.sandbox.JvmSandbox";
 
   private static final String TIME_SEAM =
       "a class that needs the time takes a java.time.InstantSource through withClock(...) and"
@@ -234,6 +239,43 @@ class ArchitectureRulesTest {
         .orShould()
         .haveRawReturnType(Clock.class)
         .because("java.time.Clock is not a parameter or return type: " + TIME_SEAM)
+        .check(LIBRARY);
+  }
+
+  @Test
+  void processBuilderIsUsedOnlyByCoreProcessAndTheSandboxLauncher() {
+    noClasses()
+        .that()
+        .resideOutsideOfPackage(HELIOS + ".core.process..")
+        .and(not(name(SANDBOX_LAUNCHER).or(nameStartingWith(SANDBOX_LAUNCHER + "$"))))
+        .should()
+        .dependOnClassesThat(nameStartingWith(ProcessBuilder.class.getName()))
+        .because(
+            "a child process is started through core.process.BoundedProcess, which owns the"
+                + " explicit argv and environment, bounded output, timeout kill and working"
+                + " directory; only repl.sandbox.JvmSandbox launches its own JVM")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void builderMethodsReturningTheBuilderStartWithWith() {
+    methods()
+        .that()
+        .arePublic()
+        .and()
+        .areNotStatic()
+        .and()
+        .areDeclaredInClassesThat()
+        .haveSimpleNameEndingWith("Builder")
+        .and(
+            describe(
+                "return their declaring builder",
+                (JavaMethod method) -> method.getRawReturnType().equals(method.getOwner())))
+        .should()
+        .haveNameStartingWith("with")
+        .because(
+            "a builder step is named withX(...): a fluent method on a *Builder that returns the"
+                + " builder starts with \"with\"")
         .check(LIBRARY);
   }
 }
