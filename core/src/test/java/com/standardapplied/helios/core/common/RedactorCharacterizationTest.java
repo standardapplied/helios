@@ -90,4 +90,22 @@ class RedactorCharacterizationTest {
     assertEquals(text, result.text());
     assertEquals(counts, List.copyOf(result.counts().entrySet()));
   }
+
+  static Stream<Arguments> emptySecretCases() {
+    return Stream.of(
+        Arguments.of("a", "a", List.of()),
+        Arguments.of("ax", "ax<redacted:E>", List.of(Map.entry("E", 1))),
+        Arguments.of("xa", "x<redacted:E>a", List.of(Map.entry("E", 1))),
+        Arguments.of(
+            "ab", "<redacted:K><redacted:E>", List.of(Map.entry("K", 1), Map.entry("E", 1))));
+  }
+
+  @ParameterizedTest
+  @MethodSource("emptySecretCases")
+  void emptySecretIsNotReportedRightAfterTheFirstByteOfAnotherSecret(
+      String input, String text, List<Map.Entry<String, Integer>> counts) {
+    var result = redactor(List.of("E", "", "K", "ab")).redact(input);
+    assertEquals(text, result.text());
+    assertEquals(counts, List.copyOf(result.counts().entrySet()));
+  }
 }
