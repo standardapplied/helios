@@ -66,7 +66,7 @@ final class ReadToolMultimodalAnthropicIntegrationTest {
 
     var options =
         SessionOptions.newBuilder()
-            .apply(SessionPresets.readOnly(workspace))
+            .withPreset(SessionPresets.readOnly(workspace))
             .withModel(model)
             .withSystemPrompt(
                 "You are a careful file inspector. When the user asks you to read a file, call"
@@ -101,7 +101,7 @@ final class ReadToolMultimodalAnthropicIntegrationTest {
 
     var options =
         SessionOptions.newBuilder()
-            .apply(SessionPresets.readOnly(workspace))
+            .withPreset(SessionPresets.readOnly(workspace))
             .withModel(model)
             .withSystemPrompt(
                 "You are a careful file inspector. When the user asks you to read a file, call"

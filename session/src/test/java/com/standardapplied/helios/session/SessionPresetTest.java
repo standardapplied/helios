@@ -50,7 +50,7 @@ final class SessionPresetTest {
   void identityPresetReturnsBuilderUnchanged() {
     SessionPreset identity = b -> b;
     var builder = seed();
-    var same = builder.apply(identity);
+    var same = builder.withPreset(identity);
     assertSame(builder, same);
     var opts = same.build();
     assertNotNull(opts);
@@ -65,14 +65,14 @@ final class SessionPresetTest {
           hits.incrementAndGet();
           return b;
         };
-    seed().apply(counter).build();
+    seed().withPreset(counter).build();
     assertEquals(1, hits.get());
   }
 
   @Test
   void applyRejectsNullPreset() {
     var b = seed();
-    var ex = assertThrows(NullPointerException.class, () -> b.apply(null));
+    var ex = assertThrows(NullPointerException.class, () -> b.withPreset(null));
     assertEquals("preset must not be null", ex.getMessage());
   }
 
@@ -80,14 +80,14 @@ final class SessionPresetTest {
   void applyRejectsNullBuilderReturnedByPreset() {
     SessionPreset badPreset = b -> null;
     var b = seed();
-    var ex = assertThrows(NullPointerException.class, () -> b.apply(badPreset));
+    var ex = assertThrows(NullPointerException.class, () -> b.withPreset(badPreset));
     assertEquals("preset must return a non-null builder", ex.getMessage());
   }
 
   @Test
   void presetCanLayerConfiguration() {
     SessionPreset preset = b -> b.withSessionId("preset-id");
-    var opts = seed().apply(preset).build();
+    var opts = seed().withPreset(preset).build();
     assertEquals("preset-id", opts.sessionId());
   }
 
@@ -95,7 +95,7 @@ final class SessionPresetTest {
   void presetsStackAssociatively() {
     SessionPreset one = b -> b.withSessionId("first");
     SessionPreset two = b -> b.withSessionId("second");
-    var opts = seed().apply(one).apply(two).build();
+    var opts = seed().withPreset(one).withPreset(two).build();
     assertEquals("second", opts.sessionId());
   }
 
@@ -103,7 +103,7 @@ final class SessionPresetTest {
   void presetsLayerDistinctFields() {
     SessionPreset tracing = b -> b.withSessionId("trace");
     SessionPreset costing = b -> b.withCostCalculator(CostCalculator.staticTable(Map.of()));
-    var opts = seed().apply(tracing).apply(costing).build();
+    var opts = seed().withPreset(tracing).withPreset(costing).build();
     assertEquals("trace", opts.sessionId());
     assertSame(CostCalculator.staticTable(Map.of()).getClass(), opts.costCalculator().getClass());
   }
@@ -112,7 +112,7 @@ final class SessionPresetTest {
   void presetCanAppendHook() {
     PreToolUseHook hook = (call, ctx) -> HookOutcome.cont();
     SessionPreset preset = b -> b.withHook(hook);
-    var opts = seed().apply(preset).build();
+    var opts = seed().withPreset(preset).build();
     assertEquals(1, opts.hooks().size());
     assertSame(hook, opts.hooks().get(0));
   }
@@ -121,14 +121,14 @@ final class SessionPresetTest {
   void presetCanReturnDifferentBuilderInstance() {
     var replacement = SessionOptions.newBuilder().withModel(stubModel()).withSessionId("forked");
     SessionPreset preset = b -> replacement;
-    var opts = seed().apply(preset).build();
+    var opts = seed().withPreset(preset).build();
     assertEquals("forked", opts.sessionId());
   }
 
   @Test
   void presetIsFunctionalInterfaceUsableAsMethodReference() {
     SessionPreset preset = SessionPresetTest::tagAsCanonical;
-    var opts = seed().apply(preset).build();
+    var opts = seed().withPreset(preset).build();
     assertEquals("canonical", opts.sessionId());
   }
 
