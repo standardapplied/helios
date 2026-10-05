@@ -5,6 +5,9 @@
 
 package com.standardapplied.helios.onnx;
 
+import static java.util.function.Predicate.not;
+
+import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.embedding.EmbeddingConfig;
 import java.io.IOException;
@@ -18,7 +21,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
@@ -37,7 +39,6 @@ final class OnnxModelDownloader implements AutoCloseable {
   private static final String TOKENIZER_FILE = "tokenizer.json";
 
   private final String modelName;
-  private final EmbeddingConfig config;
   private final OnnxModelSpec spec;
   private final HttpClient httpClient;
   private final Path localModelDir;
@@ -51,9 +52,8 @@ final class OnnxModelDownloader implements AutoCloseable {
   OnnxModelDownloader(String modelName, EmbeddingConfig config, OnnxModelSpec spec, URI hub) {
     this.hub = hub;
     this.modelName = modelName;
-    this.config = config;
     this.spec = spec;
-    this.httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
+    this.httpClient = HttpClientFactory.createForDownloads();
 
     var parts = modelName.split("/");
     var owner = parts.length == 2 ? parts[0] : modelName;
@@ -61,81 +61,72 @@ final class OnnxModelDownloader implements AutoCloseable {
     this.localModelDir = Paths.get(config.workingDirectory(), owner, shortName);
   }
 
-  void downloadModel() throws IOException {
+  /**
+   * Downloads the model unless a finished marker shows an earlier run completed it.
+   *
+   * @return the files the model is loaded from
+   */
+  ModelFiles downloadModel() throws IOException {
+    var downloaded =
+        new ModelFiles(
+            localModelDir.resolve(spec.onnxFilenamePrefix() + ".onnx"),
+            localModelDir.resolve(TOKENIZER_FILE));
     if (Files.exists(localModelDir.resolve(FINISHED_MARKER))) {
       LOGGER.info("Model already downloaded at: %s".formatted(localModelDir));
-      return;
+      return downloaded;
     }
-
-    var subfolder = spec.onnxSubfolder();
     LOGGER.info("Downloading ONNX model: %s".formatted(modelName));
-
-    var onnxFilesToDownload = new ArrayList<String>();
-    var rootFilesToDownload = new ArrayList<String>();
-    var hasOnnxModel = false;
-
-    if (!Strings.isBlank(subfolder)) {
-      var subfolderFiles = fetchFileList(modelName, "main/" + subfolder);
-      for (var currFile : subfolderFiles) {
-        if (isSelectedOnnxFile(currFile)) {
-          if (currFile.toLowerCase().endsWith(".onnx")) {
-            hasOnnxModel = true;
-          }
-          onnxFilesToDownload.add(currFile);
-        }
-      }
-
-      var rootFiles = fetchFileList(modelName, "main");
-      for (var currFile : rootFiles) {
-        var f = currFile.toLowerCase();
-        if (isTokenizerFile(f)) {
-          rootFilesToDownload.add(currFile);
-        }
-      }
-    } else {
-      var allFiles = fetchFileList(modelName, "main");
-      for (var currFile : allFiles) {
-        var f = currFile.toLowerCase();
-        if (isSelectedOnnxFile(currFile)) {
-          if (f.endsWith(".onnx")) {
-            hasOnnxModel = true;
-          }
-          onnxFilesToDownload.add(currFile);
-        } else if (isTokenizerFile(f)) {
-          rootFilesToDownload.add(currFile);
-        }
-      }
+    var files = chooseFiles(listFiles());
+    Files.createDirectories(localModelDir);
+    for (var file : files) {
+      var destination = resolveLocalPath(localModelDir, file.localName());
+      LOGGER.info(file.progress());
+      downloadFile(file.remotePath(), destination);
     }
+    writeFinishedMarker();
+    LOGGER.info("Model download completed: %s".formatted(localModelDir));
+    return downloaded;
+  }
 
-    if (!hasOnnxModel) {
+  private Listing listFiles() throws IOException {
+    var subfolder = spec.onnxSubfolder();
+    if (Strings.isBlank(subfolder)) {
+      var files = fetchFileList("main");
+      return new Listing(files, files.stream().filter(not(this::isSelectedOnnxFile)).toList(), "");
+    }
+    return new Listing(fetchFileList("main/" + subfolder), fetchFileList("main"), subfolder + "/");
+  }
+
+  private List<ModelFile> chooseFiles(Listing listing) throws IOException {
+    var onnxFiles = listing.onnxCandidates().stream().filter(this::isSelectedOnnxFile).toList();
+    if (onnxFiles.stream().noneMatch(file -> file.toLowerCase().endsWith(".onnx"))) {
       throw new IOException("Model is not available in ONNX format");
     }
-
-    Files.createDirectories(localModelDir);
-
-    for (var currFile : onnxFilesToDownload) {
-      var localFileName = stripSubfolderPrefix(currFile, subfolder);
-      var destination = resolveLocalPath(localModelDir, localFileName);
-      LOGGER.info("Downloading: %s -> %s".formatted(currFile, localFileName));
-      downloadFile(modelName, currFile, destination);
+    var chosen = new ArrayList<ModelFile>();
+    for (var file : onnxFiles) {
+      var localName = listing.localName(file);
+      chosen.add(
+          new ModelFile(file, localName, "Downloading: %s -> %s".formatted(file, localName)));
     }
-
-    for (var currFile : rootFilesToDownload) {
-      var destination = resolveLocalPath(localModelDir, currFile);
-      LOGGER.info("Downloading: %s".formatted(currFile));
-      downloadFile(modelName, currFile, destination);
-    }
-
-    var marker = localModelDir.resolve(FINISHED_MARKER);
-    if (!Files.exists(marker)) {
-      try {
-        Files.createFile(marker);
-      } catch (FileAlreadyExistsException ignored) {
-        // A concurrent downloader for the same model won the race. Both downloaded the same
-        // content; the marker is a flag, not state, so either creator is fine.
+    for (var file : listing.rootCandidates()) {
+      if (isTokenizerFile(file.toLowerCase())) {
+        chosen.add(new ModelFile(file, file, "Downloading: %s".formatted(file)));
       }
     }
-    LOGGER.info("Model download completed: %s".formatted(localModelDir));
+    return chosen;
+  }
+
+  private void writeFinishedMarker() throws IOException {
+    var marker = localModelDir.resolve(FINISHED_MARKER);
+    if (Files.exists(marker)) {
+      return;
+    }
+    try {
+      Files.createFile(marker);
+    } catch (FileAlreadyExistsException ignored) {
+      // A concurrent downloader for the same model won the race. Both downloaded the same
+      // content; the marker is a flag, not state, so either creator is fine.
+    }
   }
 
   /**
@@ -163,14 +154,6 @@ final class OnnxModelDownloader implements AutoCloseable {
     return resolved;
   }
 
-  Path modelPath() {
-    return localModelDir.resolve(spec.onnxFilenamePrefix() + ".onnx");
-  }
-
-  Path tokenizerPath() {
-    return localModelDir.resolve(TOKENIZER_FILE);
-  }
-
   private boolean isSelectedOnnxFile(String filePath) {
     var name = filePath;
     var slash = name.lastIndexOf('/');
@@ -183,8 +166,8 @@ final class OnnxModelDownloader implements AutoCloseable {
         || name.startsWith(prefix + ".onnx_data_");
   }
 
-  private List<String> fetchFileList(String hfModel, String treePath) throws IOException {
-    var url = hub + "/api/models/" + hfModel + "/tree/" + treePath;
+  private List<String> fetchFileList(String treePath) throws IOException {
+    var url = hub + "/api/models/" + modelName + "/tree/" + treePath;
     var request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
 
     try {
@@ -201,12 +184,12 @@ final class OnnxModelDownloader implements AutoCloseable {
     }
   }
 
-  private void downloadFile(String hfModel, String filePath, Path destination) throws IOException {
+  private void downloadFile(String filePath, Path destination) throws IOException {
     if (Files.exists(destination) && Files.size(destination) > 0) {
       LOGGER.info("Skipping (already present): %s".formatted(destination.getFileName()));
       return;
     }
-    var url = "%s/%s/resolve/main/%s".formatted(hub, hfModel, filePath);
+    var url = "%s/%s/resolve/main/%s".formatted(hub, modelName, filePath);
     var request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
 
     try {
@@ -260,23 +243,36 @@ final class OnnxModelDownloader implements AutoCloseable {
         || filename.equals("vocab.txt");
   }
 
-  private String stripSubfolderPrefix(String filePath, String subfolder) {
-    if (!Strings.isBlank(subfolder) && filePath.startsWith(subfolder + "/")) {
-      return filePath.substring(subfolder.length() + 1);
-    }
-    return filePath;
-  }
-
   @Override
   public void close() {
-    httpClient.shutdown();
-    try {
-      if (!httpClient.awaitTermination(Duration.ofSeconds(5))) {
-        httpClient.shutdownNow();
-      }
-    } catch (InterruptedException e) {
-      httpClient.shutdownNow();
-      Thread.currentThread().interrupt();
+    HttpClientFactory.shutdownGracefully(httpClient);
+  }
+
+  /**
+   * The files a downloaded model is loaded from.
+   *
+   * @param model the ONNX model file
+   * @param tokenizer the tokenizer file
+   */
+  record ModelFiles(Path model, Path tokenizer) {}
+
+  /**
+   * What the hub lists for a model: the candidates for its ONNX files, the candidates for its
+   * tokenizer files, and the subfolder prefix an ONNX file's hub path loses in the model directory.
+   */
+  private record Listing(
+      List<String> onnxCandidates, List<String> rootCandidates, String subfolderPrefix) {
+
+    String localName(String onnxFile) {
+      return onnxFile.startsWith(subfolderPrefix)
+          ? onnxFile.substring(subfolderPrefix.length())
+          : onnxFile;
     }
   }
+
+  /**
+   * A file chosen for download: its path on the hub, its name in the model directory and the
+   * progress line logged when it is fetched.
+   */
+  private record ModelFile(String remotePath, String localName, String progress) {}
 }

@@ -232,11 +232,15 @@ class OnnxModelDownloaderTest {
   }
 
   @Test
-  void modelAndTokenizerPathsSitInTheModelDirectory() {
+  void modelAndTokenizerPathsSitInTheModelDirectory() throws IOException {
+    Files.createDirectories(cache.resolve("acme/tiny"));
+    Files.createFile(cache.resolve("acme/tiny/.finished"));
     var config = EmbeddingConfig.newBuilder().withWorkingDirectory(cache.toString()).build();
     try (var downloader = new OnnxModelDownloader(MODEL, config, SUBFOLDER_SPEC)) {
-      assertEquals(cache.resolve("acme/tiny/model.onnx"), downloader.modelPath());
-      assertEquals(cache.resolve("acme/tiny/tokenizer.json"), downloader.tokenizerPath());
+      var files = downloader.downloadModel();
+
+      assertEquals(cache.resolve("acme/tiny/model.onnx"), files.model());
+      assertEquals(cache.resolve("acme/tiny/tokenizer.json"), files.tokenizer());
     }
   }
 
