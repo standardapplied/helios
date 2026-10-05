@@ -8,29 +8,16 @@ import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
-import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
 import io.helidon.http.Status;
-import io.helidon.http.sse.SseEvent;
-import io.helidon.webserver.CloseConnectionException;
 import io.helidon.webserver.http.HttpRules;
 import io.helidon.webserver.http.HttpService;
 import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
-import io.helidon.webserver.sse.SseSink;
-import java.io.IOException;
-import java.net.SocketException;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Flow;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -196,177 +183,12 @@ public final class AgentHttpService implements HttpService {
   }
 
   private void eventsHandler(ServerRequest req, ServerResponse resp) {
-    var sessionOpt = findSession(req, resp);
-    if (sessionOpt.isEmpty()) {
-      return;
-    }
-    var session = sessionOpt.get();
-    var sink = resp.sink(SseSink.TYPE);
-    var done = new CountDownLatch(1);
-    var subscription = new AtomicReference<Flow.Subscription>();
-    session
-        .events()
-        .subscribe(
-            new Flow.Subscriber<QueryEvent>() {
-              @Override
-              public void onSubscribe(Flow.Subscription s) {
-                subscription.set(s);
-                s.request(Long.MAX_VALUE);
-                // Synthetic Ready event so clients can synchronously confirm subscription is
-                // live before triggering work — closes the race between Helidon writing 200 OK
-                // and the subscriber actually registering on the SubmissionPublisher.
-                try {
-                  sink.emit(SseEvent.builder().name("Ready").data("{}").build());
-                } catch (Exception ignored) {
-                  // sink failures are handled in onNext below
-                }
-              }
-
-              @Override
-              public void onNext(QueryEvent event) {
-                try {
-                  sink.emit(
-                      SseEvent.builder()
-                          .name(eventName(event))
-                          .data(objectMapper.writeValueAsString(event))
-                          .build());
-                } catch (Exception ex) {
-                  if (!isDisconnect(ex)) {
-                    LOGGER.log(
-                        Level.WARNING, "SSE emit failed for session " + session.sessionId(), ex);
-                  }
-                  var s = subscription.get();
-                  if (s != null) {
-                    s.cancel();
-                  }
-                  done.countDown();
-                }
-              }
-
-              @Override
-              public void onError(Throwable t) {
-                LOGGER.log(
-                    Level.WARNING,
-                    "events publisher errored for session " + session.sessionId(),
-                    t);
-                done.countDown();
-              }
-
-              @Override
-              public void onComplete() {
-                done.countDown();
-              }
-            });
-    try {
-      done.await();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    } finally {
-      try {
-        sink.close();
-      } catch (Exception ignored) {
-        // sink may already be closed by Helidon if the client disconnected
-      }
-    }
+    findSession(req, resp)
+        .ifPresent(session -> SessionEventStream.stream(session, resp, objectMapper));
   }
 
   private void resultHandler(ServerRequest req, ServerResponse resp) {
-    var sessionOpt = findSession(req, resp);
-    if (sessionOpt.isEmpty()) {
-      return;
-    }
-    var session = sessionOpt.orElseThrow();
-    var timeoutSeconds = parseResultTimeoutSeconds(req.query().first("timeout").orElse(null));
-    var outcome = awaitResult(session.result(), timeoutSeconds, session.sessionId());
-    if (outcome.body() == null) {
-      resp.status(outcome.status()).send();
-    } else {
-      resp.status(outcome.status()).send(outcome.body());
-    }
-  }
-
-  /**
-   * Outcome of a long-poll wait on a session's terminal future, captured as an HTTP {@link Status}
-   * + optional body. {@code null} body produces a body-less response (used for the {@code 204 No
-   * Content} timeout case).
-   */
-  record ResultLongPollOutcome(Status status, Object body) {}
-
-  /**
-   * Wait up to {@code timeoutSeconds} for {@code future} to complete and translate the result into
-   * an HTTP status + body. Package-private so unit tests can exercise the catch paths ({@link
-   * InterruptedException} / {@link ExecutionException}) that are awkward to reach from a black-box
-   * HTTP test.
-   *
-   * @param future the session's result future; non-null
-   * @param timeoutSeconds non-negative wait budget
-   * @param sessionIdForLog session id used only for the WARNING log on execution failure
-   * @return outcome to translate to the HTTP response
-   */
-  static ResultLongPollOutcome awaitResult(
-      CompletableFuture<ResultMessage> future, long timeoutSeconds, String sessionIdForLog) {
-    try {
-      var terminal = future.get(timeoutSeconds, TimeUnit.SECONDS);
-      return new ResultLongPollOutcome(
-          Status.OK_200, Map.of("type", terminal.getClass().getSimpleName(), "result", terminal));
-    } catch (TimeoutException e) {
-      return new ResultLongPollOutcome(Status.NO_CONTENT_204, null);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return new ResultLongPollOutcome(
-          Status.SERVICE_UNAVAILABLE_503,
-          Map.of("error", "request interrupted while waiting for session result"));
-    } catch (ExecutionException e) {
-      // Helios is a library; diagnostic info reaches the deployer, who decides whether to
-      // forward it to their downstream HTTP clients. The cause message is part of that
-      // diagnostic surface — stripping it here would force deployers to dig through server-side
-      // logs to correlate a failed request with what actually went wrong. Deployers that need to
-      // sanitise the body can wrap this response at their HTTP layer.
-      LOGGER.log(
-          Level.WARNING, "session " + sessionIdForLog + " result future failed exceptionally", e);
-      var cause = e.getCause();
-      var msg = cause == null || cause.getMessage() == null ? "unknown" : cause.getMessage();
-      return new ResultLongPollOutcome(
-          Status.INTERNAL_SERVER_ERROR_500,
-          Map.of("error", "session terminated abnormally: " + msg));
-    }
-  }
-
-  /** Default long-poll timeout when the client omits {@code ?timeout}. */
-  static final long DEFAULT_RESULT_TIMEOUT_SECONDS = 60L;
-
-  /** Hard cap on the long-poll timeout so one request cannot pin a server thread indefinitely. */
-  static final long MAX_RESULT_TIMEOUT_SECONDS = 300L;
-
-  /**
-   * Parse the {@code timeout} query parameter. {@code null} or blank → {@link
-   * #DEFAULT_RESULT_TIMEOUT_SECONDS}; malformed values silently fall back to the default rather
-   * than 400ing (long-poll clients sometimes omit or mistype the param). Negative values clamp to
-   * {@code 0}; values above {@link #MAX_RESULT_TIMEOUT_SECONDS} clamp to the cap.
-   *
-   * <p>Package-private for unit-test access; the HTTP handler reads the query param and passes the
-   * raw value here.
-   *
-   * @param raw the raw query-string value; may be {@code null}
-   * @return a long in {@code [0, MAX_RESULT_TIMEOUT_SECONDS]}
-   */
-  static long parseResultTimeoutSeconds(String raw) {
-    if (Strings.isBlank(raw)) {
-      return DEFAULT_RESULT_TIMEOUT_SECONDS;
-    }
-    long n;
-    try {
-      n = Long.parseLong(raw.trim());
-    } catch (NumberFormatException e) {
-      return DEFAULT_RESULT_TIMEOUT_SECONDS;
-    }
-    if (n < 0L) {
-      return 0L;
-    }
-    if (n > MAX_RESULT_TIMEOUT_SECONDS) {
-      return MAX_RESULT_TIMEOUT_SECONDS;
-    }
-    return n;
+    findSession(req, resp).ifPresent(session -> ResultLongPoll.respond(session, req, resp));
   }
 
   private void deleteHandler(ServerRequest req, ServerResponse resp) {
@@ -397,44 +219,5 @@ public final class AgentHttpService implements HttpService {
     } catch (RuntimeException e) {
       throw new JacksonRuntimeException("failed to parse request body", e);
     }
-  }
-
-  private static String eventName(QueryEvent event) {
-    return event.getClass().getSimpleName();
-  }
-
-  /**
-   * Decide whether {@code ex} (or any of its causes) represents a client disconnect during SSE
-   * emit. The agent loop should keep producing events for in-flight work even when the HTTP peer
-   * has gone away; the only effect is that we stop forwarding to the dead sink.
-   *
-   * <p>Helidon 4.x raises {@link CloseConnectionException} (and its subclass {@code
-   * ServerConnectionException}) when it detects the peer closed the socket — that is the
-   * authoritative typed signal and the first check below.
-   *
-   * <p>String-matching on {@link SocketException} / {@link IOException} messages is preserved as a
-   * fallback for code paths that bypass Helidon's wrapping (raw socket I/O surfacing through the
-   * JDK), and for forward-compatibility if a future Helidon version stops wrapping in some
-   * scenarios. Matches the three messages the JDK socket layer produces on local-peer hangups
-   * across platforms.
-   */
-  static boolean isDisconnect(Throwable ex) {
-    var current = ex;
-    while (current != null) {
-      if (current instanceof CloseConnectionException) {
-        return true;
-      }
-      if (current instanceof SocketException || current instanceof IOException) {
-        var msg = current.getMessage();
-        if (msg != null
-            && (msg.contains("Broken pipe")
-                || msg.contains("Connection reset")
-                || msg.contains("Socket closed"))) {
-          return true;
-        }
-      }
-      current = current.getCause();
-    }
-    return false;
   }
 }
