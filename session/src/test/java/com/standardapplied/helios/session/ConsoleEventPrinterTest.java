@@ -140,6 +140,14 @@ final class ConsoleEventPrinterTest {
   }
 
   @Test
+  void aNullStreamErrorIsRejectedAndNothingIsWritten() {
+    var ex = assertThrows(NullPointerException.class, () -> printer.onError(null));
+
+    assertEquals("throwable must not be null", ex.getMessage());
+    assertEquals("", printed());
+  }
+
+  @Test
   void subscribingRequestsEveryEventAndCompletionFlushes() {
     var requested = new ArrayList<Long>();
     printer.onSubscribe(
