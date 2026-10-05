@@ -272,7 +272,7 @@ class ArchitectureRulesTest {
         .resideInAPackage(HELIOS + ".session.files")
         .and(not(name(WORKSPACE_WALK).or(nameStartingWith(WORKSPACE_WALK + "$"))))
         .should()
-        .callMethodWhere(
+        .accessTargetWhere(
             targetOwner(name(HELIOS + ".session.files.WorkspaceRoot"))
                 .and(target(name("walkFileTree"))))
         .because(oneWay)
@@ -281,7 +281,7 @@ class ArchitectureRulesTest {
         .that()
         .resideInAPackage(HELIOS + ".session.files")
         .should()
-        .callMethodWhere(
+        .accessTargetWhere(
             targetOwner(type(Files.class)).and(target(name("walk").or(name("walkFileTree")))))
         .because(oneWay)
         .check(LIBRARY);
