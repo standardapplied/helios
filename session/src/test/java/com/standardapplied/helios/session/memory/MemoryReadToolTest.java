@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.io.IOException;
@@ -34,7 +35,9 @@ final class MemoryReadToolTest {
   void readsFileContent(@TempDir Path tmp) throws IOException {
     var backend = seeded(tmp, "notes.md", "memory contents");
     var result =
-        MemoryReadTool.binding(backend).tool().execute(Map.of("path", "/memories/notes.md"));
+        MemoryReadTool.binding(backend)
+            .tool()
+            .execute(Map.of("path", "/memories/notes.md"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals("memory contents", result.output());
   }
@@ -56,7 +59,9 @@ final class MemoryReadToolTest {
     seeded(tmp, "user/a.md", "");
     var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
     var result =
-        MemoryReadTool.binding(backend).tool().execute(Map.of("path", "/memories/", "list", true));
+        MemoryReadTool.binding(backend)
+            .tool()
+            .execute(Map.of("path", "/memories/", "list", true), ToolContext.noop());
     assertTrue(result.success(), result.output());
     var lines = List.of(result.output().split("\n"));
     assertTrue(lines.contains("/memories/INDEX.md"));
@@ -67,7 +72,9 @@ final class MemoryReadToolTest {
   void emptyListReturnsExplicitMarker(@TempDir Path tmp) throws IOException {
     var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
     var result =
-        MemoryReadTool.binding(backend).tool().execute(Map.of("path", "/memories/", "list", true));
+        MemoryReadTool.binding(backend)
+            .tool()
+            .execute(Map.of("path", "/memories/", "list", true), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals("(empty)\n", result.output());
   }
@@ -75,7 +82,7 @@ final class MemoryReadToolTest {
   @Test
   void missingPathFails(@TempDir Path tmp) {
     var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
-    var result = MemoryReadTool.binding(backend).tool().execute(Map.of());
+    var result = MemoryReadTool.binding(backend).tool().execute(Map.of(), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("missing required 'path'"), result.output());
   }
@@ -84,7 +91,9 @@ final class MemoryReadToolTest {
   void missingFileFails(@TempDir Path tmp) {
     var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
     var result =
-        MemoryReadTool.binding(backend).tool().execute(Map.of("path", "/memories/nope.md"));
+        MemoryReadTool.binding(backend)
+            .tool()
+            .execute(Map.of("path", "/memories/nope.md"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("no such memory entry"), result.output());
   }
@@ -92,7 +101,10 @@ final class MemoryReadToolTest {
   @Test
   void badPathSurfacesAsFailure(@TempDir Path tmp) {
     var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
-    var result = MemoryReadTool.binding(backend).tool().execute(Map.of("path", "/etc/passwd"));
+    var result =
+        MemoryReadTool.binding(backend)
+            .tool()
+            .execute(Map.of("path", "/etc/passwd"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("MemoryRead:"), result.output());
   }

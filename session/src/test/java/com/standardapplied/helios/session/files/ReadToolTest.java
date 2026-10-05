@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -33,7 +34,7 @@ final class ReadToolTest {
     var tracker = InMemoryFileTracker.create();
 
     var binding = ReadTool.binding(ws, tracker);
-    var result = binding.tool().execute(Map.of("path", "hello.txt"));
+    var result = binding.tool().execute(Map.of("path", "hello.txt"), ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     var out = result.output();
@@ -52,7 +53,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "nums.txt", "offset", 2, "limit", 2));
+            .execute(Map.of("path", "nums.txt", "offset", 2, "limit", 2), ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     var out = result.output();
@@ -72,7 +73,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "nums.txt", "offset", 1L, "limit", 1L));
+            .execute(Map.of("path", "nums.txt", "offset", 1L, "limit", 1L), ToolContext.noop());
     assertTrue(result.success());
     assertTrue(result.output().contains("     1\ta"));
   }
@@ -83,7 +84,9 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "nums.txt", "offset", (short) 2, "limit", (short) 1));
+            .execute(
+                Map.of("path", "nums.txt", "offset", (short) 2, "limit", (short) 1),
+                ToolContext.noop());
     assertTrue(result.success());
     assertTrue(result.output().contains("     2\tb"), result.output());
   }
@@ -93,7 +96,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of());
+            .execute(Map.of(), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("missing required 'path'"), result.output());
   }
@@ -104,7 +107,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "x.txt", "offset", 0));
+            .execute(Map.of("path", "x.txt", "offset", 0), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("'offset' must be >= 1"), result.output());
   }
@@ -115,7 +118,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "x.txt", "limit", 0));
+            .execute(Map.of("path", "x.txt", "limit", 0), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("'limit' must be >= 1"), result.output());
   }
@@ -126,7 +129,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "dir"));
+            .execute(Map.of("path", "dir"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("not a regular file"), result.output());
   }
@@ -136,7 +139,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "../escape.txt"));
+            .execute(Map.of("path", "../escape.txt"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().startsWith("Read:"), result.output());
   }
@@ -146,7 +149,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "nope.txt"));
+            .execute(Map.of("path", "nope.txt"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("not a regular file"), result.output());
   }
@@ -186,7 +189,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "huge.txt"));
+            .execute(Map.of("path", "huge.txt"), ToolContext.noop());
     assertFalse(result.success(), result.output());
     assertTrue(result.output().contains("exceeds maximum size"), result.output());
     assertTrue(
@@ -203,7 +206,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "long-line.txt"));
+            .execute(Map.of("path", "long-line.txt"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("[line truncated to"), result.output());
     // And a closing note at the bottom.
@@ -230,11 +233,8 @@ final class ReadToolTest {
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
             .execute(
-                Map.of(
-                    "path",
-                    "many-lines.txt",
-                    "limit",
-                    1_000_000)); // big limit so byte budget is the cap that fires
+                Map.of("path", "many-lines.txt", "limit", 1_000_000),
+                ToolContext.noop()); // big limit so byte budget is the cap that fires
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("[truncated: total output exceeded"), result.output());
     assertTrue(result.output().contains("Grep"), result.output());
@@ -249,7 +249,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "blob.dat"));
+            .execute(Map.of("path", "blob.dat"), ToolContext.noop());
     assertFalse(result.success(), result.output());
     assertTrue(
         result.output().contains("binary file") || result.output().contains("refusing to decode"),
@@ -287,7 +287,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "chart.png"));
+            .execute(Map.of("path", "chart.png"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertTrue(result.hasAttachments(), "PNG must come back as a multimodal attachment");
     assertEquals(1, result.attachments().size());
@@ -304,7 +304,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "paper.pdf"));
+            .execute(Map.of("path", "paper.pdf"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertTrue(result.hasAttachments(), "PDF must come back as a multimodal attachment");
     var attachment = result.attachments().getFirst();
@@ -327,7 +327,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "big.png"));
+            .execute(Map.of("path", "big.png"), ToolContext.noop());
     assertFalse(result.success(), result.output());
     assertTrue(result.output().contains("exceeds inline attachment limit"), result.output());
     assertTrue(
@@ -348,7 +348,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "big.pdf"));
+            .execute(Map.of("path", "big.pdf"), ToolContext.noop());
     assertFalse(result.success(), result.output());
     assertTrue(result.output().contains("exceeds inline attachment limit"), result.output());
     assertTrue(
@@ -369,7 +369,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "borderline.png"));
+            .execute(Map.of("path", "borderline.png"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertTrue(result.hasAttachments());
   }
@@ -388,7 +388,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "real.png"));
+            .execute(Map.of("path", "real.png"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals(1, result.attachments().size());
     var attachment = result.attachments().getFirst();
@@ -500,7 +500,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "paper.pdf"));
+            .execute(Map.of("path", "paper.pdf"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     var attachment = result.attachments().getFirst();
     assertEquals("application/pdf", attachment.mimeType());
@@ -578,11 +578,11 @@ final class ReadToolTest {
     Files.writeString(tmp.resolve("data.json"), "{\"x\":1}", StandardCharsets.UTF_8);
     var binding = ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create());
 
-    var md = binding.tool().execute(Map.of("path", "notes.md"));
+    var md = binding.tool().execute(Map.of("path", "notes.md"), ToolContext.noop());
     assertTrue(md.success(), md.output());
     assertTrue(md.output().contains("title"));
 
-    var json = binding.tool().execute(Map.of("path", "data.json"));
+    var json = binding.tool().execute(Map.of("path", "data.json"), ToolContext.noop());
     assertTrue(json.success(), json.output());
     assertTrue(json.output().contains("\"x\":1"));
   }
@@ -598,7 +598,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "Dockerfile_no_extension"));
+            .execute(Map.of("path", "Dockerfile_no_extension"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("FROM alpine"));
   }
@@ -609,7 +609,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "note.txt"));
+            .execute(Map.of("path", "note.txt"), ToolContext.noop());
     assertTrue(result.success());
     assertFalse(result.hasAttachments(), "text results carry no attachments");
     assertEquals(0, result.attachments().size());
@@ -661,7 +661,7 @@ final class ReadToolTest {
       var result =
           ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
               .tool()
-              .execute(Map.of("path", "file." + ext));
+              .execute(Map.of("path", "file." + ext), ToolContext.noop());
       assertTrue(result.success(), ext + " should be text-readable: " + result.output());
       assertTrue(result.output().contains("content"), ext);
       assertFalse(result.hasAttachments(), ext + " should not have attachments");
@@ -680,7 +680,7 @@ final class ReadToolTest {
       var result =
           ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
               .tool()
-              .execute(Map.of("path", "img." + ext));
+              .execute(Map.of("path", "img." + ext), ToolContext.noop());
       assertTrue(result.success(), ext + ": " + result.output());
       assertTrue(result.hasAttachments(), ext + " should be an attachment");
       assertTrue(
@@ -697,7 +697,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "config.unknown"));
+            .execute(Map.of("path", "config.unknown"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("key=value"), result.output());
   }
@@ -711,7 +711,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "empty.txt"));
+            .execute(Map.of("path", "empty.txt"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals("", result.output());
   }
@@ -724,7 +724,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "five.txt", "limit", 5));
+            .execute(Map.of("path", "five.txt", "limit", 5), ToolContext.noop());
     assertTrue(result.success());
     assertFalse(
         result.output().contains("[truncated"),
@@ -742,7 +742,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create(), registry.redactor())
             .tool()
-            .execute(Map.of("path", "config.txt"));
+            .execute(Map.of("path", "config.txt"), ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     var out = result.output();
@@ -760,11 +760,11 @@ final class ReadToolTest {
     var withNull =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create(), null)
             .tool()
-            .execute(Map.of("path", "plain.txt"));
+            .execute(Map.of("path", "plain.txt"), ToolContext.noop());
     var twoArg =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "plain.txt"));
+            .execute(Map.of("path", "plain.txt"), ToolContext.noop());
 
     assertTrue(withNull.success());
     assertTrue(twoArg.success());
@@ -780,7 +780,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create(), registry.redactor())
             .tool()
-            .execute(Map.of("path", "plain.txt"));
+            .execute(Map.of("path", "plain.txt"), ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     assertTrue(
@@ -815,14 +815,14 @@ final class ReadToolTest {
     var tracker = InMemoryFileTracker.create();
     var tool = ReadTool.binding(WorkspaceRoot.of(root), tracker).tool();
 
-    var leak = tool.execute(Map.of("path", "leak.txt"));
+    var leak = tool.execute(Map.of("path", "leak.txt"), ToolContext.noop());
     assertFalse(leak.success());
     assertFalse(leak.output().contains("SENTINEL"), leak.output());
 
-    var dangling = tool.execute(Map.of("path", "dangling.txt"));
+    var dangling = tool.execute(Map.of("path", "dangling.txt"), ToolContext.noop());
     assertFalse(dangling.success());
 
-    var alias = tool.execute(Map.of("path", "alias.txt"));
+    var alias = tool.execute(Map.of("path", "alias.txt"), ToolContext.noop());
     assertTrue(alias.success(), alias.output());
     assertTrue(alias.output().contains("inside"), alias.output());
     assertTrue(tracker.fingerprintAtLastRead(root.toRealPath().resolve("inside.txt")).isPresent());
@@ -835,7 +835,7 @@ final class ReadToolTest {
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "pipe.txt"));
+            .execute(Map.of("path", "pipe.txt"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("not a regular file"), result.output());
   }

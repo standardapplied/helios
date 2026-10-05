@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -30,7 +31,10 @@ final class GrepToolTest {
         tmp.resolve("a.txt"), "hello world\nfoo bar\nhello again\n", StandardCharsets.UTF_8);
     Files.writeString(tmp.resolve("b.txt"), "no match here\n", StandardCharsets.UTF_8);
 
-    var result = GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "hello"));
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "hello"), ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     var out = result.output();
@@ -50,7 +54,10 @@ final class GrepToolTest {
   @Test
   void emptyResultWhenNoMatch(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("a.txt"), "nothing\n", StandardCharsets.UTF_8);
-    var result = GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "ZZZ"));
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "ZZZ"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals("", result.output());
   }
@@ -63,7 +70,7 @@ final class GrepToolTest {
     var result =
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
-            .execute(Map.of("pattern", "TARGET", "include", "*.java"));
+            .execute(Map.of("pattern", "TARGET", "include", "*.java"), ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("good.java"), result.output());
@@ -77,7 +84,9 @@ final class GrepToolTest {
     Files.writeString(tmp.resolve("visible.txt"), "HEADER\n", StandardCharsets.UTF_8);
 
     var result =
-        GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "HEADER"));
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "HEADER"), ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("visible.txt"), result.output());
@@ -90,7 +99,9 @@ final class GrepToolTest {
     Files.writeString(tmp.resolve("text.txt"), "TARGET line\n", StandardCharsets.UTF_8);
 
     var result =
-        GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "TARGET"));
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "TARGET"), ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("text.txt"), result.output());
@@ -103,7 +114,10 @@ final class GrepToolTest {
     java.util.Arrays.fill(buf, (byte) 'A');
     Files.write(tmp.resolve("big.txt"), buf);
     Files.writeString(tmp.resolve("small.txt"), "AAA\n", StandardCharsets.UTF_8);
-    var result = GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "AAA"));
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "AAA"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("small.txt"), result.output());
     assertFalse(result.output().contains("big.txt"));
@@ -111,7 +125,8 @@ final class GrepToolTest {
 
   @Test
   void missingPatternFails(@TempDir Path tmp) {
-    var result = GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of());
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of(), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("missing required 'pattern'"), result.output());
   }
@@ -119,7 +134,9 @@ final class GrepToolTest {
   @Test
   void invalidRegexFails(@TempDir Path tmp) {
     var result =
-        GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "[unclosed"));
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "[unclosed"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("Grep: invalid regex"), result.output());
   }
@@ -130,7 +147,7 @@ final class GrepToolTest {
     var result =
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
-            .execute(Map.of("pattern", "x", "path", "file.txt"));
+            .execute(Map.of("pattern", "x", "path", "file.txt"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("not a directory"), result.output());
   }
@@ -140,7 +157,7 @@ final class GrepToolTest {
     var result =
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
-            .execute(Map.of("pattern", "x", "path", "../etc"));
+            .execute(Map.of("pattern", "x", "path", "../etc"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().startsWith("Grep:"), result.output());
   }
@@ -157,7 +174,10 @@ final class GrepToolTest {
   void skipsMalformedUtf8(@TempDir Path tmp) throws IOException {
     Files.write(tmp.resolve("bad.txt"), new byte[] {(byte) 0xC3, 0x28, 'T', 'A', 'R', '\n'});
     Files.writeString(tmp.resolve("good.txt"), "TAR\n", StandardCharsets.UTF_8);
-    var result = GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "TAR"));
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "TAR"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("good.txt"), result.output());
     assertFalse(result.output().contains("bad.txt"));
@@ -172,7 +192,7 @@ final class GrepToolTest {
     var result =
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
-            .execute(Map.of("pattern", "needle", "include", "**/*.md"));
+            .execute(Map.of("pattern", "needle", "include", "**/*.md"), ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     var out = result.output();
@@ -198,7 +218,7 @@ final class GrepToolTest {
     var result =
         GrepTool.binding(WorkspaceRoot.of(tmp), registry.redactor())
             .tool()
-            .execute(Map.of("pattern", "api_key"));
+            .execute(Map.of("pattern", "api_key"), ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     var out = result.output();
@@ -211,8 +231,13 @@ final class GrepToolTest {
   void redactorNullEquivalentToOneArgBinding(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("a.txt"), "hello\n", StandardCharsets.UTF_8);
     var withNull =
-        GrepTool.binding(WorkspaceRoot.of(tmp), null).tool().execute(Map.of("pattern", "hello"));
-    var oneArg = GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "hello"));
+        GrepTool.binding(WorkspaceRoot.of(tmp), null)
+            .tool()
+            .execute(Map.of("pattern", "hello"), ToolContext.noop());
+    var oneArg =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "hello"), ToolContext.noop());
     assertTrue(withNull.success());
     assertTrue(oneArg.success());
     assertEquals(oneArg.output(), withNull.output());
@@ -232,7 +257,9 @@ final class GrepToolTest {
     Files.createSymbolicLink(root.resolve("loop.txt"), root.resolve("loop.txt"));
 
     var result =
-        GrepTool.binding(WorkspaceRoot.of(root)).tool().execute(Map.of("pattern", "SENTINEL"));
+        GrepTool.binding(WorkspaceRoot.of(root))
+            .tool()
+            .execute(Map.of("pattern", "SENTINEL"), ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     assertEquals("inside.txt:1:SENTINEL inside\n", result.output());
@@ -245,7 +272,10 @@ final class GrepToolTest {
     java.util.Arrays.fill(buf, (byte) 'A');
     Files.write(tmp.resolve("big.txt"), buf);
     Files.createSymbolicLink(tmp.resolve("b"), tmp.resolve("big.txt"));
-    var result = GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "AAA"));
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "AAA"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals("", result.output());
   }
@@ -255,7 +285,10 @@ final class GrepToolTest {
   void skipsSpecialFilesWithoutBlocking(@TempDir Path tmp) throws IOException {
     Assumptions.assumeTrue(SpecialFiles.mkfifo(tmp.resolve("pipe.txt")));
     Files.writeString(tmp.resolve("a.txt"), "hello\n", StandardCharsets.UTF_8);
-    var result = GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "hello"));
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "hello"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals("a.txt:1:hello\n", result.output());
   }
@@ -268,7 +301,10 @@ final class GrepToolTest {
     Files.createDirectories(ws.root().resolve("real"));
     Files.writeString(ws.root().resolve("real/a.txt"), "hello\n", StandardCharsets.UTF_8);
     Files.createSymbolicLink(ws.root().resolve("alias"), ws.root().resolve("real"));
-    var result = GrepTool.binding(ws).tool().execute(Map.of("pattern", "hello", "path", "alias"));
+    var result =
+        GrepTool.binding(ws)
+            .tool()
+            .execute(Map.of("pattern", "hello", "path", "alias"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals("real/a.txt:1:hello\n", result.output());
   }
