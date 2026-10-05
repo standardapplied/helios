@@ -40,7 +40,7 @@ final class LinuxSyscalls {
   static final int O_DIRECTORY = AARCH64 ? 16_384 : 65_536;
   static final int O_NOFOLLOW = AARCH64 ? 32_768 : 131_072;
   static final int O_CLOEXEC = 524_288;
-  static final int O_PATH = 2_097_152;
+  private static final int O_PATH = 2_097_152;
   static final int PIN = O_PATH | O_NOFOLLOW | O_CLOEXEC;
   static final Path DESCRIPTORS = Path.of("/proc/self/fd");
 
