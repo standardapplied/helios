@@ -5,19 +5,53 @@
 
 package com.standardapplied.helios.core.trace;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.events.HeliosEvent;
 import com.standardapplied.helios.core.model.Response.Usage;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class SpanBuilderTest {
+
+  @Test
+  void spanEventsWithNullSinksStaySilent() {
+    var events = new SpanEvents(null, Ids.newId());
+    var span = Span.newBuilder().withName("s").build();
+
+    assertDoesNotThrow(() -> events.opened(span.id(), null, "s"));
+    assertDoesNotThrow(() -> events.closed(span));
+  }
+
+  @Test
+  void spanClosedOfASpanWithoutDurationCarriesZero() {
+    var received = new ArrayList<HeliosEvent>();
+    var runId = Ids.newId();
+    var span = Span.newBuilder().withName("s").build();
+
+    new SpanEvents(List.of(received::add), runId).closed(span);
+
+    var closed = assertInstanceOf(HeliosEvent.SpanClosed.class, received.getFirst());
+    assertEquals(1, received.size());
+    assertEquals(runId, closed.runId());
+    assertEquals(span.id(), closed.closedSpanId());
+    assertEquals(Duration.ZERO, closed.duration());
+    assertTrue(closed.success());
+    assertEquals(Optional.empty(), closed.error());
+  }
 
   @Test
   void spanCarriesUsageAndCost() {
