@@ -11,9 +11,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 final class WorkspaceWalkTest {
@@ -90,6 +94,35 @@ final class WorkspaceWalkTest {
         });
 
     assertEquals(List.of("small.txt"), visited);
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void anEntryThatCannotBeOpenedIsSkipped(@TempDir Path tmp) throws IOException {
+    Files.writeString(tmp.resolve("a.txt"), "a", StandardCharsets.UTF_8);
+    var locked = Files.createDirectory(tmp.resolve("locked"));
+    Files.writeString(locked.resolve("b.txt"), "b", StandardCharsets.UTF_8);
+    Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+    try {
+      Assumptions.assumeFalse(Files.isReadable(locked), "permissions are not enforced (root)");
+      var workspace = WorkspaceRoot.of(tmp);
+      var visited = new ArrayList<String>();
+
+      WorkspaceWalk.run(
+          workspace,
+          workspace.root(),
+          new CancellationToken(),
+          10,
+          Long.MAX_VALUE,
+          (file, attrs, remaining) -> {
+            visited.add(workspace.relativize(file));
+            return 0;
+          });
+
+      assertEquals(List.of("a.txt"), visited);
+    } finally {
+      Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rwx------"));
+    }
   }
 
   @Test

@@ -859,4 +859,22 @@ final class ReadToolTest {
       Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
     }
   }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void unreadableFileIsAnIoErrorFingerprintingIt(@TempDir Path tmp) throws IOException {
+    var locked = Files.writeString(tmp.resolve("a.txt"), "x", StandardCharsets.UTF_8);
+    Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+    try {
+      Assumptions.assumeFalse(Files.isReadable(locked), "permissions are not enforced (root)");
+      var result =
+          ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+              .tool()
+              .execute(Map.of("path", "a.txt"), ToolContext.noop());
+      assertFalse(result.success());
+      assertTrue(result.output().startsWith("Read: I/O error fingerprinting: "), result.output());
+    } finally {
+      Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rw-------"));
+    }
+  }
 }
