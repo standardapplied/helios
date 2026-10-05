@@ -20,6 +20,7 @@
  *   <li>{@code schema} — output-schema + provenance support for structured generation.
  *   <li>{@code embedding} — provider-agnostic embedding interface (impl in helios-onnx).
  *   <li>{@code knowledge} — sandboxed filesystem-knowledge tools.
+ *   <li>{@code process} — bounded child-process execution and binary pinning.
  *   <li>{@code prompt} — versioned prompt registry + template rendering.
  *   <li>{@code trace} / {@code events} — observability primitives.
  *   <li>{@code runtime} — durable-run primitives (RunStore, ToolCallJournal, DurableResumeScanner)
@@ -39,6 +40,7 @@ module com.standardapplied.helios.core {
   exports com.standardapplied.helios.core.events;
   exports com.standardapplied.helios.core.fault;
   exports com.standardapplied.helios.core.model;
+  exports com.standardapplied.helios.core.process;
   exports com.standardapplied.helios.core.prompt;
   exports com.standardapplied.helios.core.runtime;
   exports com.standardapplied.helios.core.schema;

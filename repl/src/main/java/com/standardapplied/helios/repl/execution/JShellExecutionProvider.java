@@ -4,7 +4,6 @@
  */
 package com.standardapplied.helios.repl.execution;
 
-import com.standardapplied.helios.core.common.RedactionResult;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.runtime.CancellationToken;
@@ -414,7 +413,7 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     var stdoutResult = redactor.redact(raw.stdout());
     var stderrResult = redactor.redact(raw.stderr());
     return new RedactedOutput(
-        stdoutResult.text(), stderrResult.text(), mergeCounts(stdoutResult, stderrResult));
+        stdoutResult.text(), stderrResult.text(), stdoutResult.mergeCounts(stderrResult));
   }
 
   /**
@@ -470,16 +469,6 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
       // Preserve declaration order — Map.copyOf would lose it. The listener never mutates.
       delegate.onBindings(Collections.unmodifiableMap(redacted), result);
     };
-  }
-
-  private static Map<String, Integer> mergeCounts(RedactionResult a, RedactionResult b) {
-    if (a.counts().isEmpty() && b.counts().isEmpty()) {
-      return Map.of();
-    }
-    var merged = new LinkedHashMap<String, Integer>();
-    a.counts().forEach((k, v) -> merged.merge(k, v, Integer::sum));
-    b.counts().forEach((k, v) -> merged.merge(k, v, Integer::sum));
-    return Map.copyOf(merged);
   }
 
   private record RedactedOutput(String stdout, String stderr, Map<String, Integer> counts) {}
