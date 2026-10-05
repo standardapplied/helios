@@ -6,8 +6,6 @@
 package com.standardapplied.helios.core.runtime;
 
 import com.standardapplied.helios.core.common.Ids;
-import com.standardapplied.helios.core.tool.ToolResult;
-import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -15,16 +13,16 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Mediator between the agent loop and the {@link Durability} bundle. Encapsulates checkpointing,
- * tool-call journaling, and the "load existing or seed new" lifecycle of an {@link AgentRun}.
+ * Checkpoints the lifecycle of an {@link AgentRun} through the {@link RunStore} of a {@link
+ * Durability} bundle. Tool-call journaling is {@link ToolCallJournaling}'s.
  *
- * <p>Every public method is a no-op when invoked with a state lacking a run id — callers can wire
- * the coordinator unconditionally and the right behavior happens whether or not a particular run is
- * durable.
+ * <p>Every lifecycle method is a no-op when invoked with a state lacking a run id — callers can
+ * wire the coordinator unconditionally and the right behavior happens whether or not a particular
+ * run is durable.
  *
- * <p>Failures from the underlying {@link RunStore} or {@link ToolCallJournal} are caught and logged
- * at {@code WARNING}: durability is best-effort relative to the user's request, and a Postgres blip
- * during a checkpoint must never abort an otherwise-successful agent run.
+ * <p>Failures from the {@link RunStore} are caught and logged at {@code WARNING}: durability is
+ * best-effort relative to the user's request, and a Postgres blip during a checkpoint must never
+ * abort an otherwise-successful agent run.
  */
 public class DurabilityCoordinator {
 
@@ -131,101 +129,16 @@ public class DurabilityCoordinator {
     return builder.build();
   }
 
-  // --- Tool-call journaling ---
-
-  /**
-   * Insert a {@link ToolCallStatus#STARTED} entry. Returns {@code true} when a journal row was
-   * written so the caller knows whether to write the matching terminal status; failures and
-   * non-durable runs both return {@code false}.
-   */
-  public boolean journalStart(
-      UUID runId,
-      int iteration,
-      String toolCallId,
-      String toolName,
-      java.util.Map<String, Object> args) {
-    if (runId == null) {
-      return false;
-    }
-    var record =
-        ToolCallRecord.newBuilder()
-            .withRunId(runId)
-            .withIteration(iteration)
-            .withToolCallId(toolCallId)
-            .withToolName(toolName)
-            .withArgs(args)
-            .withStatus(ToolCallStatus.STARTED)
-            .withStartedAt(Ids.now())
-            .build();
-    try {
-      durability.toolCallJournal().start(record);
-      return true;
-    } catch (RuntimeException e) {
-      LOG.log(Level.WARNING, "Tool-call journal start failed; continuing without journal", e);
-      return false;
-    }
-  }
-
-  /**
-   * Write the terminal journal status for a tool call. Failures are logged but never propagated:
-   * the tool already executed and the user is owed its result. An orphaned {@code STARTED} entry
-   * will be reconciled on the next resume.
-   */
-  public void journalTerminal(UUID runId, String toolCallId, ToolResult toolResult) {
-    try {
-      if (toolResult.success()) {
-        durability.toolCallJournal().complete(runId, toolCallId, toolResult.output());
-      } else {
-        durability.toolCallJournal().fail(runId, toolCallId, toolResult.output());
-      }
-    } catch (RuntimeException e) {
-      LOG.log(
-          Level.WARNING,
-          "Tool-call journal terminal write failed; tool result preserved, journal entry"
-              + " left STARTED",
-          e);
-    }
-  }
-
-  /** Write a terminal {@code FAILED} entry — used by the {@code throws} path of tool execution. */
-  public void journalTerminalFailure(UUID runId, String toolCallId, String error) {
-    try {
-      durability.toolCallJournal().fail(runId, toolCallId, error);
-    } catch (RuntimeException e) {
-      LOG.log(
-          Level.WARNING,
-          "Tool-call journal failure-write failed; original tool exception will still propagate",
-          e);
-    }
-  }
-
   // --- Resume primitives ---
 
   public Optional<AgentRun> findRun(UUID runId) {
     return durability.runStore().find(runId);
   }
 
-  public List<ToolCallRecord> inflightFor(UUID runId) {
-    return durability.toolCallJournal().inflight(runId);
-  }
-
   /** Mark the run {@link AgentRunStatus#SUSPENDED} — used when refusing to resume. */
   public void markSuspended(AgentRun run) {
     safeCheckpoint(
         AgentRun.newBuilder(run).withStatus(AgentRunStatus.SUSPENDED).build(), "markSuspended");
-  }
-
-  /**
-   * Best-effort transition of an in-flight journal entry to {@code FAILED} with a synthetic reason.
-   * Used during resume preparation to clear the way for replay.
-   */
-  public void markInflightFailed(UUID runId, String toolCallId, String reason) {
-    try {
-      durability.toolCallJournal().fail(runId, toolCallId, reason);
-    } catch (RuntimeException e) {
-      LOG.log(Level.WARNING, () -> "Failed to mark inflight entry " + toolCallId + " failed");
-      LOG.log(Level.FINE, "mark-failed exception", e);
-    }
   }
 
   private void safeCheckpoint(AgentRun run, String where) {

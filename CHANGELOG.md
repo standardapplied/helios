@@ -123,6 +123,7 @@ new `core.process` package.
 | `DurableResumeScanner.Builder.register(agentId, resolver)`, `registerAgent(...)`, `registerWorkflow(...)` | `withResolver(agentId, resolver)`, `withAgent(...)`, `withWorkflow(...)` |
 | `ScriptedModel.Builder.thenText(...)`, `thenToolCalls(...)`, `thenRefusal(text)` (each appends the next turn) | `withTextTurn(...)`, `withToolCallsTurn(...)`, `withRefusalTurn(text)` (each still appends the next turn) |
 | `SessionOptions.Builder.apply(preset)` | `withPreset(preset)` |
+| `DurabilityCoordinator.journalStart(...)`, `journalTerminal(...)`, `journalTerminalFailure(...)`, `inflightFor(runId)`, `markInflightFailed(...)` | `new ToolCallJournaling(durability)` with `start(...)`, `complete(...)`, `fail(...)`, `inflight(runId)`, `markInflightFailed(...)`; `DurabilityCoordinator` keeps the run lifecycle, and journal warnings log under `com.standardapplied.helios.core.runtime.ToolCallJournaling` |
 
 ### Added
 
