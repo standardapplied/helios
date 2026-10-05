@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Assumptions;
@@ -838,5 +839,24 @@ final class ReadToolTest {
             .execute(Map.of("path", "pipe.txt"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("not a regular file"), result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void unsearchableParentIsAnIoErrorReadingTheSize(@TempDir Path tmp) throws IOException {
+    var dir = Files.createDirectory(tmp.resolve("locked"));
+    Files.writeString(dir.resolve("a.txt"), "x", StandardCharsets.UTF_8);
+    Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("---------"));
+    try {
+      Assumptions.assumeFalse(Files.isExecutable(dir), "permissions are not enforced (root)");
+      var result =
+          ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+              .tool()
+              .execute(Map.of("path", "locked/a.txt"), ToolContext.noop());
+      assertFalse(result.success());
+      assertTrue(result.output().startsWith("Read: I/O error reading size: "), result.output());
+    } finally {
+      Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
+    }
   }
 }
