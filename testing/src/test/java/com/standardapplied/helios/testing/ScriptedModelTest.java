@@ -24,6 +24,15 @@ import org.junit.jupiter.api.Test;
 
 class ScriptedModelTest {
 
+  @Test
+  void toolCallsTurnWithoutACallIsRejected() {
+    var builder = ScriptedModel.newBuilder();
+
+    var thrown = assertThrows(IllegalArgumentException.class, () -> builder.withToolCallsTurn());
+
+    assertEquals("withToolCallsTurn requires at least one tool call", thrown.getMessage());
+  }
+
   public record Verdict(String answer, int score) {}
 
   @Test
