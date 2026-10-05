@@ -6,6 +6,7 @@
 package com.standardapplied.helios.core.schema;
 
 import com.standardapplied.helios.core.common.Strings;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -94,40 +95,42 @@ public final class StructuredContentParser {
     if (Strings.isBlank(content)) {
       return null;
     }
-    var trimmed = content.trim();
-    try {
-      return parseToType(trimmed, schema, adapter, capturePolicy);
-    } catch (StructuredOutputParseException schemaMismatch) {
-      throw schemaMismatch;
-    } catch (Exception firstAttempt) {
-      var stripped = stripMarkdownWrapper(trimmed);
-      if (!stripped.equals(trimmed)) {
-        try {
-          return parseToType(stripped, schema, adapter, capturePolicy);
-        } catch (StructuredOutputParseException schemaMismatch) {
-          throw schemaMismatch;
-        } catch (Exception ignored) {
-        }
+    Exception firstFailure = null;
+    for (var candidate : candidates(content.trim())) {
+      try {
+        return parseToType(candidate, schema, adapter, capturePolicy);
+      } catch (StructuredOutputParseException schemaMismatch) {
+        throw schemaMismatch;
+      } catch (Exception syntaxError) {
+        firstFailure = firstFailure == null ? syntaxError : firstFailure;
       }
-      var extracted = extractFirstJsonObject(trimmed);
-      if (extracted != null && !extracted.equals(trimmed)) {
-        try {
-          return parseToType(extracted, schema, adapter, capturePolicy);
-        } catch (StructuredOutputParseException schemaMismatch) {
-          throw schemaMismatch;
-        } catch (Exception ignored) {
-        }
-      }
-      var detail =
-          capturePolicy == RawOutputCapturePolicy.ENABLED
-              ? firstAttempt.getMessage()
-              : "invalid JSON";
-      throw new StructuredOutputParseException(
-          List.of("JSON syntax error: " + detail), content, capturePolicy);
     }
+    var detail =
+        capturePolicy == RawOutputCapturePolicy.ENABLED
+            ? firstFailure.getMessage()
+            : "invalid JSON";
+    throw new StructuredOutputParseException(
+        List.of("JSON syntax error: " + detail), content, capturePolicy);
   }
 
-  @SuppressWarnings({"unchecked", "rawtypes"})
+  /**
+   * The JSON texts to try, in order: the trimmed content, then the content without a markdown
+   * fence, then the first balanced object inside it — each only where it differs from the content.
+   */
+  private static List<String> candidates(String trimmed) {
+    var candidates = new ArrayList<String>(3);
+    candidates.add(trimmed);
+    var stripped = stripMarkdownWrapper(trimmed);
+    if (!stripped.equals(trimmed)) {
+      candidates.add(stripped);
+    }
+    var extracted = extractFirstJsonObject(trimmed);
+    if (extracted != null && !extracted.equals(trimmed)) {
+      candidates.add(extracted);
+    }
+    return candidates;
+  }
+
   private static <T> T parseToType(
       String json,
       OutputSchema<T> schema,
@@ -139,20 +142,25 @@ public final class StructuredContentParser {
     if (!errors.isEmpty()) {
       throw new StructuredOutputParseException(errors, json, capturePolicy);
     }
-    T typed =
-        schema.innerOutputType() == null
-            ? adapter.fromMap(raw, schema.type())
-            : (T)
-                OutputSchema.reconstructProvenanced(
-                    raw,
-                    m -> {
-                      try {
-                        return adapter.fromMap((Map<String, Object>) m, schema.innerOutputType());
-                      } catch (Exception e) {
-                        throw new RuntimeException(e);
-                      }
-                    });
-    return submitValidated(typed, schema, json, capturePolicy);
+    return submitValidated(convert(raw, schema, adapter), schema, json, capturePolicy);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <T> T convert(Map<String, Object> raw, OutputSchema<T> schema, JsonAdapter adapter)
+      throws Exception {
+    if (schema.innerOutputType() == null) {
+      return adapter.fromMap(raw, schema.type());
+    }
+    return (T)
+        OutputSchema.reconstructProvenanced(
+            raw,
+            m -> {
+              try {
+                return adapter.fromMap((Map<String, Object>) m, schema.innerOutputType());
+              } catch (Exception e) {
+                throw new RuntimeException(e);
+              }
+            });
   }
 
   private static <T> T submitValidated(
@@ -182,42 +190,44 @@ public final class StructuredContentParser {
     if (content == null) {
       return null;
     }
-    int start = content.indexOf('{');
+    var start = content.indexOf('{');
     if (start < 0) {
       return null;
     }
-    int depth = 0;
-    boolean inString = false;
-    boolean escaped = false;
-    for (int i = start; i < content.length(); i++) {
-      char c = content.charAt(i);
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (inString) {
-        if (c == '\\') {
-          escaped = true;
-        } else if (c == '"') {
-          inString = false;
-        }
-        continue;
-      }
-      switch (c) {
-        case '"' -> inString = true;
+    var end = matchingBrace(content, start);
+    return end < 0 ? null : content.substring(start, end + 1);
+  }
+
+  private static int matchingBrace(String content, int open) {
+    var depth = 0;
+    for (var i = open; i < content.length(); i++) {
+      switch (content.charAt(i)) {
+        case '"' -> i = closingQuote(content, i);
         case '{' -> depth++;
         case '}' -> {
           depth--;
           if (depth == 0) {
-            return content.substring(start, i + 1);
+            return i;
           }
         }
         default -> {
-          // no-op
+          // Any other character outside a string leaves the depth unchanged.
         }
       }
     }
-    return null;
+    return -1;
+  }
+
+  private static int closingQuote(String content, int open) {
+    for (var i = open + 1; i < content.length(); i++) {
+      var c = content.charAt(i);
+      if (c == '\\') {
+        i++;
+      } else if (c == '"') {
+        return i;
+      }
+    }
+    return content.length();
   }
 
   /**

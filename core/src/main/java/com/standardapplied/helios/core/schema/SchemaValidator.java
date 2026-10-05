@@ -5,6 +5,9 @@
 
 package com.standardapplied.helios.core.schema;
 
+import static com.standardapplied.helios.core.schema.ScalarValidator.describeType;
+import static com.standardapplied.helios.core.schema.ScalarValidator.field;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -55,10 +58,10 @@ public final class SchemaValidator {
     switch (type) {
       case "object" -> validateObject(value, schema, path, errors);
       case "array" -> validateArray(value, schema, path, errors);
-      case "string" -> validateString(value, schema, path, errors);
-      case "integer" -> validateInteger(value, path, errors);
-      case "number" -> validateNumber(value, path, errors);
-      case "boolean" -> validateBoolean(value, path, errors);
+      case "string" -> ScalarValidator.validateString(value, schema, path, errors);
+      case "integer" -> ScalarValidator.validateInteger(value, path, errors);
+      case "number" -> ScalarValidator.validateNumber(value, path, errors);
+      case "boolean" -> ScalarValidator.validateBoolean(value, path, errors);
       default -> {
         // Unknown schema types pass through — we only validate what we recognize.
       }
@@ -71,28 +74,46 @@ public final class SchemaValidator {
       errors.add(field(path) + "expected object, got " + describeType(value));
       return;
     }
-    if (schema.required() != null) {
-      for (var name : schema.required()) {
-        if (!map.containsKey(name) || map.get(name) == null) {
-          errors.add(field(child(path, name)) + "is required but missing");
-        }
+    requireFields(map, schema, path, errors);
+    validateDeclared(map, schema, path, errors);
+    validateAdditional(map, schema, path, errors);
+  }
+
+  private static void requireFields(
+      Map<?, ?> map, JsonSchema schema, String path, List<String> errors) {
+    if (schema.required() == null) {
+      return;
+    }
+    for (var name : schema.required()) {
+      if (map.get(name) == null) {
+        errors.add(field(child(path, name)) + "is required but missing");
       }
     }
-    if (schema.properties() != null) {
-      for (var entry : schema.properties().entrySet()) {
-        var name = entry.getKey();
-        if (map.containsKey(name) && map.get(name) != null) {
-          validate(map.get(name), entry.getValue(), child(path, name), errors);
-        }
+  }
+
+  private static void validateDeclared(
+      Map<?, ?> map, JsonSchema schema, String path, List<String> errors) {
+    if (schema.properties() == null) {
+      return;
+    }
+    for (var entry : schema.properties().entrySet()) {
+      var name = entry.getKey();
+      if (map.get(name) != null) {
+        validate(map.get(name), entry.getValue(), child(path, name), errors);
       }
     }
-    if (schema.additionalProperties() != null) {
-      var declared = schema.properties() != null ? schema.properties().keySet() : List.<String>of();
-      for (var entry : map.entrySet()) {
-        var k = String.valueOf(entry.getKey());
-        if (!declared.contains(k)) {
-          validate(entry.getValue(), schema.additionalProperties(), child(path, k), errors);
-        }
+  }
+
+  private static void validateAdditional(
+      Map<?, ?> map, JsonSchema schema, String path, List<String> errors) {
+    if (schema.additionalProperties() == null) {
+      return;
+    }
+    var declared = schema.properties() != null ? schema.properties().keySet() : List.<String>of();
+    for (var entry : map.entrySet()) {
+      var k = String.valueOf(entry.getKey());
+      if (!declared.contains(k)) {
+        validate(entry.getValue(), schema.additionalProperties(), child(path, k), errors);
       }
     }
   }
@@ -110,76 +131,7 @@ public final class SchemaValidator {
     }
   }
 
-  private static void validateString(
-      Object value, JsonSchema schema, String path, List<String> errors) {
-    if (!(value instanceof String s)) {
-      errors.add(field(path) + "expected string, got " + describeType(value));
-      return;
-    }
-    if (schema.enumValues() != null
-        && !schema.enumValues().isEmpty()
-        && !schema.enumValues().contains(s)) {
-      errors.add(field(path) + "must be one of " + schema.enumValues() + ", got \"" + s + "\"");
-    }
-  }
-
-  private static void validateInteger(Object value, String path, List<String> errors) {
-    if (value instanceof Integer
-        || value instanceof Long
-        || value instanceof Short
-        || value instanceof Byte) {
-      return;
-    }
-    if (value instanceof Number n) {
-      var d = n.doubleValue();
-      if (d == Math.floor(d) && !Double.isInfinite(d)) {
-        return;
-      }
-      errors.add(field(path) + "expected integer, got non-integer number " + n);
-      return;
-    }
-    errors.add(field(path) + "expected integer, got " + describeType(value));
-  }
-
-  private static void validateNumber(Object value, String path, List<String> errors) {
-    if (!(value instanceof Number)) {
-      errors.add(field(path) + "expected number, got " + describeType(value));
-    }
-  }
-
-  private static void validateBoolean(Object value, String path, List<String> errors) {
-    if (!(value instanceof Boolean)) {
-      errors.add(field(path) + "expected boolean, got " + describeType(value));
-    }
-  }
-
   private static String child(String parent, String name) {
     return parent.isEmpty() ? name : parent + "." + name;
-  }
-
-  private static String field(String path) {
-    return path.isEmpty() ? "" : "field '" + path + "' ";
-  }
-
-  private static String describeType(Object value) {
-    if (value == null) {
-      return "null";
-    }
-    if (value instanceof Map) {
-      return "object";
-    }
-    if (value instanceof List) {
-      return "array";
-    }
-    if (value instanceof String) {
-      return "string";
-    }
-    if (value instanceof Boolean) {
-      return "boolean";
-    }
-    if (value instanceof Number) {
-      return "number";
-    }
-    return value.getClass().getSimpleName();
   }
 }

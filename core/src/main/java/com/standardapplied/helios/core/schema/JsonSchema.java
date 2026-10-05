@@ -5,6 +5,7 @@
 
 package com.standardapplied.helios.core.schema;
 
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -93,40 +94,39 @@ public record JsonSchema(
   public Map<String, Object> toMap() {
     var map = new LinkedHashMap<String, Object>();
     map.put("type", type);
-
-    if (properties != null && !properties.isEmpty()) {
-      var propsMap = new LinkedHashMap<String, Object>();
-      for (var entry : properties.entrySet()) {
-        propsMap.put(entry.getKey(), entry.getValue().toMap());
-      }
-      map.put("properties", propsMap);
-    }
-
-    if (items != null) {
-      map.put("items", items.toMap());
-    }
-
-    if (required != null && !required.isEmpty()) {
-      map.put("required", required);
-    }
-
-    if (enumValues != null && !enumValues.isEmpty()) {
-      map.put("enum", enumValues);
-    }
-
-    if (description != null) {
-      map.put("description", description);
-    }
-
-    if (format != null) {
-      map.put("format", format);
-    }
-
-    if (additionalProperties != null) {
-      map.put("additionalProperties", additionalProperties.toMap());
-    }
-
+    putIfPresent(map, "properties", propertiesMap());
+    putIfPresent(map, "items", mapOf(items));
+    putIfPresent(map, "required", nonEmpty(required));
+    putIfPresent(map, "enum", nonEmpty(enumValues));
+    putIfPresent(map, "description", description);
+    putIfPresent(map, "format", format);
+    putIfPresent(map, "additionalProperties", mapOf(additionalProperties));
     return map;
+  }
+
+  private Map<String, Object> propertiesMap() {
+    if (properties == null || properties.isEmpty()) {
+      return null;
+    }
+    var propsMap = new LinkedHashMap<String, Object>();
+    for (var entry : properties.entrySet()) {
+      propsMap.put(entry.getKey(), entry.getValue().toMap());
+    }
+    return propsMap;
+  }
+
+  private static Map<String, Object> mapOf(JsonSchema schema) {
+    return schema == null ? null : schema.toMap();
+  }
+
+  private static <C extends Collection<?>> C nonEmpty(C values) {
+    return values == null || values.isEmpty() ? null : values;
+  }
+
+  private static void putIfPresent(Map<String, Object> map, String key, Object value) {
+    if (value != null) {
+      map.put(key, value);
+    }
   }
 
   public static class Builder {
