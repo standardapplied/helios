@@ -19,12 +19,12 @@ import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unit tests for the package-private {@link AgentHttpService#awaitResult(CompletableFuture, long,
+ * Unit tests for the package-private {@link ResultLongPoll#awaitResult(CompletableFuture, long,
  * String)} helper. The integration test covers the happy and timeout paths through HTTP; this
  * fixture covers the exception paths (interrupted, execution-exception) that are awkward to reach
  * via a black-box HTTP call.
  */
-final class AgentHttpServiceAwaitResultTest {
+final class ResultLongPollAwaitResultTest {
 
   private static ResultMessage stubSuccess() {
     return new ResultMessage.Success(
@@ -34,7 +34,7 @@ final class AgentHttpServiceAwaitResultTest {
   @Test
   void successFutureReturns200WithTypedBody() {
     var future = CompletableFuture.completedFuture(stubSuccess());
-    var outcome = AgentHttpService.awaitResult(future, 5L, "sess-1");
+    var outcome = ResultLongPoll.awaitResult(future, 5L, "sess-1");
     assertEquals(io.helidon.http.Status.OK_200, outcome.status());
     @SuppressWarnings("unchecked")
     var body = (Map<String, Object>) outcome.body();
@@ -45,7 +45,7 @@ final class AgentHttpServiceAwaitResultTest {
   @Test
   void unresolvedFutureWithinShortTimeoutReturns204() {
     var future = new CompletableFuture<ResultMessage>();
-    var outcome = AgentHttpService.awaitResult(future, 0L, "sess-1");
+    var outcome = ResultLongPoll.awaitResult(future, 0L, "sess-1");
     assertEquals(io.helidon.http.Status.NO_CONTENT_204, outcome.status());
     assertNull(outcome.body(), "204 must carry a null body sentinel");
   }
@@ -55,7 +55,7 @@ final class AgentHttpServiceAwaitResultTest {
     var future = new CompletableFuture<ResultMessage>();
     Thread.currentThread().interrupt();
     try {
-      var outcome = AgentHttpService.awaitResult(future, 60L, "sess-1");
+      var outcome = ResultLongPoll.awaitResult(future, 60L, "sess-1");
       assertEquals(io.helidon.http.Status.SERVICE_UNAVAILABLE_503, outcome.status());
       @SuppressWarnings("unchecked")
       var body = (Map<String, Object>) outcome.body();
@@ -74,7 +74,7 @@ final class AgentHttpServiceAwaitResultTest {
     // full cause is also logged at WARNING for server-side observability.
     var future = new CompletableFuture<ResultMessage>();
     future.completeExceptionally(new IllegalStateException("backend exploded"));
-    var outcome = AgentHttpService.awaitResult(future, 5L, "sess-1");
+    var outcome = ResultLongPoll.awaitResult(future, 5L, "sess-1");
     assertEquals(io.helidon.http.Status.INTERNAL_SERVER_ERROR_500, outcome.status());
     @SuppressWarnings("unchecked")
     var body = (Map<String, Object>) outcome.body();
@@ -85,7 +85,7 @@ final class AgentHttpServiceAwaitResultTest {
   void exceptionallyCompletedFutureWithNullMessageStillReports500() {
     var future = new CompletableFuture<ResultMessage>();
     future.completeExceptionally(new RuntimeException((String) null));
-    var outcome = AgentHttpService.awaitResult(future, 5L, "sess-1");
+    var outcome = ResultLongPoll.awaitResult(future, 5L, "sess-1");
     assertEquals(io.helidon.http.Status.INTERNAL_SERVER_ERROR_500, outcome.status());
     @SuppressWarnings("unchecked")
     var body = (Map<String, Object>) outcome.body();
@@ -104,7 +104,7 @@ final class AgentHttpServiceAwaitResultTest {
             "sess-1", carrying, Usage.of(1, 1), CostEstimate.zero(), Duration.ZERO);
     var future = CompletableFuture.completedFuture((ResultMessage) terminal);
 
-    var outcome = AgentHttpService.awaitResult(future, 5L, "sess-1");
+    var outcome = ResultLongPoll.awaitResult(future, 5L, "sess-1");
     assertEquals(io.helidon.http.Status.OK_200, outcome.status());
     @SuppressWarnings("unchecked")
     var body = (Map<String, Object>) outcome.body();
