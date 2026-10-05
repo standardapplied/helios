@@ -53,7 +53,7 @@ class SubmitValidatorSelfCorrectionTest {
 
   @Test
   void semanticallyInvalidOutputIsCorrectedInsideTheLoop() {
-    var model = ScriptedModel.newBuilder().thenText(EVENTS).thenText(PEOPLE).build();
+    var model = ScriptedModel.newBuilder().withTextTurn(EVENTS).withTextTurn(PEOPLE).build();
     try (var session = session(model, PEOPLE_ONLY, 5)) {
       var out = session.runBlocking(UserMessage.text("give me people"), PEOPLE_ONLY);
 
@@ -72,7 +72,11 @@ class SubmitValidatorSelfCorrectionTest {
   @Test
   void validatorThatNeverPassesTerminatesAtMaxTurns() {
     var model =
-        ScriptedModel.newBuilder().thenText(EVENTS).thenText(EVENTS).thenText(EVENTS).build();
+        ScriptedModel.newBuilder()
+            .withTextTurn(EVENTS)
+            .withTextTurn(EVENTS)
+            .withTextTurn(EVENTS)
+            .build();
     try (var session = session(model, PEOPLE_ONLY, 3)) {
       var terminal = session.runBlocking(UserMessage.text("give me people"));
 
@@ -83,7 +87,7 @@ class SubmitValidatorSelfCorrectionTest {
 
   @Test
   void typedRunBlockingNeverReturnsAValueTheValidatorRejects() {
-    var model = ScriptedModel.newBuilder().thenText(EVENTS).thenText(EVENTS).build();
+    var model = ScriptedModel.newBuilder().withTextTurn(EVENTS).withTextTurn(EVENTS).build();
     try (var session = session(model, PEOPLE_ONLY, 2)) {
       var ex =
           assertThrows(
@@ -95,7 +99,7 @@ class SubmitValidatorSelfCorrectionTest {
 
   @Test
   void typedRunBlockingPostHocParseEnforcesTheValidator() {
-    var model = ScriptedModel.newBuilder().thenText(EVENTS).build();
+    var model = ScriptedModel.newBuilder().withTextTurn(EVENTS).build();
     try (var session = session(model, OutputSchema.of(Answer.class), 5)) {
       var ex =
           assertThrows(

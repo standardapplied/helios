@@ -144,8 +144,8 @@ public final class ScriptedModel implements Model {
      * @param text the assistant text of this turn
      * @return this builder for chaining
      */
-    public Builder thenText(String text) {
-      return thenText(text, Usage.of(0, 0));
+    public Builder withTextTurn(String text) {
+      return withTextTurn(text, Usage.of(0, 0));
     }
 
     /**
@@ -155,7 +155,7 @@ public final class ScriptedModel implements Model {
      * @param usage the token usage this turn reports
      * @return this builder for chaining
      */
-    public Builder thenText(String text, Usage usage) {
+    public Builder withTextTurn(String text, Usage usage) {
       Objects.requireNonNull(text, "text must not be null");
       Objects.requireNonNull(usage, "usage must not be null");
       turns.add(new Turn(text, List.of(), usage, FinishReason.STOP));
@@ -170,7 +170,7 @@ public final class ScriptedModel implements Model {
      * @param text the refusal text the provider surfaced; may be empty for pre-output declines
      * @return this builder for chaining
      */
-    public Builder thenRefusal(String text) {
+    public Builder withRefusalTurn(String text) {
       Objects.requireNonNull(text, "text must not be null");
       turns.add(new Turn(text, List.of(), Usage.of(0, 0), FinishReason.REFUSAL));
       return this;
@@ -182,8 +182,8 @@ public final class ScriptedModel implements Model {
      * @param toolCalls the tool calls this turn emits; at least one
      * @return this builder for chaining
      */
-    public Builder thenToolCalls(ToolCall... toolCalls) {
-      return thenToolCalls(Usage.of(0, 0), toolCalls);
+    public Builder withToolCallsTurn(ToolCall... toolCalls) {
+      return withToolCallsTurn(Usage.of(0, 0), toolCalls);
     }
 
     /**
@@ -193,10 +193,10 @@ public final class ScriptedModel implements Model {
      * @param toolCalls the tool calls this turn emits; at least one
      * @return this builder for chaining
      */
-    public Builder thenToolCalls(Usage usage, ToolCall... toolCalls) {
+    public Builder withToolCallsTurn(Usage usage, ToolCall... toolCalls) {
       Objects.requireNonNull(usage, "usage must not be null");
       if (toolCalls == null || toolCalls.length == 0) {
-        throw new IllegalArgumentException("thenToolCalls requires at least one tool call");
+        throw new IllegalArgumentException("withToolCallsTurn requires at least one tool call");
       }
       turns.add(new Turn(null, List.of(toolCalls), usage, FinishReason.TOOL_CALLS));
       return this;

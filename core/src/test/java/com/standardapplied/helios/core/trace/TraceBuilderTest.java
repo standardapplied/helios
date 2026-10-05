@@ -40,8 +40,8 @@ class TraceBuilderTest {
   @Test
   void traceWithMultipleSpans() {
     var builder = TraceBuilder.start("agent-run");
-    builder.span("model.chat", SpanKind.MODEL_CALL).end();
-    builder.span("tool.search", SpanKind.TOOL_EXECUTION).end();
+    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL).end();
+    builder.withChildSpan("tool.search", SpanKind.TOOL_EXECUTION).end();
 
     var trace = builder.end();
 
@@ -53,8 +53,8 @@ class TraceBuilderTest {
   @Test
   void traceWithNestedSpans() {
     var builder = TraceBuilder.start("agent-run");
-    var toolSpan = builder.span("tool.search", SpanKind.TOOL_EXECUTION);
-    var innerModel = toolSpan.span("inner.chat", SpanKind.MODEL_CALL);
+    var toolSpan = builder.withChildSpan("tool.search", SpanKind.TOOL_EXECUTION);
+    var innerModel = toolSpan.withChildSpan("inner.chat", SpanKind.MODEL_CALL);
     innerModel.end();
     toolSpan.end();
 
@@ -78,7 +78,7 @@ class TraceBuilderTest {
   @Test
   void endThrowsIfSpansStillOpen() {
     var builder = TraceBuilder.start("agent-run");
-    builder.span("model.chat", SpanKind.MODEL_CALL);
+    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL);
 
     var ex = assertThrows(IllegalStateException.class, builder::end);
     assertTrue(ex.getMessage().contains("1 span(s) still open"));
@@ -87,8 +87,8 @@ class TraceBuilderTest {
   @Test
   void failAutoFailsOpenSpans() {
     var builder = TraceBuilder.start("agent-run");
-    builder.span("model.chat", SpanKind.MODEL_CALL);
-    builder.span("tool.search", SpanKind.TOOL_EXECUTION);
+    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL);
+    builder.withChildSpan("tool.search", SpanKind.TOOL_EXECUTION);
 
     var trace = builder.fail("agent crashed");
 
@@ -120,7 +120,7 @@ class TraceBuilderTest {
     com.standardapplied.helios.core.events.EventSink sink = events::add;
     var builder = TraceBuilder.start("agent-run", runId, List.of(sink));
 
-    builder.span("model.chat", SpanKind.MODEL_CALL).end();
+    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL).end();
     builder.end();
 
     assertTrue(
@@ -136,6 +136,18 @@ class TraceBuilderTest {
   }
 
   @Test
+  void eventSinksHearNothingWithoutARunId() {
+    var events = new ArrayList<com.standardapplied.helios.core.events.HeliosEvent>();
+    com.standardapplied.helios.core.events.EventSink sink = events::add;
+    var builder = TraceBuilder.start("agent-run", null, List.of(sink));
+
+    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL).end();
+    builder.end();
+
+    assertEquals(List.of(), events);
+  }
+
+  @Test
   void sinkExceptionDoesNotPreventSpanCompletion() {
     var runId = com.standardapplied.helios.core.common.Ids.newId();
     com.standardapplied.helios.core.events.EventSink failing =
@@ -143,7 +155,7 @@ class TraceBuilderTest {
           throw new RuntimeException("sink failed");
         };
     var builder = TraceBuilder.start("agent-run", runId, List.of(failing));
-    builder.span("model.chat", SpanKind.MODEL_CALL).end();
+    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL).end();
     var trace = builder.end();
     assertEquals(1, trace.spans().size());
   }
@@ -151,8 +163,8 @@ class TraceBuilderTest {
   @Test
   void failWithMixOfOpenAndClosedSpans() {
     var builder = TraceBuilder.start("agent-run");
-    var span1 = builder.span("model.chat", SpanKind.MODEL_CALL);
-    builder.span("tool.search", SpanKind.TOOL_EXECUTION);
+    var span1 = builder.withChildSpan("model.chat", SpanKind.MODEL_CALL);
+    builder.withChildSpan("tool.search", SpanKind.TOOL_EXECUTION);
 
     span1.end();
     var trace = builder.fail("agent crashed");
@@ -175,7 +187,7 @@ class TraceBuilderTest {
   @Test
   void attributesRoundTrip() {
     var builder = TraceBuilder.start("agent-run");
-    builder.attribute("agent", "test-agent").attribute("model", "gemini");
+    builder.withAttribute("agent", "test-agent").withAttribute("model", "gemini");
 
     var trace = builder.end();
 
@@ -187,15 +199,15 @@ class TraceBuilderTest {
     var sessionId = UUID.randomUUID();
     var builder = TraceBuilder.start("agent-run");
     builder
-        .inputText("What is 2+2?")
-        .outputText("4")
-        .userId("user-1")
-        .sessionId(sessionId)
-        .modelId("gemini-2.0-flash")
-        .promptName("math-agent")
-        .promptVersion(2)
-        .groupId("eval-batch-1")
-        .labels(List.of("math", "test"));
+        .withInputText("What is 2+2?")
+        .withOutputText("4")
+        .withUserId("user-1")
+        .withSessionId(sessionId)
+        .withModelId("gemini-2.0-flash")
+        .withPromptName("math-agent")
+        .withPromptVersion(2)
+        .withGroupId("eval-batch-1")
+        .withLabels(List.of("math", "test"));
 
     var trace = builder.end();
 
@@ -221,14 +233,14 @@ class TraceBuilderTest {
   void rollsUpUsageAndCostAcrossSpans() {
     var builder = TraceBuilder.start("agent-run");
     builder
-        .span("model.chat", SpanKind.MODEL_CALL)
-        .usage(Usage.of(100, 50, 20, 10))
-        .cost(CostEstimate.ofMicroUsd(1_000L))
+        .withChildSpan("model.chat", SpanKind.MODEL_CALL)
+        .withUsage(Usage.of(100, 50, 20, 10))
+        .withCost(CostEstimate.ofMicroUsd(1_000L))
         .end();
     builder
-        .span("model.chat", SpanKind.MODEL_CALL)
-        .usage(Usage.of(80, 30, 0, 40))
-        .cost(CostEstimate.ofMicroUsd(500L))
+        .withChildSpan("model.chat", SpanKind.MODEL_CALL)
+        .withUsage(Usage.of(80, 30, 0, 40))
+        .withCost(CostEstimate.ofMicroUsd(500L))
         .end();
 
     var trace = builder.end();
@@ -241,14 +253,14 @@ class TraceBuilderTest {
   @Test
   void rollupIncludesNestedSpans() {
     var builder = TraceBuilder.start("agent-run");
-    var toolSpan = builder.span("tool.search", SpanKind.TOOL_EXECUTION);
+    var toolSpan = builder.withChildSpan("tool.search", SpanKind.TOOL_EXECUTION);
     toolSpan
-        .span("inner.chat", SpanKind.MODEL_CALL)
-        .usage(Usage.of(10, 5))
-        .cost(CostEstimate.ofMicroUsd(7L))
+        .withChildSpan("inner.chat", SpanKind.MODEL_CALL)
+        .withUsage(Usage.of(10, 5))
+        .withCost(CostEstimate.ofMicroUsd(7L))
         .end();
     toolSpan.end();
-    builder.span("model.chat", SpanKind.MODEL_CALL).usage(Usage.of(20, 15)).end();
+    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL).withUsage(Usage.of(20, 15)).end();
 
     var trace = builder.end();
 
@@ -260,8 +272,8 @@ class TraceBuilderTest {
   @Test
   void usageCostAndTotalTokensAbsentWhenNoSpanCarriesTypedUsage() {
     var builder = TraceBuilder.start("agent-run");
-    var span = builder.span("model.chat", SpanKind.MODEL_CALL);
-    span.attribute("inputTokens", "100").attribute("outputTokens", "50");
+    var span = builder.withChildSpan("model.chat", SpanKind.MODEL_CALL);
+    span.withAttribute("inputTokens", "100").withAttribute("outputTokens", "50");
     span.end();
 
     var trace = builder.end();
@@ -274,9 +286,9 @@ class TraceBuilderTest {
   @Test
   void totalTokensCountsOnlyTypedUsage() {
     var builder = TraceBuilder.start("agent-run");
-    builder.span("model.chat", SpanKind.MODEL_CALL).usage(Usage.of(10, 5)).end();
-    var attributed = builder.span("model.chat", SpanKind.MODEL_CALL);
-    attributed.attribute("inputTokens", "100").attribute("outputTokens", "50");
+    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL).withUsage(Usage.of(10, 5)).end();
+    var attributed = builder.withChildSpan("model.chat", SpanKind.MODEL_CALL);
+    attributed.withAttribute("inputTokens", "100").withAttribute("outputTokens", "50");
     attributed.end();
 
     var trace = builder.end();
@@ -288,7 +300,10 @@ class TraceBuilderTest {
   @Test
   void costRollsUpWithoutUsage() {
     var builder = TraceBuilder.start("agent-run");
-    builder.span("model.chat", SpanKind.MODEL_CALL).cost(CostEstimate.ofMicroUsd(42L)).end();
+    builder
+        .withChildSpan("model.chat", SpanKind.MODEL_CALL)
+        .withCost(CostEstimate.ofMicroUsd(42L))
+        .end();
 
     var trace = builder.end();
 

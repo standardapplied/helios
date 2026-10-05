@@ -21,6 +21,7 @@ import com.standardapplied.helios.core.schema.Nullable;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.util.ArrayList;
@@ -488,7 +489,7 @@ class AnthropicModelIntegrationTest {
     assertFalse(response1.toolCalls().isEmpty());
 
     var toolCall = response1.toolCalls().getFirst();
-    var toolResult = searchPeople.execute(toolCall.arguments());
+    var toolResult = searchPeople.execute(toolCall.arguments(), ToolContext.noop());
 
     var messages2 = new ArrayList<>(messages);
     messages2.add(response1.toMessage());

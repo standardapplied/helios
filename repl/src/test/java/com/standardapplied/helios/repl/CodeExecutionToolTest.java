@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.repl.sandbox.ExecutionRequest;
 import com.standardapplied.helios.repl.sandbox.ExecutionResult;
 import com.standardapplied.helios.repl.sandbox.Sandbox;
@@ -46,7 +47,7 @@ class CodeExecutionToolTest {
     var session = createSession(new StubSandbox(ExecutionResult.success("42")));
     var tool = CodeExecutionTool.create(session);
 
-    var result = tool.execute(Map.of("code", "System.out.println(42)"));
+    var result = tool.execute(Map.of("code", "System.out.println(42)"), ToolContext.noop());
 
     assertTrue(result.success());
     assertEquals("42", result.output());
@@ -62,7 +63,7 @@ class CodeExecutionToolTest {
                 ExecutionResult.newBuilder().withStdout("out").withStderr("warn").build()));
     var tool = CodeExecutionTool.create(session);
 
-    var result = tool.execute(Map.of("code", "code"));
+    var result = tool.execute(Map.of("code", "code"), ToolContext.noop());
 
     assertTrue(result.success());
     assertTrue(result.output().contains("out"));
@@ -76,7 +77,7 @@ class CodeExecutionToolTest {
     var session = createSession(new StubSandbox(ExecutionResult.failure("error", 1)));
     var tool = CodeExecutionTool.create(session);
 
-    var result = tool.execute(Map.of("code", "bad code"));
+    var result = tool.execute(Map.of("code", "bad code"), ToolContext.noop());
 
     assertTrue(result.success());
     assertTrue(result.output().contains("STDERR: error"));
@@ -90,7 +91,7 @@ class CodeExecutionToolTest {
     var session = createSession(new StubSandbox(ExecutionResult.success("out", "answer")));
     var tool = CodeExecutionTool.create(session);
 
-    var result = tool.execute(Map.of("code", "submit('answer')"));
+    var result = tool.execute(Map.of("code", "submit('answer')"), ToolContext.noop());
 
     assertTrue(result.success());
     assertTrue(result.output().contains("[submitted: answer]"));
@@ -103,7 +104,7 @@ class CodeExecutionToolTest {
     var session = createSession(new StubSandbox(ExecutionResult.success("")));
     var tool = CodeExecutionTool.create(session);
 
-    var result = tool.execute(Map.of("code", "noop"));
+    var result = tool.execute(Map.of("code", "noop"), ToolContext.noop());
 
     assertTrue(result.success());
     assertEquals("(no output)", result.output());
@@ -116,7 +117,7 @@ class CodeExecutionToolTest {
     var session = createSession(new StubSandbox(ExecutionResult.success("")));
     var tool = CodeExecutionTool.create(session);
 
-    var result = tool.execute(Map.of());
+    var result = tool.execute(Map.of(), ToolContext.noop());
 
     assertFalse(result.success());
     assertTrue(result.output().contains("'code' is required"));
@@ -129,7 +130,7 @@ class CodeExecutionToolTest {
     var session = createSession(new StubSandbox(ExecutionResult.success("")));
     var tool = CodeExecutionTool.create(session);
 
-    var result = tool.execute(Map.of("code", "  "));
+    var result = tool.execute(Map.of("code", "  "), ToolContext.noop());
 
     assertFalse(result.success());
     assertTrue(result.output().contains("'code' is required"));
@@ -142,7 +143,7 @@ class CodeExecutionToolTest {
     var session = createSession(new StubSandbox(ExecutionResult.success("")));
     var tool = CodeExecutionTool.create(session);
 
-    var result = tool.execute(Map.of("code", 42));
+    var result = tool.execute(Map.of("code", 42), ToolContext.noop());
 
     assertFalse(result.success());
     assertTrue(result.output().contains("'code' is required"));
@@ -170,7 +171,7 @@ class CodeExecutionToolTest {
     var session = createSession(sandbox);
     var tool = CodeExecutionTool.create(session);
 
-    var result = tool.execute(Map.of("code", "anything"));
+    var result = tool.execute(Map.of("code", "anything"), ToolContext.noop());
 
     assertTrue(result.success());
     assertTrue(result.output().contains("Error: sandbox died"));
@@ -214,7 +215,7 @@ class CodeExecutionToolTest {
         createSessionWithCap(new StubSandbox(ExecutionResult.success(bigStdout)), /* cap= */ 5_000);
     var tool = CodeExecutionTool.create(session);
 
-    var result = tool.execute(Map.of("code", "print(x)"));
+    var result = tool.execute(Map.of("code", "print(x)"), ToolContext.noop());
 
     assertTrue(result.success());
     assertTrue(
@@ -333,7 +334,7 @@ class CodeExecutionToolTest {
         createSessionWithCap(new StubSandbox(ExecutionResult.success(bigStdout)), /* cap= */ 0);
     var tool = CodeExecutionTool.create(session);
 
-    var result = tool.execute(Map.of("code", "print(x)"));
+    var result = tool.execute(Map.of("code", "print(x)"), ToolContext.noop());
 
     assertTrue(result.success());
     assertEquals(bigStdout, result.output(), "cap=0 disables truncation");

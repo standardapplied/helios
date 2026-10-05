@@ -77,7 +77,7 @@ public final class RlmDemoMain {
     var options =
         SessionOptions.newBuilder()
             .withModel(mainModel)
-            .apply(
+            .withPreset(
                 CodeActPreset.withSubLm(
                     MatchmakingInput.class, RankedMatches.class, input, subModel))
             .withLimits(

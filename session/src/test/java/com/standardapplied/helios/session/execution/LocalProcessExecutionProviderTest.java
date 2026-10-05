@@ -13,16 +13,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.process.BinaryResolver;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.CommandGrant;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -393,6 +395,53 @@ final class LocalProcessExecutionProviderTest {
     assertEquals("pre-acquired", failure.getMessage());
   }
 
+  /**
+   * Interrupting the worker while it waits for the child is a cancellation: the child is killed and
+   * the call fails instead of returning a result. The handler hands the worker over, and the
+   * child's pid file shows it runs before the interrupt; it would otherwise run for ten minutes.
+   */
+  @Test
+  void interruptWhileWaitingCancelsTheCallAndKillsTheChild(@TempDir Path tmp) {
+    assumeBashAvailable();
+    var worker = new CompletableFuture<Thread>();
+    var pidFile = tmp.resolve("pid");
+    LocalProcessExecutionProvider.RuntimeHandler handover =
+        request -> {
+          worker.complete(Thread.currentThread());
+          return LocalProcessExecutionProvider.RuntimeHandler.dashC("bash").buildArgv(request);
+        };
+    var provider =
+        LocalProcessExecutionProvider.newBuilder()
+            .withSecretRegistry(new SecretRegistry())
+            .withMaxTimeout(BEYOND_HANG_GUARD)
+            .withRuntime(Runtime.BASH, handover)
+            .build();
+    var req =
+        ExecutionRequest.newBuilder()
+            .withRuntime(Runtime.BASH)
+            .withScript("echo $$ > " + pidFile + "; " + HANG)
+            .withTimeout(BEYOND_HANG_GUARD)
+            .build();
+
+    var call = provider.execute(CTX, req, new CancellationToken()).toCompletableFuture();
+    Await.until("the child to write its pid", () -> !readPid(pidFile).isEmpty());
+    var child = ProcessHandle.of(Long.parseLong(readPid(pidFile))).orElseThrow();
+    Await.value("the worker", worker).interrupt();
+
+    var failure = Await.failure("the interrupted call to fail", call);
+    assertInstanceOf(CancellationException.class, failure);
+    assertEquals("interrupted while waiting for BASH process", failure.getMessage());
+    Await.until("the child to die", () -> !child.isAlive());
+  }
+
+  private static String readPid(Path file) {
+    try {
+      return Files.readString(file).strip();
+    } catch (IOException e) {
+      return "";
+    }
+  }
+
   @Test
   void executeOutputTruncatedPastCap() {
     assumeBashAvailable();
@@ -461,7 +510,7 @@ final class LocalProcessExecutionProviderTest {
 
   private static void assumePythonAvailable() {
     try {
-      CommandGrant.resolveBinary("python3", System.getenv("PATH"));
+      BinaryResolver.resolve("python3", System.getenv("PATH"));
     } catch (RuntimeException e) {
       assumeTrue(false, "python3 is not available on PATH; skipping");
     }

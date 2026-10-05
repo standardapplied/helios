@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,7 +60,7 @@ final class AskUserQuestionToolTest {
             "Continue?",
             "options",
             List.of(option("Yes", "go on"), option("No", "stop")));
-    var result = binding.tool().execute(args);
+    var result = binding.tool().execute(args, ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("user selected:"));
@@ -85,7 +86,7 @@ final class AskUserQuestionToolTest {
             List.of(option("A", "desc A"), option("B", "desc B"), option("C", "desc C")),
             "multiSelect",
             true);
-    var result = binding.tool().execute(args);
+    var result = binding.tool().execute(args, ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("- A"));
@@ -99,7 +100,8 @@ final class AskUserQuestionToolTest {
     var result =
         AskUserQuestionTool.binding(stub(AskUserQuestionResponse.single("q", "A")))
             .tool()
-            .execute(Map.of("options", List.of(option("A", ""), option("B", ""))));
+            .execute(
+                Map.of("options", List.of(option("A", ""), option("B", ""))), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("missing required 'question'"), result.output());
   }
@@ -109,7 +111,7 @@ final class AskUserQuestionToolTest {
     var result =
         AskUserQuestionTool.binding(stub(AskUserQuestionResponse.single("q", "A")))
             .tool()
-            .execute(Map.of("question", "q?"));
+            .execute(Map.of("question", "q?"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("missing required 'options'"), result.output());
   }
@@ -119,7 +121,7 @@ final class AskUserQuestionToolTest {
     var result =
         AskUserQuestionTool.binding(stub(AskUserQuestionResponse.single("q", "A")))
             .tool()
-            .execute(Map.of("question", "q?", "options", "not-an-array"));
+            .execute(Map.of("question", "q?", "options", "not-an-array"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("must be an array"), result.output());
   }
@@ -129,7 +131,8 @@ final class AskUserQuestionToolTest {
     var result =
         AskUserQuestionTool.binding(stub(AskUserQuestionResponse.single("q", "A")))
             .tool()
-            .execute(Map.of("question", "q?", "options", List.of("plain-string")));
+            .execute(
+                Map.of("question", "q?", "options", List.of("plain-string")), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("each option must be an object"), result.output());
   }
@@ -141,7 +144,8 @@ final class AskUserQuestionToolTest {
             .tool()
             .execute(
                 Map.of(
-                    "question", "q?", "options", List.of(Map.of("description", "no label here"))));
+                    "question", "q?", "options", List.of(Map.of("description", "no label here"))),
+                ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("'label' is required"), result.output());
   }
@@ -152,7 +156,8 @@ final class AskUserQuestionToolTest {
     var result =
         AskUserQuestionTool.binding(stub(AskUserQuestionResponse.single("q", "A")))
             .tool()
-            .execute(Map.of("question", "q?", "options", List.of(option("A", ""))));
+            .execute(
+                Map.of("question", "q?", "options", List.of(option("A", ""))), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("between 2 and 4 entries"), result.output());
   }
@@ -167,7 +172,8 @@ final class AskUserQuestionToolTest {
         AskUserQuestionTool.binding(gateway)
             .tool()
             .execute(
-                Map.of("question", "q?", "options", List.of(option("A", ""), option("B", ""))));
+                Map.of("question", "q?", "options", List.of(option("A", ""), option("B", ""))),
+                ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("interrupted"), result.output());
     // Clear the interrupt status set by the executor.
@@ -184,7 +190,8 @@ final class AskUserQuestionToolTest {
         AskUserQuestionTool.binding(gateway)
             .tool()
             .execute(
-                Map.of("question", "q?", "options", List.of(option("A", ""), option("B", ""))));
+                Map.of("question", "q?", "options", List.of(option("A", ""), option("B", ""))),
+                ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("cancelled"), result.output());
   }

@@ -202,6 +202,13 @@ class JsonSchemaTest {
   }
 
   @Test
+  void toMapOmitsEmptyRequiredAndEnum() {
+    var schema = new JsonSchema("string", null, null, List.of(), List.of(), null, null, null);
+
+    assertEquals(Map.of("type", "string"), schema.toMap());
+  }
+
+  @Test
   void toMapWithoutAdditionalProperties() {
     var map = JsonSchema.string().toMap();
     assertNull(map.get("additionalProperties"));

@@ -14,11 +14,16 @@ import com.standardapplied.helios.core.common.Result;
 import com.standardapplied.helios.core.test.Await;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 
 class DurableResumeScannerTest {
@@ -56,7 +61,7 @@ class DurableResumeScannerTest {
     var resumed = ConcurrentHashMap.<UUID>newKeySet();
     var scanner =
         DurableResumeScanner.builder(d)
-            .register(
+            .withResolver(
                 "research-bot",
                 runId -> {
                   resumed.add(runId);
@@ -83,7 +88,7 @@ class DurableResumeScannerTest {
     d.runStore().checkpoint(freshRunning("research-bot"));
     var scanner =
         DurableResumeScanner.builder(d)
-            .register("research-bot", runId -> Result.success("ok"))
+            .withResolver("research-bot", runId -> Result.success("ok"))
             .withStaleAfter(Duration.ofMinutes(5))
             .build();
     var result = scanner.scan();
@@ -98,7 +103,7 @@ class DurableResumeScannerTest {
     d.runStore().checkpoint(staleRunning("unknown-bot"));
     var scanner =
         DurableResumeScanner.builder(d)
-            .register("research-bot", runId -> Result.success("ok"))
+            .withResolver("research-bot", runId -> Result.success("ok"))
             .build();
     var result = scanner.scan();
     assertEquals(1, result.scanned());
@@ -107,12 +112,54 @@ class DurableResumeScannerTest {
   }
 
   @Test
+  void unknownAgentIdIsLoggedAtFine() {
+    var d = Durability.inMemory();
+    var run = staleRunning("unknown-bot");
+    d.runStore().checkpoint(run);
+    var scanner =
+        DurableResumeScanner.builder(d)
+            .withResolver("research-bot", runId -> Result.success("ok"))
+            .build();
+    var logger = Logger.getLogger(DurableResumeScanner.class.getName());
+    var records = new ArrayList<LogRecord>();
+    var handler =
+        new Handler() {
+          @Override
+          public void publish(LogRecord record) {
+            records.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    var previousLevel = logger.getLevel();
+    logger.setLevel(Level.FINE);
+    logger.addHandler(handler);
+    try {
+      scanner.scan();
+    } finally {
+      logger.removeHandler(handler);
+      logger.setLevel(previousLevel);
+    }
+
+    assertEquals(1, records.size());
+    assertEquals(Level.FINE, records.getFirst().getLevel());
+    assertEquals(
+        "DurableResumeScanner: no resolver registered for agentId='unknown-bot', skipping run "
+            + run.runId(),
+        records.getFirst().getMessage());
+  }
+
+  @Test
   void countsFailuresFromResolver() {
     var d = Durability.inMemory();
     d.runStore().checkpoint(staleRunning("research-bot"));
     var scanner =
         DurableResumeScanner.builder(d)
-            .register("research-bot", runId -> Result.failure("nope"))
+            .withResolver("research-bot", runId -> Result.failure("nope"))
             .build();
     var result = scanner.scan();
     assertEquals(1, result.resumed());
@@ -126,7 +173,7 @@ class DurableResumeScannerTest {
     d.runStore().checkpoint(staleRunning("research-bot"));
     var scanner =
         DurableResumeScanner.builder(d)
-            .register(
+            .withResolver(
                 "research-bot",
                 runId -> {
                   throw new RuntimeException("boom");
@@ -165,7 +212,7 @@ class DurableResumeScannerTest {
     var resumed = new AtomicInteger();
     var scanner =
         DurableResumeScanner.builder(d)
-            .register(
+            .withResolver(
                 "research-bot",
                 runId -> {
                   resumed.incrementAndGet();
@@ -189,7 +236,7 @@ class DurableResumeScannerTest {
     var scanner =
         DurableResumeScanner.builder(d)
             .withMaxConcurrent(3)
-            .register(
+            .withResolver(
                 "research-bot",
                 runId -> {
                   maxObserved.accumulateAndGet(concurrent.incrementAndGet(), Math::max);
@@ -209,7 +256,7 @@ class DurableResumeScannerTest {
   }
 
   @Test
-  void registerAgentConvenience() {
+  void withAgentConvenience() {
     var d = Durability.inMemory();
     var run = staleRunning("research-bot");
     d.runStore().checkpoint(run);
@@ -219,13 +266,13 @@ class DurableResumeScannerTest {
           calledFor.put(runId, true);
           return Result.success("ok");
         };
-    var scanner = DurableResumeScanner.builder(d).registerAgent("research-bot", agent).build();
+    var scanner = DurableResumeScanner.builder(d).withAgent("research-bot", agent).build();
     scanner.scan();
     assertTrue(calledFor.containsKey(run.runId()));
   }
 
   @Test
-  void registerWorkflowConvenienceUsesPrefixedAgentId() {
+  void withWorkflowConvenienceUsesPrefixedAgentId() {
     var d = Durability.inMemory();
     var run = staleRunning("workflow.ingest");
     d.runStore().checkpoint(run);
@@ -235,7 +282,7 @@ class DurableResumeScannerTest {
           calledFor.put(runId, true);
           return Result.success("ok");
         };
-    var scanner = DurableResumeScanner.builder(d).registerWorkflow("ingest", workflow).build();
+    var scanner = DurableResumeScanner.builder(d).withWorkflow("ingest", workflow).build();
     scanner.scan();
     assertTrue(calledFor.containsKey(run.runId()));
   }
@@ -251,9 +298,10 @@ class DurableResumeScannerTest {
   void builderRejectsBlankAgentId() {
     var d = Durability.inMemory();
     var b = DurableResumeScanner.builder(d);
-    assertThrows(IllegalArgumentException.class, () -> b.register("", id -> Result.success("ok")));
     assertThrows(
-        IllegalArgumentException.class, () -> b.register(null, id -> Result.success("ok")));
+        IllegalArgumentException.class, () -> b.withResolver("", id -> Result.success("ok")));
+    assertThrows(
+        IllegalArgumentException.class, () -> b.withResolver(null, id -> Result.success("ok")));
   }
 
   @Test
@@ -287,8 +335,8 @@ class DurableResumeScannerTest {
   void builderRejectsNullResolver() {
     var d = Durability.inMemory();
     var b = DurableResumeScanner.builder(d);
-    assertThrows(NullPointerException.class, () -> b.register("a", null));
-    assertThrows(NullPointerException.class, () -> b.registerAgent("a", null));
-    assertThrows(NullPointerException.class, () -> b.registerWorkflow("a", null));
+    assertThrows(NullPointerException.class, () -> b.withResolver("a", null));
+    assertThrows(NullPointerException.class, () -> b.withAgent("a", null));
+    assertThrows(NullPointerException.class, () -> b.withWorkflow("a", null));
   }
 }

@@ -6,13 +6,11 @@
 package com.standardapplied.helios.core.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.standardapplied.helios.core.tool.ToolResult;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -131,118 +129,30 @@ class DurabilityCoordinatorTest {
   }
 
   @Test
-  void journalStartWithNullRunIdReturnsFalse() {
+  void lifecycleWritesEachStatusOfTheRun() {
     var coord = new DurabilityCoordinator(Durability.inMemory(), "agent");
-
-    var wrote = coord.journalStart(null, 0, "tcid", "tool", Map.of());
-
-    assertFalse(wrote);
-  }
-
-  @Test
-  void journalStartSurvivesRuntimeException() {
-    var coord =
-        new DurabilityCoordinator(
-            Durability.newBuilder()
-                .withRunStore(new InMemoryRunStore())
-                .withToolCallJournal(new ThrowingToolCallJournal())
-                .build(),
-            "agent");
-
-    assertFalse(coord.journalStart(UUID.randomUUID(), 0, "tcid", "tool", Map.of()));
-  }
-
-  @Test
-  void journalTerminalSuccessRoutesToComplete() {
-    var journal = new RecordingToolCallJournal();
-    var coord =
-        new DurabilityCoordinator(
-            Durability.newBuilder()
-                .withRunStore(new InMemoryRunStore())
-                .withToolCallJournal(journal)
-                .build(),
-            "agent");
-
     var runId = UUID.randomUUID();
-    coord.journalTerminal(runId, "tcid", ToolResult.success("ok"));
+    var sessionId = UUID.randomUUID();
 
-    assertEquals(1, journal.completeCount());
-    assertEquals(0, journal.failCount());
-  }
+    coord.initialize(runId, sessionId, "alice", 0);
+    var running = coord.findRun(runId).orElseThrow();
+    coord.complete(runId, sessionId, "alice", 3);
+    var completed = coord.findRun(runId).orElseThrow();
+    coord.fail(runId, sessionId, "alice", 4, "model unavailable");
+    var failed = coord.findRun(runId).orElseThrow();
+    coord.markSuspended(failed);
+    var suspended = coord.findRun(runId).orElseThrow();
 
-  @Test
-  void journalTerminalFailureRoutesToFail() {
-    var journal = new RecordingToolCallJournal();
-    var coord =
-        new DurabilityCoordinator(
-            Durability.newBuilder()
-                .withRunStore(new InMemoryRunStore())
-                .withToolCallJournal(journal)
-                .build(),
-            "agent");
-
-    var runId = UUID.randomUUID();
-    coord.journalTerminal(runId, "tcid", ToolResult.failure("boom"));
-
-    assertEquals(0, journal.completeCount());
-    assertEquals(1, journal.failCount());
-  }
-
-  @Test
-  void journalTerminalSwallowsRuntimeException() {
-    var coord =
-        new DurabilityCoordinator(
-            Durability.newBuilder()
-                .withRunStore(new InMemoryRunStore())
-                .withToolCallJournal(new ThrowingToolCallJournal())
-                .build(),
-            "agent");
-
-    // Must not throw — the tool already executed and the caller is owed its result.
-    coord.journalTerminal(UUID.randomUUID(), "tcid", ToolResult.success("ok"));
-  }
-
-  @Test
-  void journalTerminalFailureWritesFailEntry() {
-    var journal = new RecordingToolCallJournal();
-    var coord =
-        new DurabilityCoordinator(
-            Durability.newBuilder()
-                .withRunStore(new InMemoryRunStore())
-                .withToolCallJournal(journal)
-                .build(),
-            "agent");
-
-    coord.journalTerminalFailure(UUID.randomUUID(), "tcid", "exception path");
-
-    assertEquals(1, journal.failCount());
-  }
-
-  @Test
-  void journalTerminalFailureSwallowsRuntimeException() {
-    var coord =
-        new DurabilityCoordinator(
-            Durability.newBuilder()
-                .withRunStore(new InMemoryRunStore())
-                .withToolCallJournal(new ThrowingToolCallJournal())
-                .build(),
-            "agent");
-
-    // Must not throw — original exception path needs to keep propagating outward.
-    coord.journalTerminalFailure(UUID.randomUUID(), "tcid", "boom");
-  }
-
-  @Test
-  void markInflightFailedSwallowsRuntimeException() {
-    var coord =
-        new DurabilityCoordinator(
-            Durability.newBuilder()
-                .withRunStore(new InMemoryRunStore())
-                .withToolCallJournal(new ThrowingToolCallJournal())
-                .build(),
-            "agent");
-
-    coord.markInflightFailed(UUID.randomUUID(), "tcid", "synthetic reason");
+    assertEquals(AgentRunStatus.RUNNING, running.status());
+    assertEquals("agent", running.agentId());
+    assertEquals(sessionId, running.sessionId());
+    assertNull(running.endedAt());
+    assertEquals(AgentRunStatus.COMPLETED, completed.status());
+    assertEquals(3, completed.iteration());
+    assertNotNull(completed.endedAt());
+    assertEquals(AgentRunStatus.FAILED, failed.status());
+    assertEquals("model unavailable", failed.error());
+    assertEquals(AgentRunStatus.SUSPENDED, suspended.status());
   }
 
   @Test
@@ -263,12 +173,6 @@ class DurabilityCoordinatorTest {
   void findRunDelegatesToRunStore() {
     var coord = new DurabilityCoordinator(Durability.inMemory(), "agent");
     assertNotNull(coord.findRun(UUID.randomUUID()));
-  }
-
-  @Test
-  void inflightForDelegatesToJournal() {
-    var coord = new DurabilityCoordinator(Durability.inMemory(), "agent");
-    assertNotNull(coord.inflightFor(UUID.randomUUID()));
   }
 
   // --- Test doubles ---------------------------------------------------------------------------
@@ -322,74 +226,6 @@ class DurabilityCoordinatorTest {
     @Override
     public int purgeOlderThan(java.time.Duration olderThan) {
       return 0;
-    }
-  }
-
-  private static final class RecordingToolCallJournal implements ToolCallJournal {
-    private final AtomicInteger completes = new AtomicInteger();
-    private final AtomicInteger failures = new AtomicInteger();
-    private final InMemoryToolCallJournal delegate = new InMemoryToolCallJournal();
-
-    int completeCount() {
-      return completes.get();
-    }
-
-    int failCount() {
-      return failures.get();
-    }
-
-    @Override
-    public void start(ToolCallRecord record) {
-      delegate.start(record);
-    }
-
-    @Override
-    public void complete(UUID runId, String toolCallId, String output) {
-      completes.incrementAndGet();
-      delegate.complete(runId, toolCallId, output);
-    }
-
-    @Override
-    public void fail(UUID runId, String toolCallId, String error) {
-      failures.incrementAndGet();
-      delegate.fail(runId, toolCallId, error);
-    }
-
-    @Override
-    public List<ToolCallRecord> inflight(UUID runId) {
-      return delegate.inflight(runId);
-    }
-
-    @Override
-    public List<ToolCallRecord> all(UUID runId) {
-      return delegate.all(runId);
-    }
-  }
-
-  private static final class ThrowingToolCallJournal implements ToolCallJournal {
-    @Override
-    public void start(ToolCallRecord record) {
-      throw new RuntimeException("boom-start");
-    }
-
-    @Override
-    public void complete(UUID runId, String toolCallId, String output) {
-      throw new RuntimeException("boom-complete");
-    }
-
-    @Override
-    public void fail(UUID runId, String toolCallId, String error) {
-      throw new RuntimeException("boom-fail");
-    }
-
-    @Override
-    public List<ToolCallRecord> inflight(UUID runId) {
-      return List.of();
-    }
-
-    @Override
-    public List<ToolCallRecord> all(UUID runId) {
-      return List.of();
     }
   }
 }

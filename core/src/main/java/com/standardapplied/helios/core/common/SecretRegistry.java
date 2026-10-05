@@ -55,6 +55,17 @@ public final class SecretRegistry {
    *     ({@code [0x20, 0x7E]} excluding {@code "} and {@code \})
    */
   public void register(String name, String value) {
+    validate(name, value);
+    var bytes = value.getBytes(StandardCharsets.US_ASCII);
+    lock.writeLock().lock();
+    try {
+      secretsByName.put(name, bytes);
+    } finally {
+      lock.writeLock().unlock();
+    }
+  }
+
+  private static void validate(String name, String value) {
     if (Strings.isBlank(name)) {
       throw new IllegalArgumentException("Secret name must not be blank");
     }
@@ -67,34 +78,30 @@ public final class SecretRegistry {
               .formatted(name, MIN_SECRET_LENGTH, value.length()));
     }
     for (var i = 0; i < value.length(); i++) {
-      var c = value.charAt(i);
-      if (c < 0x20 || c == 0x7F) {
-        throw new IllegalArgumentException(
-            ("Secret '%s' contains control character 0x%02X at index %d; only printable ASCII"
-                    + " ([0x20, 0x7E] excluding \" and \\) is permitted so byte-level redaction"
-                    + " stays safe across JSON serialisation")
-                .formatted(name, (int) c, i));
-      }
-      if (c > 0x7E) {
-        throw new IllegalArgumentException(
-            "Secret '%s' must be pure ASCII; character at index %d is non-ASCII"
-                .formatted(name, i));
-      }
-      if (c == '"' || c == '\\') {
-        throw new IllegalArgumentException(
-            ("Secret '%s' contains JSON-special character '%c' at index %d; Jackson would escape"
-                    + " it during serialisation, leaving the raw bytes invisible to the"
-                    + " byte-level Redactor and the secret leakable through any JSON column the"
-                    + " redactor scrubs post-serialise")
-                .formatted(name, c, i));
-      }
+      validateCharacter(name, value.charAt(i), i);
     }
-    var bytes = value.getBytes(StandardCharsets.US_ASCII);
-    lock.writeLock().lock();
-    try {
-      secretsByName.put(name, bytes);
-    } finally {
-      lock.writeLock().unlock();
+  }
+
+  private static void validateCharacter(String name, char c, int index) {
+    if (c < 0x20 || c == 0x7F) {
+      throw new IllegalArgumentException(
+          ("Secret '%s' contains control character 0x%02X at index %d; only printable ASCII"
+                  + " ([0x20, 0x7E] excluding \" and \\) is permitted so byte-level redaction"
+                  + " stays safe across JSON serialisation")
+              .formatted(name, (int) c, index));
+    }
+    if (c > 0x7E) {
+      throw new IllegalArgumentException(
+          "Secret '%s' must be pure ASCII; character at index %d is non-ASCII"
+              .formatted(name, index));
+    }
+    if (c == '"' || c == '\\') {
+      throw new IllegalArgumentException(
+          ("Secret '%s' contains JSON-special character '%c' at index %d; Jackson would escape"
+                  + " it during serialisation, leaving the raw bytes invisible to the"
+                  + " byte-level Redactor and the secret leakable through any JSON column the"
+                  + " redactor scrubs post-serialise")
+              .formatted(name, c, index));
     }
   }
 

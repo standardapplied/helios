@@ -435,6 +435,75 @@ final class ChatStreamPublisherTest {
   }
 
   @Test
+  void nullMetadataAndCitationsBecomeEmptyOnMessageStop() {
+    Model m =
+        new Model() {
+          @Override
+          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+            return new Response<>(
+                "x", null, List.of(), FinishReason.STOP, Response.Usage.of(1, 1), null, null, null);
+          }
+
+          @Override
+          public String id() {
+            return "test";
+          }
+
+          @Override
+          public String provider() {
+            return "test";
+          }
+        };
+    var sub = new CapturingSubscriber();
+    m.chatStream(List.of(), List.of(), new CancellationToken()).subscribe(sub);
+
+    var stop = assertInstanceOf(ModelChunk.MessageStop.class, sub.chunks.get(1));
+    assertEquals(Map.of(), stop.metadata());
+    assertEquals(List.of(), stop.citations());
+    assertTrue(sub.completed.get());
+  }
+
+  @Test
+  void cancelInsideOnNextStopsTheOutstandingDemand() {
+    var sub =
+        new CapturingSubscriber() {
+          @Override
+          public void onNext(ModelChunk chunk) {
+            super.onNext(chunk);
+            subscription.cancel();
+          }
+        };
+    withToolCalls("hi", List.of(new ToolCall("a", "t", Map.of())))
+        .chatStream(List.of(), List.of(), new CancellationToken())
+        .subscribe(sub);
+
+    assertEquals(1, sub.chunks.size());
+    assertInstanceOf(ModelChunk.TextDelta.class, sub.chunks.get(0));
+    assertFalse(sub.completed.get());
+    assertNull(sub.error.get());
+  }
+
+  @Test
+  void cancelInsideTheLastOnNextSuppressesOnComplete() {
+    var sub =
+        new CapturingSubscriber() {
+          @Override
+          public void onNext(ModelChunk chunk) {
+            super.onNext(chunk);
+            if (chunk instanceof ModelChunk.MessageStop) {
+              subscription.cancel();
+            }
+          }
+        };
+    textOnly("hello").chatStream(List.of(), List.of(), new CancellationToken()).subscribe(sub);
+
+    assertEquals(2, sub.chunks.size());
+    assertInstanceOf(ModelChunk.MessageStop.class, sub.chunks.get(1));
+    assertFalse(sub.completed.get());
+    assertNull(sub.error.get());
+  }
+
+  @Test
   void subscriptionRemainsLiveAfterCompletionForIdempotentRequests() {
     var sub = new CapturingSubscriber();
     textOnly("hello").chatStream(List.of(), List.of(), new CancellationToken()).subscribe(sub);

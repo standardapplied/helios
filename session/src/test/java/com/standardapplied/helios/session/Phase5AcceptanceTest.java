@@ -17,9 +17,9 @@ import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.process.BinaryResolver;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.CommandGrant;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.execution.ExecutionResult;
@@ -301,7 +301,7 @@ final class Phase5AcceptanceTest {
 
   private static void assumePythonAvailable() {
     try {
-      CommandGrant.resolveBinary("python3", System.getenv("PATH"));
+      BinaryResolver.resolve("python3", System.getenv("PATH"));
     } catch (RuntimeException e) {
       assumeTrue(false, "python3 is not available; skipping Phase 5 PYTHON scenarios");
     }

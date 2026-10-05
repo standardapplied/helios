@@ -83,7 +83,7 @@ final class RlmDemoIntegrationTest {
     var options =
         SessionOptions.newBuilder()
             .withModel(mainModel)
-            .apply(
+            .withPreset(
                 CodeActPreset.withSubLm(
                     MatchmakingInput.class, RankedMatches.class, input, subModel))
             .withLimits(

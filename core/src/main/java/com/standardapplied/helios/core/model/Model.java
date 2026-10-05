@@ -9,12 +9,9 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.tool.Tool;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.Flow;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Interface for LLM providers. Implementations provide the actual integration with model APIs
@@ -116,7 +113,7 @@ public interface Model extends AutoCloseable {
       List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
     Objects.requireNonNull(cancellation, "cancellation must not be null");
     var response = chat(messages, tools);
-    return subscriber -> deliverDefaultChunkSequence(response, cancellation, subscriber);
+    return new DefaultChunkSequence(response, cancellation);
   }
 
   /**
@@ -174,75 +171,7 @@ public interface Model extends AutoCloseable {
             .withCitations(typed.citations())
             .withMetadata(typed.metadata())
             .build();
-    return subscriber -> deliverDefaultChunkSequence(erased, cancellation, subscriber);
-  }
-
-  /**
-   * Synchronous best-effort delivery of the default-impl chunk sequence to a single subscriber.
-   * Internal helper for the default {@link #chatStream(List, List, CancellationToken)} body;
-   * provider overrides supply their own publishers and do not use this.
-   */
-  private static void deliverDefaultChunkSequence(
-      Response<Void> response,
-      CancellationToken cancellation,
-      Flow.Subscriber<? super ModelChunk> subscriber) {
-    Objects.requireNonNull(subscriber, "subscriber must not be null");
-    var chunks = new ArrayList<ModelChunk>();
-    if (response.hasThinking()) {
-      chunks.add(new ModelChunk.ThinkingDelta(response.thinking()));
-    }
-    if (response.content() != null && !response.content().isEmpty()) {
-      chunks.add(new ModelChunk.TextDelta(response.content()));
-    }
-    for (var call : response.toolCalls()) {
-      chunks.add(new ModelChunk.ToolUseStart(call.id(), call.name()));
-      chunks.add(new ModelChunk.ToolUseStop(call));
-    }
-    var stopReason =
-        response.finishReason() != null ? response.finishReason().name() : FinishReason.STOP.name();
-    var usage = response.usage() != null ? response.usage() : Response.Usage.of(0, 0);
-    var metadata =
-        response.metadata() != null ? response.metadata() : java.util.Map.<String, String>of();
-    var citations = response.citations() != null ? response.citations() : List.<Citation>of();
-    chunks.add(new ModelChunk.MessageStop(stopReason, usage, metadata, citations));
-
-    var subscriptionActive = new AtomicBoolean(true);
-    subscriber.onSubscribe(
-        new Flow.Subscription() {
-          private int index = 0;
-
-          @Override
-          public void request(long n) {
-            if (!subscriptionActive.get()) {
-              return;
-            }
-            if (n <= 0) {
-              if (subscriptionActive.compareAndSet(true, false)) {
-                subscriber.onError(
-                    new IllegalArgumentException("non-positive subscription request: " + n));
-              }
-              return;
-            }
-            if (cancellation.isCancelled()) {
-              if (subscriptionActive.compareAndSet(true, false)) {
-                subscriber.onError(new CancellationException(cancellation.reason().orElseThrow()));
-              }
-              return;
-            }
-            while (n > 0 && index < chunks.size() && subscriptionActive.get()) {
-              subscriber.onNext(chunks.get(index++));
-              n--;
-            }
-            if (index >= chunks.size() && subscriptionActive.compareAndSet(true, false)) {
-              subscriber.onComplete();
-            }
-          }
-
-          @Override
-          public void cancel() {
-            subscriptionActive.set(false);
-          }
-        });
+    return new DefaultChunkSequence(erased, cancellation);
   }
 
   /** The model identifier (e.g., "gemini-2.0-flash", "claude-3-opus"). */
