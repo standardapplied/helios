@@ -112,7 +112,7 @@ final class PgSpanTree {
 
   private Span attachChildren(Span span, Map<UUID, List<Span>> childrenByParentId) {
     var children = childrenByParentId.get(span.id());
-    if (children == null || children.isEmpty()) {
+    if (children == null) {
       return span;
     }
 
