@@ -171,7 +171,7 @@ class BoundedProcessTest {
   }
 
   @Test
-  void interruptWhileAwaitingKillsTheProcessAndPropagates() throws Exception {
+  void interruptWhileAwaitingPropagatesAndLeavesTheProcessToTheCaller() throws Exception {
     try (var process = bash("exec sleep 600").start()) {
       process.stdin().close();
       var thrown = new CompletableFuture<Throwable>();
@@ -189,6 +189,8 @@ class BoundedProcessTest {
       waiter.interrupt();
 
       assertInstanceOf(InterruptedException.class, Await.value("the interrupted await", thrown));
+      assertTrue(process.process().isAlive());
+      process.kill();
       Await.termination("the killed process", process.process());
     }
   }

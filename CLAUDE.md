@@ -88,7 +88,9 @@ sleep inside a string of sandboxed code is not a Java call and is not flagged.
 ArchUnit rules today: `core` depends on nothing outside the JDK; a provider module depends on
 `core` only; `session` does not depend on a provider, `runtime` or `persistence`; a
 `java.net.http.HttpClient` is built only by `core.common.HttpClientFactory`, whose clients never
-follow a redirect; no top-level type is
+follow a redirect; `java.lang.ProcessBuilder` is used only by `core.process` (whose
+`BoundedProcess` every other child process goes through) and `repl.sandbox.JvmSandbox`; a public
+instance method on a `*Builder` type that returns that builder is named `with...`; no top-level type is
 named `*Util`, `*Utils`, `*Helper`, `*Helpers` or `*Manager`; `System.out`, `System.err` and
 `printStackTrace` are used only in `repl.sandbox` and the example modules; nothing in main code
 is `@Deprecated` (a superseded type or member is deleted and its replacement recorded under
@@ -265,7 +267,7 @@ means changing `SCANNER_VERSION` and both checksums in `advisory_scan.py` togeth
 
 ```
 helios/
-├── core/                           # Zero deps - Model + tool + common + fault + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream, StubHttpServer, RedirectTrap) ship as its test-jar.
+├── core/                           # Zero deps - Model + tool + common + fault + process + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream, StubHttpServer, RedirectTrap) ship as its test-jar.
 ├── session/                        # v2 SDK - AgentSession, SessionPresets, hooks, permissions, file tools, memory backend, agent loop
 ├── runtime/                        # Helidon HTTP/SSE surface for session — POST /sessions, SSE /events, long-poll /result
 ├── gemini/                         # Gemini Interactions API + Jackson 3.x

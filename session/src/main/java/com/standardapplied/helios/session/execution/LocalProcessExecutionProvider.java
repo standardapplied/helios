@@ -298,6 +298,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
       outcome = process.await();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      killCallback.run();
       joinQuietly(stdinThread);
       inflight.remove(proc);
       killRegistration.remove();
