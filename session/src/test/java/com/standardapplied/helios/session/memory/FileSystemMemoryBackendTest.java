@@ -20,7 +20,9 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -108,6 +110,21 @@ final class FileSystemMemoryBackendTest {
   void listMissingMemoryRootReturnsEmpty(@TempDir Path tmp) throws IOException {
     var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
     assertEquals(List.of(), backend.list("/memories/"));
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void listSkipsADirectoryItCannotOpen(@TempDir Path tmp) throws IOException {
+    seed(tmp, "a.md", "a");
+    var locked = seed(tmp, "locked/b.md", "b").getParent();
+    Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+    try {
+      Assumptions.assumeFalse(Files.isReadable(locked), "permissions are not enforced (root)");
+      var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
+      assertEquals(List.of("/memories/a.md"), backend.list("/memories/"));
+    } finally {
+      Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rwx------"));
+    }
   }
 
   @Test

@@ -446,6 +446,9 @@ final class ExecuteToolTest {
             "Execute: 'environment' must be an object of string→string"),
         Arguments.of(
             Map.of("runtime", "bash", "script", "x", "environment", Map.of("K", 1)),
+            "Execute: 'environment' must be an object of string→string"),
+        Arguments.of(
+            Map.of("runtime", "bash", "script", "x", "environment", Map.of(1, "V")),
             "Execute: 'environment' must be an object of string→string"));
   }
 
