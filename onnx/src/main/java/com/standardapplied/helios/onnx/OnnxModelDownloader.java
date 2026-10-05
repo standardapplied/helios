@@ -33,8 +33,7 @@ final class OnnxModelDownloader implements AutoCloseable {
 
   private static final Logger LOGGER = Logger.getLogger(OnnxModelDownloader.class.getName());
   private static final String FINISHED_MARKER = ".finished";
-  private static final String HF_API_BASE = "https://huggingface.co/api/models/";
-  private static final String HF_DOWNLOAD_BASE = "https://huggingface.co/%s/resolve/main/%s";
+  private static final URI HUGGING_FACE = URI.create("https://huggingface.co");
   private static final String TOKENIZER_FILE = "tokenizer.json";
 
   private final String modelName;
@@ -42,8 +41,15 @@ final class OnnxModelDownloader implements AutoCloseable {
   private final OnnxModelSpec spec;
   private final HttpClient httpClient;
   private final Path localModelDir;
+  private final URI hub;
 
   OnnxModelDownloader(String modelName, EmbeddingConfig config, OnnxModelSpec spec) {
+    this(modelName, config, spec, HUGGING_FACE);
+  }
+
+  /** Downloads from {@code hub} instead of Hugging Face. Visible for tests. */
+  OnnxModelDownloader(String modelName, EmbeddingConfig config, OnnxModelSpec spec, URI hub) {
+    this.hub = hub;
     this.modelName = modelName;
     this.config = config;
     this.spec = spec;
@@ -178,7 +184,7 @@ final class OnnxModelDownloader implements AutoCloseable {
   }
 
   private List<String> fetchFileList(String hfModel, String treePath) throws IOException {
-    var url = HF_API_BASE + hfModel + "/tree/" + treePath;
+    var url = hub + "/api/models/" + hfModel + "/tree/" + treePath;
     var request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
 
     try {
@@ -200,7 +206,7 @@ final class OnnxModelDownloader implements AutoCloseable {
       LOGGER.info("Skipping (already present): %s".formatted(destination.getFileName()));
       return;
     }
-    var url = HF_DOWNLOAD_BASE.formatted(hfModel, filePath);
+    var url = "%s/%s/resolve/main/%s".formatted(hub, hfModel, filePath);
     var request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
 
     try {
