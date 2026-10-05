@@ -110,7 +110,7 @@ public class DurableResumeScanner {
   /** The resolver that resumes {@code run}, or null when the run is fresh or its agent unknown. */
   private Function<UUID, Result<?>> resolverFor(AgentRun run, OffsetDateTime cutoff, Tally tally) {
     tally.scanned.incrementAndGet();
-    if (run.lastCheckpointAt() != null && run.lastCheckpointAt().isAfter(cutoff)) {
+    if (run.lastCheckpointAt().isAfter(cutoff)) {
       tally.skippedFresh.incrementAndGet();
       return null;
     }
