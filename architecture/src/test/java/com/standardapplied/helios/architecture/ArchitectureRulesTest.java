@@ -49,9 +49,6 @@ class ArchitectureRulesTest {
   private static final String CORE = HELIOS + ".core..";
   private static final String HTTP_CLIENT_FACTORY = HELIOS + ".core.common.HttpClientFactory";
 
-  /** Burn-down, core-and-tools: the one class that still builds its own client. */
-  private static final String OWN_HTTP_CLIENT_BURN_DOWN = HELIOS + ".onnx.OnnxModelDownloader";
-
   /**
    * Burn-down, v3-injected-time: the one class that reads the wall clock statically. Thirteen
    * classes stamp records through {@code Ids.now()}, and {@code Ids.newId()} embeds the millisecond
@@ -138,13 +135,27 @@ class ArchitectureRulesTest {
     noClasses()
         .that()
         .doNotHaveFullyQualifiedName(HTTP_CLIENT_FACTORY)
-        .and()
-        .doNotHaveFullyQualifiedName(OWN_HTTP_CLIENT_BURN_DOWN)
         .should()
         .accessTargetWhere(
             targetOwner(type(HttpClient.class))
                 .and(target(name("newBuilder").or(name("newHttpClient")))))
         .because("every java.net.http.HttpClient comes from core.common.HttpClientFactory")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void onlyTheOnnxModuleBuildsARedirectFollowingClient() {
+    noClasses()
+        .that()
+        .resideOutsideOfPackage(HELIOS + ".onnx..")
+        .should()
+        .accessTargetWhere(
+            targetOwner(name(HTTP_CLIENT_FACTORY)).and(target(name("createForDownloads"))))
+        .because(
+            "a redirect target receives whatever the request carries: a client that may carry a"
+                + " credential comes from HttpClientFactory.create(...), which never follows a"
+                + " redirect, and only the onnx module's unauthenticated model downloads use"
+                + " HttpClientFactory.createForDownloads()")
         .check(LIBRARY);
   }
 

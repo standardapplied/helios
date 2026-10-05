@@ -8,6 +8,7 @@ package com.standardapplied.helios.persistence.mapper;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Response.Usage;
 import io.helidon.dbclient.DbRow;
+import java.util.List;
 
 /**
  * Maps the shared usage/cost columns ({@code input_tokens}, {@code output_tokens}, {@code
@@ -50,6 +51,20 @@ public final class UsageMapper {
   public static CostEstimate cost(DbRow row) {
     var costObj = row.column("cost_micro_usd").get(Object.class);
     return costObj != null ? CostEstimate.ofMicroUsd(((Number) costObj).longValue()) : null;
+  }
+
+  /**
+   * Appends the five usage/cost bind values in column order ({@code input_tokens, output_tokens,
+   * cache_creation_tokens, cache_read_tokens, cost_micro_usd}) — the single write-side counterpart
+   * of {@link #usage(DbRow)} and {@link #cost(DbRow)}. Null usage/cost bind all-null columns,
+   * meaning "not recorded".
+   */
+  public static void addParams(List<Object> params, Usage usage, CostEstimate cost) {
+    params.add(usage != null ? usage.inputTokens() : null);
+    params.add(usage != null ? usage.outputTokens() : null);
+    params.add(usage != null ? usage.cacheCreationInputTokens() : null);
+    params.add(usage != null ? usage.cacheReadInputTokens() : null);
+    params.add(cost != null ? cost.microUsd() : null);
   }
 
   private static Integer intOrNull(DbRow row, String column) {

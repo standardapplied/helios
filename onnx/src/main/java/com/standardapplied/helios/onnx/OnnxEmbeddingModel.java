@@ -15,7 +15,6 @@ import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.embedding.EmbeddingConfig;
 import com.standardapplied.helios.core.embedding.EmbeddingModel;
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -51,13 +50,12 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
     try {
       LOGGER.info("Initializing ONNX embedding model: %s".formatted(modelName));
 
-      Path modelPath;
-      Path tokenizerPath;
+      OnnxModelDownloader.ModelFiles files;
       try (var downloader = new OnnxModelDownloader(modelName, config, spec)) {
-        downloader.downloadModel();
-        modelPath = downloader.modelPath();
-        tokenizerPath = downloader.tokenizerPath();
+        files = downloader.downloadModel();
       }
+      var modelPath = files.model();
+      var tokenizerPath = files.tokenizer();
 
       if (!modelPath.toFile().exists()) {
         throw new OnnxEmbeddingException("ONNX model file not found: %s".formatted(modelPath));
@@ -90,7 +88,7 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
 
   @Override
   public Result<float[]> embed(String text) {
-    return embedDocument(text);
+    return embedDocument(text, null);
   }
 
   @Override
@@ -105,11 +103,6 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
     }
     var prefix = customQueryPrefix != null ? customQueryPrefix : spec.queryPrefix();
     return embedInternal(prefix + query);
-  }
-
-  @Override
-  public Result<float[]> embedDocument(String document) {
-    return embedDocument(document, null);
   }
 
   @Override
@@ -180,9 +173,9 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
         LOGGER.warning(
             "Text exceeds max sequence length (%d), truncating to %d tokens"
                 .formatted(tokens.length, spec.sequenceLength()));
-        tokens = truncate(tokens, spec.sequenceLength());
-        attentionMaskArr = truncate(attentionMaskArr, spec.sequenceLength());
-        tokenTypeArr = truncate(tokenTypeArr, spec.sequenceLength());
+        tokens = EmbeddingMath.truncate(tokens, spec.sequenceLength());
+        attentionMaskArr = EmbeddingMath.truncate(attentionMaskArr, spec.sequenceLength());
+        tokenTypeArr = EmbeddingMath.truncate(tokenTypeArr, spec.sequenceLength());
       }
 
       var inputIds = new long[1][tokens.length];
@@ -219,13 +212,13 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
           } else {
             var outputTensor = (float[][][]) result.get(0).getValue();
             if (spec.modelType() == OnnxModelSpec.ModelType.DECODER) {
-              embedding = lastTokenPooling(outputTensor[0], attentionMask[0]);
+              embedding = EmbeddingMath.lastTokenPooling(outputTensor[0], attentionMask[0]);
             } else {
-              embedding = meanPooling(outputTensor[0], attentionMask[0]);
+              embedding = EmbeddingMath.meanPooling(outputTensor[0], attentionMask[0]);
             }
           }
 
-          normalize(embedding);
+          EmbeddingMath.normalize(embedding);
           return Result.success(embedding);
         }
       } finally {
@@ -239,61 +232,6 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
     } catch (Exception e) {
       LOGGER.log(Level.SEVERE, "Failed to generate embedding", e);
       return Result.failure("Failed to generate embedding: %s".formatted(e.getMessage()), e);
-    }
-  }
-
-  private long[] truncate(long[] arr, int maxLength) {
-    var truncated = new long[maxLength];
-    System.arraycopy(arr, 0, truncated, 0, maxLength);
-    return truncated;
-  }
-
-  private float[] lastTokenPooling(float[][] tokenEmbeddings, long[] attentionMask) {
-    var lastTokenIndex = 0;
-    for (var i = 0; i < attentionMask.length; i++) {
-      if (attentionMask[i] == 1L) {
-        lastTokenIndex = i;
-      }
-    }
-    return tokenEmbeddings[lastTokenIndex].clone();
-  }
-
-  private float[] meanPooling(float[][] tokenEmbeddings, long[] attentionMask) {
-    var seqLength = tokenEmbeddings.length;
-    var hiddenSize = tokenEmbeddings[0].length;
-
-    var pooled = new float[hiddenSize];
-    var maskSum = new float[hiddenSize];
-
-    for (var i = 0; i < seqLength; i++) {
-      if (attentionMask[i] == 1L) {
-        for (var j = 0; j < hiddenSize; j++) {
-          pooled[j] += tokenEmbeddings[i][j];
-          maskSum[j] += 1.0f;
-        }
-      }
-    }
-
-    for (var j = 0; j < hiddenSize; j++) {
-      if (maskSum[j] > 0) {
-        pooled[j] /= maskSum[j];
-      }
-    }
-
-    return pooled;
-  }
-
-  private void normalize(float[] embedding) {
-    var norm = 0.0f;
-    for (var value : embedding) {
-      norm += value * value;
-    }
-    norm = (float) Math.sqrt(norm);
-
-    if (norm > 0) {
-      for (var i = 0; i < embedding.length; i++) {
-        embedding[i] /= norm;
-      }
     }
   }
 }
