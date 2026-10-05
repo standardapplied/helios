@@ -55,7 +55,7 @@ final class SessionPresetsTest {
   }
 
   private static SessionOptions build(SessionPreset preset) {
-    return seed().apply(preset).build();
+    return seed().withPreset(preset).build();
   }
 
   private static Set<String> toolNames(SessionOptions opts) {
@@ -79,14 +79,14 @@ final class SessionPresetsTest {
   @Test
   void minimalIsIdentityOnTheBuilder() {
     var builder = seed();
-    var same = builder.apply(SessionPresets.minimal());
+    var same = builder.withPreset(SessionPresets.minimal());
     assertSame(builder, same);
   }
 
   @Test
   void minimalComposesWithBuilderChaining() {
     var custom = CostCalculator.staticTable(Map.of());
-    var opts = seed().apply(SessionPresets.minimal()).withCostCalculator(custom).build();
+    var opts = seed().withPreset(SessionPresets.minimal()).withCostCalculator(custom).build();
     assertSame(custom, opts.costCalculator());
   }
 
@@ -138,7 +138,7 @@ final class SessionPresetsTest {
   @Test
   void readOnlyComposesWithBuilderChaining(@TempDir Path tmp) {
     var custom = CostCalculator.staticTable(Map.of());
-    var opts = seed().apply(SessionPresets.readOnly(tmp)).withCostCalculator(custom).build();
+    var opts = seed().withPreset(SessionPresets.readOnly(tmp)).withCostCalculator(custom).build();
     assertSame(custom, opts.costCalculator());
   }
 
@@ -187,7 +187,7 @@ final class SessionPresetsTest {
   @Test
   void workspaceComposesWithBuilderChaining(@TempDir Path tmp) {
     var custom = CostCalculator.staticTable(Map.of());
-    var opts = seed().apply(SessionPresets.workspace(tmp)).withCostCalculator(custom).build();
+    var opts = seed().withPreset(SessionPresets.workspace(tmp)).withCostCalculator(custom).build();
     assertSame(custom, opts.costCalculator());
   }
 
@@ -242,7 +242,7 @@ final class SessionPresetsTest {
   @Test
   void presetsStackAssociativelyWithUserPresets(@TempDir Path tmp) {
     SessionPreset userPreset = b -> b.withSessionId("explicit");
-    var opts = seed().apply(SessionPresets.workspace(tmp)).apply(userPreset).build();
+    var opts = seed().withPreset(SessionPresets.workspace(tmp)).withPreset(userPreset).build();
     assertEquals("explicit", opts.sessionId());
     assertTrue(toolNames(opts).contains("MemoryWrite"));
   }
@@ -251,8 +251,8 @@ final class SessionPresetsTest {
   void laterPresetOverridesEarlierOnSameField(@TempDir Path tmp) {
     var opts =
         seed()
-            .apply(SessionPresets.readOnly(tmp))
-            .apply(b -> b.withPermission(Permission.defaultInWorkspace()))
+            .withPreset(SessionPresets.readOnly(tmp))
+            .withPreset(b -> b.withPermission(Permission.defaultInWorkspace()))
             .build();
     assertEquals(Permission.defaultInWorkspace().mode(), opts.permission().orElseThrow().mode());
   }

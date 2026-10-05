@@ -33,7 +33,7 @@ import java.util.Objects;
  * <pre>{@code
  * var options = SessionOptions.newBuilder()
  *     .withModel(model)
- *     .apply(SessionPresets.workspace(Path.of("/repo")))
+ *     .withPreset(SessionPresets.workspace(Path.of("/repo")))
  *     .apply(myCustomTracingPreset)
  *     .withCostCalculator(calc)
  *     .build();

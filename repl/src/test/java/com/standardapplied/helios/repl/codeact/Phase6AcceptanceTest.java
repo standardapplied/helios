@@ -153,7 +153,7 @@ final class Phase6AcceptanceTest {
         SessionOptions.newBuilder()
             .withModel(scriptedModel(turns, "typed-phase6"))
             .withSessionId("phase6-typed-" + UUID.randomUUID())
-            .apply(CodeActPreset.typed(SumInput.class, Sum.class, input))
+            .withPreset(CodeActPreset.typed(SumInput.class, Sum.class, input))
             .build();
 
     try (var session = AgentSession.create(options)) {
@@ -197,7 +197,7 @@ final class Phase6AcceptanceTest {
         SessionOptions.newBuilder()
             .withModel(scriptedModel(turns, "typed-phase6-reqexec"))
             .withSessionId("phase6-reqexec-" + UUID.randomUUID())
-            .apply(CodeActPreset.typed(SumInput.class, Sum.class, input))
+            .withPreset(CodeActPreset.typed(SumInput.class, Sum.class, input))
             .build();
 
     try (var session = AgentSession.create(options)) {
@@ -233,7 +233,7 @@ final class Phase6AcceptanceTest {
         SessionOptions.newBuilder()
             .withModel(scriptedModel(turns, "rlm-phase6"))
             .withSessionId("phase6-rlm-" + UUID.randomUUID())
-            .apply(CodeActPreset.withSubLm(SimpleInput.class, Headline.class, input, subModel))
+            .withPreset(CodeActPreset.withSubLm(SimpleInput.class, Headline.class, input, subModel))
             .build();
 
     try (var session = AgentSession.create(options)) {
@@ -253,7 +253,7 @@ final class Phase6AcceptanceTest {
     var options =
         SessionOptions.newBuilder()
             .withModel(fixedReply("ignored"))
-            .apply(CodeActPreset.typed(SumInput.class, Sum.class, input))
+            .withPreset(CodeActPreset.typed(SumInput.class, Sum.class, input))
             .build();
     var toolNames = options.tools().bindings().stream().map(b -> b.tool().name()).toList();
     assertEquals(1, toolNames.size());
@@ -269,7 +269,7 @@ final class Phase6AcceptanceTest {
     var options =
         SessionOptions.newBuilder()
             .withModel(fixedReply("ignored"))
-            .apply(CodeActPreset.withSubLm(SumInput.class, Sum.class, input, subModel))
+            .withPreset(CodeActPreset.withSubLm(SumInput.class, Sum.class, input, subModel))
             .build();
     var toolNames = options.tools().bindings().stream().map(b -> b.tool().name()).toList();
     assertEquals(1, toolNames.size());
@@ -282,7 +282,7 @@ final class Phase6AcceptanceTest {
     var options =
         SessionOptions.newBuilder()
             .withModel(fixedReply("ignored"))
-            .apply(CodeActPreset.typed(SumInput.class, Sum.class, input))
+            .withPreset(CodeActPreset.typed(SumInput.class, Sum.class, input))
             .build();
     assertInstanceOf(
         com.standardapplied.helios.session.permissions.Permission.class,
@@ -299,7 +299,7 @@ final class Phase6AcceptanceTest {
     var options =
         SessionOptions.newBuilder()
             .withModel(fixedReply("ignored"))
-            .apply(CodeActPreset.typed(SumInput.class, Sum.class, input))
+            .withPreset(CodeActPreset.typed(SumInput.class, Sum.class, input))
             .build();
     assertTrue(options.outputSchema().isPresent());
     assertTrue(options.systemPrompt().isPresent());
@@ -356,7 +356,7 @@ final class Phase6AcceptanceTest {
         SessionOptions.newBuilder()
             .withModel(scriptedModel(turns, "rlm-phase6-direct"))
             .withSessionId("phase6-rlm-direct-" + UUID.randomUUID())
-            .apply(CodeActPreset.withSubLm(SimpleInput.class, Headline.class, input, subModel))
+            .withPreset(CodeActPreset.withSubLm(SimpleInput.class, Headline.class, input, subModel))
             .build();
 
     try (var session = AgentSession.create(options)) {

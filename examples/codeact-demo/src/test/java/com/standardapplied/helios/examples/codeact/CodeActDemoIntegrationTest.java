@@ -65,7 +65,7 @@ final class CodeActDemoIntegrationTest {
     var options =
         SessionOptions.newBuilder()
             .withModel(model)
-            .apply(CodeActPreset.typed(EdcInput.class, SdtmMapping.class, input))
+            .withPreset(CodeActPreset.typed(EdcInput.class, SdtmMapping.class, input))
             .withLimits(
                 SessionLimits.newBuilder()
                     .withMaxTurns(15)

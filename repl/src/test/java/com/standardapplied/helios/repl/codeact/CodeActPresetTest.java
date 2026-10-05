@@ -264,6 +264,6 @@ final class CodeActPresetTest {
   }
 
   private static SessionOptions build(com.standardapplied.helios.session.SessionPreset preset) {
-    return SessionOptions.newBuilder().withModel(fixedReply("ignored")).apply(preset).build();
+    return SessionOptions.newBuilder().withModel(fixedReply("ignored")).withPreset(preset).build();
   }
 }
