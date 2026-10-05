@@ -136,6 +136,18 @@ class TraceBuilderTest {
   }
 
   @Test
+  void eventSinksHearNothingWithoutARunId() {
+    var events = new ArrayList<com.standardapplied.helios.core.events.HeliosEvent>();
+    com.standardapplied.helios.core.events.EventSink sink = events::add;
+    var builder = TraceBuilder.start("agent-run", null, List.of(sink));
+
+    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL).end();
+    builder.end();
+
+    assertEquals(List.of(), events);
+  }
+
+  @Test
   void sinkExceptionDoesNotPreventSpanCompletion() {
     var runId = com.standardapplied.helios.core.common.Ids.newId();
     com.standardapplied.helios.core.events.EventSink failing =

@@ -14,11 +14,16 @@ import com.standardapplied.helios.core.common.Result;
 import com.standardapplied.helios.core.test.Await;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 
 class DurableResumeScannerTest {
@@ -104,6 +109,48 @@ class DurableResumeScannerTest {
     assertEquals(1, result.scanned());
     assertEquals(1, result.skippedUnknownAgent());
     assertEquals(0, result.resumed());
+  }
+
+  @Test
+  void unknownAgentIdIsLoggedAtFine() {
+    var d = Durability.inMemory();
+    var run = staleRunning("unknown-bot");
+    d.runStore().checkpoint(run);
+    var scanner =
+        DurableResumeScanner.builder(d)
+            .withResolver("research-bot", runId -> Result.success("ok"))
+            .build();
+    var logger = Logger.getLogger(DurableResumeScanner.class.getName());
+    var records = new ArrayList<LogRecord>();
+    var handler =
+        new Handler() {
+          @Override
+          public void publish(LogRecord record) {
+            records.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    var previousLevel = logger.getLevel();
+    logger.setLevel(Level.FINE);
+    logger.addHandler(handler);
+    try {
+      scanner.scan();
+    } finally {
+      logger.removeHandler(handler);
+      logger.setLevel(previousLevel);
+    }
+
+    assertEquals(1, records.size());
+    assertEquals(Level.FINE, records.getFirst().getLevel());
+    assertEquals(
+        "DurableResumeScanner: no resolver registered for agentId='unknown-bot', skipping run "
+            + run.runId(),
+        records.getFirst().getMessage());
   }
 
   @Test
