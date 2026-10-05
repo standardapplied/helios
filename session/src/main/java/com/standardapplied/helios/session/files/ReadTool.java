@@ -52,9 +52,9 @@ import java.util.Objects;
  *       guarantee against pathological per-line growth.
  * </ul>
  *
- * Text rendering streams through {@link BufferedReader} and stops at the first output cap hit;
- * fingerprinting separately reads the bounded source. The truncation marker explains what to try
- * next ("use {@code offset} to continue, or {@code Grep} for a narrower target").
+ * Text rendering streams through {@link java.io.BufferedReader} and stops at the first output cap
+ * hit; fingerprinting separately reads the bounded source. The truncation marker explains what to
+ * try next ("use {@code offset} to continue, or {@code Grep} for a narrower target").
  *
  * <h2>Multimodal dispatch</h2>
  *
