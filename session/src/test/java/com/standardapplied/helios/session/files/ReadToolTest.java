@@ -619,10 +619,10 @@ final class ReadToolTest {
   // ── MIME detection branch coverage ─────────────────────────────────────
 
   /**
-   * Covers every extension branch in {@link ReadTool#detectMimeType}. Each test in this batch
-   * writes a tiny file with the named extension and asserts the dispatch happens correctly — text
-   * files come back with their content, binary-attachable types come back as attachments,
-   * everything else gets the right MIME from the extension fallback. Coverage gate guard.
+   * Covers every extension branch in {@link MimeTypes#detect}. Each test in this batch writes a
+   * tiny file with the named extension and asserts the dispatch happens correctly — text files come
+   * back with their content, binary-attachable types come back as attachments, everything else gets
+   * the right MIME from the extension fallback. Coverage gate guard.
    */
   @Test
   void mimeDispatchCoversTextExtensions(@TempDir Path tmp) throws IOException {
