@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.memory;
 
+import com.standardapplied.helios.core.common.Result;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolContext;
@@ -115,78 +116,124 @@ public final class MemoryWriteTool {
   private static ToolResult execute(
       ToolContext ctx, MemoryBackend backend, Map<String, Object> args) {
     ctx.cancellation().throwIfCancelled();
+    return switch (parse(args)) {
+      case Result.Failure<Operation> failure -> ToolResult.failure(failure.error());
+      case Result.Success<Operation> operation -> apply(backend, operation.value());
+    };
+  }
+
+  private static Result<Operation> parse(Map<String, Object> args) {
     var op = ToolArgs.stringArg(args, "op");
     if (op.isEmpty()) {
-      return ToolResult.failure("MemoryWrite: missing required 'op' argument");
+      return new Result.Failure<>("MemoryWrite: missing required 'op' argument");
     }
     var path = ToolArgs.stringArg(args, "path");
     if (path.isEmpty()) {
-      return ToolResult.failure("MemoryWrite: missing required 'path' argument");
+      return new Result.Failure<>("MemoryWrite: missing required 'path' argument");
     }
+    return switch (op) {
+      case "create" -> Create.parse(path, args);
+      case "str_replace" -> StrReplace.parse(path, args);
+      case "insert" -> Insert.parse(path, args);
+      case "delete" -> new Result.Success<>(new Delete(path));
+      default ->
+          new Result.Failure<>(
+              "MemoryWrite: unknown op '"
+                  + op
+                  + "' (expected: create, str_replace, insert, delete)");
+    };
+  }
+
+  private static ToolResult apply(MemoryBackend backend, Operation operation) {
     try {
-      return switch (op) {
-        case "create" -> {
-          var content = ToolArgs.stringArgOrNull(args, "content");
-          if (content == null) {
-            yield ToolResult.failure("MemoryWrite: 'create' requires 'content'");
-          }
-          backend.create(path, content);
-          yield ToolResult.success("created " + path + " (" + content.length() + " chars)");
-        }
-        case "str_replace" -> {
-          var oldString = ToolArgs.stringArgOrNull(args, "oldString");
-          var newString = ToolArgs.stringArgOrNull(args, "newString");
-          if (oldString == null || newString == null) {
-            yield ToolResult.failure(
-                "MemoryWrite: 'str_replace' requires both 'oldString' and 'newString'");
-          }
-          backend.strReplace(path, oldString, newString);
-          yield ToolResult.success(
-              "replaced 1 occurrence in "
-                  + path
-                  + " ("
-                  + oldString.length()
-                  + " → "
-                  + newString.length()
-                  + " chars)");
-        }
-        case "insert" -> {
-          var content = ToolArgs.stringArgOrNull(args, "content");
-          var lineNumber = ToolArgs.intArg(args, "lineNumber", Integer.MIN_VALUE);
-          if (content == null) {
-            yield ToolResult.failure("MemoryWrite: 'insert' requires 'content'");
-          }
-          if (lineNumber == Integer.MIN_VALUE) {
-            yield ToolResult.failure("MemoryWrite: 'insert' requires 'lineNumber'");
-          }
-          backend.insert(path, lineNumber, content);
-          yield ToolResult.success(
-              "inserted at line "
-                  + lineNumber
-                  + " in "
-                  + path
-                  + " ("
-                  + content.length()
-                  + " chars)");
-        }
-        case "delete" -> {
-          backend.delete(path);
-          yield ToolResult.success("deleted " + path);
-        }
-        default ->
-            ToolResult.failure(
-                "MemoryWrite: unknown op '"
-                    + op
-                    + "' (expected: create, str_replace, insert, delete)");
-      };
+      return ToolResult.success(operation.applyTo(backend));
     } catch (FileAlreadyExistsException e) {
-      return ToolResult.failure("MemoryWrite: entry already exists at " + path);
+      return ToolResult.failure("MemoryWrite: entry already exists at " + operation.path());
     } catch (NoSuchFileException e) {
-      return ToolResult.failure("MemoryWrite: no such memory entry: " + path);
+      return ToolResult.failure("MemoryWrite: no such memory entry: " + operation.path());
     } catch (IllegalArgumentException e) {
       return ToolResult.failure("MemoryWrite: " + e.getMessage());
     } catch (IOException e) {
       return ToolResult.failure("MemoryWrite: I/O error: " + e.getMessage());
+    }
+  }
+
+  private sealed interface Operation {
+
+    String path();
+
+    String applyTo(MemoryBackend backend) throws IOException;
+  }
+
+  private record Create(String path, String content) implements Operation {
+
+    static Result<Operation> parse(String path, Map<String, Object> args) {
+      var content = ToolArgs.stringArgOrNull(args, "content");
+      if (content == null) {
+        return new Result.Failure<>("MemoryWrite: 'create' requires 'content'");
+      }
+      return new Result.Success<>(new Create(path, content));
+    }
+
+    @Override
+    public String applyTo(MemoryBackend backend) throws IOException {
+      backend.create(path, content);
+      return "created " + path + " (" + content.length() + " chars)";
+    }
+  }
+
+  private record StrReplace(String path, String oldString, String newString) implements Operation {
+
+    static Result<Operation> parse(String path, Map<String, Object> args) {
+      var oldString = ToolArgs.stringArgOrNull(args, "oldString");
+      var newString = ToolArgs.stringArgOrNull(args, "newString");
+      if (oldString == null || newString == null) {
+        return new Result.Failure<>(
+            "MemoryWrite: 'str_replace' requires both 'oldString' and 'newString'");
+      }
+      return new Result.Success<>(new StrReplace(path, oldString, newString));
+    }
+
+    @Override
+    public String applyTo(MemoryBackend backend) throws IOException {
+      backend.strReplace(path, oldString, newString);
+      return "replaced 1 occurrence in "
+          + path
+          + " ("
+          + oldString.length()
+          + " → "
+          + newString.length()
+          + " chars)";
+    }
+  }
+
+  private record Insert(String path, int lineNumber, String content) implements Operation {
+
+    static Result<Operation> parse(String path, Map<String, Object> args) {
+      var content = ToolArgs.stringArgOrNull(args, "content");
+      var lineNumber = ToolArgs.intArg(args, "lineNumber", Integer.MIN_VALUE);
+      if (content == null) {
+        return new Result.Failure<>("MemoryWrite: 'insert' requires 'content'");
+      }
+      if (lineNumber == Integer.MIN_VALUE) {
+        return new Result.Failure<>("MemoryWrite: 'insert' requires 'lineNumber'");
+      }
+      return new Result.Success<>(new Insert(path, lineNumber, content));
+    }
+
+    @Override
+    public String applyTo(MemoryBackend backend) throws IOException {
+      backend.insert(path, lineNumber, content);
+      return "inserted at line " + lineNumber + " in " + path + " (" + content.length() + " chars)";
+    }
+  }
+
+  private record Delete(String path) implements Operation {
+
+    @Override
+    public String applyTo(MemoryBackend backend) throws IOException {
+      backend.delete(path);
+      return "deleted " + path;
     }
   }
 }

@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.execution;
 
+import com.standardapplied.helios.core.common.Result;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
@@ -14,10 +15,6 @@ import com.standardapplied.helios.session.tools.ToolArgs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
-import java.nio.file.Path;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -59,8 +56,6 @@ public final class ExecuteTool {
 
   /** The stable tool name advertised to the model. */
   public static final String NAME = "Execute";
-
-  private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
 
   private ExecuteTool() {}
 
@@ -174,73 +169,14 @@ public final class ExecuteTool {
   private static ToolResult execute(
       ExecutionProvider provider, Map<String, Object> args, ToolContext ctx) {
     ctx.cancellation().throwIfCancelled();
-    var runtimeArg = ToolArgs.stringArg(args, "runtime");
-    if (Strings.isBlank(runtimeArg)) {
-      return ToolResult.failure("Execute: missing required 'runtime' argument");
-    }
-    Runtime runtime;
-    try {
-      runtime = Runtime.valueOf(runtimeArg.toUpperCase(Locale.ROOT));
-    } catch (IllegalArgumentException e) {
-      return ToolResult.failure(
-          "Execute: unknown runtime '"
-              + runtimeArg
-              + "'. Expected one of: BASH, PYTHON, SQL, JSHELL, R, NODE, CUSTOM");
-    }
-    // Capability pre-check: short-circuit before building a request and crossing the provider
-    // boundary when the provider has already declared the runtime as unsupported. Matches the
-    // ExecutionProvider class javadoc which promises this check happens before dispatch, and
-    // saves the provider an extra refusal-result construction.
-    var supported = provider.capabilities().supportedRuntimes();
-    if (!supported.contains(runtime)) {
-      return ToolResult.failure(
-          "Execute: runtime '"
-              + runtime
-              + "' is not supported by this provider (supported: "
-              + supported
-              + ")");
-    }
-    var script = ToolArgs.stringArg(args, "script");
-    if (Strings.isBlank(script)) {
-      return ToolResult.failure("Execute: missing required 'script' argument");
-    }
-    var positionalArgs = arrayArg(args, "args");
-    if (positionalArgs == null) {
-      return ToolResult.failure("Execute: 'args' must be an array of strings");
-    }
-    var workingDirectory = ToolArgs.stringArgOrNull(args, "workingDirectory");
-    var timeoutSecondsRaw = args.get("timeoutSeconds");
-    Duration timeout;
-    if (timeoutSecondsRaw == null) {
-      timeout = DEFAULT_TIMEOUT;
-    } else {
-      var seconds = ToolArgs.intArg(args, "timeoutSeconds", 0);
-      if (seconds <= 0) {
-        return ToolResult.failure("Execute: 'timeoutSeconds' must be a positive integer");
-      }
-      timeout = Duration.ofSeconds(seconds);
-    }
-    var environment = environmentArg(args.get("environment"));
-    if (environment == null) {
-      return ToolResult.failure("Execute: 'environment' must be an object of string→string");
-    }
-    var stdin = ToolArgs.stringArgOrNull(args, "stdin");
+    return switch (ExecuteArguments.parse(provider, args)) {
+      case Result.Failure<ExecutionRequest> failure -> ToolResult.failure(failure.error());
+      case Result.Success<ExecutionRequest> request -> dispatch(provider, request.value(), ctx);
+    };
+  }
 
-    var requestBuilder =
-        ExecutionRequest.newBuilder()
-            .withRuntime(runtime)
-            .withScript(script)
-            .withArgs(positionalArgs)
-            .withTimeout(timeout)
-            .withEnvironment(environment);
-    if (workingDirectory != null && !workingDirectory.isEmpty()) {
-      requestBuilder.withWorkingDirectory(Path.of(workingDirectory));
-    }
-    if (stdin != null) {
-      requestBuilder.withStdin(stdin);
-    }
-    var request = requestBuilder.build();
-
+  private static ToolResult dispatch(
+      ExecutionProvider provider, ExecutionRequest request, ToolContext ctx) {
     ExecutionResult result;
     try {
       result =
@@ -264,42 +200,7 @@ public final class ExecuteTool {
     } catch (CancellationException e) {
       return ToolResult.failure("Execute: cancelled");
     }
-    return ToolResult.success(format(runtime, result), result);
-  }
-
-  private static List<String> arrayArg(Map<String, Object> args, String name) {
-    var v = args.get(name);
-    if (v == null) {
-      return List.of();
-    }
-    if (!(v instanceof List<?> raw)) {
-      return null;
-    }
-    var out = new ArrayList<String>(raw.size());
-    for (var entry : raw) {
-      if (!(entry instanceof String s)) {
-        return null;
-      }
-      out.add(s);
-    }
-    return out;
-  }
-
-  private static Map<String, String> environmentArg(Object raw) {
-    if (raw == null) {
-      return Map.of();
-    }
-    if (!(raw instanceof Map<?, ?> map)) {
-      return null;
-    }
-    var out = new LinkedHashMap<String, String>(map.size());
-    for (var entry : map.entrySet()) {
-      if (!(entry.getKey() instanceof String key) || !(entry.getValue() instanceof String value)) {
-        return null;
-      }
-      out.put(key, value);
-    }
-    return out;
+    return ToolResult.success(format(request.runtime(), result), result);
   }
 
   private static String format(Runtime runtime, ExecutionResult result) {

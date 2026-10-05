@@ -22,16 +22,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Host-process {@link ExecutionProvider} backed by direct {@link BoundedProcess} dispatch. Each
@@ -90,15 +85,6 @@ import java.util.logging.Logger;
  */
 public final class LocalProcessExecutionProvider implements ExecutionProvider, AutoCloseable {
 
-  private static final Logger LOGGER =
-      Logger.getLogger(LocalProcessExecutionProvider.class.getName());
-
-  /**
-   * Disambiguated alias for {@code java.lang.Runtime} — the simple name {@code Runtime} resolves to
-   * the {@link com.standardapplied.helios.session.execution.Runtime} enum in this package.
-   */
-  private static final java.lang.Runtime JVM = java.lang.Runtime.getRuntime();
-
   private static final int DEFAULT_MAX_OUTPUT_BYTES = 50_000;
   private static final int DEFAULT_MAX_CONCURRENT = 4;
   private static final Duration DEFAULT_MAX_TIMEOUT = Duration.ofMinutes(5);
@@ -110,10 +96,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
   private final String path;
   private final int maxOutputBytes;
   private final Semaphore concurrency;
-  private final Set<Process> inflight = ConcurrentHashMap.newKeySet();
-  private final AtomicBoolean closed = new AtomicBoolean();
-  private final Thread shutdownHook;
-  private final boolean shutdownHookRegistered;
+  private final InflightProcesses inflight;
 
   private LocalProcessExecutionProvider(Builder b) {
     this.handlers = Map.copyOf(b.handlers);
@@ -128,11 +111,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
             .withFilesystemWriteAllowed(b.filesystemWriteAllowed)
             .withMaxTimeout(b.maxTimeout)
             .build();
-    this.shutdownHook = new Thread(this::reapInflight, "helios-exec-shutdown");
-    this.shutdownHookRegistered = b.registerShutdownHook;
-    if (shutdownHookRegistered) {
-      JVM.addShutdownHook(shutdownHook);
-    }
+    this.inflight = new InflightProcesses(b.registerShutdownHook);
   }
 
   /**
@@ -179,7 +158,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
     Objects.requireNonNull(session, "session must not be null");
     Objects.requireNonNull(request, "request must not be null");
     Objects.requireNonNull(cancellation, "cancellation must not be null");
-    if (closed.get()) {
+    if (inflight.isClosed()) {
       return CompletableFuture.failedFuture(new IllegalStateException("provider is closed"));
     }
     var future = new CompletableFuture<ExecutionResult>();
@@ -238,7 +217,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
       acquireRegistration.remove();
     }
     try {
-      if (closed.get()) {
+      if (inflight.isClosed()) {
         throw new CancellationException(
             "provider closed before " + request.runtime() + " could start");
       }
@@ -275,12 +254,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
   private ExecutionResult awaitProcess(
       ExecutionRequest request, BoundedProcess process, CancellationToken cancellation) {
     var proc = process.process();
-    inflight.add(proc);
-    // close() marks the provider closed and then scans the in-flight set once. A process added
-    // after that scan is one close() never saw, so the call that started it reaps it here.
-    if (closed.get()) {
-      reapInflight();
-    }
+    inflight.track(proc);
     // Once-only kill: a successful exit removes the callback's effect so a later cancel after
     // many calls does not iterate an ever-growing list of stale process refs and does not try to
     // destroy an already-reaped process.
@@ -292,21 +266,21 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
           }
         };
     var killRegistration = cancellation.onCancel(killCallback);
-    var stdinThread = startStdinFeeder(process, request.stdin().orElse(null));
+    var stdinFeeder = StdinFeeder.start(process, request.stdin().orElse(null));
     ProcessOutcome outcome;
     try {
       outcome = process.await();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       killCallback.run();
-      joinQuietly(stdinThread);
-      inflight.remove(proc);
+      stdinFeeder.join();
+      inflight.untrack(proc);
       killRegistration.remove();
       throw new CancellationException(
           "interrupted while waiting for " + request.runtime() + " process");
     }
-    joinQuietly(stdinThread);
-    inflight.remove(proc);
+    stdinFeeder.join();
+    inflight.untrack(proc);
     // Mark the per-call kill callback inert so any later token cancellation does not retain or
     // act on this now-reaped process, then detach from the (possibly long-lived) token's list so
     // the callback reference does not accumulate across many calls.
@@ -332,35 +306,13 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
         stdoutResult.mergeCounts(stderrResult));
   }
 
-  private static Thread startStdinFeeder(BoundedProcess process, String stdin) {
-    return Thread.startVirtualThread(
-        () -> {
-          try (OutputStream out = process.stdin()) {
-            if (stdin != null) {
-              out.write(stdin.getBytes(StandardCharsets.UTF_8));
-              out.flush();
-            }
-          } catch (IOException ignored) {
-            // Child closed its stdin or exited before we finished writing — both expected.
-          }
-        });
-  }
-
-  private static void joinQuietly(Thread t) {
-    try {
-      t.join();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    }
-  }
-
   /**
    * Whether this provider has been closed.
    *
    * @return {@code true} after the first successful {@link #close()}
    */
   public boolean isClosed() {
-    return closed.get();
+    return inflight.isClosed();
   }
 
   /**
@@ -381,35 +333,31 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
    */
   @Override
   public void close() {
-    if (!closed.compareAndSet(false, true)) {
-      return;
-    }
-    reapInflight();
-    if (shutdownHookRegistered) {
-      try {
-        JVM.removeShutdownHook(shutdownHook);
-      } catch (IllegalStateException ignored) {
-        // JVM is already shutting down — the hook is running or has run.
-      }
-    }
+    inflight.close();
   }
 
-  private void reapInflight() {
-    for (var p : List.copyOf(inflight)) {
+  private record StdinFeeder(Thread thread) {
+
+    static StdinFeeder start(BoundedProcess process, String stdin) {
+      return new StdinFeeder(
+          Thread.startVirtualThread(
+              () -> {
+                try (OutputStream out = process.stdin()) {
+                  if (stdin != null) {
+                    out.write(stdin.getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                  }
+                } catch (IOException ignored) {
+                  // Child closed its stdin or exited before we finished writing — both expected.
+                }
+              }));
+    }
+
+    void join() {
       try {
-        p.descendants().forEach(ProcessHandle::destroy);
-        p.destroy();
-        if (!p.waitFor(2, TimeUnit.SECONDS)) {
-          p.descendants().forEach(ProcessHandle::destroyForcibly);
-          p.destroyForcibly();
-          p.waitFor(1, TimeUnit.SECONDS);
-        }
+        thread.join();
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
-      } catch (RuntimeException e) {
-        LOGGER.log(Level.WARNING, "failed to reap subprocess on provider close", e);
-      } finally {
-        inflight.remove(p);
       }
     }
   }
