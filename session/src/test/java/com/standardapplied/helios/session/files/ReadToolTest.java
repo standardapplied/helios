@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Assumptions;
@@ -618,10 +619,10 @@ final class ReadToolTest {
   // ── MIME detection branch coverage ─────────────────────────────────────
 
   /**
-   * Covers every extension branch in {@link ReadTool#detectMimeType}. Each test in this batch
-   * writes a tiny file with the named extension and asserts the dispatch happens correctly — text
-   * files come back with their content, binary-attachable types come back as attachments,
-   * everything else gets the right MIME from the extension fallback. Coverage gate guard.
+   * Covers every extension branch in {@link MimeTypes#detect}. Each test in this batch writes a
+   * tiny file with the named extension and asserts the dispatch happens correctly — text files come
+   * back with their content, binary-attachable types come back as attachments, everything else gets
+   * the right MIME from the extension fallback. Coverage gate guard.
    */
   @Test
   void mimeDispatchCoversTextExtensions(@TempDir Path tmp) throws IOException {
@@ -838,5 +839,42 @@ final class ReadToolTest {
             .execute(Map.of("path", "pipe.txt"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("not a regular file"), result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void unsearchableParentIsAnIoErrorReadingTheSize(@TempDir Path tmp) throws IOException {
+    var dir = Files.createDirectory(tmp.resolve("locked"));
+    Files.writeString(dir.resolve("a.txt"), "x", StandardCharsets.UTF_8);
+    Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("---------"));
+    try {
+      Assumptions.assumeFalse(Files.isExecutable(dir), "permissions are not enforced (root)");
+      var result =
+          ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+              .tool()
+              .execute(Map.of("path", "locked/a.txt"), ToolContext.noop());
+      assertFalse(result.success());
+      assertTrue(result.output().startsWith("Read: I/O error reading size: "), result.output());
+    } finally {
+      Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
+    }
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void unreadableFileIsAnIoErrorFingerprintingIt(@TempDir Path tmp) throws IOException {
+    var locked = Files.writeString(tmp.resolve("a.txt"), "x", StandardCharsets.UTF_8);
+    Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+    try {
+      Assumptions.assumeFalse(Files.isReadable(locked), "permissions are not enforced (root)");
+      var result =
+          ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+              .tool()
+              .execute(Map.of("path", "a.txt"), ToolContext.noop());
+      assertFalse(result.success());
+      assertTrue(result.output().startsWith("Read: I/O error fingerprinting: "), result.output());
+    } finally {
+      Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rw-------"));
+    }
   }
 }

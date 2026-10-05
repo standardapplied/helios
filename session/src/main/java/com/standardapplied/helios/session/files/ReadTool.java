@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session.files;
 
 import com.standardapplied.helios.core.common.Redactor;
+import com.standardapplied.helios.core.common.Result;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
@@ -15,11 +16,7 @@ import com.standardapplied.helios.session.tools.ToolArgs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
@@ -55,9 +52,9 @@ import java.util.Objects;
  *       guarantee against pathological per-line growth.
  * </ul>
  *
- * Text rendering streams through {@link BufferedReader} and stops at the first output cap hit;
- * fingerprinting separately reads the bounded source. The truncation marker explains what to try
- * next ("use {@code offset} to continue, or {@code Grep} for a narrower target").
+ * Text rendering streams through {@link java.io.BufferedReader} and stops at the first output cap
+ * hit; fingerprinting separately reads the bounded source. The truncation marker explains what to
+ * try next ("use {@code offset} to continue, or {@code Grep} for a narrower target").
  *
  * <h2>Multimodal dispatch</h2>
  *
@@ -65,8 +62,8 @@ import java.util.Objects;
  *
  * <ul>
  *   <li>Text-like MIME ({@code text/*}, {@code application/json}, {@code application/xml}, {@code
- *       application/yaml}, {@code application/x-yaml}) or no detected MIME with a clean NUL-free
- *       header → bounded text path above.
+ *       application/yaml}) or no detected MIME with a clean NUL-free header → bounded text path
+ *       above.
  *   <li>{@code image/*} or {@code application/pdf} → {@link ToolResult#successWithAttachments
  *       attachment path}: the bytes ride as an {@link InlineFile} so the provider's native vision /
  *       PDF channel handles them. Images are capped at {@link #MAX_IMAGE_BYTES} (Anthropic's 5 MB
@@ -124,9 +121,6 @@ public final class ReadTool {
    * agent workloads land here for technical papers and reports that exceed the image limit.
    */
   public static final long MAX_PDF_BYTES = 20L * 1024 * 1024;
-
-  /** Number of bytes sniffed when detecting whether an unknown-MIME file is binary. */
-  static final int BINARY_SNIFF_BYTES = 8 * 1024;
 
   private ReadTool() {}
 
@@ -225,18 +219,34 @@ public final class ReadTool {
     } catch (WorkspaceRoot.WorkspaceEscapeException e) {
       return ToolResult.failure("Read: " + e.getMessage());
     }
-    long size;
+    return switch (regularFileSize(workspace, resolved)) {
+      case Result.Failure<Long> failure -> ToolResult.failure(failure.error());
+      case Result.Success<Long> size ->
+          read(workspace, tracker, redactor, args, resolved, size.value());
+    };
+  }
+
+  private static Result<Long> regularFileSize(WorkspaceRoot workspace, Path resolved) {
     try {
       var attrs = workspace.attributes(resolved);
-      if (!attrs.isRegularFile()) {
-        return ToolResult.failure("Read: not a regular file: " + workspace.relativize(resolved));
+      if (attrs.isRegularFile()) {
+        return new Result.Success<>(attrs.size());
       }
-      size = attrs.size();
     } catch (NoSuchFileException e) {
-      return ToolResult.failure("Read: not a regular file: " + workspace.relativize(resolved));
+      return new Result.Failure<>("Read: not a regular file: " + workspace.relativize(resolved));
     } catch (IOException e) {
-      return ToolResult.failure("Read: I/O error reading size: " + e.getMessage());
+      return new Result.Failure<>("Read: I/O error reading size: " + e.getMessage());
     }
+    return new Result.Failure<>("Read: not a regular file: " + workspace.relativize(resolved));
+  }
+
+  private static ToolResult read(
+      WorkspaceRoot workspace,
+      FileTracker tracker,
+      Redactor redactor,
+      Map<String, Object> args,
+      Path resolved,
+      long size) {
     if (size > MAX_FILE_SIZE_BYTES) {
       return ToolResult.failure(
           "Read: file exceeds maximum size of "
@@ -251,98 +261,32 @@ public final class ReadTool {
     } catch (IOException e) {
       return ToolResult.failure("Read: I/O error fingerprinting: " + e.getMessage());
     }
-
-    var mimeType = detectMimeType(resolved);
-    if (isAttachableBinary(mimeType)) {
-      return readBinaryAsAttachment(workspace, resolved, mimeType, size);
+    var mimeType = MimeTypes.detect(resolved);
+    if (mimeType.isPresent()) {
+      return mimeType.get().channel() == MimeTypes.Channel.ATTACHMENT
+          ? readAttachment(workspace, resolved, mimeType.get().name(), size)
+          : readText(workspace, resolved, args, redactor);
     }
-    if (isTextLike(mimeType) || isLikelyText(workspace, resolved)) {
-      var offset = ToolArgs.intArg(args, "offset", 1);
-      var limit = ToolArgs.intArg(args, "limit", DEFAULT_LIMIT);
-      if (offset < 1) {
-        return ToolResult.failure("Read: 'offset' must be >= 1, got " + offset);
-      }
-      if (limit < 1) {
-        return ToolResult.failure("Read: 'limit' must be >= 1, got " + limit);
-      }
-      return readTextStreaming(workspace, resolved, offset, limit, redactor);
+    if (MimeTypes.isLikelyText(workspace, resolved, MAX_FILE_SIZE_BYTES)) {
+      return readText(workspace, resolved, args, redactor);
     }
     return ToolResult.failure(
-        "Read: refusing to decode binary file as text (detected MIME "
-            + (mimeType == null ? "unknown" : mimeType)
-            + "). Images and PDFs are returned as attachments; for other binary formats use a "
-            + "dedicated tool or extract the payload server-side before passing the bytes through.");
+        "Read: refusing to decode binary file as text (detected MIME unknown). Images and PDFs"
+            + " are returned as attachments; for other binary formats use a dedicated tool or"
+            + " extract the payload server-side before passing the bytes through.");
   }
 
-  /**
-   * Stream the file line by line, emitting at most {@code limit} lines starting at {@code offset}.
-   * Each line is capped at {@link #MAX_LINE_BYTES} and the total output at {@link
-   * #MAX_OUTPUT_BYTES}; either cap appends a truncation marker that teaches the model the next
-   * move. The remainder of the file is never read once a cap fires.
-   */
-  private static ToolResult readTextStreaming(
-      WorkspaceRoot workspace, Path file, int offset, int limit, Redactor redactor) {
-    var out = new StringBuilder();
-    int linesEmitted = 0;
-    long currentLine = 0;
-    boolean truncatedByLines = false;
-    boolean truncatedByBytes = false;
-    boolean truncatedAnyLine = false;
-    try (var reader =
-        new BufferedReader(
-            new InputStreamReader(
-                workspace.newInputStream(file, MAX_FILE_SIZE_BYTES), StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = reader.readLine()) != null) {
-        currentLine++;
-        if (currentLine < offset) {
-          continue;
-        }
-        if (linesEmitted >= limit) {
-          truncatedByLines = true;
-          break;
-        }
-        var lineForOutput = line;
-        if (lineForOutput.length() > MAX_LINE_BYTES) {
-          lineForOutput =
-              lineForOutput.substring(0, MAX_LINE_BYTES)
-                  + " [line truncated to "
-                  + MAX_LINE_BYTES
-                  + " bytes]";
-          truncatedAnyLine = true;
-        }
-        var entry = String.format("%6d\t%s%n", currentLine, lineForOutput);
-        if (out.length() + entry.length() > MAX_OUTPUT_BYTES) {
-          truncatedByBytes = true;
-          break;
-        }
-        out.append(entry);
-        linesEmitted++;
-      }
-    } catch (IOException e) {
-      return ToolResult.failure("Read: I/O error reading file: " + e.getMessage());
+  private static ToolResult readText(
+      WorkspaceRoot workspace, Path file, Map<String, Object> args, Redactor redactor) {
+    var offset = ToolArgs.intArg(args, "offset", 1);
+    var limit = ToolArgs.intArg(args, "limit", DEFAULT_LIMIT);
+    if (offset < 1) {
+      return ToolResult.failure("Read: 'offset' must be >= 1, got " + offset);
     }
-    if (truncatedByLines) {
-      out.append("[truncated at line ")
-          .append(currentLine - 1)
-          .append("; ")
-          .append(linesEmitted)
-          .append(" lines emitted. Use offset=")
-          .append(currentLine)
-          .append(" to continue, or Grep for a narrower target.]\n");
-    } else if (truncatedByBytes) {
-      out.append("[truncated: total output exceeded ")
-          .append(MAX_OUTPUT_BYTES)
-          .append(" bytes after ")
-          .append(linesEmitted)
-          .append(" lines. Use Grep to locate the section you need.]\n");
-    } else if (truncatedAnyLine) {
-      out.append("[note: at least one line exceeded ")
-          .append(MAX_LINE_BYTES)
-          .append(" bytes and was truncated mid-line.]\n");
+    if (limit < 1) {
+      return ToolResult.failure("Read: 'limit' must be >= 1, got " + limit);
     }
-    var text = out.toString();
-    return ToolResult.success(redactor == null ? text : redactor.redact(text).text());
+    return TextPage.read(workspace, file, offset, limit, redactor);
   }
 
   /**
@@ -351,7 +295,7 @@ public final class ReadTool {
    * apply the looser {@link #MAX_PDF_BYTES}. Rejection produces a clean message naming the limit
    * and what to do next, rather than racing the API to a cryptic provider 400.
    */
-  private static ToolResult readBinaryAsAttachment(
+  private static ToolResult readAttachment(
       WorkspaceRoot workspace, Path file, String mimeType, long size) {
     var relPath = workspace.relativize(file);
     var limit = mimeType.startsWith("image/") ? MAX_IMAGE_BYTES : MAX_PDF_BYTES;
@@ -388,83 +332,5 @@ public final class ReadTool {
             + size
             + " bytes). Inspect the attached content directly.";
     return ToolResult.successWithAttachments(note, List.of(InlineFile.of(bytes, mimeType)));
-  }
-
-  /**
-   * Classify by extension without invoking platform detectors that might reopen an unconfined path.
-   * Returns {@code null} for unknown extensions; the caller sniffs a confined stream.
-   */
-  static String detectMimeType(Path file) {
-    var name = file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-    return switch (extensionOf(name)) {
-      case "pdf" -> "application/pdf";
-      case "png" -> "image/png";
-      case "jpg", "jpeg" -> "image/jpeg";
-      case "gif" -> "image/gif";
-      case "webp" -> "image/webp";
-      case "json" -> "application/json";
-      case "xml" -> "application/xml";
-      case "yaml", "yml" -> "application/yaml";
-      case "html", "htm" -> "text/html";
-      case "css" -> "text/css";
-      case "js", "mjs" -> "text/javascript";
-      case "java", "kt", "scala", "py", "rb", "go", "rs", "c", "cpp", "h", "hpp", "ts", "tsx" ->
-          "text/plain";
-      case "md", "markdown" -> "text/markdown";
-      case "csv", "tsv" -> "text/plain";
-      case "log", "txt" -> "text/plain";
-      default -> null;
-    };
-  }
-
-  private static String extensionOf(String name) {
-    var dot = name.lastIndexOf('.');
-    return dot >= 0 && dot < name.length() - 1 ? name.substring(dot + 1) : "";
-  }
-
-  static boolean isAttachableBinary(String mimeType) {
-    if (mimeType == null) {
-      return false;
-    }
-    return mimeType.startsWith("image/") || "application/pdf".equals(mimeType);
-  }
-
-  static boolean isTextLike(String mimeType) {
-    if (mimeType == null) {
-      return false;
-    }
-    if (mimeType.startsWith("text/")) {
-      return true;
-    }
-    return switch (mimeType) {
-      case "application/json",
-          "application/xml",
-          "application/yaml",
-          "application/x-yaml",
-          "application/javascript" ->
-          true;
-      default -> false;
-    };
-  }
-
-  /**
-   * Sniff the first {@link #BINARY_SNIFF_BYTES} bytes for NUL — present in essentially every binary
-   * format, absent in real-world text. Used only when the MIME probe came back null; lets us still
-   * serve uncategorised-but-clearly-text files (e.g. config files without standard extensions) as
-   * text rather than failing.
-   */
-  static boolean isLikelyText(WorkspaceRoot workspace, Path file) {
-    try (InputStream in = workspace.newInputStream(file, MAX_FILE_SIZE_BYTES)) {
-      var buf = new byte[BINARY_SNIFF_BYTES];
-      var n = in.readNBytes(buf, 0, buf.length);
-      for (var i = 0; i < n; i++) {
-        if (buf[i] == 0) {
-          return false;
-        }
-      }
-      return true;
-    } catch (IOException ignored) {
-      return false;
-    }
   }
 }

@@ -1,11 +1,12 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.examples.session;
 
+import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
 import com.standardapplied.helios.session.AgentSession;
-import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.ConsoleEventPrinter;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
@@ -27,7 +28,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.concurrent.Flow;
 import javax.imageio.ImageIO;
 
 /**
@@ -72,43 +72,15 @@ public final class SessionDemoMain {
     }
   }
 
-  private static void runExploreAndRememberScenario(
-      com.standardapplied.helios.core.model.Model model) throws IOException {
+  private static void runExploreAndRememberScenario(Model model) throws IOException {
     System.out.println("\n=== Scenario 1: explore + remember ===");
     var workspace = createFakeRepo();
     System.out.println("workspace: " + workspace);
 
-    var ws = WorkspaceRoot.of(workspace);
-    var tracker = InMemoryFileTracker.create();
-    var memoryBackend = FileSystemMemoryBackend.of(ws);
-
-    var tools =
-        new ToolRegistry(
-            List.of(
-                ReadTool.binding(ws, tracker),
-                LsTool.binding(ws),
-                GlobTool.binding(ws),
-                GrepTool.binding(ws)));
-
-    var permission =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(
-                PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryRead", "/memories/**"),
-                PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryWrite", "/memories/**")),
-            List.of(),
-            List.of());
-
-    var options =
-        SessionOptions.newBuilder()
-            .withModel(model)
-            .withTools(tools)
-            .withPermission(permission)
-            .withMemoryBackend(memoryBackend)
-            .build();
+    var options = exploreAndRememberOptions(model, workspace).build();
 
     try (var session = AgentSession.create(options)) {
-      session.events().subscribe(new ConsoleEventPrinter());
+      session.events().subscribe(new ConsoleEventPrinter(System.out));
       var prompt =
           "You're looking at a tiny sample repo. Use the file tools to see what's in it (LS, Glob,"
               + " Grep, Read are available). Then write a one-line summary to"
@@ -127,8 +99,39 @@ public final class SessionDemoMain {
     }
   }
 
-  private static void runAttachmentScenario(com.standardapplied.helios.core.model.Model model)
-      throws IOException {
+  /**
+   * The explore-and-remember session: the read-only file tools over {@code workspace}, memory under
+   * it, and memory reads and writes allowed without asking.
+   *
+   * @param model the model the session talks to
+   * @param workspace the repository to explore
+   * @return the options, ready for further limits before {@code build()}
+   */
+  static SessionOptions.Builder exploreAndRememberOptions(Model model, Path workspace) {
+    var ws = WorkspaceRoot.of(workspace);
+    var tools =
+        new ToolRegistry(
+            List.of(
+                ReadTool.binding(ws, InMemoryFileTracker.create()),
+                LsTool.binding(ws),
+                GlobTool.binding(ws),
+                GrepTool.binding(ws)));
+    var permission =
+        new Permission(
+            PermissionMode.DEFAULT,
+            List.of(
+                PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryRead", "/memories/**"),
+                PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryWrite", "/memories/**")),
+            List.of(),
+            List.of());
+    return SessionOptions.newBuilder()
+        .withModel(model)
+        .withTools(tools)
+        .withPermission(permission)
+        .withMemoryBackend(FileSystemMemoryBackend.of(ws));
+  }
+
+  private static void runAttachmentScenario(Model model) throws IOException {
     System.out.println("\n=== Scenario 2: attachment ===");
     var tmp = Files.createTempDirectory("helios-session-demo-att-");
     var pngPath = tmp.resolve("color.png");
@@ -139,7 +142,7 @@ public final class SessionDemoMain {
         SessionOptions.newBuilder().withModel(model).withSessionId("session-demo-att").build();
 
     try (var session = AgentSession.create(options)) {
-      session.events().subscribe(new ConsoleEventPrinter());
+      session.events().subscribe(new ConsoleEventPrinter(System.out));
       var msg =
           UserMessage.newBuilder()
               .withText(
@@ -217,54 +220,5 @@ public final class SessionDemoMain {
       return s.substring(0, 400) + "... [" + s.length() + " chars total]";
     }
     return s;
-  }
-
-  private static final class ConsoleEventPrinter implements Flow.Subscriber<QueryEvent> {
-
-    @Override
-    public void onSubscribe(Flow.Subscription subscription) {
-      subscription.request(Long.MAX_VALUE);
-    }
-
-    @Override
-    public void onNext(QueryEvent ev) {
-      switch (ev) {
-        case QueryEvent.AssistantText t -> System.out.print(t.text());
-        case QueryEvent.AssistantCitations c ->
-            System.out.println(
-                "\n[citations] "
-                    + c.citations().stream()
-                        .map(cit -> cit.title() != null ? cit.title() : cit.sourceId())
-                        .toList());
-        case QueryEvent.ToolUse u ->
-            System.out.println(
-                "\n[tool] " + u.call().name() + " " + truncate(u.call().arguments().toString()));
-        case QueryEvent.ToolResult r ->
-            System.out.println(
-                "[result] "
-                    + r.call().name()
-                    + " "
-                    + (r.result().success() ? "ok" : "FAILED: ")
-                    + (r.result().success() ? "" : r.result().output()));
-        case QueryEvent.ToolBlocked b ->
-            System.out.println("[blocked] " + b.call().name() + ": " + b.reason());
-        case QueryEvent.TurnEnded te -> System.out.println("\n[turn-ended] " + te.reason());
-        case QueryEvent.LoopEnded le ->
-            System.out.println("[loop-ended] " + le.result().getClass().getSimpleName());
-        default -> {
-          // skip the chatty events
-        }
-      }
-    }
-
-    @Override
-    public void onError(Throwable throwable) {
-      System.err.println("[stream-error] " + throwable);
-    }
-
-    @Override
-    public void onComplete() {
-      // nothing
-    }
   }
 }

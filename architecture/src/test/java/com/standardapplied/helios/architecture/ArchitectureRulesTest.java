@@ -30,6 +30,7 @@ import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import java.lang.module.ModuleFinder;
 import java.net.http.HttpClient;
+import java.nio.file.Files;
 import java.time.Clock;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -57,6 +58,9 @@ class ArchitectureRulesTest {
    * in a UUID v7.
    */
   private static final String STATIC_WALL_CLOCK_BURN_DOWN = HELIOS + ".core.common.Ids";
+
+  /** The one visitor that walks the workspace for the session file tools. */
+  private static final String WORKSPACE_WALK = HELIOS + ".session.files.WorkspaceWalk";
 
   /** The one launcher outside core.process: the REPL sandbox starts its own JVM. */
   private static final String SANDBOX_LAUNCHER = HELIOS + ".repl.sandbox.JvmSandbox";
@@ -254,6 +258,32 @@ class ArchitectureRulesTest {
             "a child process is started through core.process.BoundedProcess, which owns the"
                 + " explicit argv and environment, bounded output, timeout kill and working"
                 + " directory; only repl.sandbox.JvmSandbox launches its own JVM")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void sessionFilesWalksTheWorkspaceOnlyThroughWorkspaceWalk() {
+    var oneWay =
+        "a file tool walks the workspace through session.files.WorkspaceWalk, which drives the"
+            + " one confined walk, WorkspaceRoot.walkFileTree, with hidden-directory pruning, the"
+            + " regular-file and size filter, cancellation and the result cap";
+    noClasses()
+        .that()
+        .resideInAPackage(HELIOS + ".session.files")
+        .and(not(name(WORKSPACE_WALK).or(nameStartingWith(WORKSPACE_WALK + "$"))))
+        .should()
+        .accessTargetWhere(
+            targetOwner(name(HELIOS + ".session.files.WorkspaceRoot"))
+                .and(target(name("walkFileTree"))))
+        .because(oneWay)
+        .check(LIBRARY);
+    noClasses()
+        .that()
+        .resideInAPackage(HELIOS + ".session.files")
+        .should()
+        .accessTargetWhere(
+            targetOwner(type(Files.class)).and(target(name("walk").or(name("walkFileTree")))))
+        .because(oneWay)
         .check(LIBRARY);
   }
 
