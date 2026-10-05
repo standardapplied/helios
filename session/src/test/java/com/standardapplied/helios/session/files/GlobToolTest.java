@@ -171,6 +171,16 @@ final class GlobToolTest {
   }
 
   @Test
+  void missingRootIsAnIoErrorScanningIt(@TempDir Path tmp) {
+    var result =
+        GlobTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "*", "path", "absent"), ToolContext.noop());
+    assertFalse(result.success());
+    assertTrue(result.output().startsWith("Glob: I/O error scanning absent: "), result.output());
+  }
+
+  @Test
   void invalidPatternFails(@TempDir Path tmp) {
     var result =
         GlobTool.binding(WorkspaceRoot.of(tmp))

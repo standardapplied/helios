@@ -91,6 +91,16 @@ final class MimeTypesTest {
   }
 
   @Test
+  void aFileTheConfinedOpenRefusesIsNotLikelyText(@TempDir Path tmp) throws IOException {
+    Files.writeString(tmp.resolve("notes"), "plain text");
+    var workspace = WorkspaceRoot.of(tmp);
+    var notes = workspace.resolveSafe("notes");
+
+    assertTrue(MimeTypes.isLikelyText(workspace, notes, 1024));
+    assertFalse(MimeTypes.isLikelyText(workspace, notes, 1));
+  }
+
+  @Test
   void unknownExtensionWithBinaryContentIsRefusedNamingUnknownMime(@TempDir Path tmp)
       throws IOException {
     Files.write(tmp.resolve("blob.bin"), new byte[] {1, 0, 2});

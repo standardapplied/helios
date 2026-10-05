@@ -156,6 +156,16 @@ final class GrepToolTest {
   }
 
   @Test
+  void missingRootIsAnIoErrorScanningIt(@TempDir Path tmp) {
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "x", "path", "absent"), ToolContext.noop());
+    assertFalse(result.success());
+    assertTrue(result.output().startsWith("Grep: I/O error scanning absent: "), result.output());
+  }
+
+  @Test
   void escapingWorkspaceFails(@TempDir Path tmp) {
     var result =
         GrepTool.binding(WorkspaceRoot.of(tmp))
