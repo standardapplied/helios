@@ -49,6 +49,26 @@ public final class HttpClientFactory {
   }
 
   /**
+   * Create an HttpClient for unauthenticated downloads, the one client that follows redirects.
+   *
+   * <p>A file host may answer a download with a redirect to its CDN, as Hugging Face does, so this
+   * client follows it under {@link HttpClient.Redirect#NORMAL}, which refuses a redirect from
+   * {@code https} to {@code http}. A redirect target receives whatever the request carries, so this
+   * client is for plain requests that carry no credential: it takes no {@link ModelConfig}, which
+   * keeps every configured key and header away from it. Never add a credential to a request sent
+   * through it; use {@link #create(ModelConfig)} instead.
+   *
+   * @return a new HttpClient instance with the default connect timeout and {@link
+   *     HttpClient.Redirect#NORMAL}
+   */
+  public static HttpClient createForDownloads() {
+    return HttpClient.newBuilder()
+        .connectTimeout(DEFAULT_CONNECT_TIMEOUT)
+        .followRedirects(HttpClient.Redirect.NORMAL)
+        .build();
+  }
+
+  /**
    * Create an HttpClient with default settings.
    *
    * @return a new HttpClient instance with default timeouts
