@@ -11,12 +11,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.test.RedirectTrap;
+import com.standardapplied.helios.core.test.StubHttpServer;
 import java.io.ByteArrayInputStream;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -70,6 +74,40 @@ class HttpClientFactoryTest {
 
     assertEquals(HttpClient.Redirect.NEVER, HttpClientFactory.create().followRedirects());
     assertEquals(HttpClient.Redirect.NEVER, HttpClientFactory.create(config).followRedirects());
+  }
+
+  @Test
+  void createForDownloadsFollowsRedirectsWithTheDefaultConnectTimeout() {
+    var client = HttpClientFactory.createForDownloads();
+
+    assertEquals(HttpClient.Redirect.NORMAL, client.followRedirects());
+    assertEquals(Duration.ofSeconds(10), client.connectTimeout().orElse(null));
+  }
+
+  @Test
+  void createForDownloadsFollowsARedirectToItsTarget() throws Exception {
+    var client = HttpClientFactory.createForDownloads();
+    try (var server =
+        StubHttpServer.start(
+            InetAddress.getLoopbackAddress(),
+            0,
+            request ->
+                request.requestLine().startsWith("GET /file ")
+                    ? new StubHttpServer.Reply(302, Map.of("Location", "/cdn/file"), "")
+                    : new StubHttpServer.Reply(200, Map.of(), "content"))) {
+      var request = HttpRequest.newBuilder(server.uri().resolve("/file")).GET().build();
+
+      var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+      assertEquals(200, response.statusCode());
+      assertEquals("content", response.body());
+      assertEquals(server.uri().resolve("/cdn/file"), response.uri());
+      assertEquals(
+          List.of("GET /file HTTP/1.1", "GET /cdn/file HTTP/1.1"),
+          server.requests().stream().map(StubHttpServer.Request::requestLine).toList());
+    } finally {
+      HttpClientFactory.shutdownGracefully(client);
+    }
   }
 
   static Stream<RedirectTrap.Scenario> redirectScenarios() {
