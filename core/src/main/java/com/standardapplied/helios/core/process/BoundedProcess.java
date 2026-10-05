@@ -88,11 +88,11 @@ public final class BoundedProcess implements AutoCloseable {
    * for both output streams to be fully captured.
    *
    * @return the exit code, captured output and timing
-   * @throws InterruptedException if the calling thread is interrupted while waiting; the child and
-   *     its descendants are killed before this is thrown
+   * @throws InterruptedException if the calling thread is interrupted while waiting; the child
+   *     keeps running, and the caller decides whether to {@link #kill()} it
    */
   public ProcessOutcome await() throws InterruptedException {
-    var timedOut = !waitOrKill();
+    var timedOut = !process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
     if (timedOut) {
       kill();
       reapForcibly();
@@ -113,15 +113,6 @@ public final class BoundedProcess implements AutoCloseable {
   public void close() {
     if (ownedDirectory != null) {
       deleteRecursively(ownedDirectory);
-    }
-  }
-
-  private boolean waitOrKill() throws InterruptedException {
-    try {
-      return process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-    } catch (InterruptedException e) {
-      kill();
-      throw e;
     }
   }
 

@@ -71,7 +71,7 @@ in main code.
 | `CostCalculator.Pricing.ANTHROPIC_CACHE_WRITE_MULTIPLIER` | `Pricing.ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER` |
 | `CostCalculator.Pricing.anthropicCaching(input, output)` | `Pricing.anthropicCaching5m(input, output)` |
 | `JsonlEventSink.open(Path)` | `JsonlEventSink.openFull(Path)` (same behaviour) or `openMetadataOnly(Path)` |
-| `Trace.totalTokens` summed from the `inputTokens` / `outputTokens` span attributes when a span had no typed usage | record `SpanBuilder.usage(Usage)`; a span without typed usage contributes 0 and its token attributes are plain attributes |
+| `Trace.totalTokens` summed from the `inputTokens` / `outputTokens` span attributes when a span had no typed usage | record `SpanBuilder.withUsage(Usage)`; a span without typed usage contributes 0 and its token attributes are plain attributes |
 | `ModelChunk.MessageStop(stopReason, usage)` | `MessageStop(stopReason, usage, Map.of(), List.of())` |
 | `AnthropicModelId.usesAdaptiveThinking()` | `thinkingShape() != ThinkingShape.LEGACY_BUDGET` |
 | Anthropic metadata keys `anthropic.thinking` and `anthropic.thinkingSignature`, and the decode fallback that read them | `anthropic.thinkingBlocks`, a JSON array of `{"text", "signature"}` with one entry per thinking block |
@@ -107,6 +107,23 @@ it, not retryable); point `baseUrl` at the final endpoint.
 |---|---|
 | `HttpClientFactory.create(ModelConfig, HttpClient.Redirect)` | `HttpClientFactory.create(ModelConfig)`, which never follows a redirect; there is no policy to choose |
 
+**Builder steps start with `with`, and the core burn-down moves a few members.** Every public
+method on a `*Builder` type that returns that builder is now named `withX(...)`; an architecture
+rule fails the build on one that is not. `Tool.execute(Map)`, which substituted
+`ToolContext.noop()`, is gone, so every call takes the production path. Binary pinning moves to the
+new `core.process` package.
+
+| 2.x | 3.0 |
+|---|---|
+| `tool.execute(arguments)` | `tool.execute(arguments, ToolContext.noop())` |
+| `CommandGrant.resolveBinary(spec, pathEnv)` | `core.process.BinaryResolver.resolve(spec, pathEnv)` |
+| `SpanBuilder.attribute(k, v)`, `usage(u)`, `cost(c)` | `withAttribute(k, v)`, `withUsage(u)`, `withCost(c)` |
+| `TraceBuilder.attribute`, `inputText`, `outputText`, `userId`, `sessionId`, `modelId`, `promptName`, `promptVersion`, `groupId`, `labels` | `withAttribute`, `withInputText`, `withOutputText`, `withUserId`, `withSessionId`, `withModelId`, `withPromptName`, `withPromptVersion`, `withGroupId`, `withLabels` |
+| `TraceBuilder.span(name, kind)`, `SpanBuilder.span(name, kind)`, `SpanContainer.span(name, kind)` | `withChildSpan(name, kind)` |
+| `DurableResumeScanner.Builder.register(agentId, resolver)`, `registerAgent(...)`, `registerWorkflow(...)` | `withResolver(agentId, resolver)`, `withAgent(...)`, `withWorkflow(...)` |
+| `ScriptedModel.Builder.thenText(...)`, `thenToolCalls(...)`, `thenRefusal(text)` (each appends the next turn) | `withTextTurn(...)`, `withToolCallsTurn(...)`, `withRefusalTurn(text)` (each still appends the next turn) |
+| `SessionOptions.Builder.apply(preset)` | `withPreset(preset)` |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
@@ -119,6 +136,15 @@ it, not retryable); point `baseUrl` at the final endpoint.
 - **`CircuitBreaker.Builder.withClock(InstantSource)`.** The breaker reads the current instant from
   an injectable source (default `Clock.systemUTC()`), so the half-open delay can be driven by hand
   instead of by sleeping. A `java.time.Clock` is an `InstantSource` and can be passed directly.
+- **`core.process`: one bounded way to run a child process.** `BoundedProcess` starts a process
+  from an explicit argv and environment (nothing inherited from the JVM), captures stdout and
+  stderr into capped buffers with a truncation marker, kills the process and its descendants when
+  its timeout elapses, and removes its per-call working directory on `close()`; `ProcessOutcome`
+  is what it produced. `CommandGrant` and
+  `LocalProcessExecutionProvider` both run on it. `BinaryResolver` pins a binary to an absolute
+  path once. An architecture rule keeps `java.lang.ProcessBuilder` inside `core.process` and the
+  REPL sandbox launcher.
+- **`RedactionResult.mergeCounts(other)`** sums two streams' per-secret counts in encounter order.
 
 ### Fixed
 
