@@ -6,43 +6,32 @@
 package com.standardapplied.helios.persistence;
 
 import ai.singlr.scimsql.ScimEngine;
-import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.common.Paginate;
 import com.standardapplied.helios.core.common.PaginatedList;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.events.EventSink;
 import com.standardapplied.helios.core.events.HeliosEvent;
-import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.trace.Annotation;
-import com.standardapplied.helios.core.trace.Span;
 import com.standardapplied.helios.core.trace.Trace;
 import com.standardapplied.helios.core.trace.TraceFilter;
 import com.standardapplied.helios.core.trace.TraceRollup;
 import com.standardapplied.helios.core.trace.TraceRollupKey;
-import com.standardapplied.helios.persistence.mapper.AnnotationMapper;
 import com.standardapplied.helios.persistence.mapper.JsonbMapper;
-import com.standardapplied.helios.persistence.mapper.SpanMapper;
 import com.standardapplied.helios.persistence.mapper.TraceMapper;
 import com.standardapplied.helios.persistence.mapper.TraceRollupMapper;
-import com.standardapplied.helios.persistence.sql.AnnotationSql;
-import com.standardapplied.helios.persistence.sql.SpanSql;
+import com.standardapplied.helios.persistence.mapper.UsageMapper;
 import com.standardapplied.helios.persistence.sql.TraceRollupSql;
 import com.standardapplied.helios.persistence.sql.TraceSql;
 import io.helidon.dbclient.DbClient;
-import io.helidon.dbclient.DbRow;
-import io.helidon.dbclient.DbTransaction;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /**
- * PostgreSQL-backed store for traces, spans, and annotations.
+ * PostgreSQL-backed store for traces and their spans. Annotations on a trace or span are stored by
+ * {@link PgAnnotationStore}.
  *
  * <p>Implements {@link EventSink} so callers can wire it directly into any producer of {@link
  * HeliosEvent.RunCompleted} / {@link HeliosEvent.RunFailed} events; the store persists the carried
@@ -52,10 +41,12 @@ public class PgTraceStore implements EventSink {
 
   private final PgConfig config;
   private final DbClient dbClient;
+  private final PgSpanTree spanTree;
 
   public PgTraceStore(PgConfig config) {
     this.config = Objects.requireNonNull(config, "config");
     this.dbClient = config.dbClient();
+    this.spanTree = new PgSpanTree(config);
   }
 
   @Override
@@ -93,12 +84,12 @@ public class PgTraceStore implements EventSink {
       params.add(trace.promptName());
       params.add(trace.promptVersion());
       params.add(trace.totalTokens());
-      addUsageCostParams(params, trace.usage(), trace.cost());
+      UsageMapper.addParams(params, trace.usage(), trace.cost());
       params.add(trace.groupId());
       params.add(JsonbMapper.listToJsonb(trace.labels()));
       tx.dml(config.qualify(TraceSql.INSERT), params.toArray());
 
-      insertSpansBfs(tx, trace.id(), trace.spans());
+      spanTree.insert(tx, trace.id(), trace.spans());
 
       tx.commit();
     } catch (Exception e) {
@@ -130,7 +121,7 @@ public class PgTraceStore implements EventSink {
       }
 
       var trace = traceOpt.get();
-      var spans = reconstructSpanTree(id);
+      var spans = spanTree.find(id);
 
       return Trace.newBuilder(trace).withSpans(spans).build();
     } catch (Exception e) {
@@ -211,241 +202,5 @@ public class PgTraceStore implements EventSink {
     } catch (Exception e) {
       throw new PgException("Failed to summarize traces by " + key, e);
     }
-  }
-
-  /** Stores an annotation, persisting the full record including {@code metadata}. */
-  public Annotation storeAnnotation(Annotation annotation) {
-    try {
-      dbClient.execute().dml(config.qualify(AnnotationSql.INSERT), annotationParams(annotation));
-      return annotation;
-    } catch (Exception e) {
-      throw new PgException("Failed to store annotation: " + annotation.id(), e);
-    }
-  }
-
-  /**
-   * Stores or updates an annotation, persisting the full record including {@code metadata}. When
-   * the annotation has an {@code authorId} and one already exists for the same {@code (subjectId,
-   * facet, label, authorId)} key, the existing row is updated in place ({@code createdAt} is
-   * preserved, {@code updatedAt} is advanced). Author-less annotations always insert.
-   */
-  public Annotation upsertAnnotation(Annotation annotation) {
-    try {
-      dbClient.execute().dml(config.qualify(AnnotationSql.UPSERT), annotationParams(annotation));
-      return annotation;
-    } catch (Exception e) {
-      throw new PgException("Failed to upsert annotation: " + annotation.id(), e);
-    }
-  }
-
-  /** Finds all annotations for a given subject (trace or span), oldest first. */
-  public List<Annotation> findAnnotationsBySubject(UUID subjectId) {
-    try {
-      return AnnotationMapper.mapAll(
-          dbClient
-              .execute()
-              .query(config.qualify(AnnotationSql.FIND_BY_SUBJECT), subjectId.toString()));
-    } catch (Exception e) {
-      throw new PgException("Failed to find annotations for subject: " + subjectId, e);
-    }
-  }
-
-  /**
-   * Finds all annotations for a batch of subjects in a single query. Returns an empty list for a
-   * null or empty input.
-   */
-  public List<Annotation> findAnnotationsBySubjects(List<UUID> subjectIds) {
-    if (subjectIds == null || subjectIds.isEmpty()) {
-      return List.of();
-    }
-    try {
-      var placeholders =
-          subjectIds.stream().map(id -> "CAST(? AS UUID)").collect(Collectors.joining(", "));
-      var sql =
-          config.qualify(AnnotationSql.FIND_BY_SUBJECTS_PREFIX)
-              + placeholders
-              + AnnotationSql.FIND_BY_SUBJECTS_SUFFIX;
-      var params = subjectIds.stream().map(UUID::toString).toArray();
-      return AnnotationMapper.mapAll(dbClient.execute().query(sql, params));
-    } catch (Exception e) {
-      throw new PgException("Failed to find annotations for subjects", e);
-    }
-  }
-
-  /**
-   * Lists annotations with optional SCIM filter and pagination. The filter operates over the
-   * first-class columns ({@code subject_id}, {@code facet}, {@code label}, {@code author_kind},
-   * {@code rating}); filtering over {@code metadata} keys is not yet supported.
-   *
-   * @param paginate pagination parameters (defaults to page 1, size 50 if null)
-   * @param scimFilter optional SCIM filter string (e.g., {@code label eq "relevance"})
-   * @return paginated list of annotations
-   */
-  public PaginatedList<Annotation> listAnnotations(Paginate paginate, String scimFilter) {
-    if (paginate == null) {
-      paginate = Paginate.of();
-    }
-    try {
-      if (Strings.isBlank(scimFilter)) {
-        var sql =
-            config.qualify(AnnotationSql.LIST_PREFIX) + config.qualify(AnnotationSql.LIST_SUFFIX);
-        var items =
-            dbClient
-                .execute()
-                .createQuery(sql)
-                .params(Map.of("limit", paginate.limit(), "offset", paginate.offset()))
-                .execute()
-                .map(AnnotationMapper::map)
-                .toList();
-        return PaginatedList.<Annotation>newBuilder()
-            .withItems(items)
-            .withPaginate(paginate)
-            .build();
-      }
-
-      var engine = new ScimEngine();
-      var filter = engine.parseFilter(scimFilter.trim(), "", null);
-      var sql =
-          config.qualify(AnnotationSql.LIST_PREFIX)
-              + " WHERE "
-              + filter.toClause()
-              + " "
-              + config.qualify(AnnotationSql.LIST_SUFFIX);
-      var params = new HashMap<String, Object>(filter.context().indexedParams());
-      params.put("limit", paginate.limit());
-      params.put("offset", paginate.offset());
-      var items =
-          dbClient
-              .execute()
-              .createQuery(sql)
-              .params(params)
-              .execute()
-              .map(AnnotationMapper::map)
-              .toList();
-      return PaginatedList.<Annotation>newBuilder().withItems(items).withPaginate(paginate).build();
-    } catch (Exception e) {
-      throw new PgException("Failed to list annotations", e);
-    }
-  }
-
-  /**
-   * Appends the five usage/cost bind values in column order ({@code input_tokens, output_tokens,
-   * cache_creation_tokens, cache_read_tokens, cost_micro_usd}) — the single write-side counterpart
-   * of {@code UsageMapper}. Null usage/cost bind all-null columns, meaning "not recorded".
-   */
-  private static void addUsageCostParams(
-      List<Object> params, Response.Usage usage, CostEstimate cost) {
-    params.add(usage != null ? usage.inputTokens() : null);
-    params.add(usage != null ? usage.outputTokens() : null);
-    params.add(usage != null ? usage.cacheCreationInputTokens() : null);
-    params.add(usage != null ? usage.cacheReadInputTokens() : null);
-    params.add(cost != null ? cost.microUsd() : null);
-  }
-
-  private static Object[] annotationParams(Annotation annotation) {
-    return new Object[] {
-      annotation.id().toString(),
-      annotation.subjectId().toString(),
-      annotation.facet(),
-      annotation.label(),
-      annotation.authorKind().name(),
-      annotation.authorId(),
-      annotation.rating(),
-      annotation.comment(),
-      JsonbMapper.objectToJsonb(annotation.metadata()),
-      annotation.createdAt(),
-      annotation.updatedAt()
-    };
-  }
-
-  /**
-   * Inserts spans in BFS order so parent spans are always inserted before their children.
-   *
-   * @param tx the active transaction
-   * @param traceId the trace these spans belong to
-   * @param topLevelSpans the top-level spans to insert
-   */
-  private void insertSpansBfs(DbTransaction tx, UUID traceId, List<Span> topLevelSpans) {
-
-    record SpanWithParent(Span span, UUID parentId) {}
-
-    var queue = new ArrayDeque<SpanWithParent>();
-    for (var span : topLevelSpans) {
-      queue.add(new SpanWithParent(span, null));
-    }
-
-    while (!queue.isEmpty()) {
-      var entry = queue.poll();
-      var span = entry.span();
-      var parentId = entry.parentId();
-
-      var params = new ArrayList<Object>();
-      params.add(span.id().toString());
-      params.add(traceId.toString());
-      params.add(parentId != null ? parentId.toString() : null);
-      params.add(span.name());
-      params.add(span.kind().name());
-      params.add(span.startTime());
-      params.add(span.endTime());
-      params.add(config.redact(span.error()));
-      params.add(JsonbMapper.toJsonb(config.redactValues(span.attributes())));
-      addUsageCostParams(params, span.usage(), span.cost());
-      tx.dml(config.qualify(SpanSql.INSERT), params.toArray());
-
-      for (var child : span.children()) {
-        queue.add(new SpanWithParent(child, span.id()));
-      }
-    }
-  }
-
-  /**
-   * Reconstructs the span tree from flat database rows.
-   *
-   * <p>Groups spans by parent_id and assembles children recursively.
-   */
-  private List<Span> reconstructSpanTree(UUID traceId) {
-    record SpanRow(Span span, UUID parentId) {}
-
-    var rows = new ArrayList<SpanRow>();
-    dbClient
-        .execute()
-        .query(config.qualify(SpanSql.FIND_BY_TRACE_ID), traceId.toString())
-        .forEach(
-            (DbRow row) -> {
-              var span = SpanMapper.map(row);
-              var parentId = SpanMapper.parentId(row);
-              rows.add(new SpanRow(span, parentId));
-            });
-
-    if (rows.isEmpty()) {
-      return List.of();
-    }
-
-    Map<UUID, List<Span>> childrenByParentId = new LinkedHashMap<>();
-    List<Span> roots = new ArrayList<>();
-
-    for (var entry : rows) {
-      if (entry.parentId() == null) {
-        roots.add(entry.span());
-      } else {
-        childrenByParentId
-            .computeIfAbsent(entry.parentId(), k -> new ArrayList<>())
-            .add(entry.span());
-      }
-    }
-
-    return roots.stream().map(root -> attachChildren(root, childrenByParentId)).toList();
-  }
-
-  private Span attachChildren(Span span, Map<UUID, List<Span>> childrenByParentId) {
-    var children = childrenByParentId.get(span.id());
-    if (children == null || children.isEmpty()) {
-      return span;
-    }
-
-    var rebuiltChildren =
-        children.stream().map(child -> attachChildren(child, childrenByParentId)).toList();
-
-    return Span.newBuilder(span).withChildren(rebuiltChildren).build();
   }
 }
