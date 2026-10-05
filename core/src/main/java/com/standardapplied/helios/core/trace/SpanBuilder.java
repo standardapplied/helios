@@ -7,8 +7,6 @@ package com.standardapplied.helios.core.trace;
 
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.common.Ids;
-import com.standardapplied.helios.core.events.EventSink;
-import com.standardapplied.helios.core.events.HeliosEvent;
 import com.standardapplied.helios.core.model.Response.Usage;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -16,17 +14,14 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Mutable builder for constructing spans during agent execution.
  *
- * <p>Created by {@link TraceBuilder#span(String, SpanKind)} or {@link #span(String, SpanKind)} for
- * nesting. Call {@link #end()} to complete successfully or {@link #fail(String)} to complete with
- * an error. Both produce an immutable {@link Span}.
+ * <p>Created by {@link TraceBuilder#withChildSpan(String, SpanKind)} or {@link
+ * #withChildSpan(String, SpanKind)} for nesting. Call {@link #end()} to complete successfully or
+ * {@link #fail(String)} to complete with an error. Both produce an immutable {@link Span}.
  *
  * <p>Span lifecycle ({@code SpanOpened} / {@code SpanClosed}) is emitted directly to every
  * configured {@link EventSink} — no separate listener interface in between. The unified event
@@ -37,16 +32,13 @@ import java.util.logging.Logger;
  */
 public final class SpanBuilder implements SpanContainer {
 
-  private static final Logger LOG = Logger.getLogger(SpanBuilder.class.getName());
-
   private final UUID id;
   private final UUID traceId;
   private final UUID parentSpanId;
   private final String name;
   private final SpanKind kind;
   private final OffsetDateTime startTime;
-  private final List<EventSink> eventSinks;
-  private final UUID runId;
+  private final SpanEvents events;
   private final Map<String, String> attributes = new LinkedHashMap<>();
   private final List<SpanBuilder> openChildren = new ArrayList<>();
   private final List<Span> completedChildren = new ArrayList<>();
@@ -54,22 +46,15 @@ public final class SpanBuilder implements SpanContainer {
   private CostEstimate cost;
   private Span result;
 
-  SpanBuilder(
-      String name,
-      SpanKind kind,
-      UUID traceId,
-      UUID parentSpanId,
-      List<EventSink> eventSinks,
-      UUID runId) {
+  SpanBuilder(String name, SpanKind kind, UUID traceId, UUID parentSpanId, SpanEvents events) {
     this.id = Ids.newId();
     this.traceId = traceId;
     this.parentSpanId = parentSpanId;
     this.name = name;
     this.kind = kind;
     this.startTime = Ids.now();
-    this.eventSinks = eventSinks;
-    this.runId = runId;
-    fireSpanOpened();
+    this.events = events;
+    events.opened(id, parentSpanId, name);
   }
 
   /**
@@ -81,9 +66,9 @@ public final class SpanBuilder implements SpanContainer {
    * @throws IllegalStateException if this span has already ended
    */
   @Override
-  public SpanBuilder span(String name, SpanKind kind) {
+  public SpanBuilder withChildSpan(String name, SpanKind kind) {
     requireOpen();
-    var child = new SpanBuilder(name, kind, traceId, this.id, eventSinks, runId);
+    var child = new SpanBuilder(name, kind, traceId, this.id, events);
     openChildren.add(child);
     return child;
   }
@@ -96,7 +81,7 @@ public final class SpanBuilder implements SpanContainer {
    * @return this builder for chaining
    * @throws IllegalStateException if this span has already ended
    */
-  public SpanBuilder attribute(String key, String value) {
+  public SpanBuilder withAttribute(String key, String value) {
     requireOpen();
     attributes.put(key, value);
     return this;
@@ -109,7 +94,7 @@ public final class SpanBuilder implements SpanContainer {
    * @return this builder for chaining
    * @throws IllegalStateException if this span has already ended
    */
-  public SpanBuilder usage(Usage usage) {
+  public SpanBuilder withUsage(Usage usage) {
     requireOpen();
     this.usage = usage;
     return this;
@@ -122,7 +107,7 @@ public final class SpanBuilder implements SpanContainer {
    * @return this builder for chaining
    * @throws IllegalStateException if this span has already ended
    */
-  public SpanBuilder cost(CostEstimate cost) {
+  public SpanBuilder withCost(CostEstimate cost) {
     requireOpen();
     this.cost = cost;
     return this;
@@ -194,7 +179,7 @@ public final class SpanBuilder implements SpanContainer {
             Map.copyOf(attributes),
             usage,
             cost);
-    fireSpanClosed(result);
+    events.closed(result);
     return result;
   }
 
@@ -219,47 +204,6 @@ public final class SpanBuilder implements SpanContainer {
       }
     }
     openChildren.clear();
-  }
-
-  private void fireSpanOpened() {
-    if (eventSinks == null || eventSinks.isEmpty() || runId == null) {
-      return;
-    }
-    var event =
-        new HeliosEvent.SpanOpened(
-            Ids.now().toInstant(),
-            runId,
-            Optional.empty(),
-            id,
-            Optional.ofNullable(parentSpanId),
-            name);
-    fanOut(event);
-  }
-
-  private void fireSpanClosed(Span span) {
-    if (eventSinks == null || eventSinks.isEmpty() || runId == null) {
-      return;
-    }
-    var event =
-        new HeliosEvent.SpanClosed(
-            Ids.now().toInstant(),
-            runId,
-            Optional.empty(),
-            span.id(),
-            span.duration() == null ? Duration.ZERO : span.duration(),
-            span.success(),
-            Optional.ofNullable(span.error()));
-    fanOut(event);
-  }
-
-  private void fanOut(HeliosEvent event) {
-    for (var sink : eventSinks) {
-      try {
-        sink.onEvent(event);
-      } catch (RuntimeException e) {
-        LOG.log(Level.WARNING, "EventSink threw on " + event.getClass().getSimpleName(), e);
-      }
-    }
   }
 
   private void requireOpen() {

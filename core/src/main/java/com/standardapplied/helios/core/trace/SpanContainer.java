@@ -25,5 +25,5 @@ public sealed interface SpanContainer permits TraceBuilder, SpanBuilder {
    * @param kind the span kind
    * @return the span builder
    */
-  SpanBuilder span(String name, SpanKind kind);
+  SpanBuilder withChildSpan(String name, SpanKind kind);
 }

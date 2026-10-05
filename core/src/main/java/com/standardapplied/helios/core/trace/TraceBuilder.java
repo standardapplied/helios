@@ -23,8 +23,8 @@ import java.util.function.Function;
  * Mutable builder for constructing traces during agent execution.
  *
  * <p>Create with {@link #start(String)} or {@link #start(String, UUID, List)}. Add spans with
- * {@link #span(String, SpanKind)}, then call {@link #end()} or {@link #fail(String)} to produce an
- * immutable {@link Trace}.
+ * {@link #withChildSpan(String, SpanKind)}, then call {@link #end()} or {@link #fail(String)} to
+ * produce an immutable {@link Trace}.
  *
  * <p>The terminal {@link Trace} is returned from {@link #end()} / {@link #fail(String)} so callers
  * can attach it to a {@link com.standardapplied.helios.core.events.HeliosEvent.RunCompleted} or
@@ -100,9 +100,9 @@ public final class TraceBuilder implements SpanContainer {
    * @throws IllegalStateException if this trace has already ended
    */
   @Override
-  public SpanBuilder span(String name, SpanKind kind) {
+  public SpanBuilder withChildSpan(String name, SpanKind kind) {
     requireOpen();
-    var span = new SpanBuilder(name, kind, this.id, null, eventSinks, runId);
+    var span = new SpanBuilder(name, kind, this.id, null, new SpanEvents(eventSinks, runId));
     openSpans.add(span);
     return span;
   }
@@ -115,53 +115,53 @@ public final class TraceBuilder implements SpanContainer {
    * @return this builder for chaining
    * @throws IllegalStateException if this trace has already ended
    */
-  public TraceBuilder attribute(String key, String value) {
+  public TraceBuilder withAttribute(String key, String value) {
     requireOpen();
     attributes.put(key, value);
     return this;
   }
 
-  public TraceBuilder inputText(String inputText) {
+  public TraceBuilder withInputText(String inputText) {
     this.inputText = inputText;
     return this;
   }
 
-  public TraceBuilder outputText(String outputText) {
+  public TraceBuilder withOutputText(String outputText) {
     this.outputText = outputText;
     return this;
   }
 
-  public TraceBuilder userId(String userId) {
+  public TraceBuilder withUserId(String userId) {
     this.userId = userId;
     return this;
   }
 
-  public TraceBuilder sessionId(UUID sessionId) {
+  public TraceBuilder withSessionId(UUID sessionId) {
     this.sessionId = sessionId;
     return this;
   }
 
-  public TraceBuilder modelId(String modelId) {
+  public TraceBuilder withModelId(String modelId) {
     this.modelId = modelId;
     return this;
   }
 
-  public TraceBuilder promptName(String promptName) {
+  public TraceBuilder withPromptName(String promptName) {
     this.promptName = promptName;
     return this;
   }
 
-  public TraceBuilder promptVersion(Integer promptVersion) {
+  public TraceBuilder withPromptVersion(Integer promptVersion) {
     this.promptVersion = promptVersion;
     return this;
   }
 
-  public TraceBuilder groupId(String groupId) {
+  public TraceBuilder withGroupId(String groupId) {
     this.groupId = groupId;
     return this;
   }
 
-  public TraceBuilder labels(List<String> labels) {
+  public TraceBuilder withLabels(List<String> labels) {
     this.labels = labels != null ? List.copyOf(labels) : List.of();
     return this;
   }
