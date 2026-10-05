@@ -83,7 +83,7 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
     try {
       root = root.toRealPath();
       if (confineSymlinks) {
-        LinuxFiles.requireSupport(root);
+        LinuxSyscalls.requireSupport(root);
       }
       var attrs =
           confineSymlinks
@@ -211,7 +211,8 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
     if (!attrs.isRegularFile() || attrs.size() > maxBytes) {
       throw new IOException("entry is not a regular file within the size limit: " + resolved);
     }
-    return LinuxFiles.limit(Files.newInputStream(resolved, LinkOption.NOFOLLOW_LINKS), maxBytes);
+    return Handle.PinnedInput.limited(
+        Files.newInputStream(resolved, LinkOption.NOFOLLOW_LINKS), maxBytes);
   }
 
   /**
@@ -289,7 +290,9 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
    */
   public DirectoryStream<Path> newDirectoryStream(Path resolved) throws IOException {
     requireResolved(resolved);
-    return confineSymlinks ? LinuxFiles.entries(resolved) : Files.newDirectoryStream(resolved);
+    return confineSymlinks
+        ? PinnedDirectoryStream.open(resolved)
+        : Files.newDirectoryStream(resolved);
   }
 
   /**
@@ -303,37 +306,39 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
     requireResolved(start);
     Objects.requireNonNull(visitor, "visitor must not be null");
     try (var stack = new WalkStack()) {
-      Path next = start;
+      var next = start;
       while (next != null) {
-        FileVisitResult result;
-        BasicFileAttributes attrs;
-        try {
-          attrs = attributes(next);
-        } catch (IOException failure) {
-          result = visitor.visitFileFailed(next, failure);
-          if (result == FileVisitResult.TERMINATE) {
-            return;
-          }
-          next = stack.next(visitor, result);
-          continue;
-        }
-        if (attrs.isDirectory()) {
-          result = visitor.preVisitDirectory(next, attrs);
-          if (result == FileVisitResult.CONTINUE) {
-            try {
-              stack.push(new WalkFrame(next, newDirectoryStream(next)));
-            } catch (IOException failure) {
-              result = visitor.visitFileFailed(next, failure);
-            }
-          }
-        } else {
-          result = visitor.visitFile(next, attrs);
-        }
+        var result = visit(next, visitor, stack);
         if (result == FileVisitResult.TERMINATE) {
           return;
         }
         next = stack.next(visitor, result);
       }
+    }
+  }
+
+  private FileVisitResult visit(Path entry, FileVisitor<? super Path> visitor, WalkStack stack)
+      throws IOException {
+    BasicFileAttributes attrs;
+    try {
+      attrs = attributes(entry);
+    } catch (IOException failure) {
+      return visitor.visitFileFailed(entry, failure);
+    }
+    if (!attrs.isDirectory()) {
+      return visitor.visitFile(entry, attrs);
+    }
+    var result = visitor.preVisitDirectory(entry, attrs);
+    return result == FileVisitResult.CONTINUE ? push(entry, visitor, stack) : result;
+  }
+
+  private FileVisitResult push(Path directory, FileVisitor<? super Path> visitor, WalkStack stack)
+      throws IOException {
+    try {
+      stack.push(new WalkFrame(directory, newDirectoryStream(directory)));
+      return FileVisitResult.CONTINUE;
+    } catch (IOException failure) {
+      return visitor.visitFileFailed(directory, failure);
     }
   }
 

@@ -10,12 +10,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -150,6 +153,16 @@ final class GrepToolTest {
             .execute(Map.of("pattern", "x", "path", "file.txt"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("not a directory"), result.output());
+  }
+
+  @Test
+  void missingRootIsAnIoErrorScanningIt(@TempDir Path tmp) {
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "x", "path", "absent"), ToolContext.noop());
+    assertFalse(result.success());
+    assertTrue(result.output().startsWith("Grep: I/O error scanning absent: "), result.output());
   }
 
   @Test
@@ -307,5 +320,76 @@ final class GrepToolTest {
             .execute(Map.of("pattern", "hello", "path", "alias"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals("real/a.txt:1:hello\n", result.output());
+  }
+
+  @Test
+  void capsMatchesAtOneThousandWithinOneFileAndMarksTruncation(@TempDir Path tmp)
+      throws IOException {
+    Files.writeString(tmp.resolve("big.txt"), "hit\n".repeat(1001), StandardCharsets.UTF_8);
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "hit"), ToolContext.noop());
+    assertTrue(result.success(), result.output());
+    assertTrue(
+        result.output().endsWith("big.txt:1000:hit\n[truncated at 1000 matches]\n"),
+        result.output());
+    assertFalse(result.output().contains(":1001:"), result.output());
+  }
+
+  @Test
+  void capsMatchesAtOneThousandAcrossFiles(@TempDir Path tmp) throws IOException {
+    Files.writeString(tmp.resolve("a.txt"), "hit\n".repeat(999), StandardCharsets.UTF_8);
+    Files.writeString(tmp.resolve("b.txt"), "hit\n".repeat(999), StandardCharsets.UTF_8);
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "hit"), ToolContext.noop());
+    assertTrue(result.success(), result.output());
+    var lines = result.output().split("\n");
+    assertEquals(1001, lines.length);
+    assertEquals("[truncated at 1000 matches]", lines[1000]);
+  }
+
+  @Test
+  void cancelledContextFindsNothing(@TempDir Path tmp) throws IOException {
+    Files.writeString(tmp.resolve("a.txt"), "hit\n", StandardCharsets.UTF_8);
+    var session = SessionContext.forTesting("cancelled");
+    session.cancellation().cancel("stop");
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "hit"), ToolContext.of(session, Duration.ofMinutes(1)));
+    assertTrue(result.success(), result.output());
+    assertEquals("", result.output());
+  }
+
+  @Test
+  void invalidIncludePatternFails(@TempDir Path tmp) {
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "x", "include", "["), ToolContext.noop());
+    assertFalse(result.success());
+    assertTrue(result.output().startsWith("Grep: invalid include pattern '[': "), result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void skipsUnreadableFilesSilently(@TempDir Path tmp) throws IOException {
+    Files.writeString(tmp.resolve("a.txt"), "hit\n", StandardCharsets.UTF_8);
+    var locked = Files.writeString(tmp.resolve("b.txt"), "hit\n", StandardCharsets.UTF_8);
+    Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+    try {
+      Assumptions.assumeFalse(Files.isReadable(locked), "permissions are not enforced (root)");
+      var result =
+          GrepTool.binding(WorkspaceRoot.of(tmp))
+              .tool()
+              .execute(Map.of("pattern", "hit"), ToolContext.noop());
+      assertTrue(result.success(), result.output());
+      assertEquals("a.txt:1:hit\n", result.output());
+    } finally {
+      Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rw-------"));
+    }
   }
 }
