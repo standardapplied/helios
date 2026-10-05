@@ -74,6 +74,7 @@ public final class ConsoleEventPrinter implements Flow.Subscriber<QueryEvent> {
 
   @Override
   public void onError(Throwable throwable) {
+    Objects.requireNonNull(throwable, "throwable must not be null");
     out.println("[stream-error] " + throwable);
   }
 
