@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -29,7 +30,10 @@ final class LsToolTest {
     Files.writeString(tmp.resolve("aaa.md"), "y", StandardCharsets.UTF_8);
     Files.createDirectory(tmp.resolve("zeta"));
 
-    var result = LsTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("path", "."));
+    var result =
+        LsTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("path", "."), ToolContext.noop());
 
     assertTrue(result.success(), result.output());
     var out = result.output();
@@ -53,7 +57,7 @@ final class LsToolTest {
   @Test
   void defaultPathListsRoot(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("readme"), "", StandardCharsets.UTF_8);
-    var result = LsTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of());
+    var result = LsTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of(), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("readme"));
   }
@@ -61,7 +65,10 @@ final class LsToolTest {
   @Test
   void emptyPathFallsBackToDefault(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("readme"), "", StandardCharsets.UTF_8);
-    var result = LsTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("path", ""));
+    var result =
+        LsTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("path", ""), ToolContext.noop());
     assertTrue(result.success());
     assertTrue(result.output().contains("readme"));
   }
@@ -69,7 +76,10 @@ final class LsToolTest {
   @Test
   void nonStringPathFallsBackToDefault(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("readme"), "", StandardCharsets.UTF_8);
-    var result = LsTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("path", 42));
+    var result =
+        LsTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("path", 42), ToolContext.noop());
     assertTrue(result.success());
     assertTrue(result.output().contains("readme"));
   }
@@ -77,14 +87,20 @@ final class LsToolTest {
   @Test
   void notADirectoryFails(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("file.txt"), "x", StandardCharsets.UTF_8);
-    var result = LsTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("path", "file.txt"));
+    var result =
+        LsTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("path", "file.txt"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("not a directory"), result.output());
   }
 
   @Test
   void escapingWorkspaceFails(@TempDir Path tmp) {
-    var result = LsTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("path", "../etc"));
+    var result =
+        LsTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("path", "../etc"), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().startsWith("LS:"), result.output());
   }
@@ -103,7 +119,10 @@ final class LsToolTest {
     var target = tmp.resolve("target.txt");
     Files.writeString(target, "x", StandardCharsets.UTF_8);
     Files.createSymbolicLink(tmp.resolve("link.txt"), target);
-    var result = LsTool.binding(new WorkspaceRoot(tmp, false)).tool().execute(Map.of("path", "."));
+    var result =
+        LsTool.binding(new WorkspaceRoot(tmp, false))
+            .tool()
+            .execute(Map.of("path", "."), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertTrue(result.output().contains("link.txt@"), result.output());
     assertTrue(result.output().contains("target.txt"), result.output());

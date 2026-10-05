@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.schema.SchemaGenerator;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -117,7 +118,7 @@ class ToolTest {
                 })
             .build();
 
-    var result = tool.execute(Map.of("a", 5, "b", 3));
+    var result = tool.execute(Map.of("a", 5, "b", 3), ToolContext.noop());
 
     assertTrue(result.success());
     assertEquals("8", result.output());
@@ -135,7 +136,7 @@ class ToolTest {
                 })
             .build();
 
-    var result = tool.execute(Map.of());
+    var result = tool.execute(Map.of(), ToolContext.noop());
 
     assertFalse(result.success());
     assertTrue(result.output().contains("Tool execution failed"));
@@ -164,6 +165,30 @@ class ToolTest {
                 .withName("  ")
                 .withExecutor((args, ctx) -> ToolResult.success("ok"))
                 .build());
+  }
+
+  record Point(int x, int y) {}
+
+  @Test
+  void recordShapedArrayItemsRenderTheRecordSchema() {
+    var tool =
+        Tool.newBuilder()
+            .withName("plot")
+            .withParameter(
+                ToolParameter.newBuilder()
+                    .withName("points")
+                    .withType(ParameterType.ARRAY)
+                    .withItemsClass(Point.class)
+                    .build())
+            .withExecutor((args, ctx) -> ToolResult.success("ok"))
+            .build();
+
+    @SuppressWarnings("unchecked")
+    var properties = (Map<String, Object>) tool.parametersAsJsonSchema().get("properties");
+
+    assertEquals(
+        Map.of("type", "array", "items", SchemaGenerator.generate(Point.class).toMap()),
+        properties.get("points"));
   }
 
   @Test
@@ -416,7 +441,7 @@ class ToolTest {
             .build();
     assertFalse(Thread.currentThread().isInterrupted(), "test precondition");
     try {
-      var result = tool.execute(Map.of());
+      var result = tool.execute(Map.of(), ToolContext.noop());
       assertFalse(result.success());
       assertTrue(
           Thread.currentThread().isInterrupted(),
@@ -440,7 +465,7 @@ class ToolTest {
                 })
             .build();
     assertFalse(Thread.currentThread().isInterrupted(), "test precondition");
-    var result = tool.execute(Map.of());
+    var result = tool.execute(Map.of(), ToolContext.noop());
     assertFalse(result.success());
     assertFalse(
         Thread.currentThread().isInterrupted(),

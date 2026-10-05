@@ -251,7 +251,8 @@ class CommandGrantTest {
   void stderrHiddenFromModelByDefault() throws Exception {
     var grant = bash().build();
     var tool = grant.toTool();
-    var result = tool.execute(Map.of("args", List.of("-c", "echo err 1>&2; echo out")));
+    var result =
+        tool.execute(Map.of("args", List.of("-c", "echo err 1>&2; echo out")), ToolContext.noop());
     assertTrue(result.success());
     assertTrue(result.output().contains("out"));
     assertFalse(result.output().contains("err"));
@@ -261,7 +262,8 @@ class CommandGrantTest {
   void stderrToModelOptInExposesStderr() throws Exception {
     var grant = bash().withStderrToModel(true).build();
     var tool = grant.toTool();
-    var result = tool.execute(Map.of("args", List.of("-c", "echo err 1>&2; echo out")));
+    var result =
+        tool.execute(Map.of("args", List.of("-c", "echo err 1>&2; echo out")), ToolContext.noop());
     assertTrue(result.output().contains("out"));
     assertTrue(result.output().contains("err"));
     assertTrue(result.output().contains("[stderr]"));
@@ -271,7 +273,7 @@ class CommandGrantTest {
   void toolMissingArgsParameter() {
     var grant = bash().build();
     var tool = grant.toTool();
-    var result = tool.execute(Map.of());
+    var result = tool.execute(Map.of(), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("array of strings"));
   }
@@ -280,7 +282,7 @@ class CommandGrantTest {
   void toolNonStringEntryRejected() {
     var grant = bash().build();
     var tool = grant.toTool();
-    var result = tool.execute(Map.of("args", List.of(1, 2)));
+    var result = tool.execute(Map.of("args", List.of(1, 2)), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("must be a string"));
   }
@@ -289,7 +291,7 @@ class CommandGrantTest {
   void toolReportsTimeoutInOutput() {
     var grant = bash().withTimeout(Duration.ofMillis(200)).build();
     var tool = grant.toTool();
-    var result = tool.execute(Map.of("args", List.of("-c", "sleep 30")));
+    var result = tool.execute(Map.of("args", List.of("-c", "sleep 30")), ToolContext.noop());
     assertTrue(result.output().contains("TIMEOUT"));
     assertTrue(result.success());
   }
@@ -299,7 +301,9 @@ class CommandGrantTest {
     var grant = bash().withMaxOutputBytes(1024).build();
     var tool = grant.toTool();
     var result =
-        tool.execute(Map.of("args", List.of("-c", "head -c 50000 /dev/zero | tr '\\0' 'x'")));
+        tool.execute(
+            Map.of("args", List.of("-c", "head -c 50000 /dev/zero | tr '\\0' 'x'")),
+            ToolContext.noop());
     assertTrue(result.output().contains("TRUNCATED"));
   }
 
@@ -307,7 +311,7 @@ class CommandGrantTest {
   void toolWrapsRejectedAsFailure() {
     var grant = bash().withArgValidator(args -> Optional.of("nope")).build();
     var tool = grant.toTool();
-    var result = tool.execute(Map.of("args", List.of("-c", "echo hi")));
+    var result = tool.execute(Map.of("args", List.of("-c", "echo hi")), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("nope"));
   }
@@ -482,7 +486,8 @@ class CommandGrantTest {
   void stderrToModelButStderrEmpty() throws Exception {
     var grant = bash().withStderrToModel(true).build();
     var tool = grant.toTool();
-    var result = tool.execute(Map.of("args", List.of("-c", "echo only-stdout")));
+    var result =
+        tool.execute(Map.of("args", List.of("-c", "echo only-stdout")), ToolContext.noop());
     assertTrue(result.success());
     assertTrue(result.output().contains("only-stdout"));
     assertFalse(result.output().contains("[stderr]"));
@@ -526,7 +531,10 @@ class CommandGrantTest {
     var result = new CompletableFuture<ToolResult>();
     var invoker =
         Thread.startVirtualThread(
-            () -> result.complete(tool.execute(Map.of("args", List.of("-c", RUN_UNTIL_RELEASED)))));
+            () ->
+                result.complete(
+                    tool.execute(
+                        Map.of("args", List.of("-c", RUN_UNTIL_RELEASED)), ToolContext.noop())));
     awaitStarted(tmp);
 
     invoker.interrupt();
@@ -546,7 +554,7 @@ class CommandGrantTest {
         CommandGrant.builder(fakeBin.toString()).withSecretRegistry(new SecretRegistry()).build();
     Files.delete(fakeBin);
     var tool = grant.toTool();
-    var result = tool.execute(Map.of("args", List.of()));
+    var result = tool.execute(Map.of("args", List.of()), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().contains("I/O error"));
   }
