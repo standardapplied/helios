@@ -6,6 +6,8 @@
 package com.standardapplied.helios.core.common;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -28,5 +30,21 @@ public record RedactionResult(byte[] bytes, Map<String, Integer> counts) {
       total += c;
     }
     return total;
+  }
+
+  /**
+   * Sum this result's per-name counts with {@code other}'s, for output redacted as two streams.
+   *
+   * @param other the result of redacting the other stream
+   * @return unmodifiable counts in encounter order, this result's names first; empty if neither
+   *     result redacted anything
+   */
+  public Map<String, Integer> mergeCounts(RedactionResult other) {
+    if (counts.isEmpty() && other.counts.isEmpty()) {
+      return Map.of();
+    }
+    var merged = new LinkedHashMap<String, Integer>(counts);
+    other.counts.forEach((name, count) -> merged.merge(name, count, Integer::sum));
+    return Collections.unmodifiableMap(merged);
   }
 }

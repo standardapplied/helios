@@ -13,10 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.process.BinaryResolver;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.CommandGrant;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -461,7 +461,7 @@ final class LocalProcessExecutionProviderTest {
 
   private static void assumePythonAvailable() {
     try {
-      CommandGrant.resolveBinary("python3", System.getenv("PATH"));
+      BinaryResolver.resolve("python3", System.getenv("PATH"));
     } catch (RuntimeException e) {
       assumeTrue(false, "python3 is not available on PATH; skipping");
     }

@@ -520,33 +520,6 @@ class CommandGrantTest {
   }
 
   @Test
-  void resolveBinaryNullPathRejected() {
-    var ex =
-        assertThrows(IllegalStateException.class, () -> CommandGrant.resolveBinary("bash", null));
-    assertTrue(ex.getMessage().contains("PATH is empty"));
-  }
-
-  @Test
-  void resolveBinaryEmptyPathRejected() {
-    assertThrows(IllegalStateException.class, () -> CommandGrant.resolveBinary("bash", ""));
-  }
-
-  @Test
-  void resolveBinarySkipsEmptyPathEntries() {
-    var resolved = CommandGrant.resolveBinary("bash", ":/bin:");
-    assertTrue(resolved.toString().endsWith("bash"));
-  }
-
-  @Test
-  void resolveBinaryFallsThroughNonExecutableMatch(@TempDir Path tmp) throws Exception {
-    var fake = tmp.resolve("bash");
-    Files.writeString(fake, "not executable");
-    var pathEnv = tmp.toString() + ":/bin";
-    var resolved = CommandGrant.resolveBinary("bash", pathEnv);
-    assertEquals(BASH.toAbsolutePath(), resolved);
-  }
-
-  @Test
   void interruptedDuringInvokeReturnsFailureToTool(@TempDir Path tmp) throws Exception {
     var grant = bash().withCwd(tmp).withTimeout(NEVER_REACHED).build();
     var tool = grant.toTool();
