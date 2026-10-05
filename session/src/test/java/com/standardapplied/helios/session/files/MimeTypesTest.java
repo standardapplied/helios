@@ -6,7 +6,6 @@ package com.standardapplied.helios.session.files;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.tool.ToolContext;
@@ -20,7 +19,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-final class ReadToolMimeDetectionTest {
+final class MimeTypesTest {
 
   @ParameterizedTest
   @CsvSource({
@@ -62,13 +61,33 @@ final class ReadToolMimeDetectionTest {
     "archive.tar.json, application/json"
   })
   void recognisedExtensionMapsToItsMimeType(String name, String mimeType) {
-    assertEquals(mimeType, ReadTool.detectMimeType(Path.of(name)));
+    assertEquals(mimeType, MimeTypes.detect(Path.of(name)).orElseThrow().name());
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "doc.pdf, ATTACHMENT",
+    "pic.png, ATTACHMENT",
+    "pic.jpeg, ATTACHMENT",
+    "pic.gif, ATTACHMENT",
+    "pic.webp, ATTACHMENT",
+    "data.json, TEXT",
+    "data.xml, TEXT",
+    "conf.yml, TEXT",
+    "page.html, TEXT",
+    "site.css, TEXT",
+    "app.js, TEXT",
+    "README.md, TEXT",
+    "notes.txt, TEXT"
+  })
+  void onlyImagesAndPdfTravelAsAttachments(String name, MimeTypes.Channel channel) {
+    assertEquals(channel, MimeTypes.detect(Path.of(name)).orElseThrow().channel());
   }
 
   @ParameterizedTest
   @ValueSource(strings = {"Dockerfile", "archive.bin", "trailing.", ".hidden", "x.unknown"})
   void unknownExtensionHasNoMimeType(String name) {
-    assertNull(ReadTool.detectMimeType(Path.of(name)));
+    assertTrue(MimeTypes.detect(Path.of(name)).isEmpty());
   }
 
   @Test

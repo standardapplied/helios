@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session.files;
 
 import com.standardapplied.helios.core.common.Redactor;
+import com.standardapplied.helios.core.common.Result;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
@@ -19,12 +20,11 @@ import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileVisitResult;
+import java.nio.file.FileSystem;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.PathMatcher;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -139,115 +139,87 @@ public final class GrepTool {
 
   private static ToolResult execute(
       ToolContext ctx, WorkspaceRoot workspace, Redactor redactor, Map<String, Object> args) {
-    var rawPattern = ToolArgs.stringArg(args, "pattern");
-    if (Strings.isBlank(rawPattern)) {
-      return ToolResult.failure("Grep: missing required 'pattern' argument");
-    }
-    Pattern regex;
+    return switch (GrepRequest.parse(args)) {
+      case Result.Failure<GrepRequest> failure -> ToolResult.failure(failure.error());
+      case Result.Success<GrepRequest> request -> grep(ctx, workspace, redactor, request.value());
+    };
+  }
+
+  private static ToolResult grep(
+      ToolContext ctx, WorkspaceRoot workspace, Redactor redactor, GrepRequest request) {
     try {
-      regex = Pattern.compile(rawPattern);
-    } catch (PatternSyntaxException e) {
-      return ToolResult.failure("Grep: invalid regex '" + rawPattern + "': " + e.getDescription());
-    }
-    var pathArg = ToolArgs.pathArg(args);
-    var includeArg = ToolArgs.stringArg(args, "include");
-    try {
-      var root = workspace.resolveSafe(pathArg);
+      var root = workspace.resolveSafe(request.path());
       if (!workspace.attributes(root).isDirectory()) {
         return ToolResult.failure("Grep: not a directory: " + workspace.relativize(root));
       }
-      var includeMatcher =
-          includeArg.isEmpty() ? null : GlobMatchers.compile(root.getFileSystem(), includeArg);
-      var out = new StringBuilder();
-      var matchCount = new int[] {0};
-      workspace.walkFileTree(
-          root,
-          new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-              if (ctx.cancellation().isCancelled()) {
-                return FileVisitResult.TERMINATE;
-              }
-              if (!dir.equals(root) && dir.getFileName().toString().startsWith(".")) {
-                return FileVisitResult.SKIP_SUBTREE;
-              }
-              return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-              if (ctx.cancellation().isCancelled() || matchCount[0] >= MAX_MATCHES) {
-                return FileVisitResult.TERMINATE;
-              }
-              if (!attrs.isRegularFile() || attrs.size() > MAX_FILE_BYTES) {
-                return FileVisitResult.CONTINUE;
-              }
-              if (includeMatcher != null) {
-                var name = file.getFileName();
-                if (name == null || !includeMatcher.matches(name)) {
-                  return FileVisitResult.CONTINUE;
-                }
-              }
-              try {
-                byte[] bytes;
-                try (var in = workspace.newInputStream(file, MAX_FILE_BYTES)) {
-                  bytes = in.readAllBytes();
-                }
-                if (isBinary(bytes)) {
-                  return FileVisitResult.CONTINUE;
-                }
-                var relPath = workspace.relativize(file);
-                var lineNum = 0;
-                try (var reader =
-                    new BufferedReader(
-                        new InputStreamReader(
-                            new ByteArrayInputStream(bytes),
-                            StandardCharsets.UTF_8.newDecoder()))) {
-                  String line;
-                  while ((line = reader.readLine()) != null) {
-                    lineNum++;
-                    if (regex.matcher(line).find()) {
-                      var emittedLine = redactor == null ? line : redactor.redact(line).text();
-                      out.append(relPath)
-                          .append(':')
-                          .append(lineNum)
-                          .append(':')
-                          .append(emittedLine)
-                          .append('\n');
-                      matchCount[0]++;
-                      if (matchCount[0] >= MAX_MATCHES) {
-                        return FileVisitResult.TERMINATE;
-                      }
-                    }
-                  }
-                } catch (MalformedInputException e) {
-                  // Not valid UTF-8 — treat as binary and skip.
-                }
-              } catch (IOException e) {
-                // Unreadable file — skip silently rather than failing the entire search.
-              }
-              return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFileFailed(Path file, IOException exc) {
-              return FileVisitResult.CONTINUE;
-            }
-          });
-      if (matchCount[0] >= MAX_MATCHES) {
-        out.append("[truncated at ").append(MAX_MATCHES).append(" matches]\n");
-      } else if (matchCount[0] == 0) {
-        return ToolResult.success("");
-      }
-      return ToolResult.success(out.toString());
+      var include = request.includeMatcher(root.getFileSystem());
+      var hits = new ArrayList<Hit>();
+      var count =
+          WorkspaceWalk.run(
+              workspace,
+              root,
+              ctx.cancellation(),
+              MAX_MATCHES,
+              MAX_FILE_BYTES,
+              (file, attrs, remaining) ->
+                  include.matches(file.getFileName())
+                      ? searchFile(workspace, file, request.regex(), remaining, hits)
+                      : 0);
+      return ToolResult.success(format(hits, count >= MAX_MATCHES, redactor));
     } catch (WorkspaceRoot.WorkspaceEscapeException e) {
       return ToolResult.failure("Grep: " + e.getMessage());
     } catch (IllegalArgumentException e) {
       return ToolResult.failure(
-          "Grep: invalid include pattern '" + includeArg + "': " + e.getMessage());
+          "Grep: invalid include pattern '" + request.include() + "': " + e.getMessage());
     } catch (IOException e) {
-      return ToolResult.failure("Grep: I/O error scanning " + pathArg + ": " + e.getMessage());
+      return ToolResult.failure(
+          "Grep: I/O error scanning " + request.path() + ": " + e.getMessage());
     }
+  }
+
+  private static int searchFile(
+      WorkspaceRoot workspace, Path file, Pattern regex, int remaining, List<Hit> hits) {
+    byte[] bytes;
+    try (var in = workspace.newInputStream(file, MAX_FILE_BYTES)) {
+      bytes = in.readAllBytes();
+    } catch (IOException unreadable) {
+      return 0;
+    }
+    if (isBinary(bytes)) {
+      return 0;
+    }
+    var path = workspace.relativize(file);
+    var found = 0;
+    try (var reader =
+        new BufferedReader(
+            new InputStreamReader(
+                new ByteArrayInputStream(bytes), StandardCharsets.UTF_8.newDecoder()))) {
+      var lineNumber = 0;
+      String line;
+      while (found < remaining && (line = reader.readLine()) != null) {
+        lineNumber++;
+        if (regex.matcher(line).find()) {
+          hits.add(new Hit(path, lineNumber, line));
+          found++;
+        }
+      }
+    } catch (IOException notUtf8) {
+      return found;
+    }
+    return found;
+  }
+
+  private static String format(List<Hit> hits, boolean truncated, Redactor redactor) {
+    var out = new StringBuilder();
+    for (var hit : hits) {
+      var line = redactor == null ? hit.line() : redactor.redact(hit.line()).text();
+      out.append(hit.path()).append(':').append(hit.lineNumber()).append(':').append(line);
+      out.append('\n');
+    }
+    if (truncated) {
+      out.append("[truncated at ").append(MAX_MATCHES).append(" matches]\n");
+    }
+    return out.toString();
   }
 
   private static boolean isBinary(byte[] bytes) {
@@ -258,4 +230,29 @@ public final class GrepTool {
     }
     return false;
   }
+
+  private record GrepRequest(Pattern regex, String path, String include) {
+
+    static Result<GrepRequest> parse(Map<String, Object> args) {
+      var pattern = ToolArgs.stringArg(args, "pattern");
+      if (Strings.isBlank(pattern)) {
+        return new Result.Failure<>("Grep: missing required 'pattern' argument");
+      }
+      try {
+        return new Result.Success<>(
+            new GrepRequest(
+                Pattern.compile(pattern),
+                ToolArgs.pathArg(args),
+                ToolArgs.stringArg(args, "include")));
+      } catch (PatternSyntaxException e) {
+        return new Result.Failure<>("Grep: invalid regex '" + pattern + "': " + e.getDescription());
+      }
+    }
+
+    PathMatcher includeMatcher(FileSystem fs) {
+      return include.isEmpty() ? name -> true : GlobMatchers.compile(fs, include);
+    }
+  }
+
+  private record Hit(String path, int lineNumber, String line) {}
 }

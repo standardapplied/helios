@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.files;
 
+import com.standardapplied.helios.core.common.Result;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
@@ -15,10 +16,6 @@ import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.IOException;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -97,72 +94,67 @@ public final class GlobTool {
 
   private static ToolResult execute(
       ToolContext ctx, WorkspaceRoot workspace, Map<String, Object> args) {
-    var pattern = ToolArgs.stringArg(args, "pattern");
-    if (Strings.isBlank(pattern)) {
-      return ToolResult.failure("Glob: missing required 'pattern' argument");
-    }
-    var pathArg = ToolArgs.pathArg(args);
+    return switch (GlobRequest.parse(args)) {
+      case Result.Failure<GlobRequest> failure -> ToolResult.failure(failure.error());
+      case Result.Success<GlobRequest> request -> glob(ctx, workspace, request.value());
+    };
+  }
+
+  private static ToolResult glob(ToolContext ctx, WorkspaceRoot workspace, GlobRequest request) {
     try {
-      var root = workspace.resolveSafe(pathArg);
+      var root = workspace.resolveSafe(request.path());
       if (!workspace.attributes(root).isDirectory()) {
         return ToolResult.failure("Glob: not a directory: " + workspace.relativize(root));
       }
-      var matcher = GlobMatchers.compile(root.getFileSystem(), pattern);
+      var matcher = GlobMatchers.compile(root.getFileSystem(), request.pattern());
       var hits = new ArrayList<Match>();
-      workspace.walkFileTree(
-          root,
-          new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-              if (ctx.cancellation().isCancelled()) {
-                return FileVisitResult.TERMINATE;
-              }
-              if (!dir.equals(root) && dir.getFileName().toString().startsWith(".")) {
-                return FileVisitResult.SKIP_SUBTREE;
-              }
-              return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-              if (ctx.cancellation().isCancelled()) {
-                return FileVisitResult.TERMINATE;
-              }
-              if (!attrs.isRegularFile()) {
-                return FileVisitResult.CONTINUE;
-              }
-              var rel = root.relativize(file);
-              if (matcher.matches(rel) && hits.size() < MAX_RESULTS) {
+      var count =
+          WorkspaceWalk.run(
+              workspace,
+              root,
+              ctx.cancellation(),
+              MAX_RESULTS,
+              Long.MAX_VALUE,
+              (file, attrs, remaining) -> {
+                if (!matcher.matches(root.relativize(file))) {
+                  return 0;
+                }
                 hits.add(
                     new Match(workspace.relativize(file), attrs.lastModifiedTime().toMillis()));
-              }
-              return hits.size() >= MAX_RESULTS
-                  ? FileVisitResult.TERMINATE
-                  : FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFileFailed(Path file, IOException exc) {
-              return FileVisitResult.CONTINUE;
-            }
-          });
-      hits.sort(Comparator.<Match>comparingLong(m -> m.mtime).reversed());
-      var out = new StringBuilder();
-      for (var hit : hits) {
-        out.append(hit.path).append('\n');
-      }
-      if (hits.size() >= MAX_RESULTS) {
-        out.append("[truncated at ").append(MAX_RESULTS).append(" results]\n");
-      }
-      return ToolResult.success(out.toString());
+                return 1;
+              });
+      return ToolResult.success(format(hits, count >= MAX_RESULTS));
     } catch (WorkspaceRoot.WorkspaceEscapeException e) {
       return ToolResult.failure("Glob: " + e.getMessage());
-    } catch (java.util.regex.PatternSyntaxException e) {
-      return ToolResult.failure("Glob: invalid pattern '" + pattern + "': " + e.getMessage());
     } catch (IllegalArgumentException e) {
-      return ToolResult.failure("Glob: invalid pattern '" + pattern + "': " + e.getMessage());
+      return ToolResult.failure(
+          "Glob: invalid pattern '" + request.pattern() + "': " + e.getMessage());
     } catch (IOException e) {
-      return ToolResult.failure("Glob: I/O error scanning " + pathArg + ": " + e.getMessage());
+      return ToolResult.failure(
+          "Glob: I/O error scanning " + request.path() + ": " + e.getMessage());
+    }
+  }
+
+  private static String format(List<Match> hits, boolean truncated) {
+    hits.sort(Comparator.<Match>comparingLong(m -> m.mtime).reversed());
+    var out = new StringBuilder();
+    for (var hit : hits) {
+      out.append(hit.path).append('\n');
+    }
+    if (truncated) {
+      out.append("[truncated at ").append(MAX_RESULTS).append(" results]\n");
+    }
+    return out.toString();
+  }
+
+  private record GlobRequest(String pattern, String path) {
+
+    static Result<GlobRequest> parse(Map<String, Object> args) {
+      var pattern = ToolArgs.stringArg(args, "pattern");
+      if (Strings.isBlank(pattern)) {
+        return new Result.Failure<>("Glob: missing required 'pattern' argument");
+      }
+      return new Result.Success<>(new GlobRequest(pattern, ToolArgs.pathArg(args)));
     }
   }
 
