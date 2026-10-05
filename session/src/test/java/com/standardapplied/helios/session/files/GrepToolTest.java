@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Assumptions;
@@ -361,5 +362,24 @@ final class GrepToolTest {
             .execute(Map.of("pattern", "x", "include", "["), ToolContext.noop());
     assertFalse(result.success());
     assertTrue(result.output().startsWith("Grep: invalid include pattern '[': "), result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void skipsUnreadableFilesSilently(@TempDir Path tmp) throws IOException {
+    Files.writeString(tmp.resolve("a.txt"), "hit\n", StandardCharsets.UTF_8);
+    var locked = Files.writeString(tmp.resolve("b.txt"), "hit\n", StandardCharsets.UTF_8);
+    Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+    try {
+      Assumptions.assumeFalse(Files.isReadable(locked), "permissions are not enforced (root)");
+      var result =
+          GrepTool.binding(WorkspaceRoot.of(tmp))
+              .tool()
+              .execute(Map.of("pattern", "hit"), ToolContext.noop());
+      assertTrue(result.success(), result.output());
+      assertEquals("a.txt:1:hit\n", result.output());
+    } finally {
+      Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rw-------"));
+    }
   }
 }
