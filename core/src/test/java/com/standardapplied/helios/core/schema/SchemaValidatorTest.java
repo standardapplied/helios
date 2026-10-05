@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class SchemaValidatorTest {
@@ -205,5 +206,30 @@ class SchemaValidatorTest {
     assertTrue(SchemaValidator.validate(List.of(), schema).get(0).contains("array"));
     assertTrue(SchemaValidator.validate(true, schema).get(0).contains("boolean"));
     assertTrue(SchemaValidator.validate(42, schema).get(0).contains("number"));
+  }
+
+  @Test
+  void describeTypeFallsBackToJavaSimpleName() {
+    assertEquals(
+        List.of("expected string, got Optional"),
+        SchemaValidator.validate(Optional.empty(), JsonSchema.string()));
+  }
+
+  @Test
+  void integerRejectsInfinity() {
+    assertEquals(
+        List.of("expected integer, got non-integer number Infinity"),
+        SchemaValidator.validate(Double.POSITIVE_INFINITY, JsonSchema.integer()));
+  }
+
+  @Test
+  void emptyEnumAcceptsAnyString() {
+    assertTrue(SchemaValidator.validate("anything", JsonSchema.enumOf(List.of())).isEmpty());
+  }
+
+  @Test
+  void arrayWithoutItemsSchemaAcceptsAnyElements() {
+    var schema = JsonSchema.array(null);
+    assertTrue(SchemaValidator.validate(List.of(1, "two", Map.of()), schema).isEmpty());
   }
 }

@@ -15,7 +15,10 @@ import java.math.BigInteger;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class SchemaGeneratorTest {
 
@@ -793,5 +796,81 @@ class SchemaGeneratorTest {
         assertThrows(
             IllegalArgumentException.class, () -> SchemaGenerator.generate(WithWildcardMap.class));
     assertTrue(ex.getMessage().contains("Wildcard types"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      classes = {
+        int.class,
+        String[].class,
+        Color.class,
+        String.class,
+        Object.class,
+        Integer.class,
+        Double.class,
+        Boolean.class
+      })
+  void rejectsTypesThatAreNotRecordsOrClasses(Class<?> type) {
+    var ex = assertThrows(IllegalArgumentException.class, () -> SchemaGenerator.generate(type));
+    assertEquals(
+        "Schema generation requires a record or class, got: " + type.getName(), ex.getMessage());
+  }
+
+  record WithTypeVariable<T>(T value) {}
+
+  @Test
+  void throwsForTypeVariable() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> SchemaGenerator.generate(WithTypeVariable.class));
+    assertEquals("Unsupported generic type for schema generation: T", ex.getMessage());
+  }
+
+  record WithGenericArray(List<String>[] lists) {}
+
+  @Test
+  void throwsForGenericArray() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> SchemaGenerator.generate(WithGenericArray.class));
+    assertEquals(
+        "Unsupported generic type for schema generation: java.util.List<java.lang.String>[]",
+        ex.getMessage());
+  }
+
+  static class StringSupplier implements Supplier<String> {
+    public static String getDefault() {
+      return "default";
+    }
+
+    @Override
+    public String get() {
+      return "value";
+    }
+  }
+
+  @Test
+  void skipsStaticAndBridgeAccessors() {
+    var schema = SchemaGenerator.generate(StringSupplier.class);
+
+    assertEquals(Map.of("get", JsonSchema.string()), schema.properties());
+  }
+
+  static class UnprefixedNames {
+    public boolean is() {
+      return true;
+    }
+
+    public String isbn() {
+      return "isbn";
+    }
+  }
+
+  @Test
+  void keepsBareIsAndNonBooleanIsNamesUnchanged() {
+    var schema = SchemaGenerator.generate(UnprefixedNames.class);
+
+    assertEquals(Map.of("is", JsonSchema.bool(), "isbn", JsonSchema.string()), schema.properties());
+    assertEquals(List.of("is", "isbn"), schema.required());
   }
 }
