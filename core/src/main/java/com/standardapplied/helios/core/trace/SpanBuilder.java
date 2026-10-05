@@ -24,9 +24,9 @@ import java.util.UUID;
  * {@link #fail(String)} to complete with an error. Both produce an immutable {@link Span}.
  *
  * <p>Span lifecycle ({@code SpanOpened} / {@code SpanClosed}) is emitted directly to every
- * configured {@link EventSink} — no separate listener interface in between. The unified event
- * stream carries everything observers need; the {@code runId} on each event allows multiplexing
- * concurrent runs through the same sink.
+ * configured {@link com.standardapplied.helios.core.events.EventSink} — no separate listener
+ * interface in between. The unified event stream carries everything observers need; the {@code
+ * runId} on each event allows multiplexing concurrent runs through the same sink.
  *
  * <p>Not thread-safe. Designed for sequential use within an agent loop.
  */
