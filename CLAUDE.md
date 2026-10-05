@@ -88,7 +88,8 @@ sleep inside a string of sandboxed code is not a Java call and is not flagged.
 ArchUnit rules today: `core` depends on nothing outside the JDK; a provider module depends on
 `core` only; `session` does not depend on a provider, `runtime` or `persistence`; a
 `java.net.http.HttpClient` is built only by `core.common.HttpClientFactory`, whose clients never
-follow a redirect; `java.lang.ProcessBuilder` is used only by `core.process` (whose
+follow a redirect except the unauthenticated download client `createForDownloads()`, which only
+the `onnx` module may call; `java.lang.ProcessBuilder` is used only by `core.process` (whose
 `BoundedProcess` every other child process goes through) and `repl.sandbox.JvmSandbox`; a public
 instance method on a `*Builder` type that returns that builder is named `with...`; no top-level type is
 named `*Util`, `*Utils`, `*Helper`, `*Helpers` or `*Manager`; `System.out`, `System.err` and
@@ -275,7 +276,7 @@ helios/
 ├── openai/                         # OpenAI Responses API + Jackson 3.x
 ├── repl/                           # Sandboxed JShell substrate (JvmSandbox, ReplSession, CodeExecutionTool, InputBindings, HostFunction infrastructure)
 ├── onnx/                           # Local embeddings via ONNX Runtime
-├── persistence/                    # PostgreSQL persistence — PgTraceStore + PgDurability via Helidon DbClient
+├── persistence/                    # PostgreSQL persistence — PgTraceStore + PgAnnotationStore + PgDurability via Helidon DbClient
 ├── testing/                        # helios-testing — ScriptedModel test double for deterministic CI evals
 ├── architecture/                   # helios-architecture — ArchUnit rules over every library module; build-only, never deployed
 ├── config/quality/                 # PMD rule sets + PMD/CPD exclusion files shared by every module
@@ -330,7 +331,7 @@ Core exports public API; providers register via ServiceLoader SPI.
 | **Prompt drafts + activation (2.7.0)** | `PromptRegistry.registerDraft(name, content)` creates the next version inactive (active version stays live); `activate(name, version)` promotes/rolls back explicitly, throws on unknown target. Eval runners pin drafts via `resolve(name, version)`. `InMemoryPromptRegistry.resolve(name)` returns the *active* version, not the newest |
 | **ScriptedModel (helios-testing, 2.7.0)** | Deterministic `Model` replaying a builder-defined turn script (`withTextTurn`/`withToolCallsTurn`, optional per-turn `Usage`). Structured-output calls parse scripted JSON through the real `StructuredContentParser`; tool-call turns skip parse like providers; exhaustion fails fast; `calls()` captures every invocation's messages |
 | **CollectingTraceListener** | Thread-safe `TraceListener` in `core/trace` that accumulates fired traces into a `List<Trace>` |
-| **Annotation (v2 structured note)** | `core.trace.Annotation` attaches a structured judgment to a real trace/span `subjectId` (opaque consumer subjects were rejected — an annotation always targets something Helios observed). `facet` (nullable) is a named sub-coordinate within the subject so one author holds many judgments per subject without synthetic ids; `authorKind` (`HUMAN\|MODEL\|SYSTEM` enum) types the author; `metadata` is a first-class `Map<String,Object>` → `jsonb`, always non-null/immutable/null-tolerant. `PgTraceStore.upsertAnnotation` persists the full record, idempotent on `(subjectId, facet, label, authorId)` via a partial unique index with `COALESCE(facet,'')` (author-less rows always insert, preserving pre-v2 behavior; `createdAt` preserved + `updatedAt` advanced on conflict). Reads: `findAnnotationsBySubject` / `findAnnotationsBySubjects(batch)` / `listAnnotations(Paginate, scimFilter)` over first-class columns. `facet`/`label`/`metadata` are opaque — stored and returned uninterpreted. DDL delta in CHANGELOG |
+| **Annotation (v2 structured note)** | `core.trace.Annotation` attaches a structured judgment to a real trace/span `subjectId` (opaque consumer subjects were rejected — an annotation always targets something Helios observed). `facet` (nullable) is a named sub-coordinate within the subject so one author holds many judgments per subject without synthetic ids; `authorKind` (`HUMAN\|MODEL\|SYSTEM` enum) types the author; `metadata` is a first-class `Map<String,Object>` → `jsonb`, always non-null/immutable/null-tolerant. `PgAnnotationStore.upsertAnnotation` persists the full record, idempotent on `(subjectId, facet, label, authorId)` via a partial unique index with `COALESCE(facet,'')` (author-less rows always insert, preserving pre-v2 behavior; `createdAt` preserved + `updatedAt` advanced on conflict). Reads on the same store: `findAnnotationsBySubject` / `findAnnotationsBySubjects(batch)` / `listAnnotations(Paginate, scimFilter)` over first-class columns. `facet`/`label`/`metadata` are opaque — stored and returned uninterpreted. DDL delta in CHANGELOG |
 | **SpanListener (live observability)** | `core.trace.SpanListener` fires `onSpanStart(SpanStart)` and `onSpanEnd(Span)` as spans open/close — parallel SPI to `TraceListener` which fires only at trace close |
 
 ## Resource Lifecycle

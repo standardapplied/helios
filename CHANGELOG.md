@@ -129,6 +129,19 @@ remove the per-call working directory before they release the concurrency permit
 | `SessionOptions.Builder.apply(preset)` | `withPreset(preset)` |
 | `DurabilityCoordinator.journalStart(...)`, `journalTerminal(...)`, `journalTerminalFailure(...)`, `inflightFor(runId)`, `markInflightFailed(...)` | `new ToolCallJournaling(durability)` with `start(...)`, `complete(...)`, `fail(...)`, `inflight(runId)`, `markInflightFailed(...)`; `DurabilityCoordinator` keeps the run lifecycle, and journal warnings log under `com.standardapplied.helios.core.runtime.ToolCallJournaling` |
 
+**Annotations move from `PgTraceStore` to the new `PgAnnotationStore`.** `PgTraceStore` keeps
+traces and their spans (`store`, `findById`, `list`, `summarize`, `onEvent`). The five annotation
+methods move unchanged, with the same SQL, rows and errors, to `PgAnnotationStore`, built from the
+same `PgConfig`: `new PgAnnotationStore(pgConfig)`.
+
+| 2.x | 3.0 |
+|---|---|
+| `pgTraceStore.storeAnnotation(annotation)` | `pgAnnotationStore.storeAnnotation(annotation)` |
+| `pgTraceStore.upsertAnnotation(annotation)` | `pgAnnotationStore.upsertAnnotation(annotation)` |
+| `pgTraceStore.findAnnotationsBySubject(subjectId)` | `pgAnnotationStore.findAnnotationsBySubject(subjectId)` |
+| `pgTraceStore.findAnnotationsBySubjects(subjectIds)` | `pgAnnotationStore.findAnnotationsBySubjects(subjectIds)` |
+| `pgTraceStore.listAnnotations(paginate, scimFilter)` | `pgAnnotationStore.listAnnotations(paginate, scimFilter)` |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
@@ -155,6 +168,11 @@ remove the per-call working directory before they release the concurrency permit
   it streams and flushed at once; citations, tool use, tool results, blocked tools, turn ends, the
   loop end and a stream error are written one line each. It writes only to the `PrintStream` it is
   given. The session, CodeAct and RLM demos use it in place of their own copies.
+- **`HttpClientFactory.createForDownloads()`**, the one factory client that follows redirects, for
+  unauthenticated downloads such as Hugging Face files served from its CDN. It uses
+  `Redirect.NORMAL`, which never follows `https` to `http`, and the 10-second connect timeout of
+  `create(...)`. It takes no `ModelConfig`, so no configured key or header reaches it, and an
+  architecture rule allows it only in `helios-onnx`. `create(...)` still never follows a redirect.
 
 ### Fixed
 
@@ -211,6 +229,10 @@ remove the per-call working directory before they release the concurrency permit
   stopped, then halts with exit code 3 without running shutdown hooks, so a hook the snippet
   registered cannot keep it alive. A later `execute` fails, and its message gives the exit code
   and, for code 3, the cause.
+- **The ONNX model downloader waited on the operating system to give up on a connection.** Its
+  HTTP client had no connect timeout, so a connection attempt to Hugging Face that went
+  unanswered lasted as long as the host's TCP settings allowed. It now takes its client from
+  `HttpClientFactory.createForDownloads()`, and a connection attempt fails after 10 seconds.
 
 ### Security
 
