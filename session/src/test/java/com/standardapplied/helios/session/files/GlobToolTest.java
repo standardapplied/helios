@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.io.IOException;
@@ -16,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -217,5 +219,47 @@ final class GlobToolTest {
             .execute(Map.of("pattern", "**/*.md"), ToolContext.noop());
     assertTrue(result.success(), result.output());
     assertEquals("real.md\n", result.output());
+  }
+
+  @Test
+  void capsResultsAtOneThousandAndMarksTruncation(@TempDir Path tmp) throws IOException {
+    for (var i = 0; i < 1001; i++) {
+      Files.writeString(tmp.resolve(String.format("f%04d.md", i)), "x", StandardCharsets.UTF_8);
+    }
+    var result =
+        GlobTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "*.md"), ToolContext.noop());
+    assertTrue(result.success(), result.output());
+    var lines = result.output().split("\n");
+    assertEquals(1001, lines.length);
+    assertEquals("[truncated at 1000 results]", lines[1000]);
+  }
+
+  @Test
+  void exactlyOneThousandResultsAreMarkedTruncated(@TempDir Path tmp) throws IOException {
+    for (var i = 0; i < 1000; i++) {
+      Files.writeString(tmp.resolve(String.format("f%04d.md", i)), "x", StandardCharsets.UTF_8);
+    }
+    Files.writeString(tmp.resolve("other.txt"), "x", StandardCharsets.UTF_8);
+    var result =
+        GlobTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "*.md"), ToolContext.noop());
+    assertTrue(result.success(), result.output());
+    assertTrue(result.output().endsWith(".md\n[truncated at 1000 results]\n"), result.output());
+  }
+
+  @Test
+  void cancelledContextFindsNothing(@TempDir Path tmp) throws IOException {
+    Files.writeString(tmp.resolve("a.md"), "x", StandardCharsets.UTF_8);
+    var session = SessionContext.forTesting("cancelled");
+    session.cancellation().cancel("stop");
+    var result =
+        GlobTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "*.md"), ToolContext.of(session, Duration.ofMinutes(1)));
+    assertTrue(result.success(), result.output());
+    assertEquals("", result.output());
   }
 }
