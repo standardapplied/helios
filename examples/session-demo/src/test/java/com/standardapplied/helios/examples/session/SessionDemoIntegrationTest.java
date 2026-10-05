@@ -18,7 +18,6 @@ import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
-import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.LsTool;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
@@ -28,7 +27,6 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -81,30 +79,8 @@ final class SessionDemoIntegrationTest {
   @Test
   void agentExploresRepoAndWritesToMemory(@TempDir Path tmp) throws Exception {
     seedFakeRepo(tmp);
-    var ws = WorkspaceRoot.of(tmp);
-    var tracker = InMemoryFileTracker.create();
-    var memoryBackend = FileSystemMemoryBackend.of(ws);
-    var tools =
-        new ToolRegistry(
-            List.of(
-                ReadTool.binding(ws, tracker),
-                LsTool.binding(ws),
-                GlobTool.binding(ws),
-                GrepTool.binding(ws)));
-    var permission =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(
-                PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryRead", "/memories/**"),
-                PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryWrite", "/memories/**")),
-            List.of(),
-            List.of());
     var options =
-        SessionOptions.newBuilder()
-            .withModel(model)
-            .withTools(tools)
-            .withPermission(permission)
-            .withMemoryBackend(memoryBackend)
+        SessionDemoMain.exploreAndRememberOptions(model, tmp)
             .withLimits(SessionLimits.newBuilder().withMaxTurns(12).build())
             .build();
 

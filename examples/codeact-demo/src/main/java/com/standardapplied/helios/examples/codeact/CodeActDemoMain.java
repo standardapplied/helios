@@ -8,13 +8,12 @@ import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
 import com.standardapplied.helios.repl.codeact.CodeActPreset;
 import com.standardapplied.helios.session.AgentSession;
-import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.ConsoleEventPrinter;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
 import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.Flow;
 
 /**
  * End-to-end demo of the {@link CodeActPreset#typed} flavour against Gemini 3.1 Pro.
@@ -85,7 +84,7 @@ public final class CodeActDemoMain {
             .build();
 
     try (var session = AgentSession.create(options)) {
-      session.events().subscribe(new ConsoleEventPrinter());
+      session.events().subscribe(new ConsoleEventPrinter(System.out));
       var prompt = buildPrompt();
       var mapping =
           session.runBlocking(UserMessage.text(prompt), OutputSchema.of(SdtmMapping.class));
@@ -133,55 +132,5 @@ public final class CodeActDemoMain {
         Keep every `value` as the original string (do not coerce to a number). No markdown fences,\
          no commentary, no leading or trailing prose. The top-level key MUST be `rows`.\
         """;
-  }
-
-  private static final class ConsoleEventPrinter implements Flow.Subscriber<QueryEvent> {
-
-    @Override
-    public void onSubscribe(Flow.Subscription subscription) {
-      subscription.request(Long.MAX_VALUE);
-    }
-
-    @Override
-    public void onNext(QueryEvent ev) {
-      switch (ev) {
-        case QueryEvent.AssistantText t -> System.out.print(t.text());
-        case QueryEvent.ToolUse u ->
-            System.out.println(
-                "\n[tool] " + u.call().name() + " " + truncate(u.call().arguments()));
-        case QueryEvent.ToolResult r ->
-            System.out.println(
-                "[result] "
-                    + r.call().name()
-                    + " "
-                    + (r.result().success() ? "ok" : "FAILED: " + r.result().output()));
-        case QueryEvent.ToolBlocked b ->
-            System.out.println("[blocked] " + b.call().name() + ": " + b.reason());
-        case QueryEvent.TurnEnded te -> System.out.println("\n[turn-ended] " + te.reason());
-        case QueryEvent.LoopEnded le ->
-            System.out.println("[loop-ended] " + le.result().getClass().getSimpleName());
-        default -> {
-          // skip the chatty events
-        }
-      }
-    }
-
-    @Override
-    public void onError(Throwable throwable) {
-      System.err.println("[stream-error] " + throwable);
-    }
-
-    @Override
-    public void onComplete() {
-      // nothing
-    }
-
-    private static String truncate(Object value) {
-      var s = String.valueOf(value);
-      if (s.length() > 240) {
-        return s.substring(0, 240) + "... [" + s.length() + " chars]";
-      }
-      return s;
-    }
   }
 }
