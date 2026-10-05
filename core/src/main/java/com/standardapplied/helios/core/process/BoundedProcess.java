@@ -4,6 +4,7 @@ package com.standardapplied.helios.core.process;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -124,10 +125,15 @@ public final class BoundedProcess implements AutoCloseable {
     }
   }
 
+  /**
+   * Best-effort: whatever the child left behind, cleanup never throws, so it cannot cost the caller
+   * the outcome. {@code Files.walk} reports a directory it cannot read as an {@link
+   * UncheckedIOException} while iterating.
+   */
   private static void deleteRecursively(Path root) {
     try (var stream = Files.walk(root)) {
       stream.sorted(Comparator.reverseOrder()).forEach(BoundedProcess::deleteQuietly);
-    } catch (IOException ignored) {
+    } catch (IOException | UncheckedIOException ignored) {
       // Best-effort cleanup.
     }
   }
@@ -209,6 +215,7 @@ public final class BoundedProcess implements AutoCloseable {
      */
     public BoundedProcess start() throws IOException {
       var owned = workingDirectory == null ? Files.createTempDirectory(tempDirectoryPrefix) : null;
+      var started = false;
       try {
         var pb = new ProcessBuilder(argv);
         pb.environment().clear();
@@ -216,12 +223,13 @@ public final class BoundedProcess implements AutoCloseable {
         pb.directory((owned != null ? owned : workingDirectory).toFile());
         pb.redirectInput(ProcessBuilder.Redirect.PIPE);
         var startNanos = System.nanoTime();
-        return new BoundedProcess(pb.start(), owned, this, startNanos);
-      } catch (IOException | RuntimeException e) {
-        if (owned != null) {
+        var process = new BoundedProcess(pb.start(), owned, this, startNanos);
+        started = true;
+        return process;
+      } finally {
+        if (!started && owned != null) {
           deleteRecursively(owned);
         }
-        throw e;
       }
     }
   }

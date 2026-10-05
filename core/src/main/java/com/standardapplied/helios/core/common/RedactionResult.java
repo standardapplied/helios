@@ -43,7 +43,8 @@ public record RedactionResult(byte[] bytes, Map<String, Integer> counts) {
     if (counts.isEmpty() && other.counts.isEmpty()) {
       return Map.of();
     }
-    var merged = new LinkedHashMap<String, Integer>(counts);
+    var merged = new LinkedHashMap<String, Integer>();
+    counts.forEach((name, count) -> merged.merge(name, count, Integer::sum));
     other.counts.forEach((name, count) -> merged.merge(name, count, Integer::sum));
     return Collections.unmodifiableMap(merged);
   }

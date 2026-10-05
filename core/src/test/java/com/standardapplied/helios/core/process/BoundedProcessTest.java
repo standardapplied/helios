@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -26,6 +27,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 @DisabledOnOs(OS.WINDOWS)
 class BoundedProcessTest {
@@ -162,6 +165,29 @@ class BoundedProcessTest {
     }
   }
 
+  /**
+   * The descendant inherits the child's stdout, so if it outlived the timeout the capture would
+   * wait for it: {@link BoundedProcess#await()} returning is the proof that the timeout ended it
+   * too. The timeout starts in {@code await()}, after the descendant is known to run.
+   */
+  @Test
+  void timeoutEndsTheDescendantsHoldingTheOutput(@TempDir Path tmp) throws Exception {
+    try (var process =
+        bash("sleep 600 & echo $! > child; wait")
+            .withWorkingDirectory(tmp)
+            .withTimeout(SHORT)
+            .start()) {
+      process.stdin().close();
+      Await.until("the pid to be written", () -> !readPid(tmp).isEmpty());
+      var child = ProcessHandle.of(Long.parseLong(readPid(tmp))).orElseThrow();
+
+      var outcome = process.await();
+
+      assertTrue(outcome.timedOut());
+      Await.until("the descendant to die", () -> !child.isAlive());
+    }
+  }
+
   private static String readPid(Path dir) {
     try {
       return Files.readString(dir.resolve("child")).strip();
@@ -209,6 +235,56 @@ class BoundedProcessTest {
     } catch (IOException e) {
       throw new AssertionError(e);
     }
+  }
+
+  /**
+   * Whatever the child leaves in its working directory, closing the process does not throw: the
+   * cleanup is best-effort, and a tool call's result must not be lost to it. Each script prints the
+   * directory so the test can restore and remove what the cleanup could not.
+   */
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "pwd; rm -rf \"$PWD\"",
+        "pwd; mkdir sealed && touch sealed/f && chmod 555 sealed",
+        "pwd; mkdir locked && touch locked/f && chmod 000 locked"
+      })
+  void closeSurvivesAWorkingDirectoryItCannotFullyRemove(String script) throws Exception {
+    Path directory;
+    try (var process = bash(script).start()) {
+      process.stdin().close();
+      directory = Path.of(text(process.await().stdout()).strip());
+    }
+    restoreAndRemove(directory);
+  }
+
+  private static void restoreAndRemove(Path directory) throws IOException {
+    if (!Files.exists(directory)) {
+      return;
+    }
+    try (var entries = Files.walk(directory, 1)) {
+      for (var entry : entries.toList()) {
+        entry.toFile().setReadable(true);
+        entry.toFile().setWritable(true);
+        entry.toFile().setExecutable(true);
+      }
+    }
+    try (var entries = Files.walk(directory)) {
+      for (var entry : entries.sorted(Comparator.reverseOrder()).toList()) {
+        Files.delete(entry);
+      }
+    }
+  }
+
+  @Test
+  void failedStartLeavesACallerSuppliedDirectory(@TempDir Path tmp) throws IOException {
+    Files.writeString(tmp.resolve("kept"), "caller's file");
+    var builder =
+        BoundedProcess.newBuilder(List.of("/nonexistent/zzzzzz")).withWorkingDirectory(tmp);
+
+    assertThrows(IOException.class, builder::start);
+
+    assertEquals("caller's file", Files.readString(tmp.resolve("kept")));
   }
 
   @Test

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +44,17 @@ class RedactionResultTest {
   void mergeCountsKeepsOneSidedCounts() {
     assertEquals(Map.of("A", 1), result(Map.of()).mergeCounts(result(Map.of("A", 1))));
     assertEquals(Map.of("A", 1), result(Map.of("A", 1)).mergeCounts(result(Map.of())));
+  }
+
+  @Test
+  void mergeCountsRejectsANullCountOnEitherSide() {
+    var withNull = new HashMap<String, Integer>();
+    withNull.put("A", null);
+
+    assertThrows(
+        NullPointerException.class, () -> result(withNull).mergeCounts(result(Map.of("B", 1))));
+    assertThrows(
+        NullPointerException.class, () -> result(Map.of("B", 1)).mergeCounts(result(withNull)));
   }
 
   @Test
