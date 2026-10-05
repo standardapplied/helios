@@ -17,8 +17,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 final class MemoryWriteToolTest {
 
@@ -263,5 +267,87 @@ final class MemoryWriteToolTest {
   @Test
   void rejectsNullBackend() {
     assertThrows(NullPointerException.class, () -> MemoryWriteTool.binding(null));
+  }
+
+  static Stream<Arguments> operationsWithExactOutcome() {
+    return Stream.of(
+        Arguments.of(
+            Map.of("path", "/memories/a.md"), false, "MemoryWrite: missing required 'op' argument"),
+        Arguments.of(
+            Map.of("op", "create"), false, "MemoryWrite: missing required 'path' argument"),
+        Arguments.of(
+            Map.of("op", "create", "path", "/memories/a.md"),
+            false,
+            "MemoryWrite: 'create' requires 'content'"),
+        Arguments.of(
+            Map.of("op", "create", "path", "/memories/n.md", "content", "abc"),
+            true,
+            "created /memories/n.md (3 chars)"),
+        Arguments.of(
+            Map.of("op", "create", "path", "/memories/a.md", "content", "abc"),
+            false,
+            "MemoryWrite: entry already exists at /memories/a.md"),
+        Arguments.of(
+            Map.of("op", "str_replace", "path", "/memories/a.md", "oldString", "one"),
+            false,
+            "MemoryWrite: 'str_replace' requires both 'oldString' and 'newString'"),
+        Arguments.of(
+            Map.of("op", "str_replace", "path", "/memories/a.md", "newString", "one"),
+            false,
+            "MemoryWrite: 'str_replace' requires both 'oldString' and 'newString'"),
+        Arguments.of(
+            Map.of(
+                "op",
+                "str_replace",
+                "path",
+                "/memories/a.md",
+                "oldString",
+                "one",
+                "newString",
+                "three"),
+            true,
+            "replaced 1 occurrence in /memories/a.md (3 → 5 chars)"),
+        Arguments.of(
+            Map.of("op", "insert", "path", "/memories/a.md", "lineNumber", 1),
+            false,
+            "MemoryWrite: 'insert' requires 'content'"),
+        Arguments.of(
+            Map.of("op", "insert", "path", "/memories/a.md", "content", "x"),
+            false,
+            "MemoryWrite: 'insert' requires 'lineNumber'"),
+        Arguments.of(
+            Map.of("op", "insert", "path", "/memories/a.md", "content", "zero", "lineNumber", 1),
+            true,
+            "inserted at line 1 in /memories/a.md (4 chars)"),
+        Arguments.of(
+            Map.of("op", "insert", "path", "/memories/a.md", "content", "x", "lineNumber", 9),
+            false,
+            "MemoryWrite: lineNumber 9 out of range [1, 3]"),
+        Arguments.of(
+            Map.of("op", "delete", "path", "/memories/missing.md"),
+            false,
+            "MemoryWrite: no such memory entry: /memories/missing.md"),
+        Arguments.of(
+            Map.of("op", "delete", "path", "/memories/a.md"), true, "deleted /memories/a.md"),
+        Arguments.of(
+            Map.of("op", "delete", "path", "/memories/dir"),
+            false,
+            "MemoryWrite: I/O error: delete: refusing to delete a directory: /memories/dir"),
+        Arguments.of(
+            Map.of("op", "view", "path", "/memories/a.md"),
+            false,
+            "MemoryWrite: unknown op 'view' (expected: create, str_replace, insert, delete)"));
+  }
+
+  @ParameterizedTest
+  @MethodSource("operationsWithExactOutcome")
+  void operationReportsExactOutcome(
+      Map<String, Object> args, boolean success, String output, @TempDir Path tmp)
+      throws IOException {
+    var backend = seeded(tmp, "a.md", "one\ntwo\n");
+    Files.createDirectories(tmp.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR).resolve("dir"));
+    var result = MemoryWriteTool.binding(backend).tool().execute(args, ToolContext.noop());
+    assertEquals(success, result.success(), result.output());
+    assertEquals(output, result.output());
   }
 }

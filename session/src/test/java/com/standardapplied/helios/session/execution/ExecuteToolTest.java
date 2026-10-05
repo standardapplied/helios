@@ -24,7 +24,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 final class ExecuteToolTest {
 
@@ -415,5 +419,95 @@ final class ExecuteToolTest {
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), toolCtx);
     assertFalse(result.success());
     assertTrue(result.output().contains("test"));
+  }
+
+  static Stream<Arguments> invalidArgumentsInValidationOrder() {
+    return Stream.of(
+        Arguments.of(Map.of("script", "x"), "Execute: missing required 'runtime' argument"),
+        Arguments.of(
+            Map.of("runtime", "cobol"),
+            "Execute: unknown runtime 'cobol'. Expected one of: BASH, PYTHON, SQL, JSHELL, R,"
+                + " NODE, CUSTOM"),
+        Arguments.of(Map.of("runtime", "bash"), "Execute: missing required 'script' argument"),
+        Arguments.of(
+            Map.of("runtime", "bash", "script", "x", "args", "a"),
+            "Execute: 'args' must be an array of strings"),
+        Arguments.of(
+            Map.of("runtime", "bash", "script", "x", "args", List.of(1)),
+            "Execute: 'args' must be an array of strings"),
+        Arguments.of(
+            Map.of("runtime", "bash", "script", "x", "timeoutSeconds", "ten"),
+            "Execute: 'timeoutSeconds' must be a positive integer"),
+        Arguments.of(
+            Map.of("runtime", "bash", "script", "x", "timeoutSeconds", 0, "environment", "e"),
+            "Execute: 'timeoutSeconds' must be a positive integer"),
+        Arguments.of(
+            Map.of("runtime", "bash", "script", "x", "environment", "e"),
+            "Execute: 'environment' must be an object of string→string"),
+        Arguments.of(
+            Map.of("runtime", "bash", "script", "x", "environment", Map.of("K", 1)),
+            "Execute: 'environment' must be an object of string→string"));
+  }
+
+  @ParameterizedTest
+  @MethodSource("invalidArgumentsInValidationOrder")
+  void invalidArgumentFailsWithExactMessageBeforeDispatch(
+      Map<String, Object> args, String message) {
+    var provider = new RecordingProvider(ok(""));
+    var result = ExecuteTool.binding(provider).tool().execute(args, ctx());
+    assertFalse(result.success());
+    assertEquals(message, result.output());
+    assertEquals(null, provider.lastRequest);
+  }
+
+  @Test
+  void unsupportedRuntimeIsRefusedBeforeTheScriptIsValidated() {
+    var provider = new RecordingProvider(ok(""));
+    provider.supportedRuntimes = EnumSet.of(Runtime.PYTHON);
+    var result = ExecuteTool.binding(provider).tool().execute(Map.of("runtime", "bash"), ctx());
+    assertEquals(
+        "Execute: runtime 'BASH' is not supported by this provider (supported: [PYTHON])",
+        result.output());
+  }
+
+  @Test
+  void validArgumentsBuildTheRequestTheProviderSees() {
+    var provider = new RecordingProvider(ok("out"));
+    var result =
+        ExecuteTool.binding(provider)
+            .tool()
+            .execute(
+                Map.of(
+                    "runtime", "python",
+                    "script", "print(1)",
+                    "args", List.of("a", "b"),
+                    "workingDirectory", "/tmp",
+                    "timeoutSeconds", 7,
+                    "environment", Map.of("K", "V"),
+                    "stdin", "in"),
+                ctx());
+    assertTrue(result.success(), result.output());
+    var request = provider.lastRequest;
+    assertEquals(Runtime.PYTHON, request.runtime());
+    assertEquals("print(1)", request.script());
+    assertEquals(List.of("a", "b"), request.args());
+    assertEquals(Path.of("/tmp"), request.workingDirectory());
+    assertEquals(Duration.ofSeconds(7), request.timeout());
+    assertEquals(Map.of("K", "V"), request.environment());
+    assertEquals("in", request.stdin().orElseThrow());
+  }
+
+  @Test
+  void omittedOptionalArgumentsTakeTheirDefaults() {
+    var provider = new RecordingProvider(ok(""));
+    ExecuteTool.binding(provider)
+        .tool()
+        .execute(Map.of("runtime", "bash", "script", "true", "workingDirectory", ""), ctx());
+    var request = provider.lastRequest;
+    assertEquals(List.of(), request.args());
+    assertEquals(null, request.workingDirectory());
+    assertEquals(Duration.ofSeconds(30), request.timeout());
+    assertEquals(Map.of(), request.environment());
+    assertTrue(request.stdin().isEmpty());
   }
 }
