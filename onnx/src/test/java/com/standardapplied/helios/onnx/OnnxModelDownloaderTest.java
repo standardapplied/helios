@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.embedding.EmbeddingConfig;
 import com.standardapplied.helios.core.test.StubHttpServer;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -232,6 +233,36 @@ class OnnxModelDownloaderTest {
   }
 
   @Test
+  void anOnnxFileListedOutsideTheSubfolderKeepsItsPath() throws IOException {
+    var hub = new Hub();
+    hub.listing("main/onnx", "onnxfoo/model.onnx");
+    hub.listing("main");
+
+    var requests = hub.download(SUBFOLDER_SPEC, cache);
+
+    assertEquals(
+        List.of(
+            "GET " + TREE + "main/onnx",
+            "GET " + TREE + "main",
+            "GET " + RESOLVE + "onnxfoo/model.onnx"),
+        requests);
+    assertTrue(Files.exists(cache.resolve("acme/tiny/onnxfoo/model.onnx")));
+  }
+
+  @Test
+  void aMarkerAConcurrentDownloaderWroteIsKept() throws IOException {
+    var marker = cache.resolve("acme/tiny/.finished");
+    var hub = new Hub();
+    hub.listing("main/onnx", "onnx/model.onnx");
+    hub.listing("main");
+    hub.onFetch(RESOLVE + "onnx/model.onnx", () -> Files.writeString(marker, "theirs"));
+
+    hub.download(SUBFOLDER_SPEC, cache);
+
+    assertEquals("theirs", Files.readString(marker));
+  }
+
+  @Test
   void modelAndTokenizerPathsSitInTheModelDirectory() throws IOException {
     Files.createDirectories(cache.resolve("acme/tiny"));
     Files.createFile(cache.resolve("acme/tiny/.finished"));
@@ -257,8 +288,13 @@ class OnnxModelDownloaderTest {
   private static final class Hub {
 
     private final Map<String, StubHttpServer.Reply> replies = new HashMap<>();
+    private final Map<String, FetchAction> fetchActions = new HashMap<>();
     private final StubHttpServer server =
         StubHttpServer.start(InetAddress.getLoopbackAddress(), 0, this::reply);
+
+    void onFetch(String path, FetchAction action) {
+      fetchActions.put(path, action);
+    }
 
     void listing(String treePath, String... paths) {
       var body =
@@ -301,11 +337,22 @@ class OnnxModelDownloaderTest {
 
     private StubHttpServer.Reply reply(StubHttpServer.Request request) {
       var path = request.requestLine().split(" ")[1];
+      try {
+        fetchActions.getOrDefault(path, () -> {}).run();
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
       var fallback =
           path.startsWith(TREE)
               ? new StubHttpServer.Reply(404, Map.of(), "")
               : new StubHttpServer.Reply(200, Map.of(), "body of " + path);
       return replies.getOrDefault(path, fallback);
     }
+  }
+
+  /** Runs on the hub's thread before it answers a request, as another process would. */
+  @FunctionalInterface
+  private interface FetchAction {
+    void run() throws IOException;
   }
 }
