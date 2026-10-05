@@ -138,13 +138,19 @@ final class AhoCorasick {
       return g != NONE ? g : 0;
     }
 
-    /** Each state's nearest proper suffix state that ends a pattern, or none. */
+    /**
+     * Each state's nearest proper suffix state that ends a pattern, or none. The root's children
+     * are left with none, so an empty pattern is not reported right after their byte.
+     */
     int[] outputChains(int[] fail, List<Integer> order) {
       var next = new int[gotoTable.size()];
       Arrays.fill(next, NONE);
-      for (var v : order) {
-        var f = fail[v];
-        next[v] = output.get(f) != NONE ? f : next[f];
+      for (var u : order) {
+        for (var v : gotoTable.get(u)) {
+          if (v != NONE) {
+            next[v] = output.get(fail[v]) != NONE ? fail[v] : next[fail[v]];
+          }
+        }
       }
       return next;
     }
