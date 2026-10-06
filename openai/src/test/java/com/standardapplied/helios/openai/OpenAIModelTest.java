@@ -1313,6 +1313,20 @@ class OpenAIModelTest {
   }
 
   @Test
+  void parseStructuredContentThatIsNotAnObjectReportsTheUntypedMapItCouldNotRead() {
+    var ex =
+        assertThrows(
+            StructuredOutputParseException.class,
+            () -> parse("[1, 2]", OutputSchema.of(TestPerson.class)));
+
+    assertEquals(
+        "JSON syntax error: Cannot deserialize value of type"
+            + " `java.util.LinkedHashMap<java.lang.Object,java.lang.Object>` from Array value"
+            + " (token `JsonToken.START_ARRAY`)",
+        ex.errors().getFirst().lines().findFirst().orElseThrow());
+  }
+
+  @Test
   void disabledRawOutputCaptureIsAppliedByOpenAiParser() {
     var config =
         ModelConfig.newBuilder()
