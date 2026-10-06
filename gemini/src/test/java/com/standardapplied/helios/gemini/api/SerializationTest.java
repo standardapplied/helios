@@ -892,6 +892,11 @@ class SerializationTest {
     assertFalse(result.hasTypeGoogleSearchCall());
   }
 
+  @Test
+  void googleSearchCallWithoutArgumentsCarriesAnEmptyMap() {
+    assertEquals(Map.of(), Step.googleSearchCall("gs_1", null, "web_search", "sig").arguments());
+  }
+
   // --- Streaming events ---
 
   @Test
