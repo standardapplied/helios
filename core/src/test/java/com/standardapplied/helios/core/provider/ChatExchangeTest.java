@@ -15,20 +15,13 @@ import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
-import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
-import com.standardapplied.helios.core.schema.OutputSchema;
-import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
-import com.standardapplied.helios.core.schema.StructuredContentParser;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class ChatExchangeTest {
-
-  public record Answer(String summary) {}
 
   /** The exception a test provider throws, so a pass-through is told apart from a wrap. */
   static final class AcmeException extends ProviderException {
@@ -36,19 +29,6 @@ class ChatExchangeTest {
       super(message, statusCode, cause);
     }
   }
-
-  private static final StructuredContentParser.JsonAdapter ANSWERS =
-      new StructuredContentParser.JsonAdapter() {
-        @Override
-        public Map<String, Object> toMap(String json) {
-          return Map.of("summary", json.replaceAll("\\W", "").replace("summary", ""));
-        }
-
-        @Override
-        public <T> T fromMap(Map<String, Object> map, Class<T> type) {
-          return type.cast(new Answer((String) map.get("summary")));
-        }
-      };
 
   private static final Response<Void> DONE =
       Response.newBuilder()
@@ -164,31 +144,6 @@ class ChatExchangeTest {
   }
 
   @Test
-  void structuredParsesTheContentOfATurnWithoutToolCalls() {
-    var response = exchange(request -> null).structured(DONE, OutputSchema.of(Answer.class));
-
-    assertEquals(new Answer("ok"), response.parsed());
-    assertEquals(DONE.content(), response.content());
-    assertEquals(FinishReason.STOP, response.finishReason());
-  }
-
-  @Test
-  void structuredLeavesATurnThatCalledToolsUnparsed() {
-    var call = ToolCall.newBuilder().withId("c").withName("t").build();
-    var toolTurn =
-        Response.newBuilder()
-            .withContent("Let me look that up.")
-            .withToolCalls(List.of(call))
-            .withFinishReason(FinishReason.TOOL_CALLS)
-            .build();
-
-    var response = exchange(request -> null).structured(toolTurn, OutputSchema.of(Answer.class));
-
-    assertNull(response.parsed());
-    assertEquals(List.of(call), response.toolCalls());
-  }
-
-  @Test
   void streamHandsBackTheOpenedStream() {
     var stream = new Recorded(new StreamEvent.Done(DONE));
 
@@ -201,11 +156,11 @@ class ChatExchangeTest {
 
     var error =
         onlyError(
-            exchange(request -> null).stream(
+            exchange(
                 request -> {
                   throw own;
-                },
-                "req"));
+                })
+                .stream("req"));
 
     assertEquals(own.getMessage(), error.message());
     assertSame(own, error.cause());
@@ -256,9 +211,7 @@ class ChatExchangeTest {
           opened.add(request);
           return opener.open(request);
         },
-        AcmeException::new,
-        ANSWERS,
-        RawOutputCapturePolicy.ENABLED);
+        AcmeException::new);
   }
 
   private static StreamEvent.Error onlyError(CloseableIterator<StreamEvent> events) {

@@ -3,14 +3,9 @@
 # the classes it names. Lines may only be removed; duplication is never accepted, and the last
 # follow-up spec deletes this file. Policy: CLAUDE.md, "Quality gate".
 # No blank lines: the plugin reads one as a group that matches every single-file duplication.
-com.standardapplied.helios.anthropic.AnthropicModel,com.standardapplied.helios.gemini.GeminiModel
-com.standardapplied.helios.anthropic.AnthropicModel,com.standardapplied.helios.gemini.GeminiModel,com.standardapplied.helios.openai.OpenAIModel
-com.standardapplied.helios.anthropic.AnthropicModel,com.standardapplied.helios.openai.OpenAIModel
 com.standardapplied.helios.anthropic.AnthropicModelIntegrationTest,com.standardapplied.helios.openai.OpenAIModelIntegrationTest
 com.standardapplied.helios.anthropic.AnthropicModelTest,com.standardapplied.helios.gemini.GeminiModelTest
 com.standardapplied.helios.anthropic.AnthropicModelTest,com.standardapplied.helios.openai.OpenAIModelTest
-com.standardapplied.helios.anthropic.AnthropicStreamingIterator,com.standardapplied.helios.gemini.GeminiModel,com.standardapplied.helios.openai.OpenAIModel
-com.standardapplied.helios.anthropic.AnthropicStreamingIterator,com.standardapplied.helios.openai.OpenAIModel
 com.standardapplied.helios.anthropic.AnthropicWebToolsTest,com.standardapplied.helios.anthropic.StreamReadErrorCausePreservationReproTest,com.standardapplied.helios.anthropic.StreamingIteratorTest,com.standardapplied.helios.gemini.StreamingIteratorTest,com.standardapplied.helios.openai.StreamingIteratorTest
 com.standardapplied.helios.anthropic.AnthropicWebToolsTest,com.standardapplied.helios.anthropic.StreamingIteratorTest,com.standardapplied.helios.gemini.StreamingIteratorTest,com.standardapplied.helios.openai.StreamingIteratorTest
 com.standardapplied.helios.anthropic.SchemaPlusToolsBugReproTest
@@ -27,7 +22,6 @@ com.standardapplied.helios.examples.session.ReadToolMultimodalAnthropicIntegrati
 com.standardapplied.helios.examples.session.ReadToolMultimodalThroughLoopIntegrationTest,com.standardapplied.helios.session.files.ReadToolTest
 com.standardapplied.helios.examples.session.SessionDemoIntegrationTest,com.standardapplied.helios.session.Phase4AcceptanceTest
 com.standardapplied.helios.examples.session.WorkspaceReadOnlyRedactionAgentSessionAnthropicIntegrationTest,com.standardapplied.helios.examples.session.WorkspaceReadOnlyRedactionAgentSessionIntegrationTest
-com.standardapplied.helios.gemini.GeminiModel,com.standardapplied.helios.openai.OpenAIModel
 com.standardapplied.helios.gemini.GeminiModelTest,com.standardapplied.helios.openai.OpenAIModelTest
 com.standardapplied.helios.gemini.StreamingIteratorTest
 com.standardapplied.helios.gemini.StreamingIteratorTest,com.standardapplied.helios.openai.StreamingIteratorTest

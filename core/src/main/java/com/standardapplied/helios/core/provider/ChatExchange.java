@@ -7,25 +7,21 @@ import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.TransientStreamException;
-import com.standardapplied.helios.core.schema.OutputSchema;
-import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
-import com.standardapplied.helios.core.schema.StructuredContentParser;
 import java.io.IOException;
 import java.util.List;
+import java.util.Objects;
 
 /**
- * The call flow every streaming provider shares, composed into each {@code Model}. A blocking call
- * opens a stream and drains it to its {@link Response}; a streaming call hands back the stream,
- * with a failure to open it as its one {@link StreamEvent.Error}; a structured call parses the
- * drained content against its schema unless the turn called tools. Failures map one way for every
- * provider: the provider's own exception and a {@link TransientStreamException} pass through, an
- * {@link IOException} becomes a retryable {@link TransientStreamException} naming the provider, an
- * interrupt is restored and becomes the provider's exception, and anything else becomes the
- * provider's exception.
+ * The {@link Exchange} every streaming provider shares. A blocking call opens a stream and drains
+ * it to its {@link Response}; a streaming call hands back the stream, with a failure to open it as
+ * its one {@link StreamEvent.Error}. Failures map one way for every provider: the provider's own
+ * exception and a {@link TransientStreamException} pass through, an {@link IOException} becomes a
+ * retryable {@link TransientStreamException} naming the provider, an interrupt is restored and
+ * becomes the provider's exception, and anything else becomes the provider's exception.
  *
  * @param <R> the provider's request type
  */
-public final class ChatExchange<R> {
+public final class ChatExchange<R> implements Exchange<R> {
 
   /**
    * Opens one response stream for a request.
@@ -48,8 +44,6 @@ public final class ChatExchange<R> {
   private final String apiName;
   private final StreamOpener<R> opener;
   private final ProviderFailure failure;
-  private final StructuredContentParser.JsonAdapter json;
-  private final RawOutputCapturePolicy capturePolicy;
 
   /**
    * An exchange for one provider.
@@ -58,32 +52,19 @@ public final class ChatExchange<R> {
    * @param apiName the API a failure to communicate names, e.g. {@code "Anthropic API"}
    * @param opener opens a stream for a request
    * @param failure creates the provider's exception
-   * @param json the provider's JSON binding, for structured output
-   * @param capturePolicy whether a structured-output failure keeps the raw output
    */
   public ChatExchange(
-      String providerName,
-      String apiName,
-      StreamOpener<R> opener,
-      ProviderFailure failure,
-      StructuredContentParser.JsonAdapter json,
-      RawOutputCapturePolicy capturePolicy) {
-    this.providerName = providerName;
-    this.apiName = apiName;
-    this.opener = opener;
-    this.failure = failure;
-    this.json = json;
-    this.capturePolicy = capturePolicy;
+      String providerName, String apiName, StreamOpener<R> opener, ProviderFailure failure) {
+    this.providerName = Objects.requireNonNull(providerName, "providerName must not be null");
+    this.apiName = Objects.requireNonNull(apiName, "apiName must not be null");
+    this.opener = Objects.requireNonNull(opener, "opener must not be null");
+    this.failure = Objects.requireNonNull(failure, "failure must not be null");
   }
 
   /** Opens a stream for {@code request} and drains it to its response. */
+  @Override
   public Response<Void> chat(R request) {
-    return chat(opener, request);
-  }
-
-  /** Has {@code streams} open a stream for {@code request} and drains it to its response. */
-  public Response<Void> chat(StreamOpener<R> streams, R request) {
-    try (var events = streams.open(request)) {
+    try (var events = opener.open(request)) {
       return drain(events);
     } catch (IOException e) {
       throw new TransientStreamException("Failed to communicate with " + apiName, e, providerName);
@@ -93,42 +74,11 @@ public final class ChatExchange<R> {
     }
   }
 
-  /**
-   * {@code response} typed by {@code schema}, its content parsed when the turn called no tools. A
-   * tool-calling turn is intermediate: its prose is not the structured answer, which a later
-   * text-only turn delivers.
-   */
-  public <T> Response<T> structured(Response<Void> response, OutputSchema<T> schema) {
-    var parsed = response.toolCalls().isEmpty() ? parse(response.content(), schema) : null;
-    return Response.<T>newBuilder(schema.type())
-        .withContent(response.content())
-        .withParsed(parsed)
-        .withToolCalls(response.toolCalls())
-        .withFinishReason(response.finishReason())
-        .withUsage(response.usage())
-        .withThinking(response.thinking())
-        .withCitations(response.citations())
-        .withMetadata(response.metadata())
-        .build();
-  }
-
-  /** {@code content} parsed and validated against {@code schema}. */
-  public <T> T parse(String content, OutputSchema<T> schema) {
-    return StructuredContentParser.parse(content, schema, json, capturePolicy);
-  }
-
   /** The stream for {@code request}, or a stream of the one error that kept it from opening. */
+  @Override
   public CloseableIterator<StreamEvent> stream(R request) {
-    return stream(opener, request);
-  }
-
-  /**
-   * The stream {@code streams} opens for {@code request}, or a stream of the one error that kept it
-   * from opening.
-   */
-  public CloseableIterator<StreamEvent> stream(StreamOpener<R> streams, R request) {
     try {
-      return streams.open(request);
+      return opener.open(request);
     } catch (ProviderException e) {
       return failed(new StreamEvent.Error(e.getMessage(), e));
     } catch (IOException e) {
