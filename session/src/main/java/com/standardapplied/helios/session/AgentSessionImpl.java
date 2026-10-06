@@ -328,6 +328,11 @@ public final class AgentSessionImpl implements AgentSession {
     return events.executor();
   }
 
+  /** Package-private accessor for tests that need to assert the deadline scheduler's shutdown. */
+  ScheduledExecutorService deadlineSchedulerForTests() {
+    return deadlineScheduler;
+  }
+
   @Override
   public void answer(String questionId, AskUserQuestionResponse response) {
     Objects.requireNonNull(questionId, "questionId must not be null");
