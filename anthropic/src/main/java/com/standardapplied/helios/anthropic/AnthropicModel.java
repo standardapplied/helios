@@ -5,47 +5,22 @@
 
 package com.standardapplied.helios.anthropic;
 
-import com.standardapplied.helios.anthropic.api.CacheControl;
-import com.standardapplied.helios.anthropic.api.ContentBlock;
+import com.standardapplied.helios.anthropic.api.AnthropicJson;
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
-import com.standardapplied.helios.anthropic.api.OutputConfig;
-import com.standardapplied.helios.anthropic.api.SystemContent;
-import com.standardapplied.helios.anthropic.api.ThinkingConfig;
-import com.standardapplied.helios.anthropic.api.ToolChoiceConfig;
-import com.standardapplied.helios.anthropic.api.ToolDefinition;
 import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.CloseableIterator;
-import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.StreamEvent;
-import com.standardapplied.helios.core.model.ThinkingLevel;
-import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.model.ToolChoice;
-import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.core.provider.ChatExchange;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
-import com.standardapplied.helios.core.schema.StructuredContentParser;
 import com.standardapplied.helios.core.tool.Tool;
-import java.io.IOException;
-import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import tools.jackson.databind.DeserializationFeature;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Anthropic Claude model implementation using the Messages API.
@@ -59,7 +34,6 @@ public class AnthropicModel implements Model {
 
   static final String PROVIDER_NAME = "anthropic";
   static final String DEFAULT_BASE_URL = "https://api.anthropic.com/v1/messages";
-  private static final String API_VERSION = "2023-06-01";
 
   /**
    * Output-token ceiling assumed for a Claude model ID this build does not recognise (one not in
@@ -82,31 +56,22 @@ public class AnthropicModel implements Model {
    * fetch), held a {@code redacted_thinking} block, or interleaved thinking with text or tool
    * calls. Those blocks — including each result's {@code encrypted_content} and each thinking
    * block's position — must be echoed back <b>verbatim</b> on later turns or the API rejects the
-   * request with a 400; {@link #convertAssistantMessage} replays this array as the message content
-   * when present.
+   * request with a 400; a later request replays this array as the message content when present.
    */
   static final String RAW_CONTENT_KEY = "anthropic.rawContent";
 
   /** Metadata key carrying the provider's raw {@code stop_reason} string. */
   static final String STOP_REASON_KEY = "anthropic.stopReason";
 
-  /**
-   * Ceiling on automatic {@code pause_turn} continuations within one logical turn. The API pauses
-   * long server-tool turns (default server loop is ~10 iterations); each continuation re-sends the
-   * paused assistant content and resumes. The bound turns a pathological pause loop into a loud
-   * failure instead of an infinite spin.
-   */
-  static final int MAX_PAUSE_CONTINUATIONS = 8;
-
-  private static final String PAUSE_TURN = "pause_turn";
-
   private final String wireModelId;
   private final AnthropicModelId knownModel;
-  private final AnthropicModelId.ThinkingShape thinkingShape;
   private final ModelConfig config;
-  private final HttpClient httpClient;
-  private final ObjectMapper objectMapper;
   private final CachePolicy cachePolicy;
+  private final HttpClient httpClient;
+  final AnthropicRequestBuilder requests;
+  final AnthropicStreams streams;
+  final ChatExchange<MessagesRequest> exchange;
+  private final PauseContinuation continuation;
 
   AnthropicModel(AnthropicModelId modelId, ModelConfig config) {
     this(modelId, config, CachePolicy.shortLived());
@@ -138,31 +103,26 @@ public class AnthropicModel implements Model {
     if (cachePolicy == null) {
       throw new IllegalArgumentException("cachePolicy is required");
     }
-    var hasCustomEndpoint = !Strings.isBlank(config.baseUrl());
-    if (!hasCustomEndpoint && Strings.isBlank(config.apiKey())) {
+    if (Strings.isBlank(config.baseUrl()) && Strings.isBlank(config.apiKey())) {
       throw new IllegalArgumentException(
           "config with valid apiKey is required (or set baseUrl + auth header)");
     }
-    if (knownModel != null
-        && !knownModel.acceptsForcedToolChoice()
-        && isForced(config.toolChoice())) {
-      throw new IllegalArgumentException(
-          "Model "
-              + wireModelId
-              + " rejects forced tool use (tool_choice any/required); use ToolChoice.auto() and"
-              + " instruct the model in the prompt, or a structured OutputSchema.");
-    }
+    this.requests = new AnthropicRequestBuilder(wireModelId, knownModel, config, cachePolicy);
     this.wireModelId = wireModelId;
     this.knownModel = knownModel;
-    // Unrecognised Claude IDs default to the adaptive thinking shape: new releases adopt it, and
-    // it is where the family is converging. Known models keep their recorded shape.
-    this.thinkingShape =
-        knownModel != null ? knownModel.thinkingShape() : AnthropicModelId.ThinkingShape.ADAPTIVE;
     this.config = config;
     this.cachePolicy = cachePolicy;
     this.httpClient = HttpClientFactory.create(config);
-    this.objectMapper =
-        JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
+    this.streams = new AnthropicStreams(config, httpClient);
+    this.exchange =
+        new ChatExchange<>(
+            PROVIDER_NAME,
+            "Anthropic API",
+            streams::open,
+            AnthropicException::new,
+            AnthropicJson.STRUCTURED,
+            config.rawOutputCapturePolicy());
+    this.continuation = new PauseContinuation(exchange, streams::open);
   }
 
   /**
@@ -173,15 +133,6 @@ public class AnthropicModel implements Model {
    */
   public CachePolicy cachePolicy() {
     return cachePolicy;
-  }
-
-  /**
-   * Convenience accessor: whether the policy emits {@code cache_control} breakpoints.
-   *
-   * @return {@code true} for short-lived or long-lived policies; {@code false} for disabled
-   */
-  public boolean promptCachingEnabled() {
-    return cachePolicy.enabled();
   }
 
   @Override
@@ -204,7 +155,7 @@ public class AnthropicModel implements Model {
 
   @Override
   public int maxOutputTokens() {
-    return knownModel != null ? knownModel.maxOutputTokens() : DEFAULT_MAX_OUTPUT_TOKENS;
+    return requests.defaultMaxTokens();
   }
 
   @Override
@@ -219,936 +170,18 @@ public class AnthropicModel implements Model {
 
   @Override
   public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-    var request = buildRequest(messages, tools, null);
-    return streamAndDrain(request);
+    return continuation.drain(requests.build(messages, tools, null));
   }
 
   @Override
   public <T> Response<T> chat(
       List<Message> messages, List<Tool> tools, OutputSchema<T> outputSchema) {
-    var request = buildRequest(messages, tools, outputSchema.schema().toMap());
-    var response = streamAndDrain(request);
-    // Tool-calling turns are intermediate — structured output is the deliverable of a later
-    // text-only turn. Parsing the incidental prose (model's preamble before the tool_use block)
-    // as JSON throws and kills the session before the loop ever dispatches the tool. The schema
-    // still rides the request via the system instruction; the gate is on the response side only.
-    T parsed = null;
-    if (response.toolCalls().isEmpty()) {
-      parsed = parseStructuredContent(response.content(), outputSchema);
-    }
-
-    return Response.<T>newBuilder(outputSchema.type())
-        .withContent(response.content())
-        .withParsed(parsed)
-        .withToolCalls(response.toolCalls())
-        .withFinishReason(response.finishReason())
-        .withUsage(response.usage())
-        .withThinking(response.thinking())
-        .withCitations(response.citations())
-        .withMetadata(response.metadata())
-        .build();
+    var request = requests.build(messages, tools, outputSchema.schema().toMap());
+    return exchange.structured(continuation.drain(request), outputSchema);
   }
 
   @Override
   public CloseableIterator<StreamEvent> chatStream(List<Message> messages, List<Tool> tools) {
-    var request = buildRequest(messages, tools, null);
-    try {
-      return new PauseContinuingIterator(request);
-    } catch (AnthropicException e) {
-      return CloseableIterator.of(
-          List.of((StreamEvent) new StreamEvent.Error(e.getMessage(), e)).iterator());
-    } catch (IOException e) {
-      return CloseableIterator.of(
-          List.of((StreamEvent) new StreamEvent.Error("Failed to connect", e)).iterator());
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return CloseableIterator.of(
-          List.of((StreamEvent) new StreamEvent.Error("Request interrupted", e)).iterator());
-    }
-  }
-
-  <T> T parseStructuredContent(String content, OutputSchema<T> schema) {
-    return StructuredContentParser.parse(
-        content, schema, jsonAdapter, config.rawOutputCapturePolicy());
-  }
-
-  @SuppressWarnings({"unchecked", "rawtypes"})
-  private final StructuredContentParser.JsonAdapter jsonAdapter =
-      new StructuredContentParser.JsonAdapter() {
-        @Override
-        public Map<String, Object> toMap(String json) throws Exception {
-          return objectMapper.readValue(json, Map.class);
-        }
-
-        @Override
-        public <T> T fromMap(Map<String, Object> map, Class<T> type) {
-          return objectMapper.convertValue(map, type);
-        }
-      };
-
-  /**
-   * {@link CloseableIterator} facade that splices {@code pause_turn} continuations into one
-   * seamless event stream: the paused segment's {@code Done} is swallowed, a continuation stream
-   * opens with the paused content echoed verbatim, and the final {@code Done} carries the merged
-   * response. Consumers never observe the pause. Bounded by {@link #MAX_PAUSE_CONTINUATIONS}.
-   */
-  private final class PauseContinuingIterator implements CloseableIterator<StreamEvent> {
-
-    private final MessagesRequest baseRequest;
-    private AnthropicStreamingIterator current;
-    private Response<Void> mergedSoFar;
-    private int continuations;
-
-    PauseContinuingIterator(MessagesRequest baseRequest) throws IOException, InterruptedException {
-      this.baseRequest = baseRequest;
-      this.current = openStream(baseRequest);
-    }
-
-    @Override
-    public boolean hasNext() {
-      return current.hasNext();
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public StreamEvent next() {
-      while (true) {
-        var event = current.next();
-        if (!(event instanceof StreamEvent.Done done)) {
-          return event;
-        }
-        var segment = (Response<Void>) done.response();
-        var merged = mergedSoFar == null ? segment : mergeSegments(mergedSoFar, segment);
-        if (!PAUSE_TURN.equals(merged.metadata().get(STOP_REASON_KEY))) {
-          return new StreamEvent.Done(merged);
-        }
-        if (continuations >= MAX_PAUSE_CONTINUATIONS) {
-          return new StreamEvent.Error(
-              "pause_turn continuation limit exceeded after "
-                  + MAX_PAUSE_CONTINUATIONS
-                  + " resumes",
-              null);
-        }
-        mergedSoFar = merged;
-        continuations++;
-        current.close();
-        try {
-          current = openStream(buildContinuationRequest(baseRequest, merged));
-        } catch (AnthropicException e) {
-          return new StreamEvent.Error(e.getMessage(), e);
-        } catch (IOException e) {
-          return new StreamEvent.Error("Failed to reopen paused stream", e);
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-          return new StreamEvent.Error("Request interrupted", e);
-        }
-      }
-    }
-
-    @Override
-    public void close() {
-      current.close();
-    }
-  }
-
-  private AnthropicStreamingIterator openStream(MessagesRequest request)
-      throws IOException, InterruptedException {
-    var jsonBody = serializeRequest(request);
-    var httpRequest = buildHttpRequest(jsonBody);
-    var httpResponse = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
-    if (httpResponse.statusCode() != 200) {
-      try (var body = httpResponse.body()) {
-        var errorBody = HttpClientFactory.readBoundedErrorBody(body);
-        throw new AnthropicException(
-            "API error (status " + httpResponse.statusCode() + "): " + errorBody,
-            httpResponse.statusCode());
-      }
-    }
-    return new AnthropicStreamingIterator(httpResponse, objectMapper, config.streamIdleTimeout());
-  }
-
-  /**
-   * Drive {@link #openStream(MessagesRequest)} and {@link
-   * #drainToResponse(AnthropicStreamingIterator)}, promoting transport-layer failures to the typed
-   * signals the session loop's retry policy understands.
-   *
-   * <p>Mapping:
-   *
-   * <ul>
-   *   <li>{@link TransientStreamException} from {@link #drainToResponse} (mid-stream socket drop
-   *       after a 200 response) — propagated unchanged so the loop retries.
-   *   <li>{@link AnthropicException} from {@link #openStream} (non-200 response parsed and wrapped
-   *       with status code) — propagated unchanged so non-stream protocol errors keep their
-   *       existing error path.
-   *   <li>{@link IOException} from {@link #openStream} (connect-time failure: DNS, TCP reset,
-   *       half-closed pre-handshake) — promoted to {@link TransientStreamException} so the loop
-   *       retries. Matches {@link AnthropicException#isRetryable()} which classifies {@code status
-   *       == 0} network errors as retryable.
-   *   <li>{@link InterruptedException} — wrapped as a non-retryable {@link AnthropicException} so
-   *       the caller can clean up rather than spinning on retries.
-   * </ul>
-   */
-  private Response<Void> streamAndDrain(MessagesRequest request) {
-    return drainWithContinuation(request, this::openStream);
-  }
-
-  /**
-   * Provider seam for {@link #drainWithContinuation}: opens one SSE stream for a request. In
-   * production this is {@link #openStream(MessagesRequest)}; tests substitute canned iterators.
-   */
-  interface StreamOpener {
-    AnthropicStreamingIterator open(MessagesRequest request)
-        throws IOException, InterruptedException;
-  }
-
-  /**
-   * Drain a turn to completion, automatically continuing across {@code pause_turn} boundaries.
-   * Anthropic pauses long server-tool turns (web search / web fetch); the resume protocol is to
-   * re-send the conversation with the paused assistant content appended <b>unchanged</b>. Segments
-   * merge into one logical {@link Response} — text concatenated, tool calls and citations
-   * accumulated, usage summed, raw content arrays joined — so callers never observe the pause.
-   * Bounded by {@link #MAX_PAUSE_CONTINUATIONS}; exceeding it throws {@link AnthropicException}.
-   */
-  Response<Void> drainWithContinuation(MessagesRequest request, StreamOpener opener) {
-    Response<Void> merged = null;
-    var current = request;
-    for (var attempt = 0; attempt <= MAX_PAUSE_CONTINUATIONS; attempt++) {
-      Response<Void> segment;
-      try (var iterator = opener.open(current)) {
-        segment = drainToResponse(iterator);
-      } catch (AnthropicException | TransientStreamException e) {
-        throw e;
-      } catch (IOException e) {
-        throw new TransientStreamException(
-            "Failed to communicate with Anthropic API", e, PROVIDER_NAME);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new AnthropicException("Request interrupted", e);
-      }
-      merged = merged == null ? segment : mergeSegments(merged, segment);
-      if (!PAUSE_TURN.equals(merged.metadata().get(STOP_REASON_KEY))) {
-        return merged;
-      }
-      current = buildContinuationRequest(request, merged);
-    }
-    throw new AnthropicException(
-        "pause_turn continuation limit exceeded after "
-            + MAX_PAUSE_CONTINUATIONS
-            + " resumes; the server-tool loop did not converge");
-  }
-
-  /**
-   * The continuation request for a paused turn: the original request with the merged-so-far
-   * assistant content appended verbatim from {@link #RAW_CONTENT_KEY}.
-   */
-  @SuppressWarnings("unchecked")
-  private MessagesRequest buildContinuationRequest(MessagesRequest base, Response<Void> merged) {
-    var rawContent = merged.metadata().get(RAW_CONTENT_KEY);
-    if (rawContent == null || rawContent.isEmpty()) {
-      throw new AnthropicException(
-          "pause_turn received without capturable assistant content; cannot resume");
-    }
-    List<Object> blocks;
-    try {
-      blocks = (List<Object>) objectMapper.readValue(rawContent, List.class);
-    } catch (Exception e) {
-      throw new AnthropicException("Failed to decode paused assistant content for resume", e);
-    }
-    var messages = new ArrayList<>(base.messages());
-    messages.add(new MessagesRequest.MessageEntry("assistant", blocks));
-    return base.continuationWith(messages);
-  }
-
-  /**
-   * Merge two segments of one logical assistant turn split by {@code pause_turn}. Later-segment
-   * scalars (finish reason, raw stop reason) win; accumulative fields (text, tool calls, citations,
-   * thinking, usage, raw content) combine in order.
-   */
-  private Response<Void> mergeSegments(Response<Void> first, Response<Void> second) {
-    var content =
-        (first.content() == null ? "" : first.content())
-            + (second.content() == null ? "" : second.content());
-
-    var toolCalls = new ArrayList<ToolCall>(first.toolCalls());
-    toolCalls.addAll(second.toolCalls());
-
-    var citations = new ArrayList<com.standardapplied.helios.core.model.Citation>();
-    if (first.citations() != null) {
-      citations.addAll(first.citations());
-    }
-    if (second.citations() != null) {
-      citations.addAll(second.citations());
-    }
-
-    String thinking;
-    if (first.thinking() == null) {
-      thinking = second.thinking();
-    } else if (second.thinking() == null) {
-      thinking = first.thinking();
-    } else {
-      thinking = first.thinking() + "\n\n" + second.thinking();
-    }
-
-    Response.Usage usage;
-    if (first.usage() == null) {
-      usage = second.usage();
-    } else if (second.usage() == null) {
-      usage = first.usage();
-    } else {
-      usage = first.usage().plus(second.usage());
-    }
-
-    var metadata = new HashMap<String, String>(second.metadata());
-    var mergedRaw = mergeRawContent(first, second);
-    if (mergedRaw != null) {
-      metadata.put(RAW_CONTENT_KEY, mergedRaw);
-    }
-    mergeThinkingMetadata(first.metadata(), metadata);
-
-    // Only promote a STOP into TOOL_CALLS — the defensive override for streams whose final stop
-    // reason lags behind an emitted tool_use block. REFUSAL / LENGTH / ERROR from the final
-    // segment must survive the merge so the session loop routes them correctly.
-    var finishReason = second.finishReason();
-    if (!toolCalls.isEmpty() && finishReason == FinishReason.STOP) {
-      finishReason = FinishReason.TOOL_CALLS;
-    }
-
-    return Response.newBuilder()
-        .withContent(content)
-        .withToolCalls(toolCalls)
-        .withFinishReason(finishReason)
-        .withUsage(usage)
-        .withThinking(thinking)
-        .withCitations(citations)
-        .withMetadata(Map.copyOf(metadata))
-        .build();
-  }
-
-  /**
-   * Merge the two segments' content-block arrays for the verbatim echo. A segment without {@link
-   * #RAW_CONTENT_KEY} (e.g. a text-only continuation that used no server tools) is reconstructed
-   * from its response — signed thinking blocks, text, and client tool_use — so the merged echo
-   * carries the <em>entire</em> assistant turn, not just the paused prefix.
-   */
-  private String mergeRawContent(Response<Void> first, Response<Void> second) {
-    var combined = new ArrayList<Object>(rawBlocksOf(first));
-    combined.addAll(rawBlocksOf(second));
-    if (combined.isEmpty()) {
-      return null;
-    }
-    try {
-      return objectMapper.writeValueAsString(combined);
-    } catch (Exception e) {
-      throw new AnthropicException("Failed to merge paused-turn content arrays", e);
-    }
-  }
-
-  @SuppressWarnings("unchecked")
-  private List<Object> rawBlocksOf(Response<Void> segment) {
-    var raw = segment.metadata().get(RAW_CONTENT_KEY);
-    if (raw != null && !raw.isEmpty()) {
-      try {
-        return (List<Object>) objectMapper.readValue(raw, List.class);
-      } catch (Exception e) {
-        throw new AnthropicException("Failed to decode segment content array", e);
-      }
-    }
-    var blocks = new ArrayList<Object>();
-    for (var tb : decodeThinkingBlocks(segment.metadata())) {
-      var block = new LinkedHashMap<String, Object>();
-      block.put("type", "thinking");
-      block.put("thinking", tb.text());
-      block.put("signature", tb.signature());
-      blocks.add(block);
-    }
-    if (segment.content() != null && !segment.content().isEmpty()) {
-      var block = new LinkedHashMap<String, Object>();
-      block.put("type", "text");
-      block.put("text", segment.content());
-      blocks.add(block);
-    }
-    for (var tc : segment.toolCalls()) {
-      var block = new LinkedHashMap<String, Object>();
-      block.put("type", "tool_use");
-      block.put("id", tc.id());
-      block.put("name", tc.name());
-      block.put("input", tc.arguments());
-      blocks.add(block);
-    }
-    return blocks;
-  }
-
-  /**
-   * Fold the first segment's thinking metadata into the merged map (which is seeded from the second
-   * segment): {@link #THINKING_BLOCKS_KEY} arrays concatenate in segment order.
-   */
-  @SuppressWarnings("unchecked")
-  private void mergeThinkingMetadata(Map<String, String> firstMeta, Map<String, String> merged) {
-    var firstBlocks = decodeThinkingBlocks(firstMeta);
-    if (firstBlocks.isEmpty()) {
-      return;
-    }
-    var combined = new ArrayList<ThinkingBlock>(firstBlocks);
-    combined.addAll(decodeThinkingBlocks(merged));
-    try {
-      var arr = new ArrayList<Map<String, String>>(combined.size());
-      for (var tb : combined) {
-        arr.add(Map.of("text", tb.text(), "signature", tb.signature()));
-      }
-      merged.put(THINKING_BLOCKS_KEY, objectMapper.writeValueAsString(arr));
-    } catch (Exception e) {
-      throw new AnthropicException("Failed to merge thinking metadata", e);
-    }
-  }
-
-  /**
-   * Drain the SSE iterator into a final {@link Response}, mapping {@link StreamEvent.Error} events
-   * into provider exceptions.
-   *
-   * <p>Routing:
-   *
-   * <ul>
-   *   <li>Cause is {@link AnthropicException} — rethrown verbatim (HTTP-side failures parsed from a
-   *       non-200 response retain their status code).
-   *   <li>Cause is {@link TransientStreamException} (the API reported a retryable failure such as
-   *       {@code overloaded_error} after the 200 response) — rethrown verbatim so the agent loop's
-   *       bounded retry can re-issue the turn.
-   *   <li>Cause is {@link IOException} (typed signal that the SSE socket dropped mid-stream after a
-   *       200 response) — promoted to {@link TransientStreamException} so the agent loop's bounded
-   *       retry can re-issue the turn; the {@link IOException} is preserved as {@link
-   *       Throwable#getCause()} so the session terminal can walk the chain.
-   *   <li>Cause is anything else, or {@code null} (the API-side {@code event: error} path carries
-   *       {@code null}) — rewrapped in {@link AnthropicException} with the original cause, the type
-   *       the non-stream error paths throw.
-   * </ul>
-   */
-  @SuppressWarnings("unchecked")
-  private Response<Void> drainToResponse(AnthropicStreamingIterator iterator) {
-    while (iterator.hasNext()) {
-      var event = iterator.next();
-      if (event instanceof StreamEvent.Done(var response)) {
-        return (Response<Void>) response;
-      }
-      if (event instanceof StreamEvent.Error(String message, Exception cause)) {
-        if (cause instanceof AnthropicException ae) {
-          throw ae;
-        }
-        if (cause instanceof TransientStreamException tse) {
-          throw tse;
-        }
-        if (cause instanceof IOException) {
-          throw new TransientStreamException(message, cause, PROVIDER_NAME);
-        }
-        throw new AnthropicException(message, cause);
-      }
-    }
-    throw new AnthropicException("Stream ended without completion event");
-  }
-
-  MessagesRequest buildRequest(
-      List<Message> messages, List<Tool> tools, Map<String, Object> outputSchema) {
-    var apiMessages = new ArrayList<MessagesRequest.MessageEntry>();
-    String systemInstruction = null;
-
-    for (int i = 0; i < messages.size(); i++) {
-      var message = messages.get(i);
-      switch (message.role()) {
-        case SYSTEM -> systemInstruction = appendSystemText(systemInstruction, message.content());
-        case USER -> apiMessages.add(convertUserMessage(message));
-        case ASSISTANT -> apiMessages.add(convertAssistantMessage(message));
-        case TOOL -> {
-          var toolResults = new ArrayList<ContentBlock>();
-          toolResults.add(ContentBlock.toolResult(message.toolCallId(), message.content()));
-          while (i + 1 < messages.size() && messages.get(i + 1).role() == Role.TOOL) {
-            i++;
-            var next = messages.get(i);
-            toolResults.add(ContentBlock.toolResult(next.toolCallId(), next.content()));
-          }
-          apiMessages.add(MessagesRequest.MessageEntry.user(toolResults));
-        }
-      }
-    }
-
-    if (outputSchema != null) {
-      var schemaJson = serializeValue(outputSchema);
-      // Two phrasings — the tool-using variant acknowledges the loop so the schema instruction
-      // doesn't fight the deployer's "use tools first, then emit JSON" guidance every turn.
-      // Without this contextualisation the loudest-instruction-wins effect causes Claude to skip
-      // tool dispatch on turn 0 and emit prose that fails downstream parse gating.
-      var instruction =
-          (tools == null || tools.isEmpty())
-              ? "You must respond with valid JSON matching this schema:\n"
-                  + schemaJson
-                  + "\nDo not wrap the JSON in markdown code blocks. Output only the raw JSON."
-              : "You may call the available tools to gather information."
-                  + " When you are ready to emit your final answer (not a tool call),"
-                  + " it must be valid JSON matching this schema:\n"
-                  + schemaJson
-                  + "\nDo not wrap the JSON in markdown code blocks. Output only the raw JSON.";
-      systemInstruction = appendSystemText(systemInstruction, instruction);
-    }
-
-    List<ToolDefinition> clientToolDefs = null;
-    if (tools != null && !tools.isEmpty()) {
-      clientToolDefs =
-          tools.stream()
-              .map(
-                  t ->
-                      new ToolDefinition(
-                          null, t.name(), t.description(), t.parametersAsJsonSchema(), null))
-              .toList();
-    }
-    var serverToolDefs = new ArrayList<ToolDefinition>();
-    if (config.webSearch()) {
-      serverToolDefs.add(ToolDefinition.webSearch());
-    }
-    if (config.webFetch()) {
-      serverToolDefs.add(ToolDefinition.webFetch());
-    }
-    if (clientToolDefs != null && !serverToolDefs.isEmpty()) {
-      for (var server : serverToolDefs) {
-        for (var client : clientToolDefs) {
-          if (server.name().equals(client.name())) {
-            throw new IllegalArgumentException(
-                "Client tool name '"
-                    + client.name()
-                    + "' collides with the enabled Anthropic server tool of the same name;"
-                    + " rename the client tool or disable the toggle");
-          }
-        }
-      }
-    }
-
-    var toolChoiceConfig = buildToolChoice(tools);
-    var thinkingSpec = buildThinkingSpec();
-
-    int maxTokens = config.maxOutputTokens() != null ? config.maxOutputTokens() : maxOutputTokens();
-    if (thinkingSpec.thinking() != null && thinkingSpec.thinking().budgetTokens() != null) {
-      maxTokens = Math.max(maxTokens, thinkingSpec.thinking().budgetTokens() + 1024);
-    }
-
-    // Adaptive-family models reject temperature/top_p outright
-    // with a 400, thinking on or off — never send them. Legacy models accept sampling params but
-    // reject temperature alongside an active thinking config.
-    Double temperature = config.temperature();
-    Double topP = config.topP();
-    if (!thinkingShape.acceptsSamplingParameters()) {
-      temperature = null;
-      topP = null;
-    } else if (thinkingSpec.thinking() != null
-        && !"disabled".equals(thinkingSpec.thinking().type())) {
-      temperature = null;
-    }
-
-    var builder =
-        MessagesRequest.newBuilder()
-            .withModel(wireModelId)
-            .withMaxTokens(maxTokens)
-            .withMessages(apiMessages)
-            .withStream(true)
-            .withToolChoice(toolChoiceConfig)
-            .withTemperature(temperature)
-            .withTopP(topP)
-            .withStopSequences(config.stopSequences())
-            .withThinking(thinkingSpec.thinking())
-            .withOutputConfig(thinkingSpec.outputConfig());
-
-    if (cachePolicy.enabled()) {
-      var breakpoint = cachePolicy.breakpoint();
-      applySystemWithCache(builder, systemInstruction, breakpoint);
-      // The tools breakpoint anchors to the last CLIENT tool; server-tool entries keep the exact
-      // documented {type, name} shape and follow after. The system breakpoint still covers the
-      // whole tools+system prefix, so nothing is lost when there are no client tools.
-      builder.withTools(concatTools(withCachedTail(clientToolDefs, breakpoint), serverToolDefs));
-      annotateLastMessageForCaching(apiMessages, breakpoint);
-    } else {
-      builder.withSystem(systemInstruction);
-      builder.withTools(concatTools(clientToolDefs, serverToolDefs));
-    }
-
-    return builder.build();
-  }
-
-  private static List<ToolDefinition> concatTools(
-      List<ToolDefinition> clientTools, List<ToolDefinition> serverTools) {
-    if (serverTools == null || serverTools.isEmpty()) {
-      return clientTools;
-    }
-    var combined = new ArrayList<ToolDefinition>();
-    if (clientTools != null) {
-      combined.addAll(clientTools);
-    }
-    combined.addAll(serverTools);
-    return List.copyOf(combined);
-  }
-
-  /**
-   * Promote a non-blank system string to the cache-aware array shape with a single ephemeral
-   * breakpoint on the only block; pass plain string (or {@code null}) when caching is disabled or
-   * when there is no system prompt. The Anthropic API only respects {@code cache_control} on the
-   * array shape, so the legacy string form silently misses cache hits even with caching enabled.
-   */
-  static void applySystemWithCache(
-      MessagesRequest.Builder builder, String systemInstruction, CacheControl breakpoint) {
-    if (Strings.isBlank(systemInstruction)) {
-      builder.withSystem((String) null);
-      return;
-    }
-    builder.withSystem(List.of(SystemContent.text(systemInstruction).withCacheControl(breakpoint)));
-  }
-
-  /**
-   * Return a copy of {@code defs} with the last tool annotated with {@code cache_control}. The
-   * Anthropic server treats the cache breakpoint as anchored to the end of the tools array; one
-   * breakpoint covers the entire section. Empty / null input passes through untouched.
-   */
-  static List<ToolDefinition> withCachedTail(List<ToolDefinition> defs, CacheControl breakpoint) {
-    if (defs == null || defs.isEmpty()) {
-      return defs;
-    }
-    var copy = new ArrayList<ToolDefinition>(defs.size());
-    for (var i = 0; i < defs.size() - 1; i++) {
-      copy.add(defs.get(i));
-    }
-    copy.add(defs.getLast().withCacheControl(breakpoint));
-    return List.copyOf(copy);
-  }
-
-  /**
-   * Mark the last (and second-to-last when present) message with a {@code cache_control}
-   * breakpoint. Together with the system and tools breakpoints this exhausts Anthropic's
-   * 4-breakpoint budget on the canonical agent-loop shape — the intended use of the budget.
-   *
-   * <h2>Why the second-to-last breakpoint matters</h2>
-   *
-   * Anthropic enforces a per-breakpoint <b>20-block lookback window</b> when resolving cache
-   * prefixes. A conversation that grows past 20 blocks of history (typical after ~5 agent turns
-   * with multi-tool-call rounds) makes the single last-message breakpoint blind to the system +
-   * tools cache prefix — every turn becomes a full cache miss.
-   *
-   * <p>Annotating the second-to-last message gives the cache a stable rolling write that the next
-   * turn's lookback can find: turn N writes prefixes at penultimate-msg-N AND last-msg-N; turn
-   * N+1's penultimate becomes turn N's last, and lookback chains cleanly.
-   *
-   * <p>String-content messages are promoted to a single-text-block list so the {@code
-   * cache_control} field has a block to attach to (Anthropic does not accept {@code cache_control}
-   * on a plain-string {@code content}). Empty-string and empty-list messages are skipped per slot —
-   * we never synthesize empty cache blocks.
-   */
-  static void annotateLastMessageForCaching(
-      List<MessagesRequest.MessageEntry> apiMessages, CacheControl breakpoint) {
-    if (apiMessages == null || apiMessages.isEmpty()) {
-      return;
-    }
-    var lastIdx = apiMessages.size() - 1;
-    annotateMessageEntryForCaching(apiMessages, lastIdx, breakpoint);
-    if (apiMessages.size() >= 2) {
-      annotateMessageEntryForCaching(apiMessages, lastIdx - 1, breakpoint);
-    }
-  }
-
-  /**
-   * Attach {@code breakpoint} to the last block of the message at {@code idx}, promoting a
-   * string-content message to single-block form first. Idempotent — re-annotating a block that
-   * already carries {@code cache_control} replaces it with the new breakpoint.
-   */
-  private static void annotateMessageEntryForCaching(
-      List<MessagesRequest.MessageEntry> apiMessages, int idx, CacheControl breakpoint) {
-    var entry = apiMessages.get(idx);
-    if (entry.content() instanceof String text) {
-      if (text.isEmpty()) {
-        return;
-      }
-      var block = ContentBlock.text(text).withCacheControl(breakpoint);
-      apiMessages.set(idx, new MessagesRequest.MessageEntry(entry.role(), List.of(block)));
-      return;
-    }
-    if (entry.content() instanceof List<?> raw && !raw.isEmpty()) {
-      var tail = cachedTail(raw.getLast(), breakpoint);
-      if (tail == null) {
-        return;
-      }
-      var newBlocks = new ArrayList<Object>(raw.subList(0, raw.size() - 1));
-      newBlocks.add(tail);
-      apiMessages.set(idx, new MessagesRequest.MessageEntry(entry.role(), List.copyOf(newBlocks)));
-    }
-  }
-
-  /**
-   * The last block of a message carrying {@code breakpoint}, or {@code null} when the block must
-   * not be annotated. Typed blocks always take the breakpoint. A raw-echo block takes it only when
-   * it is a client {@code tool_use} — the tail of every tool-calling turn, and wire-identical to
-   * its typed form; any other raw block (server-tool results, text with citations) goes back
-   * untouched.
-   */
-  @SuppressWarnings("unchecked")
-  private static Object cachedTail(Object last, CacheControl breakpoint) {
-    if (last instanceof ContentBlock block) {
-      return block.withCacheControl(breakpoint);
-    }
-    if (last instanceof Map<?, ?> raw && "tool_use".equals(raw.get("type"))) {
-      var annotated = new LinkedHashMap<String, Object>((Map<String, Object>) raw);
-      annotated.put("cache_control", breakpoint);
-      return annotated;
-    }
-    return null;
-  }
-
-  private static String appendSystemText(String existing, String additional) {
-    if (existing == null) {
-      return additional;
-    }
-    return existing + "\n\n" + additional;
-  }
-
-  private static MessagesRequest.MessageEntry convertUserMessage(Message message) {
-    if (message.hasFileReferences()) {
-      throw new IllegalArgumentException(
-          "Anthropic does not support URI file references through this message API");
-    }
-    var text = message.content() != null ? message.content() : "";
-    if (!message.hasInlineFiles()) {
-      return MessagesRequest.MessageEntry.user(text);
-    }
-    var blocks = new ArrayList<ContentBlock>(message.inlineFiles().size() + 1);
-    for (var file : message.inlineFiles()) {
-      var data = Base64.getEncoder().encodeToString(file.data());
-      var media = file.mimeType();
-      if ("application/pdf".equals(media)) {
-        blocks.add(ContentBlock.document(media, data));
-      } else if (media != null && media.startsWith("image/")) {
-        blocks.add(ContentBlock.image(media, data));
-      } else {
-        // Text-shaped / unsupported binary — inline as a fenced text block so the model sees the
-        // content. The provider doesn't have a generic "file" content type the way OpenAI does, so
-        // we fall back to text. Empty data is rejected upstream.
-        var body = new String(file.data(), StandardCharsets.UTF_8);
-        blocks.add(ContentBlock.text("[attachment " + media + "]\n" + body));
-      }
-    }
-    if (!text.isEmpty()) {
-      blocks.add(ContentBlock.text(text));
-    }
-    return MessagesRequest.MessageEntry.user(blocks);
-  }
-
-  /** Shared mapper for static decode paths — Jackson 3 mappers are immutable and thread-safe. */
-  private static final ObjectMapper SHARED_MAPPER = JsonMapper.builder().build();
-
-  @SuppressWarnings("unchecked")
-  static MessagesRequest.MessageEntry convertAssistantMessage(Message message) {
-    var rawContent = message.metadata() != null ? message.metadata().get(RAW_CONTENT_KEY) : null;
-    if (rawContent != null && !rawContent.isEmpty()) {
-      try {
-        var blocks = (List<Object>) SHARED_MAPPER.readValue(rawContent, List.class);
-        return new MessagesRequest.MessageEntry("assistant", blocks);
-      } catch (Exception e) {
-        throw new AnthropicException(
-            "Corrupted raw content on assistant message; refusing to echo a truncated"
-                + " turn (the API would reject or mis-read it)",
-            e);
-      }
-    }
-    var thinkingBlocks =
-        decodeThinkingBlocks(message.metadata() == null ? Map.of() : message.metadata());
-    if (!message.hasToolCalls() && thinkingBlocks.isEmpty()) {
-      return MessagesRequest.MessageEntry.assistant(
-          message.content() != null ? message.content() : "");
-    }
-
-    var blocks = new ArrayList<ContentBlock>();
-    for (var tb : thinkingBlocks) {
-      blocks.add(ContentBlock.thinking(tb.text(), tb.signature()));
-    }
-
-    if (message.content() != null && !message.content().isEmpty()) {
-      blocks.add(ContentBlock.text(message.content()));
-    }
-
-    for (var tc : message.toolCalls()) {
-      blocks.add(ContentBlock.toolUse(tc.id(), tc.name(), tc.arguments()));
-    }
-
-    return MessagesRequest.MessageEntry.assistant(blocks);
-  }
-
-  /**
-   * Recover every thinking block recorded on the message under {@link #THINKING_BLOCKS_KEY}.
-   * Returns an empty list when the key is absent or unreadable, or no entry carries a signature.
-   */
-  static List<ThinkingBlock> decodeThinkingBlocks(Map<String, String> metadata) {
-    if (metadata == null) {
-      return List.of();
-    }
-    var encoded = metadata.get(THINKING_BLOCKS_KEY);
-    if (encoded == null || encoded.isEmpty()) {
-      return List.of();
-    }
-    try {
-      @SuppressWarnings("unchecked")
-      var raw = (List<Map<String, Object>>) SHARED_MAPPER.readValue(encoded, List.class);
-      var out = new ArrayList<ThinkingBlock>(raw.size());
-      for (var entry : raw) {
-        var text = entry.get("text") == null ? "" : entry.get("text").toString();
-        var signature = entry.get("signature") == null ? "" : entry.get("signature").toString();
-        if (!signature.isEmpty()) {
-          out.add(new ThinkingBlock(text, signature));
-        }
-      }
-      return out;
-    } catch (Exception ignored) {
-      return List.of();
-    }
-  }
-
-  /** One thinking content block — text plus its content-block-scoped Anthropic signature. */
-  record ThinkingBlock(String text, String signature) {}
-
-  private static boolean isForced(ToolChoice toolChoice) {
-    return toolChoice instanceof ToolChoice.Any || toolChoice instanceof ToolChoice.Required;
-  }
-
-  private ToolChoiceConfig buildToolChoice(List<Tool> tools) {
-    if (config.toolChoice() == null) {
-      return null;
-    }
-
-    return switch (config.toolChoice()) {
-      case ToolChoice.Auto a -> ToolChoiceConfig.auto();
-      case ToolChoice.Any a -> ToolChoiceConfig.any();
-      case ToolChoice.None n -> null;
-      case ToolChoice.Required r -> {
-        if (r.allowedTools().size() > 1) {
-          throw new IllegalStateException(
-              "Claude tool choice supports only a single tool name, got: " + r.allowedTools());
-        }
-        yield ToolChoiceConfig.tool(r.allowedTools().iterator().next());
-      }
-    };
-  }
-
-  /**
-   * Translate {@link ThinkingLevel} into the Anthropic API request shape, dispatching by {@link
-   * AnthropicModelId.ThinkingShape}. Adaptive-family models use {@code thinking.type=adaptive} +
-   * {@code output_config.effort=...}. {@code ThinkingLevel.NONE} takes each shape's lowest setting:
-   * an explicit {@code disabled} on adaptive-default-on models, {@code between_tools} on Sonnet
-   * 5.5, and an omitted field everywhere else — which leaves always-on models thinking at the API's
-   * default effort. {@code ADAPTIVE_WITHOUT_XHIGH} models (Opus 4.6, Sonnet 4.6) fail fast on
-   * {@code XHIGH}; {@code LEGACY_BUDGET} models (Haiku 4.5) use {@code thinking.type=enabled} +
-   * {@code budget_tokens} and fail fast on {@code XHIGH}/{@code MAX}, which have no budget
-   * equivalent.
-   *
-   * @return both the {@link ThinkingConfig} and any sibling {@link OutputConfig} that must ride on
-   *     the request; either may be {@code null}
-   */
-  private ThinkingSpec buildThinkingSpec() {
-    var level = config.thinkingLevel() == null ? ThinkingLevel.NONE : config.thinkingLevel();
-    if (level == ThinkingLevel.NONE) {
-      return new ThinkingSpec(thinkingOff(), null);
-    }
-    if (thinkingShape == AnthropicModelId.ThinkingShape.LEGACY_BUDGET) {
-      return new ThinkingSpec(ThinkingConfig.enabled(legacyBudgetTokens(level)), null);
-    }
-    if (level == ThinkingLevel.XHIGH
-        && thinkingShape == AnthropicModelId.ThinkingShape.ADAPTIVE_WITHOUT_XHIGH) {
-      throw new IllegalArgumentException(
-          "ThinkingLevel.XHIGH requires Opus 4.7 or later; model "
-              + wireModelId
-              + " accepts effort low/medium/high/max only.");
-    }
-    var effort =
-        switch (level) {
-          case NONE -> throw new IllegalStateException("NONE handled above; unreachable");
-          case MINIMAL, LOW -> OutputConfig.LOW;
-          case MEDIUM -> OutputConfig.MEDIUM;
-          case HIGH -> OutputConfig.HIGH;
-          case XHIGH -> OutputConfig.XHIGH;
-          case MAX -> OutputConfig.MAX;
-        };
-    return new ThinkingSpec(ThinkingConfig.adaptive(), effort);
-  }
-
-  private ThinkingConfig thinkingOff() {
-    return switch (thinkingShape) {
-      case ADAPTIVE_DEFAULT_ON -> ThinkingConfig.disabled();
-      case ADAPTIVE_BETWEEN_TOOLS -> ThinkingConfig.betweenTools();
-      case LEGACY_BUDGET, ADAPTIVE_WITHOUT_XHIGH, ADAPTIVE, ALWAYS_ON -> null;
-    };
-  }
-
-  private int legacyBudgetTokens(ThinkingLevel level) {
-    return switch (level) {
-      case MINIMAL -> 1024;
-      case LOW -> 4096;
-      case MEDIUM -> 10000;
-      case HIGH -> 32000;
-      case NONE, XHIGH, MAX ->
-          throw new IllegalArgumentException(
-              "ThinkingLevel."
-                  + level
-                  + " has no enabled+budget_tokens equivalent; model "
-                  + wireModelId
-                  + " supports extended thinking only (MINIMAL..HIGH). Adaptive models from"
-                  + " Opus 4.7 on accept xhigh/max.");
-    };
-  }
-
-  /**
-   * Pair of thinking-related request fields. Translation in {@link #buildThinkingSpec} produces
-   * exactly the right combination: legacy models get a {@code ThinkingConfig} alone; adaptive
-   * models get a {@code ThinkingConfig} plus a sibling {@code OutputConfig}; thinking-off runs get
-   * the shape's lowest {@code ThinkingConfig} (or none) and no {@code OutputConfig}.
-   */
-  private record ThinkingSpec(ThinkingConfig thinking, OutputConfig outputConfig) {}
-
-  private String serializeRequest(MessagesRequest request) {
-    try {
-      return objectMapper.writeValueAsString(request);
-    } catch (Exception e) {
-      throw new AnthropicException("Failed to serialize request", e);
-    }
-  }
-
-  private String serializeValue(Object value) {
-    try {
-      return objectMapper.writeValueAsString(value);
-    } catch (Exception e) {
-      throw new AnthropicException("Failed to serialize value", e);
-    }
-  }
-
-  HttpRequest buildHttpRequest(String jsonBody) {
-    var defaults = new LinkedHashMap<String, String>();
-    defaults.put("Content-Type", "application/json");
-    if (!Strings.isBlank(config.apiKey())) {
-      defaults.put("x-api-key", config.apiKey());
-    }
-    defaults.put("anthropic-version", API_VERSION);
-    var builder =
-        HttpRequest.newBuilder()
-            .uri(URI.create(config.effectiveBaseUrl(DEFAULT_BASE_URL)))
-            .POST(HttpRequest.BodyPublishers.ofString(jsonBody));
-    for (var entry : config.effectiveHeaders(defaults).entrySet()) {
-      builder.header(entry.getKey(), entry.getValue());
-    }
-
-    if (config.responseTimeout() != null) {
-      builder.timeout(config.responseTimeout());
-    }
-
-    return builder.build();
-  }
-
-  static FinishReason mapStopReason(String stopReason) {
-    if (stopReason == null) {
-      return FinishReason.STOP;
-    }
-    return switch (stopReason) {
-      case "end_turn", "stop_sequence" -> FinishReason.STOP;
-      case "tool_use" -> FinishReason.TOOL_CALLS;
-      case "max_tokens", "model_context_window_exceeded" -> FinishReason.LENGTH;
-      case "refusal" -> FinishReason.REFUSAL;
-      default -> FinishReason.STOP;
-    };
+    return exchange.stream(continuation::open, requests.build(messages, tools, null));
   }
 }

@@ -64,7 +64,7 @@ class SchemaPlusToolsBugReproTest {
     var schema = Map.<String, Object>of("type", "object", "properties", Map.of());
 
     var request =
-        model.buildRequest(
+        model.requests.build(
             java.util.List.of(Message.user("Find me three matches.")),
             java.util.List.of(searchTool()),
             schema);
@@ -90,7 +90,8 @@ class SchemaPlusToolsBugReproTest {
     var schema = Map.<String, Object>of("type", "object", "properties", Map.of());
 
     var request =
-        model.buildRequest(java.util.List.of(Message.user("Extract")), java.util.List.of(), schema);
+        model.requests.build(
+            java.util.List.of(Message.user("Extract")), java.util.List.of(), schema);
 
     var systemText = request.systemAsText();
     assertTrue(

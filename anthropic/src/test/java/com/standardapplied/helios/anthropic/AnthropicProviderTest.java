@@ -86,7 +86,7 @@ class AnthropicProviderTest {
     AnthropicModel model =
         provider.create(AnthropicModelId.CLAUDE_OPUS_5.id(), config, CachePolicy.disabled());
 
-    assertFalse(model.promptCachingEnabled());
+    assertFalse(model.cachePolicy().enabled());
   }
 
   @Test
