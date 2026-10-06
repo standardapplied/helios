@@ -15,13 +15,9 @@ import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ThinkingLevel;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.tool.ParameterType;
-import com.standardapplied.helios.core.tool.Tool;
-import com.standardapplied.helios.core.tool.ToolParameter;
-import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.core.test.ConversationFixture;
 import com.standardapplied.helios.openai.OpenAIModelId.EffortSupport;
 import com.standardapplied.helios.openai.api.ApiUsage;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -58,7 +54,7 @@ class OpenAIRestructuredPartsTest {
         ToolCall.newBuilder()
             .withId("c1")
             .withName("search")
-            .withArguments(selfReferencing())
+            .withArguments(ConversationFixture.selfReferencing())
             .build();
 
     var failure =
@@ -74,19 +70,7 @@ class OpenAIRestructuredPartsTest {
         new OpenAIModel(
             OpenAIModelId.GPT_5_6,
             ModelConfig.newBuilder().withApiKey("k").withBaseUrl("http://127.0.0.1:1").build());
-    var tool =
-        Tool.newBuilder()
-            .withName("odd")
-            .withDescription("has an unwritable default")
-            .withParameter(
-                ToolParameter.newBuilder()
-                    .withName("p")
-                    .withType(ParameterType.STRING)
-                    .withDescription("p")
-                    .withDefaultValue(selfReferencing())
-                    .build())
-            .withExecutor((arguments, context) -> ToolResult.success("ok"))
-            .build();
+    var tool = ConversationFixture.unwritableTool();
 
     var failure =
         assertThrows(
@@ -155,11 +139,5 @@ class OpenAIRestructuredPartsTest {
             StreamEvent.Done.class,
             OpenAIResponseAssembler.done("", List.of(), "", usage, "completed"));
     return done.response().usage();
-  }
-
-  private static Map<String, Object> selfReferencing() {
-    var map = new HashMap<String, Object>();
-    map.put("self", map);
-    return map;
   }
 }

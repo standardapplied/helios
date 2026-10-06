@@ -10,6 +10,7 @@ import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -59,6 +60,29 @@ public final class ConversationFixture {
                     .build())
             .withExecutor((arguments, context) -> ToolResult.success("ok"))
             .build());
+  }
+
+  /** A tool whose parameter default no JSON writer can finish, so a request offering it fails. */
+  public static Tool unwritableTool() {
+    return Tool.newBuilder()
+        .withName("unwritable")
+        .withDescription("Its parameter's default holds itself")
+        .withParameter(
+            ToolParameter.newBuilder()
+                .withName("p")
+                .withType(ParameterType.STRING)
+                .withDescription("p")
+                .withDefaultValue(selfReferencing())
+                .build())
+        .withExecutor((arguments, context) -> ToolResult.success("ok"))
+        .build();
+  }
+
+  /** A map holding itself, which no JSON writer can finish: past its nesting limit, it fails. */
+  public static Map<String, Object> selfReferencing() {
+    var map = new HashMap<String, Object>();
+    map.put("self", map);
+    return map;
   }
 
   /** The output schema of the structured snapshots. */

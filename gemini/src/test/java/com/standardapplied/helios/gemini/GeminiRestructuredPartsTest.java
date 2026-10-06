@@ -15,14 +15,10 @@ import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
-import com.standardapplied.helios.core.tool.ParameterType;
-import com.standardapplied.helios.core.tool.Tool;
-import com.standardapplied.helios.core.tool.ToolParameter;
-import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.core.test.ConversationFixture;
 import com.standardapplied.helios.gemini.api.ContentItem;
 import com.standardapplied.helios.gemini.api.GeminiJson;
 import com.standardapplied.helios.gemini.api.Step;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -93,21 +89,7 @@ class GeminiRestructuredPartsTest {
 
   @Test
   void aToolThatCannotBeWrittenFailsTheCallBeforeItIsSent() {
-    var looped = new HashMap<String, Object>();
-    looped.put("self", looped);
-    var tool =
-        Tool.newBuilder()
-            .withName("odd")
-            .withDescription("has an unwritable default")
-            .withParameter(
-                ToolParameter.newBuilder()
-                    .withName("p")
-                    .withType(ParameterType.STRING)
-                    .withDescription("p")
-                    .withDefaultValue(looped)
-                    .build())
-            .withExecutor((arguments, context) -> ToolResult.success("ok"))
-            .build();
+    var tool = ConversationFixture.unwritableTool();
     var model =
         new GeminiModel(
             GeminiModelId.GEMINI_3_5_FLASH,

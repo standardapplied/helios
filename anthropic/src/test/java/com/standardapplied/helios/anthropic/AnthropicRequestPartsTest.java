@@ -17,13 +17,9 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.tool.ParameterType;
-import com.standardapplied.helios.core.tool.Tool;
-import com.standardapplied.helios.core.tool.ToolParameter;
-import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.core.test.ConversationFixture;
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -183,7 +179,7 @@ class AnthropicRequestPartsTest {
     var model =
         new AnthropicModel(
             AnthropicModelId.CLAUDE_OPUS_5_5, ModelConfig.newBuilder().withApiKey("k").build());
-    var schema = selfReferencing();
+    var schema = ConversationFixture.selfReferencing();
 
     var failure =
         assertThrows(
@@ -199,32 +195,13 @@ class AnthropicRequestPartsTest {
         new AnthropicModel(
             AnthropicModelId.CLAUDE_OPUS_5_5,
             ModelConfig.newBuilder().withApiKey("k").withBaseUrl("http://127.0.0.1:1").build());
-    var tool =
-        Tool.newBuilder()
-            .withName("odd")
-            .withDescription("has an unwritable default")
-            .withParameter(
-                ToolParameter.newBuilder()
-                    .withName("p")
-                    .withType(ParameterType.STRING)
-                    .withDescription("p")
-                    .withDefaultValue(selfReferencing())
-                    .build())
-            .withExecutor((arguments, context) -> ToolResult.success("ok"))
-            .build();
+    var tool = ConversationFixture.unwritableTool();
 
     var failure =
         assertThrows(
             AnthropicException.class, () -> model.chat(List.of(Message.user("hi")), List.of(tool)));
 
     assertEquals("Failed to serialize request", failure.getMessage());
-  }
-
-  /** A map holding itself, which no JSON writer can finish. */
-  static Map<String, Object> selfReferencing() {
-    var map = new HashMap<String, Object>();
-    map.put("self", map);
-    return map;
   }
 
   @Test
