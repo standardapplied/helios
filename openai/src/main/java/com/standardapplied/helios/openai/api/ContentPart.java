@@ -38,10 +38,6 @@ public record ContentPart(
     return new ContentPart("input_text", text, null, null, null);
   }
 
-  public static ContentPart refusal(String text) {
-    return new ContentPart("refusal", text, null, null, null);
-  }
-
   /**
    * Inline image content part. The Responses API accepts a base64 data URI in {@code image_url}.
    *
@@ -66,25 +62,5 @@ public record ContentPart(
   public static ContentPart inputFile(String mediaType, String base64Data, String filename) {
     return new ContentPart(
         "input_file", null, null, "data:" + mediaType + ";base64," + base64Data, filename);
-  }
-
-  public boolean hasTypeOutputText() {
-    return "output_text".equals(type);
-  }
-
-  public boolean hasTypeInputText() {
-    return "input_text".equals(type);
-  }
-
-  public boolean hasTypeRefusal() {
-    return "refusal".equals(type);
-  }
-
-  public boolean hasTypeInputImage() {
-    return "input_image".equals(type);
-  }
-
-  public boolean hasTypeInputFile() {
-    return "input_file".equals(type);
   }
 }
