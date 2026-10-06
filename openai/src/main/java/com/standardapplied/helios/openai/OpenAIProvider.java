@@ -63,8 +63,8 @@ public class OpenAIProvider implements ModelProvider {
 
   private static Model model(String wireModelId, OpenAIModelId knownModel, ModelConfig config) {
     validate(wireModelId, config);
-    var httpClient = HttpClientFactory.create(config);
     var requests = new OpenAIRequestBuilder(wireModelId, knownModel, config);
+    var httpClient = HttpClientFactory.create(config);
     var streams = new OpenAIStreams(config, httpClient);
     return StreamingModel.<ResponsesRequest>newBuilder()
         .withId(wireModelId)

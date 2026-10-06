@@ -50,6 +50,7 @@ public class GeminiProvider implements ModelProvider {
     }
     validate(config);
     var endpoint = GeminiEndpoint.of(config);
+    var requests = new GeminiRequestBuilder(id, config);
     var httpClient = HttpClientFactory.create(config);
     var streams = new GeminiStreams(config, httpClient, endpoint);
     return StreamingModel.<InteractionRequest>newBuilder()
@@ -59,7 +60,7 @@ public class GeminiProvider implements ModelProvider {
         .withDefaultContextWindow(id.contextWindow())
         .withMaxOutputTokens(id.maxOutputTokens())
         .withHttpClient(httpClient)
-        .withRequests(new GeminiRequestBuilder(id, config))
+        .withRequests(requests)
         .withExchange(
             new ChatExchange<>(PROVIDER_NAME, "Gemini API", streams::open, GeminiException::new))
         .withJson(GeminiJson.STRUCTURED)
