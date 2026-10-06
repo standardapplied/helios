@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.ConversationFixture;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -35,7 +36,6 @@ import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -721,8 +721,7 @@ class GeminiFilesClientTest {
   void aRequestBodyThatCannotBeWrittenFailsBeforeSending() {
     var config = ModelConfig.newBuilder().withApiKey("g-key").build();
     var http = new FilesHttp(config, httpClient(), FilesEndpoint.of(config));
-    var looped = new HashMap<String, Object>();
-    looped.put("self", looped);
+    var looped = ConversationFixture.selfReferencing();
 
     var error = assertThrows(GeminiException.class, () -> http.serialize(looped));
 

@@ -12,6 +12,7 @@ import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.test.ConversationFixture;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -117,7 +118,7 @@ class SegmentMergeTest {
         ToolCall.newBuilder()
             .withId("t1")
             .withName("search")
-            .withArguments(AnthropicRequestPartsTest.selfReferencing())
+            .withArguments(ConversationFixture.selfReferencing())
             .build();
     var unwritable = Response.newBuilder().withToolCalls(List.of(call)).build();
 
