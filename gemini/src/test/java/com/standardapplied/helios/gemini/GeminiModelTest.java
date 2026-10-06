@@ -1025,6 +1025,21 @@ class GeminiModelTest {
   }
 
   @Test
+  void parseStructuredContentThatIsNotAnObjectReportsTheUntypedMapItCouldNotRead() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
+    var ex =
+        assertThrows(
+            StructuredOutputParseException.class,
+            () -> parse("[1, 2]", OutputSchema.of(TestPerson.class), config));
+
+    assertEquals(
+        "JSON syntax error: Cannot deserialize value of type"
+            + " `java.util.LinkedHashMap<java.lang.Object,java.lang.Object>` from Array value"
+            + " (token `JsonToken.START_ARRAY`)",
+        ex.errors().getFirst().lines().findFirst().orElseThrow());
+  }
+
+  @Test
   void parseStructuredContentNullReturnsNull() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     assertNull(parse(null, OutputSchema.of(TestPerson.class), config));
