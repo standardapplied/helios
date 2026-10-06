@@ -36,9 +36,11 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * The producer (the provider's streaming publisher) calls {@code onSubscribe/onNext/onError/
  * onComplete} on its own thread; the consumer (the runner thread) receives the {@link StreamedTurn}
- * from {@link #awaitDone(CancellationToken)}. The barrier between the two phases makes the
- * StringBuilder + List access safe via the latch's happens-before edge; the atomic fields cover the
- * case where {@code awaitDone} is interrupted before the producer's terminal signal fires.
+ * from {@link #awaitDone(CancellationToken)}. When the producer's terminal signal releases the
+ * latch, its happens-before edge makes the StringBuilder and List reads safe. When the wait ends
+ * another way (cancellation, idle timeout, interrupt), the producer may still be appending: the
+ * atomic fields stay consistent, and the snapshot reads the error before the text, as the runner
+ * did before the snapshot existed.
  */
 final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
@@ -160,6 +162,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       registration.remove();
       idleWatchdog.cancel();
     }
+    var failure = error.get();
     return new StreamedTurn(
         content.toString(),
         List.copyOf(toolCalls),
@@ -167,7 +170,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
         finishReason.get(),
         usage.get(),
         metadata.get(),
-        error.get());
+        failure);
   }
 
   /** End the stream with {@code cause} unless it already ended with an error. */
