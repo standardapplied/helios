@@ -108,15 +108,6 @@ class SerializationTest {
     assertFalse(json.contains("\"summary\""));
   }
 
-  @Test
-  void serializeThoughtStepWithSummary() throws Exception {
-    var step = Step.thought("sig-z", List.of(ContentItem.text("thinking out loud")));
-    var json = objectMapper.writeValueAsString(step);
-
-    assertTrue(json.contains("\"summary\":["));
-    assertTrue(json.contains("\"text\":\"thinking out loud\""));
-  }
-
   // --- Multi-turn round trip: user / model_output / function_call / function_result ---
 
   @Test
@@ -149,7 +140,7 @@ class SerializationTest {
 
   @Test
   void serializeImageInlineDataContentItem() throws Exception {
-    var item = ContentItem.image("image/png", "iVBORw0KGgo=");
+    var item = ContentItem.inlineData("image", "image/png", "iVBORw0KGgo=");
     var json = objectMapper.writeValueAsString(item);
 
     assertTrue(json.contains("\"type\":\"image\""));
@@ -161,7 +152,7 @@ class SerializationTest {
 
   @Test
   void serializeImageUriContentItem() throws Exception {
-    var item = ContentItem.imageUri("image/jpeg", "https://example.com/cat.jpg");
+    var item = ContentItem.fileUri("image", "image/jpeg", "https://example.com/cat.jpg");
     var json = objectMapper.writeValueAsString(item);
 
     assertTrue(json.contains("\"type\":\"image\""));
@@ -172,7 +163,7 @@ class SerializationTest {
 
   @Test
   void serializePdfDocumentContentItem() throws Exception {
-    var item = ContentItem.document("application/pdf", "JVBERi0=");
+    var item = ContentItem.inlineData("document", "application/pdf", "JVBERi0=");
     var json = objectMapper.writeValueAsString(item);
 
     assertTrue(json.contains("\"type\":\"document\""));
@@ -182,7 +173,7 @@ class SerializationTest {
 
   @Test
   void serializeDocumentUriContentItem() throws Exception {
-    var item = ContentItem.documentUri("application/pdf", "https://example.com/spec.pdf");
+    var item = ContentItem.fileUri("document", "application/pdf", "https://example.com/spec.pdf");
     var json = objectMapper.writeValueAsString(item);
 
     assertTrue(json.contains("\"type\":\"document\""));
@@ -191,7 +182,7 @@ class SerializationTest {
 
   @Test
   void serializeAudioContentItem() throws Exception {
-    var item = ContentItem.audio("audio/wav", "AAAA");
+    var item = ContentItem.inlineData("audio", "audio/wav", "AAAA");
     var json = objectMapper.writeValueAsString(item);
 
     assertTrue(json.contains("\"type\":\"audio\""));
@@ -201,7 +192,7 @@ class SerializationTest {
 
   @Test
   void serializeAudioUriContentItem() throws Exception {
-    var item = ContentItem.audioUri("audio/mp3", "https://example.com/track.mp3");
+    var item = ContentItem.fileUri("audio", "audio/mp3", "https://example.com/track.mp3");
     var json = objectMapper.writeValueAsString(item);
 
     assertTrue(json.contains("\"uri\":\"https://example.com/track.mp3\""));
@@ -209,7 +200,7 @@ class SerializationTest {
 
   @Test
   void serializeVideoContentItem() throws Exception {
-    var item = ContentItem.video("video/mp4", "BBBB");
+    var item = ContentItem.inlineData("video", "video/mp4", "BBBB");
     var json = objectMapper.writeValueAsString(item);
 
     assertTrue(json.contains("\"type\":\"video\""));
@@ -219,7 +210,7 @@ class SerializationTest {
 
   @Test
   void serializeVideoUriContentItem() throws Exception {
-    var item = ContentItem.videoUri("video/mp4", "https://example.com/clip.mp4");
+    var item = ContentItem.fileUri("video", "video/mp4", "https://example.com/clip.mp4");
     var json = objectMapper.writeValueAsString(item);
 
     assertTrue(json.contains("\"uri\":\"https://example.com/clip.mp4\""));
@@ -230,7 +221,7 @@ class SerializationTest {
     var step =
         Step.userInput(
             List.of(
-                ContentItem.document("application/pdf", "JVBERi0="),
+                ContentItem.inlineData("document", "application/pdf", "JVBERi0="),
                 ContentItem.text("Extract text from this PDF")));
 
     var json = objectMapper.writeValueAsString(step);
@@ -246,7 +237,7 @@ class SerializationTest {
     var step =
         Step.userInput(
             List.of(
-                ContentItem.image("image/png", "iVBORw0KGgo="),
+                ContentItem.inlineData("image", "image/png", "iVBORw0KGgo="),
                 ContentItem.text("Caption this image")));
 
     var json = objectMapper.writeValueAsString(step);
@@ -380,43 +371,8 @@ class SerializationTest {
   }
 
   @Test
-  void serializeRequestWithTextResponseFormat() throws Exception {
-    var request =
-        InteractionRequest.newBuilder()
-            .withModel("gemini-3-flash-preview")
-            .withInput(List.of(Step.userInput("Hi")))
-            .withResponseFormat(ResponseFormat.text())
-            .build();
-
-    var json = objectMapper.writeValueAsString(request);
-    assertTrue(json.contains("\"response_format\":{\"type\":\"text\"}"));
-  }
-
-  @Test
-  void serializeRequestWithImageResponseFormat() throws Exception {
-    var request =
-        InteractionRequest.newBuilder()
-            .withModel("gemini-3-flash-preview")
-            .withInput(List.of(Step.userInput("Draw a cat")))
-            .withResponseFormat(ResponseFormat.image("image/jpeg", "1:1", "1K"))
-            .build();
-
-    var json = objectMapper.writeValueAsString(request);
-    assertTrue(json.contains("\"type\":\"image\""));
-    assertTrue(json.contains("\"mime_type\":\"image/jpeg\""));
-    assertTrue(json.contains("\"aspect_ratio\":\"1:1\""));
-    assertTrue(json.contains("\"image_size\":\"1K\""));
-  }
-
-  @Test
   void jsonResponseFormatRequiresSchema() {
     assertThrows(IllegalArgumentException.class, () -> ResponseFormat.json(null));
-  }
-
-  @Test
-  void imageResponseFormatRequiresMimeType() {
-    assertThrows(IllegalArgumentException.class, () -> ResponseFormat.image(null, "1:1", "1K"));
-    assertThrows(IllegalArgumentException.class, () -> ResponseFormat.image("", "1:1", "1K"));
   }
 
   // --- previous_interaction_id ---
@@ -486,7 +442,7 @@ class SerializationTest {
     var response = objectMapper.readValue(json, InteractionResponse.class);
 
     assertEquals("int_123", response.id());
-    assertTrue(response.hasStatusCompleted());
+    assertEquals("completed", response.status());
     assertNotNull(response.steps());
     assertEquals(1, response.steps().size());
 
@@ -533,7 +489,7 @@ class SerializationTest {
 
     var response = objectMapper.readValue(json, InteractionResponse.class);
 
-    assertTrue(response.hasStatusRequiresAction());
+    assertEquals("requires_action", response.status());
     assertEquals(2, response.steps().size());
 
     var thought = response.steps().get(0);
@@ -543,7 +499,7 @@ class SerializationTest {
     assertEquals("I need to check the weather in Boston...", thought.summary().getFirst().text());
 
     var call = response.steps().get(1);
-    assertTrue(call.hasTypeFunctionCall());
+    assertEquals("function_call", call.type());
     assertEquals("fc_1", call.id());
     assertEquals("get_weather", call.name());
     assertEquals("Boston, MA", call.arguments().get("location"));
@@ -563,7 +519,7 @@ class SerializationTest {
         """;
     var step = objectMapper.readValue(json, Step.class);
 
-    assertTrue(step.hasTypeFunctionResult());
+    assertEquals("function_result", step.type());
     assertEquals("fc_1", step.callId());
     assertEquals("get_weather", step.name());
     assertEquals(Boolean.FALSE, step.errorFlag());
@@ -617,9 +573,9 @@ class SerializationTest {
     var response = objectMapper.readValue(json, InteractionResponse.class);
 
     assertEquals(3, response.steps().size());
-    assertTrue(response.steps().get(0).hasTypeGoogleSearchCall());
+    assertEquals("google_search_call", response.steps().get(0).type());
     assertEquals("sig_call", response.steps().get(0).signature());
-    assertTrue(response.steps().get(1).hasTypeGoogleSearchResult());
+    assertEquals("google_search_result", response.steps().get(1).type());
     assertEquals("gs_1", response.steps().get(1).callId());
     assertNotNull(response.steps().get(1).result());
     @SuppressWarnings("unchecked")
@@ -658,9 +614,7 @@ class SerializationTest {
         }
         """;
     var response = objectMapper.readValue(json, InteractionResponse.class);
-    assertTrue(response.hasStatusFailed());
-    assertFalse(response.hasStatusCompleted());
-    assertFalse(response.hasStatusRequiresAction());
+    assertEquals("failed", response.status());
   }
 
   @Test
@@ -669,13 +623,9 @@ class SerializationTest {
         objectMapper.readValue(
             "{\"type\":\"user_input\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}",
             Step.class);
-    assertTrue(userStep.hasTypeUserInput());
+    assertEquals("user_input", userStep.type());
     assertFalse(userStep.hasTypeModelOutput());
     assertFalse(userStep.hasTypeThought());
-    assertFalse(userStep.hasTypeFunctionCall());
-    assertFalse(userStep.hasTypeFunctionResult());
-    assertFalse(userStep.hasTypeGoogleSearchCall());
-    assertFalse(userStep.hasTypeGoogleSearchResult());
     assertTrue(userStep.hasContent());
     assertFalse(userStep.hasSummary());
 
@@ -730,26 +680,9 @@ class SerializationTest {
   }
 
   @Test
-  void contentItemTypePredicatesCoverEveryShape() {
+  void contentItemHasTypeTextMatchesOnlyText() {
     assertTrue(ContentItem.text("x").hasTypeText());
-    assertFalse(ContentItem.text("x").hasTypeImage());
-    assertFalse(ContentItem.text("x").hasTypeThoughtSignature());
-
-    var img = ContentItem.image("image/png", "AAA=");
-    assertTrue(img.hasTypeImage());
-    assertFalse(img.hasTypeText());
-
-    var doc = ContentItem.document("application/pdf", "JVB=");
-    assertTrue(doc.hasTypeDocument());
-
-    var audio = ContentItem.audio("audio/wav", "AAA=");
-    assertTrue(audio.hasTypeAudio());
-
-    var video = ContentItem.video("video/mp4", "BBB=");
-    assertTrue(video.hasTypeVideo());
-
-    var sig = new ContentItem("thought_signature", null, null, null, null, "sig123", null, null);
-    assertTrue(sig.hasTypeThoughtSignature());
+    assertFalse(ContentItem.inlineData("image", "image/png", "AAA=").hasTypeText());
   }
 
   @Test
@@ -797,15 +730,6 @@ class SerializationTest {
     assertFalse(json.contains("\"parameters\""));
   }
 
-  @Test
-  void serializeCodeExecutionToolDefinition() throws Exception {
-    var tool = ToolDefinition.codeExecution();
-    var json = objectMapper.writeValueAsString(tool);
-
-    assertTrue(json.contains("\"type\":\"code_execution\""));
-    assertFalse(json.contains("\"name\""));
-  }
-
   // --- Generation config ---
 
   @Test
@@ -847,7 +771,7 @@ class SerializationTest {
             .withInput(List.of(Step.userInput("hi")))
             .withTools(List.of(ToolDefinition.googleSearch()))
             .withGenerationConfig(gen)
-            .withResponseFormat(ResponseFormat.text())
+            .withResponseFormat(ResponseFormat.json(Map.of("type", "object")))
             .withStream(true)
             .build();
 
@@ -861,11 +785,14 @@ class SerializationTest {
   }
 
   @Test
-  void stepHasSummaryHandlesEmptyAndPopulatedLists() {
-    var emptySummary = Step.thought("sig", List.of());
+  void stepHasSummaryHandlesEmptyAndPopulatedLists() throws Exception {
+    var emptySummary = objectMapper.readValue("{\"type\":\"thought\",\"summary\":[]}", Step.class);
     assertFalse(emptySummary.hasSummary());
 
-    var populatedSummary = Step.thought("sig", List.of(ContentItem.text("inner")));
+    var populatedSummary =
+        objectMapper.readValue(
+            "{\"type\":\"thought\",\"summary\":[{\"type\":\"text\",\"text\":\"inner\"}]}",
+            Step.class);
     assertTrue(populatedSummary.hasSummary());
   }
 
@@ -876,25 +803,10 @@ class SerializationTest {
   }
 
   @Test
-  void stepFlagsAreMutuallyExclusiveForFunctionCallAndSearch() {
+  void functionCallFactoryBuildsAFunctionCallStep() {
     var fc = Step.functionCall("id1", "name1", Map.of());
-    assertTrue(fc.hasTypeFunctionCall());
+    assertEquals("function_call", fc.type());
     assertFalse(fc.hasTypeModelOutput());
-    assertFalse(fc.hasTypeGoogleSearchCall());
-
-    var search = Step.googleSearchCall("gs_1", Map.of(), "web_search", "sig");
-    assertTrue(search.hasTypeGoogleSearchCall());
-    assertFalse(search.hasTypeFunctionCall());
-    assertEquals("web_search", search.searchType());
-
-    var result = Step.googleSearchResult("gs_1", Map.of("a", "b"), "sig");
-    assertTrue(result.hasTypeGoogleSearchResult());
-    assertFalse(result.hasTypeGoogleSearchCall());
-  }
-
-  @Test
-  void googleSearchCallWithoutArgumentsCarriesAnEmptyMap() {
-    assertEquals(Map.of(), Step.googleSearchCall("gs_1", null, "web_search", "sig").arguments());
   }
 
   // --- Streaming events ---
@@ -905,30 +817,27 @@ class SerializationTest {
         objectMapper.readValue(
             "{\"event_type\":\"interaction.created\",\"interaction\":{\"id\":\"int_z\"}}",
             StreamingEvent.class);
-    assertTrue(created.hasTypeInteractionCreated());
-    assertFalse(created.hasTypeInteractionCompleted());
+    assertEquals("interaction.created", created.eventType());
 
     var inProgress =
         objectMapper.readValue(
             "{\"event_type\":\"interaction.in_progress\",\"interaction_id\":\"int_z\"}",
             StreamingEvent.class);
-    assertTrue(inProgress.hasTypeInteractionInProgress());
-    assertFalse(inProgress.hasTypeInteractionStatusUpdate());
+    assertEquals("interaction.in_progress", inProgress.eventType());
     assertEquals("int_z", inProgress.interactionId());
 
     var requires =
         objectMapper.readValue(
             "{\"event_type\":\"interaction.requires_action\",\"interaction_id\":\"int_z\"}",
             StreamingEvent.class);
-    assertTrue(requires.hasTypeInteractionRequiresAction());
+    assertEquals("interaction.requires_action", requires.eventType());
 
     var statusUpdate =
         objectMapper.readValue(
             "{\"event_type\":\"interaction.status_update\","
                 + "\"interaction_id\":\"int_z\",\"status\":\"in_progress\"}",
             StreamingEvent.class);
-    assertTrue(statusUpdate.hasTypeInteractionStatusUpdate());
-    assertFalse(statusUpdate.hasTypeInteractionInProgress());
+    assertEquals("interaction.status_update", statusUpdate.eventType());
     assertEquals("int_z", statusUpdate.interactionId());
     assertEquals("in_progress", statusUpdate.status());
 
@@ -937,13 +846,13 @@ class SerializationTest {
             "{\"event_type\":\"interaction.completed\","
                 + "\"interaction\":{\"id\":\"int_z\",\"status\":\"completed\"}}",
             StreamingEvent.class);
-    assertTrue(completed.hasTypeInteractionCompleted());
+    assertEquals("interaction.completed", completed.eventType());
 
     var start =
         objectMapper.readValue(
             "{\"event_type\":\"step.start\",\"index\":0,\"step\":{\"type\":\"model_output\"}}",
             StreamingEvent.class);
-    assertTrue(start.hasTypeStepStart());
+    assertEquals("step.start", start.eventType());
     assertEquals(0, start.index());
     assertNotNull(start.step());
 
@@ -952,7 +861,7 @@ class SerializationTest {
             "{\"event_type\":\"step.delta\",\"index\":0,"
                 + "\"delta\":{\"type\":\"text\",\"text\":\"hi\"}}",
             StreamingEvent.class);
-    assertTrue(deltaText.hasTypeStepDelta());
+    assertEquals("step.delta", deltaText.eventType());
     assertNotNull(deltaText.delta());
     assertNull(deltaText.argumentsDelta());
 
@@ -960,20 +869,20 @@ class SerializationTest {
         objectMapper.readValue(
             "{\"event_type\":\"step.delta\",\"index\":1,\"arguments_delta\":\"{\\\"a\\\":1\"}",
             StreamingEvent.class);
-    assertTrue(deltaArgs.hasTypeStepDelta());
+    assertEquals("step.delta", deltaArgs.eventType());
     assertEquals("{\"a\":1", deltaArgs.argumentsDelta());
 
     var stop =
         objectMapper.readValue(
             "{\"event_type\":\"step.stop\",\"index\":0,\"status\":\"done\"}", StreamingEvent.class);
-    assertTrue(stop.hasTypeStepStop());
+    assertEquals("step.stop", stop.eventType());
     assertEquals("done", stop.status());
 
     var error =
         objectMapper.readValue(
             "{\"event_type\":\"error\",\"error\":{\"code\":500,\"message\":\"Internal error\"}}",
             StreamingEvent.class);
-    assertTrue(error.hasTypeError());
+    assertEquals("error", error.eventType());
     assertNotNull(error.error());
     assertEquals(500, error.error().get("code"));
     assertEquals("Internal error", error.error().get("message"));
@@ -1020,7 +929,7 @@ class SerializationTest {
             "{\"type\":\"google_search_call\",\"id\":\"gsc_1\","
                 + "\"arguments\":{\"queries\":[\"x\"]},\"search_type\":\"web_search\"}",
             Step.class);
-    assertTrue(step.hasTypeGoogleSearchCall());
+    assertEquals("google_search_call", step.type());
     assertEquals("web_search", step.searchType());
     assertEquals(List.of("x"), step.arguments().get("queries"));
   }
