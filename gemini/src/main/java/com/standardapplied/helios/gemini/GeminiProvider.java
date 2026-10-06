@@ -41,6 +41,9 @@ public class GeminiProvider implements ModelProvider {
    */
   @Override
   public Model create(String modelId, ModelConfig config) {
+    if (config == null) {
+      throw new IllegalArgumentException("config is required");
+    }
     var id = GeminiModelId.fromId(modelId);
     if (id == null) {
       throw new IllegalArgumentException("Unsupported model: " + modelId);
@@ -69,9 +72,6 @@ public class GeminiProvider implements ModelProvider {
   }
 
   private static void validate(ModelConfig config) {
-    if (config == null) {
-      throw new IllegalArgumentException("config is required");
-    }
     if (Strings.isBlank(config.baseUrl()) && Strings.isBlank(config.apiKey())) {
       throw new IllegalArgumentException(
           "config with valid apiKey is required (or set baseUrl + auth header)");

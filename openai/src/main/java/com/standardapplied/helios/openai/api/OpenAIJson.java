@@ -3,7 +3,6 @@
 package com.standardapplied.helios.openai.api;
 
 import com.standardapplied.helios.core.provider.JsonBinding;
-import java.util.Map;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -20,7 +19,7 @@ public final class OpenAIJson {
 
   /** Structured output read through {@link #LENIENT}. */
   public static final JsonBinding STRUCTURED =
-      new JsonBinding(json -> LENIENT.readValue(json, Map.class), LENIENT::convertValue);
+      new JsonBinding(LENIENT.readerForMapOf(Object.class)::readValue, LENIENT::convertValue);
 
   private OpenAIJson() {}
 }

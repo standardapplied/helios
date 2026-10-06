@@ -40,6 +40,9 @@ public class OpenAIProvider implements ModelProvider {
 
   @Override
   public Model create(String modelId, ModelConfig config) {
+    if (config == null) {
+      throw new IllegalArgumentException("config is required");
+    }
     var known = OpenAIModelId.fromId(modelId);
     if (known != null) {
       return model(known.id(), known, config);
@@ -80,9 +83,6 @@ public class OpenAIProvider implements ModelProvider {
   private static void validate(String wireModelId, ModelConfig config) {
     if (Strings.isBlank(wireModelId)) {
       throw new IllegalArgumentException("modelId is required");
-    }
-    if (config == null) {
-      throw new IllegalArgumentException("config is required");
     }
     if (Strings.isBlank(config.baseUrl()) && Strings.isBlank(config.apiKey())) {
       throw new IllegalArgumentException(
