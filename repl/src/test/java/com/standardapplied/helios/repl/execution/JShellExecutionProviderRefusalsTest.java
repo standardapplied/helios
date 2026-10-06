@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -84,6 +85,56 @@ class JShellExecutionProviderRefusalsTest {
       assertSame(SessionStartOutcome.accept(), provider.onSessionStart(ctx("t")));
       assertEquals(
           "JShell session pool saturated (cap=2)", refusal(provider.onSessionStart(ctx("u"))));
+    }
+  }
+
+  @Test
+  void startThatFindsTheProviderClosedOnceItsSandboxSpawnedDiscardsIt() {
+    var spawned = new ArrayList<RecordingSandbox>();
+    var holder = new ArrayList<JShellExecutionProvider>();
+    SandboxFactory factory =
+        registry -> {
+          var sandbox = new RecordingSandbox(code -> ok());
+          spawned.add(sandbox);
+          holder.getFirst().close();
+          return sandbox;
+        };
+    var provider = provider(ReplConfig.newBuilder().withSandboxFactory(factory).build(), 1);
+    holder.add(provider);
+
+    assertEquals("provider is closed", refusal(provider.onSessionStart(ctx("s"))));
+    assertTrue(spawned.getFirst().closed);
+    assertEquals(0, provider.liveSessionCount());
+  }
+
+  @Test
+  void sessionEndedWhileItsStartupSnippetRunsGivesItsPermitBackOnce() {
+    var holder = new ArrayList<JShellExecutionProvider>();
+    var firstStartup = new AtomicBoolean(true);
+    var config =
+        config(
+            code -> {
+              if (!firstStartup.getAndSet(false)) {
+                return ok();
+              }
+              holder.getFirst().onSessionEnd(ctx("s"));
+              return ExecutionResult.newBuilder().withExitCode(1).withStderr("ended").build();
+            });
+    try (var provider =
+        JShellExecutionProvider.newBuilder()
+            .withReplConfig(config)
+            .withStartupSnippet("init();")
+            .withMaxConcurrentSessions(1)
+            .withShutdownHook(false)
+            .build()) {
+      holder.add(provider);
+
+      assertEquals(
+          "JShell startup snippet failed for session s (exit=1): ended",
+          refusal(provider.onSessionStart(ctx("s"))));
+      assertSame(SessionStartOutcome.accept(), provider.onSessionStart(ctx("t")));
+      assertEquals(
+          "JShell session pool saturated (cap=1)", refusal(provider.onSessionStart(ctx("u"))));
     }
   }
 

@@ -6,7 +6,6 @@ import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.repl.ReplConfig;
 import com.standardapplied.helios.repl.ReplSession;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
@@ -17,7 +16,9 @@ import java.util.logging.Logger;
  * The provider's live sandboxes: one {@link ReplSession} per Helios session id, at most {@code
  * maxConcurrentSessions} of them. A session holds one permit from its start until it ends; a start
  * that is refused, or whose startup snippet fails, gives its permit back and closes whatever it
- * spawned.
+ * spawned. A bound session's permit is given back only by whoever removes it from the pool, so a
+ * session ended while it starts is never released twice, and a start that finds the pool closed
+ * once it has bound its session discards it.
  */
 final class SandboxPool {
 
@@ -28,6 +29,7 @@ final class SandboxPool {
   private final int maxConcurrentSessions;
   private final Semaphore sessionPermits;
   private final Map<String, ReplSession> sessions = new ConcurrentHashMap<>();
+  private volatile boolean closed;
 
   /**
    * @param replConfig the configuration each session's sandbox is spawned with
@@ -70,6 +72,10 @@ final class SandboxPool {
       sessionPermits.release();
       return alreadyBound(sessionId);
     }
+    if (closed) {
+      discard(sessionId, session);
+      return SessionStartOutcome.refuse("provider is closed");
+    }
     var startup = runStartupSnippet(sessionId, session);
     if (startup instanceof SessionStartOutcome.Accept) {
       ctx.cancellation().onCancel(() -> end(sessionId));
@@ -99,13 +105,10 @@ final class SandboxPool {
     return maxConcurrentSessions;
   }
 
-  /** End every live session. */
-  void reapAll() {
-    for (var entry : List.copyOf(sessions.entrySet())) {
-      sessions.remove(entry.getKey());
-      safeClose(entry.getValue());
-      sessionPermits.release();
-    }
+  /** End every live session, and discard any that a start binds afterwards. */
+  void close() {
+    closed = true;
+    sessions.keySet().forEach(this::end);
   }
 
   /** Close {@code session}, logging rather than throwing a failure to close. */
@@ -143,9 +146,11 @@ final class SandboxPool {
   }
 
   private void discard(String sessionId, ReplSession session) {
-    sessions.remove(sessionId);
+    var stillBound = sessions.remove(sessionId, session);
     safeClose(session);
-    sessionPermits.release();
+    if (stillBound) {
+      sessionPermits.release();
+    }
   }
 
   private static SessionStartOutcome alreadyBound(String sessionId) {
