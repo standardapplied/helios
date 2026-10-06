@@ -1,0 +1,14 @@
+== chatStream
+ThinkingDelta[text=First Paris.]
+ThinkingComplete[fullThinking=First Paris., signature=SIG-1]
+ToolCallComplete[toolCall=ToolCall[id=toolu_1, name=weather, arguments={city=Paris}]]
+ThinkingDelta[text=Now Rome.]
+ThinkingComplete[fullThinking=Now Rome., signature=SIG-2]
+ToolCallComplete[toolCall=ToolCall[id=toolu_2, name=weather, arguments={city=Rome}]]
+Done[response=Response[content=, parsed=null, toolCalls=[ToolCall[id=toolu_1, name=weather, arguments={city=Paris}], ToolCall[id=toolu_2, name=weather, arguments={city=Rome}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=50, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=87], thinking=First Paris.
+
+Now Rome., citations=[], metadata={anthropic.rawContent=[{"signature":"SIG-1","thinking":"First Paris.","type":"thinking"},{"id":"toolu_1","input":{"city":"Paris"},"name":"weather","type":"tool_use"},{"signature":"SIG-2","thinking":"Now Rome.","type":"thinking"},{"id":"toolu_2","input":{"city":"Rome"},"name":"weather","type":"tool_use"}], anthropic.stopReason=tool_use, anthropic.thinkingBlocks=[{"signature":"SIG-1","text":"First Paris."},{"signature":"SIG-2","text":"Now Rome."}]}]]
+== chat
+Response[content=, parsed=null, toolCalls=[ToolCall[id=toolu_1, name=weather, arguments={city=Paris}], ToolCall[id=toolu_2, name=weather, arguments={city=Rome}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=50, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=87], thinking=First Paris.
+
+Now Rome., citations=[], metadata={anthropic.rawContent=[{"signature":"SIG-1","thinking":"First Paris.","type":"thinking"},{"id":"toolu_1","input":{"city":"Paris"},"name":"weather","type":"tool_use"},{"signature":"SIG-2","thinking":"Now Rome.","type":"thinking"},{"id":"toolu_2","input":{"city":"Rome"},"name":"weather","type":"tool_use"}], anthropic.stopReason=tool_use, anthropic.thinkingBlocks=[{"signature":"SIG-1","text":"First Paris."},{"signature":"SIG-2","text":"Now Rome."}]}]

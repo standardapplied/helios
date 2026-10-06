@@ -36,16 +36,8 @@ public record OutputItem(
     String status,
     List<ReasoningSummary> summary) {
 
-  public boolean hasTypeMessage() {
-    return "message".equals(type);
-  }
-
   public boolean hasTypeFunctionCall() {
     return "function_call".equals(type);
-  }
-
-  public boolean hasTypeReasoning() {
-    return "reasoning".equals(type);
   }
 
   /**

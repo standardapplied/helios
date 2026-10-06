@@ -51,45 +51,4 @@ public record StreamingEvent(
     InteractionResponse interaction,
     @JsonProperty("interaction_id") String interactionId,
     String status,
-    Map<String, Object> error) {
-
-  public boolean hasTypeError() {
-    return "error".equals(eventType);
-  }
-
-  public boolean hasTypeInteractionCreated() {
-    return "interaction.created".equals(eventType);
-  }
-
-  public boolean hasTypeInteractionCompleted() {
-    return "interaction.completed".equals(eventType);
-  }
-
-  public boolean hasTypeInteractionInProgress() {
-    return "interaction.in_progress".equals(eventType);
-  }
-
-  public boolean hasTypeInteractionRequiresAction() {
-    return "interaction.requires_action".equals(eventType);
-  }
-
-  /**
-   * The stable API emits a unified {@code interaction.status_update} carrying {@link
-   * #interactionId()} and {@link #status()}.
-   */
-  public boolean hasTypeInteractionStatusUpdate() {
-    return "interaction.status_update".equals(eventType);
-  }
-
-  public boolean hasTypeStepStart() {
-    return "step.start".equals(eventType);
-  }
-
-  public boolean hasTypeStepDelta() {
-    return "step.delta".equals(eventType);
-  }
-
-  public boolean hasTypeStepStop() {
-    return "step.stop".equals(eventType);
-  }
-}
+    Map<String, Object> error) {}

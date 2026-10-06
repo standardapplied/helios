@@ -14,9 +14,9 @@ import java.util.List;
  *
  * <p>The {@code system} field accepts either a plain {@link String} (legacy shape, no prompt
  * caching) or a {@code List<SystemContent>} (cache-aware shape — required by the API when any
- * {@code SystemContent} block carries a {@code cache_control} annotation). {@link
- * AnthropicModel#buildRequest} selects the shape based on whether prompt caching is enabled for the
- * model; serialization is uniform because Jackson emits whichever runtime type the field holds.
+ * {@code SystemContent} block carries a {@code cache_control} annotation). The request builder
+ * selects the shape based on whether prompt caching is enabled for the model; serialization is
+ * uniform because Jackson emits whichever runtime type the field holds.
  *
  * @param model the model identifier
  * @param maxTokens maximum tokens to generate (required by Claude)
@@ -74,39 +74,6 @@ public record MessagesRequest(
         stopSequences,
         thinking,
         outputConfig);
-  }
-
-  /**
-   * Diagnostic accessor that returns the system prompt as flat text regardless of which wire shape
-   * ({@link String} or {@code List<SystemContent>}) the request carries. Concatenates {@code text}
-   * fields of every {@link SystemContent} block in the array shape; returns {@code null} when no
-   * system is set.
-   *
-   * <p>This is for tests, traces, and audit log surfaces. The Anthropic API only sees the typed
-   * {@link #system()} field — never this projection.
-   *
-   * @return the flat system text, or {@code null} when no system content is set
-   */
-  public String systemAsText() {
-    return switch (system) {
-      case null -> null;
-      case String s -> s;
-      case List<?> list -> {
-        var joined = new StringBuilder();
-        for (var item : list) {
-          if (item instanceof SystemContent block) {
-            if (!joined.isEmpty()) {
-              joined.append("\n\n");
-            }
-            joined.append(block.text());
-          }
-        }
-        yield joined.length() == 0 ? null : joined.toString();
-      }
-      default ->
-          throw new IllegalStateException(
-              "unexpected system content type: " + system.getClass().getName());
-    };
   }
 
   /**

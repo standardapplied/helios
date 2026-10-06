@@ -22,6 +22,8 @@
  *   <li>{@code knowledge} — sandboxed filesystem-knowledge tools.
  *   <li>{@code process} — bounded child-process execution and binary pinning.
  *   <li>{@code prompt} — versioned prompt registry + template rendering.
+ *   <li>{@code provider} — the mechanics every streaming model provider shares: the SSE reader, the
+ *       chat exchange and the JSON request assembly.
  *   <li>{@code trace} / {@code events} — observability primitives.
  *   <li>{@code runtime} — durable-run primitives (RunStore, ToolCallJournal, DurableResumeScanner)
  *       the v2 session SDK can plug into.
@@ -42,6 +44,7 @@ module com.standardapplied.helios.core {
   exports com.standardapplied.helios.core.model;
   exports com.standardapplied.helios.core.process;
   exports com.standardapplied.helios.core.prompt;
+  exports com.standardapplied.helios.core.provider;
   exports com.standardapplied.helios.core.runtime;
   exports com.standardapplied.helios.core.schema;
   exports com.standardapplied.helios.core.tool;

@@ -1,0 +1,6 @@
+data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Partial"}
+
+data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"server_error","message":"boom"}}}
+
+data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"never read"}
+

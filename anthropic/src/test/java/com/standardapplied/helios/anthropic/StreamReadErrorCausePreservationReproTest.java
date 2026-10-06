@@ -8,10 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.core.provider.ChatExchange;
+import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.tool.Tool;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -19,23 +22,13 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.SequenceInputStream;
 import java.net.ServerSocket;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import javax.net.ssl.SSLSession;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import tools.jackson.databind.DeserializationFeature;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Regression coverage for the 2.5.5 Anthropic-layer change: a mid-stream {@link IOException} (the
@@ -48,12 +41,12 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>Three layers exercised here:
  *
  * <ol>
- *   <li>{@link AnthropicStreamingIterator} preserves the {@code IOException} as {@link
- *       StreamEvent.Error#cause()} after a partial SSE prefix has been delivered.
- *   <li>{@link AnthropicModel#chat(List, List)} promotes the iterator's {@code
- *       StreamEvent.Error(IOException)} to a {@link TransientStreamException} (instead of the old
- *       opaque {@link AnthropicException}), so the session loop can identify it without depending
- *       on provider-specific exception classes.
+ *   <li>{@link SseReader} preserves the {@code IOException} as {@link StreamEvent.Error#cause()}
+ *       after a partial SSE prefix has been delivered.
+ *   <li>A model's {@link com.standardapplied.helios.core.model.Model#chat(List, List)} promotes the
+ *       iterator's {@code StreamEvent.Error(IOException)} to a {@link TransientStreamException}
+ *       (instead of the old opaque {@link AnthropicException}), so the session loop can identify it
+ *       without depending on provider-specific exception classes.
  *   <li>An API-side {@code event: error} of a retryable type ({@code overloaded_error} and peers)
  *       is transient as well; every other cause remains on the {@link AnthropicException} path so
  *       the loop doesn't retry programmer errors.
@@ -78,10 +71,7 @@ class StreamReadErrorCausePreservationReproTest {
           + "data: {\"type\":\"content_block_delta\",\"index\":0,"
           + "\"delta\":{\"type\":\"text_delta\",\"text\":\"partial-emit\"}}\n\n";
 
-  private final tools.jackson.databind.ObjectMapper objectMapper =
-      JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
-
-  // ── Layer 1 — AnthropicStreamingIterator preserves IOException cause
+  // ── Layer 1 — SseReader preserves IOException cause
   // ─────────────────────────────
 
   @org.junit.jupiter.api.Test
@@ -99,8 +89,11 @@ class StreamReadErrorCausePreservationReproTest {
             });
 
     try (var iterator =
-        new AnthropicStreamingIterator(
-            fakeResponse(failingStream), objectMapper, Duration.ofSeconds(5))) {
+        new SseReader(
+            failingStream,
+            Duration.ofSeconds(5),
+            new AnthropicStreamParser(),
+            AnthropicException::new)) {
       assertTrue(iterator.hasNext());
       assertInstanceOf(StreamEvent.TextDelta.class, iterator.next());
 
@@ -123,7 +116,8 @@ class StreamReadErrorCausePreservationReproTest {
     InputStream stream = new ByteArrayInputStream(apiErrorJson.getBytes(StandardCharsets.UTF_8));
 
     try (var iterator =
-        new AnthropicStreamingIterator(fakeResponse(stream), objectMapper, Duration.ofSeconds(5))) {
+        new SseReader(
+            stream, Duration.ofSeconds(5), new AnthropicStreamParser(), AnthropicException::new)) {
       assertTrue(iterator.hasNext());
       var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().startsWith("API stream error:"));
@@ -134,7 +128,7 @@ class StreamReadErrorCausePreservationReproTest {
     }
   }
 
-  // ── Layer 2 — AnthropicModel.chat surfaces stream-IO failures as TransientStreamException ──
+  // ── Layer 2 — Model.chat surfaces stream-IO failures as TransientStreamException ──
 
   private ServerSocket serverSocket;
   private ExecutorService serverExecutor;
@@ -200,7 +194,7 @@ class StreamReadErrorCausePreservationReproTest {
             .withApiKey("test-key")
             .withBaseUrl("http://localhost:" + port)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var model = new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
 
     var thrown =
         org.junit.jupiter.api.Assertions.assertThrows(
@@ -224,19 +218,19 @@ class StreamReadErrorCausePreservationReproTest {
             + errorType
             + "\",\"message\":\"failed\"}}\n\n";
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5_5, config);
-    var request = model.buildRequest(List.of(Message.user("hi")), List.<Tool>of(), null);
+    var opus = AnthropicModelId.CLAUDE_OPUS_5_5;
+    var request =
+        new AnthropicRequestBuilder(opus.id(), opus, config, CachePolicy.shortLived())
+            .build(List.of(Message.user("hi")), List.<Tool>of(), null);
+    ChatExchange.StreamOpener<MessagesRequest> segments =
+        ignored ->
+            new SseReader(
+                new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)),
+                Duration.ofSeconds(5),
+                new AnthropicStreamParser(),
+                AnthropicException::new);
     return org.junit.jupiter.api.Assertions.assertThrows(
-        RuntimeException.class,
-        () ->
-            model.drainWithContinuation(
-                request,
-                ignored ->
-                    new AnthropicStreamingIterator(
-                        fakeResponse(
-                            new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8))),
-                        objectMapper,
-                        Duration.ofSeconds(5))));
+        RuntimeException.class, () -> PauseContinuationTest.continuation(segments).chat(request));
   }
 
   @org.junit.jupiter.api.Test
@@ -258,7 +252,7 @@ class StreamReadErrorCausePreservationReproTest {
 
   @org.junit.jupiter.api.Test
   void streamingIteratorParseFailureRemainsAnthropicExceptionNotTransientStream() {
-    // A malformed SSE frame triggers parseStreamEvent's catch (Exception e) branch which yields
+    // A malformed SSE frame triggers AnthropicStreamParser.parse's catch branch, which yields
     // StreamEvent.Error("Failed to parse stream event", e). That cause is NOT an IOException, so
     // it must NOT be promoted to TransientStreamException (parser bugs and provider contract
     // violations are not transient).
@@ -266,7 +260,8 @@ class StreamReadErrorCausePreservationReproTest {
     InputStream stream = new ByteArrayInputStream(malformed.getBytes(StandardCharsets.UTF_8));
 
     try (var iterator =
-        new AnthropicStreamingIterator(fakeResponse(stream), objectMapper, Duration.ofSeconds(5))) {
+        new SseReader(
+            stream, Duration.ofSeconds(5), new AnthropicStreamParser(), AnthropicException::new)) {
       assertTrue(iterator.hasNext());
       var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().contains("Failed to parse"));
@@ -276,49 +271,5 @@ class StreamReadErrorCausePreservationReproTest {
           "the parse failure is a Jackson exception, not an IOException — only IOExceptions"
               + " get promoted to TransientStreamException for retry");
     }
-  }
-
-  private static HttpResponse<InputStream> fakeResponse(InputStream body) {
-    return new HttpResponse<>() {
-      @Override
-      public int statusCode() {
-        return 200;
-      }
-
-      @Override
-      public HttpHeaders headers() {
-        return HttpHeaders.of(Map.of(), (a, b) -> true);
-      }
-
-      @Override
-      public InputStream body() {
-        return body;
-      }
-
-      @Override
-      public Optional<HttpResponse<InputStream>> previousResponse() {
-        return Optional.empty();
-      }
-
-      @Override
-      public HttpRequest request() {
-        return null;
-      }
-
-      @Override
-      public URI uri() {
-        return URI.create("https://test");
-      }
-
-      @Override
-      public HttpClient.Version version() {
-        return HttpClient.Version.HTTP_2;
-      }
-
-      @Override
-      public Optional<SSLSession> sslSession() {
-        return Optional.empty();
-      }
-    };
   }
 }

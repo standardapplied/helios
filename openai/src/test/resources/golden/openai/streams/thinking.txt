@@ -1,0 +1,8 @@
+== chatStream
+ThinkingDelta[text=Let me think]
+ThinkingDelta[text= about this.]
+ThinkingComplete[fullThinking=Let me think about this., signature=null]
+TextDelta[text=Hello!]
+Done[response=Response[content=Hello!, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], thinking=Let me think about this., citations=[], metadata={openai.reasoning=Let me think about this.}]]
+== chat
+Response[content=Hello!, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], thinking=Let me think about this., citations=[], metadata={openai.reasoning=Let me think about this.}]

@@ -163,8 +163,8 @@ try (var events = JsonlEventSink.openMetadataOnly(Path.of("events.jsonl"));
 `withProviderContinuation(false)` resends local history and neither sends nor returns Gemini
 interaction IDs. `RawOutputCapturePolicy.DISABLED` preserves actionable schema and submit-validator
 corrections while keeping raw model text out of structured-output exceptions. The effective
-Interactions version is available from `GeminiModel.apiVersion()` and response metadata under
-`gemini.apiVersion`; base URLs and credentials are excluded from those diagnostics.
+Interactions version is reported in response metadata under `gemini.apiVersion`; base URLs and
+credentials are excluded from that diagnostic.
 When `withBaseUrl(...)` is also set, that compatibility override supplies the complete endpoint
 prefix and therefore takes precedence over canonical version-path construction.
 
@@ -187,12 +187,12 @@ for one-shot workloads:
 var provider = new AnthropicProvider();
 var config = ModelConfig.of(System.getenv("ANTHROPIC_API_KEY"));
 
-AnthropicModel longLived = provider.create(
+Model longLived = provider.create(
     AnthropicModelId.CLAUDE_OPUS_5.id(),
     config,
     CachePolicy.longLived());
 
-AnthropicModel uncached = provider.create(
+Model uncached = provider.create(
     AnthropicModelId.CLAUDE_OPUS_5.id(),
     config,
     CachePolicy.disabled());

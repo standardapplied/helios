@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.schema.OutputSchema;
@@ -29,14 +30,14 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".+")
 class OpenAIModelIntegrationTest {
 
-  private static OpenAIModel model;
+  private static Model model;
   private static String apiKey;
 
   @BeforeAll
   static void setUp() {
     apiKey = System.getenv("OPENAI_API_KEY");
     var config = ModelConfig.newBuilder().withApiKey(apiKey).build();
-    model = new OpenAIModel(OpenAIModelId.GPT_4_1_MINI, config);
+    model = new OpenAIProvider().create(OpenAIModelId.GPT_4_1_MINI.id(), config);
   }
 
   @Test

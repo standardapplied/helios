@@ -14,20 +14,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.FeedableInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import javax.net.ssl.SSLSession;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -110,7 +105,7 @@ class StreamingIteratorTest {
       var done = (StreamEvent.Done) events.get(1);
       assertEquals("Hello", done.response().content());
       assertEquals(FinishReason.STOP, done.response().finishReason());
-      assertEquals("int_xyz", done.response().metadata().get(GeminiModel.INTERACTION_ID_KEY));
+      assertEquals("int_xyz", done.response().metadata().get(ContinuationPoint.INTERACTION_ID_KEY));
     }
   }
 
@@ -212,8 +207,8 @@ class StreamingIteratorTest {
       assertTrue(done.response().thinking().contains("thinking..."));
 
       var metadata = done.response().metadata();
-      assertTrue(metadata.containsKey(GeminiModel.THOUGHT_SIGNATURES_KEY));
-      assertEquals("sig123", metadata.get(GeminiModel.THOUGHT_SIGNATURES_KEY));
+      assertTrue(metadata.containsKey(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
+      assertEquals("sig123", metadata.get(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
     }
   }
 
@@ -233,7 +228,7 @@ class StreamingIteratorTest {
       }
       var done = (StreamEvent.Done) events.getLast();
       var metadata = done.response().metadata();
-      assertEquals("sig456", metadata.get(GeminiModel.THOUGHT_SIGNATURES_KEY));
+      assertEquals("sig456", metadata.get(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
       assertNull(done.response().thinking());
     }
   }
@@ -262,9 +257,9 @@ class StreamingIteratorTest {
       var done = (StreamEvent.Done) events.getLast();
       var metadata = done.response().metadata();
       assertTrue(
-          metadata.containsKey(GeminiModel.THOUGHT_SIGNATURES_KEY),
+          metadata.containsKey(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY),
           "Expected thought_signature step.delta to be captured");
-      assertEquals("wireSig", metadata.get(GeminiModel.THOUGHT_SIGNATURES_KEY));
+      assertEquals("wireSig", metadata.get(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
     }
   }
 
@@ -284,7 +279,8 @@ class StreamingIteratorTest {
         events.add(iterator.next());
       }
       var done = (StreamEvent.Done) events.getLast();
-      assertFalse(done.response().metadata().containsKey(GeminiModel.THOUGHT_SIGNATURES_KEY));
+      assertFalse(
+          done.response().metadata().containsKey(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
     }
   }
 
@@ -392,7 +388,7 @@ class StreamingIteratorTest {
       assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
       assertInstanceOf(StreamEvent.Done.class, events.get(1));
       var done = (StreamEvent.Done) events.get(1);
-      assertEquals("int_xyz", done.response().metadata().get(GeminiModel.INTERACTION_ID_KEY));
+      assertEquals("int_xyz", done.response().metadata().get(ContinuationPoint.INTERACTION_ID_KEY));
     }
   }
 
@@ -572,8 +568,11 @@ class StreamingIteratorTest {
     var neverDelivers = new FeedableInputStream();
 
     try (var iterator =
-        new GeminiModel.StreamingIterator(
-            fakeResponse(neverDelivers), objectMapper, SHORT_IDLE_TIMEOUT)) {
+        new SseReader(
+            neverDelivers,
+            SHORT_IDLE_TIMEOUT,
+            new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
+            GeminiException::new)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
@@ -689,6 +688,38 @@ class StreamingIteratorTest {
       var done = (StreamEvent.Done) events.getLast();
       assertEquals(1, done.response().citations().size());
       assertEquals("b.com", done.response().citations().getFirst().title());
+    }
+  }
+
+  private static String citedText(String text, String url) {
+    return "{\"type\":\"text\",\"text\":\""
+        + text
+        + "\",\"annotations\":[{\"type\":\"url_citation\",\"url\":\""
+        + url
+        + "\"}]}";
+  }
+
+  @org.junit.jupiter.api.Test
+  void onlyModelOutputStepsContributeCitationsInArrivalOrder() {
+    var sse =
+        stepStart(0, "{\"type\":\"user_input\",\"content\":[" + citedText("u", "https://u") + "]}")
+            + stepStart(
+                1, "{\"type\":\"thought\",\"summary\":[" + citedText("t", "https://t") + "]}")
+            + stepStart(2, "{\"type\":\"model_output\",\"content\":[]}")
+            + stepStart(
+                3, "{\"type\":\"model_output\",\"content\":[" + citedText("A", "https://a") + "]}")
+            + stepStart(
+                4, "{\"type\":\"model_output\",\"content\":[" + citedText("B", "https://b") + "]}")
+            + INTERACTION_COMPLETED;
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getLast();
+      assertEquals(
+          List.of("https://a", "https://b"),
+          done.response().citations().stream().map(citation -> citation.sourceId()).toList());
     }
   }
 
@@ -831,7 +862,7 @@ class StreamingIteratorTest {
       var done = (StreamEvent.Done) events.getFirst();
       assertEquals(FinishReason.STOP, done.response().finishReason());
       assertNull(done.response().usage());
-      assertFalse(done.response().metadata().containsKey(GeminiModel.INTERACTION_ID_KEY));
+      assertFalse(done.response().metadata().containsKey(ContinuationPoint.INTERACTION_ID_KEY));
     }
   }
 
@@ -844,7 +875,7 @@ class StreamingIteratorTest {
         events.add(iterator.next());
       }
       var done = (StreamEvent.Done) events.getFirst();
-      assertFalse(done.response().metadata().containsKey(GeminiModel.INTERACTION_ID_KEY));
+      assertFalse(done.response().metadata().containsKey(ContinuationPoint.INTERACTION_ID_KEY));
     }
   }
 
@@ -1010,7 +1041,8 @@ class StreamingIteratorTest {
         events.add(iterator.next());
       }
       var done = (StreamEvent.Done) events.getLast();
-      assertFalse(done.response().metadata().containsKey(GeminiModel.THOUGHT_SIGNATURES_KEY));
+      assertFalse(
+          done.response().metadata().containsKey(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
     }
   }
 
@@ -1140,7 +1172,8 @@ class StreamingIteratorTest {
       }
       var done = (StreamEvent.Done) events.getLast();
       assertEquals("inner", done.response().thinking());
-      assertFalse(done.response().metadata().containsKey(GeminiModel.THOUGHT_SIGNATURES_KEY));
+      assertFalse(
+          done.response().metadata().containsKey(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
     }
   }
 
@@ -1194,7 +1227,11 @@ class StreamingIteratorTest {
           }
         };
     var iterator =
-        new GeminiModel.StreamingIterator(fakeResponse(failingClose), objectMapper, NEVER_IDLE);
+        new SseReader(
+            failingClose,
+            NEVER_IDLE,
+            new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
+            GeminiException::new);
     // Drain so the iterator reaches Done and then closes itself.
     while (iterator.hasNext()) {
       iterator.next();
@@ -1314,7 +1351,7 @@ class StreamingIteratorTest {
       var done = (StreamEvent.Done) events.getFirst();
       assertEquals(
           "int_status",
-          done.response().metadata().get(GeminiModel.INTERACTION_ID_KEY),
+          done.response().metadata().get(ContinuationPoint.INTERACTION_ID_KEY),
           "status_update must capture interaction_id");
     }
   }
@@ -1341,15 +1378,19 @@ class StreamingIteratorTest {
             + "\"interaction_id\":\"interaction-secret\",\"status\":\"completed\"}\n\n";
     var inputStream = new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8));
     try (var iterator =
-        new GeminiModel.StreamingIterator(
-            fakeResponse(inputStream), objectMapper, NEVER_IDLE, false, "v1beta")) {
+        new SseReader(
+            inputStream,
+            NEVER_IDLE,
+            new GeminiStreamParser(false, "v1beta"),
+            GeminiException::new)) {
       var events = new java.util.ArrayList<StreamEvent>();
       while (iterator.hasNext()) {
         events.add(iterator.next());
       }
       var done = (StreamEvent.Done) events.getLast();
-      assertFalse(done.response().metadata().containsKey(GeminiModel.INTERACTION_ID_KEY));
-      assertEquals("v1beta", done.response().metadata().get(GeminiModel.API_VERSION_KEY));
+      assertFalse(done.response().metadata().containsKey(ContinuationPoint.INTERACTION_ID_KEY));
+      assertEquals(
+          "v1beta", done.response().metadata().get(GeminiResponseAssembler.API_VERSION_KEY));
       assertFalse(done.response().metadata().containsValue("interaction-secret"));
     }
   }
@@ -1388,7 +1429,11 @@ class StreamingIteratorTest {
           }
         };
     try (var iterator =
-        new GeminiModel.StreamingIterator(fakeResponse(failingStream), objectMapper, NEVER_IDLE)) {
+        new SseReader(
+            failingStream,
+            NEVER_IDLE,
+            new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
+            GeminiException::new)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
@@ -1407,7 +1452,11 @@ class StreamingIteratorTest {
           }
         };
     try (var iterator =
-        new GeminiModel.StreamingIterator(fakeResponse(failingStream), objectMapper, NEVER_IDLE)) {
+        new SseReader(
+            failingStream,
+            NEVER_IDLE,
+            new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
+            GeminiException::new)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
@@ -1424,8 +1473,11 @@ class StreamingIteratorTest {
         new Thread(
             () -> {
               try (var iterator =
-                  new GeminiModel.StreamingIterator(
-                      fakeResponse(neverDelivers), objectMapper, NEVER_IDLE)) {
+                  new SseReader(
+                      neverDelivers,
+                      NEVER_IDLE,
+                      new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
+                      GeminiException::new)) {
                 while (iterator.hasNext()) {
                   events.add(iterator.next());
                 }
@@ -1439,52 +1491,12 @@ class StreamingIteratorTest {
     assertInstanceOf(StreamEvent.Error.class, events.getFirst());
   }
 
-  private GeminiModel.StreamingIterator createIterator(String sseData, Duration idleTimeout) {
+  private SseReader createIterator(String sseData, Duration idleTimeout) {
     var inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8));
-    return new GeminiModel.StreamingIterator(fakeResponse(inputStream), objectMapper, idleTimeout);
-  }
-
-  private static HttpResponse<InputStream> fakeResponse(InputStream body) {
-    return new HttpResponse<>() {
-      @Override
-      public int statusCode() {
-        return 200;
-      }
-
-      @Override
-      public HttpHeaders headers() {
-        return HttpHeaders.of(Map.of(), (a, b) -> true);
-      }
-
-      @Override
-      public InputStream body() {
-        return body;
-      }
-
-      @Override
-      public Optional<HttpResponse<InputStream>> previousResponse() {
-        return Optional.empty();
-      }
-
-      @Override
-      public HttpRequest request() {
-        return null;
-      }
-
-      @Override
-      public URI uri() {
-        return URI.create("https://test");
-      }
-
-      @Override
-      public HttpClient.Version version() {
-        return HttpClient.Version.HTTP_2;
-      }
-
-      @Override
-      public Optional<SSLSession> sslSession() {
-        return Optional.empty();
-      }
-    };
+    return new SseReader(
+        inputStream,
+        idleTimeout,
+        new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
+        GeminiException::new);
   }
 }

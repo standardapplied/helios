@@ -1,0 +1,24 @@
+data: {"event_type":"interaction.created","interaction":{"id":"int_xyz","status":"in_progress"}}
+
+data: {"event_type":"step.start","index":0,"step":{"type":"thought","signature":"sig-start"}}
+
+data: {"event_type":"step.stop","index":0,"status":"done"}
+
+data: {"event_type":"step.start","index":1,"step":{"type":"function_call","id":"call_1","name":"weather"}}
+
+data: {"event_type":"step.delta","index":1,"arguments_delta":"{\"city\":\"Paris\"}"}
+
+data: {"event_type":"step.stop","index":1,"status":"done"}
+
+data: {"event_type":"step.start","index":2,"step":{"type":"function_call","id":"call_2","name":"weather"}}
+
+data: {"event_type":"step.delta","index":2,"delta":{"type":"arguments_delta","arguments":"{\"city\":\"Rome\"}"}}
+
+data: {"event_type":"step.stop","index":2,"status":"done"}
+
+data: {"event_type":"step.start","index":3,"step":{"type":"function_call","id":"call_3","name":"weather","arguments":{"city":"Oslo"}}}
+
+data: {"event_type":"step.stop","index":3,"status":"done"}
+
+data: {"event_type":"interaction.status_update","interaction_id":"int_xyz","status":"requires_action"}
+

@@ -48,8 +48,8 @@ import org.junit.jupiter.api.Test;
 class StreamReadErrorReproTest {
 
   /**
-   * Mimics what {@code AnthropicModel.drainToResponse} now throws when the SSE reader catches an
-   * {@code IOException} mid-stream: a {@link TransientStreamException} carrying the originating
+   * Mimics what a provider's {@code core.provider.ChatExchange} throws when the SSE reader catches
+   * an {@code IOException} mid-stream: a {@link TransientStreamException} carrying the originating
    * {@code IOException} as its cause and the provider name in {@link
    * TransientStreamException#providerName()}.
    */

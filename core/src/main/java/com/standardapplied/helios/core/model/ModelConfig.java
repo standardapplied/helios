@@ -146,8 +146,8 @@ public record ModelConfig(
   /**
    * Resolve the effective base URL for a provider HTTP request. Returns the configured {@link
    * #baseUrl()} when set (non-null, non-blank); otherwise falls back to the provider's built-in
-   * default. Used by {@code OpenAIModel}, {@code AnthropicModel}, {@code GeminiModel} to choose
-   * between {@code https://api.openai.com/v1/responses} (or peer) and a user-supplied override.
+   * default. Each provider uses it to choose between its endpoint, such as {@code
+   * https://api.openai.com/v1/responses}, and a user-supplied override.
    */
   public String effectiveBaseUrl(String providerDefault) {
     return !Strings.isBlank(baseUrl) ? baseUrl : providerDefault;

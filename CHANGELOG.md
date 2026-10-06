@@ -99,7 +99,7 @@ pass `JvmSandboxConfig.DEFAULT_STOP_GRACE` for the previous behaviour.
 `HttpClientFactory.create(...)` builds uses `HttpClient.Redirect.NEVER`. The JDK strips
 `Authorization` on a redirect but not `x-api-key`, `x-goog-api-key` or a `ModelConfig.withHeader`
 credential, so a 307 from the endpoint or a gateway forwarded the key and the prompt to whatever
-origin `Location` named. `AnthropicModel`, `OpenAIModel` and `GeminiModel` now report a 3xx from
+origin `Location` named. Every provider's model now reports a 3xx from
 `chat` and `chatStream` like any other non-200 status (`ProviderException.statusCode()` carries
 it, not retryable); point `baseUrl` at the final endpoint.
 
@@ -129,6 +129,21 @@ remove the per-call working directory before they release the concurrency permit
 | `SessionOptions.Builder.apply(preset)` | `withPreset(preset)` |
 | `DurabilityCoordinator.journalStart(...)`, `journalTerminal(...)`, `journalTerminalFailure(...)`, `inflightFor(runId)`, `markInflightFailed(...)` | `new ToolCallJournaling(durability)` with `start(...)`, `complete(...)`, `fail(...)`, `inflight(runId)`, `markInflightFailed(...)`; `DurabilityCoordinator` keeps the run lifecycle, and journal warnings log under `com.standardapplied.helios.core.runtime.ToolCallJournaling` |
 
+**The provider model classes are removed; every provider returns a `Model`.** `AnthropicModel`,
+`OpenAIModel` and `GeminiModel` were one forwarding surface written three times. Each provider now
+assembles a `core.provider.StreamingModel` from its own request builder, stream parser and JSON
+binding, and `create(...)` returns it as the `ModelProvider` SPI's `Model`. Requests, responses,
+streamed events, errors and validation messages are unchanged. The three classes' constructors were
+already package-private, so code reached them only through a provider; code that typed the result
+as the provider's class types it as `Model`.
+
+| 2.x | 3.0 |
+|---|---|
+| `AnthropicModel model = anthropicProvider.create(id, config)` (and with a `CachePolicy`) | `Model model = anthropicProvider.create(id, config)` |
+| `GeminiModel model = geminiProvider.create(id, config)` | `Model model = geminiProvider.create(id, config)` |
+| `anthropicModel.cachePolicy()`, `anthropicModel.promptCachingEnabled()` | removed: the policy is the one passed to `create(id, config, cachePolicy)`, `CachePolicy.shortLived()` when none is, and `cachePolicy.enabled()` answers whether it caches |
+| `geminiModel.apiVersion()` | removed: response metadata `gemini.apiVersion` reports the effective version |
+
 **Annotations move from `PgTraceStore` to the new `PgAnnotationStore`.** `PgTraceStore` keeps
 traces and their spans (`store`, `findById`, `list`, `summarize`, `onEvent`). The five annotation
 methods move unchanged, with the same SQL, rows and errors, to `PgAnnotationStore`, built from the
@@ -149,8 +164,12 @@ same `PgConfig`: `new PgAnnotationStore(pgConfig)`.
   `com.standardapplied.helios.core.test`, are what the Helios test suite uses instead of sleeps,
   self-chosen timeouts and piped streams. `StubHttpServer` (a loopback HTTP/1.1 server that
   records each request before answering it) and `RedirectTrap` (the redirect contract a
-  credentialed provider client is held to) test HTTP clients. Depend on it with
-  `<type>test-jar</type>` and `<scope>test</scope>`.
+  credentialed provider client is held to) test HTTP clients. `ModelHarness` runs a provider
+  `Model` against a stub that replays recorded server-sent events (`SseReplies`), `Transcript`
+  renders what it streamed and returned as canonical text, `Golden` compares it with a file under
+  `src/test/resources/golden` (`-Dgolden.update=true` rewrites the files), and
+  `ConversationFixture` is the conversation every provider's request snapshots share. Depend on it
+  with `<type>test-jar</type>` and `<scope>test</scope>`.
 - **`CircuitBreaker.Builder.withClock(InstantSource)`.** The breaker reads the current instant from
   an injectable source (default `Clock.systemUTC()`), so the half-open delay can be driven by hand
   instead of by sleeping. A `java.time.Clock` is an `InstantSource` and can be passed directly.
@@ -162,6 +181,19 @@ same `PgConfig`: `new PgAnnotationStore(pgConfig)`.
   `LocalProcessExecutionProvider` both run on it. `BinaryResolver` pins a binary to an absolute
   path once. An architecture rule keeps `java.lang.ProcessBuilder` inside `core.process` and the
   REPL sandbox launcher.
+- **`core.provider`: what every streaming provider shares**, for the built-in providers and for a
+  provider written outside Helios. `StreamingModel` is the `Model` a provider assembles through
+  `StreamingModel.newBuilder()` from its identity, `ModelConfig`, HTTP client, `RequestFactory`
+  (one turn's request), `Exchange` (how a turn runs) and a JSON adapter; it implements chat,
+  structured chat (parsed unless the turn called tools), streaming and close once. `ChatExchange`
+  is the standard `Exchange`: it opens a stream, drains it or hands it back, and maps failures
+  one way (the provider's exception and `TransientStreamException` pass through, an `IOException`
+  becomes a retryable `TransientStreamException`, an interrupt is restored). `SseReader` reads
+  server-sent events with a per-line idle timeout, `JsonPost` builds the JSON `POST` with default
+  and configured headers, `ProviderFailure` creates a provider's exception, and `JsonBinding`
+  adapts a JSON library to structured output from two functions. Architecture rules keep provider
+  modules on them: no class in a provider implements `Model`, reads a stream with a
+  `BufferedReader`, or builds a Jackson mapper outside its `api` holder.
 - **`RedactionResult.mergeCounts(other)`** sums two streams' per-secret counts in encounter order.
 - **`session.ConsoleEventPrinter`** prints a session's event stream for a command-line host:
   `session.events().subscribe(new ConsoleEventPrinter(System.out))`. Assistant text is written as
@@ -176,6 +208,11 @@ same `PgConfig`: `new PgAnnotationStore(pgConfig)`.
 
 ### Fixed
 
+- **A provider given no `ModelConfig` failed with a `NullPointerException`.** `AnthropicProvider`
+  and `OpenAIProvider` read `config.baseUrl()` while resolving a model id they do not catalogue, so
+  `create("custom-id", null)` threw a bare `NullPointerException`; `GeminiProvider` reported the
+  model as unsupported instead. Every provider now checks for a configuration first and fails with
+  `IllegalArgumentException("config is required")`.
 - **`CommandGrant`: a timed-out process could leave a descendant running and stall the call.** On
   timeout the grant terminated the child before looking up its descendants. If the child died
   first, its descendants were no longer listed, so a grandchild that held stdout survived, and the

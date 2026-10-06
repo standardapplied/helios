@@ -1,0 +1,8 @@
+== chatStream
+ThinkingDelta[text=The user greets me. ]
+ThinkingDelta[text=I greet back.]
+ThinkingComplete[fullThinking=The user greets me. I greet back., signature=SIG-A]
+TextDelta[text=Hello!]
+Done[response=Response[content=Hello!, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=25, outputTokens=30, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=67], thinking=The user greets me. I greet back., citations=[], metadata={anthropic.stopReason=end_turn, anthropic.thinkingBlocks=[{"signature":"SIG-A","text":"The user greets me. I greet back."}]}]]
+== chat
+Response[content=Hello!, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=25, outputTokens=30, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=67], thinking=The user greets me. I greet back., citations=[], metadata={anthropic.stopReason=end_turn, anthropic.thinkingBlocks=[{"signature":"SIG-A","text":"The user greets me. I greet back."}]}]

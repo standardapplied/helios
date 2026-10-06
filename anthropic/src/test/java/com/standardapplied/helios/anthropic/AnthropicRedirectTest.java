@@ -13,7 +13,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class AnthropicRedirectTest {
 
   private static Model trapped(ModelConfig config) {
-    return new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    return new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
   }
 
   @ParameterizedTest

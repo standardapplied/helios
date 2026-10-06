@@ -1,0 +1,18 @@
+data: {"event_type":"interaction.created","interaction":{"id":"int_xyz","status":"in_progress"}}
+
+data: {"event_type":"step.start","index":0,"step":{"type":"thought","summary":[{"type":"text","text":"Plan the answer."}]}}
+
+data: {"event_type":"step.delta","index":0,"delta":{"type":"thought_signature","signature":"wireSig"}}
+
+data: {"event_type":"step.delta","index":0,"delta":{"type":"text","text":"Then greet."}}
+
+data: {"event_type":"step.stop","index":0,"status":"done"}
+
+data: {"event_type":"step.start","index":1,"step":{"type":"model_output"}}
+
+data: {"event_type":"step.delta","index":1,"delta":{"type":"text","text":"Hello!"}}
+
+data: {"event_type":"step.stop","index":1,"status":"done"}
+
+data: {"event_type":"interaction.completed","interaction":{"id":"int_xyz","status":"completed","usage":{"total_input_tokens":2006,"total_output_tokens":150,"total_tokens":2156,"total_cached_tokens":1920}}}
+

@@ -1,0 +1,1454 @@
+{
+  "continuation" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "low"
+    },
+    "input" : [ {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    }, {
+      "content" : [ {
+        "text" : "And Berlin?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    } ],
+    "model" : "gemini-3.5-flash",
+    "previous_interaction_id" : "int_prev",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "continuation disabled" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "low"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    }, {
+      "content" : [ {
+        "text" : "And Berlin?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    } ],
+    "model" : "gemini-3.5-flash",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3-flash-preview MEDIUM tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "medium"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3-flash-preview",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3-flash-preview NONE tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "minimal"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3-flash-preview",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.1-flash-lite MEDIUM tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "medium"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.1-flash-lite",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.1-flash-lite NONE tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "minimal"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.1-flash-lite",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.1-pro-preview MEDIUM tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "medium"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.1-pro-preview",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.1-pro-preview NONE tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "low"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.1-pro-preview",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.5-flash MEDIUM tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "medium"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.5-flash",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.5-flash NONE tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "minimal"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.5-flash",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.5-flash-lite MEDIUM tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "medium"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.5-flash-lite",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.5-flash-lite NONE tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "minimal"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.5-flash-lite",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.6-flash MEDIUM tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "medium"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.6-flash",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.6-flash NONE tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "minimal"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.6-flash",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.7-flash MEDIUM tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "medium"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.7-flash",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.7-flash NONE tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "low"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.7-flash",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.8-flash MEDIUM tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "medium"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.8-flash",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gemini-3.8-flash NONE tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "low"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.8-flash",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "generation settings" : {
+    "generation_config" : {
+      "max_output_tokens" : 2048,
+      "seed" : 7,
+      "stop_sequences" : [ "END" ],
+      "thinking_level" : "high",
+      "tool_choice" : {
+        "allowed_tools" : {
+          "mode" : "validated",
+          "tools" : [ "weather" ]
+        }
+      }
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.5-flash",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "schema" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "low"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.5-flash",
+    "response_format" : {
+      "mime_type" : "application/json",
+      "schema" : {
+        "properties" : {
+          "summary" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "summary" ],
+        "type" : "object"
+      },
+      "type" : "text"
+    },
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant."
+  },
+  "schema and tools" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "low"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.5-flash",
+    "response_format" : {
+      "mime_type" : "application/json",
+      "schema" : {
+        "properties" : {
+          "summary" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "summary" ],
+        "type" : "object"
+      },
+      "type" : "text"
+    },
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "url context" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "low"
+    },
+    "input" : [ {
+      "content" : [ {
+        "text" : "Summarise https://example.com",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    } ],
+    "model" : "gemini-3.5-flash",
+    "stream" : true,
+    "tools" : [ {
+      "type" : "url_context"
+    } ]
+  },
+  "web search" : {
+    "generation_config" : {
+      "max_output_tokens" : 65536,
+      "thinking_level" : "low"
+    },
+    "input" : [ {
+      "content" : [ {
+        "data" : "iVBORw==",
+        "mime_type" : "image/png",
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "type" : "user_input"
+    }, {
+      "signature" : "sig-1",
+      "type" : "thought"
+    }, {
+      "signature" : "sig-2",
+      "type" : "thought"
+    }, {
+      "arguments" : {
+        "city" : "Paris"
+      },
+      "id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : {
+        "city" : "Rome"
+      },
+      "id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "name" : "weather",
+      "result" : "18C and sunny",
+      "type" : "function_result"
+    }, {
+      "call_id" : "call_2",
+      "name" : "weather",
+      "result" : "22C and cloudy",
+      "type" : "function_result"
+    } ],
+    "model" : "gemini-3.5-flash",
+    "stream" : true,
+    "system_instruction" : "You are a precise assistant.",
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    }, {
+      "type" : "google_search"
+    } ]
+  }
+}

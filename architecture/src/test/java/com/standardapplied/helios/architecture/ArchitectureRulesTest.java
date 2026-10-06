@@ -20,14 +20,18 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMembers;
 import static com.tngtech.archunit.library.GeneralCodingRules.ACCESS_STANDARD_STREAMS;
 
+import com.standardapplied.helios.core.model.Model;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
+import com.tngtech.archunit.core.domain.JavaConstructor;
 import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaStaticInitializer;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.lang.module.ModuleFinder;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
@@ -36,6 +40,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
@@ -48,6 +53,13 @@ class ArchitectureRulesTest {
   private static final String HELIOS = "com.standardapplied.helios";
   private static final String CORE = HELIOS + ".core..";
   private static final String HTTP_CLIENT_FACTORY = HELIOS + ".core.common.HttpClientFactory";
+
+  private static final String[] PROVIDERS = {
+    HELIOS + ".anthropic..", HELIOS + ".openai..", HELIOS + ".gemini.."
+  };
+
+  private static final String JSON_MAPPER = "tools.jackson.databind.json.JsonMapper";
+  private static final String OBJECT_MAPPER = "tools.jackson.databind.ObjectMapper";
 
   /**
    * Burn-down, v3-injected-time: the one class that reads the wall clock statically. Thirteen
@@ -108,6 +120,71 @@ class ArchitectureRulesTest {
         .because(
             "a provider module builds on helios-core only: shared code moves to core, never"
                 + " into another provider, session, runtime, persistence or repl")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void providersReadResponseStreamsOnlyThroughTheSseReader() {
+    noClasses()
+        .that()
+        .resideInAnyPackage(PROVIDERS)
+        .should()
+        .dependOnClassesThat(type(BufferedReader.class).or(type(InputStreamReader.class)))
+        .because(
+            "a provider reads a response stream through core.provider.SseReader, which owns the"
+                + " body, the per-line idle timeout, the read failures and the close of the"
+                + " stream and its reader thread")
+        .check(LIBRARY);
+  }
+
+  @ParameterizedTest
+  @CsvSource({"anthropic, AnthropicJson", "openai, OpenAIJson", "gemini, GeminiJson"})
+  void providerBuildsJsonMappersOnlyInItsHolder(String provider, String holder) {
+    var module = HELIOS + "." + provider;
+    var holderName = module + ".api." + holder;
+    noClasses()
+        .that()
+        .resideInAPackage(module + "..")
+        .and(not(name(holderName).or(nameStartingWith(holderName + "$"))))
+        .should()
+        .accessTargetWhere(
+            targetOwner(name(JSON_MAPPER))
+                .and(target(name("builder").or(name("shared"))))
+                .or(
+                    targetOwner(name(JSON_MAPPER).or(name(OBJECT_MAPPER)))
+                        .and(target(name(JavaConstructor.CONSTRUCTOR_NAME)))))
+        .because(
+            "a provider module builds each Jackson mapper configuration once, in its api."
+                + holder
+                + " holder, and every other class takes the mapper from there")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void providersServeTheirModelsThroughStreamingModel() {
+    noClasses()
+        .that()
+        .resideInAnyPackage(PROVIDERS)
+        .should()
+        .beAssignableTo(Model.class)
+        .because(
+            "a streaming provider's Model is a core.provider.StreamingModel assembled from the"
+                + " provider's request factory, exchange and JSON binding, so chat, structured"
+                + " chat, streaming and close are written once for every provider")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void coreProviderDependsOnNoProviderModule() {
+    noClasses()
+        .that()
+        .resideInAPackage(HELIOS + ".core.provider..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAnyPackage(PROVIDERS)
+        .because(
+            "core.provider holds only what every provider does identically; what one provider"
+                + " does differently stays in that provider's module")
         .check(LIBRARY);
   }
 

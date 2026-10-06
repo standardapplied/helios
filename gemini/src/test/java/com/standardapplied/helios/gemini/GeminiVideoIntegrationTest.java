@@ -44,7 +44,7 @@ class GeminiVideoIntegrationTest {
 
     try (var files = new GeminiFilesClient(config);
         var managed = files.uploadManaged(video, "video/mp4");
-        var model = new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, config)) {
+        var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_7_FLASH.id(), config)) {
       var message =
           Message.newBuilder()
               .withRole(Role.USER)
