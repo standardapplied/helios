@@ -21,6 +21,14 @@ class GeminiProviderTest {
   private final GeminiProvider provider = new GeminiProvider();
 
   @Test
+  void aMissingConfigFailsBeforeTheModelIdIsResolved() {
+    var thrown =
+        assertThrows(IllegalArgumentException.class, () -> provider.create("acme-unknown", null));
+
+    assertEquals("config is required", thrown.getMessage());
+  }
+
+  @Test
   void name() {
     assertEquals("gemini", provider.name());
   }

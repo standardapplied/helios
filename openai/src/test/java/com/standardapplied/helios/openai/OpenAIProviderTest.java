@@ -22,6 +22,14 @@ class OpenAIProviderTest {
   private final OpenAIProvider provider = new OpenAIProvider();
 
   @Test
+  void aMissingConfigFailsBeforeTheModelIdIsResolved() {
+    var thrown =
+        assertThrows(IllegalArgumentException.class, () -> provider.create("acme-unknown", null));
+
+    assertEquals("config is required", thrown.getMessage());
+  }
+
+  @Test
   void providerName() {
     assertEquals("openai", provider.name());
   }

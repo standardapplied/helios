@@ -59,6 +59,9 @@ public class AnthropicProvider implements ModelProvider {
    *     invalid
    */
   public Model create(String modelId, ModelConfig config, CachePolicy cachePolicy) {
+    if (config == null) {
+      throw new IllegalArgumentException("config is required");
+    }
     var known = AnthropicModelId.fromId(modelId);
     if (known != null) {
       return model(known.id(), known, config, cachePolicy);
@@ -107,9 +110,6 @@ public class AnthropicProvider implements ModelProvider {
   private static void validate(String wireModelId, ModelConfig config, CachePolicy cachePolicy) {
     if (Strings.isBlank(wireModelId)) {
       throw new IllegalArgumentException("modelId is required");
-    }
-    if (config == null) {
-      throw new IllegalArgumentException("config is required");
     }
     if (cachePolicy == null) {
       throw new IllegalArgumentException("cachePolicy is required");
