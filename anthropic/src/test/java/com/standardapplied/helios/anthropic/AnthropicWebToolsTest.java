@@ -18,20 +18,13 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.provider.SseReader;
 import java.io.ByteArrayInputStream;
-import java.io.InputStream;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import javax.net.ssl.SSLSession;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
@@ -52,7 +45,7 @@ class AnthropicWebToolsTest {
   void webSearchToggleEmitsServerTool() {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
 
-    var request = model(config).buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model(config).requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertNotNull(request.tools());
     var search = request.tools().getLast();
@@ -65,7 +58,7 @@ class AnthropicWebToolsTest {
   void webFetchToggleEmitsServerTool() {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebFetch(true).build();
 
-    var request = model(config).buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model(config).requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     var fetch = request.tools().getLast();
     assertEquals("web_fetch_20260318", fetch.type());
@@ -76,7 +69,7 @@ class AnthropicWebToolsTest {
   void webTogglesOffEmitNoServerTools() {
     var config = ModelConfig.newBuilder().withApiKey("k").build();
 
-    var request = model(config).buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model(config).requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertNull(request.tools());
   }
@@ -93,7 +86,7 @@ class AnthropicWebToolsTest {
             .build();
 
     var request =
-        model(config).buildRequest(List.of(Message.user("Hi")), List.of(clientTool), null);
+        model(config).requests.build(List.of(Message.user("Hi")), List.of(clientTool), null);
 
     assertEquals(2, request.tools().size());
     assertEquals("lookup", request.tools().getFirst().name());
@@ -224,7 +217,7 @@ class AnthropicWebToolsTest {
         Message.assistant(
             "I'll search.", List.of(), Map.of(AnthropicModel.RAW_CONTENT_KEY, rawJson));
 
-    var entry = AnthropicModel.convertAssistantMessage(message);
+    var entry = AnthropicMessages.assistant(message);
 
     assertEquals("assistant", entry.role());
     @SuppressWarnings("unchecked")
@@ -247,8 +240,8 @@ class AnthropicWebToolsTest {
 
     var request =
         model(config)
-            .buildRequest(
-                List.of(Message.user("go"), assistant, Message.user("more")), List.of(), null);
+            .requests
+            .build(List.of(Message.user("go"), assistant, Message.user("more")), List.of(), null);
 
     assertNotNull(request, "raw-echo assistant content must not break cache annotation");
   }
@@ -303,18 +296,19 @@ class AnthropicWebToolsTest {
   void pauseTurnContinuesAutomaticallyAndMergesSegments() throws Exception {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
     var m = model(config);
-    var initial = m.buildRequest(List.of(Message.user("research this")), List.of(), null);
+    var initial = m.requests.build(List.of(Message.user("research this")), List.of(), null);
 
     var openedRequests = new ArrayList<MessagesRequest>();
     var segments = new ArrayList<>(List.of(PAUSED_SEGMENT_SSE, FINAL_SEGMENT_SSE));
 
     var response =
-        m.drainWithContinuation(
-            initial,
-            request -> {
-              openedRequests.add(request);
-              return iterator(segments.removeFirst());
-            });
+        new PauseContinuation(
+                m.exchange,
+                request -> {
+                  openedRequests.add(request);
+                  return iterator(segments.removeFirst());
+                })
+            .drain(initial);
 
     assertEquals(2, openedRequests.size(), "paused turn must re-open exactly one continuation");
     assertEquals("Done.", response.content());
@@ -408,9 +402,10 @@ class AnthropicWebToolsTest {
   private Response<Void> drainPausedTurn(String pausedSegment, String finalSegment) {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
     var m = model(config);
-    var initial = m.buildRequest(List.of(Message.user("research this")), List.of(), null);
+    var initial = m.requests.build(List.of(Message.user("research this")), List.of(), null);
     var segments = new ArrayList<>(List.of(pausedSegment, finalSegment));
-    return m.drainWithContinuation(initial, request -> iterator(segments.removeFirst()));
+    return new PauseContinuation(m.exchange, request -> iterator(segments.removeFirst()))
+        .drain(initial);
   }
 
   @Test
@@ -420,9 +415,8 @@ class AnthropicWebToolsTest {
 
     assertEquals(
         List.of(
-            new AnthropicModel.ThinkingBlock("Search first.", "SIG-A"),
-            new AnthropicModel.ThinkingBlock("Now answer.", "SIG-B")),
-        AnthropicModel.decodeThinkingBlocks(response.metadata()));
+            new ThinkingBlock("Search first.", "SIG-A"), new ThinkingBlock("Now answer.", "SIG-B")),
+        ThinkingBlock.decodeAll(response.metadata()));
   }
 
   @Test
@@ -430,8 +424,8 @@ class AnthropicWebToolsTest {
     var response = drainPausedTurn(PAUSED_SEGMENT_WITH_THINKING_SSE, FINAL_SEGMENT_SSE);
 
     assertEquals(
-        List.of(new AnthropicModel.ThinkingBlock("Search first.", "SIG-A")),
-        AnthropicModel.decodeThinkingBlocks(response.metadata()));
+        List.of(new ThinkingBlock("Search first.", "SIG-A")),
+        ThinkingBlock.decodeAll(response.metadata()));
     assertFalse(response.metadata().containsKey("anthropic.thinking"));
     assertFalse(response.metadata().containsKey("anthropic.thinkingSignature"));
   }
@@ -482,10 +476,12 @@ class AnthropicWebToolsTest {
         """;
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
     var m = model(config);
-    var initial = m.buildRequest(List.of(Message.user("research this")), List.of(), null);
+    var initial = m.requests.build(List.of(Message.user("research this")), List.of(), null);
     var segments = new ArrayList<>(List.of(PAUSED_SEGMENT_SSE, interleavedFinal));
 
-    var response = m.drainWithContinuation(initial, request -> iterator(segments.removeFirst()));
+    var response =
+        new PauseContinuation(m.exchange, request -> iterator(segments.removeFirst()))
+            .drain(initial);
 
     @SuppressWarnings("unchecked")
     var merged =
@@ -524,10 +520,12 @@ class AnthropicWebToolsTest {
         """;
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
     var m = model(config);
-    var initial = m.buildRequest(List.of(Message.user("go")), List.of(), null);
+    var initial = m.requests.build(List.of(Message.user("go")), List.of(), null);
     var segments = new ArrayList<>(List.of(pausedTextOnly, FINAL_SEGMENT_SSE));
 
-    var response = m.drainWithContinuation(initial, request -> iterator(segments.removeFirst()));
+    var response =
+        new PauseContinuation(m.exchange, request -> iterator(segments.removeFirst()))
+            .drain(initial);
 
     assertEquals("Starting.Done.", response.content());
     assertEquals("end_turn", response.metadata().get(AnthropicModel.STOP_REASON_KEY));
@@ -542,17 +540,18 @@ class AnthropicWebToolsTest {
             .withToolChoice(new com.standardapplied.helios.core.model.ToolChoice.Any())
             .build();
     var m = model(config);
-    var initial = m.buildRequest(List.of(Message.user("go")), List.of(), null);
+    var initial = m.requests.build(List.of(Message.user("go")), List.of(), null);
     assertNotNull(initial.toolChoice(), "precondition: forced tool choice rides the base request");
 
     var openedRequests = new ArrayList<MessagesRequest>();
     var segments = new ArrayList<>(List.of(PAUSED_SEGMENT_SSE, FINAL_SEGMENT_SSE));
-    m.drainWithContinuation(
-        initial,
-        request -> {
-          openedRequests.add(request);
-          return iterator(segments.removeFirst());
-        });
+    new PauseContinuation(
+            m.exchange,
+            request -> {
+              openedRequests.add(request);
+              return iterator(segments.removeFirst());
+            })
+        .drain(initial);
 
     assertNull(
         openedRequests.get(1).toolChoice(),
@@ -602,7 +601,7 @@ class AnthropicWebToolsTest {
                 (args, ctx) -> com.standardapplied.helios.core.tool.ToolResult.success("ok"))
             .build();
 
-    var request = m.buildRequest(List.of(Message.user("Hi")), List.of(clientTool), null);
+    var request = m.requests.build(List.of(Message.user("Hi")), List.of(clientTool), null);
 
     assertNotNull(request.tools().getFirst().cacheControl(), "client tail carries the breakpoint");
     assertNull(
@@ -623,7 +622,8 @@ class AnthropicWebToolsTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> model(config).buildRequest(List.of(Message.user("Hi")), List.of(collider), null));
+            () ->
+                model(config).requests.build(List.of(Message.user("Hi")), List.of(collider), null));
     assertTrue(ex.getMessage().contains("web_search"));
   }
 
@@ -631,12 +631,14 @@ class AnthropicWebToolsTest {
   void pauseTurnContinuationIsBounded() {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
     var m = model(config);
-    var initial = m.buildRequest(List.of(Message.user("research this")), List.of(), null);
+    var initial = m.requests.build(List.of(Message.user("research this")), List.of(), null);
 
     var ex =
         assertThrows(
             AnthropicException.class,
-            () -> m.drainWithContinuation(initial, request -> iterator(PAUSED_SEGMENT_SSE)));
+            () ->
+                new PauseContinuation(m.exchange, request -> iterator(PAUSED_SEGMENT_SSE))
+                    .drain(initial));
     assertTrue(ex.getMessage().contains("pause_turn"));
   }
 
@@ -655,52 +657,9 @@ class AnthropicWebToolsTest {
     }
   }
 
-  private AnthropicStreamingIterator iterator(String sse) {
+  private SseReader iterator(String sse) {
     var in = new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8));
-    return new AnthropicStreamingIterator(fakeResponse(in), objectMapper, Duration.ofSeconds(5));
-  }
-
-  private static HttpResponse<InputStream> fakeResponse(InputStream body) {
-    return new HttpResponse<>() {
-      @Override
-      public int statusCode() {
-        return 200;
-      }
-
-      @Override
-      public HttpHeaders headers() {
-        return HttpHeaders.of(Map.of(), (a, b) -> true);
-      }
-
-      @Override
-      public InputStream body() {
-        return body;
-      }
-
-      @Override
-      public Optional<HttpResponse<InputStream>> previousResponse() {
-        return Optional.empty();
-      }
-
-      @Override
-      public HttpRequest request() {
-        return null;
-      }
-
-      @Override
-      public URI uri() {
-        return URI.create("https://test");
-      }
-
-      @Override
-      public HttpClient.Version version() {
-        return HttpClient.Version.HTTP_2;
-      }
-
-      @Override
-      public Optional<SSLSession> sslSession() {
-        return Optional.empty();
-      }
-    };
+    return new SseReader(
+        in, Duration.ofSeconds(5), new AnthropicStreamParser(), AnthropicException::new);
   }
 }

@@ -12,6 +12,7 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.tool.Tool;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -19,19 +20,11 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.SequenceInputStream;
 import java.net.ServerSocket;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import javax.net.ssl.SSLSession;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import tools.jackson.databind.DeserializationFeature;
@@ -48,8 +41,8 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>Three layers exercised here:
  *
  * <ol>
- *   <li>{@link AnthropicStreamingIterator} preserves the {@code IOException} as {@link
- *       StreamEvent.Error#cause()} after a partial SSE prefix has been delivered.
+ *   <li>{@link SseReader} preserves the {@code IOException} as {@link StreamEvent.Error#cause()}
+ *       after a partial SSE prefix has been delivered.
  *   <li>{@link AnthropicModel#chat(List, List)} promotes the iterator's {@code
  *       StreamEvent.Error(IOException)} to a {@link TransientStreamException} (instead of the old
  *       opaque {@link AnthropicException}), so the session loop can identify it without depending
@@ -99,8 +92,11 @@ class StreamReadErrorCausePreservationReproTest {
             });
 
     try (var iterator =
-        new AnthropicStreamingIterator(
-            fakeResponse(failingStream), objectMapper, Duration.ofSeconds(5))) {
+        new SseReader(
+            failingStream,
+            Duration.ofSeconds(5),
+            new AnthropicStreamParser(),
+            AnthropicException::new)) {
       assertTrue(iterator.hasNext());
       assertInstanceOf(StreamEvent.TextDelta.class, iterator.next());
 
@@ -123,7 +119,8 @@ class StreamReadErrorCausePreservationReproTest {
     InputStream stream = new ByteArrayInputStream(apiErrorJson.getBytes(StandardCharsets.UTF_8));
 
     try (var iterator =
-        new AnthropicStreamingIterator(fakeResponse(stream), objectMapper, Duration.ofSeconds(5))) {
+        new SseReader(
+            stream, Duration.ofSeconds(5), new AnthropicStreamParser(), AnthropicException::new)) {
       assertTrue(iterator.hasNext());
       var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().startsWith("API stream error:"));
@@ -225,18 +222,19 @@ class StreamReadErrorCausePreservationReproTest {
             + "\",\"message\":\"failed\"}}\n\n";
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5_5, config);
-    var request = model.buildRequest(List.of(Message.user("hi")), List.<Tool>of(), null);
+    var request = model.requests.build(List.of(Message.user("hi")), List.<Tool>of(), null);
     return org.junit.jupiter.api.Assertions.assertThrows(
         RuntimeException.class,
         () ->
-            model.drainWithContinuation(
-                request,
-                ignored ->
-                    new AnthropicStreamingIterator(
-                        fakeResponse(
-                            new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8))),
-                        objectMapper,
-                        Duration.ofSeconds(5))));
+            new PauseContinuation(
+                    model.exchange,
+                    ignored ->
+                        new SseReader(
+                            new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)),
+                            Duration.ofSeconds(5),
+                            new AnthropicStreamParser(),
+                            AnthropicException::new))
+                .drain(request));
   }
 
   @org.junit.jupiter.api.Test
@@ -266,7 +264,8 @@ class StreamReadErrorCausePreservationReproTest {
     InputStream stream = new ByteArrayInputStream(malformed.getBytes(StandardCharsets.UTF_8));
 
     try (var iterator =
-        new AnthropicStreamingIterator(fakeResponse(stream), objectMapper, Duration.ofSeconds(5))) {
+        new SseReader(
+            stream, Duration.ofSeconds(5), new AnthropicStreamParser(), AnthropicException::new)) {
       assertTrue(iterator.hasNext());
       var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().contains("Failed to parse"));
@@ -276,49 +275,5 @@ class StreamReadErrorCausePreservationReproTest {
           "the parse failure is a Jackson exception, not an IOException — only IOExceptions"
               + " get promoted to TransientStreamException for retry");
     }
-  }
-
-  private static HttpResponse<InputStream> fakeResponse(InputStream body) {
-    return new HttpResponse<>() {
-      @Override
-      public int statusCode() {
-        return 200;
-      }
-
-      @Override
-      public HttpHeaders headers() {
-        return HttpHeaders.of(Map.of(), (a, b) -> true);
-      }
-
-      @Override
-      public InputStream body() {
-        return body;
-      }
-
-      @Override
-      public Optional<HttpResponse<InputStream>> previousResponse() {
-        return Optional.empty();
-      }
-
-      @Override
-      public HttpRequest request() {
-        return null;
-      }
-
-      @Override
-      public URI uri() {
-        return URI.create("https://test");
-      }
-
-      @Override
-      public HttpClient.Version version() {
-        return HttpClient.Version.HTTP_2;
-      }
-
-      @Override
-      public Optional<SSLSession> sslSession() {
-        return Optional.empty();
-      }
-    };
   }
 }

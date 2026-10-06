@@ -189,7 +189,7 @@ class AnthropicModelIntegrationTest {
     assertFalse(response.thinking().isBlank(), "Thinking should not be empty");
 
     assertFalse(
-        AnthropicModel.decodeThinkingBlocks(response.metadata()).isEmpty(),
+        ThinkingBlock.decodeAll(response.metadata()).isEmpty(),
         "Expected a signed thinking block in metadata");
   }
 
