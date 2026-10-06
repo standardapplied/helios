@@ -23,11 +23,11 @@ import java.util.Map;
  * and states what was expected, so the model can correct its next attempt without parsing schema
  * syntax.
  *
- * <p>Used by each provider's structured-output parse path ({@code parseStructuredContent} in {@code
- * AnthropicModel}, {@code GeminiModel}, {@code OpenAIModel}) which runs this against the
- * deserialized response Map before Jackson type-coerces; failures throw a {@link
- * StructuredOutputParseException} carrying the diff so the session loop can inject a corrective
- * USER message and retry instead of terminating.
+ * <p>Used by every provider's structured-output parse path ({@link StructuredContentParser}, which
+ * {@code core.provider.StreamingModel} runs on a drained turn) against the deserialized response
+ * Map before Jackson type-coerces; failures throw a {@link StructuredOutputParseException} carrying
+ * the diff so the session loop can inject a corrective USER message and retry instead of
+ * terminating.
  */
 public final class SchemaValidator {
 

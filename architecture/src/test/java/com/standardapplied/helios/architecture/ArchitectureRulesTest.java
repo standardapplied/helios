@@ -20,6 +20,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMembers;
 import static com.tngtech.archunit.library.GeneralCodingRules.ACCESS_STANDARD_STREAMS;
 
+import com.standardapplied.helios.core.model.Model;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
@@ -156,6 +157,20 @@ class ArchitectureRulesTest {
             "a provider module builds each Jackson mapper configuration once, in its api."
                 + holder
                 + " holder, and every other class takes the mapper from there")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void providersServeTheirModelsThroughStreamingModel() {
+    noClasses()
+        .that()
+        .resideInAnyPackage(PROVIDERS)
+        .should()
+        .beAssignableTo(Model.class)
+        .because(
+            "a streaming provider's Model is a core.provider.StreamingModel assembled from the"
+                + " provider's request factory, exchange and JSON binding, so chat, structured"
+                + " chat, streaming and close are written once for every provider")
         .check(LIBRARY);
   }
 
