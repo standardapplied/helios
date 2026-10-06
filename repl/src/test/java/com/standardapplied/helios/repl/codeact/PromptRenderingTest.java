@@ -13,6 +13,7 @@ import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.host.HostParameter;
+import com.standardapplied.helios.repl.sandbox.SandboxPrelude;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -140,6 +141,61 @@ final class PromptRenderingTest {
     var rendered = sb.toString();
     assertTrue(rendered.contains("required (String) — required field"));
     assertTrue(rendered.contains("optional (String) [optional] — optional field"));
+  }
+
+  @Test
+  void appendFieldsHandlesAnOutputSchemaWithoutAJsonSchema() {
+    var sb = new StringBuilder();
+    PromptRendering.appendFields(sb, new OutputSchema<>(Map.class, null, null, null, null));
+    assertEquals("", sb.toString());
+  }
+
+  @Test
+  void appendFieldsWithoutARequiredListMarksEveryFieldOptional() {
+    var schema =
+        new JsonSchema(
+            "object", Map.of("topic", JsonSchema.string()), null, null, null, null, null, null);
+    var sb = new StringBuilder();
+    PromptRendering.appendFields(sb, new OutputSchema<>(Map.class, schema, null, null, null));
+    assertEquals("  - topic (String) [optional]\n", sb.toString());
+  }
+
+  @Test
+  void appendCustomHostFunctionsRendersTheHeaderOnceAndMarksOptionalParameters() {
+    var quote =
+        new HostFunction(
+            "marketQuote",
+            "Looks up a market price",
+            List.of(
+                HostParameter.required("ticker", ParameterType.STRING, "Symbol"),
+                HostParameter.optional("venue", ParameterType.STRING, "Exchange")),
+            params -> "x");
+    var ping = new HostFunction("ping", "Checks the host", params -> "pong");
+    var sb = new StringBuilder();
+    PromptRendering.appendCustomHostFunctions(sb, List.of(quote, ping));
+    assertEquals(
+        "\nCustom host functions registered for this run:\n"
+            + "  - "
+            + SandboxPrelude.formatSignature(quote)
+            + " — Looks up a market price\n"
+            + "      ticker (string) — Symbol\n"
+            + "      [optional] venue (string) — Exchange\n"
+            + "  - "
+            + SandboxPrelude.formatSignature(ping)
+            + " — Checks the host\n",
+        sb.toString());
+  }
+
+  @Test
+  void describeReturnsAnyForASchemaWithoutAType() {
+    var schema = new JsonSchema(null, null, null, null, null, null, null, null);
+    assertEquals("any", PromptRendering.describe(schema));
+  }
+
+  @Test
+  void describeRendersAStringWithAnEmptyEnumAsString() {
+    var schema = new JsonSchema("string", null, null, null, List.of(), null, null, null);
+    assertEquals("String", PromptRendering.describe(schema));
   }
 
   @Test

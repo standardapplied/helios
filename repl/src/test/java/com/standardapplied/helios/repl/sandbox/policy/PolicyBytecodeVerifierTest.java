@@ -816,6 +816,19 @@ class PolicyBytecodeVerifierTest {
   }
 
   @Test
+  void denyFileSystemAccessLeavesAFileClassLiteralLoadable() {
+    var bytes =
+        buildTestClass(
+            code -> {
+              code.ldc(ClassDesc.of("java.io.File"));
+              code.pop();
+            });
+    var policy = SandboxPolicy.newBuilder().withDenyFileSystemAccess(true).build();
+
+    assertDoesNotThrow(() -> new PolicyBytecodeVerifier(policy).verify("Test", bytes));
+  }
+
+  @Test
   void denyFileSystemAccessOffLeavesEveryFileSystemPathOpen() {
     // Sanity: the flag must be opt-in. Permissive baseline doesn't deny these.
     var CD_Path = ClassDesc.of("java.nio.file.Path");

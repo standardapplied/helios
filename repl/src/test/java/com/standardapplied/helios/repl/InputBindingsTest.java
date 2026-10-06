@@ -322,4 +322,17 @@ class InputBindingsTest {
         snippet.contains("var count = (java.lang.Integer) __input.get(\"count\");"),
         "simple sibling field unaffected");
   }
+
+  @Test
+  void snippetCastsArraysOfNameableTypesAndBindsTheRestUncast() {
+    record ArrayShapes<T>(int[] ids, String[][] grid, Stats[] stats, T anything) {}
+
+    assertEquals(
+        "var __input = com.standardapplied.helios.repl.sandbox.HostBridge.getInput();\n"
+            + "var ids = (java.lang.Integer[]) __input.get(\"ids\");\n"
+            + "var grid = (java.lang.String[][]) __input.get(\"grid\");\n"
+            + "var stats = __input.get(\"stats\");\n"
+            + "var anything = __input.get(\"anything\");\n",
+        InputBindings.snippet(ArrayShapes.class));
+  }
 }
