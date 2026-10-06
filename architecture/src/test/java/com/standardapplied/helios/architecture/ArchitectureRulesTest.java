@@ -37,6 +37,9 @@ import java.net.http.HttpClient;
 import java.nio.file.Files;
 import java.time.Clock;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.SubmissionPublisher;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -70,6 +73,15 @@ class ArchitectureRulesTest {
 
   /** The one visitor that walks the workspace for the session file tools. */
   private static final String WORKSPACE_WALK = HELIOS + ".session.files.WorkspaceWalk";
+
+  /** The one class in the session module that builds a Jackson mapper. */
+  private static final String SESSION_JSON = HELIOS + ".session.SessionJson";
+
+  /** The one owner of the session's event fan-out. */
+  private static final String SESSION_EVENT_PUBLISHER = HELIOS + ".session.SessionEventPublisher";
+
+  /** The one owner of the session's start-up and shutdown. */
+  private static final String SESSION_LIFECYCLE = HELIOS + ".session.SessionLifecycle";
 
   /** The one launcher outside core.process: the REPL sandbox starts its own JVM. */
   private static final String SANDBOX_LAUNCHER = HELIOS + ".repl.sandbox.JvmSandbox";
@@ -157,6 +169,69 @@ class ArchitectureRulesTest {
             "a provider module builds each Jackson mapper configuration once, in its api."
                 + holder
                 + " holder, and every other class takes the mapper from there")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void sessionBuildsAJsonMapperOnlyInSessionJson() {
+    noClasses()
+        .that()
+        .resideInAPackage(HELIOS + ".session..")
+        .and(not(name(SESSION_JSON).or(nameStartingWith(SESSION_JSON + "$"))))
+        .should()
+        .accessTargetWhere(
+            targetOwner(name(JSON_MAPPER))
+                .and(target(name("builder").or(name("shared"))))
+                .or(
+                    targetOwner(name(JSON_MAPPER).or(name(OBJECT_MAPPER)))
+                        .and(target(name(JavaConstructor.CONSTRUCTOR_NAME)))))
+        .because(
+            "the session module builds its one Jackson mapper in session.SessionJson, and every"
+                + " other class reads JSON through the binding it holds")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void submissionPublisherIsUsedOnlyBySessionEventPublisher() {
+    noClasses()
+        .that(
+            not(name(SESSION_EVENT_PUBLISHER).or(nameStartingWith(SESSION_EVENT_PUBLISHER + "$"))))
+        .should()
+        .dependOnClassesThat(type(SubmissionPublisher.class))
+        .because(
+            "a session's events fan out through session.SessionEventPublisher, which owns the"
+                + " SubmissionPublisher, its executor, the bounded wait on a slow subscriber and"
+                + " the replay of the terminal event")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void sessionExecutorsAreCreatedOnlyByTheEventPublisherAndTheLifecycle() {
+    noClasses()
+        .that()
+        .resideInAPackage(HELIOS + ".session..")
+        .and()
+        .resideOutsideOfPackages(
+            HELIOS + ".session.files..",
+            HELIOS + ".session.memory..",
+            HELIOS + ".session.execution..")
+        .and(
+            not(
+                name(SESSION_EVENT_PUBLISHER)
+                    .or(nameStartingWith(SESSION_EVENT_PUBLISHER + "$"))
+                    .or(name(SESSION_LIFECYCLE))
+                    .or(nameStartingWith(SESSION_LIFECYCLE + "$"))))
+        .should()
+        .accessTargetWhere(
+            targetOwner(type(Executors.class))
+                .and(target(nameStartingWith("new")))
+                .or(
+                    targetOwner(assignableTo(ExecutorService.class))
+                        .and(target(name(JavaConstructor.CONSTRUCTOR_NAME)))))
+        .because(
+            "every pool a session owns has one owner that shuts it down: the event executor is"
+                + " session.SessionEventPublisher's and the deadline scheduler is"
+                + " session.SessionLifecycle's; every other class is handed the pool it uses")
         .check(LIBRARY);
   }
 

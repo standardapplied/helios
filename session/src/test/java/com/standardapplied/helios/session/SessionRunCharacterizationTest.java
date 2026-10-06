@@ -159,8 +159,9 @@ class SessionRunCharacterizationTest {
 
   private static void assertShutDown(AgentSession session) {
     var impl = (AgentSessionImpl) session;
-    assertTrue(impl.publisherExecutorForTests().isShutdown(), "publisher executor shut down");
-    assertTrue(impl.deadlineSchedulerForTests().isShutdown(), "deadline scheduler shut down");
+    assertTrue(
+        impl.lifecycleForTests().publisherExecutor().isShutdown(), "publisher executor shut down");
+    assertTrue(impl.lifecycleForTests().scheduler().isShutdown(), "deadline scheduler shut down");
   }
 
   private static final List<String> EXPECTED_EVENTS =

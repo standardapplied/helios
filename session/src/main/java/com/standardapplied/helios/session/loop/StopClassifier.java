@@ -79,17 +79,17 @@ public final class StopClassifier {
     if (state.elapsed().compareTo(limits.maxWallClock()) > 0) {
       return Optional.of(
           new ResultMessage.ErrorMaxWallClock(
-              state.sessionId(), state.usage(), state.cost(), state.elapsed()));
+              state.sessionId(), state.totals().usage(), state.totals().cost(), state.elapsed()));
     }
 
     if (limits.maxBudgetMicroUsd().isPresent()
-        && state.cost().microUsd() > limits.maxBudgetMicroUsd().getAsLong()) {
+        && state.totals().cost().microUsd() > limits.maxBudgetMicroUsd().getAsLong()) {
       return Optional.of(
           new ResultMessage.ErrorMaxBudgetUsd(
               state.sessionId(),
-              state.cost().microUsd(),
-              state.usage(),
-              state.cost(),
+              state.totals().cost().microUsd(),
+              state.totals().usage(),
+              state.totals().cost(),
               state.elapsed()));
     }
 
@@ -98,8 +98,8 @@ public final class StopClassifier {
           new ResultMessage.Cancelled(
               state.sessionId(),
               state.cancellation().reason().orElseThrow(),
-              state.usage(),
-              state.cost(),
+              state.totals().usage(),
+              state.totals().cost(),
               state.elapsed()));
     }
 
@@ -108,8 +108,8 @@ public final class StopClassifier {
           new ResultMessage.ErrorMaxTurns(
               state.sessionId(),
               Math.toIntExact(state.currentTurnIndex()),
-              state.usage(),
-              state.cost(),
+              state.totals().usage(),
+              state.totals().cost(),
               state.elapsed()));
     }
 
@@ -126,10 +126,10 @@ public final class StopClassifier {
                   new ResultMessage.Success(
                       state.sessionId(),
                       assistantContent,
-                      state.usage(),
-                      state.cost(),
+                      state.totals().usage(),
+                      state.totals().cost(),
                       state.elapsed(),
-                      state.citations()));
+                      state.totals().citations()));
       case LENGTH ->
           Optional.of(
               new ResultMessage.ErrorDuringExecution(
@@ -140,8 +140,8 @@ public final class StopClassifier {
                           + (Strings.isBlank(assistantContent)
                               ? ""
                               : "; partial content: " + assistantContent)),
-                  state.usage(),
-                  state.cost(),
+                  state.totals().usage(),
+                  state.totals().cost(),
                   state.elapsed()));
       case TOOL_CALLS -> Optional.empty();
     };
@@ -159,8 +159,8 @@ public final class StopClassifier {
         state.sessionId(),
         Strings.orDefault(
             explanation, Strings.orDefault(outcome.assistantContent(), "[refused without text]")),
-        state.usage(),
-        state.cost(),
+        state.totals().usage(),
+        state.totals().cost(),
         state.elapsed(),
         outcome.metadata().get(Response.REFUSAL_CATEGORY_KEY));
   }
@@ -194,16 +194,16 @@ public final class StopClassifier {
           tse.providerName(),
           streamAttempts,
           SerializedError.of(tse),
-          state.usage(),
-          state.cost(),
+          state.totals().usage(),
+          state.totals().cost(),
           state.elapsed());
     }
     if (streamError != null) {
       return new ResultMessage.ErrorDuringExecution(
           state.sessionId(),
           SerializedError.of(streamError),
-          state.usage(),
-          state.cost(),
+          state.totals().usage(),
+          state.totals().cost(),
           state.elapsed());
     }
     return new ResultMessage.ErrorDuringExecution(
@@ -211,8 +211,8 @@ public final class StopClassifier {
         SerializedError.of(
             "ProviderError",
             Strings.isBlank(assistantContent) ? "provider reported ERROR" : assistantContent),
-        state.usage(),
-        state.cost(),
+        state.totals().usage(),
+        state.totals().cost(),
         state.elapsed());
   }
 }
