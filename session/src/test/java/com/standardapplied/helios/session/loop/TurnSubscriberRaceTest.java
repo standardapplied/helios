@@ -29,8 +29,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unit coverage for the race-handling guards in {@link TurnSubscriber#armIdleTimer()} — the paths
- * the end-to-end {@link com.standardapplied.helios.session.AgentSessionStreamIdleTest} can't reach
+ * Unit coverage for the race-handling guards in {@link IdleWatchdog#arm()} — the paths the
+ * end-to-end {@link com.standardapplied.helios.session.AgentSessionStreamIdleTest} can't reach
  * deterministically because they depend on the relative ordering of producer / scheduler / runner
  * threads.
  *
@@ -68,7 +68,7 @@ final class TurnSubscriberRaceTest {
     assertEquals(
         scheduledAtArm,
         scheduler.scheduleCount.get(),
-        "armIdleTimer after onComplete must not schedule a new task");
+        "arm after onComplete must not schedule a new task");
   }
 
   @Test
@@ -85,7 +85,7 @@ final class TurnSubscriberRaceTest {
     assertEquals(
         scheduledBeforeRace,
         scheduler.scheduleCount.get(),
-        "armIdleTimer after onError must not schedule a new task");
+        "arm after onError must not schedule a new task");
   }
 
   @Test
