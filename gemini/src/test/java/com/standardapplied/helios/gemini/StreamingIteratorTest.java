@@ -104,7 +104,7 @@ class StreamingIteratorTest {
       var done = (StreamEvent.Done) events.get(1);
       assertEquals("Hello", done.response().content());
       assertEquals(FinishReason.STOP, done.response().finishReason());
-      assertEquals("int_xyz", done.response().metadata().get(GeminiModel.INTERACTION_ID_KEY));
+      assertEquals("int_xyz", done.response().metadata().get(ContinuationPoint.INTERACTION_ID_KEY));
     }
   }
 
@@ -206,8 +206,8 @@ class StreamingIteratorTest {
       assertTrue(done.response().thinking().contains("thinking..."));
 
       var metadata = done.response().metadata();
-      assertTrue(metadata.containsKey(GeminiModel.THOUGHT_SIGNATURES_KEY));
-      assertEquals("sig123", metadata.get(GeminiModel.THOUGHT_SIGNATURES_KEY));
+      assertTrue(metadata.containsKey(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
+      assertEquals("sig123", metadata.get(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
     }
   }
 
@@ -227,7 +227,7 @@ class StreamingIteratorTest {
       }
       var done = (StreamEvent.Done) events.getLast();
       var metadata = done.response().metadata();
-      assertEquals("sig456", metadata.get(GeminiModel.THOUGHT_SIGNATURES_KEY));
+      assertEquals("sig456", metadata.get(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
       assertNull(done.response().thinking());
     }
   }
@@ -256,9 +256,9 @@ class StreamingIteratorTest {
       var done = (StreamEvent.Done) events.getLast();
       var metadata = done.response().metadata();
       assertTrue(
-          metadata.containsKey(GeminiModel.THOUGHT_SIGNATURES_KEY),
+          metadata.containsKey(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY),
           "Expected thought_signature step.delta to be captured");
-      assertEquals("wireSig", metadata.get(GeminiModel.THOUGHT_SIGNATURES_KEY));
+      assertEquals("wireSig", metadata.get(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
     }
   }
 
@@ -278,7 +278,8 @@ class StreamingIteratorTest {
         events.add(iterator.next());
       }
       var done = (StreamEvent.Done) events.getLast();
-      assertFalse(done.response().metadata().containsKey(GeminiModel.THOUGHT_SIGNATURES_KEY));
+      assertFalse(
+          done.response().metadata().containsKey(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
     }
   }
 
@@ -386,7 +387,7 @@ class StreamingIteratorTest {
       assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
       assertInstanceOf(StreamEvent.Done.class, events.get(1));
       var done = (StreamEvent.Done) events.get(1);
-      assertEquals("int_xyz", done.response().metadata().get(GeminiModel.INTERACTION_ID_KEY));
+      assertEquals("int_xyz", done.response().metadata().get(ContinuationPoint.INTERACTION_ID_KEY));
     }
   }
 
@@ -569,7 +570,7 @@ class StreamingIteratorTest {
         new SseReader(
             neverDelivers,
             SHORT_IDLE_TIMEOUT,
-            new GeminiStreamParser(true, GeminiModel.DEFAULT_API_VERSION),
+            new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
             GeminiException::new)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
@@ -828,7 +829,7 @@ class StreamingIteratorTest {
       var done = (StreamEvent.Done) events.getFirst();
       assertEquals(FinishReason.STOP, done.response().finishReason());
       assertNull(done.response().usage());
-      assertFalse(done.response().metadata().containsKey(GeminiModel.INTERACTION_ID_KEY));
+      assertFalse(done.response().metadata().containsKey(ContinuationPoint.INTERACTION_ID_KEY));
     }
   }
 
@@ -841,7 +842,7 @@ class StreamingIteratorTest {
         events.add(iterator.next());
       }
       var done = (StreamEvent.Done) events.getFirst();
-      assertFalse(done.response().metadata().containsKey(GeminiModel.INTERACTION_ID_KEY));
+      assertFalse(done.response().metadata().containsKey(ContinuationPoint.INTERACTION_ID_KEY));
     }
   }
 
@@ -1007,7 +1008,8 @@ class StreamingIteratorTest {
         events.add(iterator.next());
       }
       var done = (StreamEvent.Done) events.getLast();
-      assertFalse(done.response().metadata().containsKey(GeminiModel.THOUGHT_SIGNATURES_KEY));
+      assertFalse(
+          done.response().metadata().containsKey(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
     }
   }
 
@@ -1137,7 +1139,8 @@ class StreamingIteratorTest {
       }
       var done = (StreamEvent.Done) events.getLast();
       assertEquals("inner", done.response().thinking());
-      assertFalse(done.response().metadata().containsKey(GeminiModel.THOUGHT_SIGNATURES_KEY));
+      assertFalse(
+          done.response().metadata().containsKey(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
     }
   }
 
@@ -1194,7 +1197,7 @@ class StreamingIteratorTest {
         new SseReader(
             failingClose,
             NEVER_IDLE,
-            new GeminiStreamParser(true, GeminiModel.DEFAULT_API_VERSION),
+            new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
             GeminiException::new);
     // Drain so the iterator reaches Done and then closes itself.
     while (iterator.hasNext()) {
@@ -1315,7 +1318,7 @@ class StreamingIteratorTest {
       var done = (StreamEvent.Done) events.getFirst();
       assertEquals(
           "int_status",
-          done.response().metadata().get(GeminiModel.INTERACTION_ID_KEY),
+          done.response().metadata().get(ContinuationPoint.INTERACTION_ID_KEY),
           "status_update must capture interaction_id");
     }
   }
@@ -1352,8 +1355,9 @@ class StreamingIteratorTest {
         events.add(iterator.next());
       }
       var done = (StreamEvent.Done) events.getLast();
-      assertFalse(done.response().metadata().containsKey(GeminiModel.INTERACTION_ID_KEY));
-      assertEquals("v1beta", done.response().metadata().get(GeminiModel.API_VERSION_KEY));
+      assertFalse(done.response().metadata().containsKey(ContinuationPoint.INTERACTION_ID_KEY));
+      assertEquals(
+          "v1beta", done.response().metadata().get(GeminiResponseAssembler.API_VERSION_KEY));
       assertFalse(done.response().metadata().containsValue("interaction-secret"));
     }
   }
@@ -1395,7 +1399,7 @@ class StreamingIteratorTest {
         new SseReader(
             failingStream,
             NEVER_IDLE,
-            new GeminiStreamParser(true, GeminiModel.DEFAULT_API_VERSION),
+            new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
             GeminiException::new)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
@@ -1418,7 +1422,7 @@ class StreamingIteratorTest {
         new SseReader(
             failingStream,
             NEVER_IDLE,
-            new GeminiStreamParser(true, GeminiModel.DEFAULT_API_VERSION),
+            new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
             GeminiException::new)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
@@ -1439,7 +1443,7 @@ class StreamingIteratorTest {
                   new SseReader(
                       neverDelivers,
                       NEVER_IDLE,
-                      new GeminiStreamParser(true, GeminiModel.DEFAULT_API_VERSION),
+                      new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
                       GeminiException::new)) {
                 while (iterator.hasNext()) {
                   events.add(iterator.next());
@@ -1459,7 +1463,7 @@ class StreamingIteratorTest {
     return new SseReader(
         inputStream,
         idleTimeout,
-        new GeminiStreamParser(true, GeminiModel.DEFAULT_API_VERSION),
+        new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
         GeminiException::new);
   }
 }

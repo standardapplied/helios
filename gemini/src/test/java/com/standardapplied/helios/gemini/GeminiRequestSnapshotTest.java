@@ -39,7 +39,8 @@ class GeminiRequestSnapshotTest {
 
   private static final Map<String, String> THOUGHTS =
       Map.of(
-          GeminiModel.THOUGHT_SIGNATURES_KEY, "sig-1" + GeminiModel.SIGNATURE_DELIMITER + "sig-2");
+          GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY,
+          "sig-1" + GeminiResponseAssembler.SIGNATURE_DELIMITER + "sig-2");
 
   private final Map<String, Object> snapshots = new LinkedHashMap<>();
 
@@ -99,7 +100,7 @@ class GeminiRequestSnapshotTest {
 
   private static Consumer<Model> continuation() {
     var metadata = new LinkedHashMap<>(THOUGHTS);
-    metadata.put(GeminiModel.INTERACTION_ID_KEY, "int_prev");
+    metadata.put(ContinuationPoint.INTERACTION_ID_KEY, "int_prev");
     return model -> {
       var history = new ArrayList<>(ConversationFixture.history(metadata));
       history.add(Message.user("And Berlin?"));
@@ -112,6 +113,7 @@ class GeminiRequestSnapshotTest {
   }
 
   private static Function<URI, Model> modelAt(GeminiModelId id, ModelConfig.Builder settings) {
-    return uri -> new GeminiModel(id, settings.withBaseUrl(uri + "/v1beta").build());
+    return uri ->
+        new GeminiProvider().create(id.id(), settings.withBaseUrl(uri + "/v1beta").build());
   }
 }

@@ -17,17 +17,20 @@ import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.FileReference;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.core.schema.StructuredContentParser;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.gemini.api.ContentItem;
+import com.standardapplied.helios.gemini.api.GeminiJson;
 import com.standardapplied.helios.gemini.api.OutputAnnotation;
 import com.standardapplied.helios.gemini.api.Step;
 import java.io.BufferedReader;
@@ -47,15 +50,15 @@ class GeminiModelTest {
 
   @Test
   void thoughtSignatureDelimiterIsRecordSeparator() {
-    assertEquals("", GeminiModel.SIGNATURE_DELIMITER);
+    assertEquals("", GeminiResponseAssembler.SIGNATURE_DELIMITER);
   }
 
   @Test
   void thoughtSignaturesRoundTripWithNewlines() {
     var signatures = List.of("abc123", "sig\nwith\nnewlines", "def456");
 
-    var joined = String.join(GeminiModel.SIGNATURE_DELIMITER, signatures);
-    var split = joined.split(GeminiModel.SIGNATURE_DELIMITER);
+    var joined = String.join(GeminiResponseAssembler.SIGNATURE_DELIMITER, signatures);
+    var split = joined.split(GeminiResponseAssembler.SIGNATURE_DELIMITER);
 
     assertArrayEquals(signatures.toArray(), split);
   }
@@ -64,56 +67,54 @@ class GeminiModelTest {
   void thoughtSignaturesRoundTripSingleSignature() {
     var signatures = List.of("single-sig");
 
-    var joined = String.join(GeminiModel.SIGNATURE_DELIMITER, signatures);
-    var split = joined.split(GeminiModel.SIGNATURE_DELIMITER);
+    var joined = String.join(GeminiResponseAssembler.SIGNATURE_DELIMITER, signatures);
+    var split = joined.split(GeminiResponseAssembler.SIGNATURE_DELIMITER);
 
     assertArrayEquals(signatures.toArray(), split);
   }
 
   @Test
   void thoughtSignatureDelimiterDoesNotAppearInBase64() {
-    assertFalse("aGVsbG8gd29ybGQ=".contains(GeminiModel.SIGNATURE_DELIMITER));
+    assertFalse("aGVsbG8gd29ybGQ=".contains(GeminiResponseAssembler.SIGNATURE_DELIMITER));
   }
 
   @Test
   void constructorRequiresModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    assertThrows(IllegalArgumentException.class, () -> new GeminiModel(null, config));
+    assertThrows(IllegalArgumentException.class, () -> new GeminiProvider().create(null, config));
   }
 
   @Test
   void constructorRequiresConfig() {
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, null));
+        IllegalArgumentException.class, () -> create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, null));
   }
 
   @Test
   void constructorRequiresApiKey() {
     var config = ModelConfig.newBuilder().build();
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config));
+        IllegalArgumentException.class, () -> create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config));
   }
 
   @Test
   void idReturnsModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     assertEquals(GeminiModelId.GEMINI_3_FLASH_PREVIEW.id(), model.id());
   }
 
   @Test
   void providerReturnsGemini() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     assertEquals("gemini", model.provider());
   }
 
   @Test
   void contextWindowReturnsModelValueByDefault() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     assertEquals(GeminiModelId.GEMINI_3_FLASH_PREVIEW.contextWindow(), model.contextWindow());
   }
 
@@ -121,7 +122,7 @@ class GeminiModelTest {
   void contextWindowConfigOverrideWins() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withContextWindow(2_000_000).build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     assertEquals(2_000_000, model.contextWindow());
   }
 
@@ -223,28 +224,22 @@ class GeminiModelTest {
 
   @Test
   void defaultBaseUrlUsesStableInteractionsApi() {
-    assertEquals("https://generativelanguage.googleapis.com", GeminiModel.DEFAULT_API_ROOT);
+    assertEquals("https://generativelanguage.googleapis.com", GeminiEndpoint.DEFAULT_API_ROOT);
   }
 
   @Test
   void configuredApiVersionsResolveToCanonicalStableAndBetaEndpoints() {
-    var stable =
-        new GeminiModel(
-            GeminiModelId.GEMINI_3_7_FLASH,
-            ModelConfig.newBuilder().withApiKey("key").withApiVersion("v1").build());
-    var beta =
-        new GeminiModel(
-            GeminiModelId.GEMINI_3_7_FLASH,
-            ModelConfig.newBuilder().withApiKey("key").withApiVersion("v1beta").build());
+    var stable = ModelConfig.newBuilder().withApiKey("key").withApiVersion("v1").build();
+    var beta = ModelConfig.newBuilder().withApiKey("key").withApiVersion("v1beta").build();
 
     assertEquals(
         "https://generativelanguage.googleapis.com/v1/interactions?alt=sse",
-        stable.streams.httpRequest("{}").uri().toString());
+        streams(stable).httpRequest("{}").uri().toString());
     assertEquals(
         "https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse",
-        beta.streams.httpRequest("{}").uri().toString());
-    assertEquals("v1", stable.apiVersion());
-    assertEquals("v1beta", beta.apiVersion());
+        streams(beta).httpRequest("{}").uri().toString());
+    assertEquals("v1", GeminiEndpoint.of(stable).apiVersion());
+    assertEquals("v1beta", GeminiEndpoint.of(beta).apiVersion());
   }
 
   @Test
@@ -254,7 +249,7 @@ class GeminiModelTest {
       var error =
           assertThrows(
               IllegalArgumentException.class,
-              () -> new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, config),
+              () -> create(GeminiModelId.GEMINI_3_7_FLASH, config),
               value);
       assertTrue(error.getMessage().contains("apiVersion"));
       assertFalse(error.getMessage().contains("secret"));
@@ -270,11 +265,10 @@ class GeminiModelTest {
     var temperatureError =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, withTemperature));
+            () -> create(GeminiModelId.GEMINI_3_7_FLASH, withTemperature));
     var topPError =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, withTopP));
+            IllegalArgumentException.class, () -> create(GeminiModelId.GEMINI_3_7_FLASH, withTopP));
 
     assertTrue(temperatureError.getMessage().contains("temperature"));
     assertTrue(topPError.getMessage().contains("topP"));
@@ -283,7 +277,7 @@ class GeminiModelTest {
   @Test
   void urlContextWithFunctionToolsThrows() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").withWebFetch(true).build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
 
     var tool =
         Tool.newBuilder()
@@ -304,9 +298,9 @@ class GeminiModelTest {
     assertThrows(IllegalStateException.class, () -> model.chat(messages, List.of(tool)));
   }
 
-  private GeminiModel createModel() {
+  private static Model createModel() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    return new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    return create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
   }
 
   // --- convertMessages: every TOOL message becomes its own function_result step ---
@@ -379,7 +373,7 @@ class GeminiModelTest {
   @Test
   void convertMessagesEmitsThoughtStepsBeforeFunctionCalls() {
     var model = createModel();
-    var sigs = "sig-a" + GeminiModel.SIGNATURE_DELIMITER + "sig-b";
+    var sigs = "sig-a" + GeminiResponseAssembler.SIGNATURE_DELIMITER + "sig-b";
     var msgWithSigs =
         Message.assistant(
             null,
@@ -389,7 +383,7 @@ class GeminiModelTest {
                     .withName("search")
                     .withArguments(Map.of("q", "x"))
                     .build()),
-            Map.of(GeminiModel.THOUGHT_SIGNATURES_KEY, sigs));
+            Map.of(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY, sigs));
     var messages = List.of(Message.user("Hi"), msgWithSigs, Message.tool("c1", "search", "ok"));
 
     var converted = GeminiConversation.of(messages);
@@ -571,7 +565,7 @@ class GeminiModelTest {
 
   @Test
   void findContinuationPointFindsLastAssistantWithId() {
-    var metadata = Map.of(GeminiModel.INTERACTION_ID_KEY, "interaction-123");
+    var metadata = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "interaction-123");
     var messages =
         List.of(
             Message.user("Hello"),
@@ -587,8 +581,8 @@ class GeminiModelTest {
 
   @Test
   void findContinuationPointPicksLastOfMultipleAssistants() {
-    var meta1 = Map.of(GeminiModel.INTERACTION_ID_KEY, "interaction-1");
-    var meta2 = Map.of(GeminiModel.INTERACTION_ID_KEY, "interaction-2");
+    var meta1 = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "interaction-1");
+    var meta2 = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "interaction-2");
     var messages =
         List.of(
             Message.user("Hello"),
@@ -606,7 +600,7 @@ class GeminiModelTest {
 
   @Test
   void findContinuationPointSkipsAssistantWithEmptyId() {
-    var metadata = Map.of(GeminiModel.INTERACTION_ID_KEY, "");
+    var metadata = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "");
     var messages = List.of(Message.user("Hello"), Message.assistant("Hi", List.of(), metadata));
 
     var result = ContinuationPoint.find(messages);
@@ -623,7 +617,7 @@ class GeminiModelTest {
                 .withName("search")
                 .withArguments(Map.of("q", "test"))
                 .build());
-    var metadata = Map.of(GeminiModel.INTERACTION_ID_KEY, "interaction-456");
+    var metadata = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "interaction-456");
     var messages =
         List.of(
             Message.user("Search for something"),
@@ -748,7 +742,7 @@ class GeminiModelTest {
 
   @Test
   void interactionIdKeyConstant() {
-    assertEquals("gemini.interactionId", GeminiModel.INTERACTION_ID_KEY);
+    assertEquals("gemini.interactionId", ContinuationPoint.INTERACTION_ID_KEY);
   }
 
   @Test
@@ -760,8 +754,8 @@ class GeminiModelTest {
 
   @Test
   void buildRequestContinuationIncludesSystemInstruction() {
-    var model = createModel();
-    var metadata = Map.of(GeminiModel.INTERACTION_ID_KEY, "int-abc");
+    var requests = defaultRequests();
+    var metadata = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "int-abc");
     var toolCalls =
         List.of(
             ToolCall.newBuilder()
@@ -776,7 +770,7 @@ class GeminiModelTest {
             Message.assistant(null, toolCalls, metadata),
             Message.tool("c1", "search", "found it"));
 
-    var request = model.requests.build(messages, null, null);
+    var request = requests.build(messages, null, null);
 
     assertNotNull(request.previousInteractionId(), "continuation must use previous_interaction_id");
     assertEquals("int-abc", request.previousInteractionId());
@@ -790,16 +784,18 @@ class GeminiModelTest {
   void statelessInteractionsResendLocalHistoryWithoutInteractionId() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withProviderContinuation(false).build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, config);
+    var requests = new GeminiRequestBuilder(GeminiModelId.GEMINI_3_7_FLASH, config);
     var messages =
         List.of(
             Message.system("system"),
             Message.user("first"),
             Message.assistant(
-                "answer", List.of(), Map.of(GeminiModel.INTERACTION_ID_KEY, "interaction-secret")),
+                "answer",
+                List.of(),
+                Map.of(ContinuationPoint.INTERACTION_ID_KEY, "interaction-secret")),
             Message.user("second"));
 
-    var request = model.requests.build(messages, null, null);
+    var request = requests.build(messages, null, null);
 
     assertNull(request.previousInteractionId());
     assertEquals("system", request.systemInstruction());
@@ -816,10 +812,10 @@ class GeminiModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.MINIMAL)
             .build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var requests = new GeminiRequestBuilder(GeminiModelId.GEMINI_3_5_FLASH, config);
     var messages = List.of(Message.user("Hello"));
 
-    var request = model.requests.build(messages, null, null);
+    var request = requests.build(messages, null, null);
 
     assertEquals("minimal", request.generationConfig().thinkingLevel());
   }
@@ -831,10 +827,10 @@ class GeminiModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.LOW)
             .build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var requests = new GeminiRequestBuilder(GeminiModelId.GEMINI_3_5_FLASH, config);
     var messages = List.of(Message.user("Hello"));
 
-    var request = model.requests.build(messages, null, null);
+    var request = requests.build(messages, null, null);
 
     assertEquals("low", request.generationConfig().thinkingLevel());
   }
@@ -846,10 +842,10 @@ class GeminiModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.HIGH)
             .build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var requests = new GeminiRequestBuilder(GeminiModelId.GEMINI_3_5_FLASH, config);
     var messages = List.of(Message.user("Hello"));
 
-    var request = model.requests.build(messages, null, null);
+    var request = requests.build(messages, null, null);
 
     assertEquals("high", request.generationConfig().thinkingLevel());
   }
@@ -861,8 +857,8 @@ class GeminiModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.MEDIUM)
             .build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
-    var request = model.requests.build(List.of(Message.user("Hello")), null, null);
+    var requests = new GeminiRequestBuilder(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var request = requests.build(List.of(Message.user("Hello")), null, null);
 
     assertEquals("medium", request.generationConfig().thinkingLevel());
   }
@@ -874,8 +870,8 @@ class GeminiModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.XHIGH)
             .build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
-    var request = model.requests.build(List.of(Message.user("Hello")), null, null);
+    var requests = new GeminiRequestBuilder(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var request = requests.build(List.of(Message.user("Hello")), null, null);
 
     assertEquals("high", request.generationConfig().thinkingLevel());
   }
@@ -887,8 +883,8 @@ class GeminiModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.MAX)
             .build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
-    var request = model.requests.build(List.of(Message.user("Hello")), null, null);
+    var requests = new GeminiRequestBuilder(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var request = requests.build(List.of(Message.user("Hello")), null, null);
 
     assertEquals("high", request.generationConfig().thinkingLevel());
   }
@@ -900,9 +896,9 @@ class GeminiModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.NONE)
             .build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    var requests = new GeminiRequestBuilder(GeminiModelId.GEMINI_3_5_FLASH, config);
 
-    var request = model.requests.build(List.of(Message.user("Hello")), null, null);
+    var request = requests.build(List.of(Message.user("Hello")), null, null);
 
     assertEquals(
         "minimal",
@@ -917,9 +913,9 @@ class GeminiModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.NONE)
             .build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, config);
+    var requests = new GeminiRequestBuilder(GeminiModelId.GEMINI_3_7_FLASH, config);
 
-    var request = model.requests.build(List.of(Message.user("Hello")), null, null);
+    var request = requests.build(List.of(Message.user("Hello")), null, null);
 
     assertEquals("low", request.generationConfig().thinkingLevel());
   }
@@ -932,9 +928,9 @@ class GeminiModelTest {
               .withApiKey("test-key")
               .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.MINIMAL)
               .build();
-      var model = new GeminiModel(id, config);
+      var requests = new GeminiRequestBuilder(id, config);
 
-      var request = model.requests.build(List.of(Message.user("Hello")), null, null);
+      var request = requests.build(List.of(Message.user("Hello")), null, null);
 
       assertEquals("low", request.generationConfig().thinkingLevel(), id.id());
     }
@@ -960,15 +956,15 @@ class GeminiModelTest {
 
   @Test
   void buildRequestContinuationWithoutSystemMessageOmitsIt() {
-    var model = createModel();
-    var metadata = Map.of(GeminiModel.INTERACTION_ID_KEY, "int-abc");
+    var requests = defaultRequests();
+    var metadata = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "int-abc");
     var messages =
         List.of(
             Message.user("Search for X"),
             Message.assistant("ok", List.of(), metadata),
             Message.user("Follow-up"));
 
-    var request = model.requests.build(messages, null, null);
+    var request = requests.build(messages, null, null);
 
     assertNotNull(request.previousInteractionId());
     assertNull(request.systemInstruction());
@@ -977,14 +973,14 @@ class GeminiModelTest {
   @Test
   void closeReleasesHttpClientResources() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     model.close();
   }
 
   @Test
   void closeIsIdempotent() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     model.close();
     model.close();
     model.close();
@@ -993,7 +989,7 @@ class GeminiModelTest {
   @Test
   void modelUsableInTryWithResources() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    try (var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config)) {
+    try (var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config)) {
       assertEquals(GeminiModelId.GEMINI_3_FLASH_PREVIEW.id(), model.id());
     }
   }
@@ -1003,9 +999,8 @@ class GeminiModelTest {
   @Test
   void parseStructuredContentPlainSchema() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     var result =
-        model.exchange.parse("{\"name\":\"Alice\",\"age\":30}", OutputSchema.of(TestPerson.class));
+        parse("{\"name\":\"Alice\",\"age\":30}", OutputSchema.of(TestPerson.class), config);
     assertEquals("Alice", result.name());
     assertEquals(30, result.age());
   }
@@ -1013,7 +1008,6 @@ class GeminiModelTest {
   @Test
   void parseStructuredContentProvenancedReconstructsTypedOutput() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     var schema = OutputSchema.provenancedOf(TestPerson.class);
     var json =
         "{\"output\":{\"name\":\"Alice\",\"age\":30},\"provenance\":["
@@ -1021,7 +1015,7 @@ class GeminiModelTest {
             + "\"reasoning\":\"named in source\",\"confidence\":\"HIGH\"},"
             + "{\"field\":\"age\",\"sources\":[],\"reasoning\":\"guess\",\"confidence\":\"LOW\"}]}";
 
-    var result = model.exchange.parse(json, schema);
+    var result = parse(json, schema, config);
 
     assertNotNull(result);
     assertEquals("Alice", result.output().name());
@@ -1033,19 +1027,17 @@ class GeminiModelTest {
   @Test
   void parseStructuredContentNullReturnsNull() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
-    assertNull(model.exchange.parse(null, OutputSchema.of(TestPerson.class)));
+    assertNull(parse(null, OutputSchema.of(TestPerson.class), config));
   }
 
   @Test
   void parseStructuredContentSchemaMismatchSurfacesFieldLevelDiff() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     var schema = OutputSchema.of(TestPerson.class);
     var ex =
         assertThrows(
             StructuredOutputParseException.class,
-            () -> model.exchange.parse("{\"name\":\"Alice\"}", schema));
+            () -> parse("{\"name\":\"Alice\"}", schema, config));
     assertTrue(
         ex.errors().stream().anyMatch(e -> e.contains("age") && e.contains("required")),
         "diff must name the missing 'age' field as required: " + ex.errors());
@@ -1055,13 +1047,12 @@ class GeminiModelTest {
   @Test
   void parseStructuredContentSyntaxErrorThrowsStructuredOutputParseException() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     var ex =
         assertThrows(
             StructuredOutputParseException.class,
             () ->
-                model.exchange.parse(
-                    "{\"name\":\"Alice\",unterminated", OutputSchema.of(TestPerson.class)));
+                parse(
+                    "{\"name\":\"Alice\",unterminated", OutputSchema.of(TestPerson.class), config));
     assertTrue(ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")));
   }
 
@@ -1073,14 +1064,12 @@ class GeminiModelTest {
             .withApiKey("test-key")
             .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
             .build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
 
     var error =
         assertThrows(
             StructuredOutputParseException.class,
             () ->
-                model.exchange.parse(
-                    "{\"name\":\"" + canary + "\"}", OutputSchema.of(TestPerson.class)));
+                parse("{\"name\":\"" + canary + "\"}", OutputSchema.of(TestPerson.class), config));
 
     assertNull(error.rawContent());
     assertFalse(error.getMessage().contains(canary));
@@ -1111,8 +1100,7 @@ class GeminiModelTest {
   @Test
   void buildHttpRequestUsesDefaultsWhenBaseUrlAndHeadersUnset() {
     var config = ModelConfig.newBuilder().withApiKey("g-key").build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
-    var httpRequest = model.streams.httpRequest("{}");
+    var httpRequest = streams(config).httpRequest("{}");
     assertEquals(
         java.net.URI.create("https://generativelanguage.googleapis.com/v1/interactions?alt=sse"),
         httpRequest.uri());
@@ -1164,7 +1152,7 @@ class GeminiModelTest {
               .withApiVersion("v1")
               .withBaseUrl(baseUrl)
               .build();
-      var model = new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, config);
+      var model = create(GeminiModelId.GEMINI_3_7_FLASH, config);
       var video = FileReference.of("https://files.example/private", "video/mp4");
       var message =
           Message.newBuilder()
@@ -1190,13 +1178,12 @@ class GeminiModelTest {
             .withApiKey("g-key")
             .withBaseUrl("https://vertex.example/v1beta")
             .build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
-    var httpRequest = model.streams.httpRequest("{}");
+    var httpRequest = streams(config).httpRequest("{}");
     assertEquals(
         java.net.URI.create("https://vertex.example/v1beta/interactions?alt=sse"),
         httpRequest.uri(),
         "configured baseUrl replaces the default host+/v1beta prefix; provider keeps appending its own /interactions?alt=sse");
-    assertEquals("v1beta", model.apiVersion());
+    assertEquals("v1beta", GeminiEndpoint.of(config).apiVersion());
   }
 
   @Test
@@ -1206,9 +1193,8 @@ class GeminiModelTest {
             .withApiKey("g-key")
             .withBaseUrl("https://gateway.example/gemini")
             .build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
 
-    assertEquals("custom", model.apiVersion());
+    assertEquals("custom", GeminiEndpoint.of(config).apiVersion());
   }
 
   @Test
@@ -1218,8 +1204,7 @@ class GeminiModelTest {
             .withApiKey("default-key")
             .withHeader("X-GOOG-API-KEY", "override-key")
             .build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
-    var httpRequest = model.streams.httpRequest("{}");
+    var httpRequest = streams(config).httpRequest("{}");
     assertEquals("override-key", httpRequest.headers().firstValue("x-goog-api-key").orElseThrow());
     assertEquals(
         1,
@@ -1230,9 +1215,26 @@ class GeminiModelTest {
   @Test
   void buildHttpRequestExtraHeaderIsAppended() {
     var config = ModelConfig.newBuilder().withApiKey("g-key").withHeader("x-trace", "t1").build();
-    var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
-    var httpRequest = model.streams.httpRequest("{}");
+    var httpRequest = streams(config).httpRequest("{}");
     assertEquals("t1", httpRequest.headers().firstValue("x-trace").orElseThrow());
     assertEquals("g-key", httpRequest.headers().firstValue("x-goog-api-key").orElseThrow());
+  }
+
+  private static Model create(GeminiModelId id, ModelConfig config) {
+    return new GeminiProvider().create(id.id(), config);
+  }
+
+  private static GeminiRequestBuilder defaultRequests() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
+    return new GeminiRequestBuilder(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+  }
+
+  private static GeminiStreams streams(ModelConfig config) {
+    return new GeminiStreams(config, HttpClientFactory.create(config), GeminiEndpoint.of(config));
+  }
+
+  private static <T> T parse(String content, OutputSchema<T> schema, ModelConfig config) {
+    return StructuredContentParser.parse(
+        content, schema, GeminiJson.STRUCTURED, config.rawOutputCapturePolicy());
   }
 }

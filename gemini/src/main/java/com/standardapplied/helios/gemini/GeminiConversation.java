@@ -108,9 +108,10 @@ record GeminiConversation(List<Step> steps, String systemInstruction) {
       steps.add(Step.modelOutput(message.content()));
       return;
     }
-    var signatures = message.metadata().getOrDefault(GeminiModel.THOUGHT_SIGNATURES_KEY, "");
+    var signatures =
+        message.metadata().getOrDefault(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY, "");
     if (!signatures.isEmpty()) {
-      for (var signature : signatures.split(GeminiModel.SIGNATURE_DELIMITER)) {
+      for (var signature : signatures.split(GeminiResponseAssembler.SIGNATURE_DELIMITER)) {
         steps.add(Step.thought(signature));
       }
     }

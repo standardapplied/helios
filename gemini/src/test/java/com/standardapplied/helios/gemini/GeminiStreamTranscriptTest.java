@@ -21,12 +21,13 @@ class GeminiStreamTranscriptTest {
         ModelHarness.transcript(
             "gemini/streams/" + name + ".sse",
             uri ->
-                new GeminiModel(
-                    GeminiModelId.GEMINI_3_5_FLASH,
-                    ModelConfig.newBuilder()
-                        .withApiKey("test-key")
-                        .withBaseUrl(uri + "/v1beta")
-                        .build()));
+                new GeminiProvider()
+                    .create(
+                        GeminiModelId.GEMINI_3_5_FLASH.id(),
+                        ModelConfig.newBuilder()
+                            .withApiKey("test-key")
+                            .withBaseUrl(uri + "/v1beta")
+                            .build()));
 
     Golden.assertMatches("gemini/streams/" + name + ".txt", transcript);
   }

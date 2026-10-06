@@ -16,13 +16,15 @@ import java.util.List;
  */
 record ContinuationPoint(String interactionId, int startIndex) {
 
+  static final String INTERACTION_ID_KEY = "gemini.interactionId";
+
   /** The continuation point of {@code messages}, or {@code null} when there is none. */
   static ContinuationPoint find(List<Message> messages) {
     for (var i = messages.size() - 1; i >= 0; i--) {
       var message = messages.get(i);
       var interactionId =
           message.role() == Role.ASSISTANT && message.metadata() != null
-              ? message.metadata().get(GeminiModel.INTERACTION_ID_KEY)
+              ? message.metadata().get(INTERACTION_ID_KEY)
               : null;
       if (interactionId != null && !interactionId.isEmpty()) {
         return new ContinuationPoint(interactionId, i + 1);
