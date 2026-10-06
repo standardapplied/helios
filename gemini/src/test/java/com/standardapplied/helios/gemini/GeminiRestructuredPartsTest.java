@@ -120,6 +120,22 @@ class GeminiRestructuredPartsTest {
   }
 
   @Test
+  void anErrorEventWithANonPositiveCodeIsARetryableFailureWithoutAStatus() {
+    var parser = new GeminiStreamParser(true, "v1");
+
+    var error =
+        assertInstanceOf(
+            StreamEvent.Error.class,
+            parser.parse(
+                "{\"event_type\":\"error\",\"error\":{\"code\":-1,\"message\":\"boom\"}}"));
+
+    var cause = (GeminiException) error.cause();
+    assertEquals("API error: boom", error.message());
+    assertEquals(0, cause.statusCode());
+    assertTrue(cause.isRetryable());
+  }
+
+  @Test
   void argumentsDeltasOutsideAFunctionCallOnlyHarvestTheirAnnotations() {
     var steps = new StreamedSteps();
     steps.start(0, Step.modelOutput("x"));
