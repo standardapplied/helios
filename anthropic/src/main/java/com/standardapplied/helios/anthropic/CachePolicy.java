@@ -44,8 +44,8 @@ public sealed interface CachePolicy
     permits CachePolicy.Disabled, CachePolicy.ShortLived, CachePolicy.LongLived {
 
   /**
-   * Prompt caching disabled. {@link AnthropicModel#buildRequest} emits no {@code cache_control}
-   * annotations; the server returns billing with {@code cache_creation_input_tokens=0} and {@code
+   * Prompt caching disabled. Requests carry no {@code cache_control} annotations; the server
+   * returns billing with {@code cache_creation_input_tokens=0} and {@code
    * cache_read_input_tokens=0}. Use for one-shot calls or compliance environments that prohibit
    * server-side caching.
    *

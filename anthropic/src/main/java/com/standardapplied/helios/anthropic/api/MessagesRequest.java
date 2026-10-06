@@ -14,9 +14,9 @@ import java.util.List;
  *
  * <p>The {@code system} field accepts either a plain {@link String} (legacy shape, no prompt
  * caching) or a {@code List<SystemContent>} (cache-aware shape — required by the API when any
- * {@code SystemContent} block carries a {@code cache_control} annotation). {@link
- * AnthropicModel#buildRequest} selects the shape based on whether prompt caching is enabled for the
- * model; serialization is uniform because Jackson emits whichever runtime type the field holds.
+ * {@code SystemContent} block carries a {@code cache_control} annotation). The request builder
+ * selects the shape based on whether prompt caching is enabled for the model; serialization is
+ * uniform because Jackson emits whichever runtime type the field holds.
  *
  * @param model the model identifier
  * @param maxTokens maximum tokens to generate (required by Claude)
