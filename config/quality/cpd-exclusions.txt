@@ -30,7 +30,6 @@ com.standardapplied.helios.onnx.EmbeddingGemmaTest,com.standardapplied.helios.on
 com.standardapplied.helios.onnx.EmbeddingGemmaTest,com.standardapplied.helios.onnx.EmbeddingNomicTest
 com.standardapplied.helios.onnx.EmbeddingHarrier06bTest,com.standardapplied.helios.onnx.EmbeddingNomicTest
 com.standardapplied.helios.onnx.EmbeddingHarrierTest,com.standardapplied.helios.onnx.EmbeddingNomicTest
-com.standardapplied.helios.repl.codeact.CodeActStrategy,com.standardapplied.helios.repl.codeact.RlmStrategy
 com.standardapplied.helios.repl.codeact.RequireExecuteCodeHookTest,com.standardapplied.helios.session.hooks.RequireSignatureHookTest
 com.standardapplied.helios.session.Phase2AcceptanceTest,com.standardapplied.helios.session.Phase4AcceptanceTest,com.standardapplied.helios.session.Phase5AcceptanceTest
 com.standardapplied.helios.session.Phase4AcceptanceTest

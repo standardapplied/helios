@@ -72,6 +72,11 @@ class InputBindingsTypeRenderingTest {
   }
 
   @Test
+  void noTypeBecomesObject() {
+    assertEquals("java.lang.Object", InputBindings.renderTypeAsJavaSource(null));
+  }
+
+  @Test
   void nestedTypeUsesItsCanonicalName() {
     assertEquals("java.util.Map.Entry", InputBindings.renderTypeAsJavaSource(Map.Entry.class));
     assertEquals(

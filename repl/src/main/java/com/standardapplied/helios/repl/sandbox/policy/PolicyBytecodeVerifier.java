@@ -25,7 +25,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
 
 /**
@@ -227,21 +229,30 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
           "setLastModified",
           "toPath");
 
-  private final SandboxPolicy policy;
   private final Set<String> allowedPackagesInternal;
   private final Set<String> deniedClassesInternal;
   private final Set<String> deniedPackagesInternal;
+  private final List<Rule> rules;
+
+  /** One rule of the policy: the label it rejects an owner/member reference with, or empty. */
+  @FunctionalInterface
+  private interface Rule {
+
+    Optional<String> violation(String owner, String member);
+  }
 
   /**
    * Construct a verifier for {@code policy}. The policy's deny / allow lists are eagerly converted
    * to internal form ({@code java/lang/ProcessBuilder} rather than {@code
-   * java.lang.ProcessBuilder}) so every per-instruction check is a single set lookup.
+   * java.lang.ProcessBuilder}) so every per-instruction check is a single set lookup. The rules are
+   * checked in order and the first that matches names the violation: explicit denied classes,
+   * denied packages, the categorical denies (reflection, native access, dynamic class definition,
+   * filesystem access), then the allow-list default-deny.
    */
   public PolicyBytecodeVerifier(SandboxPolicy policy) {
     if (policy == null) {
       throw new IllegalArgumentException("policy must not be null");
     }
-    this.policy = policy;
     this.allowedPackagesInternal =
         policy.allowedPackages().stream()
             .map(s -> s.replace('.', '/') + "/")
@@ -254,6 +265,47 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
         policy.deniedPackages().stream()
             .map(s -> s.replace('.', '/') + "/")
             .collect(Collectors.toUnmodifiableSet());
+    this.rules =
+        List.of(
+            (owner, member) ->
+                deniedClassesInternal.contains(owner)
+                    ? Optional.of("deniedClasses:" + owner.replace('/', '.'))
+                    : Optional.empty(),
+            (owner, member) ->
+                deniedPackagesInternal.stream()
+                    .filter(owner::startsWith)
+                    .findFirst()
+                    .map(
+                        pkg ->
+                            "deniedPackages:"
+                                + pkg.substring(0, pkg.length() - 1).replace('/', '.')),
+            categorical(
+                policy.denyReflection(), "denyReflection", PolicyBytecodeVerifier::isReflection),
+            categorical(
+                policy.denyNativeAccess(),
+                "denyNativeAccess",
+                PolicyBytecodeVerifier::isNativeAccess),
+            categorical(
+                policy.denyDynamicClassDefinition(),
+                "denyDynamicClassDefinition",
+                PolicyBytecodeVerifier::isDynamicClassDefinition),
+            categorical(
+                policy.denyFileSystemAccess(),
+                "denyFileSystemAccess",
+                PolicyBytecodeVerifier::isFileSystemAccess),
+            categorical(
+                !allowedPackagesInternal.isEmpty(),
+                "allowedPackages-default-deny",
+                (owner, member) -> isJdkScoped(owner) && !isInAllowedPackage(owner)));
+  }
+
+  /**
+   * A rule that, when {@code enabled}, rejects every reference {@code matches} with {@code label}.
+   */
+  private static Rule categorical(
+      boolean enabled, String label, BiPredicate<String, String> matches) {
+    return (owner, member) ->
+        enabled && matches.test(owner, member) ? Optional.of(label) : Optional.empty();
   }
 
   @Override
@@ -364,34 +416,11 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
     if (ownerInternal == null) {
       return;
     }
-    if (deniedClassesInternal.contains(ownerInternal)) {
-      throw new SandboxPolicyException(
-          ownerInternal, member, "deniedClasses:" + ownerInternal.replace('/', '.'));
-    }
-    for (var pkg : deniedPackagesInternal) {
-      if (ownerInternal.startsWith(pkg)) {
-        throw new SandboxPolicyException(
-            ownerInternal,
-            member,
-            "deniedPackages:" + pkg.substring(0, pkg.length() - 1).replace('/', '.'));
+    for (var rule : rules) {
+      var violation = rule.violation(ownerInternal, member);
+      if (violation.isPresent()) {
+        throw new SandboxPolicyException(ownerInternal, member, violation.get());
       }
-    }
-    if (policy.denyReflection() && isReflection(ownerInternal, member)) {
-      throw new SandboxPolicyException(ownerInternal, member, "denyReflection");
-    }
-    if (policy.denyNativeAccess() && isNativeAccess(ownerInternal, member)) {
-      throw new SandboxPolicyException(ownerInternal, member, "denyNativeAccess");
-    }
-    if (policy.denyDynamicClassDefinition() && isDynamicClassDefinition(ownerInternal, member)) {
-      throw new SandboxPolicyException(ownerInternal, member, "denyDynamicClassDefinition");
-    }
-    if (policy.denyFileSystemAccess() && isFileSystemAccess(ownerInternal, member)) {
-      throw new SandboxPolicyException(ownerInternal, member, "denyFileSystemAccess");
-    }
-    if (!allowedPackagesInternal.isEmpty()
-        && isJdkScoped(ownerInternal)
-        && !isInAllowedPackage(ownerInternal)) {
-      throw new SandboxPolicyException(ownerInternal, member, "allowedPackages-default-deny");
     }
   }
 
