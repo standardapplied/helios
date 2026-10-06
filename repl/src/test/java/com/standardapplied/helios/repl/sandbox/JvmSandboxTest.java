@@ -236,7 +236,8 @@ class JvmSandboxTest {
 
   @Test
   void factoryWithNullConfigThrows() {
-    assertThrows(IllegalArgumentException.class, () -> JvmSandbox.factory(null));
+    var thrown = assertThrows(IllegalArgumentException.class, () -> JvmSandbox.factory(null));
+    assertEquals("Config must not be null", thrown.getMessage());
   }
 
   @Test
@@ -1018,7 +1019,12 @@ class JvmSandboxTest {
         assertThrows(
             com.standardapplied.helios.repl.ReplException.class,
             () -> JvmSandbox.create(config, registry));
+    assertEquals("Failed to start JVM sandbox subprocess", thrown.getMessage());
     assertNotNull(thrown.getCause(), "expected wrapped cause");
+    assertEquals(
+        "Subprocess did not connect to the RPC socket within PT0.05S; the launch probably failed"
+            + " — check stderr for the cause",
+        thrown.getCause().getMessage());
     var causeMessage = thrown.getCause().getMessage();
     assertNotNull(causeMessage, "cause must carry a message");
     assertTrue(
