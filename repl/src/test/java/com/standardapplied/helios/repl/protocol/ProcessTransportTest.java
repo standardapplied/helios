@@ -322,6 +322,47 @@ class ProcessTransportTest {
   }
 
   @Test
+  void deserializeRejectionsNameTheOffendingFieldAndMessage() {
+    assertEquals(
+        "JSON-RPC 'method' field must be a string: 42",
+        assertThrows(
+                IOException.class,
+                () -> ProcessTransport.deserializeMessage("{\"id\":\"1\",\"method\":42}"))
+            .getMessage());
+    assertEquals(
+        "JSON-RPC 'method' field must be a string: null",
+        assertThrows(
+                IOException.class, () -> ProcessTransport.deserializeMessage("{\"method\":null}"))
+            .getMessage());
+    assertEquals(
+        "JSON-RPC 'error' field must be an object: {\"id\":\"1\",\"error\":\"x\"}",
+        assertThrows(
+                IOException.class,
+                () -> ProcessTransport.deserializeMessage("{\"id\":\"1\",\"error\":\"x\"}"))
+            .getMessage());
+    assertEquals(
+        "Unrecognized JSON-RPC message: {\"unknown\":true}",
+        assertThrows(
+                IOException.class, () -> ProcessTransport.deserializeMessage("{\"unknown\":true}"))
+            .getMessage());
+  }
+
+  @Test
+  void deserializeSelectsTheKindByTheFieldsPresent() throws Exception {
+    assertInstanceOf(
+        RpcMessage.Request.class,
+        ProcessTransport.deserializeMessage("{\"id\":\"1\",\"method\":\"m\",\"error\":{}}"));
+    assertInstanceOf(
+        RpcMessage.Notification.class,
+        ProcessTransport.deserializeMessage("{\"method\":\"m\",\"result\":1}"));
+    assertInstanceOf(
+        RpcMessage.ErrorResponse.class,
+        ProcessTransport.deserializeMessage("{\"id\":\"1\",\"error\":{},\"result\":1}"));
+    assertEquals(
+        new RpcMessage.Response("7", null), ProcessTransport.deserializeMessage("{\"id\":7}"));
+  }
+
+  @Test
   void deserializeErrorWithNonStringMessageCoerces() throws Exception {
     var json = "{\"id\":\"1\",\"error\":{\"code\":-1,\"message\":42}}";
     var msg = ProcessTransport.deserializeMessage(json);

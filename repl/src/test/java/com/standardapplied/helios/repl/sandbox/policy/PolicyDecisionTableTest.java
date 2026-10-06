@@ -21,10 +21,10 @@ import org.junit.jupiter.params.provider.CsvSource;
 /**
  * The verifier's decision for one owner/member reference under the permissive, {@code noEgress} and
  * an allow-list policy: the rule label it rejects with, or {@code allowed}. Rows cover every rule
- * and the edges of their order: a class denied explicitly inside an allowed package, a denied
- * package that is also reflective, the reflective entry points on {@code java.lang.Class} next to
- * its plain members, user code outside the allow-list, and a trusted language bootstrap whose
- * argument is denied.
+ * and the edges of their order: a class denied explicitly inside an allowed package and inside a
+ * denied package, a denied package that is also reflective, the reflective entry points on {@code
+ * java.lang.Class} next to its plain members, user code outside the allow-list, and a trusted
+ * language bootstrap whose argument is denied.
  *
  * <p>A reference is written {@code kind owner member}: {@code call} invokes a static method, {@code
  * new} instantiates, {@code class} loads a class literal, {@code lambda} is a {@code
@@ -79,6 +79,7 @@ class PolicyDecisionTableTest {
     "allowList,  call,   java.util.Random,                      nextInt,             deniedClasses:java.util.Random",
     "allowList,  call,   java.util.concurrent.Executors,        newFixedThreadPool,  deniedPackages:java.util.concurrent",
     "allowList,  call,   java.lang.reflect.Array,               newInstance,         deniedPackages:java.lang.reflect",
+    "allowList,  call,   java.lang.reflect.Proxy,               newProxyInstance,    deniedClasses:java.lang.reflect.Proxy",
     "allowList,  call,   java.lang.invoke.MethodHandles$Lookup, defineHiddenClass,   denyDynamicClassDefinition",
     "allowList,  call,   java.lang.Class,                       forName,             allowed",
     "allowList,  call,   java.util.List,                        of,                  allowed",
@@ -147,7 +148,7 @@ class PolicyDecisionTableTest {
       case "allowList" ->
           SandboxPolicy.newBuilder()
               .withAllowedPackages("java.lang", "java.util")
-              .withDeniedClasses("java.util.Random")
+              .withDeniedClasses("java.util.Random", "java.lang.reflect.Proxy")
               .withDeniedPackages("java.util.concurrent", "java.lang.reflect")
               .withDenyDynamicClassDefinition(true)
               .build();
