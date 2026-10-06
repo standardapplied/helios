@@ -129,7 +129,7 @@ record AnthropicMessages(String system, List<MessageEntry> entries) {
     if ("application/pdf".equals(mediaType)) {
       return ContentBlock.document(mediaType, Base64.getEncoder().encodeToString(data));
     }
-    if (mediaType != null && mediaType.startsWith("image/")) {
+    if (mediaType.startsWith("image/")) {
       return ContentBlock.image(mediaType, Base64.getEncoder().encodeToString(data));
     }
     return ContentBlock.text(

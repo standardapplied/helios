@@ -54,7 +54,7 @@ record OpenAIInput(String instructions, List<InputItem> items) {
       var data = Base64.getEncoder().encodeToString(file.data());
       var media = file.mimeType();
       parts.add(
-          media != null && media.startsWith("image/")
+          media.startsWith("image/")
               ? ContentPart.inputImage(media, data)
               : ContentPart.inputFile(media, data, null));
     }

@@ -32,7 +32,7 @@ class SseReaderTest {
   private static final Duration NEVER_IDLE = Duration.ofMinutes(10);
 
   /** Echoes each payload as text, ends the stream on "stop" and completes with "complete". */
-  private static final class EchoParser implements SseReader.Parser {
+  private static class EchoParser implements SseReader.Parser {
     private final List<String> payloads = new ArrayList<>();
     private boolean finished;
 
@@ -89,6 +89,33 @@ class SseReaderTest {
 
     assertEquals(List.of("one", "stop"), texts(reader));
     assertTrue(body.closed);
+  }
+
+  @Test
+  void hasNextAsksOnceUntilTheEventIsTaken() {
+    var parser = new EchoParser();
+    var reader =
+        new SseReader(stream("data: one\ndata: two\n"), NEVER_IDLE, parser, ProviderException::new);
+
+    assertTrue(reader.hasNext());
+    assertTrue(reader.hasNext());
+
+    assertEquals(new StreamEvent.TextDelta("one"), reader.next());
+    assertEquals(List.of("one"), parser.payloads);
+  }
+
+  @Test
+  void aStreamWithNothingToCompleteWithEndsWithoutAnEvent() {
+    var parser =
+        new EchoParser() {
+          @Override
+          public StreamEvent complete() {
+            return null;
+          }
+        };
+    var reader = new SseReader(stream(""), NEVER_IDLE, parser, ProviderException::new);
+
+    assertFalse(reader.hasNext());
   }
 
   @Test
