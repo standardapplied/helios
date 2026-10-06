@@ -40,11 +40,11 @@ public record CompactionResult(List<Message> history, Usage usage, String modelI
   /**
    * Canonical constructor.
    *
-   * <p>{@code history} is NOT defensively copied here — {@code AgentLoop} calls {@link
-   * com.standardapplied.helios.session.loop.SessionState#replaceHistory(List)} which performs its
-   * own copy, and leaving identity intact lets compactors signal "no-op" by returning the supplied
-   * list unchanged. Implementations that build a fresh history should return an immutable list
-   * (e.g. via {@link List#copyOf(java.util.Collection)}).
+   * <p>{@code history} is NOT defensively copied here — the loop copies it when it replaces the
+   * session's {@link com.standardapplied.helios.session.loop.ConversationHistory}, and leaving
+   * identity intact lets compactors signal "no-op" by returning the supplied list unchanged.
+   * Implementations that build a fresh history should return an immutable list (e.g. via {@link
+   * List#copyOf(java.util.Collection)}).
    *
    * @throws NullPointerException if any argument is null
    * @throws IllegalArgumentException if {@code usage} reports non-zero tokens but {@code modelId}
