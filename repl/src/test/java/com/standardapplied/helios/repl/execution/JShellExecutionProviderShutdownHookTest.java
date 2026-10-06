@@ -5,12 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.standardapplied.helios.core.test.Await;
 import java.io.File;
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -70,9 +70,9 @@ class JShellExecutionProviderShutdownHookTest {
 
     assertEquals(0, process.exitValue(), () -> read(stderr));
     assertEquals(
-        Set.of(
-            "started=Accept[]", "reaped-by=helios-jshell-shutdown", "closed-during-shutdown=true"),
-        Set.copyOf(Files.readAllLines(stdout)),
+        List.of(
+            "closed-during-shutdown=true", "reaped-by=helios-jshell-shutdown", "started=Accept[]"),
+        Files.readAllLines(stdout).stream().sorted().toList(),
         () -> read(stderr));
   }
 
@@ -98,7 +98,7 @@ class JShellExecutionProviderShutdownHookTest {
   private static String read(Path file) {
     try {
       return Files.readString(file);
-    } catch (java.io.IOException e) {
+    } catch (IOException e) {
       return "unreadable: " + e;
     }
   }
