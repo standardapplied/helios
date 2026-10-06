@@ -82,7 +82,6 @@ final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
         MessagesRequest.newBuilder()
             .withModel(wireModelId)
             .withMaxTokens(thinking.maxTokens(requestedMaxTokens()))
-            .withMessages(conversation.entries())
             .withStream(true)
             .withToolChoice(toolChoice)
             .withTemperature(

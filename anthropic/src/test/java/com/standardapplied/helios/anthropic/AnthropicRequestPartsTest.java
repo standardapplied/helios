@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.anthropic.AnthropicModelId.ThinkingShape;
 import com.standardapplied.helios.anthropic.api.ContentBlock;
+import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.anthropic.api.ThinkingConfig;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
@@ -124,6 +125,31 @@ class AnthropicRequestPartsTest {
                 Message.tool("t2", "search", "two")));
 
     assertEquals(3, conversation.entries().size());
+  }
+
+  @Test
+  void aConversationsEntriesCannotBeChanged() {
+    var conversation = AnthropicMessages.of(List.of(Message.user("hi")));
+
+    assertThrows(UnsupportedOperationException.class, () -> conversation.entries().removeFirst());
+  }
+
+  @Test
+  void placingBreakpointsLeavesTheConversationUntouched() {
+    var conversation = AnthropicMessages.of(List.of(Message.user("hi"), Message.user("again")));
+    var request = MessagesRequest.newBuilder().withModel("m").withMaxTokens(1);
+
+    PromptCache.apply(
+        CachePolicy.shortLived(),
+        request,
+        null,
+        AnthropicTools.of(List.of(), ModelConfig.of("k")),
+        conversation.entries());
+
+    assertEquals("again", conversation.entries().getLast().content());
+    var marked = (List<?>) request.build().messages().getLast().content();
+    assertEquals(
+        CachePolicy.shortLived().breakpoint(), ((ContentBlock) marked.getFirst()).cacheControl());
   }
 
   @Test

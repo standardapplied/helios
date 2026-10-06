@@ -18,7 +18,7 @@ import java.util.Map;
  * user and assistant turn one entry, and each run of tool results one user entry.
  *
  * @param system the system prompt, or {@code null} when the conversation has none
- * @param entries the wire messages, mutable so prompt-cache breakpoints can be placed on them
+ * @param entries the wire messages
  */
 record AnthropicMessages(String system, List<MessageEntry> entries) {
 
@@ -39,7 +39,7 @@ record AnthropicMessages(String system, List<MessageEntry> entries) {
         }
       }
     }
-    return new AnthropicMessages(system, entries);
+    return new AnthropicMessages(system, List.copyOf(entries));
   }
 
   /** {@code additional} appended to {@code existing} as a new paragraph. */
