@@ -574,20 +574,37 @@ public final class JvmSandbox implements Sandbox {
    */
   static List<String> buildLaunchCommand(
       String javaBin, JvmSandboxConfig config, String rpcSocketPath) {
+    return buildLaunchCommand(
+        javaBin,
+        config,
+        rpcSocketPath,
+        ManagementFactory.getRuntimeMXBean().getInputArguments(),
+        System.getProperty("java.class.path"),
+        Path.of("").toAbsolutePath());
+  }
+
+  /**
+   * The launch command for a host JVM started with {@code parentArgs} and {@code rawClasspath} from
+   * {@code hostCwd}.
+   */
+  static List<String> buildLaunchCommand(
+      String javaBin,
+      JvmSandboxConfig config,
+      String rpcSocketPath,
+      List<String> parentArgs,
+      String rawClasspath,
+      Path hostCwd) {
     var command = new ArrayList<String>();
     command.add(javaBin);
     command.add("-Xmx" + config.maxHeapMb() + "m");
 
-    var parentArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
     for (var arg : parentArgs) {
       if (shouldPropagateJvmArg(arg)) {
         command.add(arg);
       }
     }
 
-    var classpath =
-        resolveClasspathForSubprocess(
-            System.getProperty("java.class.path"), Path.of("").toAbsolutePath());
+    var classpath = resolveClasspathForSubprocess(rawClasspath, hostCwd);
     if (!Strings.isBlank(classpath)) {
       command.add("-cp");
       command.add(classpath);
