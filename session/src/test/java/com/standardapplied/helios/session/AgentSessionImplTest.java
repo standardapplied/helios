@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -41,10 +42,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 
 final class AgentSessionImplTest {
@@ -712,6 +718,46 @@ final class AgentSessionImplTest {
       assertInstanceOf(ResultMessage.Success.class, terminalOf(s));
       assertTrue(provider.endSeen.get());
     }
+  }
+
+  @Test
+  void providerOnSessionEndFailureIsLoggedAsAWarningOnTheSessionLogger() {
+    var provider = new LifecycleProvider();
+    provider.throwOnEnd = new RuntimeException("end-cleanup-boom");
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+    var logger = Logger.getLogger(AgentSessionImpl.class.getName());
+    var handler =
+        new Handler() {
+          @Override
+          public void publish(LogRecord logRecord) {
+            logged.add(logRecord);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    logger.addHandler(handler);
+    try {
+      AgentSession.create(
+              SessionOptions.newBuilder()
+                  .withModel(textOnceModel("unused", FinishReason.STOP))
+                  .withSessionId(SID)
+                  .withClock(CLOCK)
+                  .withExecutionProvider(provider)
+                  .build())
+          .close();
+    } finally {
+      logger.removeHandler(handler);
+    }
+
+    assertEquals(1, logged.size());
+    var warning = logged.getFirst();
+    assertEquals(Level.WARNING, warning.getLevel());
+    assertEquals("onSessionEnd threw — continuing shutdown", warning.getMessage());
+    assertSame(provider.throwOnEnd, warning.getThrown());
   }
 
   // ── publisher-drain happens-before result settling (hv2-bug2 Issue 2) ────
