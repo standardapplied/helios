@@ -29,8 +29,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import tools.jackson.databind.DeserializationFeature;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Regression coverage for the 2.5.5 Anthropic-layer change: a mid-stream {@link IOException} (the
@@ -73,10 +71,7 @@ class StreamReadErrorCausePreservationReproTest {
           + "data: {\"type\":\"content_block_delta\",\"index\":0,"
           + "\"delta\":{\"type\":\"text_delta\",\"text\":\"partial-emit\"}}\n\n";
 
-  private final tools.jackson.databind.ObjectMapper objectMapper =
-      JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
-
-  // ── Layer 1 — AnthropicStreamingIterator preserves IOException cause
+  // ── Layer 1 — SseReader preserves IOException cause
   // ─────────────────────────────
 
   @org.junit.jupiter.api.Test
@@ -257,7 +252,7 @@ class StreamReadErrorCausePreservationReproTest {
 
   @org.junit.jupiter.api.Test
   void streamingIteratorParseFailureRemainsAnthropicExceptionNotTransientStream() {
-    // A malformed SSE frame triggers parseStreamEvent's catch (Exception e) branch which yields
+    // A malformed SSE frame triggers AnthropicStreamParser.parse's catch branch, which yields
     // StreamEvent.Error("Failed to parse stream event", e). That cause is NOT an IOException, so
     // it must NOT be promoted to TransientStreamException (parser bugs and provider contract
     // violations are not transient).
