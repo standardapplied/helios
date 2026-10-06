@@ -29,7 +29,7 @@ class SubprocessModulesLaunchTest {
   @Test
   void launchCommandOmitsLimitModulesWhenUnrestricted() {
     var config = JvmSandboxConfig.newBuilder().build();
-    var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config);
+    var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", config);
     assertFalse(
         cmd.contains("--limit-modules"),
         () -> "Unrestricted should not emit --limit-modules; cmd was: " + cmd);
@@ -39,7 +39,7 @@ class SubprocessModulesLaunchTest {
   void launchCommandIncludesLimitModulesWhenMinimal() {
     var config =
         JvmSandboxConfig.newBuilder().withSubprocessModules(SubprocessModules.minimal()).build();
-    var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config);
+    var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", config);
     var idx = cmd.indexOf("--limit-modules");
     assertTrue(idx >= 0, () -> "--limit-modules missing from cmd: " + cmd);
     var arg = cmd.get(idx + 1);
@@ -54,7 +54,7 @@ class SubprocessModulesLaunchTest {
         JvmSandboxConfig.newBuilder()
             .withSubprocessModules(SubprocessModules.allowingExtras("java.net.http"))
             .build();
-    var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config);
+    var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", config);
     var idx = cmd.indexOf("--limit-modules");
     assertTrue(idx >= 0);
     assertTrue(cmd.get(idx + 1).contains("java.net.http"));

@@ -182,7 +182,7 @@ class SubprocessModulesClasspathLaunchTest {
         process.getOutputStream().close();
 
         try {
-          var acceptedSocket = JvmSandbox.acceptWithTimeout(listener, Await.HANG_GUARD);
+          var acceptedSocket = SandboxRpc.acceptWithTimeout(listener, Await.HANG_GUARD);
           try {
             Files.deleteIfExists(socketPath);
             var transport =

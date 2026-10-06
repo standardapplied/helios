@@ -84,7 +84,7 @@ class ArchitectureRulesTest {
   private static final String SESSION_LIFECYCLE = HELIOS + ".session.SessionLifecycle";
 
   /** The one launcher outside core.process: the REPL sandbox starts its own JVM. */
-  private static final String SANDBOX_LAUNCHER = HELIOS + ".repl.sandbox.JvmSandbox";
+  private static final String SANDBOX_LAUNCHER = HELIOS + ".repl.sandbox.SandboxLauncher";
 
   private static final String TIME_SEAM =
       "a class that needs the time takes a java.time.InstantSource through withClock(...) and"
@@ -420,7 +420,7 @@ class ArchitectureRulesTest {
         .because(
             "a child process is started through core.process.BoundedProcess, which owns the"
                 + " explicit argv and environment, bounded output, timeout kill and working"
-                + " directory; only repl.sandbox.JvmSandbox launches its own JVM")
+                + " directory; only repl.sandbox.SandboxLauncher launches its own JVM")
         .check(LIBRARY);
   }
 

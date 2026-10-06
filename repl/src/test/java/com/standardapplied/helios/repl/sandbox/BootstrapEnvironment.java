@@ -33,10 +33,11 @@ import jdk.jshell.spi.ExecutionControlProvider;
 import jdk.jshell.spi.ExecutionEnv;
 
 /**
- * A {@link JvmSandboxBootstrap} standing in for the sandbox subprocess, installed as the instance
- * {@link HostBridge} calls into, with the test as its host. The test feeds the lines the host would
- * send and takes the lines the bootstrap writes, one at a time, so it reads a request only once the
- * bootstrap has written it and no stream fails because a thread exited.
+ * The sandbox bootstrap's read loop, evaluator and host-bridge state standing in for the sandbox
+ * subprocess, the state installed as the instance {@link HostBridge} calls into, with the test as
+ * its host. The test feeds the lines the host would send and takes the lines the bootstrap writes,
+ * one at a time, so it reads a request only once the bootstrap has written it and no stream fails
+ * because a thread exited.
  */
 final class BootstrapEnvironment implements AutoCloseable {
 
@@ -44,7 +45,9 @@ final class BootstrapEnvironment implements AutoCloseable {
   private final FeedableInputStream fromHost = new FeedableInputStream();
   private final LineSink toHost = new LineSink();
   private final CompletableFuture<Integer> exitStatus = new CompletableFuture<>();
-  private final JvmSandboxBootstrap bootstrap;
+  private final HostBridgeState bridge;
+  private final SnippetEvaluator evaluator;
+  private final BootstrapRpc rpc;
   private volatile CompletableFuture<Void> nextTimeout = new CompletableFuture<>();
   private Thread readLoop;
 
@@ -65,17 +68,17 @@ final class BootstrapEnvironment implements AutoCloseable {
   private BootstrapEnvironment(
       Duration stopGrace, ExecutionControlProvider engine, boolean timedOutByTheTest) {
     jshell = newJShell(engine);
-    JvmSandboxBootstrap.ExecutionTimer timer =
+    SnippetEvaluator.ExecutionTimer timer =
         timedOutByTheTest ? this::endsBeforeTheTestTimesItOut : Thread::join;
-    bootstrap =
-        new JvmSandboxBootstrap(
-            jshell,
+    bridge = new HostBridgeState(new PrintStream(toHost, true, StandardCharsets.UTF_8));
+    evaluator = new SnippetEvaluator(jshell, bridge, timer, stopGrace);
+    rpc =
+        new BootstrapRpc(
             new BufferedReader(new InputStreamReader(fromHost, StandardCharsets.UTF_8)),
-            new PrintStream(toHost, true, StandardCharsets.UTF_8),
-            timer,
-            stopGrace,
+            bridge,
+            evaluator,
             exitStatus::complete);
-    JvmSandboxBootstrap.setInstance(bootstrap);
+    HostBridgeState.setInstance(bridge);
   }
 
   /**
@@ -116,8 +119,16 @@ final class BootstrapEnvironment implements AutoCloseable {
     return environment;
   }
 
-  JvmSandboxBootstrap bootstrap() {
-    return bootstrap;
+  HostBridgeState bridge() {
+    return bridge;
+  }
+
+  SnippetEvaluator evaluator() {
+    return evaluator;
+  }
+
+  BootstrapRpc rpc() {
+    return rpc;
   }
 
   /**
@@ -134,7 +145,7 @@ final class BootstrapEnvironment implements AutoCloseable {
   }
 
   void startReadLoop() {
-    readLoop = Thread.ofVirtual().name("test-readloop").start(bootstrap::readLoop);
+    readLoop = Thread.ofVirtual().name("test-readloop").start(rpc::readLoop);
   }
 
   /** Runs {@code sandboxCode} on its own thread, as a snippet calling into the host would run. */
@@ -189,7 +200,7 @@ final class BootstrapEnvironment implements AutoCloseable {
     if (readLoop != null) {
       awaitReadLoopEnd();
     }
-    JvmSandboxBootstrap.setInstance(null);
+    HostBridgeState.setInstance(null);
     jshell.close();
   }
 
