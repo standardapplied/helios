@@ -8,6 +8,12 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.FeedableInputStream;
 import com.standardapplied.helios.core.test.LineSink;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.SequenceInputStream;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -26,6 +32,35 @@ class StdoutCaptureTest {
 
     assertEquals("first\nsecond", capture.drain());
     assertEquals("", capture.drain());
+  }
+
+  @Test
+  void theReaderRunsOnAVirtualThreadOfItsOwn() {
+    var process = new ReadRecordingProcess(InputStream.nullInputStream());
+    var capture = StdoutCapture.start(process);
+
+    capture.awaitEnd(Await.HANG_GUARD);
+
+    assertEquals("helios-sandbox-stdout-reader", process.reader.getName());
+    assertTrue(process.reader.isVirtual());
+  }
+
+  @Test
+  void aStreamThatFailsEndsTheCaptureWithWhatWasReadBeforeIt() {
+    var failing =
+        new InputStream() {
+          @Override
+          public int read() throws IOException {
+            throw new IOException("stream closed");
+          }
+        };
+    var printed = new ByteArrayInputStream("partial\n".getBytes(StandardCharsets.UTF_8));
+    var capture =
+        StdoutCapture.start(new ReadRecordingProcess(new SequenceInputStream(printed, failing)));
+
+    capture.awaitEnd(Await.HANG_GUARD);
+
+    assertEquals("partial", capture.drain());
   }
 
   @Test
@@ -56,5 +91,44 @@ class StdoutCaptureTest {
     capture.awaitEnd(Await.HANG_GUARD);
 
     assertEquals("plain output", capture.drain());
+  }
+
+  /** A process whose stdout is {@code stdout}, recording which thread opened it. */
+  private static final class ReadRecordingProcess extends Process {
+    private final InputStream stdout;
+    private volatile Thread reader;
+
+    ReadRecordingProcess(InputStream stdout) {
+      this.stdout = stdout;
+    }
+
+    @Override
+    public InputStream getInputStream() {
+      reader = Thread.currentThread();
+      return stdout;
+    }
+
+    @Override
+    public OutputStream getOutputStream() {
+      return OutputStream.nullOutputStream();
+    }
+
+    @Override
+    public InputStream getErrorStream() {
+      return InputStream.nullInputStream();
+    }
+
+    @Override
+    public int waitFor() {
+      return 0;
+    }
+
+    @Override
+    public int exitValue() {
+      return 0;
+    }
+
+    @Override
+    public void destroy() {}
   }
 }
