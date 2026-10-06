@@ -236,6 +236,14 @@ and its name suggested one sandbox where the provider spawns one per session.
 
 ### Fixed
 
+- **`JShellExecutionProvider`: a session ended while it started could free its slot twice, and a
+  closed provider could keep a live sandbox.** If `onSessionEnd` ran while the session's startup
+  snippet was running and the snippet then failed, the end and the failed start each gave the
+  session's slot back, so the provider then admitted one session more than
+  `withMaxConcurrentSessions` allows. A `close()` that ran while a session's sandbox was spawning
+  left that sandbox running in the closed provider and its start accepted. The slot is now freed
+  only by whoever removes the session, and a start that finds the provider closed once its sandbox
+  is up closes it and refuses with `provider is closed`.
 - **A provider given no `ModelConfig` failed with a `NullPointerException`.** `AnthropicProvider`
   and `OpenAIProvider` read `config.baseUrl()` while resolving a model id they do not catalogue, so
   `create("custom-id", null)` threw a bare `NullPointerException`; `GeminiProvider` reported the
