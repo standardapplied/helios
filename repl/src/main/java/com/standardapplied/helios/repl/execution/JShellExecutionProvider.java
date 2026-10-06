@@ -104,7 +104,7 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
             .withFilesystemWriteAllowed(b.filesystemWriteAllowed)
             .withMaxTimeout(b.maxTimeout)
             .build();
-    this.shutdownHook = new Thread(pool::reapAll, "helios-jshell-shutdown");
+    this.shutdownHook = new Thread(pool::close, "helios-jshell-shutdown");
     this.shutdownHookRegistered = b.registerShutdownHook;
     if (shutdownHookRegistered) {
       JVM.addShutdownHook(shutdownHook);
@@ -228,7 +228,7 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     if (!closed.compareAndSet(false, true)) {
       return;
     }
-    pool.reapAll();
+    pool.close();
     if (shutdownHookRegistered) {
       try {
         JVM.removeShutdownHook(shutdownHook);
