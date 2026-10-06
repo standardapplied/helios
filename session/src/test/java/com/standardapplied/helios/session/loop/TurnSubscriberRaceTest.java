@@ -95,11 +95,11 @@ final class TurnSubscriberRaceTest {
 
     subscriber.onSubscribe(new NoopSubscription());
     subscriber.onComplete();
-    subscriber.awaitDone(new CancellationToken());
+    var streamed = subscriber.awaitDone(new CancellationToken());
 
     // After awaitDone returns, no task should still be holding the scheduler — the prior task
     // was cancelled by onComplete, and awaitDone's finally clause cancels any successor.
-    assertNull(subscriber.error(), "normal completion records no error");
+    assertNull(streamed.error(), "normal completion records no error");
     assertEquals(0, scheduler.outstandingCount(), "no scheduled task should outlive the turn");
   }
 

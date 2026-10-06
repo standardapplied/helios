@@ -416,7 +416,7 @@ final class AgentSessionImplTest {
   @Test
   void closeBeforeAnySendShutsDownPublisherExecutor() {
     var s = (AgentSessionImpl) buildSession(textOnceModel("x", FinishReason.STOP));
-    var executor = s.publisherExecutorForTests();
+    var executor = s.lifecycleForTests().publisherExecutor();
     assertTrue(!executor.isShutdown(), "executor live before close()");
     s.close();
     assertTrue(executor.isShutdown(), "executor shut down by close()");
@@ -426,7 +426,7 @@ final class AgentSessionImplTest {
   @Test
   void naturalLoopTerminationShutsDownPublisherExecutor() throws Exception {
     var s = (AgentSessionImpl) buildSession(textOnceModel("done", FinishReason.STOP));
-    var executor = s.publisherExecutorForTests();
+    var executor = s.lifecycleForTests().publisherExecutor();
     s.send(UserMessage.text("hi"));
     terminalOf(s);
     // closeRuntime() runs BEFORE resultFuture settles (hv2-bug2 Issue 2 fix), so the executor is
@@ -557,6 +557,42 @@ final class AgentSessionImplTest {
     }
     // onSessionEnd never fires when the provider refused at start.
     assertFalse(provider.endSeen.get());
+  }
+
+  @Test
+  void providerOnSessionStartExceptionWithoutAMessageIsReportedAsNoMessage() throws Exception {
+    var provider = new LifecycleProvider();
+    provider.throwOnStart = new IllegalStateException();
+    try (var s =
+        AgentSession.create(
+            SessionOptions.newBuilder()
+                .withModel(textOnceModel("unused", FinishReason.STOP))
+                .withSessionId(SID)
+                .withClock(CLOCK)
+                .withExecutionProvider(provider)
+                .build())) {
+      var err = assertInstanceOf(ResultMessage.ErrorProviderUnavailable.class, terminalOf(s));
+      assertEquals("onSessionStart threw IllegalStateException: (no message)", err.reason());
+    }
+  }
+
+  @Test
+  void systemPromptLeadsTheHistoryTheModelSees() {
+    var model =
+        com.standardapplied.helios.testing.ScriptedModel.newBuilder().withTextTurn("ok").build();
+    try (var s =
+        AgentSession.create(
+            SessionOptions.newBuilder()
+                .withModel(model)
+                .withSessionId(SID)
+                .withClock(CLOCK)
+                .withSystemPrompt("be terse")
+                .build())) {
+      s.runBlocking(UserMessage.text("hi"));
+    }
+    var seen = model.calls().getFirst();
+    assertEquals(List.of("be terse", "hi"), seen.stream().map(Message::content).toList());
+    assertEquals(com.standardapplied.helios.core.model.Role.SYSTEM, seen.getFirst().role());
   }
 
   @Test
@@ -706,7 +742,7 @@ final class AgentSessionImplTest {
       if (event instanceof QueryEvent.LoopEnded ended) {
         Await.until(
             "the session to begin draining its publisher",
-            session.publisherExecutorForTests()::isShutdown);
+            session.lifecycleForTests().publisherExecutor()::isShutdown);
         resultSettledFirst.set(session.result().isDone());
         captured.set(ended.result());
       }
