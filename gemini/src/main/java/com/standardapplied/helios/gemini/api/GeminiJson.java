@@ -2,7 +2,7 @@
 
 package com.standardapplied.helios.gemini.api;
 
-import com.standardapplied.helios.core.schema.StructuredContentParser;
+import com.standardapplied.helios.core.provider.JsonBinding;
 import java.util.Map;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
@@ -22,19 +22,8 @@ public final class GeminiJson {
   public static final ObjectMapper DEFAULT = JsonMapper.builder().build();
 
   /** Structured output read through {@link #LENIENT}. */
-  public static final StructuredContentParser.JsonAdapter STRUCTURED =
-      new StructuredContentParser.JsonAdapter() {
-        @Override
-        @SuppressWarnings("unchecked")
-        public Map<String, Object> toMap(String json) {
-          return LENIENT.readValue(json, Map.class);
-        }
-
-        @Override
-        public <T> T fromMap(Map<String, Object> map, Class<T> type) {
-          return LENIENT.convertValue(map, type);
-        }
-      };
+  public static final JsonBinding STRUCTURED =
+      new JsonBinding(json -> LENIENT.readValue(json, Map.class), LENIENT::convertValue);
 
   private GeminiJson() {}
 }

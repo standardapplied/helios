@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.provider.StreamingModel;
 import org.junit.jupiter.api.Test;
 
 class GeminiProviderTest {
@@ -53,13 +54,13 @@ class GeminiProviderTest {
   }
 
   @Test
-  void createModelReturnsGeminiModel() {
+  void createModelReturnsStreamingModel() {
     var config = ModelConfig.of("test-api-key");
 
     var model = provider.create(GeminiModelId.GEMINI_3_FLASH_PREVIEW.id(), config);
 
     assertNotNull(model);
-    assertInstanceOf(GeminiModel.class, model);
+    assertInstanceOf(StreamingModel.class, model);
     assertEquals(GeminiModelId.GEMINI_3_FLASH_PREVIEW.id(), model.id());
     assertEquals("gemini", model.provider());
   }

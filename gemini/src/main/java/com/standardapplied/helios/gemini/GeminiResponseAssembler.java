@@ -16,6 +16,10 @@ import java.util.Map;
  */
 final class GeminiResponseAssembler {
 
+  static final String API_VERSION_KEY = "gemini.apiVersion";
+  static final String THOUGHT_SIGNATURES_KEY = "gemini.thoughtSignatures";
+  static final String SIGNATURE_DELIMITER = "\u001E";
+
   private static final Map<String, FinishReason> FINISH_REASON =
       Map.of(
           "failed", FinishReason.ERROR,
@@ -36,14 +40,12 @@ final class GeminiResponseAssembler {
       String interactionId,
       String apiVersion) {
     var metadata = new HashMap<String, String>();
-    metadata.put(GeminiModel.API_VERSION_KEY, apiVersion);
+    metadata.put(API_VERSION_KEY, apiVersion);
     if (!output.signatures().isEmpty()) {
-      metadata.put(
-          GeminiModel.THOUGHT_SIGNATURES_KEY,
-          String.join(GeminiModel.SIGNATURE_DELIMITER, output.signatures()));
+      metadata.put(THOUGHT_SIGNATURES_KEY, String.join(SIGNATURE_DELIMITER, output.signatures()));
     }
     if (interactionId != null) {
-      metadata.put(GeminiModel.INTERACTION_ID_KEY, interactionId);
+      metadata.put(ContinuationPoint.INTERACTION_ID_KEY, interactionId);
     }
     var response =
         Response.newBuilder()

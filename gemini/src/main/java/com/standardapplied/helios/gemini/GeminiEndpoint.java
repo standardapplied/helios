@@ -16,12 +16,15 @@ import java.net.URI;
  */
 record GeminiEndpoint(String apiVersion, String baseUrl) {
 
+  static final String DEFAULT_API_ROOT = "https://generativelanguage.googleapis.com";
+  static final String DEFAULT_API_VERSION = "v1";
+
   /** The endpoint {@code config} addresses. */
   static GeminiEndpoint of(ModelConfig config) {
     var apiVersion = apiVersion(config);
     var baseUrl =
         Strings.isBlank(config.baseUrl())
-            ? GeminiModel.DEFAULT_API_ROOT + "/" + apiVersion
+            ? DEFAULT_API_ROOT + "/" + apiVersion
             : withoutTrailingSlash(config.baseUrl());
     return new GeminiEndpoint(apiVersion, baseUrl);
   }
@@ -39,13 +42,13 @@ record GeminiEndpoint(String apiVersion, String baseUrl) {
       throw new IllegalArgumentException("apiVersion must be exactly 'v1' or 'v1beta'");
     }
     if (Strings.isBlank(config.baseUrl())) {
-      return GeminiModel.DEFAULT_API_VERSION;
+      return DEFAULT_API_VERSION;
     }
     var baseUrl = withoutTrailingSlash(config.baseUrl());
     if (baseUrl.endsWith("/v1beta")) {
       return "v1beta";
     }
-    return baseUrl.endsWith("/v1") ? GeminiModel.DEFAULT_API_VERSION : "custom";
+    return baseUrl.endsWith("/v1") ? DEFAULT_API_VERSION : "custom";
   }
 
   private static String withoutTrailingSlash(String url) {

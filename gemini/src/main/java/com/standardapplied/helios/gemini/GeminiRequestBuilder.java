@@ -5,6 +5,7 @@ package com.standardapplied.helios.gemini;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.ToolChoice;
+import com.standardapplied.helios.core.provider.RequestFactory;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.gemini.api.InteractionGenerationConfig;
 import com.standardapplied.helios.gemini.api.InteractionRequest;
@@ -13,13 +14,14 @@ import com.standardapplied.helios.gemini.api.ToolChoiceConfig;
 import com.standardapplied.helios.gemini.api.ToolDefinition;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Builds the Interactions API request for one turn of one model: the conversation, or only what
  * follows its continuation point when continuing server-side; the tools, with Google Search and URL
  * context when enabled; and the generation settings.
  */
-final class GeminiRequestBuilder {
+final class GeminiRequestBuilder implements RequestFactory<InteractionRequest> {
 
   private final GeminiModelId modelId;
   private final ModelConfig config;
@@ -29,14 +31,19 @@ final class GeminiRequestBuilder {
     this.config = config;
   }
 
-  /** The request for {@code messages}, offering {@code tools} and answering in {@code format}. */
-  InteractionRequest build(List<Message> messages, List<Tool> tools, ResponseFormat format) {
+  /**
+   * The request for {@code messages}, offering {@code tools} and answering as JSON matching {@code
+   * outputSchema}, or in free text when it is {@code null}.
+   */
+  @Override
+  public InteractionRequest build(
+      List<Message> messages, List<Tool> tools, Map<String, Object> outputSchema) {
     var request =
         InteractionRequest.newBuilder()
             .withModel(modelId.id())
             .withTools(toolDefinitions(tools))
             .withGenerationConfig(generationConfig())
-            .withResponseFormat(format)
+            .withResponseFormat(outputSchema == null ? null : ResponseFormat.json(outputSchema))
             .withStream(true);
     var continuation = config.providerContinuation() ? ContinuationPoint.find(messages) : null;
     if (continuation != null) {

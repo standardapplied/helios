@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.FileReference;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
@@ -29,13 +30,12 @@ class GeminiRestructuredPartsTest {
   @Test
   void eachToolChoiceModeReachesTheGenerationConfig() {
     for (var choice : List.of(ToolChoice.auto(), ToolChoice.any(), ToolChoice.none())) {
-      var model =
-          new GeminiModel(
+      var requests =
+          new GeminiRequestBuilder(
               GeminiModelId.GEMINI_3_5_FLASH,
               ModelConfig.newBuilder().withApiKey("k").withToolChoice(choice).build());
 
-      var config =
-          model.requests.build(List.of(Message.user("hi")), List.of(), null).generationConfig();
+      var config = requests.build(List.of(Message.user("hi")), List.of(), null).generationConfig();
 
       assertEquals(
           choice.getClass().getSimpleName().toLowerCase(Locale.ROOT), config.toolChoice().mode());
@@ -52,12 +52,13 @@ class GeminiRestructuredPartsTest {
   @Test
   void theModelReportsItsCatalogCeilingAndCapturePolicy() {
     var model =
-        new GeminiModel(
-            GeminiModelId.GEMINI_3_5_FLASH,
-            ModelConfig.newBuilder()
-                .withApiKey("k")
-                .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
-                .build());
+        new GeminiProvider()
+            .create(
+                GeminiModelId.GEMINI_3_5_FLASH.id(),
+                ModelConfig.newBuilder()
+                    .withApiKey("k")
+                    .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
+                    .build());
 
     assertEquals(GeminiModelId.GEMINI_3_5_FLASH.maxOutputTokens(), model.maxOutputTokens());
     assertEquals(RawOutputCapturePolicy.DISABLED, model.rawOutputCapturePolicy());
@@ -79,24 +80,24 @@ class GeminiRestructuredPartsTest {
 
   @Test
   void aKeylessRequestToACustomEndpointCarriesNoApiKeyHeader() {
-    var model =
-        new GeminiModel(
-            GeminiModelId.GEMINI_3_5_FLASH,
-            ModelConfig.newBuilder().withBaseUrl("http://gateway.local/v1beta").build());
+    var config = ModelConfig.newBuilder().withBaseUrl("http://gateway.local/v1beta").build();
+    var streams =
+        new GeminiStreams(config, HttpClientFactory.create(config), GeminiEndpoint.of(config));
 
-    assertTrue(model.streams.httpRequest("{}").headers().firstValue("x-goog-api-key").isEmpty());
+    assertTrue(streams.httpRequest("{}").headers().firstValue("x-goog-api-key").isEmpty());
   }
 
   @Test
   void aToolThatCannotBeWrittenFailsTheCallBeforeItIsSent() {
     var tool = ConversationFixture.unwritableTool();
     var model =
-        new GeminiModel(
-            GeminiModelId.GEMINI_3_5_FLASH,
-            ModelConfig.newBuilder()
-                .withApiKey("k")
-                .withBaseUrl("http://127.0.0.1:1/v1beta")
-                .build());
+        new GeminiProvider()
+            .create(
+                GeminiModelId.GEMINI_3_5_FLASH.id(),
+                ModelConfig.newBuilder()
+                    .withApiKey("k")
+                    .withBaseUrl("http://127.0.0.1:1/v1beta")
+                    .build());
 
     var error =
         assertThrows(
