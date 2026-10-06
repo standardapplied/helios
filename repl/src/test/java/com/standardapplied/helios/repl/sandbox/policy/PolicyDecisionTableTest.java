@@ -24,7 +24,9 @@ import org.junit.jupiter.params.provider.CsvSource;
  * and the edges of their order: a class denied explicitly inside an allowed package and inside a
  * denied package, a denied package that is also reflective, the reflective entry points on {@code
  * java.lang.Class} next to its plain members, user code outside the allow-list, and a trusted
- * language bootstrap whose argument is denied.
+ * language bootstrap whose argument is denied. The {@code overlapping} allow-list policy denies
+ * reflection and names classes and packages that other rules also match, so each row of it shows
+ * which of two matching rules comes first.
  *
  * <p>A reference is written {@code kind owner member}: {@code call} invokes a static method, {@code
  * new} instantiates, {@code class} loads a class literal, {@code lambda} is a {@code
@@ -88,6 +90,14 @@ class PolicyDecisionTableTest {
     "allowList,  call,   com.sun.net.httpserver.HttpServer,     create,              allowedPackages-default-deny",
     "allowList,  call,   jdk.internal.misc.Unsafe,              getUnsafe,           allowedPackages-default-deny",
     "allowList,  call,   javaxx.Custom,                         run,                 allowed",
+    "noEgress,   call,   java.lang.Runtime,                     loadLibrary,         deniedClasses:java.lang.Runtime",
+    "overlapping, call,  java.util.concurrent.ForkJoinPool,     commonPool,          deniedClasses:java.util.concurrent.ForkJoinPool",
+    "overlapping, call,  java.lang.invoke.MethodHandles,        lookup,              deniedClasses:java.lang.invoke.MethodHandles",
+    "overlapping, new,   java.net.Socket,                       <init>,              deniedClasses:java.net.Socket",
+    "overlapping, call,  java.lang.reflect.Method,              invoke,              deniedPackages:java.lang.reflect",
+    "overlapping, call,  java.nio.channels.Channels,            newReader,           deniedPackages:java.nio.channels",
+    "overlapping, call,  java.lang.Class,                       forName,             denyReflection",
+    "overlapping, call,  java.net.URI,                          create,              allowedPackages-default-deny",
   })
   void decision(String policy, String kind, String owner, String member, String expected) {
     var bytes = referencing(kind, ClassDesc.of(owner), member);
@@ -151,6 +161,16 @@ class PolicyDecisionTableTest {
               .withDeniedClasses("java.util.Random", "java.lang.reflect.Proxy")
               .withDeniedPackages("java.util.concurrent", "java.lang.reflect")
               .withDenyDynamicClassDefinition(true)
+              .build();
+      case "overlapping" ->
+          SandboxPolicy.newBuilder()
+              .withAllowedPackages("java.lang", "java.util")
+              .withDeniedClasses(
+                  "java.util.concurrent.ForkJoinPool",
+                  "java.lang.invoke.MethodHandles",
+                  "java.net.Socket")
+              .withDeniedPackages("java.util.concurrent", "java.lang.reflect", "java.nio.channels")
+              .withDenyReflection(true)
               .build();
       default -> throw new IllegalArgumentException(name);
     };
