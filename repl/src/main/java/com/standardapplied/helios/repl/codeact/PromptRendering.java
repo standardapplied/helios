@@ -75,10 +75,7 @@ final class PromptRendering {
         rendered = true;
       }
       sb.append("  - ").append(SandboxPrelude.formatSignature(fn));
-      if (!Strings.isBlank(fn.description())) {
-        sb.append(" — ").append(fn.description());
-      }
-      sb.append('\n');
+      sb.append(" — ").append(fn.description()).append('\n');
       for (var p : fn.parameters()) {
         sb.append("      ").append(p.required() ? "" : "[optional] ");
         sb.append(p.name()).append(" (").append(p.type().jsonType()).append(") — ");
