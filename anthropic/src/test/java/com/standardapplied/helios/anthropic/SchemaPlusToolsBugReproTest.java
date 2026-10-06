@@ -33,12 +33,12 @@ import org.junit.jupiter.api.Test;
  * <p>Two cooperating fixes landed in 2.3.3:
  *
  * <ol>
- *   <li>{@link AnthropicModel#chat(java.util.List, java.util.List,
- *       com.standardapplied.helios.core.schema.OutputSchema)} skips {@code parseStructuredContent}
- *       when {@code response.toolCalls()} is non-empty — tool-calling turns are intermediate,
- *       structured output is the deliverable of a later text-only turn.
- *   <li>{@link AnthropicModel#buildRequest} rephrases the schema instruction when tools are present
- *       so it stops fighting the deployer's "use tools first" guidance.
+ *   <li>A model's {@link com.standardapplied.helios.core.model.Model#chat(java.util.List,
+ *       java.util.List, com.standardapplied.helios.core.schema.OutputSchema)} skips parsing when
+ *       {@code response.toolCalls()} is non-empty — tool-calling turns are intermediate, structured
+ *       output is the deliverable of a later text-only turn.
+ *   <li>{@link AnthropicRequestBuilder#build} rephrases the schema instruction when tools are
+ *       present so it stops fighting the deployer's "use tools first" guidance.
  * </ol>
  */
 class SchemaPlusToolsBugReproTest {
@@ -53,6 +53,11 @@ class SchemaPlusToolsBugReproTest {
         .build();
   }
 
+  private static AnthropicRequestBuilder requests(ModelConfig config) {
+    var model = AnthropicModelId.CLAUDE_SONNET_4_6;
+    return new AnthropicRequestBuilder(model.id(), model, config, CachePolicy.shortLived());
+  }
+
   // ---------------------------------------------------------------------------------------------
   // Claim #1 — schema instruction is contextualised when tools are present
   // ---------------------------------------------------------------------------------------------
@@ -60,11 +65,11 @@ class SchemaPlusToolsBugReproTest {
   @Test
   void buildRequestWithSchemaAndToolsAppendsTheTurnAwareInstruction() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(config);
     var schema = Map.<String, Object>of("type", "object", "properties", Map.of());
 
     var request =
-        model.requests.build(
+        requests.build(
             java.util.List.of(Message.user("Find me three matches.")),
             java.util.List.of(searchTool()),
             schema);
@@ -86,12 +91,11 @@ class SchemaPlusToolsBugReproTest {
   @Test
   void buildRequestWithSchemaButNoToolsKeepsTheBareJsonInstruction() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(config);
     var schema = Map.<String, Object>of("type", "object", "properties", Map.of());
 
     var request =
-        model.requests.build(
-            java.util.List.of(Message.user("Extract")), java.util.List.of(), schema);
+        requests.build(java.util.List.of(Message.user("Extract")), java.util.List.of(), schema);
 
     var systemText = request.systemAsText();
     assertTrue(
@@ -220,7 +224,8 @@ class SchemaPlusToolsBugReproTest {
   void chatWithProsePreambleAndToolCallsReturnsToolCallsWithoutParsing() {
     respondWithToolUse("I'll work through this carefully.");
     var config = ModelConfig.newBuilder().withApiKey("test-key").withBaseUrl(baseUrl).build();
-    try (var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config)) {
+    try (var model =
+        new AnthropicProvider().create(AnthropicModelId.CLAUDE_OPUS_4_7.id(), config)) {
       var schema = OutputSchema.of(SimpleAnswer.class);
       var response =
           model.chat(
@@ -244,7 +249,8 @@ class SchemaPlusToolsBugReproTest {
   void chatWithToolUseAndNoProseReturnsNullParsed() {
     respondWithToolUse(null);
     var config = ModelConfig.newBuilder().withApiKey("test-key").withBaseUrl(baseUrl).build();
-    try (var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config)) {
+    try (var model =
+        new AnthropicProvider().create(AnthropicModelId.CLAUDE_OPUS_4_7.id(), config)) {
       var schema = OutputSchema.of(SimpleAnswer.class);
       var response =
           model.chat(

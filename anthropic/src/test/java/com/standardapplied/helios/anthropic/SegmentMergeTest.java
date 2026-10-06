@@ -26,7 +26,7 @@ class SegmentMergeTest {
     assertEquals("", merged.content());
     assertNull(merged.usage());
     assertEquals(List.of(), merged.citations());
-    assertFalse(merged.metadata().containsKey(AnthropicModel.RAW_CONTENT_KEY));
+    assertFalse(merged.metadata().containsKey(RawContentEcho.RAW_CONTENT_KEY));
   }
 
   @Test
@@ -67,7 +67,7 @@ class SegmentMergeTest {
     assertEquals(
         "[{\"type\":\"text\",\"text\":\"Searching.\"},"
             + "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"search\",\"input\":{\"q\":\"x\"}}]",
-        merged.metadata().get(AnthropicModel.RAW_CONTENT_KEY));
+        merged.metadata().get(RawContentEcho.RAW_CONTENT_KEY));
   }
 
   @Test
@@ -75,14 +75,14 @@ class SegmentMergeTest {
     var empty =
         Response.newBuilder()
             .withContent("Hi")
-            .withMetadata(Map.of(AnthropicModel.RAW_CONTENT_KEY, ""))
+            .withMetadata(Map.of(RawContentEcho.RAW_CONTENT_KEY, ""))
             .build();
 
     var merged = SegmentMerge.merge(empty, segment("", null, null));
 
     assertEquals(
         "[{\"type\":\"text\",\"text\":\"Hi\"}]",
-        merged.metadata().get(AnthropicModel.RAW_CONTENT_KEY));
+        merged.metadata().get(RawContentEcho.RAW_CONTENT_KEY));
   }
 
   @Test
@@ -102,7 +102,7 @@ class SegmentMergeTest {
   void unreadableVerbatimContentFailsTheMerge() {
     var corrupted =
         Response.newBuilder()
-            .withMetadata(Map.of(AnthropicModel.RAW_CONTENT_KEY, "{not json"))
+            .withMetadata(Map.of(RawContentEcho.RAW_CONTENT_KEY, "{not json"))
             .build();
 
     var failure =

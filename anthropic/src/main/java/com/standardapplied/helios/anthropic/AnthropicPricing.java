@@ -41,8 +41,8 @@ public final class AnthropicPricing {
    * CostCalculator#staticTable(java.util.Map)}: an unknown rate is a configuration gap, not
    * something to guess at.
    *
-   * @param cachePolicy the policy the session's {@link AnthropicModel} was created with; selects
-   *     the five-minute or one-hour cache-write rate. Non-null
+   * @param cachePolicy the policy the session's model was created with through {@link
+   *     AnthropicProvider}; selects the five-minute or one-hour cache-write rate. Non-null
    * @return a calculator backed by an immutable snapshot of the rate card
    * @throws NullPointerException if {@code cachePolicy} is null
    */

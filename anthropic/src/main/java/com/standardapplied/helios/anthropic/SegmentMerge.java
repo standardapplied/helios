@@ -30,12 +30,12 @@ final class SegmentMerge {
     var verbatim = new ArrayList<Object>(blocksOf(first));
     verbatim.addAll(blocksOf(second));
     if (!verbatim.isEmpty()) {
-      metadata.put(AnthropicModel.RAW_CONTENT_KEY, serialize(verbatim));
+      metadata.put(RawContentEcho.RAW_CONTENT_KEY, serialize(verbatim));
     }
     var thinkingBlocks = new ArrayList<ThinkingBlock>(ThinkingBlock.decodeAll(first.metadata()));
     if (!thinkingBlocks.isEmpty()) {
       thinkingBlocks.addAll(ThinkingBlock.decodeAll(metadata));
-      metadata.put(AnthropicModel.THINKING_BLOCKS_KEY, ThinkingBlock.encodeAll(thinkingBlocks));
+      metadata.put(ThinkingBlock.THINKING_BLOCKS_KEY, ThinkingBlock.encodeAll(thinkingBlocks));
     }
     return Response.newBuilder()
         .withContent(orEmpty(first.content()) + orEmpty(second.content()))
@@ -93,7 +93,7 @@ final class SegmentMerge {
    */
   @SuppressWarnings("unchecked")
   private static List<Object> blocksOf(Response<Void> segment) {
-    var raw = segment.metadata().get(AnthropicModel.RAW_CONTENT_KEY);
+    var raw = segment.metadata().get(RawContentEcho.RAW_CONTENT_KEY);
     if (raw != null && !raw.isEmpty()) {
       try {
         return (List<Object>) AnthropicJson.LENIENT.readValue(raw, List.class);

@@ -19,6 +19,8 @@ import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.ConversationFixture;
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -58,7 +60,7 @@ class AnthropicRequestPartsTest {
         Message.assistant(
             "",
             List.of(),
-            Map.of(AnthropicModel.THINKING_BLOCKS_KEY, "[{\"text\":\"hm\",\"signature\":\"s\"}]"));
+            Map.of(ThinkingBlock.THINKING_BLOCKS_KEY, "[{\"text\":\"hm\",\"signature\":\"s\"}]"));
 
     var blocks = (List<?>) AnthropicMessages.assistant(message).content();
 
@@ -77,7 +79,7 @@ class AnthropicRequestPartsTest {
 
   @Test
   void emptyVerbatimContentFallsBackToTheTypedEcho() {
-    var message = Message.assistant("Hi", List.of(), Map.of(AnthropicModel.RAW_CONTENT_KEY, ""));
+    var message = Message.assistant("Hi", List.of(), Map.of(RawContentEcho.RAW_CONTENT_KEY, ""));
 
     assertEquals("Hi", AnthropicMessages.assistant(message).content());
   }
@@ -85,7 +87,7 @@ class AnthropicRequestPartsTest {
   @Test
   void unreadableVerbatimContentIsRefused() {
     var message =
-        Message.assistant("Hi", List.of(), Map.of(AnthropicModel.RAW_CONTENT_KEY, "{bad"));
+        Message.assistant("Hi", List.of(), Map.of(RawContentEcho.RAW_CONTENT_KEY, "{bad"));
 
     var failure =
         assertThrows(AnthropicException.class, () -> AnthropicMessages.assistant(message));
@@ -126,13 +128,7 @@ class AnthropicRequestPartsTest {
 
   @Test
   void aCachedRequestWithoutToolsOrMessagesMarksNothing() {
-    var model =
-        new AnthropicModel(
-            AnthropicModelId.CLAUDE_OPUS_5_5,
-            ModelConfig.newBuilder().withApiKey("k").build(),
-            CachePolicy.shortLived());
-
-    var request = model.requests.build(List.of(), List.of(), null);
+    var request = requests().build(List.of(), List.of(), null);
 
     assertNull(request.tools());
     assertEquals(List.of(), request.messages());
@@ -140,51 +136,42 @@ class AnthropicRequestPartsTest {
 
   @Test
   void aCachedMessageWithoutBlocksIsLeftUnmarked() {
-    var model =
-        new AnthropicModel(
-            AnthropicModelId.CLAUDE_OPUS_5_5, ModelConfig.newBuilder().withApiKey("k").build());
-    var empty = Message.assistant("", List.of(), Map.of(AnthropicModel.RAW_CONTENT_KEY, "[]"));
+    var requests = requests();
+    var empty = Message.assistant("", List.of(), Map.of(RawContentEcho.RAW_CONTENT_KEY, "[]"));
 
     var request =
-        model.requests.build(new ArrayList<>(List.of(Message.user("hi"), empty)), List.of(), null);
+        requests.build(new ArrayList<>(List.of(Message.user("hi"), empty)), List.of(), null);
 
     assertEquals(List.of(), request.messages().getLast().content());
   }
 
   @Test
   void aSchemaWithAnEmptyToolListAsksForJsonAlone() {
-    var model =
-        new AnthropicModel(
-            AnthropicModelId.CLAUDE_OPUS_5_5, ModelConfig.newBuilder().withApiKey("k").build());
+    var requests = requests();
 
-    var request =
-        model.requests.build(List.of(Message.user("hi")), List.of(), Map.of("type", "object"));
+    var request = requests.build(List.of(Message.user("hi")), List.of(), Map.of("type", "object"));
 
     assertTrue(request.systemAsText().startsWith("You must respond with valid JSON"));
   }
 
   @Test
   void aSchemaWithoutAToolListAsksForJsonAlone() {
-    var model =
-        new AnthropicModel(
-            AnthropicModelId.CLAUDE_OPUS_5_5, ModelConfig.newBuilder().withApiKey("k").build());
+    var requests = requests();
 
-    var request = model.requests.build(List.of(Message.user("hi")), null, Map.of("type", "object"));
+    var request = requests.build(List.of(Message.user("hi")), null, Map.of("type", "object"));
 
     assertTrue(request.systemAsText().startsWith("You must respond with valid JSON"));
   }
 
   @Test
   void aSchemaThatCannotBeWrittenFailsTheRequest() {
-    var model =
-        new AnthropicModel(
-            AnthropicModelId.CLAUDE_OPUS_5_5, ModelConfig.newBuilder().withApiKey("k").build());
+    var requests = requests();
     var schema = ConversationFixture.selfReferencing();
 
     var failure =
         assertThrows(
             AnthropicException.class,
-            () -> model.requests.build(List.of(Message.user("hi")), List.of(), schema));
+            () -> requests.build(List.of(Message.user("hi")), List.of(), schema));
 
     assertEquals("Failed to serialize value", failure.getMessage());
   }
@@ -192,9 +179,10 @@ class AnthropicRequestPartsTest {
   @Test
   void aToolThatCannotBeWrittenFailsTheCallBeforeItIsSent() {
     var model =
-        new AnthropicModel(
-            AnthropicModelId.CLAUDE_OPUS_5_5,
-            ModelConfig.newBuilder().withApiKey("k").withBaseUrl("http://127.0.0.1:1").build());
+        new AnthropicProvider()
+            .create(
+                AnthropicModelId.CLAUDE_OPUS_5_5.id(),
+                ModelConfig.newBuilder().withApiKey("k").withBaseUrl("http://127.0.0.1:1").build());
     var tool = ConversationFixture.unwritableTool();
 
     var failure =
@@ -206,12 +194,9 @@ class AnthropicRequestPartsTest {
 
   @Test
   void aKeylessRequestToACustomEndpointCarriesNoApiKeyHeader() {
-    var model =
-        new AnthropicModel(
-            AnthropicModelId.CLAUDE_OPUS_5_5,
-            ModelConfig.newBuilder().withBaseUrl("http://gateway.local/v1/messages").build());
+    var config = ModelConfig.newBuilder().withBaseUrl("http://gateway.local/v1/messages").build();
 
-    var request = model.streams.httpRequest("{}");
+    var request = httpRequest(config);
 
     assertEquals(URI.create("http://gateway.local/v1/messages"), request.uri());
     assertTrue(request.headers().firstValue("x-api-key").isEmpty());
@@ -220,11 +205,22 @@ class AnthropicRequestPartsTest {
   @Test
   void thinkingMetadataWithoutBlocksDecodesToNone() {
     assertEquals(List.of(), ThinkingBlock.decodeAll(null));
-    assertEquals(
-        List.of(), ThinkingBlock.decodeAll(Map.of(AnthropicModel.THINKING_BLOCKS_KEY, "")));
+    assertEquals(List.of(), ThinkingBlock.decodeAll(Map.of(ThinkingBlock.THINKING_BLOCKS_KEY, "")));
     assertEquals(
         List.of(new ThinkingBlock("", "sig")),
         ThinkingBlock.decodeAll(
-            Map.of(AnthropicModel.THINKING_BLOCKS_KEY, "[{\"signature\":\"sig\"}]")));
+            Map.of(ThinkingBlock.THINKING_BLOCKS_KEY, "[{\"signature\":\"sig\"}]")));
+  }
+
+  private static AnthropicRequestBuilder requests() {
+    var model = AnthropicModelId.CLAUDE_OPUS_5_5;
+    var config = ModelConfig.newBuilder().withApiKey("k").build();
+    return new AnthropicRequestBuilder(model.id(), model, config, CachePolicy.shortLived());
+  }
+
+  private static HttpRequest httpRequest(ModelConfig config) {
+    try (var client = HttpClient.newHttpClient()) {
+      return new AnthropicStreams(config, client).httpRequest("{}");
+    }
   }
 }

@@ -41,12 +41,13 @@ class AnthropicStreamTranscriptTest {
         ModelHarness.transcript(
             "anthropic/streams/" + name + ".sse",
             uri ->
-                new AnthropicModel(
-                    AnthropicModelId.CLAUDE_OPUS_5_5,
-                    ModelConfig.newBuilder()
-                        .withApiKey("test-key")
-                        .withBaseUrl(uri + "/v1/messages")
-                        .build()),
+                new AnthropicProvider()
+                    .create(
+                        AnthropicModelId.CLAUDE_OPUS_5_5.id(),
+                        ModelConfig.newBuilder()
+                            .withApiKey("test-key")
+                            .withBaseUrl(uri + "/v1/messages")
+                            .build()),
             AnthropicStreamTranscriptTest::canonicalJson);
 
     Golden.assertMatches("anthropic/streams/" + name + ".txt", transcript);

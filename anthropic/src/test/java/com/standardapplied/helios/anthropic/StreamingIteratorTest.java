@@ -422,7 +422,7 @@ class StreamingIteratorTest {
       }
       var done = (StreamEvent.Done) events.getLast();
       assertNull(done.response().thinking());
-      assertFalse(done.response().metadata().containsKey(AnthropicModel.THINKING_BLOCKS_KEY));
+      assertFalse(done.response().metadata().containsKey(ThinkingBlock.THINKING_BLOCKS_KEY));
     }
   }
 
@@ -591,7 +591,7 @@ class StreamingIteratorTest {
   @SuppressWarnings("unchecked")
   private java.util.List<Map<String, Object>> rawContent(Map<String, String> metadata) {
     return objectMapper.readValue(
-        metadata.get(AnthropicModel.RAW_CONTENT_KEY), java.util.List.class);
+        metadata.get(RawContentEcho.RAW_CONTENT_KEY), java.util.List.class);
   }
 
   @org.junit.jupiter.api.Test
@@ -649,7 +649,7 @@ class StreamingIteratorTest {
     var metadata = doneMetadata(sse);
 
     assertNull(
-        metadata.get(AnthropicModel.RAW_CONTENT_KEY),
+        metadata.get(RawContentEcho.RAW_CONTENT_KEY),
         "the typed echo already reproduces thinking, text, tool_use order");
     assertEquals(2, ThinkingBlock.decodeAll(metadata).size());
   }
@@ -671,8 +671,8 @@ class StreamingIteratorTest {
             + MESSAGE_DELTA_END_TURN
             + MESSAGE_STOP;
 
-    assertNull(doneMetadata(unsignedThinkingAfterText).get(AnthropicModel.RAW_CONTENT_KEY));
-    assertNull(doneMetadata(emptyTextBeforeThinking).get(AnthropicModel.RAW_CONTENT_KEY));
+    assertNull(doneMetadata(unsignedThinkingAfterText).get(RawContentEcho.RAW_CONTENT_KEY));
+    assertNull(doneMetadata(emptyTextBeforeThinking).get(RawContentEcho.RAW_CONTENT_KEY));
   }
 
   @org.junit.jupiter.api.Test
@@ -739,7 +739,7 @@ class StreamingIteratorTest {
     var response = ((StreamEvent.Done) drain(sse).getLast()).response();
 
     assertEquals("Answer.", response.content());
-    assertNull(response.metadata().get(AnthropicModel.RAW_CONTENT_KEY));
+    assertNull(response.metadata().get(RawContentEcho.RAW_CONTENT_KEY));
   }
 
   @org.junit.jupiter.api.Test
@@ -821,7 +821,7 @@ class StreamingIteratorTest {
 
     var metadata = doneMetadata(sse);
 
-    assertEquals("refusal", metadata.get(AnthropicModel.STOP_REASON_KEY));
+    assertEquals("refusal", metadata.get(AnthropicResponseAssembler.STOP_REASON_KEY));
     assertFalse(
         metadata.containsKey(com.standardapplied.helios.core.model.Response.REFUSAL_CATEGORY_KEY));
     assertFalse(

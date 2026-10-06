@@ -51,12 +51,12 @@ record AnthropicMessages(String system, List<MessageEntry> entries) {
   }
 
   /**
-   * An assistant turn on the wire. A turn recorded with {@link AnthropicModel#RAW_CONTENT_KEY}
+   * An assistant turn on the wire. A turn recorded with {@link RawContentEcho#RAW_CONTENT_KEY}
    * replays that content verbatim; any other turn sends its thinking blocks, text and tool calls.
    */
   static MessageEntry assistant(Message message) {
     var metadata = message.metadata() == null ? Map.<String, String>of() : message.metadata();
-    var rawContent = metadata.get(AnthropicModel.RAW_CONTENT_KEY);
+    var rawContent = metadata.get(RawContentEcho.RAW_CONTENT_KEY);
     if (rawContent != null && !rawContent.isEmpty()) {
       return new MessageEntry("assistant", verbatim(rawContent));
     }

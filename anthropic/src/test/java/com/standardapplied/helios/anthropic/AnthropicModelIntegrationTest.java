@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ThinkingLevel;
@@ -33,14 +34,14 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".+")
 class AnthropicModelIntegrationTest {
 
-  private static AnthropicModel model;
+  private static Model model;
   private static String apiKey;
 
   @BeforeAll
   static void setUp() {
     apiKey = System.getenv("ANTHROPIC_API_KEY");
     var config = ModelConfig.newBuilder().withApiKey(apiKey).build();
-    model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    model = new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
   }
 
   @Test
@@ -173,7 +174,8 @@ class AnthropicModelIntegrationTest {
   void chatWithThinking() {
     var config =
         ModelConfig.newBuilder().withApiKey(apiKey).withThinkingLevel(ThinkingLevel.HIGH).build();
-    var thinkingModel = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var thinkingModel =
+        new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
 
     var messages =
         List.of(
@@ -198,14 +200,15 @@ class AnthropicModelIntegrationTest {
   private static final List<AnthropicModelId> THE_55_MODELS =
       List.of(AnthropicModelId.CLAUDE_OPUS_5_5, AnthropicModelId.CLAUDE_SONNET_5_5);
 
-  private static AnthropicModel modelFor(String modelId, ThinkingLevel level) {
-    return new AnthropicModel(
-        modelId,
-        ModelConfig.newBuilder()
-            .withApiKey(apiKey)
-            .withThinkingLevel(level)
-            .withMaxOutputTokens(16_000)
-            .build());
+  private static Model modelFor(String modelId, ThinkingLevel level) {
+    return new AnthropicProvider()
+        .create(
+            modelId,
+            ModelConfig.newBuilder()
+                .withApiKey(apiKey)
+                .withThinkingLevel(level)
+                .withMaxOutputTokens(16_000)
+                .build());
   }
 
   private static Tool stringTool(String name, String description, String parameter) {
@@ -230,7 +233,7 @@ class AnthropicModelIntegrationTest {
    * fails here.
    */
   private static List<com.standardapplied.helios.core.model.Response<Void>> runToolLoop(
-      AnthropicModel candidate, List<Message> opening, List<Tool> tools, String toolOutput) {
+      Model candidate, List<Message> opening, List<Tool> tools, String toolOutput) {
     var history = new ArrayList<>(opening);
     var turns = new ArrayList<com.standardapplied.helios.core.model.Response<Void>>();
     for (var turn = 0; turn < 8; turn++) {
@@ -374,7 +377,7 @@ class AnthropicModelIntegrationTest {
               .withMaxOutputTokens(16_000)
               .withWebSearch(true)
               .build();
-      try (var candidate = new AnthropicModel(modelId, config)) {
+      try (var candidate = new AnthropicProvider().create(modelId.id(), config)) {
         var turns =
             runToolLoop(
                 candidate,
@@ -388,7 +391,7 @@ class AnthropicModelIntegrationTest {
         assertEquals(FinishReason.STOP, turns.getLast().finishReason(), modelId.id());
         assertTrue(
             turns.stream()
-                .anyMatch(turn -> turn.metadata().containsKey(AnthropicModel.RAW_CONTENT_KEY)),
+                .anyMatch(turn -> turn.metadata().containsKey(RawContentEcho.RAW_CONTENT_KEY)),
             () -> modelId.id() + ": the search turn must be echoed from its raw content");
       }
     }
@@ -435,7 +438,7 @@ class AnthropicModelIntegrationTest {
     // This is the regression test that fails in 1.1.4 and passes in 1.1.5.
     var config =
         ModelConfig.newBuilder().withApiKey(apiKey).withThinkingLevel(ThinkingLevel.MEDIUM).build();
-    var opus47 = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var opus47 = new AnthropicProvider().create(AnthropicModelId.CLAUDE_OPUS_4_7.id(), config);
 
     var response = opus47.chat(List.of(Message.user("What is 2+2? Think briefly.")));
 
@@ -449,7 +452,7 @@ class AnthropicModelIntegrationTest {
     // Validates the claude-opus-4-8 wire id is live and the adaptive thinking shape is accepted.
     var config =
         ModelConfig.newBuilder().withApiKey(apiKey).withThinkingLevel(ThinkingLevel.MEDIUM).build();
-    var opus48 = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_8, config);
+    var opus48 = new AnthropicProvider().create(AnthropicModelId.CLAUDE_OPUS_4_8.id(), config);
 
     var response = opus48.chat(List.of(Message.user("What is 2+2? Think briefly.")));
 
