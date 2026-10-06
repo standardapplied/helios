@@ -36,8 +36,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * {@code "omitted"}, which would zero out Helios's thinking text. {@link #adaptive()} therefore
  * pins {@code display = "summarized"} explicitly so callers continue to receive thinking text —
  * including the progress notes Fable 5.1, Opus 5.5 and Sonnet 5.5 write between tool calls, which
- * arrive as {@code thinking} blocks rather than {@code text}. Callers who want the omitted-mode
- * latency win use {@link #adaptiveOmitted()} explicitly.
+ * arrive as {@code thinking} blocks rather than {@code text}.
  *
  * @param type {@code "enabled"}, {@code "disabled"}, {@code "adaptive"}, or {@code "between_tools"}
  * @param budgetTokens maximum tokens for thinking (only for {@code enabled})
@@ -60,16 +59,6 @@ public record ThinkingConfig(
    */
   public static ThinkingConfig adaptive() {
     return new ThinkingConfig("adaptive", null, "summarized");
-  }
-
-  /**
-   * Adaptive shape with {@code display="omitted"} — Anthropic's API returns empty thinking blocks
-   * carrying only the encrypted signature. Trade summary visibility for lower time-to-first-text.
-   * Multi-turn conversations are unaffected (the signature still lets the model reconstruct
-   * internal state).
-   */
-  public static ThinkingConfig adaptiveOmitted() {
-    return new ThinkingConfig("adaptive", null, "omitted");
   }
 
   /**

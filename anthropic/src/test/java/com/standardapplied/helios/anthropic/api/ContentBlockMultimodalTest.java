@@ -5,7 +5,7 @@
 package com.standardapplied.helios.anthropic.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -18,8 +18,8 @@ final class ContentBlockMultimodalTest {
   @Test
   void imageBlockSerialisesWithBase64Source() throws Exception {
     var block = ContentBlock.image("image/png", "aGVsbG8=");
-    assertTrue(block.hasTypeImage());
-    assertFalse(block.hasTypeDocument());
+    assertEquals("image", block.type());
+    assertNotEquals("document", block.type());
     assertEquals("base64", block.source().type());
     assertEquals("image/png", block.source().mediaType());
     assertEquals("aGVsbG8=", block.source().data());
@@ -32,8 +32,8 @@ final class ContentBlockMultimodalTest {
   @Test
   void documentBlockSerialisesWithBase64Source() throws Exception {
     var block = ContentBlock.document("application/pdf", "JVBERi0=");
-    assertTrue(block.hasTypeDocument());
-    assertFalse(block.hasTypeImage());
+    assertEquals("document", block.type());
+    assertNotEquals("image", block.type());
     assertEquals("application/pdf", block.source().mediaType());
     var json = mapper.writeValueAsString(block);
     assertTrue(json.contains("\"type\":\"document\""), json);

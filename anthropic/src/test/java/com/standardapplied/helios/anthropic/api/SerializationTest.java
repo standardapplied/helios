@@ -8,7 +8,6 @@ package com.standardapplied.helios.anthropic.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.tool.ParameterType;
@@ -98,27 +97,6 @@ class SerializationTest {
     assertFalse(
         json.contains("budget_tokens"),
         "adaptive shape must NOT include budget_tokens — Opus 4.7 rejects it");
-  }
-
-  @Test
-  void serializeAdaptiveOmittedThinkingShape() throws Exception {
-    // Opt-in latency win: callers using ThinkingConfig.adaptiveOmitted() trade summary visibility
-    // for skipping the summary-streaming phase entirely. Verify the wire string is "omitted".
-    var request =
-        MessagesRequest.newBuilder()
-            .withModel("claude-opus-4-7")
-            .withMaxTokens(4096)
-            .withMessages(List.of(MessagesRequest.MessageEntry.user("Hello")))
-            .withThinking(ThinkingConfig.adaptiveOmitted())
-            .withOutputConfig(OutputConfig.XHIGH)
-            .build();
-    var json = objectMapper.writeValueAsString(request);
-    assertTrue(
-        json.contains("\"thinking\":{\"type\":\"adaptive\",\"display\":\"omitted\"}"),
-        "adaptive omitted shape, got:\n" + json);
-    assertTrue(
-        json.contains("\"output_config\":{\"effort\":\"xhigh\"}"),
-        "xhigh effort wire string, got:\n" + json);
   }
 
   @Test
@@ -338,7 +316,7 @@ class SerializationTest {
     assertEquals("message", response.type());
     assertEquals("assistant", response.role());
     assertEquals(1, response.content().size());
-    assertTrue(response.content().getFirst().hasTypeText());
+    assertEquals("text", response.content().getFirst().type());
     assertEquals("Hello!", response.content().getFirst().text());
     assertEquals("end_turn", response.stopReason());
     assertNotNull(response.usage());
@@ -367,8 +345,8 @@ class SerializationTest {
     var response = objectMapper.readValue(json, MessagesResponse.class);
 
     assertEquals(2, response.content().size());
-    assertTrue(response.content().get(0).hasTypeText());
-    assertTrue(response.content().get(1).hasTypeToolUse());
+    assertEquals("text", response.content().get(0).type());
+    assertEquals("tool_use", response.content().get(1).type());
     assertEquals("toolu_1", response.content().get(1).id());
     assertEquals("get_weather", response.content().get(1).name());
     assertEquals("tool_use", response.stopReason());
@@ -393,7 +371,7 @@ class SerializationTest {
 
     var event = objectMapper.readValue(json, ApiStreamEvent.class);
 
-    assertTrue(event.hasTypeMessageStart());
+    assertEquals("message_start", event.type());
     assertNotNull(event.message());
     assertEquals("msg_1", event.message().id());
     assertEquals(25, event.message().usage().inputTokens());
@@ -412,10 +390,10 @@ class SerializationTest {
 
     var event = objectMapper.readValue(json, ApiStreamEvent.class);
 
-    assertTrue(event.hasTypeContentBlockDelta());
+    assertEquals("content_block_delta", event.type());
     assertEquals(0, event.index());
     assertNotNull(event.delta());
-    assertTrue(event.delta().hasTypeTextDelta());
+    assertEquals("text_delta", event.delta().type());
     assertEquals("Hello", event.delta().text());
   }
 
@@ -432,7 +410,7 @@ class SerializationTest {
 
     var event = objectMapper.readValue(json, ApiStreamEvent.class);
 
-    assertTrue(event.hasTypeMessageDelta());
+    assertEquals("message_delta", event.type());
     assertNotNull(event.delta());
     assertEquals("end_turn", event.delta().stopReason());
     assertNotNull(event.usage());
@@ -452,9 +430,9 @@ class SerializationTest {
 
     var event = objectMapper.readValue(json, ApiStreamEvent.class);
 
-    assertTrue(event.hasTypeContentBlockStart());
+    assertEquals("content_block_start", event.type());
     assertNotNull(event.contentBlock());
-    assertTrue(event.contentBlock().hasTypeText());
+    assertEquals("text", event.contentBlock().type());
   }
 
   @Test
@@ -470,9 +448,9 @@ class SerializationTest {
 
     var event = objectMapper.readValue(json, ApiStreamEvent.class);
 
-    assertTrue(event.hasTypeContentBlockStart());
+    assertEquals("content_block_start", event.type());
     assertEquals(1, event.index());
-    assertTrue(event.contentBlock().hasTypeToolUse());
+    assertEquals("tool_use", event.contentBlock().type());
     assertEquals("toolu_1", event.contentBlock().id());
     assertEquals("search", event.contentBlock().name());
   }
@@ -506,7 +484,7 @@ class SerializationTest {
 
     var delta = objectMapper.readValue(json, ContentDelta.class);
 
-    assertTrue(delta.hasTypeInputJsonDelta());
+    assertEquals("input_json_delta", delta.type());
     assertEquals("{\"city\"", delta.partialJson());
   }
 
@@ -519,7 +497,7 @@ class SerializationTest {
 
     var delta = objectMapper.readValue(json, ContentDelta.class);
 
-    assertTrue(delta.hasTypeThinkingDelta());
+    assertEquals("thinking_delta", delta.type());
     assertEquals("Let me think...", delta.thinking());
   }
 
@@ -532,7 +510,7 @@ class SerializationTest {
 
     var delta = objectMapper.readValue(json, ContentDelta.class);
 
-    assertTrue(delta.hasTypeSignatureDelta());
+    assertEquals("signature_delta", delta.type());
     assertEquals("EqoB123abc", delta.signature());
   }
 
@@ -591,80 +569,6 @@ class SerializationTest {
         MessagesRequest.MessageEntry.assistant(
             List.of(ContentBlock.text("text"), ContentBlock.toolUse("t1", "fn", Map.of())));
     assertEquals("assistant", assistantBlocks.role());
-  }
-
-  @Test
-  void contentBlockHelperMethods() {
-    var text = ContentBlock.text("hello");
-    assertTrue(text.hasTypeText());
-    assertFalse(text.hasTypeToolUse());
-    assertFalse(text.hasTypeToolResult());
-    assertFalse(text.hasTypeThinking());
-
-    var toolUse = ContentBlock.toolUse("id", "name", Map.of());
-    assertFalse(toolUse.hasTypeText());
-    assertTrue(toolUse.hasTypeToolUse());
-
-    var toolResult = ContentBlock.toolResult("id", "content");
-    assertTrue(toolResult.hasTypeToolResult());
-
-    var thinking = ContentBlock.thinking("thought", "sig");
-    assertTrue(thinking.hasTypeThinking());
-  }
-
-  @Test
-  void contentDeltaHelperMethods() throws Exception {
-    var textDelta =
-        objectMapper.readValue("{\"type\":\"text_delta\",\"text\":\"hi\"}", ContentDelta.class);
-    assertTrue(textDelta.hasTypeTextDelta());
-    assertFalse(textDelta.hasTypeInputJsonDelta());
-    assertFalse(textDelta.hasTypeThinkingDelta());
-    assertFalse(textDelta.hasTypeSignatureDelta());
-    assertFalse(textDelta.hasTypeCitationsDelta());
-
-    var inputJson =
-        objectMapper.readValue(
-            "{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}", ContentDelta.class);
-    assertTrue(inputJson.hasTypeInputJsonDelta());
-
-    var thinking =
-        objectMapper.readValue(
-            "{\"type\":\"thinking_delta\",\"thinking\":\"hmm\"}", ContentDelta.class);
-    assertTrue(thinking.hasTypeThinkingDelta());
-
-    var signature =
-        objectMapper.readValue(
-            "{\"type\":\"signature_delta\",\"signature\":\"abc\"}", ContentDelta.class);
-    assertTrue(signature.hasTypeSignatureDelta());
-  }
-
-  @Test
-  void apiStreamEventHelperMethods() throws Exception {
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"message_start\"}", ApiStreamEvent.class)
-            .hasTypeMessageStart());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"content_block_start\"}", ApiStreamEvent.class)
-            .hasTypeContentBlockStart());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"content_block_delta\"}", ApiStreamEvent.class)
-            .hasTypeContentBlockDelta());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"content_block_stop\"}", ApiStreamEvent.class)
-            .hasTypeContentBlockStop());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"message_delta\"}", ApiStreamEvent.class)
-            .hasTypeMessageDelta());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"message_stop\"}", ApiStreamEvent.class)
-            .hasTypeMessageStop());
-    assertTrue(objectMapper.readValue("{\"type\":\"error\"}", ApiStreamEvent.class).hasTypeError());
   }
 
   // ── cache-control wire shape (hv2-bug2 Issue 1) ───────────────────────────
@@ -778,19 +682,6 @@ class SerializationTest {
     assertTrue(
         json.contains("\"system\":\"Plain string system\""),
         "plain system field must serialize as a string when no caching is requested: " + json);
-  }
-
-  @Test
-  void systemAsTextOfAnEmptyBlockListIsNull() {
-    var request =
-        MessagesRequest.newBuilder()
-            .withModel("claude-opus-4-7")
-            .withMaxTokens(1024)
-            .withMessages(List.of(MessagesRequest.MessageEntry.user("Hi")))
-            .withSystem(List.<SystemContent>of())
-            .build();
-
-    assertNull(request.systemAsText());
   }
 
   @Test

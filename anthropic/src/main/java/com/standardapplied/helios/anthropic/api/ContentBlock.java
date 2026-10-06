@@ -122,30 +122,6 @@ public record ContentBlock(
         type, text, id, name, input, toolUseId, content, thinking, signature, source, cacheControl);
   }
 
-  public boolean hasTypeText() {
-    return "text".equals(type);
-  }
-
-  public boolean hasTypeToolUse() {
-    return "tool_use".equals(type);
-  }
-
-  public boolean hasTypeToolResult() {
-    return "tool_result".equals(type);
-  }
-
-  public boolean hasTypeThinking() {
-    return "thinking".equals(type);
-  }
-
-  public boolean hasTypeImage() {
-    return "image".equals(type);
-  }
-
-  public boolean hasTypeDocument() {
-    return "document".equals(type);
-  }
-
   /**
    * Nested source object for {@code image} and {@code document} content blocks.
    *

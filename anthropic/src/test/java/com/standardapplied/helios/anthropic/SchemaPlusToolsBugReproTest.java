@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.anthropic.api.SystemContent;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.schema.OutputSchema;
@@ -74,7 +75,9 @@ class SchemaPlusToolsBugReproTest {
             java.util.List.of(searchTool()),
             schema);
 
-    var systemText = request.systemAsText();
+    var system = (java.util.List<?>) request.system();
+    assertEquals(1, system.size());
+    var systemText = ((SystemContent) system.getFirst()).text();
     assertTrue(
         systemText.contains("You may call the available tools"),
         "tool-using schema instruction must acknowledge the loop; system=\n" + systemText);
@@ -97,7 +100,9 @@ class SchemaPlusToolsBugReproTest {
     var request =
         requests.build(java.util.List.of(Message.user("Extract")), java.util.List.of(), schema);
 
-    var systemText = request.systemAsText();
+    var system = (java.util.List<?>) request.system();
+    assertEquals(1, system.size());
+    var systemText = ((SystemContent) system.getFirst()).text();
     assertTrue(
         systemText.contains("You must respond with valid JSON"),
         "tool-less schema instruction stays bare; system=\n" + systemText);

@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.anthropic.api.AnthropicJson;
 import com.standardapplied.helios.anthropic.api.ContentBlock;
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
+import com.standardapplied.helios.anthropic.api.SystemContent;
 import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.FileReference;
 import com.standardapplied.helios.core.model.FinishReason;
@@ -172,13 +173,13 @@ class AnthropicModelTest {
     var blocks = (List<ContentBlock>) entry.content();
     assertEquals(2, blocks.size());
     var imageBlock = blocks.get(0);
-    assertTrue(imageBlock.hasTypeImage());
+    assertEquals("image", imageBlock.type());
     assertEquals("image/png", imageBlock.source().mediaType());
     assertEquals("base64", imageBlock.source().type());
     assertEquals(
         java.util.Base64.getEncoder().encodeToString(pngBytes), imageBlock.source().data());
     var textBlock = blocks.get(1);
-    assertTrue(textBlock.hasTypeText());
+    assertEquals("text", textBlock.type());
     assertEquals("look at this", textBlock.text());
   }
 
@@ -194,7 +195,7 @@ class AnthropicModelTest {
 
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) request.messages().getFirst().content();
-    assertTrue(blocks.get(0).hasTypeDocument());
+    assertEquals("document", blocks.get(0).type());
     assertEquals("application/pdf", blocks.get(0).source().mediaType());
   }
 
@@ -210,7 +211,7 @@ class AnthropicModelTest {
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) request.messages().getFirst().content();
     assertEquals(1, blocks.size());
-    assertTrue(blocks.get(0).hasTypeText());
+    assertEquals("text", blocks.get(0).type());
     assertTrue(blocks.get(0).text().contains("[attachment text/csv]"), blocks.get(0).text());
     assertTrue(blocks.get(0).text().contains("a,b"), blocks.get(0).text());
   }
@@ -224,7 +225,9 @@ class AnthropicModelTest {
 
     var request = requests.build(messages, List.of(), null);
 
-    assertEquals("You are helpful", request.systemAsText());
+    var system = (List<?>) request.system();
+    assertEquals(1, system.size());
+    assertEquals("You are helpful", ((SystemContent) system.getFirst()).text());
     assertEquals(1, request.messages().size());
     assertEquals("user", request.messages().getFirst().role());
   }
@@ -255,10 +258,10 @@ class AnthropicModelTest {
     @SuppressWarnings("unchecked")
     var toolResults = (List<ContentBlock>) request.messages().get(2).content();
     assertEquals(2, toolResults.size());
-    assertTrue(toolResults.get(0).hasTypeToolResult());
+    assertEquals("tool_result", toolResults.get(0).type());
     assertEquals("call_1", toolResults.get(0).toolUseId());
     assertEquals("result1", toolResults.get(0).content());
-    assertTrue(toolResults.get(1).hasTypeToolResult());
+    assertEquals("tool_result", toolResults.get(1).type());
     assertEquals("call_2", toolResults.get(1).toolUseId());
     assertEquals("result2", toolResults.get(1).content());
   }
@@ -665,8 +668,11 @@ class AnthropicModelTest {
     var request = requests.build(List.of(Message.user("Extract")), List.of(), schema);
 
     assertNotNull(request.system());
-    assertTrue(request.systemAsText().contains("JSON"));
-    assertTrue(request.systemAsText().contains("schema"));
+    var system = (List<?>) request.system();
+    assertEquals(1, system.size());
+    var systemText = ((SystemContent) system.getFirst()).text();
+    assertTrue(systemText.contains("JSON"));
+    assertTrue(systemText.contains("schema"));
   }
 
   @Test
@@ -861,7 +867,7 @@ class AnthropicModelTest {
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) entry.content();
     assertEquals(1, blocks.size());
-    assertTrue(blocks.getFirst().hasTypeToolUse());
+    assertEquals("tool_use", blocks.getFirst().type());
     assertEquals("call_1", blocks.getFirst().id());
     assertEquals("search", blocks.getFirst().name());
   }
@@ -880,10 +886,10 @@ class AnthropicModelTest {
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) entry.content();
     assertEquals(2, blocks.size());
-    assertTrue(blocks.get(0).hasTypeThinking());
+    assertEquals("thinking", blocks.get(0).type());
     assertEquals("I need to think about this", blocks.get(0).thinking());
     assertEquals("sig123", blocks.get(0).signature());
-    assertTrue(blocks.get(1).hasTypeText());
+    assertEquals("text", blocks.get(1).type());
     assertEquals("Answer", blocks.get(1).text());
   }
 
@@ -1326,8 +1332,11 @@ class AnthropicModelTest {
     var messages = List.of(Message.system("Be helpful"), Message.user("Extract"));
     var request = requests.build(messages, List.of(), schema);
 
-    assertTrue(request.systemAsText().startsWith("Be helpful"));
-    assertTrue(request.systemAsText().contains("JSON"));
+    var system = (List<?>) request.system();
+    assertEquals(1, system.size());
+    var systemText = ((SystemContent) system.getFirst()).text();
+    assertTrue(systemText.startsWith("Be helpful"));
+    assertTrue(systemText.contains("JSON"));
   }
 
   @Test
@@ -1595,7 +1604,7 @@ class AnthropicModelTest {
 
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) entry.content();
-    var thinkingCount = blocks.stream().filter(ContentBlock::hasTypeThinking).count();
+    var thinkingCount = blocks.stream().filter(b -> "thinking".equals(b.type())).count();
     assertEquals(
         2, thinkingCount, "two thinking blocks must round-trip into separate ContentBlocks");
     // Per-block signatures must be preserved (the bug we fixed was concatenation).
@@ -1846,7 +1855,7 @@ class AnthropicModelTest {
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) last.content();
     assertEquals(1, blocks.size());
-    assertTrue(blocks.getFirst().hasTypeText());
+    assertEquals("text", blocks.getFirst().type());
     assertEquals("Latest turn", blocks.getFirst().text());
     assertNotNull(
         blocks.getFirst().cacheControl(),
@@ -2024,30 +2033,6 @@ class AnthropicModelTest {
 
     assertEquals(
         3, breakpointCount, "single-turn first-call uses 3 of 4 breakpoints — no penultimate");
-  }
-
-  @Test
-  void messagesRequestSystemAsTextHandlesPlainStringShape() {
-    var request = MessagesRequest.newBuilder().withSystem("hello system").build();
-    assertEquals("hello system", request.systemAsText());
-  }
-
-  @Test
-  void messagesRequestSystemAsTextHandlesBlockArrayShape() {
-    var request =
-        MessagesRequest.newBuilder()
-            .withSystem(
-                List.of(
-                    com.standardapplied.helios.anthropic.api.SystemContent.text("first"),
-                    com.standardapplied.helios.anthropic.api.SystemContent.text("second")))
-            .build();
-    assertEquals("first\n\nsecond", request.systemAsText());
-  }
-
-  @Test
-  void messagesRequestSystemAsTextHandlesNull() {
-    var request = MessagesRequest.newBuilder().build();
-    assertNull(request.systemAsText());
   }
 
   // ── verbatim echo of interleaved thinking ─────────────────────────────────

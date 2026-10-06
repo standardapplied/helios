@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.anthropic.AnthropicModelId.ThinkingShape;
 import com.standardapplied.helios.anthropic.api.ContentBlock;
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
+import com.standardapplied.helios.anthropic.api.SystemContent;
 import com.standardapplied.helios.anthropic.api.ThinkingConfig;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
@@ -177,7 +178,10 @@ class AnthropicRequestPartsTest {
 
     var request = requests.build(List.of(Message.user("hi")), List.of(), Map.of("type", "object"));
 
-    assertTrue(request.systemAsText().startsWith("You must respond with valid JSON"));
+    var system = (List<?>) request.system();
+    assertEquals(1, system.size());
+    assertTrue(
+        ((SystemContent) system.getFirst()).text().startsWith("You must respond with valid JSON"));
   }
 
   @Test
@@ -186,7 +190,10 @@ class AnthropicRequestPartsTest {
 
     var request = requests.build(List.of(Message.user("hi")), null, Map.of("type", "object"));
 
-    assertTrue(request.systemAsText().startsWith("You must respond with valid JSON"));
+    var system = (List<?>) request.system();
+    assertEquals(1, system.size());
+    assertTrue(
+        ((SystemContent) system.getFirst()).text().startsWith("You must respond with valid JSON"));
   }
 
   @Test
