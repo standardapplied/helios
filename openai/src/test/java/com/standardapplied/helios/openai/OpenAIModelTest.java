@@ -169,7 +169,7 @@ class OpenAIModelTest {
     var request = requests.build(messages, List.of(), null);
 
     assertEquals(1, request.input().size());
-    assertTrue(request.input().getFirst().hasTypeMessage());
+    assertEquals("message", request.input().getFirst().type());
     assertEquals("user", request.input().getFirst().role());
     assertEquals("Hello", request.input().getFirst().content());
   }
@@ -184,16 +184,16 @@ class OpenAIModelTest {
     var request = requests.build(List.of(msg), List.of(), null);
 
     var item = request.input().getFirst();
-    assertTrue(item.hasTypeMessage());
+    assertEquals("message", item.type());
     assertEquals("user", item.role());
     @SuppressWarnings("unchecked")
     var parts = (List<ContentPart>) item.content();
     assertEquals(2, parts.size());
-    assertTrue(parts.get(0).hasTypeInputImage());
+    assertEquals("input_image", parts.get(0).type());
     var expected =
         "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(pngBytes);
     assertEquals(expected, parts.get(0).imageUrl());
-    assertTrue(parts.get(1).hasTypeInputText());
+    assertEquals("input_text", parts.get(1).type());
     assertEquals("see this", parts.get(1).text());
   }
 
@@ -208,7 +208,7 @@ class OpenAIModelTest {
 
     @SuppressWarnings("unchecked")
     var parts = (List<ContentPart>) request.input().getFirst().content();
-    assertTrue(parts.get(0).hasTypeInputFile());
+    assertEquals("input_file", parts.get(0).type());
     assertTrue(parts.get(0).fileData().startsWith("data:application/pdf;base64,"));
   }
 
@@ -227,10 +227,10 @@ class OpenAIModelTest {
     var request = requests.build(messages, List.of(), null);
 
     assertEquals(4, request.input().size());
-    assertTrue(request.input().get(0).hasTypeMessage());
-    assertTrue(request.input().get(1).hasTypeMessage());
-    assertTrue(request.input().get(2).hasTypeFunctionCall());
-    assertTrue(request.input().get(3).hasTypeFunctionCallOutput());
+    assertEquals("message", request.input().get(0).type());
+    assertEquals("message", request.input().get(1).type());
+    assertEquals("function_call", request.input().get(2).type());
+    assertEquals("function_call_output", request.input().get(3).type());
     assertEquals("call_1", request.input().get(3).callId());
     assertEquals("result1", request.input().get(3).output());
   }
@@ -891,7 +891,7 @@ class OpenAIModelTest {
     var items = OpenAIInput.assistant(message);
 
     assertEquals(1, items.size());
-    assertTrue(items.getFirst().hasTypeMessage());
+    assertEquals("message", items.getFirst().type());
     assertEquals("assistant", items.getFirst().role());
   }
 
@@ -909,8 +909,8 @@ class OpenAIModelTest {
     var items = OpenAIInput.assistant(message);
 
     assertEquals(2, items.size());
-    assertTrue(items.get(0).hasTypeMessage());
-    assertTrue(items.get(1).hasTypeFunctionCall());
+    assertEquals("message", items.get(0).type());
+    assertEquals("function_call", items.get(1).type());
     assertEquals("call_1", items.get(1).callId());
     assertEquals("search", items.get(1).name());
   }
@@ -929,7 +929,7 @@ class OpenAIModelTest {
     var items = OpenAIInput.assistant(message);
 
     assertEquals(1, items.size());
-    assertTrue(items.getFirst().hasTypeFunctionCall());
+    assertEquals("function_call", items.getFirst().type());
   }
 
   @Test
@@ -940,7 +940,7 @@ class OpenAIModelTest {
     var items = OpenAIInput.assistant(message);
 
     assertEquals(1, items.size());
-    assertTrue(items.getFirst().hasTypeMessage());
+    assertEquals("message", items.getFirst().type());
   }
 
   @Test
@@ -951,7 +951,7 @@ class OpenAIModelTest {
     var items = OpenAIInput.assistant(message);
 
     assertEquals(1, items.size());
-    assertTrue(items.getFirst().hasTypeMessage());
+    assertEquals("message", items.getFirst().type());
   }
 
   @Test
@@ -963,7 +963,7 @@ class OpenAIModelTest {
     var items = OpenAIInput.assistant(message);
 
     assertEquals(1, items.size());
-    assertTrue(items.getFirst().hasTypeFunctionCall());
+    assertEquals("function_call", items.getFirst().type());
     assertEquals("{}", items.getFirst().arguments());
   }
 
@@ -1033,9 +1033,10 @@ class OpenAIModelTest {
 
     var request = requests.build(messages, List.of(), null);
 
-    long functionCalls = request.input().stream().filter(InputItem::hasTypeFunctionCall).count();
+    long functionCalls =
+        request.input().stream().filter(item -> "function_call".equals(item.type())).count();
     long functionOutputs =
-        request.input().stream().filter(InputItem::hasTypeFunctionCallOutput).count();
+        request.input().stream().filter(item -> "function_call_output".equals(item.type())).count();
     assertEquals(2, functionCalls);
     assertEquals(2, functionOutputs);
   }

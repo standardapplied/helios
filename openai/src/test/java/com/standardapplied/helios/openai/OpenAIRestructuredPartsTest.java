@@ -111,8 +111,8 @@ class OpenAIRestructuredPartsTest {
 
   @Test
   void usageCountsAnyReportedTokenClassAndNothingWhenAllAreZero() {
-    assertNull(usage(new ApiUsage(0, 0, 0)));
-    assertEquals(Response.Usage.of(0, 4, 0, 0), usage(new ApiUsage(null, 4, 4)));
+    assertNull(usage(new ApiUsage(0, 0, 0, null, null)));
+    assertEquals(Response.Usage.of(0, 4, 0, 0), usage(new ApiUsage(null, 4, 4, null, null)));
     assertEquals(
         Response.Usage.of(0, 0, 0, 3),
         usage(new ApiUsage(0, 0, 0, new ApiUsage.InputTokensDetails(3, null), null)));
