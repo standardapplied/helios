@@ -17,6 +17,7 @@ import com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -66,6 +67,19 @@ class SandboxWorkingDirectoryTest {
           Path.of(System.getProperty("user.dir")).toRealPath(),
           snippetSeen,
           "subprocess cwd must NOT inherit the host JVM's cwd");
+    }
+  }
+
+  @Test
+  void socketAndEphemeralWorkingDirectoriesAreOwnerOnly() throws IOException {
+    var directories = SandboxDirectories.create(null);
+    try {
+      var ownerOnly = PosixFilePermissions.fromString("rwx------");
+      assertEquals(ownerOnly, Files.getPosixFilePermissions(directories.socketDirectory()));
+      assertEquals(
+          ownerOnly, Files.getPosixFilePermissions(directories.ephemeralWorkingDirectory()));
+    } finally {
+      directories.delete();
     }
   }
 

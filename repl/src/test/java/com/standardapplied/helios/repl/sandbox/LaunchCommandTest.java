@@ -115,6 +115,15 @@ class LaunchCommandTest {
     assertEquals(List.of(JAVA, "-Xmx1024m", MAIN_CLASS, "--stop-grace=PT1.5S"), command);
   }
 
+  @Test
+  void emptyClassPathEntriesAreKeptAndRelativeOnesResolvedAgainstTheHostDirectory() {
+    var raw = String.join(File.pathSeparator, "lib/a.jar", "", "/opt/b.jar");
+
+    assertEquals(
+        String.join(File.pathSeparator, "/host/app/lib/a.jar", "", "/opt/b.jar"),
+        SandboxLauncher.resolveClasspathForSubprocess(raw, HOST_CWD));
+  }
+
   private static List<String> parentArgs(boolean modulePath) {
     var args = new ArrayList<String>();
     if (modulePath) {
