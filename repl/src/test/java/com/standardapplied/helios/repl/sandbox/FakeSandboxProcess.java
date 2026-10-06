@@ -15,6 +15,7 @@ import com.standardapplied.helios.repl.protocol.RpcMessage;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
 /**
  * A {@link JvmSandbox} whose subprocess is played by the test. The sandbox's transport writes its
@@ -28,7 +29,7 @@ final class FakeSandboxProcess implements AutoCloseable {
   private final LineSink toProcess = new LineSink();
   private final FeedableInputStream fromProcess = new FeedableInputStream();
   private final JvmSandbox sandbox;
-  private CompletableFuture<Void> answer = CompletableFuture.completedFuture(null);
+  private CompletableFuture<String> answer = CompletableFuture.completedFuture(null);
 
   FakeSandboxProcess() throws IOException {
     var transport = new ProcessTransport(fromProcess, toProcess);
@@ -50,19 +51,32 @@ final class FakeSandboxProcess implements AutoCloseable {
    * plainOutput} the way a snippet's own output reaches the stream the transport reads.
    */
   void answerNext(Object result, String... plainOutput) {
+    answerNextWith(id -> new RpcMessage.Response(id, result), plainOutput);
+  }
+
+  /**
+   * Answers the sandbox's next request with the message {@code reply} builds from the request's id,
+   * after printing each line of {@code plainOutput}.
+   */
+  void answerNextWith(Function<String, RpcMessage> reply, String... plainOutput) {
     answer =
-        CompletableFuture.runAsync(
+        CompletableFuture.supplyAsync(
             () -> {
-              var request = nextRequest();
-              for (var line : plainOutput) {
-                fromProcess.feed(line + "\n");
+              var line = toProcess.nextLine();
+              var request = request(line);
+              for (var output : plainOutput) {
+                fromProcess.feed(output + "\n");
               }
               fromProcess.feed(
-                  ProcessTransport.RPC_PREFIX
-                      + serialize(new RpcMessage.Response(request.id(), result))
-                      + "\n");
+                  ProcessTransport.RPC_PREFIX + serialize(reply.apply(request.id())) + "\n");
+              return line;
             },
             Thread.ofVirtual()::start);
+  }
+
+  /** The request line the last {@link #answerNextWith} answered. */
+  String answeredRequest() {
+    return Await.value("the fake subprocess's answer", answer);
   }
 
   @Override
@@ -71,9 +85,9 @@ final class FakeSandboxProcess implements AutoCloseable {
     Await.value("the fake subprocess's answer", answer);
   }
 
-  private RpcMessage.Request nextRequest() {
+  private static RpcMessage.Request request(String line) {
     try {
-      return (RpcMessage.Request) ProcessTransport.deserializeMessage(toProcess.nextLine());
+      return (RpcMessage.Request) ProcessTransport.deserializeMessage(line);
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
