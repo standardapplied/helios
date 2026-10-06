@@ -28,7 +28,7 @@ final class PromptCache {
 
   private PromptCache() {}
 
-  /** Sets {@code system} and {@code tools} on {@code request} and marks {@code messages}. */
+  /** Sets {@code system}, {@code tools} and {@code messages} on {@code request}. */
   static void apply(
       CachePolicy policy,
       MessagesRequest.Builder request,
@@ -38,12 +38,15 @@ final class PromptCache {
     if (!policy.enabled()) {
       request.withSystem(system);
       request.withTools(tools.all());
+      request.withMessages(messages);
       return;
     }
     var breakpoint = policy.breakpoint();
     request.withSystem(cachedSystem(system, breakpoint));
     request.withTools(tools.followedByServerTools(withCachedTail(tools.client(), breakpoint)));
-    markLastMessages(messages, breakpoint);
+    var marked = new ArrayList<>(messages);
+    markLastMessages(marked, breakpoint);
+    request.withMessages(List.copyOf(marked));
   }
 
   /**
