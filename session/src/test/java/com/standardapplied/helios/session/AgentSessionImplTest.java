@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -41,10 +42,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 
 final class AgentSessionImplTest {
@@ -416,7 +422,7 @@ final class AgentSessionImplTest {
   @Test
   void closeBeforeAnySendShutsDownPublisherExecutor() {
     var s = (AgentSessionImpl) buildSession(textOnceModel("x", FinishReason.STOP));
-    var executor = s.publisherExecutorForTests();
+    var executor = s.lifecycleForTests().publisherExecutor();
     assertTrue(!executor.isShutdown(), "executor live before close()");
     s.close();
     assertTrue(executor.isShutdown(), "executor shut down by close()");
@@ -426,7 +432,7 @@ final class AgentSessionImplTest {
   @Test
   void naturalLoopTerminationShutsDownPublisherExecutor() throws Exception {
     var s = (AgentSessionImpl) buildSession(textOnceModel("done", FinishReason.STOP));
-    var executor = s.publisherExecutorForTests();
+    var executor = s.lifecycleForTests().publisherExecutor();
     s.send(UserMessage.text("hi"));
     terminalOf(s);
     // closeRuntime() runs BEFORE resultFuture settles (hv2-bug2 Issue 2 fix), so the executor is
@@ -560,6 +566,42 @@ final class AgentSessionImplTest {
   }
 
   @Test
+  void providerOnSessionStartExceptionWithoutAMessageIsReportedAsNoMessage() throws Exception {
+    var provider = new LifecycleProvider();
+    provider.throwOnStart = new IllegalStateException();
+    try (var s =
+        AgentSession.create(
+            SessionOptions.newBuilder()
+                .withModel(textOnceModel("unused", FinishReason.STOP))
+                .withSessionId(SID)
+                .withClock(CLOCK)
+                .withExecutionProvider(provider)
+                .build())) {
+      var err = assertInstanceOf(ResultMessage.ErrorProviderUnavailable.class, terminalOf(s));
+      assertEquals("onSessionStart threw IllegalStateException: (no message)", err.reason());
+    }
+  }
+
+  @Test
+  void systemPromptLeadsTheHistoryTheModelSees() {
+    var model =
+        com.standardapplied.helios.testing.ScriptedModel.newBuilder().withTextTurn("ok").build();
+    try (var s =
+        AgentSession.create(
+            SessionOptions.newBuilder()
+                .withModel(model)
+                .withSessionId(SID)
+                .withClock(CLOCK)
+                .withSystemPrompt("be terse")
+                .build())) {
+      s.runBlocking(UserMessage.text("hi"));
+    }
+    var seen = model.calls().getFirst();
+    assertEquals(List.of("be terse", "hi"), seen.stream().map(Message::content).toList());
+    assertEquals(com.standardapplied.helios.core.model.Role.SYSTEM, seen.getFirst().role());
+  }
+
+  @Test
   void providerOnSessionStartRuntimeExceptionProducesErrorProviderUnavailable() throws Exception {
     var provider = new LifecycleProvider();
     provider.throwOnStart = new RuntimeException("auth failed");
@@ -678,6 +720,46 @@ final class AgentSessionImplTest {
     }
   }
 
+  @Test
+  void providerOnSessionEndFailureIsLoggedAsAWarningOnTheSessionLogger() {
+    var provider = new LifecycleProvider();
+    provider.throwOnEnd = new RuntimeException("end-cleanup-boom");
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+    var logger = Logger.getLogger(AgentSessionImpl.class.getName());
+    var handler =
+        new Handler() {
+          @Override
+          public void publish(LogRecord logRecord) {
+            logged.add(logRecord);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    logger.addHandler(handler);
+    try {
+      AgentSession.create(
+              SessionOptions.newBuilder()
+                  .withModel(textOnceModel("unused", FinishReason.STOP))
+                  .withSessionId(SID)
+                  .withClock(CLOCK)
+                  .withExecutionProvider(provider)
+                  .build())
+          .close();
+    } finally {
+      logger.removeHandler(handler);
+    }
+
+    assertEquals(1, logged.size());
+    var warning = logged.getFirst();
+    assertEquals(Level.WARNING, warning.getLevel());
+    assertEquals("onSessionEnd threw — continuing shutdown", warning.getMessage());
+    assertSame(provider.throwOnEnd, warning.getThrown());
+  }
+
   // ── publisher-drain happens-before result settling (hv2-bug2 Issue 2) ────
 
   /**
@@ -706,7 +788,7 @@ final class AgentSessionImplTest {
       if (event instanceof QueryEvent.LoopEnded ended) {
         Await.until(
             "the session to begin draining its publisher",
-            session.publisherExecutorForTests()::isShutdown);
+            session.lifecycleForTests().publisherExecutor()::isShutdown);
         resultSettledFirst.set(session.result().isDone());
         captured.set(ended.result());
       }

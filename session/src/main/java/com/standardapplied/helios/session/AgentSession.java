@@ -8,11 +8,9 @@ import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.schema.StructuredContentParser;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * A live, streamable, steerable agent session.
@@ -197,34 +195,11 @@ public interface AgentSession extends AutoCloseable {
               + "; cannot parse a typed result from a non-Success terminal");
     }
     return StructuredContentParser.parse(
-        success.result(), schema, JacksonJsonAdapter.SHARED, rawOutputCapturePolicy());
+        success.result(), schema, SessionJson.STRUCTURED, rawOutputCapturePolicy());
   }
 
   /** Structured-output retention policy inherited from the session model. */
   default RawOutputCapturePolicy rawOutputCapturePolicy() {
     return RawOutputCapturePolicy.ENABLED;
-  }
-
-  /**
-   * Jackson 3.x adapter for {@link StructuredContentParser}. Held as a constant so we don't
-   * allocate a fresh {@code JsonMapper} per typed {@code runBlocking} call.
-   */
-  final class JacksonJsonAdapter implements StructuredContentParser.JsonAdapter {
-
-    private static final JsonMapper MAPPER = JsonMapper.builder().build();
-    static final JacksonJsonAdapter SHARED = new JacksonJsonAdapter();
-
-    private JacksonJsonAdapter() {}
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public Map<String, Object> toMap(String json) {
-      return MAPPER.readValue(json, Map.class);
-    }
-
-    @Override
-    public <T> T fromMap(Map<String, Object> map, Class<T> type) {
-      return MAPPER.convertValue(map, type);
-    }
   }
 }

@@ -147,7 +147,7 @@ final class StopClassifierTest {
   @Test
   void budgetExceededProducesErrorMaxBudgetUsd() {
     var s = state();
-    s.accumulateCost(CostEstimate.ofMicroUsd(1_500_000L));
+    s.totals().accumulateCost(CostEstimate.ofMicroUsd(1_500_000L));
     var limits = SessionLimits.newBuilder().withMaxBudgetMicroUsd(1_000_000L).build();
     var result = classifyNoError(s, limits, FinishReason.STOP, "x", false);
     var b = assertInstanceOf(ResultMessage.ErrorMaxBudgetUsd.class, result.orElseThrow());
@@ -157,7 +157,7 @@ final class StopClassifierTest {
   @Test
   void budgetEqualToLimitDoesNotTrigger() {
     var s = state();
-    s.accumulateCost(CostEstimate.ofMicroUsd(1_000_000L));
+    s.totals().accumulateCost(CostEstimate.ofMicroUsd(1_000_000L));
     var limits = SessionLimits.newBuilder().withMaxBudgetMicroUsd(1_000_000L).build();
     var result = classifyNoError(s, limits, FinishReason.STOP, "done", false);
     assertInstanceOf(ResultMessage.Success.class, result.orElseThrow());
@@ -166,7 +166,7 @@ final class StopClassifierTest {
   @Test
   void budgetAbsentDoesNotTrigger() {
     var s = state();
-    s.accumulateCost(CostEstimate.ofMicroUsd(999_999_000_000L));
+    s.totals().accumulateCost(CostEstimate.ofMicroUsd(999_999_000_000L));
     var result = classifyNoError(s, defaults(), FinishReason.STOP, "x", false);
     assertInstanceOf(ResultMessage.Success.class, result.orElseThrow());
   }
@@ -337,8 +337,8 @@ final class StopClassifierTest {
   @Test
   void usageAndCostFlowIntoResult() {
     var s = state();
-    s.accumulateUsage(Usage.of(20, 10));
-    s.accumulateCost(CostEstimate.ofMicroUsd(420_000L));
+    s.totals().accumulateUsage(Usage.of(20, 10));
+    s.totals().accumulateCost(CostEstimate.ofMicroUsd(420_000L));
     var result = classifyNoError(s, defaults(), FinishReason.STOP, "ok", false).orElseThrow();
     assertEquals(20, result.usage().inputTokens());
     assertEquals(10, result.usage().outputTokens());

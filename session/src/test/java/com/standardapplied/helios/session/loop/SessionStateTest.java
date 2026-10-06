@@ -45,9 +45,9 @@ final class SessionStateTest {
     assertSame(cancellation, state.cancellation());
     assertEquals(fixed, state.startedAt());
     assertEquals(0, state.currentTurnIndex());
-    assertEquals(Usage.of(0, 0), state.usage());
-    assertEquals(CostEstimate.zero(), state.cost());
-    assertTrue(state.historySnapshot().isEmpty());
+    assertEquals(Usage.of(0, 0), state.totals().usage());
+    assertEquals(CostEstimate.zero(), state.totals().cost());
+    assertTrue(state.history().snapshot().isEmpty());
     assertFalse(state.isTerminal());
     assertEquals(Optional.empty(), state.terminal());
   }
@@ -97,9 +97,9 @@ final class SessionStateTest {
   @Test
   void appendMessageGrowsHistorySnapshot() {
     var state = build();
-    state.appendMessage(Message.user("hello"));
-    state.appendMessage(Message.assistant("hi"));
-    var snapshot = state.historySnapshot();
+    state.history().append(Message.user("hello"));
+    state.history().append(Message.assistant("hi"));
+    var snapshot = state.history().snapshot();
     assertEquals(2, snapshot.size());
     assertEquals("hello", snapshot.get(0).content());
     assertEquals("hi", snapshot.get(1).content());
@@ -108,18 +108,18 @@ final class SessionStateTest {
   @Test
   void historySnapshotIsImmutable() {
     var state = build();
-    state.appendMessage(Message.user("hello"));
-    var snapshot = state.historySnapshot();
+    state.history().append(Message.user("hello"));
+    var snapshot = state.history().snapshot();
     assertThrows(UnsupportedOperationException.class, () -> snapshot.add(Message.user("bad")));
   }
 
   @Test
   void historySnapshotIsFreshOnEachCall() {
     var state = build();
-    state.appendMessage(Message.user("first"));
-    var snap1 = state.historySnapshot();
-    state.appendMessage(Message.user("second"));
-    var snap2 = state.historySnapshot();
+    state.history().append(Message.user("first"));
+    var snap1 = state.history().snapshot();
+    state.history().append(Message.user("second"));
+    var snap2 = state.history().snapshot();
     assertEquals(1, snap1.size());
     assertEquals(2, snap2.size());
   }
@@ -127,16 +127,16 @@ final class SessionStateTest {
   @Test
   void appendMessageRejectsNull() {
     var state = build();
-    var ex = assertThrows(NullPointerException.class, () -> state.appendMessage(null));
+    var ex = assertThrows(NullPointerException.class, () -> state.history().append(null));
     assertEquals("message must not be null", ex.getMessage());
   }
 
   @Test
   void accumulateUsageSumsAllFieldsIncludingTotal() {
     var state = build();
-    state.accumulateUsage(Usage.of(10, 5));
-    state.accumulateUsage(Usage.of(7, 3));
-    var sum = state.usage();
+    state.totals().accumulateUsage(Usage.of(10, 5));
+    state.totals().accumulateUsage(Usage.of(7, 3));
+    var sum = state.totals().usage();
     assertEquals(17, sum.inputTokens());
     assertEquals(8, sum.outputTokens());
     assertEquals(25, sum.totalTokens());
@@ -145,35 +145,35 @@ final class SessionStateTest {
   @Test
   void accumulateUsagePreservesExplicitTotal() {
     var state = build();
-    state.accumulateUsage(new Usage(2, 3, 0, 0, 99));
-    assertEquals(99, state.usage().totalTokens(), "explicit total carries through");
+    state.totals().accumulateUsage(new Usage(2, 3, 0, 0, 99));
+    assertEquals(99, state.totals().usage().totalTokens(), "explicit total carries through");
   }
 
   @Test
   void accumulateUsageRejectsNull() {
     var state = build();
-    var ex = assertThrows(NullPointerException.class, () -> state.accumulateUsage(null));
+    var ex = assertThrows(NullPointerException.class, () -> state.totals().accumulateUsage(null));
     assertEquals("delta must not be null", ex.getMessage());
   }
 
   @Test
   void accumulateCostAccumulates() {
     var state = build();
-    state.accumulateCost(CostEstimate.ofMicroUsd(250_000L));
-    state.accumulateCost(CostEstimate.ofMicroUsd(100_000L));
-    assertEquals(350_000L, state.cost().microUsd());
+    state.totals().accumulateCost(CostEstimate.ofMicroUsd(250_000L));
+    state.totals().accumulateCost(CostEstimate.ofMicroUsd(100_000L));
+    assertEquals(350_000L, state.totals().cost().microUsd());
   }
 
   @Test
   void accumulateCostRejectsNull() {
     var state = build();
-    var ex = assertThrows(NullPointerException.class, () -> state.accumulateCost(null));
+    var ex = assertThrows(NullPointerException.class, () -> state.totals().accumulateCost(null));
     assertEquals("delta must not be null", ex.getMessage());
   }
 
   @Test
   void citationsStartEmpty() {
-    assertTrue(build().citations().isEmpty());
+    assertTrue(build().totals().citations().isEmpty());
   }
 
   @Test
@@ -182,9 +182,9 @@ final class SessionStateTest {
     var a = Citation.of("https://a", "x");
     var b = Citation.of("https://b", "y");
     var c = Citation.of("https://c", "z");
-    state.accumulateCitations(List.of(a, b));
-    state.accumulateCitations(List.of(c));
-    assertEquals(List.of(a, b, c), state.citations());
+    state.totals().accumulateCitations(List.of(a, b));
+    state.totals().accumulateCitations(List.of(c));
+    assertEquals(List.of(a, b, c), state.totals().citations());
   }
 
   @Test
@@ -192,30 +192,31 @@ final class SessionStateTest {
     var state = build();
     var a = Citation.of("https://a", "x");
     var b = Citation.of("https://b", "y");
-    state.accumulateCitations(List.of(a, b));
-    state.accumulateCitations(List.of(a, Citation.of("https://b", "y")));
-    assertEquals(List.of(a, b), state.citations());
+    state.totals().accumulateCitations(List.of(a, b));
+    state.totals().accumulateCitations(List.of(a, Citation.of("https://b", "y")));
+    assertEquals(List.of(a, b), state.totals().citations());
   }
 
   @Test
   void accumulateCitationsEmptyDeltaIsNoOp() {
     var state = build();
-    state.accumulateCitations(List.of());
-    assertTrue(state.citations().isEmpty());
+    state.totals().accumulateCitations(List.of());
+    assertTrue(state.totals().citations().isEmpty());
   }
 
   @Test
   void citationsSnapshotIsImmutable() {
     var state = build();
-    state.accumulateCitations(List.of(Citation.of("https://a", "x")));
+    state.totals().accumulateCitations(List.of(Citation.of("https://a", "x")));
     assertThrows(
         UnsupportedOperationException.class,
-        () -> state.citations().add(Citation.of("https://b", "y")));
+        () -> state.totals().citations().add(Citation.of("https://b", "y")));
   }
 
   @Test
   void accumulateCitationsRejectsNullDelta() {
-    var ex = assertThrows(NullPointerException.class, () -> build().accumulateCitations(null));
+    var ex =
+        assertThrows(NullPointerException.class, () -> build().totals().accumulateCitations(null));
     assertEquals("delta must not be null", ex.getMessage());
   }
 
@@ -223,7 +224,9 @@ final class SessionStateTest {
   void accumulateCitationsRejectsNullElement() {
     var withNull = new java.util.ArrayList<Citation>();
     withNull.add(null);
-    var ex = assertThrows(NullPointerException.class, () -> build().accumulateCitations(withNull));
+    var ex =
+        assertThrows(
+            NullPointerException.class, () -> build().totals().accumulateCitations(withNull));
     assertEquals("delta must not contain null", ex.getMessage());
   }
 
@@ -284,24 +287,24 @@ final class SessionStateTest {
   @Test
   void contextWarningFlagStartsClear() {
     var state = build();
-    assertFalse(state.contextWarningFired());
+    assertFalse(state.contextWatermark().fired());
   }
 
   @Test
   void tryFireContextWarningIsFirstWins() {
     var state = build();
-    assertTrue(state.tryFireContextWarning());
-    assertTrue(state.contextWarningFired());
-    assertFalse(state.tryFireContextWarning(), "second call must return false");
-    assertTrue(state.contextWarningFired());
+    assertTrue(state.contextWatermark().tryFire());
+    assertTrue(state.contextWatermark().fired());
+    assertFalse(state.contextWatermark().tryFire(), "second call must return false");
+    assertTrue(state.contextWatermark().fired());
   }
 
   @Test
   void resetContextWarningFlagReArms() {
     var state = build();
-    state.tryFireContextWarning();
-    state.resetContextWarningFlag();
-    assertFalse(state.contextWarningFired());
-    assertTrue(state.tryFireContextWarning(), "post-reset try must succeed again");
+    state.contextWatermark().tryFire();
+    state.contextWatermark().reset();
+    assertFalse(state.contextWatermark().fired());
+    assertTrue(state.contextWatermark().tryFire(), "post-reset try must succeed again");
   }
 }

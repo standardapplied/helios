@@ -99,7 +99,7 @@ final class TurnRunnerToolDispatchTest {
 
   private SessionState freshState() {
     var s = new SessionState(SID, new CancellationToken(), CLOCK);
-    s.appendMessage(Message.user("call echo"));
+    s.history().append(Message.user("call echo"));
     s.beginTurn();
     return s;
   }
@@ -107,13 +107,8 @@ final class TurnRunnerToolDispatchTest {
   /** A model that streams a fixed sequence of chunks. */
   private TurnRunner runner(Model model, ToolDispatch dispatch) {
     return new TurnRunner(
+        new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
         model,
-        hooks,
-        dispatch,
-        queue,
-        events::add,
-        CTX_FACTORY,
-        CLOCK,
         CostCalculator.ZERO,
         null,
         scheduler);
@@ -185,7 +180,7 @@ final class TurnRunnerToolDispatchTest {
     assertEquals("echoed: hello", ((QueryEvent.ToolResult) toolResultEvt).result().output());
 
     // History: user, assistant(with toolCalls), tool(echoed: hello).
-    var history = state.historySnapshot();
+    var history = state.history().snapshot();
     assertEquals(3, history.size());
     var assistant = history.get(1);
     assertEquals(com.standardapplied.helios.core.model.Role.ASSISTANT, assistant.role());
@@ -222,7 +217,7 @@ final class TurnRunnerToolDispatchTest {
     assertEquals("echoed: one", toolResults.get(0).result().output());
     assertEquals("echoed: two", toolResults.get(1).result().output());
 
-    var history = state.historySnapshot();
+    var history = state.history().snapshot();
     assertEquals(4, history.size(), "user + assistant + 2 tool messages");
   }
 
@@ -266,7 +261,7 @@ final class TurnRunnerToolDispatchTest {
                 new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of())));
     var runner = runner(model, dispatch);
     var state = new SessionState(SID, token, CLOCK);
-    state.appendMessage(Message.user("call echo"));
+    state.history().append(Message.user("call echo"));
     state.beginTurn();
     runner.runTurn(state, SessionLimits.defaults());
 
@@ -294,7 +289,7 @@ final class TurnRunnerToolDispatchTest {
 
     assertEquals(FinishReason.STOP, outcome.finishReason());
     assertEquals("just text", outcome.assistantContent());
-    assertEquals(2, state.historySnapshot().size(), "user + assistant only");
+    assertEquals(2, state.history().snapshot().size(), "user + assistant only");
   }
 
   @Test
@@ -379,7 +374,7 @@ final class TurnRunnerToolDispatchTest {
     var state = freshState();
     runner.runTurn(state, SessionLimits.defaults());
 
-    var history = state.historySnapshot();
+    var history = state.history().snapshot();
     // Expected shape: user("call echo"), assistant(toolCall), tool(text), user(synthetic+attached).
     assertEquals(4, history.size(), "tool result + splice user message must both land in history");
     var toolMsg = history.get(2);
@@ -415,7 +410,7 @@ final class TurnRunnerToolDispatchTest {
     var state = freshState();
     runner.runTurn(state, SessionLimits.defaults());
 
-    var history = state.historySnapshot();
+    var history = state.history().snapshot();
     assertEquals(3, history.size(), "no attachments -> no splice message");
     assertEquals(com.standardapplied.helios.core.model.Role.TOOL, history.get(2).role());
   }
