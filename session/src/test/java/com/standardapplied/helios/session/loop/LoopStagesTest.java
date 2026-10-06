@@ -22,6 +22,7 @@ import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.hooks.CompactionPayload;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookContext;
@@ -29,6 +30,7 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.hooks.OnUserMessageHook;
 import com.standardapplied.helios.session.hooks.PostCompactHook;
+import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -46,8 +48,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The loop's stages at their edges: a session already terminal, a compaction whose post-compact
- * hook stops the session before the turn, compaction spend reported as output tokens only, an
- * on-user-message hook with no name, and a pre-stop inject the full steering queue drops.
+ * hook stops the session before the turn, a throwing compactor, compact-hook outcomes their phase
+ * does not honour, compaction spend reported as output tokens only, an on-user-message hook with no
+ * name, and a pre-stop inject the full steering queue drops.
  */
 final class LoopStagesTest {
 
@@ -146,6 +149,81 @@ final class LoopStagesTest {
 
     assertEquals(Usage.of(2, 8), state.totals().usage());
     assertEquals(CostEstimate.ofMicroUsd(8), state.totals().cost());
+  }
+
+  @Test
+  void aThrowingCompactorIsLoggedOnTheAgentLoopLoggerAndTheSessionContinues() {
+    queue.offer(UserMessage.text("hello"));
+    var failure = new IllegalStateException("compactor down");
+    ContextCompactor throwing =
+        (history, s) -> {
+          throw failure;
+        };
+    var model = ScriptedModel.newBuilder().withTextTurn("done").build();
+    var records = new CopyOnWriteArrayList<LogRecord>();
+
+    ResultMessage result;
+    try (var ignored = LogCapture.of(AgentLoop.class, records)) {
+      result = loop(model, OVER_THE_WATERMARK, throwing).run(state, SMALL_WINDOW);
+    }
+
+    assertEquals("done", assertInstanceOf(ResultMessage.Success.class, result).result());
+    var warning = records.getFirst();
+    assertEquals(Level.WARNING, warning.getLevel());
+    assertEquals(
+        "context compactor threw; leaving history unchanged this turn", warning.getMessage());
+    assertSame(failure, warning.getThrown());
+  }
+
+  @Test
+  void compactHookOutcomesTheirPhaseDoesNotHonourAreLoggedOnTheAgentLoopLogger() {
+    state.history().append(Message.system("system"));
+    queue.offer(UserMessage.text("hello"));
+    var compacted = new AtomicBoolean();
+    ContextCompactor keepLastOnce =
+        (history, s) ->
+            CompactionResult.noOp(
+                compacted.compareAndSet(false, true) ? List.of(history.getLast()) : history);
+    var blockingPre =
+        new PreCompactHook() {
+          @Override
+          public String name() {
+            return "pre";
+          }
+
+          @Override
+          public HookOutcome beforeCompact(List<Message> history, HookContext ctx) {
+            return HookOutcome.block("no");
+          }
+        };
+    var injectingPost =
+        new PostCompactHook() {
+          @Override
+          public String name() {
+            return "post";
+          }
+
+          @Override
+          public HookOutcome afterCompact(CompactionPayload payload, HookContext ctx) {
+            return HookOutcome.inject("ignored");
+          }
+        };
+    var model = ScriptedModel.newBuilder().withTextTurn("done").build();
+    var records = new CopyOnWriteArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(AgentLoop.class, records)) {
+      loop(model, OVER_THE_WATERMARK, keepLastOnce, blockingPre, injectingPost)
+          .run(state, SMALL_WINDOW);
+    }
+
+    assertEquals(
+        "PreCompactHook ''{0}'' {1} is not honored at this phase; using original history",
+        records.get(0).getMessage());
+    assertEquals(List.of("pre", "Block"), List.of(records.get(0).getParameters()));
+    assertEquals(
+        "PostCompactHook ''{0}'' {1} is not honored at this phase", records.get(1).getMessage());
+    assertEquals(List.of("post", "Inject"), List.of(records.get(1).getParameters()));
+    assertEquals(0, queue.size());
   }
 
   @Test
