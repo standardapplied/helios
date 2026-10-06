@@ -29,9 +29,9 @@ import org.junit.jupiter.api.io.TempDir;
  * Anthropic peer of {@link ReadToolMultimodalThroughLoopIntegrationTest}. Closes the chain end to
  * end on Claude Sonnet 4.6 (the cheapest vision/PDF-capable Anthropic model in the supported
  * matrix): Read tool reads a real PNG / real PDF from the workspace, the loop splices the
- * attachment into a follow-up user message, the {@code AnthropicModel} adapter converts the {@code
- * InlineFile} into the Messages API {@code image} / {@code document} content block, the live Claude
- * server parses the bytes, the model returns a coherent response.
+ * attachment into a follow-up user message, the Anthropic provider's request builder converts the
+ * {@code InlineFile} into the Messages API {@code image} / {@code document} content block, the live
+ * Claude server parses the bytes, the model returns a coherent response.
  *
  * <p>Anthropic enforces tighter per-image limits than Gemini (5 MB per image) — this test
  * deliberately uses fixtures well inside that floor (67-byte PNG, ~520-byte PDF) so the caps in
@@ -144,7 +144,7 @@ final class ReadToolMultimodalAnthropicIntegrationTest {
    * 1x1 PNG with valid IHDR / IDAT / IEND chunks and correct CRCs — Gemini accepted it; Claude
    * rejected it with HTTP 400 {@code "Could not process image"}. Anthropic's vision pipeline is
    * stricter about PNG variants than Gemini's. The cookbook bytes are the canonical reference; if
-   * this regresses, the failure lives in our {@code AnthropicModel} adapter, not in the fixture.
+   * this regresses, the failure lives in our Anthropic request builder, not in the fixture.
    *
    * <p>This is exactly the kind of cross-provider divergence that only live testing surfaces.
    */
