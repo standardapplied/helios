@@ -29,6 +29,7 @@ import jdk.jshell.JShell;
 import jdk.jshell.execution.LocalExecutionControl;
 import jdk.jshell.execution.LocalExecutionControlProvider;
 import jdk.jshell.spi.ExecutionControl;
+import jdk.jshell.spi.ExecutionControl.EngineTerminationException;
 import jdk.jshell.spi.ExecutionControlProvider;
 import jdk.jshell.spi.ExecutionEnv;
 
@@ -110,6 +111,29 @@ final class BootstrapEnvironment implements AutoCloseable {
           }
         },
         true);
+  }
+
+  /**
+   * An environment whose executes time out by the clock and whose engine has terminated by the time
+   * a variable's value is read, so JShell fails every read with {@code message}.
+   */
+  static BootstrapEnvironment failingVarValue(String message) {
+    return new BootstrapEnvironment(
+        Await.HANG_GUARD.multipliedBy(5),
+        new LocalExecutionControlProvider() {
+          @Override
+          public ExecutionControl createExecutionControl(
+              ExecutionEnv env, Map<String, String> parameters) {
+            return new LocalExecutionControl() {
+              @Override
+              public String varValue(String className, String varName)
+                  throws EngineTerminationException {
+                throw new EngineTerminationException(message);
+              }
+            };
+          }
+        },
+        false);
   }
 
   /** An environment whose bootstrap is already reading what the test feeds. */
@@ -226,6 +250,12 @@ final class BootstrapEnvironment implements AutoCloseable {
   /**
    * In the test JVM the module's classes are not on JShell's own classpath, so snippets that call
    * {@link HostBridge} need the build output added to it.
+   *
+   * <p>The source analysis is taken last, on the test's thread, as the bootstrap's {@code main}
+   * takes it installing the prelude after its imports: the first analysis in a JVM starts JShell's
+   * indexing thread, which never ends. Started by an execute's eval thread it would join that
+   * execute's thread group, and a timed-out snippet would be given up as unstoppable once the stop
+   * grace expired.
    */
   private static JShell newJShell(ExecutionControlProvider engine) {
     var jshell = JShell.builder().executionEngine(engine, Map.of()).build();
@@ -235,6 +265,7 @@ final class BootstrapEnvironment implements AutoCloseable {
     }
     jshell.eval("import static com.standardapplied.helios.repl.sandbox.HostBridge.*;");
     jshell.eval("import com.standardapplied.helios.repl.sandbox.HostBridge;");
+    jshell.sourceCodeAnalysis();
     return jshell;
   }
 }

@@ -119,7 +119,7 @@ class SubprocessModulesClasspathLaunchTest {
    * its existing classpath. The subprocess can then load all of helios-repl + transitive deps via
    * classpath alone, with no {@code --module-path} or {@code --add-modules} flag.
    */
-  private static String buildFlattenedClasspath() {
+  static String buildFlattenedClasspath() {
     var paths = new ArrayList<String>();
     var parentArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
     for (var arg : parentArgs) {
