@@ -1657,6 +1657,11 @@ class AnthropicModelTest {
   }
 
   @Test
+  void disabledCachePolicyHasNoBreakpoint() {
+    assertNull(CachePolicy.disabled().breakpoint());
+  }
+
+  @Test
   void cachePolicyLongLivedAnnotatesWithOneHourTtl() {
     // 1h TTL is opt-in; cache write at 2x base, read still at 0.10x. Verify the breakpoint
     // payload reaches the system block intact so Anthropic bills the correct rate.
