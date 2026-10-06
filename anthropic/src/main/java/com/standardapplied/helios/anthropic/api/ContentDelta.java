@@ -50,24 +50,4 @@ public record ContentDelta(
    * @param explanation human-readable description meant for display; null alongside a null category
    */
   public record StopDetails(String category, String explanation) {}
-
-  public boolean hasTypeTextDelta() {
-    return "text_delta".equals(type);
-  }
-
-  public boolean hasTypeInputJsonDelta() {
-    return "input_json_delta".equals(type);
-  }
-
-  public boolean hasTypeThinkingDelta() {
-    return "thinking_delta".equals(type);
-  }
-
-  public boolean hasTypeSignatureDelta() {
-    return "signature_delta".equals(type);
-  }
-
-  public boolean hasTypeCitationsDelta() {
-    return "citations_delta".equals(type);
-  }
 }
