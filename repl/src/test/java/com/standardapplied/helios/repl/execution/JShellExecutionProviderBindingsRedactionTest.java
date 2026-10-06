@@ -42,7 +42,7 @@ final class JShellExecutionProviderBindingsRedactionTest {
     var captured = new AtomicReference<Map<String, String>>();
     SandboxBindingsListener inner = (bindings, result) -> captured.set(bindings);
 
-    var wrapped = JShellExecutionProvider.redactingBindingsListener(registry, inner);
+    var wrapped = OutputRedaction.redactingBindingsListener(registry, inner);
     assertNotNull(wrapped);
 
     var snapshot =
@@ -67,7 +67,7 @@ final class JShellExecutionProviderBindingsRedactionTest {
     var registry = new SecretRegistry();
     var captured = new AtomicReference<Map<String, String>>();
     SandboxBindingsListener inner = (bindings, result) -> captured.set(bindings);
-    var wrapped = JShellExecutionProvider.redactingBindingsListener(registry, inner);
+    var wrapped = OutputRedaction.redactingBindingsListener(registry, inner);
 
     var snapshot = Map.of("x", "1", "y", "2");
     wrapped.onBindings(snapshot, stubResult());
@@ -79,7 +79,7 @@ final class JShellExecutionProviderBindingsRedactionTest {
   void wrapperOfNullDelegateIsNull() {
     var registry = new SecretRegistry();
     assertNull(
-        JShellExecutionProvider.redactingBindingsListener(registry, null),
+        OutputRedaction.redactingBindingsListener(registry, null),
         "no listener configured → no wrapper allocated; preserves the null-disables semantics");
   }
 
@@ -90,7 +90,7 @@ final class JShellExecutionProviderBindingsRedactionTest {
 
     var captured = new AtomicReference<Map<String, String>>();
     SandboxBindingsListener inner = (bindings, result) -> captured.set(bindings);
-    var wrapped = JShellExecutionProvider.redactingBindingsListener(registry, inner);
+    var wrapped = OutputRedaction.redactingBindingsListener(registry, inner);
 
     var snapshot = new java.util.LinkedHashMap<String, String>();
     snapshot.put("z", "1");

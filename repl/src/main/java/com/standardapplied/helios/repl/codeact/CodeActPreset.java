@@ -51,7 +51,7 @@ import java.util.OptionalInt;
  *
  * @see CodeActStrategy
  * @see RlmStrategy
- * @see JShellExecutionProvider#singleSandbox(ReplConfig, String)
+ * @see JShellExecutionProvider.Builder#withStartupSnippet(String)
  */
 public final class CodeActPreset {
 
