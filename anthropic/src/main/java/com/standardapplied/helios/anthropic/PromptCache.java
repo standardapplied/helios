@@ -60,8 +60,8 @@ final class PromptCache {
   /** {@code tools} with the breakpoint on the last, which covers the whole tools section. */
   private static List<ToolDefinition> withCachedTail(
       List<ToolDefinition> tools, CacheControl breakpoint) {
-    if (tools == null || tools.isEmpty()) {
-      return tools;
+    if (tools == null) {
+      return null;
     }
     var copy = new ArrayList<ToolDefinition>(tools.subList(0, tools.size() - 1));
     copy.add(tools.getLast().withCacheControl(breakpoint));

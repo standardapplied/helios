@@ -84,7 +84,7 @@ final class TextBlocks implements RawContentEcho.Source {
     block.put("type", "text");
     block.put("text", text.toString());
     var cited = blockCitations.get(index);
-    if (cited != null && !cited.isEmpty()) {
+    if (cited != null) {
       block.put("citations", cited);
     }
     return block;

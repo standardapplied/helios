@@ -65,14 +65,17 @@ final class FilesHttp {
   HttpResponse<InputStream> send(HttpRequest request) throws IOException, InterruptedException {
     var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
-      try (var body = response.body()) {
-        var errorBody = HttpClientFactory.readBoundedErrorBody(body);
-        throw new GeminiException(
-            "Files API error (status " + response.statusCode() + "): " + errorBody,
-            response.statusCode());
-      }
+      throw new GeminiException(
+          "Files API error (status " + response.statusCode() + "): " + errorBody(response.body()),
+          response.statusCode());
     }
     return response;
+  }
+
+  private static String errorBody(InputStream body) throws IOException {
+    try (body) {
+      return HttpClientFactory.readBoundedErrorBody(body);
+    }
   }
 
   /** The JSON body of {@code response} as a {@code type}. */
@@ -127,11 +130,10 @@ final class FilesHttp {
             .build();
     try {
       var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-      try (var body = response.body()) {
-        var status = response.statusCode();
-        if ((status >= 200 && status < 300) || status == 404) {
-          return;
-        }
+      response.body().close();
+      var status = response.statusCode();
+      if ((status >= 200 && status < 300) || status == 404) {
+        return;
       }
       throw new GeminiException(
           "Gemini Files API delete failed (status " + response.statusCode() + ")",

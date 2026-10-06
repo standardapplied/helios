@@ -96,15 +96,18 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
       throws IOException, InterruptedException {
     var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
     if (response.statusCode() != 200) {
-      try (var errorBody = response.body()) {
-        var detail = HttpClientFactory.readBoundedErrorBody(errorBody);
-        throw failure.create(
-            "API error (status " + response.statusCode() + "): " + detail,
-            response.statusCode(),
-            null);
-      }
+      throw failure.create(
+          "API error (status " + response.statusCode() + "): " + errorBody(response.body()),
+          response.statusCode(),
+          null);
     }
     return new SseReader(response.body(), idleTimeout, parser, failure);
+  }
+
+  private static String errorBody(InputStream body) throws IOException {
+    try (body) {
+      return HttpClientFactory.readBoundedErrorBody(body);
+    }
   }
 
   @Override
