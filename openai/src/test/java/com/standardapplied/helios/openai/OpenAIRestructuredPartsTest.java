@@ -67,9 +67,10 @@ class OpenAIRestructuredPartsTest {
   @Test
   void aToolThatCannotBeWrittenFailsTheCallBeforeItIsSent() {
     var model =
-        new OpenAIModel(
-            OpenAIModelId.GPT_5_6,
-            ModelConfig.newBuilder().withApiKey("k").withBaseUrl("http://127.0.0.1:1").build());
+        new OpenAIProvider()
+            .create(
+                OpenAIModelId.GPT_5_6.id(),
+                ModelConfig.newBuilder().withApiKey("k").withBaseUrl("http://127.0.0.1:1").build());
     var tool = ConversationFixture.unwritableTool();
 
     var failure =
@@ -81,9 +82,12 @@ class OpenAIRestructuredPartsTest {
 
   @Test
   void anUnrecognisedModelIsStandardWithoutKnownLimits() {
-    var model = new OpenAIModel("gpt-next", ModelConfig.newBuilder().withApiKey("k").build());
+    var config = ModelConfig.newBuilder().withApiKey("k").withBaseUrl("http://127.0.0.1:1").build();
+    var model = new OpenAIProvider().create("gpt-next", config);
 
-    var request = model.requests.build(List.of(Message.user("hi")), List.of(), null);
+    var request =
+        new OpenAIRequestBuilder("gpt-next", null, config)
+            .build(List.of(Message.user("hi")), List.of(), null);
 
     assertNull(request.reasoning());
     assertEquals(0, request.maxOutputTokens());

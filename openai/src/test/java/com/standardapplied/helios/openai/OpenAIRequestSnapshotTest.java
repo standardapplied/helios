@@ -35,7 +35,7 @@ class OpenAIRequestSnapshotTest {
   private static final List<String> REPLY = List.of(Golden.read("openai/requests-reply.sse"));
 
   private static final Map<String, String> REASONING =
-      Map.of(OpenAIModel.REASONING_KEY, "Two cities, two calls.");
+      Map.of(OpenAIResponseAssembler.REASONING_KEY, "Two cities, two calls.");
 
   private final Map<String, Object> snapshots = new LinkedHashMap<>();
 
@@ -92,7 +92,7 @@ class OpenAIRequestSnapshotTest {
   }
 
   private static Function<URI, Model> modelAt(OpenAIModelId id, Function<URI, ModelConfig> config) {
-    return uri -> new OpenAIModel(id, config.apply(uri));
+    return uri -> new OpenAIProvider().create(id.id(), config.apply(uri));
   }
 
   private static Function<URI, ModelConfig> config(

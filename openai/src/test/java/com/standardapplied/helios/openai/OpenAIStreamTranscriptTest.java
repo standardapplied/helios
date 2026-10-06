@@ -21,12 +21,13 @@ class OpenAIStreamTranscriptTest {
         ModelHarness.transcript(
             "openai/streams/" + name + ".sse",
             uri ->
-                new OpenAIModel(
-                    OpenAIModelId.GPT_5_6,
-                    ModelConfig.newBuilder()
-                        .withApiKey("test-key")
-                        .withBaseUrl(uri + "/v1/responses")
-                        .build()));
+                new OpenAIProvider()
+                    .create(
+                        OpenAIModelId.GPT_5_6.id(),
+                        ModelConfig.newBuilder()
+                            .withApiKey("test-key")
+                            .withBaseUrl(uri + "/v1/responses")
+                            .build()));
 
     Golden.assertMatches("openai/streams/" + name + ".txt", transcript);
   }

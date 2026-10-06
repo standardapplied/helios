@@ -16,6 +16,8 @@ import java.util.Map;
 /** Sends a Responses API request and opens its response as a stream of events. */
 final class OpenAIStreams {
 
+  static final String DEFAULT_BASE_URL = "https://api.openai.com/v1/responses";
+
   private final ModelConfig config;
   private final HttpClient httpClient;
 
@@ -40,7 +42,7 @@ final class OpenAIStreams {
         Strings.isBlank(config.apiKey())
             ? Map.<String, String>of()
             : Map.of("Authorization", "Bearer " + config.apiKey());
-    return JsonPost.toBaseUrl(OpenAIModel.DEFAULT_BASE_URL, config, headers, jsonBody);
+    return JsonPost.toBaseUrl(DEFAULT_BASE_URL, config, headers, jsonBody);
   }
 
   /** {@code request} as JSON. */
