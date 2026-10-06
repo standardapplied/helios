@@ -129,6 +129,13 @@ remove the per-call working directory before they release the concurrency permit
 | `SessionOptions.Builder.apply(preset)` | `withPreset(preset)` |
 | `DurabilityCoordinator.journalStart(...)`, `journalTerminal(...)`, `journalTerminalFailure(...)`, `inflightFor(runId)`, `markInflightFailed(...)` | `new ToolCallJournaling(durability)` with `start(...)`, `complete(...)`, `fail(...)`, `inflight(runId)`, `markInflightFailed(...)`; `DurabilityCoordinator` keeps the run lifecycle, and journal warnings log under `com.standardapplied.helios.core.runtime.ToolCallJournaling` |
 
+**`AnthropicModel.promptCachingEnabled()` is removed.** It duplicated `cachePolicy().enabled()`,
+which every `CachePolicy` answers.
+
+| 2.x | 3.0 |
+|---|---|
+| `model.promptCachingEnabled()` | `model.cachePolicy().enabled()` |
+
 **Annotations move from `PgTraceStore` to the new `PgAnnotationStore`.** `PgTraceStore` keeps
 traces and their spans (`store`, `findById`, `list`, `summarize`, `onEvent`). The five annotation
 methods move unchanged, with the same SQL, rows and errors, to `PgAnnotationStore`, built from the
@@ -149,8 +156,12 @@ same `PgConfig`: `new PgAnnotationStore(pgConfig)`.
   `com.standardapplied.helios.core.test`, are what the Helios test suite uses instead of sleeps,
   self-chosen timeouts and piped streams. `StubHttpServer` (a loopback HTTP/1.1 server that
   records each request before answering it) and `RedirectTrap` (the redirect contract a
-  credentialed provider client is held to) test HTTP clients. Depend on it with
-  `<type>test-jar</type>` and `<scope>test</scope>`.
+  credentialed provider client is held to) test HTTP clients. `ModelHarness` runs a provider
+  `Model` against a stub that replays recorded server-sent events (`SseReplies`), `Transcript`
+  renders what it streamed and returned as canonical text, `Golden` compares it with a file under
+  `src/test/resources/golden` (`-Dgolden.update=true` rewrites the files), and
+  `ConversationFixture` is the conversation every provider's request snapshots share. Depend on it
+  with `<type>test-jar</type>` and `<scope>test</scope>`.
 - **`CircuitBreaker.Builder.withClock(InstantSource)`.** The breaker reads the current instant from
   an injectable source (default `Clock.systemUTC()`), so the half-open delay can be driven by hand
   instead of by sleeping. A `java.time.Clock` is an `InstantSource` and can be passed directly.
