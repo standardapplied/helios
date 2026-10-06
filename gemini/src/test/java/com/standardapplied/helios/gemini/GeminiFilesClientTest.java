@@ -29,6 +29,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -760,6 +761,25 @@ class GeminiFilesClientTest {
         IllegalArgumentException.class,
         () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
     assertTrue(http.requests.isEmpty());
+  }
+
+  @Test
+  void aFileNameOverFiveHundredTwelveCharactersIsRejectedBeforeSending() throws Exception {
+    try (var zip =
+        FileSystems.newFileSystem(tempDir.resolve("long-names.zip"), Map.of("create", "true"))) {
+      var video = zip.getPath("a".repeat(509) + ".mp4");
+      Files.write(video, new byte[] {1});
+      var http = httpClient();
+
+      var error =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
+
+      assertEquals(
+          "file name exceeds the Gemini Files API 512-character limit", error.getMessage());
+      assertTrue(http.requests.isEmpty());
+    }
   }
 
   @Test
