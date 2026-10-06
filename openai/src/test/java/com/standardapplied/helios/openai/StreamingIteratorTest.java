@@ -14,22 +14,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.FeedableInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Map;
-import java.util.Optional;
-import javax.net.ssl.SSLSession;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -252,8 +246,8 @@ class StreamingIteratorTest {
     var neverDelivers = new FeedableInputStream();
 
     try (var iterator =
-        new OpenAIModel.StreamingIterator(
-            fakeResponse(neverDelivers), objectMapper, SHORT_IDLE_TIMEOUT)) {
+        new SseReader(
+            neverDelivers, SHORT_IDLE_TIMEOUT, new OpenAIStreamParser(), OpenAIException::new)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
@@ -777,7 +771,7 @@ class StreamingIteratorTest {
           }
         };
     try (var iterator =
-        new OpenAIModel.StreamingIterator(fakeResponse(failingStream), objectMapper, NEVER_IDLE)) {
+        new SseReader(failingStream, NEVER_IDLE, new OpenAIStreamParser(), OpenAIException::new)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
@@ -794,7 +788,7 @@ class StreamingIteratorTest {
           }
         };
     try (var iterator =
-        new OpenAIModel.StreamingIterator(fakeResponse(failingStream), objectMapper, NEVER_IDLE)) {
+        new SseReader(failingStream, NEVER_IDLE, new OpenAIStreamParser(), OpenAIException::new)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();
       assertInstanceOf(StreamEvent.Error.class, event);
@@ -811,8 +805,8 @@ class StreamingIteratorTest {
         new Thread(
             () -> {
               try (var iterator =
-                  new OpenAIModel.StreamingIterator(
-                      fakeResponse(neverDelivers), objectMapper, NEVER_IDLE)) {
+                  new SseReader(
+                      neverDelivers, NEVER_IDLE, new OpenAIStreamParser(), OpenAIException::new)) {
                 while (iterator.hasNext()) {
                   events.add(iterator.next());
                 }
@@ -846,52 +840,8 @@ class StreamingIteratorTest {
     }
   }
 
-  private OpenAIModel.StreamingIterator createIterator(String sseData, Duration idleTimeout) {
+  private SseReader createIterator(String sseData, Duration idleTimeout) {
     var inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8));
-    return new OpenAIModel.StreamingIterator(fakeResponse(inputStream), objectMapper, idleTimeout);
-  }
-
-  private static HttpResponse<InputStream> fakeResponse(InputStream body) {
-    return new HttpResponse<>() {
-      @Override
-      public int statusCode() {
-        return 200;
-      }
-
-      @Override
-      public HttpHeaders headers() {
-        return HttpHeaders.of(Map.of(), (a, b) -> true);
-      }
-
-      @Override
-      public InputStream body() {
-        return body;
-      }
-
-      @Override
-      public Optional<HttpResponse<InputStream>> previousResponse() {
-        return Optional.empty();
-      }
-
-      @Override
-      public HttpRequest request() {
-        return null;
-      }
-
-      @Override
-      public URI uri() {
-        return URI.create("https://test");
-      }
-
-      @Override
-      public HttpClient.Version version() {
-        return HttpClient.Version.HTTP_2;
-      }
-
-      @Override
-      public Optional<SSLSession> sslSession() {
-        return Optional.empty();
-      }
-    };
+    return new SseReader(inputStream, idleTimeout, new OpenAIStreamParser(), OpenAIException::new);
   }
 }

@@ -22,6 +22,7 @@ import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ThinkingLevel;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.ToolChoice;
+import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
@@ -33,18 +34,11 @@ import com.standardapplied.helios.openai.api.ContentPart;
 import com.standardapplied.helios.openai.api.InputItem;
 import com.standardapplied.helios.openai.api.ResponsesRequest;
 import java.io.ByteArrayInputStream;
-import java.io.InputStream;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import javax.net.ssl.SSLSession;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
@@ -119,7 +113,7 @@ class OpenAIModelTest {
 
     var messages = List.of(Message.system("You are helpful"), Message.user("Hello"));
 
-    var request = model.buildRequest(messages, List.of(), null);
+    var request = model.requests.build(messages, List.of(), null);
 
     assertEquals("You are helpful", request.instructions());
     assertEquals(1, request.input().size());
@@ -132,7 +126,7 @@ class OpenAIModelTest {
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
     var messages = List.of(Message.user("Hello"));
-    var request = model.buildRequest(messages, List.of(), null);
+    var request = model.requests.build(messages, List.of(), null);
 
     assertEquals(1, request.input().size());
     assertTrue(request.input().getFirst().hasTypeMessage());
@@ -147,7 +141,7 @@ class OpenAIModelTest {
     var pngBytes = new byte[] {(byte) 0x89, 'P', 'N', 'G', 1, 2};
     var msg = Message.user("see this", List.of(InlineFile.of(pngBytes, "image/png")));
 
-    var request = model.buildRequest(List.of(msg), List.of(), null);
+    var request = model.requests.build(List.of(msg), List.of(), null);
 
     var item = request.input().getFirst();
     assertTrue(item.hasTypeMessage());
@@ -170,7 +164,7 @@ class OpenAIModelTest {
     var pdfBytes = "%PDF-1.4\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     var msg = Message.user("summarize", List.of(InlineFile.of(pdfBytes, "application/pdf")));
 
-    var request = model.buildRequest(List.of(msg), List.of(), null);
+    var request = model.requests.build(List.of(msg), List.of(), null);
 
     @SuppressWarnings("unchecked")
     var parts = (List<ContentPart>) request.input().getFirst().content();
@@ -190,7 +184,7 @@ class OpenAIModelTest {
             Message.assistant("Sure", toolCalls),
             Message.tool("call_1", "tool1", "result1"));
 
-    var request = model.buildRequest(messages, List.of(), null);
+    var request = model.requests.build(messages, List.of(), null);
 
     assertEquals(4, request.input().size());
     assertTrue(request.input().get(0).hasTypeMessage());
@@ -221,7 +215,7 @@ class OpenAIModelTest {
             .build();
 
     var messages = List.of(Message.user("Weather?"));
-    var request = model.buildRequest(messages, List.of(tool), null);
+    var request = model.requests.build(messages, List.of(tool), null);
 
     assertNotNull(request.tools());
     assertEquals(1, request.tools().size());
@@ -236,7 +230,7 @@ class OpenAIModelTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(OpenAIModelId.GPT_4O.maxOutputTokens(), request.maxOutputTokens());
   }
@@ -247,8 +241,8 @@ class OpenAIModelTest {
     var gpt4oModel = new OpenAIModel(OpenAIModelId.GPT_4O, config);
     var o3Model = new OpenAIModel(OpenAIModelId.O3, config);
 
-    var gpt4oReq = gpt4oModel.buildRequest(List.of(Message.user("Hi")), List.of(), null);
-    var o3Req = o3Model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var gpt4oReq = gpt4oModel.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var o3Req = o3Model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(16_384, gpt4oReq.maxOutputTokens());
     assertEquals(100_000, o3Req.maxOutputTokens());
@@ -266,7 +260,7 @@ class OpenAIModelTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").withMaxOutputTokens(8192).build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(8192, request.maxOutputTokens());
   }
@@ -277,7 +271,7 @@ class OpenAIModelTest {
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
     var schema = Map.<String, Object>of("type", "object", "properties", Map.of());
-    var request = model.buildRequest(List.of(Message.user("Extract")), List.of(), schema);
+    var request = model.requests.build(List.of(Message.user("Extract")), List.of(), schema);
 
     assertNotNull(request.text());
     assertNotNull(request.text().format());
@@ -308,7 +302,7 @@ class OpenAIModelTest {
             "required",
             List.of("targetToSources"));
 
-    var request = model.buildRequest(List.of(Message.user("Map it")), List.of(), openMapSchema);
+    var request = model.requests.build(List.of(Message.user("Map it")), List.of(), openMapSchema);
 
     assertNotNull(request.text());
     var format = request.text().format();
@@ -340,7 +334,7 @@ class OpenAIModelTest {
             .withDescription("test")
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(tool), null);
 
     assertEquals("auto", request.toolChoice());
   }
@@ -357,7 +351,7 @@ class OpenAIModelTest {
             .withDescription("test")
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(tool), null);
 
     assertEquals("required", request.toolChoice());
   }
@@ -374,7 +368,7 @@ class OpenAIModelTest {
             .withDescription("test")
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(tool), null);
 
     assertEquals("none", request.toolChoice());
   }
@@ -395,7 +389,7 @@ class OpenAIModelTest {
             .withDescription("test")
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(tool), null);
 
     var choice = (Map<String, String>) request.toolChoice();
     assertEquals("function", choice.get("type"));
@@ -413,7 +407,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(0.7, request.temperature());
     assertEquals(0.9, request.topP());
@@ -425,7 +419,7 @@ class OpenAIModelTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertTrue(request.stream());
   }
@@ -435,7 +429,7 @@ class OpenAIModelTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertNull(request.tools());
   }
@@ -445,7 +439,7 @@ class OpenAIModelTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), null, null);
+    var request = model.requests.build(List.of(Message.user("Hi")), null, null);
 
     assertNull(request.tools());
   }
@@ -455,7 +449,7 @@ class OpenAIModelTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new OpenAIModel(OpenAIModelId.GPT_5_4, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals("gpt-5.4", request.model());
   }
@@ -469,7 +463,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.O3, config);
 
-    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertNotNull(request.reasoning());
     assertEquals("medium", request.reasoning().effort());
@@ -484,7 +478,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.O3, config);
 
-    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertNotNull(request.reasoning());
     assertEquals("low", request.reasoning().effort());
@@ -499,7 +493,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.O3, config);
 
-    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertNotNull(request.reasoning());
     assertEquals("low", request.reasoning().effort());
@@ -514,7 +508,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.O3, config);
 
-    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertNotNull(request.reasoning());
     assertEquals("high", request.reasoning().effort());
@@ -529,7 +523,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_5_6, config);
 
-    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertEquals("max", request.reasoning().effort());
   }
@@ -543,7 +537,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_5_5, config);
 
-    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertEquals("xhigh", request.reasoning().effort());
   }
@@ -557,7 +551,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_5_6, config);
 
-    var request = model.buildRequest(List.of(Message.user("Quick")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Quick")), List.of(), null);
 
     assertNotNull(request.reasoning());
     assertEquals("none", request.reasoning().effort());
@@ -572,7 +566,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_5_5, config);
 
-    var request = model.buildRequest(List.of(Message.user("Quick")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Quick")), List.of(), null);
 
     assertNotNull(request.reasoning(), "omitting reasoning runs gpt-5.5's default medium effort");
     assertEquals("none", request.reasoning().effort());
@@ -581,7 +575,7 @@ class OpenAIModelTest {
   private static ResponsesRequest requestFor(OpenAIModelId modelId, ThinkingLevel level) {
     var config = ModelConfig.newBuilder().withApiKey("test-key").withThinkingLevel(level).build();
     return new OpenAIModel(modelId, config)
-        .buildRequest(List.of(Message.user("Hi")), List.of(), null);
+        .requests.build(List.of(Message.user("Hi")), List.of(), null);
   }
 
   @Test
@@ -639,7 +633,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_6_LUNA, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals("none", request.reasoning().effort());
     assertEquals(0.2, request.temperature());
@@ -657,7 +651,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_6_ASTRA, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals("low", request.reasoning().effort());
     assertNull(request.temperature());
@@ -675,7 +669,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_6_ASTRA, config);
 
-    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertNull(request.temperature());
     assertNull(request.topP(), "top_p with a reasoning effort returns a 400 on the GPT-6 family");
@@ -690,7 +684,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_5_4_MINI, config);
 
-    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertEquals("xhigh", request.reasoning().effort());
   }
@@ -704,7 +698,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.O4_MINI, config);
 
-    var request = model.buildRequest(List.of(Message.user("Quick")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Quick")), List.of(), null);
 
     assertNull(request.reasoning());
   }
@@ -718,14 +712,14 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_5_6, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals("tenant:acme:support-v1", request.promptCacheKey());
   }
 
   @Test
   void promptCacheKeyAbsentByDefault() {
-    var request = createModel().buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = createModel().requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertNull(request.promptCacheKey());
   }
@@ -762,7 +756,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_5_5, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(
         "xhigh",
@@ -780,7 +774,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_5_4, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals("xhigh", request.reasoning().effort());
   }
@@ -797,7 +791,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_5_5, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(
         "xhigh",
@@ -817,7 +811,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.O3, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals("high", request.reasoning().effort());
   }
@@ -831,7 +825,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.O4_MINI, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals("high", request.reasoning().effort());
   }
@@ -845,7 +839,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.O3, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertNull(request.reasoning());
   }
@@ -855,7 +849,7 @@ class OpenAIModelTest {
     var model = createModel();
     var message = Message.assistant("Hello");
 
-    var items = model.convertAssistantMessage(message);
+    var items = OpenAIInput.assistant(message);
 
     assertEquals(1, items.size());
     assertTrue(items.getFirst().hasTypeMessage());
@@ -873,7 +867,7 @@ class OpenAIModelTest {
             .build();
     var message = Message.assistant("I'll search", List.of(tc));
 
-    var items = model.convertAssistantMessage(message);
+    var items = OpenAIInput.assistant(message);
 
     assertEquals(2, items.size());
     assertTrue(items.get(0).hasTypeMessage());
@@ -893,7 +887,7 @@ class OpenAIModelTest {
             .build();
     var message = Message.assistant(List.of(tc));
 
-    var items = model.convertAssistantMessage(message);
+    var items = OpenAIInput.assistant(message);
 
     assertEquals(1, items.size());
     assertTrue(items.getFirst().hasTypeFunctionCall());
@@ -904,7 +898,7 @@ class OpenAIModelTest {
     var model = createModel();
     var message = new Message(Role.ASSISTANT, null, List.of(), null, null, Map.of(), List.of());
 
-    var items = model.convertAssistantMessage(message);
+    var items = OpenAIInput.assistant(message);
 
     assertEquals(1, items.size());
     assertTrue(items.getFirst().hasTypeMessage());
@@ -915,7 +909,7 @@ class OpenAIModelTest {
     var model = createModel();
     var message = new Message(Role.ASSISTANT, "", List.of(), null, null, Map.of(), List.of());
 
-    var items = model.convertAssistantMessage(message);
+    var items = OpenAIInput.assistant(message);
 
     assertEquals(1, items.size());
     assertTrue(items.getFirst().hasTypeMessage());
@@ -927,7 +921,7 @@ class OpenAIModelTest {
     var tc = ToolCall.newBuilder().withId("call_1").withName("fn").build();
     var message = Message.assistant(List.of(tc));
 
-    var items = model.convertAssistantMessage(message);
+    var items = OpenAIInput.assistant(message);
 
     assertEquals(1, items.size());
     assertTrue(items.getFirst().hasTypeFunctionCall());
@@ -936,27 +930,27 @@ class OpenAIModelTest {
 
   @Test
   void mapStatusCompleted() {
-    assertEquals(FinishReason.STOP, OpenAIModel.mapStatus("completed"));
+    assertEquals(FinishReason.STOP, OpenAIResponseAssembler.mapStatus("completed"));
   }
 
   @Test
   void mapStatusIncomplete() {
-    assertEquals(FinishReason.LENGTH, OpenAIModel.mapStatus("incomplete"));
+    assertEquals(FinishReason.LENGTH, OpenAIResponseAssembler.mapStatus("incomplete"));
   }
 
   @Test
   void mapStatusFailed() {
-    assertEquals(FinishReason.ERROR, OpenAIModel.mapStatus("failed"));
+    assertEquals(FinishReason.ERROR, OpenAIResponseAssembler.mapStatus("failed"));
   }
 
   @Test
   void mapStatusNull() {
-    assertEquals(FinishReason.STOP, OpenAIModel.mapStatus(null));
+    assertEquals(FinishReason.STOP, OpenAIResponseAssembler.mapStatus(null));
   }
 
   @Test
   void mapStatusUnknown() {
-    assertEquals(FinishReason.STOP, OpenAIModel.mapStatus("unknown"));
+    assertEquals(FinishReason.STOP, OpenAIResponseAssembler.mapStatus("unknown"));
   }
 
   @Test
@@ -967,7 +961,7 @@ class OpenAIModelTest {
     var messages =
         List.of(Message.system("Be helpful"), Message.system("Be concise"), Message.user("Hello"));
 
-    var request = model.buildRequest(messages, List.of(), null);
+    var request = model.requests.build(messages, List.of(), null);
 
     assertTrue(request.instructions().contains("Be helpful"));
     assertTrue(request.instructions().contains("Be concise"));
@@ -979,7 +973,7 @@ class OpenAIModelTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertNull(request.toolChoice());
   }
@@ -998,7 +992,7 @@ class OpenAIModelTest {
             Message.tool("call_1", "tool1", "r1"),
             Message.tool("call_2", "tool2", "r2"));
 
-    var request = model.buildRequest(messages, List.of(), null);
+    var request = model.requests.build(messages, List.of(), null);
 
     long functionCalls = request.input().stream().filter(InputItem::hasTypeFunctionCall).count();
     long functionOutputs =
@@ -1017,7 +1011,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.O3, config);
 
-    var request = model.buildRequest(List.of(Message.user("Think")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertNull(request.temperature());
     assertNotNull(request.reasoning());
@@ -1028,7 +1022,7 @@ class OpenAIModelTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").withTemperature(0.5).build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hi")), List.of(), null);
+    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(0.5, request.temperature());
     assertNull(request.reasoning());
@@ -1039,7 +1033,7 @@ class OpenAIModelTest {
     var model = createModel();
     var message = new Message(Role.USER, null, List.of(), null, null, Map.of(), List.of());
 
-    var request = model.buildRequest(List.of(message), List.of(), null);
+    var request = model.requests.build(List.of(message), List.of(), null);
 
     assertEquals(1, request.input().size());
     assertEquals("", request.input().getFirst().content());
@@ -1055,8 +1049,7 @@ class OpenAIModelTest {
                 List.of(FileReference.of("https://example.com/video.mp4", "video/mp4")))
             .build();
 
-    var error =
-        assertThrows(IllegalArgumentException.class, () -> OpenAIModel.convertUserMessage(message));
+    var error = assertThrows(IllegalArgumentException.class, () -> OpenAIInput.user(message));
 
     assertTrue(error.getMessage().contains("file references"));
   }
@@ -1070,7 +1063,7 @@ class OpenAIModelTest {
             "properties", Map.of("name", Map.of("type", "string")),
             "required", List.of("name"));
 
-    var result = OpenAIModel.addAdditionalPropertiesFalse(schema);
+    var result = StrictSchema.addAdditionalPropertiesFalse(schema);
 
     assertEquals(false, result.get("additionalProperties"));
     var props = (Map<String, Object>) result.get("properties");
@@ -1090,7 +1083,7 @@ class OpenAIModelTest {
                 "address",
                 Map.of("type", "object", "properties", Map.of("city", Map.of("type", "string")))));
 
-    var result = OpenAIModel.addAdditionalPropertiesFalse(schema);
+    var result = StrictSchema.addAdditionalPropertiesFalse(schema);
 
     assertEquals(false, result.get("additionalProperties"));
     var props = (Map<String, Object>) result.get("properties");
@@ -1108,7 +1101,7 @@ class OpenAIModelTest {
             "items",
             Map.of("type", "object", "properties", Map.of("name", Map.of("type", "string"))));
 
-    var result = OpenAIModel.addAdditionalPropertiesFalse(schema);
+    var result = StrictSchema.addAdditionalPropertiesFalse(schema);
 
     var items = (Map<String, Object>) result.get("items");
     assertEquals(false, items.get("additionalProperties"));
@@ -1118,7 +1111,7 @@ class OpenAIModelTest {
   void addAdditionalPropertiesFalseLeafType() {
     var schema = Map.<String, Object>of("type", "string");
 
-    var result = OpenAIModel.addAdditionalPropertiesFalse(schema);
+    var result = StrictSchema.addAdditionalPropertiesFalse(schema);
 
     assertEquals("string", result.get("type"));
     assertNull(result.get("additionalProperties"));
@@ -1134,14 +1127,14 @@ class OpenAIModelTest {
             Map.of("name", Map.of("type", "string"), "count", Map.of("type", "integer")),
             "required",
             List.of("name", "count"));
-    assertFalse(OpenAIModel.hasOpenMapShape(schema));
+    assertFalse(StrictSchema.hasOpenMapShape(schema));
   }
 
   @Test
   void hasOpenMapShapeDetectsTopLevelOpenMap() {
     var schema =
         Map.<String, Object>of("type", "object", "additionalProperties", Map.of("type", "string"));
-    assertTrue(OpenAIModel.hasOpenMapShape(schema));
+    assertTrue(StrictSchema.hasOpenMapShape(schema));
   }
 
   @Test
@@ -1162,7 +1155,7 @@ class OpenAIModelTest {
             "required",
             List.of("targetToSources"));
     assertTrue(
-        OpenAIModel.hasOpenMapShape(schema),
+        StrictSchema.hasOpenMapShape(schema),
         "Map<String, List<String>> inside a record property must be detected so strict mode is"
             + " disabled — strict mode rejects open Maps with HTTP 400");
   }
@@ -1176,7 +1169,7 @@ class OpenAIModelTest {
             "array",
             "items",
             Map.of("type", "object", "additionalProperties", Map.of("type", "string")));
-    assertTrue(OpenAIModel.hasOpenMapShape(schema));
+    assertTrue(StrictSchema.hasOpenMapShape(schema));
   }
 
   @Test
@@ -1191,12 +1184,12 @@ class OpenAIModelTest {
             Map.of("name", Map.of("type", "string")),
             "additionalProperties",
             false);
-    assertFalse(OpenAIModel.hasOpenMapShape(schema));
+    assertFalse(StrictSchema.hasOpenMapShape(schema));
   }
 
   @Test
   void hasOpenMapShapeReturnsFalseForNull() {
-    assertFalse(OpenAIModel.hasOpenMapShape(null));
+    assertFalse(StrictSchema.hasOpenMapShape(null));
   }
 
   @Test
@@ -1210,7 +1203,7 @@ class OpenAIModelTest {
             "additionalProperties",
             Map.of("type", "array", "items", Map.of("type", "string")));
 
-    var result = OpenAIModel.addAdditionalPropertiesFalse(schema);
+    var result = StrictSchema.addAdditionalPropertiesFalse(schema);
 
     // additionalProperties should be recursed into, NOT overwritten with false
     var addlProps = (Map<String, Object>) result.get("additionalProperties");
@@ -1232,7 +1225,7 @@ class OpenAIModelTest {
             "additionalProperties",
             Map.of("type", "object", "properties", Map.of("name", Map.of("type", "string"))));
 
-    var result = OpenAIModel.addAdditionalPropertiesFalse(schema);
+    var result = StrictSchema.addAdditionalPropertiesFalse(schema);
 
     var addlProps = (Map<String, Object>) result.get("additionalProperties");
     assertNotNull(addlProps);
@@ -1244,7 +1237,7 @@ class OpenAIModelTest {
   void buildRequestWithOutputSchemaAddsAdditionalProperties() {
     var model = createModel();
     var schema = Map.<String, Object>of("type", "object", "properties", Map.of());
-    var request = model.buildRequest(List.of(Message.user("Extract")), List.of(), schema);
+    var request = model.requests.build(List.of(Message.user("Extract")), List.of(), schema);
 
     assertNotNull(request.text());
     var format = request.text().format();
@@ -1259,8 +1252,7 @@ class OpenAIModelTest {
   void parseStructuredContentValidJson() {
     var model = createModel();
     var result =
-        model.parseStructuredContent(
-            "{\"name\":\"Alice\",\"age\":30}", OutputSchema.of(TestPerson.class));
+        model.exchange.parse("{\"name\":\"Alice\",\"age\":30}", OutputSchema.of(TestPerson.class));
     assertNotNull(result);
     assertEquals("Alice", result.name());
     assertEquals(30, result.age());
@@ -1269,13 +1261,13 @@ class OpenAIModelTest {
   @Test
   void parseStructuredContentNullReturnsNull() {
     var model = createModel();
-    assertNull(model.parseStructuredContent(null, OutputSchema.of(TestPerson.class)));
+    assertNull(model.exchange.parse(null, OutputSchema.of(TestPerson.class)));
   }
 
   @Test
   void parseStructuredContentBlankReturnsNull() {
     var model = createModel();
-    assertNull(model.parseStructuredContent("   ", OutputSchema.of(TestPerson.class)));
+    assertNull(model.exchange.parse("   ", OutputSchema.of(TestPerson.class)));
   }
 
   @Test
@@ -1284,8 +1276,7 @@ class OpenAIModelTest {
     var ex =
         assertThrows(
             StructuredOutputParseException.class,
-            () ->
-                model.parseStructuredContent("not json at all", OutputSchema.of(TestPerson.class)));
+            () -> model.exchange.parse("not json at all", OutputSchema.of(TestPerson.class)));
     assertTrue(ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")));
   }
 
@@ -1302,7 +1293,7 @@ class OpenAIModelTest {
         assertThrows(
             StructuredOutputParseException.class,
             () ->
-                model.parseStructuredContent(
+                model.exchange.parse(
                     "{\"name\":\"private-model-output-canary\"}",
                     OutputSchema.of(TestPerson.class)));
 
@@ -1314,7 +1305,7 @@ class OpenAIModelTest {
   void parseStructuredContentMarkdownWrapped() {
     var model = createModel();
     var result =
-        model.parseStructuredContent(
+        model.exchange.parse(
             "```json\n{\"name\":\"Bob\",\"age\":25}\n```", OutputSchema.of(TestPerson.class));
     assertNotNull(result);
     assertEquals("Bob", result.name());
@@ -1327,8 +1318,7 @@ class OpenAIModelTest {
         assertThrows(
             StructuredOutputParseException.class,
             () ->
-                model.parseStructuredContent(
-                    "```json\nnot valid\n```", OutputSchema.of(TestPerson.class)));
+                model.exchange.parse("```json\nnot valid\n```", OutputSchema.of(TestPerson.class)));
     assertTrue(ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")));
   }
 
@@ -1342,7 +1332,7 @@ class OpenAIModelTest {
             + "\"reasoning\":\"named in source\",\"confidence\":\"HIGH\"},"
             + "{\"field\":\"age\",\"sources\":[],\"reasoning\":\"guess\",\"confidence\":\"LOW\"}]}";
 
-    var result = model.parseStructuredContent(json, schema);
+    var result = model.exchange.parse(json, schema);
 
     assertNotNull(result);
     assertEquals("Alice", result.output().name());
@@ -1360,7 +1350,7 @@ class OpenAIModelTest {
             + "{\"field\":\"name\",\"sources\":[],\"reasoning\":\"r\",\"confidence\":\"LOW\"},"
             + "{\"field\":\"age\",\"sources\":[],\"reasoning\":\"r\",\"confidence\":\"LOW\"}]}\n```";
 
-    var result = model.parseStructuredContent(json, schema);
+    var result = model.exchange.parse(json, schema);
     assertEquals("Bob", result.output().name());
   }
 
@@ -1374,7 +1364,7 @@ class OpenAIModelTest {
             .withStream(true)
             .build();
 
-    var json = model.serializeRequest(request);
+    var json = model.streams.serialize(request);
 
     assertNotNull(json);
     assertTrue(json.contains("\"model\":\"gpt-4o\""));
@@ -1386,7 +1376,7 @@ class OpenAIModelTest {
     var config = ModelConfig.newBuilder().withApiKey("sk-test-key").build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
-    var httpRequest = model.buildHttpRequest("{\"model\":\"gpt-4o\"}");
+    var httpRequest = model.streams.httpRequest("{\"model\":\"gpt-4o\"}");
 
     assertEquals("POST", httpRequest.method());
     assertEquals(URI.create("https://api.openai.com/v1/responses"), httpRequest.uri());
@@ -1398,7 +1388,7 @@ class OpenAIModelTest {
     var config = ModelConfig.newBuilder().withApiKey("sk-test-key").build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
-    var httpRequest = model.buildHttpRequest("{\"model\":\"gpt-4o\"}");
+    var httpRequest = model.streams.httpRequest("{\"model\":\"gpt-4o\"}");
 
     assertTrue(httpRequest.timeout().isPresent());
     assertEquals(Duration.ofSeconds(60), httpRequest.timeout().get());
@@ -1413,7 +1403,7 @@ class OpenAIModelTest {
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
-    var httpRequest = model.buildHttpRequest("{\"model\":\"gpt-4o\"}");
+    var httpRequest = model.streams.httpRequest("{\"model\":\"gpt-4o\"}");
 
     assertTrue(httpRequest.timeout().isPresent());
     assertEquals(Duration.ofSeconds(30), httpRequest.timeout().get());
@@ -1427,7 +1417,7 @@ class OpenAIModelTest {
         ModelConfig.newBuilder().withApiKey("sk-test-key").withResponseTimeout(null).build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
 
-    var httpRequest = model.buildHttpRequest("{\"model\":\"gpt-4o\"}");
+    var httpRequest = model.streams.httpRequest("{\"model\":\"gpt-4o\"}");
 
     assertTrue(httpRequest.timeout().isEmpty());
   }
@@ -1436,7 +1426,7 @@ class OpenAIModelTest {
   void buildHttpRequestSendsDefaultAuthorizationHeader() {
     var config = ModelConfig.newBuilder().withApiKey("sk-test-key").build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
-    var httpRequest = model.buildHttpRequest("{}");
+    var httpRequest = model.streams.httpRequest("{}");
     assertEquals(
         "Bearer sk-test-key", httpRequest.headers().firstValue("Authorization").orElseThrow());
   }
@@ -1449,7 +1439,7 @@ class OpenAIModelTest {
             .withBaseUrl("https://my-llm-proxy.example/v1/responses")
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
-    var httpRequest = model.buildHttpRequest("{}");
+    var httpRequest = model.streams.httpRequest("{}");
     assertEquals(URI.create("https://my-llm-proxy.example/v1/responses"), httpRequest.uri());
   }
 
@@ -1462,7 +1452,7 @@ class OpenAIModelTest {
             .withHeader("api-key", "azure-secret")
             .build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
-    var httpRequest = model.buildHttpRequest("{}");
+    var httpRequest = model.streams.httpRequest("{}");
     assertEquals(
         URI.create(
             "https://my-resource.openai.azure.com/openai/deployments/my-dep/responses?api-version=2024-08-01-preview"),
@@ -1477,7 +1467,7 @@ class OpenAIModelTest {
   void constructorAllowsBlankApiKeyWhenBaseUrlSet() {
     var config = ModelConfig.newBuilder().withBaseUrl("https://proxy.example/v1/responses").build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
-    var httpRequest = model.buildHttpRequest("{}");
+    var httpRequest = model.streams.httpRequest("{}");
     assertTrue(httpRequest.headers().firstValue("Authorization").isEmpty());
   }
 
@@ -1493,7 +1483,7 @@ class OpenAIModelTest {
     var config =
         ModelConfig.newBuilder().withApiKey("sk-test-key").withHeader("x-trace-id", "abc").build();
     var model = new OpenAIModel(OpenAIModelId.GPT_4O, config);
-    var httpRequest = model.buildHttpRequest("{}");
+    var httpRequest = model.streams.httpRequest("{}");
     assertEquals("abc", httpRequest.headers().firstValue("x-trace-id").orElseThrow());
     assertEquals(
         "Bearer sk-test-key", httpRequest.headers().firstValue("Authorization").orElseThrow());
@@ -1510,8 +1500,12 @@ class OpenAIModelTest {
     var objectMapper =
         JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
     try (var iterator =
-        new OpenAIModel.StreamingIterator(fakeResponse(sse), objectMapper, Duration.ofSeconds(5))) {
-      var response = OpenAIModel.drainToResponse(iterator);
+        new SseReader(
+            new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)),
+            Duration.ofSeconds(5),
+            new OpenAIStreamParser(),
+            OpenAIException::new)) {
+      var response = createModel().exchange.chat(request -> iterator, null);
       assertEquals("Hi", response.content());
       assertEquals(FinishReason.STOP, response.finishReason());
       assertNotNull(response.usage());
@@ -1527,8 +1521,13 @@ class OpenAIModelTest {
     var objectMapper =
         JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
     try (var iterator =
-        new OpenAIModel.StreamingIterator(fakeResponse(sse), objectMapper, Duration.ofSeconds(5))) {
-      assertThrows(OpenAIException.class, () -> OpenAIModel.drainToResponse(iterator));
+        new SseReader(
+            new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)),
+            Duration.ofSeconds(5),
+            new OpenAIStreamParser(),
+            OpenAIException::new)) {
+      assertThrows(
+          OpenAIException.class, () -> createModel().exchange.chat(request -> iterator, null));
     }
   }
 
@@ -1539,8 +1538,13 @@ class OpenAIModelTest {
     var objectMapper =
         JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
     try (var iterator =
-        new OpenAIModel.StreamingIterator(fakeResponse(sse), objectMapper, Duration.ofSeconds(5))) {
-      assertThrows(OpenAIException.class, () -> OpenAIModel.drainToResponse(iterator));
+        new SseReader(
+            new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)),
+            Duration.ofSeconds(5),
+            new OpenAIStreamParser(),
+            OpenAIException::new)) {
+      assertThrows(
+          OpenAIException.class, () -> createModel().exchange.chat(request -> iterator, null));
     }
   }
 
@@ -1551,57 +1555,16 @@ class OpenAIModelTest {
     var objectMapper =
         JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
     try (var iterator =
-        new OpenAIModel.StreamingIterator(fakeResponse(sse), objectMapper, Duration.ofSeconds(5))) {
-      var response = OpenAIModel.drainToResponse(iterator);
+        new SseReader(
+            new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)),
+            Duration.ofSeconds(5),
+            new OpenAIStreamParser(),
+            OpenAIException::new)) {
+      var response = createModel().exchange.chat(request -> iterator, null);
       assertNotNull(response);
       assertEquals("", response.content());
       assertEquals(FinishReason.STOP, response.finishReason());
     }
-  }
-
-  private static HttpResponse<InputStream> fakeResponse(String sseData) {
-    var inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8));
-    return new HttpResponse<>() {
-      @Override
-      public int statusCode() {
-        return 200;
-      }
-
-      @Override
-      public HttpHeaders headers() {
-        return HttpHeaders.of(Map.of(), (a, b) -> true);
-      }
-
-      @Override
-      public InputStream body() {
-        return inputStream;
-      }
-
-      @Override
-      public Optional<HttpResponse<InputStream>> previousResponse() {
-        return Optional.empty();
-      }
-
-      @Override
-      public HttpRequest request() {
-        return null;
-      }
-
-      @Override
-      public URI uri() {
-        return URI.create("https://test");
-      }
-
-      @Override
-      public HttpClient.Version version() {
-        return HttpClient.Version.HTTP_2;
-      }
-
-      @Override
-      public Optional<SSLSession> sslSession() {
-        return Optional.empty();
-      }
-    };
   }
 
   @Test
@@ -1632,7 +1595,7 @@ class OpenAIModelTest {
     var ex =
         assertThrows(
             StructuredOutputParseException.class,
-            () -> model.parseStructuredContent("{\"name\":\"Alice\"}", schema));
+            () -> model.exchange.parse("{\"name\":\"Alice\"}", schema));
     assertTrue(
         ex.errors().stream().anyMatch(e -> e.contains("age") && e.contains("required")),
         "diff must name the missing 'age' field as required: " + ex.errors());
@@ -1649,7 +1612,7 @@ class OpenAIModelTest {
             + "\"reasoning\":\"named in source\",\"confidence\":\"HIGH\"}]}";
     var ex =
         assertThrows(
-            StructuredOutputParseException.class, () -> model.parseStructuredContent(json, schema));
+            StructuredOutputParseException.class, () -> model.exchange.parse(json, schema));
     assertTrue(
         ex.errors().stream().anyMatch(e -> e.contains("provenance[0].sources[0].url")),
         "diff must include the deep path 'provenance[0].sources[0].url': " + ex.errors());
