@@ -27,19 +27,21 @@ class PauseContinuationTest {
 
   private static final String PAUSED_CONTENT = "[{\"type\":\"server_tool_use\",\"id\":\"s1\"}]";
 
-  private final AnthropicModel model =
-      new AnthropicModel(
-          AnthropicModelId.CLAUDE_OPUS_5_5, ModelConfig.newBuilder().withApiKey("k").build());
   private final MessagesRequest request =
-      model.requests.build(List.of(Message.user("go")), List.of(), null);
+      new AnthropicRequestBuilder(
+              AnthropicModelId.CLAUDE_OPUS_5_5.id(),
+              AnthropicModelId.CLAUDE_OPUS_5_5,
+              ModelConfig.newBuilder().withApiKey("k").build(),
+              CachePolicy.shortLived())
+          .build(List.of(Message.user("go")), List.of(), null);
 
   @Test
   void aPauseWithoutVerbatimContentCannotResume() {
-    var paused = paused(Map.of(AnthropicModel.STOP_REASON_KEY, "pause_turn"));
+    var paused = paused(Map.of(AnthropicResponseAssembler.STOP_REASON_KEY, "pause_turn"));
 
     var failure =
         assertThrows(
-            AnthropicException.class, () -> continuation(r -> stream(paused)).drain(request));
+            AnthropicException.class, () -> continuation(r -> stream(paused)).chat(request));
 
     assertEquals(
         "pause_turn received without capturable assistant content; cannot resume",
@@ -51,9 +53,12 @@ class PauseContinuationTest {
     var paused =
         paused(
             Map.of(
-                AnthropicModel.STOP_REASON_KEY, "pause_turn", AnthropicModel.RAW_CONTENT_KEY, ""));
+                AnthropicResponseAssembler.STOP_REASON_KEY,
+                "pause_turn",
+                RawContentEcho.RAW_CONTENT_KEY,
+                ""));
 
-    assertThrows(AnthropicException.class, () -> continuation(r -> stream(paused)).drain(request));
+    assertThrows(AnthropicException.class, () -> continuation(r -> stream(paused)).chat(request));
   }
 
   @Test
@@ -61,12 +66,12 @@ class PauseContinuationTest {
     var paused =
         paused(
             Map.of(
-                AnthropicModel.STOP_REASON_KEY, "pause_turn",
-                AnthropicModel.RAW_CONTENT_KEY, "{not json"));
+                AnthropicResponseAssembler.STOP_REASON_KEY, "pause_turn",
+                RawContentEcho.RAW_CONTENT_KEY, "{not json"));
 
     var failure =
         assertThrows(
-            AnthropicException.class, () -> continuation(r -> stream(paused)).drain(request));
+            AnthropicException.class, () -> continuation(r -> stream(paused)).chat(request));
 
     assertEquals("Failed to decode paused assistant content for resume", failure.getMessage());
   }
@@ -76,11 +81,11 @@ class PauseContinuationTest {
     var opened = new int[1];
     var events =
         continuation(
-                r -> {
-                  opened[0]++;
-                  return stream(pausedWithContent());
-                })
-            .open(request);
+            r -> {
+              opened[0]++;
+              return stream(pausedWithContent());
+            })
+            .stream(request);
 
     var error = assertInstanceOf(StreamEvent.Error.class, events.next());
 
@@ -133,10 +138,27 @@ class PauseContinuationTest {
   }
 
   @Test
+  void aFirstSegmentThatCannotOpenIsTheStreamsOneError() {
+    var refused = new AnthropicException("API error (status 400): bad", 400);
+
+    var events =
+        continuation(
+            r -> {
+              throw refused;
+            })
+            .stream(request);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.next());
+    assertEquals(refused.getMessage(), error.message());
+    assertSame(refused, error.cause());
+    assertFalse(events.hasNext());
+  }
+
+  @Test
   void eventsBeforeThePauseStreamThrough() throws Exception {
     var text = new StreamEvent.TextDelta("searching");
     var done = new StreamEvent.Done(paused(Map.of()));
-    var events = continuation(r -> new Events(List.of(text, done))).open(request);
+    var events = continuation(r -> new Events(List.of(text, done))).stream(request);
 
     assertTrue(events.hasNext());
     assertSame(text, events.next());
@@ -148,21 +170,24 @@ class PauseContinuationTest {
       throws Exception {
     var opened = new int[1];
     var events =
-        continuation(r -> opened[0]++ == 0 ? stream(pausedWithContent()) : resume.open(r))
-            .open(request);
+        continuation(r -> opened[0]++ == 0 ? stream(pausedWithContent()) : resume.open(r)).stream(
+            request);
     return assertInstanceOf(StreamEvent.Error.class, events.next());
   }
 
-  private PauseContinuation continuation(ChatExchange.StreamOpener<MessagesRequest> segments) {
-    return new PauseContinuation(model.exchange, segments);
+  static PauseContinuation continuation(ChatExchange.StreamOpener<MessagesRequest> segments) {
+    var exchange =
+        new ChatExchange<>(
+            AnthropicProvider.PROVIDER_NAME, "Anthropic API", segments, AnthropicException::new);
+    return new PauseContinuation(exchange, segments);
   }
 
   private static Response<Void> pausedWithContent() {
     return paused(
         Map.of(
-            AnthropicModel.STOP_REASON_KEY,
+            AnthropicResponseAssembler.STOP_REASON_KEY,
             "pause_turn",
-            AnthropicModel.RAW_CONTENT_KEY,
+            RawContentEcho.RAW_CONTENT_KEY,
             PAUSED_CONTENT));
   }
 

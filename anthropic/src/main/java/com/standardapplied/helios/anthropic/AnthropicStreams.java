@@ -16,6 +16,8 @@ import java.util.LinkedHashMap;
 /** Sends a Messages API request and opens its response as a stream of events. */
 final class AnthropicStreams {
 
+  static final String DEFAULT_BASE_URL = "https://api.anthropic.com/v1/messages";
+
   private static final String API_VERSION = "2023-06-01";
 
   private final ModelConfig config;
@@ -43,7 +45,7 @@ final class AnthropicStreams {
       headers.put("x-api-key", config.apiKey());
     }
     headers.put("anthropic-version", API_VERSION);
-    return JsonPost.toBaseUrl(AnthropicModel.DEFAULT_BASE_URL, config, headers, jsonBody);
+    return JsonPost.toBaseUrl(DEFAULT_BASE_URL, config, headers, jsonBody);
   }
 
   private static String serialize(MessagesRequest request) {

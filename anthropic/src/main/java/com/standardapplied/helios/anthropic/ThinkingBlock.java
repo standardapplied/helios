@@ -9,9 +9,16 @@ import java.util.Map;
 
 /**
  * One thinking content block — text plus its content-block-scoped Anthropic signature — and the
- * codec of the {@link AnthropicModel#THINKING_BLOCKS_KEY} metadata that carries a turn's blocks.
+ * codec of the {@link #THINKING_BLOCKS_KEY} metadata that carries a turn's blocks.
  */
 record ThinkingBlock(String text, String signature) {
+
+  /**
+   * Metadata key carrying every thinking block in the message as a JSON array of {@code
+   * [{"text":"…","signature":"…"}, …]}, one entry per block whatever their number. Each block keeps
+   * its own signature: the Anthropic API rejects a signature fabricated across blocks.
+   */
+  static final String THINKING_BLOCKS_KEY = "anthropic.thinkingBlocks";
 
   /**
    * Every thinking block recorded in {@code metadata}. Empty when the key is absent or unreadable,
@@ -21,7 +28,7 @@ record ThinkingBlock(String text, String signature) {
     if (metadata == null) {
       return List.of();
     }
-    var encoded = metadata.get(AnthropicModel.THINKING_BLOCKS_KEY);
+    var encoded = metadata.get(THINKING_BLOCKS_KEY);
     if (encoded == null || encoded.isEmpty()) {
       return List.of();
     }
@@ -41,7 +48,7 @@ record ThinkingBlock(String text, String signature) {
     }
   }
 
-  /** The {@link AnthropicModel#THINKING_BLOCKS_KEY} value carrying {@code blocks}, in order. */
+  /** The {@link #THINKING_BLOCKS_KEY} value carrying {@code blocks}, in order. */
   static String encodeAll(List<ThinkingBlock> blocks) {
     var entries = new ArrayList<Map<String, String>>(blocks.size());
     for (var block : blocks) {

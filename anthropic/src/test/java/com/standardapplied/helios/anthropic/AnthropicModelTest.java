@@ -6,13 +6,12 @@
 package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.anthropic.api.AnthropicJson;
 import com.standardapplied.helios.anthropic.api.ContentBlock;
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.core.common.HttpClientFactory;
@@ -20,6 +19,7 @@ import com.standardapplied.helios.core.model.FileReference;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ThinkingLevel;
@@ -28,11 +28,14 @@ import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.core.schema.StructuredContentParser;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -41,86 +44,126 @@ class AnthropicModelTest {
 
   private static final int MAX_ERROR_BODY_BYTES = 64 * 1024;
 
+  private static final AnthropicProvider PROVIDER = new AnthropicProvider();
+
+  private static Model model(AnthropicModelId model, ModelConfig config) {
+    return PROVIDER.create(model.id(), config);
+  }
+
+  private static Model model(String modelId, ModelConfig config) {
+    return PROVIDER.create(modelId, config);
+  }
+
+  private static Model model(AnthropicModelId model, ModelConfig config, CachePolicy cachePolicy) {
+    return PROVIDER.create(model.id(), config, cachePolicy);
+  }
+
+  private static AnthropicRequestBuilder requests(AnthropicModelId model, ModelConfig config) {
+    return requests(model, config, CachePolicy.shortLived());
+  }
+
+  private static AnthropicRequestBuilder requests(
+      AnthropicModelId model, ModelConfig config, CachePolicy cachePolicy) {
+    return new AnthropicRequestBuilder(model.id(), model, config, cachePolicy);
+  }
+
+  private static AnthropicRequestBuilder requests(String wireModelId, ModelConfig config) {
+    return new AnthropicRequestBuilder(
+        wireModelId, AnthropicModelId.fromWireId(wireModelId), config, CachePolicy.shortLived());
+  }
+
+  private static <T> T parse(ModelConfig config, String content, OutputSchema<T> schema) {
+    return StructuredContentParser.parse(
+        content, schema, AnthropicJson.STRUCTURED, config.rawOutputCapturePolicy());
+  }
+
+  private static HttpRequest httpRequest(ModelConfig config) {
+    try (var client = HttpClient.newHttpClient()) {
+      return new AnthropicStreams(config, client).httpRequest("{}");
+    }
+  }
+
   @Test
   void constructorRequiresModelId() {
-    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    assertThrows(
-        IllegalArgumentException.class, () -> new AnthropicModel((AnthropicModelId) null, config));
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-key")
+            .withBaseUrl("https://proxy.example/v1/messages")
+            .build();
+    var ex = assertThrows(IllegalArgumentException.class, () -> model(" ", config));
+    assertEquals("modelId is required", ex.getMessage());
   }
 
   @Test
   void constructorRequiresConfig() {
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, null));
+        IllegalArgumentException.class, () -> model(AnthropicModelId.CLAUDE_SONNET_4_6, null));
   }
 
   @Test
   void constructorRequiresApiKey() {
     var config = ModelConfig.newBuilder().build();
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config));
+        IllegalArgumentException.class, () -> model(AnthropicModelId.CLAUDE_SONNET_4_6, config));
   }
 
   @Test
   void constructorRequiresNonBlankApiKey() {
     var config = ModelConfig.newBuilder().withApiKey("   ").build();
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config));
+        IllegalArgumentException.class, () -> model(AnthropicModelId.CLAUDE_SONNET_4_6, config));
   }
 
   @Test
   void idReturnsModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_SONNET_4_6, config);
     assertEquals(AnthropicModelId.CLAUDE_SONNET_4_6.id(), model.id());
   }
 
   @Test
   void providerReturnsAnthropic() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_SONNET_4_6, config);
     assertEquals("anthropic", model.provider());
   }
 
   @Test
   void contextWindowReturnsModelValue() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_OPUS_4_6, config);
     assertEquals(1_000_000, model.contextWindow());
   }
 
   @Test
   void contextWindowConfigOverrideWinsOverKnownModel() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").withContextWindow(250_000).build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_OPUS_4_6, config);
     assertEquals(250_000, model.contextWindow());
   }
 
   @Test
   void unknownClaudeModelContextWindowFromConfig() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").withContextWindow(750_000).build();
-    var model = new AnthropicModel("claude-some-future-model", config);
+    var model = model("claude-some-future-model", config);
     assertEquals(750_000, model.contextWindow());
   }
 
   @Test
   void unknownClaudeModelContextWindowDefaultsToZeroWhenUnset() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel("claude-some-future-model", config);
+    var model = model("claude-some-future-model", config);
     assertEquals(0, model.contextWindow());
   }
 
   @Test
   void userMessageWithImageAttachmentEmitsImageBlock() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
     var pngBytes = new byte[] {(byte) 0x89, 'P', 'N', 'G', 1, 2, 3};
     var userMessage = Message.user("look at this", List.of(InlineFile.of(pngBytes, "image/png")));
 
-    var request = model.requests.build(List.of(userMessage), List.of(), null);
+    var request = requests.build(List.of(userMessage), List.of(), null);
 
     var entry = request.messages().getFirst();
     assertEquals("user", entry.role());
@@ -141,12 +184,12 @@ class AnthropicModelTest {
   @Test
   void userMessageWithPdfAttachmentEmitsDocumentBlock() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
     var pdfBytes = "%PDF-1.4\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     var userMessage =
         Message.user("summarize this", List.of(InlineFile.of(pdfBytes, "application/pdf")));
 
-    var request = model.requests.build(List.of(userMessage), List.of(), null);
+    var request = requests.build(List.of(userMessage), List.of(), null);
 
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) request.messages().getFirst().content();
@@ -157,11 +200,11 @@ class AnthropicModelTest {
   @Test
   void userMessageWithTextAttachmentInlinesAsTextBlock() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
     var csvBytes = "a,b\n1,2\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     var userMessage = Message.user("", List.of(InlineFile.of(csvBytes, "text/csv")));
 
-    var request = model.requests.build(List.of(userMessage), List.of(), null);
+    var request = requests.build(List.of(userMessage), List.of(), null);
 
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) request.messages().getFirst().content();
@@ -174,11 +217,11 @@ class AnthropicModelTest {
   @Test
   void buildRequestExtractsSystemMessage() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
     var messages = List.of(Message.system("You are helpful"), Message.user("Hello"));
 
-    var request = model.requests.build(messages, List.of(), null);
+    var request = requests.build(messages, List.of(), null);
 
     assertEquals("You are helpful", request.systemAsText());
     assertEquals(1, request.messages().size());
@@ -188,7 +231,7 @@ class AnthropicModelTest {
   @Test
   void buildRequestCoalescesToolMessages() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
     var toolCalls =
         List.of(
@@ -201,7 +244,7 @@ class AnthropicModelTest {
             Message.tool("call_1", "tool1", "result1"),
             Message.tool("call_2", "tool2", "result2"));
 
-    var request = model.requests.build(messages, List.of(), null);
+    var request = requests.build(messages, List.of(), null);
 
     assertEquals(3, request.messages().size());
     assertEquals("user", request.messages().get(0).role());
@@ -222,7 +265,7 @@ class AnthropicModelTest {
   @Test
   void buildRequestWithTools() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
     var tool =
         Tool.newBuilder()
@@ -239,7 +282,7 @@ class AnthropicModelTest {
             .build();
 
     var messages = List.of(Message.user("Weather?"));
-    var request = model.requests.build(messages, List.of(tool), null);
+    var request = requests.build(messages, List.of(tool), null);
 
     assertNotNull(request.tools());
     assertEquals(1, request.tools().size());
@@ -251,9 +294,9 @@ class AnthropicModelTest {
   @Test
   void buildRequestDefaultMaxTokensFallsBackToModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(AnthropicModelId.CLAUDE_SONNET_4_6.maxOutputTokens(), request.maxTokens());
   }
@@ -261,11 +304,11 @@ class AnthropicModelTest {
   @Test
   void buildRequestPerModelDefaultDiffersByModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var haikuModel = new AnthropicModel(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
-    var opus47Model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var haikuRequests = requests(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
+    var opus47Requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
 
-    var haikuReq = haikuModel.requests.build(List.of(Message.user("Hi")), List.of(), null);
-    var opusReq = opus47Model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var haikuReq = haikuRequests.build(List.of(Message.user("Hi")), List.of(), null);
+    var opusReq = opus47Requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(64_000, haikuReq.maxTokens());
     assertEquals(128_000, opusReq.maxTokens());
@@ -274,7 +317,7 @@ class AnthropicModelTest {
   @Test
   void modelExposesMaxOutputTokensFromModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var model = model(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     assertEquals(AnthropicModelId.CLAUDE_OPUS_4_7.maxOutputTokens(), model.maxOutputTokens());
   }
 
@@ -285,9 +328,11 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.HIGH)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_8, config);
+    var model = model(AnthropicModelId.CLAUDE_OPUS_4_8, config);
 
-    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
+    var request =
+        requests(AnthropicModelId.CLAUDE_OPUS_4_8, config)
+            .build(List.of(Message.user("Think")), List.of(), null);
 
     assertEquals("adaptive", request.thinking().type());
     assertNull(request.thinking().budgetTokens());
@@ -298,12 +343,14 @@ class AnthropicModelTest {
   @Test
   void unknownClaudeModelDefaultsMaxOutputTokens() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel("claude-some-future-model", config);
+    var model = model("claude-some-future-model", config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request =
+        requests("claude-some-future-model", config)
+            .build(List.of(Message.user("Hi")), List.of(), null);
 
-    assertEquals(AnthropicModel.DEFAULT_MAX_OUTPUT_TOKENS, model.maxOutputTokens());
-    assertEquals(AnthropicModel.DEFAULT_MAX_OUTPUT_TOKENS, request.maxTokens());
+    assertEquals(AnthropicRequestBuilder.DEFAULT_MAX_OUTPUT_TOKENS, model.maxOutputTokens());
+    assertEquals(AnthropicRequestBuilder.DEFAULT_MAX_OUTPUT_TOKENS, request.maxTokens());
   }
 
   @Test
@@ -313,9 +360,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.MEDIUM)
             .build();
-    var model = new AnthropicModel("claude-some-future-model", config);
+    var requests = requests("claude-some-future-model", config);
 
-    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertEquals("adaptive", request.thinking().type());
     assertNull(
@@ -331,9 +378,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.MAX)
             .build();
-    var model = new AnthropicModel("claude-some-future-model", config);
+    var requests = requests("claude-some-future-model", config);
 
-    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertEquals("adaptive", request.thinking().type());
     assertEquals("max", request.outputConfig().effort());
@@ -342,9 +389,9 @@ class AnthropicModelTest {
   @Test
   void buildRequestCustomMaxTokens() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").withMaxOutputTokens(8192).build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(8192, request.maxTokens());
   }
@@ -356,9 +403,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.MEDIUM)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertNotNull(request.thinking());
     assertEquals("adaptive", request.thinking().type(), "4.6 deprecates enabled+budget_tokens");
@@ -374,9 +421,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.MEDIUM)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
 
-    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertEquals("enabled", request.thinking().type(), "Haiku 4.5 rejects adaptive");
     assertEquals(10000, request.thinking().budgetTokens());
@@ -389,11 +436,11 @@ class AnthropicModelTest {
   void haiku45RejectsXhighAndMax() {
     for (var level : List.of(ThinkingLevel.XHIGH, ThinkingLevel.MAX)) {
       var config = ModelConfig.newBuilder().withApiKey("test-key").withThinkingLevel(level).build();
-      var model = new AnthropicModel(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
+      var requests = requests(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
       var ex =
           assertThrows(
               IllegalArgumentException.class,
-              () -> model.requests.build(List.of(Message.user("Hi")), List.of(), null));
+              () -> requests.build(List.of(Message.user("Hi")), List.of(), null));
       assertTrue(ex.getMessage().contains("claude-haiku-4-5"), ex.getMessage());
     }
   }
@@ -406,9 +453,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.MEDIUM)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
 
-    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertNotNull(request.thinking());
     assertEquals("adaptive", request.thinking().type());
@@ -431,8 +478,8 @@ class AnthropicModelTest {
     for (var entry : levels.entrySet()) {
       var config =
           ModelConfig.newBuilder().withApiKey("test-key").withThinkingLevel(entry.getKey()).build();
-      var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-      var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+      var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+      var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
       assertEquals(
           entry.getValue(),
           request.outputConfig().effort(),
@@ -449,9 +496,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.XHIGH)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals("adaptive", request.thinking().type());
     assertEquals(
@@ -468,9 +515,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.MAX)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals("adaptive", request.thinking().type());
     assertEquals("max", request.outputConfig().effort());
@@ -487,9 +534,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.HIGH)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(
         "summarized",
@@ -507,12 +554,12 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.XHIGH)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_6, config);
 
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> model.requests.build(List.of(Message.user("Hi")), List.of(), null));
+            () -> requests.build(List.of(Message.user("Hi")), List.of(), null));
     assertTrue(
         ex.getMessage().toLowerCase(java.util.Locale.ROOT).contains("xhigh"),
         () -> "exception must name the rejected effort: " + ex.getMessage());
@@ -528,9 +575,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.MAX)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_6, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals("adaptive", request.thinking().type());
     assertEquals("max", request.outputConfig().effort());
@@ -543,9 +590,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.MEDIUM)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_6, config);
 
-    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertEquals("adaptive", request.thinking().type());
     assertNull(request.thinking().budgetTokens());
@@ -559,9 +606,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.NONE)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertNull(request.thinking());
   }
@@ -573,9 +620,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.MINIMAL)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(1024, request.thinking().budgetTokens());
   }
@@ -587,9 +634,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.LOW)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(4096, request.thinking().budgetTokens());
   }
@@ -601,9 +648,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.HIGH)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(32000, request.thinking().budgetTokens());
   }
@@ -611,10 +658,10 @@ class AnthropicModelTest {
   @Test
   void buildRequestWithOutputSchema() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
     var schema = Map.<String, Object>of("type", "object", "properties", Map.of());
-    var request = model.requests.build(List.of(Message.user("Extract")), List.of(), schema);
+    var request = requests.build(List.of(Message.user("Extract")), List.of(), schema);
 
     assertNotNull(request.system());
     assertTrue(request.systemAsText().contains("JSON"));
@@ -625,7 +672,7 @@ class AnthropicModelTest {
   void buildRequestToolChoiceAuto() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.auto()).build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
     var tool =
         Tool.newBuilder()
@@ -633,7 +680,7 @@ class AnthropicModelTest {
             .withDescription("test")
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null);
 
     assertNotNull(request.toolChoice());
     assertEquals("auto", request.toolChoice().type());
@@ -643,7 +690,7 @@ class AnthropicModelTest {
   void buildRequestToolChoiceAny() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.any()).build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
     var tool =
         Tool.newBuilder()
@@ -651,7 +698,7 @@ class AnthropicModelTest {
             .withDescription("test")
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null);
 
     assertNotNull(request.toolChoice());
     assertEquals("any", request.toolChoice().type());
@@ -661,7 +708,7 @@ class AnthropicModelTest {
   void buildRequestToolChoiceNoneReturnsNull() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.none()).build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
     var tool =
         Tool.newBuilder()
@@ -669,7 +716,7 @@ class AnthropicModelTest {
             .withDescription("test")
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null);
 
     assertNull(request.toolChoice());
   }
@@ -681,7 +728,7 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withToolChoice(ToolChoice.required("my_tool"))
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
     var tool =
         Tool.newBuilder()
@@ -689,7 +736,7 @@ class AnthropicModelTest {
             .withDescription("test")
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null);
 
     assertNotNull(request.toolChoice());
     assertEquals("tool", request.toolChoice().type());
@@ -703,14 +750,13 @@ class AnthropicModelTest {
       var ex =
           assertThrows(
               IllegalArgumentException.class,
-              () -> new AnthropicModel(AnthropicModelId.CLAUDE_FABLE_5_1, config));
+              () -> model(AnthropicModelId.CLAUDE_FABLE_5_1, config));
       assertTrue(ex.getMessage().contains("claude-fable-5-1"), ex.getMessage());
       assertTrue(ex.getMessage().contains("forced tool use"), ex.getMessage());
     }
     var wireConfig =
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.any()).build();
-    assertThrows(
-        IllegalArgumentException.class, () -> new AnthropicModel("claude-mythos-5-1", wireConfig));
+    assertThrows(IllegalArgumentException.class, () -> model("claude-mythos-5-1", wireConfig));
   }
 
   @Test
@@ -725,8 +771,8 @@ class AnthropicModelTest {
     var auto =
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.auto()).build();
     var autoRequest =
-        new AnthropicModel(AnthropicModelId.CLAUDE_FABLE_5_1, auto)
-            .requests.build(List.of(Message.user("Hi")), List.of(tool), null);
+        requests(AnthropicModelId.CLAUDE_FABLE_5_1, auto)
+            .build(List.of(Message.user("Hi")), List.of(tool), null);
     assertEquals("auto", autoRequest.toolChoice().type());
     assertNull(autoRequest.thinking());
     assertNull(autoRequest.temperature());
@@ -734,8 +780,8 @@ class AnthropicModelTest {
     var none =
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.none()).build();
     var noneRequest =
-        new AnthropicModel(AnthropicModelId.CLAUDE_FABLE_5_1, none)
-            .requests.build(List.of(Message.user("Hi")), List.of(tool), null);
+        requests(AnthropicModelId.CLAUDE_FABLE_5_1, none)
+            .build(List.of(Message.user("Hi")), List.of(tool), null);
     assertNull(noneRequest.toolChoice());
   }
 
@@ -746,7 +792,7 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withToolChoice(ToolChoice.required("tool1", "tool2"))
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
     var tool =
         Tool.newBuilder()
@@ -757,7 +803,7 @@ class AnthropicModelTest {
 
     assertThrows(
         IllegalStateException.class,
-        () -> model.requests.build(List.of(Message.user("Hi")), List.of(tool), null));
+        () -> requests.build(List.of(Message.user("Hi")), List.of(tool), null));
   }
 
   @Test
@@ -769,9 +815,9 @@ class AnthropicModelTest {
             .withTopP(0.9)
             .withStopSequences(List.of("END"))
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(0.7, request.temperature());
     assertEquals(0.9, request.topP());
@@ -781,9 +827,9 @@ class AnthropicModelTest {
   @Test
   void buildRequestStreamsAlways() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertTrue(request.stream());
   }
@@ -823,7 +869,7 @@ class AnthropicModelTest {
   void convertAssistantMessageWithThinkingSignature() {
     var metadata =
         Map.of(
-            AnthropicModel.THINKING_BLOCKS_KEY,
+            ThinkingBlock.THINKING_BLOCKS_KEY,
             "[{\"text\":\"I need to think about this\",\"signature\":\"sig123\"}]");
     var message = Message.assistant("Answer", List.of(), metadata);
 
@@ -843,7 +889,7 @@ class AnthropicModelTest {
   @Test
   void convertAssistantMessageWithEmptyThinkingSignatureUsesString() {
     var metadata =
-        Map.of(AnthropicModel.THINKING_BLOCKS_KEY, "[{\"text\":\"unsigned\",\"signature\":\"\"}]");
+        Map.of(ThinkingBlock.THINKING_BLOCKS_KEY, "[{\"text\":\"unsigned\",\"signature\":\"\"}]");
     var message = Message.assistant("Answer", List.of(), metadata);
 
     var entry = AnthropicMessages.assistant(message);
@@ -901,9 +947,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.HIGH)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_FABLE_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_FABLE_5, config);
 
-    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertEquals("adaptive", request.thinking().type());
     assertEquals(
@@ -921,9 +967,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.NONE)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_FABLE_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_FABLE_5, config);
 
-    var request = model.requests.build(List.of(Message.user("Quick")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Quick")), List.of(), null);
 
     assertNull(request.thinking(), "thinking cannot be disabled on Fable 5 — omit the field");
     assertNull(request.outputConfig());
@@ -936,9 +982,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.XHIGH)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5, config);
 
-    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertEquals("adaptive", request.thinking().type());
     assertNull(request.thinking().budgetTokens());
@@ -952,9 +998,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.NONE)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5, config);
 
-    var request = model.requests.build(List.of(Message.user("Quick")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Quick")), List.of(), null);
 
     assertNotNull(
         request.thinking(),
@@ -970,9 +1016,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.NONE)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_5, config);
 
-    var request = model.requests.build(List.of(Message.user("Quick")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Quick")), List.of(), null);
 
     assertEquals("disabled", request.thinking().type());
     assertEquals(128_000, request.maxTokens());
@@ -985,9 +1031,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.MAX)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_5, config);
 
-    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertEquals("adaptive", request.thinking().type());
     assertEquals("max", request.outputConfig().effort());
@@ -1000,9 +1046,9 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withThinkingLevel(ThinkingLevel.MAX)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_MYTHOS_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_MYTHOS_5, config);
 
-    var request = model.requests.build(List.of(Message.user("Think")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
 
     assertEquals("adaptive", request.thinking().type());
     assertEquals("summarized", request.thinking().display());
@@ -1014,8 +1060,7 @@ class AnthropicModelTest {
 
   private static MessagesRequest requestFor(AnthropicModelId modelId, ThinkingLevel level) {
     var config = ModelConfig.newBuilder().withApiKey("test-key").withThinkingLevel(level).build();
-    return new AnthropicModel(modelId, config)
-        .requests.build(List.of(Message.user("Hi")), List.of(), null);
+    return requests(modelId, config).build(List.of(Message.user("Hi")), List.of(), null);
   }
 
   private static String json(Object value) {
@@ -1097,9 +1142,7 @@ class AnthropicModelTest {
               .withTopP(0.8)
               .build();
 
-      var request =
-          new AnthropicModel(modelId, config)
-              .requests.build(List.of(Message.user("Hi")), List.of(), null);
+      var request = requests(modelId, config).build(List.of(Message.user("Hi")), List.of(), null);
 
       assertNull(request.temperature(), modelId.name());
       assertNull(request.topP(), modelId.name());
@@ -1113,8 +1156,7 @@ class AnthropicModelTest {
       for (var forced : List.of(ToolChoice.any(), ToolChoice.required("search_profiles"))) {
         var config = ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(forced).build();
 
-        var ex =
-            assertThrows(IllegalArgumentException.class, () -> new AnthropicModel(modelId, config));
+        var ex = assertThrows(IllegalArgumentException.class, () -> model(modelId, config));
         assertTrue(ex.getMessage().contains(modelId.id()), ex.getMessage());
         assertTrue(ex.getMessage().contains("ToolChoice.auto()"), ex.getMessage());
       }
@@ -1128,9 +1170,7 @@ class AnthropicModelTest {
       var config =
           ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.auto()).build();
 
-      var request =
-          new AnthropicModel(modelId, config)
-              .requests.build(List.of(Message.user("Hi")), List.of(), null);
+      var request = requests(modelId, config).build(List.of(Message.user("Hi")), List.of(), null);
 
       assertEquals("auto", request.toolChoice().type(), modelId.name());
     }
@@ -1145,11 +1185,9 @@ class AnthropicModelTest {
             .build();
 
     var opus =
-        new AnthropicModel("claude-opus-5-5", config)
-            .requests.build(List.of(Message.user("Hi")), List.of(), null);
+        requests("claude-opus-5-5", config).build(List.of(Message.user("Hi")), List.of(), null);
     var sonnet =
-        new AnthropicModel("claude-sonnet-5-5", config)
-            .requests.build(List.of(Message.user("Hi")), List.of(), null);
+        requests("claude-sonnet-5-5", config).build(List.of(Message.user("Hi")), List.of(), null);
 
     assertNull(opus.thinking(), "Opus 5's disabled would 400 on Opus 5.5");
     assertEquals(128_000, opus.maxTokens());
@@ -1165,12 +1203,10 @@ class AnthropicModelTest {
             .build();
 
     for (var wireId : List.of("claude-opus-5-7", "claude-sonnet-5-9")) {
-      var request =
-          new AnthropicModel(wireId, config)
-              .requests.build(List.of(Message.user("Hi")), List.of(), null);
+      var request = requests(wireId, config).build(List.of(Message.user("Hi")), List.of(), null);
 
       assertNull(request.thinking(), wireId);
-      assertEquals(AnthropicModel.DEFAULT_MAX_OUTPUT_TOKENS, request.maxTokens(), wireId);
+      assertEquals(AnthropicRequestBuilder.DEFAULT_MAX_OUTPUT_TOKENS, request.maxTokens(), wireId);
     }
   }
 
@@ -1185,9 +1221,9 @@ class AnthropicModelTest {
             .withTemperature(0.7)
             .withTopP(0.9)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_8, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_8, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertNull(request.temperature(), "Opus 4.7+ rejects temperature with a 400 — never send it");
     assertNull(request.topP(), "Opus 4.7+ rejects top_p with a 400 — never send it");
@@ -1197,9 +1233,9 @@ class AnthropicModelTest {
   void fable5NeverSendsSamplingParams() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withTemperature(0.3).withTopP(0.8).build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_FABLE_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_FABLE_5, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertNull(request.temperature());
     assertNull(request.topP());
@@ -1213,9 +1249,9 @@ class AnthropicModelTest {
             .withThinkingLevel(ThinkingLevel.NONE)
             .withTemperature(0.2)
             .build();
-    var model = new AnthropicModel("claude-sonnet-4-6-20251114", config);
+    var requests = requests("claude-sonnet-4-6-20251114", config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(
         0.2,
@@ -1232,9 +1268,9 @@ class AnthropicModelTest {
             .withTemperature(0.7)
             .withTopP(0.9)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(0.7, request.temperature());
     assertEquals(0.9, request.topP());
@@ -1243,9 +1279,9 @@ class AnthropicModelTest {
   @Test
   void buildRequestNoToolsReturnsNullToolDefs() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertNull(request.tools());
   }
@@ -1253,9 +1289,9 @@ class AnthropicModelTest {
   @Test
   void buildRequestNullToolsReturnsNullToolDefs() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), null, null);
+    var request = requests.build(List.of(Message.user("Hi")), null, null);
 
     assertNull(request.tools());
   }
@@ -1263,7 +1299,7 @@ class AnthropicModelTest {
   @Test
   void rejectsProviderFileReferencesInsteadOfSilentlyDroppingThem() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
     var message =
         Message.newBuilder()
             .withRole(Role.USER)
@@ -1275,7 +1311,7 @@ class AnthropicModelTest {
     var error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> model.requests.build(List.of(message), List.of(), null));
+            () -> requests.build(List.of(message), List.of(), null));
 
     assertTrue(error.getMessage().contains("file references"));
   }
@@ -1283,11 +1319,11 @@ class AnthropicModelTest {
   @Test
   void buildRequestSystemAndOutputSchemaAppended() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
     var schema = Map.<String, Object>of("type", "object");
     var messages = List.of(Message.system("Be helpful"), Message.user("Extract"));
-    var request = model.requests.build(messages, List.of(), schema);
+    var request = requests.build(messages, List.of(), schema);
 
     assertTrue(request.systemAsText().startsWith("Be helpful"));
     assertTrue(request.systemAsText().contains("JSON"));
@@ -1314,9 +1350,9 @@ class AnthropicModelTest {
   @Test
   void buildRequestModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_6, config);
 
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals("claude-opus-4-6", request.model());
   }
@@ -1324,14 +1360,14 @@ class AnthropicModelTest {
   @Test
   void closeReleasesHttpClientResources() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_OPUS_4_6, config);
     model.close();
   }
 
   @Test
   void closeIsIdempotent() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_OPUS_4_6, config);
     model.close();
     model.close();
     model.close();
@@ -1340,7 +1376,7 @@ class AnthropicModelTest {
   @Test
   void modelUsableInTryWithResources() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    try (var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config)) {
+    try (var model = model(AnthropicModelId.CLAUDE_OPUS_4_6, config)) {
       assertEquals(AnthropicModelId.CLAUDE_OPUS_4_6.id(), model.id());
     }
   }
@@ -1350,9 +1386,8 @@ class AnthropicModelTest {
   @Test
   void parseStructuredContentPlainSchema() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
     var result =
-        model.exchange.parse("{\"name\":\"Alice\",\"age\":30}", OutputSchema.of(TestPerson.class));
+        parse(config, "{\"name\":\"Alice\",\"age\":30}", OutputSchema.of(TestPerson.class));
     assertEquals("Alice", result.name());
     assertEquals(30, result.age());
   }
@@ -1360,7 +1395,6 @@ class AnthropicModelTest {
   @Test
   void parseStructuredContentProvenancedReconstructsTypedOutput() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
     var schema = OutputSchema.provenancedOf(TestPerson.class);
     var json =
         "{\"output\":{\"name\":\"Alice\",\"age\":30},\"provenance\":["
@@ -1368,7 +1402,7 @@ class AnthropicModelTest {
             + "\"reasoning\":\"named in source\",\"confidence\":\"HIGH\"},"
             + "{\"field\":\"age\",\"sources\":[],\"reasoning\":\"guess\",\"confidence\":\"LOW\"}]}";
 
-    var result = model.exchange.parse(json, schema);
+    var result = parse(config, json, schema);
 
     assertNotNull(result);
     assertEquals("Alice", result.output().name());
@@ -1380,19 +1414,17 @@ class AnthropicModelTest {
   @Test
   void parseStructuredContentNullReturnsNull() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
-    assertNull(model.exchange.parse(null, OutputSchema.of(TestPerson.class)));
+    assertNull(parse(config, null, OutputSchema.of(TestPerson.class)));
   }
 
   @Test
   void parseStructuredContentSchemaMismatchSurfacesFieldLevelDiff() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
     var schema = OutputSchema.of(TestPerson.class);
     var ex =
         assertThrows(
             StructuredOutputParseException.class,
-            () -> model.exchange.parse("{\"name\":\"Alice\"}", schema));
+            () -> parse(config, "{\"name\":\"Alice\"}", schema));
     assertTrue(
         ex.errors().stream().anyMatch(e -> e.contains("age") && e.contains("required")),
         "diff must name the missing 'age' field as required: " + ex.errors());
@@ -1406,13 +1438,14 @@ class AnthropicModelTest {
             .withApiKey("test-key")
             .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_OPUS_4_6, config);
 
     var error =
         assertThrows(
             StructuredOutputParseException.class,
             () ->
-                model.exchange.parse(
+                parse(
+                    config,
                     "{\"name\":\"private-model-output-canary\"}",
                     OutputSchema.of(TestPerson.class)));
 
@@ -1423,16 +1456,13 @@ class AnthropicModelTest {
   @Test
   void parseStructuredContentSchemaMismatchInProvenancedEnvelopeReportsNestedPath() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
     var schema = OutputSchema.provenancedOf(TestPerson.class);
     // Source object missing the required 'url' field — surfaces as a deep path under provenance.
     var json =
         "{\"output\":{\"name\":\"Alice\",\"age\":30},\"provenance\":["
             + "{\"field\":\"name\",\"sources\":[{\"excerpts\":[\"a\"]}],"
             + "\"reasoning\":\"named in source\",\"confidence\":\"HIGH\"}]}";
-    var ex =
-        assertThrows(
-            StructuredOutputParseException.class, () -> model.exchange.parse(json, schema));
+    var ex = assertThrows(StructuredOutputParseException.class, () -> parse(config, json, schema));
     assertTrue(
         ex.errors().stream().anyMatch(e -> e.contains("provenance[0].sources[0].url")),
         "diff must include the deep path 'provenance[0].sources[0].url': " + ex.errors());
@@ -1441,13 +1471,12 @@ class AnthropicModelTest {
   @Test
   void parseStructuredContentSyntaxErrorThrowsStructuredOutputParseException() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_6, config);
     var ex =
         assertThrows(
             StructuredOutputParseException.class,
             () ->
-                model.exchange.parse(
-                    "{\"name\":\"Alice\",unterminated", OutputSchema.of(TestPerson.class)));
+                parse(
+                    config, "{\"name\":\"Alice\",unterminated", OutputSchema.of(TestPerson.class)));
     assertTrue(ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")));
   }
 
@@ -1484,7 +1513,7 @@ class AnthropicModelTest {
         Message.newBuilder()
             .withRole(com.standardapplied.helios.core.model.Role.ASSISTANT)
             .withContent("response")
-            .withMetadata(Map.of(AnthropicModel.THINKING_BLOCKS_KEY, json))
+            .withMetadata(Map.of(ThinkingBlock.THINKING_BLOCKS_KEY, json))
             .build();
 
     var blocks = ThinkingBlock.decodeAll(msg.metadata());
@@ -1501,7 +1530,7 @@ class AnthropicModelTest {
     var blocks =
         ThinkingBlock.decodeAll(
             Map.of(
-                AnthropicModel.THINKING_BLOCKS_KEY,
+                ThinkingBlock.THINKING_BLOCKS_KEY,
                 "[{\"text\":\"I am thinking\",\"signature\":\"sig-1\"}]"));
 
     assertEquals(List.of(new ThinkingBlock("I am thinking", "sig-1")), blocks);
@@ -1519,7 +1548,7 @@ class AnthropicModelTest {
 
   @Test
   void decodeThinkingBlocksMalformedJsonYieldsNoBlocks() {
-    var blocks = ThinkingBlock.decodeAll(Map.of(AnthropicModel.THINKING_BLOCKS_KEY, "not-json"));
+    var blocks = ThinkingBlock.decodeAll(Map.of(ThinkingBlock.THINKING_BLOCKS_KEY, "not-json"));
 
     assertTrue(blocks.isEmpty());
   }
@@ -1543,7 +1572,7 @@ class AnthropicModelTest {
         Message.newBuilder()
             .withRole(com.standardapplied.helios.core.model.Role.ASSISTANT)
             .withContent("final answer")
-            .withMetadata(Map.of(AnthropicModel.THINKING_BLOCKS_KEY, json))
+            .withMetadata(Map.of(ThinkingBlock.THINKING_BLOCKS_KEY, json))
             .build();
 
     var entry = AnthropicMessages.assistant(msg);
@@ -1561,8 +1590,7 @@ class AnthropicModelTest {
   @Test
   void buildHttpRequestUsesDefaultsWhenBaseUrlAndHeadersUnset() {
     var config = ModelConfig.newBuilder().withApiKey("sk-ant-test").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
-    var httpRequest = model.streams.httpRequest("{}");
+    var httpRequest = httpRequest(config);
     assertEquals(java.net.URI.create("https://api.anthropic.com/v1/messages"), httpRequest.uri());
     assertEquals("sk-ant-test", httpRequest.headers().firstValue("x-api-key").orElseThrow());
   }
@@ -1574,8 +1602,7 @@ class AnthropicModelTest {
             .withApiKey("sk-ant-test")
             .withBaseUrl("https://bedrock-anthropic.example/v1/messages")
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
-    var httpRequest = model.streams.httpRequest("{}");
+    var httpRequest = httpRequest(config);
     assertEquals(
         java.net.URI.create("https://bedrock-anthropic.example/v1/messages"), httpRequest.uri());
   }
@@ -1587,8 +1614,7 @@ class AnthropicModelTest {
             .withApiKey("default-key")
             .withHeader("X-API-KEY", "override-key")
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
-    var httpRequest = model.streams.httpRequest("{}");
+    var httpRequest = httpRequest(config);
     assertEquals("override-key", httpRequest.headers().firstValue("x-api-key").orElseThrow());
     assertEquals(
         1,
@@ -1600,8 +1626,7 @@ class AnthropicModelTest {
   void buildHttpRequestExtraHeaderIsAppended() {
     var config =
         ModelConfig.newBuilder().withApiKey("sk-ant-test").withHeader("x-trace", "t1").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
-    var httpRequest = model.streams.httpRequest("{}");
+    var httpRequest = httpRequest(config);
     assertEquals("t1", httpRequest.headers().firstValue("x-trace").orElseThrow());
     assertEquals("sk-ant-test", httpRequest.headers().firstValue("x-api-key").orElseThrow());
   }
@@ -1610,28 +1635,25 @@ class AnthropicModelTest {
 
   @Test
   void promptCachingDefaultsOn() {
-    var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-    assertTrue(
-        model.cachePolicy().enabled(),
+    assertNotNull(
+        SentCacheControl.onSystemPrompt(at -> model(AnthropicModelId.CLAUDE_OPUS_4_7, at)),
         "Helios bills Anthropic via prompt caching by default — opt-out is explicit");
   }
 
   @Test
   void promptCachingDisabledViaCachePolicy() {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model =
-        new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.disabled());
     var request =
-        model.requests.build(
-            List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
+        requests(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.disabled())
+            .build(List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
 
     // System emits the legacy plain-string shape — no cache_control, no array wrapping.
     assertEquals("Be helpful", request.system());
     // Last message stays as a String — caching annotation requires the array shape.
     assertEquals("Hi", request.messages().getFirst().content());
-    assertFalse(model.cachePolicy().enabled());
-    assertInstanceOf(CachePolicy.Disabled.class, model.cachePolicy());
+    assertNull(
+        SentCacheControl.onSystemPrompt(
+            at -> model(AnthropicModelId.CLAUDE_OPUS_4_7, at, CachePolicy.disabled())));
   }
 
   @Test
@@ -1639,11 +1661,9 @@ class AnthropicModelTest {
     // 1h TTL is opt-in; cache write at 2x base, read still at 0.10x. Verify the breakpoint
     // payload reaches the system block intact so Anthropic bills the correct rate.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model =
-        new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.longLived());
     var request =
-        model.requests.build(
-            List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
+        requests(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.longLived())
+            .build(List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
 
     @SuppressWarnings("unchecked")
     var systemBlocks =
@@ -1655,7 +1675,10 @@ class AnthropicModelTest {
         com.standardapplied.helios.anthropic.api.CacheControl.TTL_1_HOUR,
         cc.ttl(),
         "long-lived CachePolicy must propagate ttl='1h' to every cache breakpoint");
-    assertInstanceOf(CachePolicy.LongLived.class, model.cachePolicy());
+    assertEquals(
+        SentCacheControl.LONG_LIVED,
+        SentCacheControl.onSystemPrompt(
+            at -> model(AnthropicModelId.CLAUDE_OPUS_4_7, at, CachePolicy.longLived())));
   }
 
   @Test
@@ -1663,11 +1686,9 @@ class AnthropicModelTest {
     // 5m is Anthropic's implicit default; sending ttl='5m' would still work but adds wire bloat.
     // Verify the short-lived policy emits a breakpoint with no ttl field set.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model =
-        new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.shortLived());
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.shortLived());
     var request =
-        model.requests.build(
-            List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
+        requests.build(List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
 
     @SuppressWarnings("unchecked")
     var systemBlocks =
@@ -1683,7 +1704,7 @@ class AnthropicModelTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config, (CachePolicy) null));
+            () -> model(AnthropicModelId.CLAUDE_OPUS_4_7, config, null));
     assertEquals("cachePolicy is required", ex.getMessage());
   }
 
@@ -1693,9 +1714,9 @@ class AnthropicModelTest {
     // server bills every input token at the base rate, producing the Light Grid matchmaking
     // baseline's flat $235.54 across 24 viewers. Annotated requests get the cache discount.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     var request =
-        model.requests.build(
+        requests.build(
             List.of(Message.system("You are a careful assistant."), Message.user("Hi")),
             List.of(),
             null);
@@ -1720,15 +1741,15 @@ class AnthropicModelTest {
     // No system prompt set; caching ON. The model must not synthesize an empty SystemContent
     // block — Anthropic rejects empty system arrays and an empty text block wastes a breakpoint.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
     assertNull(request.system(), "blank system must serialize as omitted, not as an empty array");
   }
 
   @Test
   void promptCachingAnnotatesLastToolWithCacheControl() {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     var tool1 =
         Tool.newBuilder()
             .withName("search")
@@ -1755,7 +1776,7 @@ class AnthropicModelTest {
                     .build())
             .withExecutor((args, ctx) -> ToolResult.success(""))
             .build();
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(tool1, tool2), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(tool1, tool2), null);
 
     assertEquals(2, request.tools().size());
     assertNull(
@@ -1772,22 +1793,22 @@ class AnthropicModelTest {
   @Test
   void promptCachingSingleToolGetsCacheControl() {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     var tool =
         Tool.newBuilder()
             .withName("solo")
             .withDescription("a lone tool")
             .withExecutor((args, ctx) -> ToolResult.success(""))
             .build();
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null);
     assertNotNull(request.tools().getFirst().cacheControl());
   }
 
   @Test
   void promptCachingOmitsToolBreakpointWhenToolsEmpty() {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-    var request = model.requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
     assertNull(request.tools(), "empty tools list serializes as omitted, no breakpoint");
   }
 
@@ -1797,8 +1818,8 @@ class AnthropicModelTest {
     // block. This test guards the promotion path: a single string-content user message becomes a
     // single-block list with the block annotated.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-    var request = model.requests.build(List.of(Message.user("Latest turn")), List.of(), null);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request = requests.build(List.of(Message.user("Latest turn")), List.of(), null);
 
     var last = request.messages().getLast();
     @SuppressWarnings("unchecked")
@@ -1817,10 +1838,10 @@ class AnthropicModelTest {
     // single cache_control per request slot; annotating multiple blocks of the same message would
     // burn breakpoints with no incremental cacheability.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     var pngBytes = new byte[] {(byte) 0x89, 'P', 'N', 'G', 1, 2, 3};
     var msg = Message.user("Look at this", List.of(InlineFile.of(pngBytes, "image/png")));
-    var request = model.requests.build(List.of(msg), List.of(), null);
+    var request = requests.build(List.of(msg), List.of(), null);
 
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) request.messages().getFirst().content();
@@ -1836,9 +1857,9 @@ class AnthropicModelTest {
     // Anthropic's 20-block lookback window, which would otherwise blind out the system+tools
     // cache after roughly five tool-heavy agent turns.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     var request =
-        model.requests.build(
+        requests.build(
             List.of(Message.user("hello"), Message.assistant("hi"), Message.user("how are you")),
             List.of(),
             null);
@@ -1865,8 +1886,8 @@ class AnthropicModelTest {
     // Single-message request: there's no second-to-last to annotate. Only the last gets a
     // breakpoint — no synthetic empty breakpoint, no off-by-one.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-    var request = model.requests.build(List.of(Message.user("solo")), List.of(), null);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request = requests.build(List.of(Message.user("solo")), List.of(), null);
 
     assertEquals(1, request.messages().size());
     @SuppressWarnings("unchecked")
@@ -1879,10 +1900,9 @@ class AnthropicModelTest {
     // Verify the rolling breakpoint lands on an ASSISTANT message when that's the penultimate
     // entry — Anthropic accepts cache_control on assistant content blocks too.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     var request =
-        model.requests.build(
-            List.of(Message.user("hi"), Message.assistant("hello!")), List.of(), null);
+        requests.build(List.of(Message.user("hi"), Message.assistant("hello!")), List.of(), null);
 
     @SuppressWarnings("unchecked")
     var penultimate = (List<ContentBlock>) request.messages().get(0).content();
@@ -1900,9 +1920,8 @@ class AnthropicModelTest {
     // annotator must skip rather than synthesize an empty block. The other breakpoints (system,
     // tools) still apply.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-    var request =
-        model.requests.build(List.of(Message.system("S"), Message.user("")), List.of(), null);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var request = requests.build(List.of(Message.system("S"), Message.user("")), List.of(), null);
     // Last message stays as an empty string — no promotion to an empty block.
     assertEquals("", request.messages().getFirst().content());
     // System still cached.
@@ -1918,7 +1937,7 @@ class AnthropicModelTest {
     // last-message = 4 breakpoints. The penultimate breakpoint maintains rolling cache lookup
     // within Anthropic's 20-block lookback window for long conversations.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     var tool =
         Tool.newBuilder()
             .withName("only")
@@ -1926,7 +1945,7 @@ class AnthropicModelTest {
             .withExecutor((args, ctx) -> ToolResult.success(""))
             .build();
     var request =
-        model.requests.build(
+        requests.build(
             List.of(
                 Message.system("be helpful"),
                 Message.user("hello"),
@@ -1961,7 +1980,7 @@ class AnthropicModelTest {
     // First-turn shape (no prior conversation): system + tools + last-message = 3 breakpoints.
     // No penultimate to annotate, so we stay one under the 4-breakpoint budget.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     var tool =
         Tool.newBuilder()
             .withName("only")
@@ -1969,7 +1988,7 @@ class AnthropicModelTest {
             .withExecutor((args, ctx) -> ToolResult.success(""))
             .build();
     var request =
-        model.requests.build(
+        requests.build(
             List.of(Message.system("be helpful"), Message.user("hi")), List.of(tool), null);
 
     var breakpointCount = 0;
@@ -2047,10 +2066,10 @@ class AnthropicModelTest {
   void interleavedThinkingTurnIsReplayedInItsOriginalBlockOrder() throws Exception {
     var response = drainSseFixture(INTERLEAVED_THINKING_SSE).response();
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_5_5, config);
 
     var request =
-        model.requests.build(
+        requests.build(
             List.of(
                 Message.user("Compare profiles 1 and 2"),
                 response.toMessage(),
@@ -2074,13 +2093,13 @@ class AnthropicModelTest {
   @SuppressWarnings("unchecked")
   void rawEchoTurnEndingInAToolCallStillCarriesTheCacheBreakpoint() throws Exception {
     var response = drainSseFixture(INTERLEAVED_THINKING_SSE).response();
-    var storedRawContent = response.metadata().get(AnthropicModel.RAW_CONTENT_KEY);
+    var storedRawContent = response.metadata().get(RawContentEcho.RAW_CONTENT_KEY);
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_5_5, config);
     var assistantMessage = response.toMessage();
 
     var request =
-        model.requests.build(
+        requests.build(
             List.of(
                 Message.user("Compare profiles 1 and 2"),
                 assistantMessage,
@@ -2097,7 +2116,7 @@ class AnthropicModelTest {
         assistant.subList(0, 3).stream().noneMatch(block -> block.containsKey("cache_control")));
     assertEquals(
         storedRawContent,
-        assistantMessage.metadata().get(AnthropicModel.RAW_CONTENT_KEY),
+        assistantMessage.metadata().get(RawContentEcho.RAW_CONTENT_KEY),
         "annotation must never leak into the stored turn");
   }
 
@@ -2108,12 +2127,12 @@ class AnthropicModelTest {
         "[{\"type\":\"redacted_thinking\",\"data\":\"ENC\"},"
             + "{\"type\":\"text\",\"text\":\"Done.\"}]";
     var assistant =
-        Message.assistant("Done.", List.of(), Map.of(AnthropicModel.RAW_CONTENT_KEY, rawJson));
+        Message.assistant("Done.", List.of(), Map.of(RawContentEcho.RAW_CONTENT_KEY, rawJson));
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_5_5, config);
 
     var request =
-        model.requests.build(
+        requests.build(
             List.of(Message.user("go"), assistant, Message.user("more")), List.of(), null);
 
     var blocks = (List<Map<String, Object>>) request.messages().get(1).content();
@@ -2128,12 +2147,12 @@ class AnthropicModelTest {
   void rawEchoTurnEndingInANonObjectBlockIsLeftUntouched() {
     var assistant =
         Message.assistant(
-            "Done.", List.of(), Map.of(AnthropicModel.RAW_CONTENT_KEY, "[\"not-a-block\"]"));
+            "Done.", List.of(), Map.of(RawContentEcho.RAW_CONTENT_KEY, "[\"not-a-block\"]"));
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5_5, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_5_5, config);
 
     var request =
-        model.requests.build(
+        requests.build(
             List.of(Message.user("go"), assistant, Message.user("more")), List.of(), null);
 
     assertEquals(List.of("not-a-block"), request.messages().get(1).content());

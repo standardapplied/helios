@@ -8,10 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.core.provider.ChatExchange;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.tool.Tool;
 import java.io.ByteArrayInputStream;
@@ -43,10 +45,10 @@ import tools.jackson.databind.json.JsonMapper;
  * <ol>
  *   <li>{@link SseReader} preserves the {@code IOException} as {@link StreamEvent.Error#cause()}
  *       after a partial SSE prefix has been delivered.
- *   <li>{@link AnthropicModel#chat(List, List)} promotes the iterator's {@code
- *       StreamEvent.Error(IOException)} to a {@link TransientStreamException} (instead of the old
- *       opaque {@link AnthropicException}), so the session loop can identify it without depending
- *       on provider-specific exception classes.
+ *   <li>A model's {@link com.standardapplied.helios.core.model.Model#chat(List, List)} promotes the
+ *       iterator's {@code StreamEvent.Error(IOException)} to a {@link TransientStreamException}
+ *       (instead of the old opaque {@link AnthropicException}), so the session loop can identify it
+ *       without depending on provider-specific exception classes.
  *   <li>An API-side {@code event: error} of a retryable type ({@code overloaded_error} and peers)
  *       is transient as well; every other cause remains on the {@link AnthropicException} path so
  *       the loop doesn't retry programmer errors.
@@ -131,7 +133,7 @@ class StreamReadErrorCausePreservationReproTest {
     }
   }
 
-  // ── Layer 2 — AnthropicModel.chat surfaces stream-IO failures as TransientStreamException ──
+  // ── Layer 2 — Model.chat surfaces stream-IO failures as TransientStreamException ──
 
   private ServerSocket serverSocket;
   private ExecutorService serverExecutor;
@@ -197,7 +199,7 @@ class StreamReadErrorCausePreservationReproTest {
             .withApiKey("test-key")
             .withBaseUrl("http://localhost:" + port)
             .build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var model = new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
 
     var thrown =
         org.junit.jupiter.api.Assertions.assertThrows(
@@ -221,20 +223,19 @@ class StreamReadErrorCausePreservationReproTest {
             + errorType
             + "\",\"message\":\"failed\"}}\n\n";
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = new AnthropicModel(AnthropicModelId.CLAUDE_OPUS_5_5, config);
-    var request = model.requests.build(List.of(Message.user("hi")), List.<Tool>of(), null);
+    var opus = AnthropicModelId.CLAUDE_OPUS_5_5;
+    var request =
+        new AnthropicRequestBuilder(opus.id(), opus, config, CachePolicy.shortLived())
+            .build(List.of(Message.user("hi")), List.<Tool>of(), null);
+    ChatExchange.StreamOpener<MessagesRequest> segments =
+        ignored ->
+            new SseReader(
+                new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)),
+                Duration.ofSeconds(5),
+                new AnthropicStreamParser(),
+                AnthropicException::new);
     return org.junit.jupiter.api.Assertions.assertThrows(
-        RuntimeException.class,
-        () ->
-            new PauseContinuation(
-                    model.exchange,
-                    ignored ->
-                        new SseReader(
-                            new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)),
-                            Duration.ofSeconds(5),
-                            new AnthropicStreamParser(),
-                            AnthropicException::new))
-                .drain(request));
+        RuntimeException.class, () -> PauseContinuationTest.continuation(segments).chat(request));
   }
 
   @org.junit.jupiter.api.Test

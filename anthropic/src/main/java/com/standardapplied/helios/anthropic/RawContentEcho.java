@@ -11,11 +11,21 @@ import java.util.TreeSet;
 
 /**
  * The verbatim echo of a streamed assistant turn: its content-block array in stream-index order,
- * for the {@link AnthropicModel#RAW_CONTENT_KEY} metadata. A turn needs it when it must go back
- * exactly as it arrived — it held a verbatim block, interleaved thinking with other content, or
- * paused — since the API rejects such a turn echoed in the typed shape.
+ * for the {@link #RAW_CONTENT_KEY} metadata. A turn needs it when it must go back exactly as it
+ * arrived — it held a verbatim block, interleaved thinking with other content, or paused — since
+ * the API rejects such a turn echoed in the typed shape.
  */
 final class RawContentEcho {
+
+  /**
+   * Metadata key carrying the assistant turn's full content-block array as raw JSON, set whenever
+   * the turn must go back exactly as it arrived: it used Anthropic server tools (web search / web
+   * fetch), held a {@code redacted_thinking} block, or interleaved thinking with text or tool
+   * calls. Those blocks — including each result's {@code encrypted_content} and each thinking
+   * block's position — must be echoed back <b>verbatim</b> on later turns or the API rejects the
+   * request with a 400; a later request replays this array as the message content when present.
+   */
+  static final String RAW_CONTENT_KEY = "anthropic.rawContent";
 
   /** One kind of content block a turn accumulates, by stream index. */
   interface Source {

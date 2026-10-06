@@ -8,6 +8,7 @@ import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.ChatExchange;
+import com.standardapplied.helios.core.provider.Exchange;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +19,7 @@ import java.util.List;
  * appended unchanged. The segments merge into one response, so a caller never sees the pause. At
  * most {@link #MAX_PAUSE_CONTINUATIONS} resumes, which turns a pause loop into a loud failure.
  */
-final class PauseContinuation {
+final class PauseContinuation implements Exchange<MessagesRequest> {
 
   /**
    * The most resumes of one turn; the API's own server loop runs about ten iterations a segment.
@@ -27,14 +28,15 @@ final class PauseContinuation {
 
   private static final String PAUSE_TURN = "pause_turn";
 
-  private final ChatExchange<MessagesRequest> exchange;
+  private final Exchange<MessagesRequest> exchange;
   private final ChatExchange.StreamOpener<MessagesRequest> segments;
 
   /**
-   * Continues turns whose segments {@code segments} opens, draining them through {@code exchange}.
+   * Continues turns segment by segment through {@code exchange}; a paused stream's next segment is
+   * opened by {@code segments}, the opener behind {@code exchange}.
    */
   PauseContinuation(
-      ChatExchange<MessagesRequest> exchange, ChatExchange.StreamOpener<MessagesRequest> segments) {
+      Exchange<MessagesRequest> exchange, ChatExchange.StreamOpener<MessagesRequest> segments) {
     this.exchange = exchange;
     this.segments = segments;
   }
@@ -44,11 +46,12 @@ final class PauseContinuation {
    *
    * @throws AnthropicException if the turn pauses more than {@link #MAX_PAUSE_CONTINUATIONS} times
    */
-  Response<Void> drain(MessagesRequest request) {
+  @Override
+  public Response<Void> chat(MessagesRequest request) {
     Response<Void> merged = null;
     var current = request;
     for (var attempt = 0; attempt <= MAX_PAUSE_CONTINUATIONS; attempt++) {
-      var segment = exchange.chat(segments, current);
+      var segment = exchange.chat(current);
       merged = merged == null ? segment : SegmentMerge.merge(merged, segment);
       if (!paused(merged)) {
         return merged;
@@ -63,21 +66,22 @@ final class PauseContinuation {
 
   /**
    * The events of the whole turn answering {@code request}: the paused segment's completion is
-   * swallowed, the continuation streams on, and the one completion carries the merged response.
+   * swallowed, the continuation streams on, and the one completion carries the merged response. A
+   * failure to open the first segment is the exchange's one error event, passed through.
    */
-  CloseableIterator<StreamEvent> open(MessagesRequest request)
-      throws IOException, InterruptedException {
-    return new ContinuingStream(request, segments.open(request));
+  @Override
+  public CloseableIterator<StreamEvent> stream(MessagesRequest request) {
+    return new ContinuingStream(request, exchange.stream(request));
   }
 
   private static boolean paused(Response<Void> response) {
-    return PAUSE_TURN.equals(response.metadata().get(AnthropicModel.STOP_REASON_KEY));
+    return PAUSE_TURN.equals(response.metadata().get(AnthropicResponseAssembler.STOP_REASON_KEY));
   }
 
   /** {@code base} with the merged-so-far assistant content appended verbatim. */
   @SuppressWarnings("unchecked")
   private static MessagesRequest continuation(MessagesRequest base, Response<Void> merged) {
-    var rawContent = merged.metadata().get(AnthropicModel.RAW_CONTENT_KEY);
+    var rawContent = merged.metadata().get(RawContentEcho.RAW_CONTENT_KEY);
     if (rawContent == null || rawContent.isEmpty()) {
       throw new AnthropicException(
           "pause_turn received without capturable assistant content; cannot resume");

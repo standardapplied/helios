@@ -36,7 +36,7 @@ class AnthropicRequestSnapshotTest {
 
   private static final Map<String, String> THINKING =
       Map.of(
-          AnthropicModel.THINKING_BLOCKS_KEY,
+          ThinkingBlock.THINKING_BLOCKS_KEY,
           "[{\"text\":\"Two cities, two calls.\",\"signature\":\"sig-1\"}]");
 
   private final Map<String, Object> snapshots = new LinkedHashMap<>();
@@ -63,22 +63,25 @@ class AnthropicRequestSnapshotTest {
     snapshot(
         "web tools",
         uri ->
-            new AnthropicModel(
-                sonnet, config(uri, medium).withWebSearch(true).withWebFetch(true).build()),
+            new AnthropicProvider()
+                .create(
+                    sonnet.id(),
+                    config(uri, medium).withWebSearch(true).withWebFetch(true).build()),
         withTools());
 
     snapshot(
         "generation settings",
         uri ->
-            new AnthropicModel(
-                AnthropicModelId.CLAUDE_HAIKU_4_5,
-                config(uri, ThinkingLevel.NONE)
-                    .withTemperature(0.3)
-                    .withTopP(0.9)
-                    .withStopSequences(List.of("END"))
-                    .withMaxOutputTokens(2048)
-                    .withToolChoice(ToolChoice.required("weather"))
-                    .build()),
+            new AnthropicProvider()
+                .create(
+                    AnthropicModelId.CLAUDE_HAIKU_4_5.id(),
+                    config(uri, ThinkingLevel.NONE)
+                        .withTemperature(0.3)
+                        .withTopP(0.9)
+                        .withStopSequences(List.of("END"))
+                        .withMaxOutputTokens(2048)
+                        .withToolChoice(ToolChoice.required("weather"))
+                        .build()),
         withTools());
 
     Golden.assertMatches("anthropic/requests.json", JSON.writeValueAsString(snapshots));
@@ -100,7 +103,7 @@ class AnthropicRequestSnapshotTest {
 
   private static Function<URI, Model> modelAt(
       AnthropicModelId id, ThinkingLevel level, CachePolicy cachePolicy) {
-    return uri -> new AnthropicModel(id, config(uri, level).build(), cachePolicy);
+    return uri -> new AnthropicProvider().create(id.id(), config(uri, level).build(), cachePolicy);
   }
 
   private static ModelConfig.Builder config(URI uri, ThinkingLevel level) {

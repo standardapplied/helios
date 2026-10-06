@@ -7,6 +7,7 @@ import com.standardapplied.helios.anthropic.api.AnthropicJson;
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.provider.RequestFactory;
 import com.standardapplied.helios.core.tool.Tool;
 import java.util.List;
 import java.util.Map;
@@ -15,7 +16,15 @@ import java.util.Map;
  * Builds the Messages API request for one turn of one model: the conversation, the output-schema
  * instruction, tools and tool choice, thinking and sampling settings, and prompt-cache breakpoints.
  */
-final class AnthropicRequestBuilder {
+final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
+
+  /**
+   * Output-token ceiling assumed for a Claude model ID this build does not recognise (one not in
+   * {@link AnthropicModelId}). Matches the current Opus ceiling — a sane non-zero default so an
+   * unrecognised model's requests aren't rejected for {@code max_tokens=0}. Callers override via
+   * {@link ModelConfig.Builder#withMaxOutputTokens(Integer)}.
+   */
+  static final int DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
 
   private final String wireModelId;
   private final ThinkingShape thinkingShape;
@@ -47,9 +56,7 @@ final class AnthropicRequestBuilder {
     this.wireModelId = wireModelId;
     this.thinkingShape = knownModel != null ? knownModel.thinkingShape() : ThinkingShape.ADAPTIVE;
     this.defaultMaxTokens =
-        knownModel != null
-            ? knownModel.maxOutputTokens()
-            : AnthropicModel.DEFAULT_MAX_OUTPUT_TOKENS;
+        knownModel != null ? knownModel.maxOutputTokens() : DEFAULT_MAX_OUTPUT_TOKENS;
     this.config = config;
     this.cachePolicy = cachePolicy;
   }
@@ -63,7 +70,8 @@ final class AnthropicRequestBuilder {
    * The request for {@code messages}, offering {@code tools} and, when {@code outputSchema} is not
    * null, instructing the model to answer with JSON matching it.
    */
-  MessagesRequest build(
+  @Override
+  public MessagesRequest build(
       List<Message> messages, List<Tool> tools, Map<String, Object> outputSchema) {
     var conversation = AnthropicMessages.of(messages);
     var system = withSchemaInstruction(conversation.system(), outputSchema, tools);

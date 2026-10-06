@@ -104,7 +104,7 @@ final class AnthropicStreamParser implements SseReader.Parser {
     var message = "API stream error: " + payload;
     var cause =
         error != null && error.isTransient()
-            ? new TransientStreamException(message, null, AnthropicModel.PROVIDER_NAME)
+            ? new TransientStreamException(message, null, AnthropicProvider.PROVIDER_NAME)
             : null;
     return new StreamEvent.Error(message, cause);
   }

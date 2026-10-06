@@ -17,6 +17,9 @@ import java.util.Map;
  */
 final class AnthropicResponseAssembler {
 
+  /** Metadata key carrying the provider's raw {@code stop_reason} string. */
+  static final String STOP_REASON_KEY = "anthropic.stopReason";
+
   private AnthropicResponseAssembler() {}
 
   /** The completion event of the turn in {@code blocks}. */
@@ -75,15 +78,15 @@ final class AnthropicResponseAssembler {
       ContentDelta.StopDetails stopDetails) {
     var metadata = new HashMap<String, String>();
     if (!thinkingBlocks.isEmpty()) {
-      metadata.put(AnthropicModel.THINKING_BLOCKS_KEY, ThinkingBlock.encodeAll(thinkingBlocks));
+      metadata.put(ThinkingBlock.THINKING_BLOCKS_KEY, ThinkingBlock.encodeAll(thinkingBlocks));
     }
-    putIfPresent(metadata, AnthropicModel.STOP_REASON_KEY, stopReason);
+    putIfPresent(metadata, STOP_REASON_KEY, stopReason);
     if (stopDetails != null) {
       putIfPresent(metadata, Response.REFUSAL_CATEGORY_KEY, stopDetails.category());
       putIfPresent(metadata, Response.REFUSAL_EXPLANATION_KEY, stopDetails.explanation());
     }
     if (RawContentEcho.needed(blocks, stopReason)) {
-      metadata.put(AnthropicModel.RAW_CONTENT_KEY, RawContentEcho.assemble(blocks));
+      metadata.put(RawContentEcho.RAW_CONTENT_KEY, RawContentEcho.assemble(blocks));
     }
     return Map.copyOf(metadata);
   }
