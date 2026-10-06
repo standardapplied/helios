@@ -44,8 +44,6 @@ import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import tools.jackson.databind.DeserializationFeature;
-import tools.jackson.databind.json.JsonMapper;
 
 class GeminiFilesClientTest {
 
@@ -57,7 +55,7 @@ class GeminiFilesClientTest {
   void productionHttpClientNeverFollowsRedirects() {
     var config = ModelConfig.newBuilder().withApiKey("key").build();
 
-    try (var http = GeminiFilesClient.createHttpClient(config)) {
+    try (var http = FilesEndpoint.createHttpClient(config)) {
       assertEquals(HttpClient.Redirect.NEVER, http.followRedirects());
     }
   }
@@ -645,9 +643,7 @@ class GeminiFilesClientTest {
 
   private GeminiFilesClient client(
       ModelConfig config, StubHttpClient http, Duration processingTimeout) {
-    var mapper =
-        JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
-    return new GeminiFilesClient(config, http, mapper, Duration.ZERO, processingTimeout, false);
+    return new GeminiFilesClient(config, http, Duration.ZERO, processingTimeout, false);
   }
 
   private static String header(HttpRequest request, String name) {

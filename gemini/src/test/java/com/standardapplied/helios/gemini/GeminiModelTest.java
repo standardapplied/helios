@@ -127,27 +127,27 @@ class GeminiModelTest {
 
   @Test
   void interactionsContentTypeImage() {
-    assertEquals("image", GeminiModel.interactionsContentType("image/png"));
-    assertEquals("image", GeminiModel.interactionsContentType("image/jpeg"));
-    assertEquals("image", GeminiModel.interactionsContentType("image/webp"));
+    assertEquals("image", GeminiConversation.interactionsContentType("image/png"));
+    assertEquals("image", GeminiConversation.interactionsContentType("image/jpeg"));
+    assertEquals("image", GeminiConversation.interactionsContentType("image/webp"));
   }
 
   @Test
   void interactionsContentTypeAudio() {
-    assertEquals("audio", GeminiModel.interactionsContentType("audio/mp3"));
-    assertEquals("audio", GeminiModel.interactionsContentType("audio/wav"));
+    assertEquals("audio", GeminiConversation.interactionsContentType("audio/mp3"));
+    assertEquals("audio", GeminiConversation.interactionsContentType("audio/wav"));
   }
 
   @Test
   void interactionsContentTypeVideo() {
-    assertEquals("video", GeminiModel.interactionsContentType("video/mp4"));
+    assertEquals("video", GeminiConversation.interactionsContentType("video/mp4"));
   }
 
   @Test
   void interactionsContentTypeDocument() {
-    assertEquals("document", GeminiModel.interactionsContentType("application/pdf"));
-    assertEquals("document", GeminiModel.interactionsContentType("text/plain"));
-    assertEquals("document", GeminiModel.interactionsContentType("application/json"));
+    assertEquals("document", GeminiConversation.interactionsContentType("application/pdf"));
+    assertEquals("document", GeminiConversation.interactionsContentType("text/plain"));
+    assertEquals("document", GeminiConversation.interactionsContentType("application/json"));
   }
 
   private static ContentItem textWithAnnotations(String text, OutputAnnotation... annotations) {
@@ -158,7 +158,7 @@ class GeminiModelTest {
   void extractCitationsFromUrlAnnotations() {
     var annotation = new OutputAnnotation("url_citation", "https://example.com", "Example", 0, 10);
     var step = Step.modelOutput(List.of(textWithAnnotations("Some text", annotation)));
-    var citations = GeminiModel.extractCitations(List.of(step));
+    var citations = GeminiCitations.extract(List.of(step));
 
     assertEquals(1, citations.size());
     var citation = citations.getFirst();
@@ -172,14 +172,14 @@ class GeminiModelTest {
   void extractCitationsSkipsNonUrlCitation() {
     var annotation = new OutputAnnotation("file_citation", "file://local", "Local File", 0, 5);
     var step = Step.modelOutput(List.of(textWithAnnotations("Some text", annotation)));
-    var citations = GeminiModel.extractCitations(List.of(step));
+    var citations = GeminiCitations.extract(List.of(step));
 
     assertTrue(citations.isEmpty());
   }
 
   @Test
   void extractCitationsFromNullSteps() {
-    assertTrue(GeminiModel.extractCitations(null).isEmpty());
+    assertTrue(GeminiCitations.extract(null).isEmpty());
   }
 
   @Test
@@ -187,13 +187,13 @@ class GeminiModelTest {
     var annotation = new OutputAnnotation("url_citation", "https://example.com", "Example", 0, 10);
     var thoughtStep = Step.thought("sig", List.of(ContentItem.text("summary")));
     var userStep = Step.userInput(List.of(textWithAnnotations("ignored", annotation)));
-    assertTrue(GeminiModel.extractCitations(List.of(thoughtStep, userStep)).isEmpty());
+    assertTrue(GeminiCitations.extract(List.of(thoughtStep, userStep)).isEmpty());
   }
 
   @Test
   void extractCitationsSkipsNonTextContent() {
     var step = Step.modelOutput(List.of(ContentItem.image("image/png", "iVBORw0KGgo=")));
-    assertTrue(GeminiModel.extractCitations(List.of(step)).isEmpty());
+    assertTrue(GeminiCitations.extract(List.of(step)).isEmpty());
   }
 
   @Test
@@ -202,7 +202,7 @@ class GeminiModelTest {
     var ann2 = new OutputAnnotation("url_citation", "https://b.com", "B", 10, 20);
     var step1 = Step.modelOutput(List.of(textWithAnnotations("First", ann1)));
     var step2 = Step.modelOutput(List.of(textWithAnnotations("Second", ann2)));
-    var citations = GeminiModel.extractCitations(List.of(step1, step2));
+    var citations = GeminiCitations.extract(List.of(step1, step2));
 
     assertEquals(2, citations.size());
     assertEquals("https://a.com", citations.get(0).sourceId());
@@ -212,13 +212,13 @@ class GeminiModelTest {
   @Test
   void extractCitationsFromContentWithNoAnnotations() {
     var step = Step.modelOutput("No sources here");
-    assertTrue(GeminiModel.extractCitations(List.of(step)).isEmpty());
+    assertTrue(GeminiCitations.extract(List.of(step)).isEmpty());
   }
 
   @Test
   void extractCitationsFromEmptyModelOutput() {
     var step = Step.modelOutput(List.of());
-    assertTrue(GeminiModel.extractCitations(List.of(step)).isEmpty());
+    assertTrue(GeminiCitations.extract(List.of(step)).isEmpty());
   }
 
   @Test
@@ -239,10 +239,10 @@ class GeminiModelTest {
 
     assertEquals(
         "https://generativelanguage.googleapis.com/v1/interactions?alt=sse",
-        stable.buildHttpRequest("{}").uri().toString());
+        stable.streams.httpRequest("{}").uri().toString());
     assertEquals(
         "https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse",
-        beta.buildHttpRequest("{}").uri().toString());
+        beta.streams.httpRequest("{}").uri().toString());
     assertEquals("v1", stable.apiVersion());
     assertEquals("v1beta", beta.apiVersion());
   }
@@ -326,7 +326,7 @@ class GeminiModelTest {
                         .build())),
             Message.tool("c1", "search", "result1"));
 
-    var converted = model.convertMessages(messages);
+    var converted = GeminiConversation.of(messages);
 
     assertEquals(3, converted.steps().size());
     assertTrue(converted.steps().get(0).hasTypeUserInput());
@@ -360,7 +360,7 @@ class GeminiModelTest {
             Message.tool("c1", "quote", "AAPL: $228"),
             Message.tool("c2", "quote", "NVDA: $480"));
 
-    var converted = model.convertMessages(messages);
+    var converted = GeminiConversation.of(messages);
 
     assertEquals(5, converted.steps().size());
     assertTrue(converted.steps().get(0).hasTypeUserInput());
@@ -392,7 +392,7 @@ class GeminiModelTest {
             Map.of(GeminiModel.THOUGHT_SIGNATURES_KEY, sigs));
     var messages = List.of(Message.user("Hi"), msgWithSigs, Message.tool("c1", "search", "ok"));
 
-    var converted = model.convertMessages(messages);
+    var converted = GeminiConversation.of(messages);
 
     assertEquals(5, converted.steps().size());
     assertTrue(converted.steps().get(0).hasTypeUserInput());
@@ -409,7 +409,7 @@ class GeminiModelTest {
     var model = createModel();
     var messages = List.of(Message.user("Hi"), Message.assistant("There"));
 
-    var converted = model.convertMessages(messages);
+    var converted = GeminiConversation.of(messages);
 
     assertEquals(2, converted.steps().size());
     assertTrue(converted.steps().get(1).hasTypeModelOutput());
@@ -423,7 +423,7 @@ class GeminiModelTest {
     var bytes = new byte[] {1, 2, 3};
     var user = Message.user("Describe this", List.of(new InlineFile(bytes, "image/png")));
 
-    var converted = model.convertMessages(List.of(user));
+    var converted = GeminiConversation.of(List.of(user));
 
     assertEquals(1, converted.steps().size());
     var step = converted.steps().getFirst();
@@ -444,7 +444,7 @@ class GeminiModelTest {
     var pdf = new byte[] {37, 80, 68, 70};
     var user = Message.user("Extract", List.of(new InlineFile(pdf, "application/pdf")));
 
-    var converted = model.convertMessages(List.of(user));
+    var converted = GeminiConversation.of(List.of(user));
 
     var step = converted.steps().getFirst();
     var doc = step.content().get(0);
@@ -469,7 +469,7 @@ class GeminiModelTest {
             null,
             List.of(video));
 
-    var result = createModel().convertMessages(List.of(user));
+    var result = GeminiConversation.of(List.of(user));
 
     var content = result.steps().getFirst().content();
     assertEquals(2, content.size());
@@ -485,7 +485,7 @@ class GeminiModelTest {
     var model = createModel();
     var messages = List.of(Message.system("Be helpful"), Message.user("Hi"));
 
-    var converted = model.convertMessages(messages);
+    var converted = GeminiConversation.of(messages);
 
     assertEquals("Be helpful", converted.systemInstruction());
     assertEquals(1, converted.steps().size());
@@ -497,7 +497,7 @@ class GeminiModelTest {
     var model = createModel();
     var messages = List.of(Message.user("Hi"));
 
-    var converted = model.convertMessages(messages);
+    var converted = GeminiConversation.of(messages);
 
     assertNull(converted.systemInstruction());
     assertEquals(1, converted.steps().size());
@@ -536,7 +536,7 @@ class GeminiModelTest {
             Message.tool("c3", "quote", "MSFT: $420"),
             Message.assistant("MSFT is strong"));
 
-    var converted = model.convertMessages(messages);
+    var converted = GeminiConversation.of(messages);
 
     assertEquals("You are an analyst", converted.systemInstruction());
     var steps = converted.steps();
@@ -564,7 +564,7 @@ class GeminiModelTest {
   void findContinuationPointReturnsNullWhenNoInteractionId() {
     var messages = List.of(Message.user("Hello"), Message.assistant("Hi"));
 
-    var result = GeminiModel.findContinuationPoint(messages);
+    var result = ContinuationPoint.find(messages);
 
     assertNull(result);
   }
@@ -578,7 +578,7 @@ class GeminiModelTest {
             Message.assistant("Hi", List.of(), metadata),
             Message.user("Follow-up"));
 
-    var result = GeminiModel.findContinuationPoint(messages);
+    var result = ContinuationPoint.find(messages);
 
     assertNotNull(result);
     assertEquals("interaction-123", result.interactionId());
@@ -597,7 +597,7 @@ class GeminiModelTest {
             Message.assistant("Second", List.of(), meta2),
             Message.tool("c1", "search", "result"));
 
-    var result = GeminiModel.findContinuationPoint(messages);
+    var result = ContinuationPoint.find(messages);
 
     assertNotNull(result);
     assertEquals("interaction-2", result.interactionId());
@@ -609,7 +609,7 @@ class GeminiModelTest {
     var metadata = Map.of(GeminiModel.INTERACTION_ID_KEY, "");
     var messages = List.of(Message.user("Hello"), Message.assistant("Hi", List.of(), metadata));
 
-    var result = GeminiModel.findContinuationPoint(messages);
+    var result = ContinuationPoint.find(messages);
 
     assertNull(result);
   }
@@ -630,7 +630,7 @@ class GeminiModelTest {
             Message.assistant(null, toolCalls, metadata),
             Message.tool("c1", "search", "found it"));
 
-    var result = GeminiModel.findContinuationPoint(messages);
+    var result = ContinuationPoint.find(messages);
 
     assertNotNull(result);
     assertEquals("interaction-456", result.interactionId());
@@ -645,7 +645,7 @@ class GeminiModelTest {
             Message.assistant("calling tool"),
             Message.tool("c1", "search", "result1"));
 
-    var steps = GeminiModel.buildContinuationSteps(messages, 2);
+    var steps = GeminiConversation.continuationSteps(messages, 2);
 
     assertEquals(1, steps.size());
     assertTrue(steps.getFirst().hasTypeFunctionResult());
@@ -663,7 +663,7 @@ class GeminiModelTest {
             Message.tool("c1", "quote", "AAPL: $228"),
             Message.tool("c2", "quote", "NVDA: $480"));
 
-    var steps = GeminiModel.buildContinuationSteps(messages, 2);
+    var steps = GeminiConversation.continuationSteps(messages, 2);
 
     assertEquals(2, steps.size());
     assertTrue(steps.get(0).hasTypeFunctionResult());
@@ -679,7 +679,7 @@ class GeminiModelTest {
     var messages =
         List.of(Message.user("Hello"), Message.assistant("Hi"), Message.user("Follow-up"));
 
-    var steps = GeminiModel.buildContinuationSteps(messages, 2);
+    var steps = GeminiConversation.continuationSteps(messages, 2);
 
     assertEquals(1, steps.size());
     assertTrue(steps.getFirst().hasTypeUserInput());
@@ -695,7 +695,7 @@ class GeminiModelTest {
     messages.add(Message.assistant("Hi"));
     messages.add(Message.user("Follow-up"));
 
-    var steps = GeminiModel.buildContinuationSteps(messages, 3);
+    var steps = GeminiConversation.continuationSteps(messages, 3);
 
     assertEquals(1, steps.size());
     assertTrue(steps.getFirst().hasTypeUserInput());
@@ -711,7 +711,7 @@ class GeminiModelTest {
             Message.tool("c1", "search", "result1"),
             Message.user("Thanks, now search more"));
 
-    var steps = GeminiModel.buildContinuationSteps(messages, 2);
+    var steps = GeminiConversation.continuationSteps(messages, 2);
 
     assertEquals(2, steps.size());
     assertTrue(steps.get(0).hasTypeFunctionResult());
@@ -725,7 +725,7 @@ class GeminiModelTest {
     var msg = new Message(Role.ASSISTANT, "Hi", List.of(), null, null, null, List.of());
     var messages = List.of(Message.user("Hello"), msg);
 
-    var result = GeminiModel.findContinuationPoint(messages);
+    var result = ContinuationPoint.find(messages);
 
     assertNull(result);
   }
@@ -739,7 +739,7 @@ class GeminiModelTest {
             Message.assistant("more"),
             Message.user("Follow-up"));
 
-    var steps = GeminiModel.buildContinuationSteps(messages, 1);
+    var steps = GeminiConversation.continuationSteps(messages, 1);
 
     assertEquals(1, steps.size());
     assertTrue(steps.getFirst().hasTypeUserInput());
@@ -753,7 +753,7 @@ class GeminiModelTest {
 
   @Test
   void continuationPointRecord() {
-    var point = new GeminiModel.ContinuationPoint("id-123", 5);
+    var point = new ContinuationPoint("id-123", 5);
     assertEquals("id-123", point.interactionId());
     assertEquals(5, point.startIndex());
   }
@@ -776,7 +776,7 @@ class GeminiModelTest {
             Message.assistant(null, toolCalls, metadata),
             Message.tool("c1", "search", "found it"));
 
-    var request = model.buildRequest(messages, null, null);
+    var request = model.requests.build(messages, null, null);
 
     assertNotNull(request.previousInteractionId(), "continuation must use previous_interaction_id");
     assertEquals("int-abc", request.previousInteractionId());
@@ -799,7 +799,7 @@ class GeminiModelTest {
                 "answer", List.of(), Map.of(GeminiModel.INTERACTION_ID_KEY, "interaction-secret")),
             Message.user("second"));
 
-    var request = model.buildRequest(messages, null, null);
+    var request = model.requests.build(messages, null, null);
 
     assertNull(request.previousInteractionId());
     assertEquals("system", request.systemInstruction());
@@ -819,7 +819,7 @@ class GeminiModelTest {
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
     var messages = List.of(Message.user("Hello"));
 
-    var request = model.buildRequest(messages, null, null);
+    var request = model.requests.build(messages, null, null);
 
     assertEquals("minimal", request.generationConfig().thinkingLevel());
   }
@@ -834,7 +834,7 @@ class GeminiModelTest {
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
     var messages = List.of(Message.user("Hello"));
 
-    var request = model.buildRequest(messages, null, null);
+    var request = model.requests.build(messages, null, null);
 
     assertEquals("low", request.generationConfig().thinkingLevel());
   }
@@ -849,7 +849,7 @@ class GeminiModelTest {
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
     var messages = List.of(Message.user("Hello"));
 
-    var request = model.buildRequest(messages, null, null);
+    var request = model.requests.build(messages, null, null);
 
     assertEquals("high", request.generationConfig().thinkingLevel());
   }
@@ -862,7 +862,7 @@ class GeminiModelTest {
             .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.MEDIUM)
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
-    var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
+    var request = model.requests.build(List.of(Message.user("Hello")), null, null);
 
     assertEquals("medium", request.generationConfig().thinkingLevel());
   }
@@ -875,7 +875,7 @@ class GeminiModelTest {
             .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.XHIGH)
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
-    var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
+    var request = model.requests.build(List.of(Message.user("Hello")), null, null);
 
     assertEquals("high", request.generationConfig().thinkingLevel());
   }
@@ -888,7 +888,7 @@ class GeminiModelTest {
             .withThinkingLevel(com.standardapplied.helios.core.model.ThinkingLevel.MAX)
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
-    var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
+    var request = model.requests.build(List.of(Message.user("Hello")), null, null);
 
     assertEquals("high", request.generationConfig().thinkingLevel());
   }
@@ -902,7 +902,7 @@ class GeminiModelTest {
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
+    var request = model.requests.build(List.of(Message.user("Hello")), null, null);
 
     assertEquals(
         "minimal",
@@ -919,7 +919,7 @@ class GeminiModelTest {
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_7_FLASH, config);
 
-    var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
+    var request = model.requests.build(List.of(Message.user("Hello")), null, null);
 
     assertEquals("low", request.generationConfig().thinkingLevel());
   }
@@ -934,7 +934,7 @@ class GeminiModelTest {
               .build();
       var model = new GeminiModel(id, config);
 
-      var request = model.buildRequest(List.of(Message.user("Hello")), null, null);
+      var request = model.requests.build(List.of(Message.user("Hello")), null, null);
 
       assertEquals("low", request.generationConfig().thinkingLevel(), id.id());
     }
@@ -943,19 +943,19 @@ class GeminiModelTest {
   @Test
   void extractSystemInstructionFindsSystemMessage() {
     var messages = List.of(Message.system("Be helpful"), Message.user("Hi"));
-    assertEquals("Be helpful", GeminiModel.extractSystemInstruction(messages));
+    assertEquals("Be helpful", GeminiConversation.extractSystemInstruction(messages));
   }
 
   @Test
   void extractSystemInstructionReturnsNullWhenAbsent() {
     var messages = List.of(Message.user("Hi"));
-    assertNull(GeminiModel.extractSystemInstruction(messages));
+    assertNull(GeminiConversation.extractSystemInstruction(messages));
   }
 
   @Test
   void extractSystemInstructionTakesLastSystemMessage() {
     var messages = List.of(Message.system("First"), Message.user("Hi"), Message.system("Second"));
-    assertEquals("Second", GeminiModel.extractSystemInstruction(messages));
+    assertEquals("Second", GeminiConversation.extractSystemInstruction(messages));
   }
 
   @Test
@@ -968,7 +968,7 @@ class GeminiModelTest {
             Message.assistant("ok", List.of(), metadata),
             Message.user("Follow-up"));
 
-    var request = model.buildRequest(messages, null, null);
+    var request = model.requests.build(messages, null, null);
 
     assertNotNull(request.previousInteractionId());
     assertNull(request.systemInstruction());
@@ -1005,8 +1005,7 @@ class GeminiModelTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
     var result =
-        model.parseStructuredContent(
-            "{\"name\":\"Alice\",\"age\":30}", OutputSchema.of(TestPerson.class));
+        model.exchange.parse("{\"name\":\"Alice\",\"age\":30}", OutputSchema.of(TestPerson.class));
     assertEquals("Alice", result.name());
     assertEquals(30, result.age());
   }
@@ -1022,7 +1021,7 @@ class GeminiModelTest {
             + "\"reasoning\":\"named in source\",\"confidence\":\"HIGH\"},"
             + "{\"field\":\"age\",\"sources\":[],\"reasoning\":\"guess\",\"confidence\":\"LOW\"}]}";
 
-    var result = model.parseStructuredContent(json, schema);
+    var result = model.exchange.parse(json, schema);
 
     assertNotNull(result);
     assertEquals("Alice", result.output().name());
@@ -1035,7 +1034,7 @@ class GeminiModelTest {
   void parseStructuredContentNullReturnsNull() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
-    assertNull(model.parseStructuredContent(null, OutputSchema.of(TestPerson.class)));
+    assertNull(model.exchange.parse(null, OutputSchema.of(TestPerson.class)));
   }
 
   @Test
@@ -1046,7 +1045,7 @@ class GeminiModelTest {
     var ex =
         assertThrows(
             StructuredOutputParseException.class,
-            () -> model.parseStructuredContent("{\"name\":\"Alice\"}", schema));
+            () -> model.exchange.parse("{\"name\":\"Alice\"}", schema));
     assertTrue(
         ex.errors().stream().anyMatch(e -> e.contains("age") && e.contains("required")),
         "diff must name the missing 'age' field as required: " + ex.errors());
@@ -1061,7 +1060,7 @@ class GeminiModelTest {
         assertThrows(
             StructuredOutputParseException.class,
             () ->
-                model.parseStructuredContent(
+                model.exchange.parse(
                     "{\"name\":\"Alice\",unterminated", OutputSchema.of(TestPerson.class)));
     assertTrue(ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")));
   }
@@ -1080,7 +1079,7 @@ class GeminiModelTest {
         assertThrows(
             StructuredOutputParseException.class,
             () ->
-                model.parseStructuredContent(
+                model.exchange.parse(
                     "{\"name\":\"" + canary + "\"}", OutputSchema.of(TestPerson.class)));
 
     assertNull(error.rawContent());
@@ -1113,7 +1112,7 @@ class GeminiModelTest {
   void buildHttpRequestUsesDefaultsWhenBaseUrlAndHeadersUnset() {
     var config = ModelConfig.newBuilder().withApiKey("g-key").build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
-    var httpRequest = model.buildHttpRequest("{}");
+    var httpRequest = model.streams.httpRequest("{}");
     assertEquals(
         java.net.URI.create("https://generativelanguage.googleapis.com/v1/interactions?alt=sse"),
         httpRequest.uri());
@@ -1192,7 +1191,7 @@ class GeminiModelTest {
             .withBaseUrl("https://vertex.example/v1beta")
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
-    var httpRequest = model.buildHttpRequest("{}");
+    var httpRequest = model.streams.httpRequest("{}");
     assertEquals(
         java.net.URI.create("https://vertex.example/v1beta/interactions?alt=sse"),
         httpRequest.uri(),
@@ -1220,7 +1219,7 @@ class GeminiModelTest {
             .withHeader("X-GOOG-API-KEY", "override-key")
             .build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
-    var httpRequest = model.buildHttpRequest("{}");
+    var httpRequest = model.streams.httpRequest("{}");
     assertEquals("override-key", httpRequest.headers().firstValue("x-goog-api-key").orElseThrow());
     assertEquals(
         1,
@@ -1232,7 +1231,7 @@ class GeminiModelTest {
   void buildHttpRequestExtraHeaderIsAppended() {
     var config = ModelConfig.newBuilder().withApiKey("g-key").withHeader("x-trace", "t1").build();
     var model = new GeminiModel(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
-    var httpRequest = model.buildHttpRequest("{}");
+    var httpRequest = model.streams.httpRequest("{}");
     assertEquals("t1", httpRequest.headers().firstValue("x-trace").orElseThrow());
     assertEquals("g-key", httpRequest.headers().firstValue("x-goog-api-key").orElseThrow());
   }

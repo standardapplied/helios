@@ -7,7 +7,6 @@ import java.util.Map;
 import tools.jackson.core.JsonParser;
 import tools.jackson.databind.DeserializationContext;
 import tools.jackson.databind.ValueDeserializer;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Deserializes the function-call {@code arguments} field, which the Gemini Interactions API ships
@@ -26,9 +25,6 @@ import tools.jackson.databind.json.JsonMapper;
  */
 public final class ArgumentsDeserializer extends ValueDeserializer<Map<String, Object>> {
 
-  // Re-parser for string-shaped arguments. Stateless and thread-safe.
-  private static final JsonMapper STRING_PARSER = JsonMapper.builder().build();
-
   @Override
   @SuppressWarnings("unchecked")
   public Map<String, Object> deserialize(JsonParser p, DeserializationContext ctxt) {
@@ -37,14 +33,14 @@ public final class ArgumentsDeserializer extends ValueDeserializer<Map<String, O
       return null;
     }
     if (node.isObject()) {
-      return STRING_PARSER.convertValue(node, Map.class);
+      return GeminiJson.DEFAULT.convertValue(node, Map.class);
     }
     if (node.isString()) {
       var raw = node.asString();
       if (Strings.isBlank(raw)) {
         return Map.of();
       }
-      return STRING_PARSER.readValue(raw, Map.class);
+      return GeminiJson.DEFAULT.readValue(raw, Map.class);
     }
     return null;
   }
