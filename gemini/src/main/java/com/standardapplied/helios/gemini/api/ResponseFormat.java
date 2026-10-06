@@ -7,7 +7,6 @@ package com.standardapplied.helios.gemini.api;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.standardapplied.helios.core.common.Strings;
 import java.util.Map;
 
 /**
@@ -40,24 +39,11 @@ public record ResponseFormat(
     @JsonProperty("aspect_ratio") String aspectRatio,
     @JsonProperty("image_size") String imageSize) {
 
-  /** Plain text output (no schema, no explicit MIME). */
-  public static ResponseFormat text() {
-    return new ResponseFormat("text", null, null, null, null);
-  }
-
   /** JSON output constrained by the supplied JSON Schema. */
   public static ResponseFormat json(Map<String, Object> schema) {
     if (schema == null) {
       throw new IllegalArgumentException("schema is required for JSON response format");
     }
     return new ResponseFormat("text", "application/json", schema, null, null);
-  }
-
-  /** Image output with the given MIME type and optional sizing hints. */
-  public static ResponseFormat image(String mimeType, String aspectRatio, String imageSize) {
-    if (Strings.isBlank(mimeType)) {
-      throw new IllegalArgumentException("mimeType is required for image response format");
-    }
-    return new ResponseFormat("image", mimeType, null, aspectRatio, imageSize);
   }
 }

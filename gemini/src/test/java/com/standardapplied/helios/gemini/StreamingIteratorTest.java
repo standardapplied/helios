@@ -21,6 +21,7 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
@@ -687,6 +688,38 @@ class StreamingIteratorTest {
       var done = (StreamEvent.Done) events.getLast();
       assertEquals(1, done.response().citations().size());
       assertEquals("b.com", done.response().citations().getFirst().title());
+    }
+  }
+
+  private static String citedText(String text, String url) {
+    return "{\"type\":\"text\",\"text\":\""
+        + text
+        + "\",\"annotations\":[{\"type\":\"url_citation\",\"url\":\""
+        + url
+        + "\"}]}";
+  }
+
+  @org.junit.jupiter.api.Test
+  void onlyModelOutputStepsContributeCitationsInArrivalOrder() {
+    var sse =
+        stepStart(0, "{\"type\":\"user_input\",\"content\":[" + citedText("u", "https://u") + "]}")
+            + stepStart(
+                1, "{\"type\":\"thought\",\"summary\":[" + citedText("t", "https://t") + "]}")
+            + stepStart(2, "{\"type\":\"model_output\",\"content\":[]}")
+            + stepStart(
+                3, "{\"type\":\"model_output\",\"content\":[" + citedText("A", "https://a") + "]}")
+            + stepStart(
+                4, "{\"type\":\"model_output\",\"content\":[" + citedText("B", "https://b") + "]}")
+            + INTERACTION_COMPLETED;
+    try (var iterator = createIterator(sse, NEVER_IDLE)) {
+      var events = new java.util.ArrayList<StreamEvent>();
+      while (iterator.hasNext()) {
+        events.add(iterator.next());
+      }
+      var done = (StreamEvent.Done) events.getLast();
+      assertEquals(
+          List.of("https://a", "https://b"),
+          done.response().citations().stream().map(citation -> citation.sourceId()).toList());
     }
   }
 

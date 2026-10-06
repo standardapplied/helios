@@ -29,10 +29,7 @@ import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.gemini.api.ContentItem;
 import com.standardapplied.helios.gemini.api.GeminiJson;
-import com.standardapplied.helios.gemini.api.OutputAnnotation;
-import com.standardapplied.helios.gemini.api.Step;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
@@ -151,77 +148,6 @@ class GeminiModelTest {
     assertEquals("document", GeminiConversation.interactionsContentType("application/json"));
   }
 
-  private static ContentItem textWithAnnotations(String text, OutputAnnotation... annotations) {
-    return new ContentItem("text", text, null, null, null, null, List.of(annotations), null);
-  }
-
-  @Test
-  void extractCitationsFromUrlAnnotations() {
-    var annotation = new OutputAnnotation("url_citation", "https://example.com", "Example", 0, 10);
-    var step = Step.modelOutput(List.of(textWithAnnotations("Some text", annotation)));
-    var citations = GeminiCitations.extract(List.of(step));
-
-    assertEquals(1, citations.size());
-    var citation = citations.getFirst();
-    assertEquals("https://example.com", citation.sourceId());
-    assertEquals("Example", citation.title());
-    assertEquals(0, citation.startIndex());
-    assertEquals(10, citation.endIndex());
-  }
-
-  @Test
-  void extractCitationsSkipsNonUrlCitation() {
-    var annotation = new OutputAnnotation("file_citation", "file://local", "Local File", 0, 5);
-    var step = Step.modelOutput(List.of(textWithAnnotations("Some text", annotation)));
-    var citations = GeminiCitations.extract(List.of(step));
-
-    assertTrue(citations.isEmpty());
-  }
-
-  @Test
-  void extractCitationsFromNullSteps() {
-    assertTrue(GeminiCitations.extract(null).isEmpty());
-  }
-
-  @Test
-  void extractCitationsSkipsNonModelOutputSteps() {
-    var annotation = new OutputAnnotation("url_citation", "https://example.com", "Example", 0, 10);
-    var thoughtStep = Step.thought("sig", List.of(ContentItem.text("summary")));
-    var userStep = Step.userInput(List.of(textWithAnnotations("ignored", annotation)));
-    assertTrue(GeminiCitations.extract(List.of(thoughtStep, userStep)).isEmpty());
-  }
-
-  @Test
-  void extractCitationsSkipsNonTextContent() {
-    var step = Step.modelOutput(List.of(ContentItem.image("image/png", "iVBORw0KGgo=")));
-    assertTrue(GeminiCitations.extract(List.of(step)).isEmpty());
-  }
-
-  @Test
-  void extractCitationsMultipleStepsAndAnnotations() {
-    var ann1 = new OutputAnnotation("url_citation", "https://a.com", "A", 0, 5);
-    var ann2 = new OutputAnnotation("url_citation", "https://b.com", "B", 10, 20);
-    var step1 = Step.modelOutput(List.of(textWithAnnotations("First", ann1)));
-    var step2 = Step.modelOutput(List.of(textWithAnnotations("Second", ann2)));
-    var citations = GeminiCitations.extract(List.of(step1, step2));
-
-    assertEquals(2, citations.size());
-    assertEquals("https://a.com", citations.get(0).sourceId());
-    assertEquals("https://b.com", citations.get(1).sourceId());
-  }
-
-  @Test
-  void extractCitationsFromContentWithNoAnnotations() {
-    var step = Step.modelOutput("No sources here");
-    assertTrue(GeminiCitations.extract(List.of(step)).isEmpty());
-  }
-
-  @Test
-  void extractCitationsFromEmptyModelOutput() {
-    var step = Step.modelOutput(List.of());
-    assertTrue(GeminiCitations.extract(List.of(step)).isEmpty());
-  }
-
   @Test
   void defaultBaseUrlUsesStableInteractionsApi() {
     assertEquals("https://generativelanguage.googleapis.com", GeminiEndpoint.DEFAULT_API_ROOT);
@@ -323,12 +249,12 @@ class GeminiModelTest {
     var converted = GeminiConversation.of(messages);
 
     assertEquals(3, converted.steps().size());
-    assertTrue(converted.steps().get(0).hasTypeUserInput());
-    assertTrue(converted.steps().get(1).hasTypeFunctionCall());
+    assertEquals("user_input", converted.steps().get(0).type());
+    assertEquals("function_call", converted.steps().get(1).type());
     assertEquals("c1", converted.steps().get(1).id());
     assertEquals("search", converted.steps().get(1).name());
     assertEquals(Map.of("q", "test"), converted.steps().get(1).arguments());
-    assertTrue(converted.steps().get(2).hasTypeFunctionResult());
+    assertEquals("function_result", converted.steps().get(2).type());
     assertEquals("c1", converted.steps().get(2).callId());
     assertEquals("result1", converted.steps().get(2).result());
   }
@@ -357,15 +283,15 @@ class GeminiModelTest {
     var converted = GeminiConversation.of(messages);
 
     assertEquals(5, converted.steps().size());
-    assertTrue(converted.steps().get(0).hasTypeUserInput());
-    assertTrue(converted.steps().get(1).hasTypeFunctionCall());
+    assertEquals("user_input", converted.steps().get(0).type());
+    assertEquals("function_call", converted.steps().get(1).type());
     assertEquals("c1", converted.steps().get(1).id());
-    assertTrue(converted.steps().get(2).hasTypeFunctionCall());
+    assertEquals("function_call", converted.steps().get(2).type());
     assertEquals("c2", converted.steps().get(2).id());
-    assertTrue(converted.steps().get(3).hasTypeFunctionResult());
+    assertEquals("function_result", converted.steps().get(3).type());
     assertEquals("c1", converted.steps().get(3).callId());
     assertEquals("AAPL: $228", converted.steps().get(3).result());
-    assertTrue(converted.steps().get(4).hasTypeFunctionResult());
+    assertEquals("function_result", converted.steps().get(4).type());
     assertEquals("c2", converted.steps().get(4).callId());
     assertEquals("NVDA: $480", converted.steps().get(4).result());
   }
@@ -389,13 +315,13 @@ class GeminiModelTest {
     var converted = GeminiConversation.of(messages);
 
     assertEquals(5, converted.steps().size());
-    assertTrue(converted.steps().get(0).hasTypeUserInput());
+    assertEquals("user_input", converted.steps().get(0).type());
     assertTrue(converted.steps().get(1).hasTypeThought());
     assertEquals("sig-a", converted.steps().get(1).signature());
     assertTrue(converted.steps().get(2).hasTypeThought());
     assertEquals("sig-b", converted.steps().get(2).signature());
-    assertTrue(converted.steps().get(3).hasTypeFunctionCall());
-    assertTrue(converted.steps().get(4).hasTypeFunctionResult());
+    assertEquals("function_call", converted.steps().get(3).type());
+    assertEquals("function_result", converted.steps().get(4).type());
   }
 
   @Test
@@ -421,7 +347,7 @@ class GeminiModelTest {
 
     assertEquals(1, converted.steps().size());
     var step = converted.steps().getFirst();
-    assertTrue(step.hasTypeUserInput());
+    assertEquals("user_input", step.type());
     assertEquals(2, step.content().size());
     var image = step.content().get(0);
     assertEquals("image", image.type());
@@ -483,7 +409,7 @@ class GeminiModelTest {
 
     assertEquals("Be helpful", converted.systemInstruction());
     assertEquals(1, converted.steps().size());
-    assertTrue(converted.steps().getFirst().hasTypeUserInput());
+    assertEquals("user_input", converted.steps().getFirst().type());
   }
 
   @Test
@@ -535,20 +461,20 @@ class GeminiModelTest {
     assertEquals("You are an analyst", converted.systemInstruction());
     var steps = converted.steps();
     assertEquals(10, steps.size());
-    assertTrue(steps.get(0).hasTypeUserInput());
-    assertTrue(steps.get(1).hasTypeFunctionCall());
+    assertEquals("user_input", steps.get(0).type());
+    assertEquals("function_call", steps.get(1).type());
     assertEquals("c1", steps.get(1).id());
-    assertTrue(steps.get(2).hasTypeFunctionCall());
+    assertEquals("function_call", steps.get(2).type());
     assertEquals("c2", steps.get(2).id());
-    assertTrue(steps.get(3).hasTypeFunctionResult());
+    assertEquals("function_result", steps.get(3).type());
     assertEquals("c1", steps.get(3).callId());
-    assertTrue(steps.get(4).hasTypeFunctionResult());
+    assertEquals("function_result", steps.get(4).type());
     assertEquals("c2", steps.get(4).callId());
     assertTrue(steps.get(5).hasTypeModelOutput());
-    assertTrue(steps.get(6).hasTypeUserInput());
-    assertTrue(steps.get(7).hasTypeFunctionCall());
+    assertEquals("user_input", steps.get(6).type());
+    assertEquals("function_call", steps.get(7).type());
     assertEquals("c3", steps.get(7).id());
-    assertTrue(steps.get(8).hasTypeFunctionResult());
+    assertEquals("function_result", steps.get(8).type());
     assertTrue(steps.get(9).hasTypeModelOutput());
   }
 
@@ -642,7 +568,7 @@ class GeminiModelTest {
     var steps = GeminiConversation.continuationSteps(messages, 2);
 
     assertEquals(1, steps.size());
-    assertTrue(steps.getFirst().hasTypeFunctionResult());
+    assertEquals("function_result", steps.getFirst().type());
     assertEquals("search", steps.getFirst().name());
     assertEquals("c1", steps.getFirst().callId());
     assertEquals("result1", steps.getFirst().result());
@@ -660,10 +586,10 @@ class GeminiModelTest {
     var steps = GeminiConversation.continuationSteps(messages, 2);
 
     assertEquals(2, steps.size());
-    assertTrue(steps.get(0).hasTypeFunctionResult());
+    assertEquals("function_result", steps.get(0).type());
     assertEquals("c1", steps.get(0).callId());
     assertEquals("AAPL: $228", steps.get(0).result());
-    assertTrue(steps.get(1).hasTypeFunctionResult());
+    assertEquals("function_result", steps.get(1).type());
     assertEquals("c2", steps.get(1).callId());
     assertEquals("NVDA: $480", steps.get(1).result());
   }
@@ -676,7 +602,7 @@ class GeminiModelTest {
     var steps = GeminiConversation.continuationSteps(messages, 2);
 
     assertEquals(1, steps.size());
-    assertTrue(steps.getFirst().hasTypeUserInput());
+    assertEquals("user_input", steps.getFirst().type());
     assertEquals(1, steps.getFirst().content().size());
     assertEquals("Follow-up", steps.getFirst().content().getFirst().text());
   }
@@ -692,7 +618,7 @@ class GeminiModelTest {
     var steps = GeminiConversation.continuationSteps(messages, 3);
 
     assertEquals(1, steps.size());
-    assertTrue(steps.getFirst().hasTypeUserInput());
+    assertEquals("user_input", steps.getFirst().type());
     assertEquals("Follow-up", steps.getFirst().content().getFirst().text());
   }
 
@@ -708,9 +634,9 @@ class GeminiModelTest {
     var steps = GeminiConversation.continuationSteps(messages, 2);
 
     assertEquals(2, steps.size());
-    assertTrue(steps.get(0).hasTypeFunctionResult());
+    assertEquals("function_result", steps.get(0).type());
     assertEquals("c1", steps.get(0).callId());
-    assertTrue(steps.get(1).hasTypeUserInput());
+    assertEquals("user_input", steps.get(1).type());
     assertEquals("Thanks, now search more", steps.get(1).content().getFirst().text());
   }
 
@@ -736,7 +662,7 @@ class GeminiModelTest {
     var steps = GeminiConversation.continuationSteps(messages, 1);
 
     assertEquals(1, steps.size());
-    assertTrue(steps.getFirst().hasTypeUserInput());
+    assertEquals("user_input", steps.getFirst().type());
     assertEquals("Follow-up", steps.getFirst().content().getFirst().text());
   }
 
@@ -800,9 +726,9 @@ class GeminiModelTest {
     assertNull(request.previousInteractionId());
     assertEquals("system", request.systemInstruction());
     assertEquals(3, request.input().size());
-    assertTrue(request.input().get(0).hasTypeUserInput());
+    assertEquals("user_input", request.input().get(0).type());
     assertTrue(request.input().get(1).hasTypeModelOutput());
-    assertTrue(request.input().get(2).hasTypeUserInput());
+    assertEquals("user_input", request.input().get(2).type());
   }
 
   @Test

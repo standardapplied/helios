@@ -22,17 +22,4 @@ import java.util.List;
  * @param usage token usage statistics
  */
 public record InteractionResponse(
-    String id, String model, String status, List<Step> steps, InteractionUsage usage) {
-
-  public boolean hasStatusCompleted() {
-    return "completed".equals(status);
-  }
-
-  public boolean hasStatusFailed() {
-    return "failed".equals(status);
-  }
-
-  public boolean hasStatusRequiresAction() {
-    return "requires_action".equals(status);
-  }
-}
+    String id, String model, String status, List<Step> steps, InteractionUsage usage) {}

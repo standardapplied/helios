@@ -64,60 +64,8 @@ public record ContentItem(
     return new ContentItem(type, null, mimeType, null, uri, null, null, null);
   }
 
-  public static ContentItem image(String mimeType, String base64Data) {
-    return inlineData("image", mimeType, base64Data);
-  }
-
-  public static ContentItem imageUri(String mimeType, String uri) {
-    return fileUri("image", mimeType, uri);
-  }
-
-  public static ContentItem document(String mimeType, String base64Data) {
-    return inlineData("document", mimeType, base64Data);
-  }
-
-  public static ContentItem documentUri(String mimeType, String uri) {
-    return fileUri("document", mimeType, uri);
-  }
-
-  public static ContentItem audio(String mimeType, String base64Data) {
-    return inlineData("audio", mimeType, base64Data);
-  }
-
-  public static ContentItem audioUri(String mimeType, String uri) {
-    return fileUri("audio", mimeType, uri);
-  }
-
-  public static ContentItem video(String mimeType, String base64Data) {
-    return inlineData("video", mimeType, base64Data);
-  }
-
-  public static ContentItem videoUri(String mimeType, String uri) {
-    return fileUri("video", mimeType, uri);
-  }
-
   public boolean hasTypeText() {
     return "text".equals(type);
-  }
-
-  public boolean hasTypeImage() {
-    return "image".equals(type);
-  }
-
-  public boolean hasTypeAudio() {
-    return "audio".equals(type);
-  }
-
-  public boolean hasTypeDocument() {
-    return "document".equals(type);
-  }
-
-  public boolean hasTypeVideo() {
-    return "video".equals(type);
-  }
-
-  public boolean hasTypeThoughtSignature() {
-    return "thought_signature".equals(type);
   }
 
   public boolean hasAnnotations() {
