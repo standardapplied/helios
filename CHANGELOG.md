@@ -157,6 +157,27 @@ same `PgConfig`: `new PgAnnotationStore(pgConfig)`.
 | `pgTraceStore.findAnnotationsBySubjects(subjectIds)` | `pgAnnotationStore.findAnnotationsBySubjects(subjectIds)` |
 | `pgTraceStore.listAnnotations(paginate, scimFilter)` | `pgAnnotationStore.listAnnotations(paginate, scimFilter)` |
 
+**The session loop's collaborators are one record, and `SessionState` exposes its parts.**
+`TurnRunner` and `AgentLoop` took ten constructor arguments, six of them the same objects; those
+six are now the new public record `loop.LoopCollaborators` (`newBuilder()` / `with*`), built once
+and passed to both. `SessionState` is composed of the new public types `loop.ConversationHistory`
+and `loop.SessionTotals` and exposes them instead of re-declaring their methods. Replacing the
+history and accumulating usage, cost and citations are no longer public: the loop owns history
+replacement and accounting. Events, hook outcomes, terminals, requests and log messages are
+unchanged.
+
+| 2.x | 3.0 |
+|---|---|
+| `new TurnRunner(model, hooks, toolDispatch, steeringQueue, eventSink, hookContextFactory, clock, costCalculator, outputSchema, scheduler)` | `new TurnRunner(collaborators, model, costCalculator, outputSchema, scheduler)` with `collaborators = LoopCollaborators.newBuilder().withHooks(hooks).withToolDispatch(toolDispatch).withSteeringQueue(steeringQueue).withEventSink(eventSink).withHookContextFactory(hookContextFactory).withClock(clock).build()` |
+| `new AgentLoop(turnRunner, classifier, hooks, toolDispatch, steeringQueue, eventSink, hookContextFactory, clock, tokenCounter, contextCompactor)` | `new AgentLoop(collaborators, turnRunner, classifier, tokenCounter, contextCompactor)`, the same `collaborators` as the turn runner's |
+| `state.historySnapshot()` | `state.history().snapshot()` |
+| `state.appendMessage(message)` | `state.history().append(message)` |
+| `state.usage()`, `state.cost()`, `state.citations()` | `state.totals().usage()`, `state.totals().cost()`, `state.totals().citations()` |
+| `state.replaceHistory(messages)` | removed from the public API: compaction and a `PreModelTurnHook` returning `MutateHistory` replace the history |
+| `state.accumulateUsage(u)`, `state.accumulateCost(c)`, `state.accumulateCitations(cs)` | removed from the public API: the loop accumulates every model call's totals |
+| `state.tryFireContextWarning()`, `state.resetContextWarningFlag()`, `state.contextWarningFired()` | removed from the public API: the context watermark is the loop's |
+| `AgentSession.JacksonJsonAdapter` | removed: it had a private constructor and a package-private instance, so no caller could use it; typed `runBlocking` parses through the session module's one Jackson mapper |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
