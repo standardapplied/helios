@@ -124,6 +124,7 @@ class SessionRunCharacterizationTest {
   @Test
   void cancellationDuringAStalledTurnEndsTheRunAsCancelledAndShutsTheExecutorsDown() {
     var run = new Run();
+    run.limits = run.limits().withStreamIdleTimeout(Duration.ofHours(1));
     var stalled = new CountDownLatch(1);
     run.model.replies.removeLast();
     run.model.replies.removeLast();
