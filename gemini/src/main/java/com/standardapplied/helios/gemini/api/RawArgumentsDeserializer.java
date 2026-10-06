@@ -5,7 +5,6 @@ package com.standardapplied.helios.gemini.api;
 import tools.jackson.core.JsonParser;
 import tools.jackson.databind.DeserializationContext;
 import tools.jackson.databind.ValueDeserializer;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Deserializes the streaming {@code arguments} carrier on {@link ContentItem}, which the Gemini
@@ -29,9 +28,6 @@ import tools.jackson.databind.json.JsonMapper;
  */
 public final class RawArgumentsDeserializer extends ValueDeserializer<String> {
 
-  // Re-serializer for object/array-shaped arguments. Stateless and thread-safe.
-  private static final JsonMapper WRITER = JsonMapper.builder().build();
-
   @Override
   public String deserialize(JsonParser p, DeserializationContext ctxt) {
     var node = ctxt.readTree(p);
@@ -41,6 +37,6 @@ public final class RawArgumentsDeserializer extends ValueDeserializer<String> {
     if (node.isString()) {
       return node.asString();
     }
-    return WRITER.writeValueAsString(node);
+    return GeminiJson.DEFAULT.writeValueAsString(node);
   }
 }
