@@ -44,7 +44,7 @@ final class OpenAIReasoning {
 
   private OpenAIReasoning() {}
 
-  /** The reasoning config for {@code level}, {@code null} meaning none, or {@code null} to omit. */
+  /** The reasoning config for {@code level}, a null level being {@code NONE}; null to omit it. */
   static ResponsesRequest.ReasoningConfig of(EffortSupport support, ThinkingLevel level) {
     if (level == null || level == ThinkingLevel.NONE) {
       var effort = EFFORT_FOR_NONE.get(support);

@@ -1453,8 +1453,7 @@ class OpenAIModelTest {
   @Test
   void buildHttpRequestSkipsTimeoutWhenNull() {
     // Parity with the Anthropic and Gemini streams — when ModelConfig.responseTimeout is null we
-    // must
-    // not pass null to HttpRequest.Builder.timeout (which NPEs).
+    // must not pass null to HttpRequest.Builder.timeout (which NPEs).
     var config =
         ModelConfig.newBuilder().withApiKey("sk-test-key").withResponseTimeout(null).build();
     var streams = streams(config);
