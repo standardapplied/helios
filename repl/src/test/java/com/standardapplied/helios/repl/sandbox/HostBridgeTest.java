@@ -112,7 +112,7 @@ class HostBridgeTest {
       answer(env, Map.of("status", "accepted"));
 
       Await.value("submit to return", submitted);
-      assertEquals("stored-value", env.bootstrap().submittedValue());
+      assertEquals("stored-value", env.bridge().submittedValue());
     }
   }
 

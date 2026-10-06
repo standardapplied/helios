@@ -27,9 +27,9 @@ import java.util.Set;
  * module remains observable. Under classpath launch, {@code com.standardapplied.helios.repl} is NOT
  * added (it lives in the unnamed module on classpath and naming it would crash the JVM with "Module
  * not found"); the JDK baseline is enough because the bootstrap loads via classpath into the
- * unnamed module which reads all observable modules. {@link JvmSandbox#buildLaunchCommand} handles
- * the conditional logic — callers configure intent here and launch mode is decided at launch time
- * based on the parent's JVM arguments.
+ * unnamed module which reads all observable modules. {@link SandboxLauncher#buildLaunchCommand}
+ * handles the conditional logic — callers configure intent here and launch mode is decided at
+ * launch time based on the parent's JVM arguments.
  *
  * <p><strong>Bootstrap-transitive-closure limit (modulepath only).</strong> Under modulepath
  * launch, the bootstrap's transitive module dependencies stay observable regardless of {@code
@@ -70,9 +70,10 @@ public sealed interface SubprocessModules
    * {@code --limit-modules} regardless of launch mode.
    *
    * <p>{@code com.standardapplied.helios.repl} is deliberately NOT in this list — it's a user
-   * module that's only observable under modulepath launch. {@link JvmSandbox#buildLaunchCommand}
-   * appends it conditionally when the parent JVM uses {@code --module-path}; under classpath launch
-   * the bootstrap loads via classpath into the unnamed module and the JDK baseline suffices.
+   * module that's only observable under modulepath launch. {@link
+   * SandboxLauncher#buildLaunchCommand} appends it conditionally when the parent JVM uses {@code
+   * --module-path}; under classpath launch the bootstrap loads via classpath into the unnamed
+   * module and the JDK baseline suffices.
    *
    * <p>Includes:
    *
@@ -85,9 +86,9 @@ public sealed interface SubprocessModules
   List<String> REQUIRED_ROOTS = List.of("java.base", "java.compiler", "jdk.compiler", "jdk.jshell");
 
   /**
-   * Bootstrap module name. Appended to {@code --limit-modules} by {@link JvmSandbox} only when the
-   * parent uses {@code --module-path}; naming it under classpath launch would crash the subprocess
-   * JVM with "Module not found".
+   * Bootstrap module name. Appended to {@code --limit-modules} by {@link SandboxLauncher} only when
+   * the parent uses {@code --module-path}; naming it under classpath launch would crash the
+   * subprocess JVM with "Module not found".
    */
   String BOOTSTRAP_MODULE = "com.standardapplied.helios.repl";
 
@@ -135,9 +136,9 @@ public sealed interface SubprocessModules
   /**
    * Build the comma-separated argument value for {@code --limit-modules}, or return empty when this
    * variant is {@link Unrestricted}. {@code modulepathLaunch} is the launch-mode signal from {@link
-   * JvmSandbox#buildLaunchCommand} — when {@code true}, {@link #BOOTSTRAP_MODULE} is included; when
-   * {@code false} (classpath launch), it's omitted because the bootstrap class lives in the unnamed
-   * module and naming a non-observable module would crash the subprocess JVM.
+   * SandboxLauncher#buildLaunchCommand} — when {@code true}, {@link #BOOTSTRAP_MODULE} is included;
+   * when {@code false} (classpath launch), it's omitted because the bootstrap class lives in the
+   * unnamed module and naming a non-observable module would crash the subprocess JVM.
    *
    * @param modulepathLaunch whether the parent JVM uses {@code --module-path} (i.e. the bootstrap
    *     module is observable as a named module in the subprocess)

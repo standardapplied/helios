@@ -79,7 +79,7 @@ class LaunchCommandTest {
             .build();
 
     var command =
-        JvmSandbox.buildLaunchCommand(
+        SandboxLauncher.buildLaunchCommand(
             JAVA, config, RPC_SOCKET, parentArgs(modulePath), RAW_CLASSPATH, HOST_CWD);
 
     var expected = new ArrayList<String>();
@@ -110,7 +110,7 @@ class LaunchCommandTest {
             .withStopGrace(Duration.ofMillis(1500))
             .build();
 
-    var command = JvmSandbox.buildLaunchCommand(JAVA, config, null, List.of(), "", HOST_CWD);
+    var command = SandboxLauncher.buildLaunchCommand(JAVA, config, null, List.of(), "", HOST_CWD);
 
     assertEquals(List.of(JAVA, "-Xmx1024m", MAIN_CLASS, "--stop-grace=PT1.5S"), command);
   }
