@@ -1,0 +1,6 @@
+== chatStream
+TextDelta[text=Partial]
+Error[message=API stream error: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}, cause=TransientStreamException(API stream error: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}) provider=anthropic]
+Done[response=Response[content=Partial, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=25, outputTokens=0, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=37], thinking=null, citations=[], metadata={}]]
+== chat
+threw TransientStreamException(API stream error: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}) provider=anthropic

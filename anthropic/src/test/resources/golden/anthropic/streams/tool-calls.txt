@@ -1,0 +1,7 @@
+== chatStream
+TextDelta[text=Checking both.]
+ToolCallComplete[toolCall=ToolCall[id=toolu_1, name=weather, arguments={city=Paris}]]
+ToolCallComplete[toolCall=ToolCall[id=toolu_2, name=weather, arguments={city=Rome}]]
+Done[response=Response[content=Checking both., parsed=null, toolCalls=[ToolCall[id=toolu_1, name=weather, arguments={city=Paris}], ToolCall[id=toolu_2, name=weather, arguments={city=Rome}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=40, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=77], thinking=null, citations=[], metadata={anthropic.stopReason=tool_use}]]
+== chat
+Response[content=Checking both., parsed=null, toolCalls=[ToolCall[id=toolu_1, name=weather, arguments={city=Paris}], ToolCall[id=toolu_2, name=weather, arguments={city=Rome}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=40, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=77], thinking=null, citations=[], metadata={anthropic.stopReason=tool_use}]
