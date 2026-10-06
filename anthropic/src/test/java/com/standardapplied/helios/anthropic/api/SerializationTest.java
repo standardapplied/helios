@@ -8,6 +8,7 @@ package com.standardapplied.helios.anthropic.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.tool.ParameterType;
@@ -619,6 +620,7 @@ class SerializationTest {
     assertFalse(textDelta.hasTypeInputJsonDelta());
     assertFalse(textDelta.hasTypeThinkingDelta());
     assertFalse(textDelta.hasTypeSignatureDelta());
+    assertFalse(textDelta.hasTypeCitationsDelta());
 
     var inputJson =
         objectMapper.readValue(
@@ -776,6 +778,19 @@ class SerializationTest {
     assertTrue(
         json.contains("\"system\":\"Plain string system\""),
         "plain system field must serialize as a string when no caching is requested: " + json);
+  }
+
+  @Test
+  void systemAsTextOfAnEmptyBlockListIsNull() {
+    var request =
+        MessagesRequest.newBuilder()
+            .withModel("claude-opus-4-7")
+            .withMaxTokens(1024)
+            .withMessages(List.of(MessagesRequest.MessageEntry.user("Hi")))
+            .withSystem(List.<SystemContent>of())
+            .build();
+
+    assertNull(request.systemAsText());
   }
 
   @Test
