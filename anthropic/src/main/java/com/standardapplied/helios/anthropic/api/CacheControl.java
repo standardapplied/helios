@@ -28,9 +28,6 @@ public record CacheControl(String type, String ttl) {
   /** Cache class understood by every cache-aware Claude endpoint. */
   public static final String TYPE_EPHEMERAL = "ephemeral";
 
-  /** Five-minute default — the implicit TTL when {@link #ttl()} is {@code null}. */
-  public static final String TTL_5_MINUTES = "5m";
-
   /** One-hour extended TTL — opt-in via {@link #ephemeral(String)}. */
   public static final String TTL_1_HOUR = "1h";
 
@@ -58,7 +55,8 @@ public record CacheControl(String type, String ttl) {
   /**
    * Ephemeral cache breakpoint with an explicit TTL hint.
    *
-   * @param ttl Anthropic-defined TTL string; {@link #TTL_5_MINUTES} or {@link #TTL_1_HOUR}
+   * @param ttl Anthropic-defined TTL string, e.g. {@link #TTL_1_HOUR}; {@code null} means five
+   *     minutes
    * @return an ephemeral cache-control carrying {@code ttl}
    */
   public static CacheControl ephemeral(String ttl) {
