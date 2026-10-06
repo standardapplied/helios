@@ -3,6 +3,7 @@
 package com.standardapplied.helios.anthropic.api;
 
 import com.standardapplied.helios.core.provider.JsonBinding;
+import java.util.Map;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -22,7 +23,7 @@ public final class AnthropicJson {
 
   /** Structured output read through {@link #LENIENT}. */
   public static final JsonBinding STRUCTURED =
-      new JsonBinding(LENIENT.readerForMapOf(Object.class)::readValue, LENIENT::convertValue);
+      new JsonBinding(LENIENT.readerFor(Map.class)::readValue, LENIENT::convertValue);
 
   private AnthropicJson() {}
 }

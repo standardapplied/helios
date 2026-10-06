@@ -39,6 +39,7 @@ import java.net.http.HttpRequest;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JacksonException;
 
 class AnthropicModelTest {
 
@@ -1478,6 +1479,21 @@ class AnthropicModelTest {
                 parse(
                     config, "{\"name\":\"Alice\",unterminated", OutputSchema.of(TestPerson.class)));
     assertTrue(ex.errors().stream().anyMatch(e -> e.startsWith("JSON syntax error:")));
+  }
+
+  @Test
+  void aStructuredAnswerThatIsNotAnObjectReportsTheMapReadFailure() {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
+    var expected =
+        assertThrows(
+            JacksonException.class, () -> AnthropicJson.LENIENT.readValue("[1, 2]", Map.class));
+
+    var ex =
+        assertThrows(
+            StructuredOutputParseException.class,
+            () -> parse(config, "[1, 2]", OutputSchema.of(TestPerson.class)));
+
+    assertEquals(List.of("JSON syntax error: " + expected.getMessage()), ex.errors());
   }
 
   @Test
