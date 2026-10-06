@@ -15,8 +15,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.repl.protocol.RpcError;
 import com.standardapplied.helios.repl.protocol.RpcMessage;
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
+import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
@@ -56,6 +59,9 @@ class JvmSandboxBootstrapTest {
   private static final String LOOP_FOREVER = "while (true) { }";
 
   private static final String SNIPPET_THREAD_GROUP = "JShell process local execution";
+
+  private static final String UNSTOPPABLE =
+      "The timed-out snippet could not be stopped; the sandbox is shutting down";
 
   private BootstrapEnvironment env;
   private HostBridgeState bridge;
@@ -185,7 +191,7 @@ class JvmSandboxBootstrapTest {
     var result =
         evaluator.handleExecute(Map.of("code", BLOCK_UNTIL_INTERRUPTED, "timeoutMs", TIMEOUT_MS));
 
-    assertTimedOut(result);
+    assertStopped(result);
     assertEquals(List.of(), liveSnippetThreads());
   }
 
@@ -193,7 +199,7 @@ class JvmSandboxBootstrapTest {
   void loopingSnippetIsStoppedAtTimeout() {
     var result = evaluator.handleExecute(Map.of("code", LOOP_FOREVER, "timeoutMs", TIMEOUT_MS));
 
-    assertTimedOut(result);
+    assertStopped(result);
     assertEquals(List.of(), liveSnippetThreads());
   }
 
@@ -208,7 +214,7 @@ class JvmSandboxBootstrapTest {
   void timeoutBeforeTheSnippetRunsStillStopsIt(String snippet) {
     var result = evaluator.handleExecute(Map.of("code", snippet, "timeoutMs", 1));
 
-    assertTimedOut(result);
+    assertStopped(result);
     assertEquals(List.of(), liveSnippetThreads());
   }
 
@@ -267,13 +273,16 @@ class JvmSandboxBootstrapTest {
   @Test
   void requestWhoseHandlerThrowsIsAnsweredWithAnInternalError() {
     env.close();
+    var params = Map.<String, Object>of("snippet", "int fromPrelude = 7;");
+    var handlerFailure =
+        assertThrows(IllegalStateException.class, () -> evaluator.handleInstallPrelude(params));
 
-    rpc.dispatch(
-        new RpcMessage.Request("1", "installPrelude", Map.of("snippet", "int fromPrelude = 7;")));
+    rpc.dispatch(new RpcMessage.Request("1", "installPrelude", params));
 
     var error = assertInstanceOf(RpcMessage.ErrorResponse.class, env.nextMessage());
     assertEquals("1", error.id());
     assertEquals(RpcError.INTERNAL_ERROR, error.error().code());
+    assertEquals(handlerFailure.getMessage(), error.error().message());
   }
 
   @Test
@@ -312,7 +321,7 @@ class JvmSandboxBootstrapTest {
     var timedOut =
         evaluator.handleExecute(
             Map.of("code", BLOCK_UNTIL_INTERRUPTED + " after = 1;", "timeoutMs", TIMEOUT_MS));
-    assertTimedOut(timedOut);
+    assertStopped(timedOut);
 
     var read = evaluator.handleExecute(Map.of("code", "after", "timeoutMs", BEYOND_HANG_GUARD_MS));
 
@@ -523,7 +532,7 @@ class JvmSandboxBootstrapTest {
 
     var failure = Await.failure("the host call answered with an error", result);
     assertInstanceOf(RuntimeException.class, failure);
-    assertTrue(failure.getMessage().contains("something broke"));
+    assertEquals("Host call failed: Host error [-32603]: something broke", failure.getMessage());
   }
 
   @Test
@@ -610,7 +619,76 @@ class JvmSandboxBootstrapTest {
 
     var failure = Await.failure("the host call pending at end of input", call);
     assertInstanceOf(RuntimeException.class, failure);
-    assertTrue(failure.getMessage().contains("Sandbox stdin closed"));
+    assertEquals("Host call failed: Sandbox stdin closed", failure.getMessage());
+  }
+
+  @Test
+  void readFailureFailsThePendingHostCalls() {
+    var call = env.inSandbox(() -> bridge.callHost("test", Map.of("key", "val")));
+    env.nextRequest();
+    var failingSocket =
+        new BufferedReader(
+            new Reader() {
+              @Override
+              public int read(char[] buffer, int offset, int length) throws IOException {
+                throw new IOException("connection reset");
+              }
+
+              @Override
+              public void close() {}
+            });
+
+    new BootstrapRpc(failingSocket, bridge, evaluator, status -> {}).readLoop();
+
+    var failure = Await.failure("the host call pending when the read failed", call);
+    assertEquals("Host call failed: Sandbox stdin closed", failure.getMessage());
+  }
+
+  @Test
+  void interruptedHostCallFailsAndKeepsTheInterrupt() {
+    var call =
+        env.inSandbox(
+            () -> {
+              Thread.currentThread().interrupt();
+              var failure =
+                  assertThrows(RuntimeException.class, () -> bridge.callHost("test", Map.of()));
+              return Map.entry(failure.getMessage(), Thread.currentThread().isInterrupted());
+            });
+
+    assertEquals(
+        Map.entry("Host call interrupted", true), Await.value("the interrupted host call", call));
+  }
+
+  /**
+   * The warning goes to {@code System.err}, which an execute captures while its snippet runs, so
+   * the warning is written while a snippet is parked in a host call and read from that execute's
+   * stderr.
+   */
+  @Test
+  void classpathThatCannotBeExtendedIsWarnedAbout() {
+    var closed = JShell.create();
+    closed.close();
+    var execute =
+        env.inSandbox(
+            () ->
+                evaluator.handleExecute(
+                    Map.of(
+                        "code",
+                        "predict(\"hold\", \"the captured streams\");",
+                        "timeoutMs",
+                        BEYOND_HANG_GUARD_MS,
+                        "captureBindings",
+                        false)));
+    var parked = env.nextRequest();
+
+    JvmSandboxBootstrap.addHostBridgeToJShellClasspath(closed);
+    answer(parked);
+
+    assertEquals(
+        "Warning: could not add HostBridge location to JShell classpath: JShell ("
+            + closed
+            + ") has been closed.\n",
+        Await.value("the execute capturing the warning", execute).get("stderr"));
   }
 
   @Test
@@ -630,10 +708,11 @@ class JvmSandboxBootstrapTest {
     var before = System.out;
     var beforeErr = System.err;
 
-    evaluator.handleExecute(Map.of("code", LOOP_FOREVER, "timeoutMs", TIMEOUT_MS));
+    var result = evaluator.handleExecute(Map.of("code", LOOP_FOREVER, "timeoutMs", TIMEOUT_MS));
 
     assertEquals(before, System.out);
     assertEquals(beforeErr, System.err);
+    assertStopped(result);
   }
 
   /**
@@ -658,7 +737,8 @@ class JvmSandboxBootstrapTest {
         evaluator.handleExecute(Map.of("code", "1 + 1", "timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals(1, result.get("exitCode"));
-    assertTrue(((String) result.get("stderr")).contains("Concurrent execution rejected"));
+    assertEquals(
+        "Concurrent execution rejected — only one execute may run at a time", result.get("stderr"));
     rpc.dispatch(new RpcMessage.Response(heldBy.id(), Map.of("output", "released")));
     assertEquals(0, Await.value("the first execute", first).get("exitCode"));
   }
@@ -723,8 +803,17 @@ class JvmSandboxBootstrapTest {
   private static void assertUnstoppable(Map<String, Object> result) {
     assertTimedOut(result);
     assertTrue(
-        ((String) result.get("stderr")).contains("could not be stopped"),
+        ((String) result.get("stderr")).contains(UNSTOPPABLE + "\n"),
         "stderr was: " + result.get("stderr"));
+  }
+
+  /** Timed out, and stopped rather than given up as unstoppable. */
+  private void assertStopped(Map<String, Object> result) {
+    assertTimedOut(result);
+    assertFalse(
+        ((String) result.get("stderr")).contains(UNSTOPPABLE),
+        "stderr was: " + result.get("stderr"));
+    assertFalse(evaluator.isUnstoppableOn(Thread.currentThread()));
   }
 
   private static void assertTimedOut(Map<String, Object> result) {

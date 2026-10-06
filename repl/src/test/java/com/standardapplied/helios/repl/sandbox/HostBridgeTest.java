@@ -27,7 +27,10 @@ class HostBridgeTest {
 
   @Test
   void predictWithNoBootstrapThrows() {
-    assertThrows(IllegalStateException.class, () -> HostBridge.predict("instructions", "input"));
+    var thrown =
+        assertThrows(
+            IllegalStateException.class, () -> HostBridge.predict("instructions", "input"));
+    assertEquals("HostBridge can only be called from within a sandbox", thrown.getMessage());
   }
 
   @Test

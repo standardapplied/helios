@@ -27,7 +27,14 @@ final class BootstrapArguments {
    * WARNING surfaces the reduced isolation so deployers don't take it on accident.
    */
   static void warnIfReducedIsolation(PrintStream err) {
-    var module = JvmSandboxBootstrap.class.getModule();
+    warnIfReducedIsolation(JvmSandboxBootstrap.class.getModule(), err);
+  }
+
+  /**
+   * The {@link #warnIfReducedIsolation(PrintStream)} decision for the bootstrap running in {@code
+   * module}, so each launch regime can be checked from a single JVM.
+   */
+  static void warnIfReducedIsolation(Module module, PrintStream err) {
     String reason;
     if (!module.isNamed()) {
       reason = "running in the unnamed module (classpath launch)";
