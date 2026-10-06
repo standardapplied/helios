@@ -126,25 +126,15 @@ final class AgentLoopTest {
       Model model, SteeringQueue queue, TokenCounter counter, ContextCompactor compactor) {
     var runner =
         new TurnRunner(
+            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
             model,
-            hooks,
-            dispatch,
-            queue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
             CostCalculator.ZERO,
             null,
             scheduler);
     return new AgentLoop(
+        new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
         runner,
         new StopClassifier(),
-        hooks,
-        dispatch,
-        queue,
-        events::add,
-        CTX_FACTORY,
-        CLOCK,
         counter,
         compactor);
   }
@@ -156,13 +146,8 @@ final class AgentLoopTest {
     var queue = new SteeringQueue(8);
     var runner =
         new TurnRunner(
+            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
             fixedModel("x", FinishReason.STOP, Usage.of(1, 1)),
-            hooks,
-            dispatch,
-            queue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
             CostCalculator.ZERO,
             null,
             scheduler);
@@ -171,142 +156,59 @@ final class AgentLoopTest {
     var compactor = ContextCompactor.disabled();
     assertThrows(
         NullPointerException.class,
+        () -> new AgentLoop(null, runner, classifier, counter, compactor));
+    assertThrows(
+        NullPointerException.class,
         () ->
             new AgentLoop(
+                new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
                 null,
                 classifier,
-                hooks,
-                dispatch,
-                queue,
-                events::add,
-                CTX_FACTORY,
-                CLOCK,
                 counter,
                 compactor));
     assertThrows(
         NullPointerException.class,
         () ->
             new AgentLoop(
+                new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
                 runner,
-                null,
-                hooks,
-                dispatch,
-                queue,
-                events::add,
-                CTX_FACTORY,
-                CLOCK,
-                counter,
-                compactor));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new AgentLoop(
-                runner,
-                classifier,
-                null,
-                dispatch,
-                queue,
-                events::add,
-                CTX_FACTORY,
-                CLOCK,
-                counter,
-                compactor));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new AgentLoop(
-                runner,
-                classifier,
-                hooks,
-                null,
-                queue,
-                events::add,
-                CTX_FACTORY,
-                CLOCK,
-                counter,
-                compactor));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new AgentLoop(
-                runner,
-                classifier,
-                hooks,
-                dispatch,
-                null,
-                events::add,
-                CTX_FACTORY,
-                CLOCK,
-                counter,
-                compactor));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new AgentLoop(
-                runner,
-                classifier,
-                hooks,
-                dispatch,
-                queue,
-                null,
-                CTX_FACTORY,
-                CLOCK,
-                counter,
-                compactor));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new AgentLoop(
-                runner,
-                classifier,
-                hooks,
-                dispatch,
-                queue,
-                events::add,
-                null,
-                CLOCK,
-                counter,
-                compactor));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new AgentLoop(
-                runner,
-                classifier,
-                hooks,
-                dispatch,
-                queue,
-                events::add,
-                CTX_FACTORY,
                 null,
                 counter,
                 compactor));
     assertThrows(
         NullPointerException.class,
+        () -> new LoopCollaborators(null, dispatch, queue, events::add, CTX_FACTORY, CLOCK));
+    assertThrows(
+        NullPointerException.class,
+        () -> new LoopCollaborators(hooks, null, queue, events::add, CTX_FACTORY, CLOCK));
+    assertThrows(
+        NullPointerException.class,
+        () -> new LoopCollaborators(hooks, dispatch, null, events::add, CTX_FACTORY, CLOCK));
+    assertThrows(
+        NullPointerException.class,
+        () -> new LoopCollaborators(hooks, dispatch, queue, null, CTX_FACTORY, CLOCK));
+    assertThrows(
+        NullPointerException.class,
+        () -> new LoopCollaborators(hooks, dispatch, queue, events::add, null, CLOCK));
+    assertThrows(
+        NullPointerException.class,
+        () -> new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, null));
+    assertThrows(
+        NullPointerException.class,
         () ->
             new AgentLoop(
+                new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
                 runner,
                 classifier,
-                hooks,
-                dispatch,
-                queue,
-                events::add,
-                CTX_FACTORY,
-                CLOCK,
                 null,
                 compactor));
     assertThrows(
         NullPointerException.class,
         () ->
             new AgentLoop(
+                new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
                 runner,
                 classifier,
-                hooks,
-                dispatch,
-                queue,
-                events::add,
-                CTX_FACTORY,
-                CLOCK,
                 counter,
                 null));
   }
@@ -371,7 +273,7 @@ final class AgentLoopTest {
 
     var received = events.stream().filter(e -> e instanceof QueryEvent.UserMessageReceived).count();
     assertEquals(3, received, "one UserMessageReceived per original message");
-    var history = state.historySnapshot();
+    var history = state.history().snapshot();
     assertTrue(history.get(0).content().startsWith("[messages composed: 3]"));
     assertTrue(history.get(0).content().contains("one"));
     assertTrue(history.get(0).content().contains("two"));
@@ -500,13 +402,8 @@ final class AgentLoopTest {
     // Sabotage by passing an event sink that throws on the very first emission.
     var runner =
         new TurnRunner(
+            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
             fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)),
-            hooks,
-            dispatch,
-            queue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
             CostCalculator.ZERO,
             null,
             scheduler);
@@ -516,14 +413,9 @@ final class AgentLoopTest {
         };
     var sabotaged =
         new AgentLoop(
+            new LoopCollaborators(hooks, dispatch, queue, throwingSink, CTX_FACTORY, CLOCK),
             runner,
             new StopClassifier(),
-            hooks,
-            dispatch,
-            queue,
-            throwingSink,
-            CTX_FACTORY,
-            CLOCK,
             TokenCounter.charBased(),
             ContextCompactor.disabled());
     var result = sabotaged.run(freshState(), SessionLimits.defaults());
@@ -643,7 +535,7 @@ final class AgentLoopTest {
             } else if (n == 2) {
               // Turn 2 simulates the Day-2 compactor clearing the flag before the
               // watermark check fires again for this turn.
-              state.resetContextWarningFlag();
+              state.contextWatermark().reset();
             }
             return Response.newBuilder()
                 .withContent("step-" + n)
@@ -843,31 +735,21 @@ final class AgentLoopTest {
     var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(trimmer));
     var runner =
         new TurnRunner(
+            new LoopCollaborators(hookRegistry, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
             fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)),
-            hookRegistry,
-            dispatch,
-            queue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
             CostCalculator.ZERO,
             null,
             scheduler);
     var loop =
         new AgentLoop(
+            new LoopCollaborators(hookRegistry, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
             runner,
             new StopClassifier(),
-            hookRegistry,
-            dispatch,
-            queue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
             TokenCounter.charBased(),
             ContextCompactor.disabled());
     var state = freshState();
     loop.run(state, SessionLimits.defaults());
-    var history = state.historySnapshot();
+    var history = state.history().snapshot();
     assertEquals(replacement.size() + 1, history.size(), "history rewritten; assistant appended");
     assertEquals("compacted system", history.get(0).content());
     assertEquals("merged turn", history.get(1).content());
@@ -944,8 +826,10 @@ final class AgentLoopTest {
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, reporting)
         .run(state, limits);
     // Model turn contributes 1+1, compaction contributes 200+40.
-    assertTrue(state.usage().inputTokens() >= 200, "compaction input tokens must accumulate");
-    assertTrue(state.usage().outputTokens() >= 40, "compaction output tokens must accumulate");
+    assertTrue(
+        state.totals().usage().inputTokens() >= 200, "compaction input tokens must accumulate");
+    assertTrue(
+        state.totals().usage().outputTokens() >= 40, "compaction output tokens must accumulate");
   }
 
   @Test
@@ -961,8 +845,8 @@ final class AgentLoopTest {
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, pureTrim)
         .run(state, limits);
     // Only the model turn's 1+1 contributes; compactor reports zero usage.
-    assertEquals(1, state.usage().inputTokens());
-    assertEquals(1, state.usage().outputTokens());
+    assertEquals(1, state.totals().usage().inputTokens());
+    assertEquals(1, state.totals().usage().outputTokens());
   }
 
   // ── effectiveMaxContextTokens resolver (P0-2c, model-aware default) ──────
@@ -1009,7 +893,7 @@ final class AgentLoopTest {
             ContextCompactor.disabled());
     var limits = SessionLimits.newBuilder().withMaxContextTokens(0L).build();
     // 1M - 20K output reservation = 980_000.
-    assertEquals(980_000L, loop.effectiveMaxContextTokens(limits));
+    assertEquals(980_000L, loop.compaction().effectiveMaxContextTokens(limits));
   }
 
   @Test
@@ -1021,7 +905,7 @@ final class AgentLoopTest {
             TokenCounter.charBased(),
             ContextCompactor.disabled());
     var limits = SessionLimits.newBuilder().withMaxContextTokens(50_000L).build();
-    assertEquals(50_000L, loop.effectiveMaxContextTokens(limits));
+    assertEquals(50_000L, loop.compaction().effectiveMaxContextTokens(limits));
   }
 
   @Test
@@ -1034,7 +918,7 @@ final class AgentLoopTest {
             ContextCompactor.disabled());
     var limits = SessionLimits.newBuilder().withMaxContextTokens(1_000_000L).build();
     // 200K - 20K reservation = 180_000.
-    assertEquals(180_000L, loop.effectiveMaxContextTokens(limits));
+    assertEquals(180_000L, loop.compaction().effectiveMaxContextTokens(limits));
   }
 
   @Test
@@ -1047,7 +931,8 @@ final class AgentLoopTest {
             ContextCompactor.disabled());
     var limits = SessionLimits.newBuilder().withMaxContextTokens(0L).build();
     assertEquals(
-        AgentLoop.AUTO_FALLBACK_MAX_CONTEXT_TOKENS, loop.effectiveMaxContextTokens(limits));
+        ContextCompaction.AUTO_FALLBACK_MAX_CONTEXT_TOKENS,
+        loop.compaction().effectiveMaxContextTokens(limits));
   }
 
   @Test
@@ -1059,7 +944,7 @@ final class AgentLoopTest {
             TokenCounter.charBased(),
             ContextCompactor.disabled());
     var limits = SessionLimits.newBuilder().withMaxContextTokens(75_000L).build();
-    assertEquals(75_000L, loop.effectiveMaxContextTokens(limits));
+    assertEquals(75_000L, loop.compaction().effectiveMaxContextTokens(limits));
   }
 
   @Test
@@ -1132,26 +1017,16 @@ final class AgentLoopTest {
     var model = fixedModel("ok", FinishReason.STOP, Usage.of(0, 0));
     var runner =
         new TurnRunner(
+            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
             model,
-            hooks,
-            dispatch,
-            queue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
             calculator,
             null,
             scheduler);
     var loop =
         new AgentLoop(
+            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
             runner,
             new StopClassifier(),
-            hooks,
-            dispatch,
-            queue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
             staged,
             reporting);
     var state = freshState();
@@ -1159,7 +1034,7 @@ final class AgentLoopTest {
     // 1_000_000 input × (10_000_000 μUSD / 1M tokens) + 100_000 output × (10/M) = 11_000_000 μUSD.
     // The pre-fix code priced at the main rate (100/M) → 110_000_000 μUSD. The order-of-magnitude
     // assertion isolates the routing fix from the exact firing count.
-    var cost = state.cost().microUsd();
+    var cost = state.totals().cost().microUsd();
     assertTrue(cost > 0L, "compaction usage must accumulate cost");
     assertTrue(
         cost < 50_000_000L,
@@ -1209,25 +1084,15 @@ final class AgentLoopTest {
       com.standardapplied.helios.session.hooks.HookRegistry hookRegistry) {
     var runner =
         new TurnRunner(
+            new LoopCollaborators(hookRegistry, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
             model,
-            hookRegistry,
-            dispatch,
-            queue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
             CostCalculator.ZERO,
             null,
             scheduler);
     return new AgentLoop(
+        new LoopCollaborators(hookRegistry, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
         runner,
         new StopClassifier(),
-        hookRegistry,
-        dispatch,
-        queue,
-        events::add,
-        CTX_FACTORY,
-        CLOCK,
         counter,
         compactor);
   }

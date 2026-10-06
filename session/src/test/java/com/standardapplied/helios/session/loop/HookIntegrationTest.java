@@ -160,25 +160,15 @@ final class HookIntegrationTest {
             ConcurrencyLimits.defaults());
     var runner =
         new TurnRunner(
+            new LoopCollaborators(hooks, dispatch, queue, events::add, contextFactory(), CLOCK),
             model,
-            hooks,
-            dispatch,
-            queue,
-            events::add,
-            contextFactory(),
-            CLOCK,
             CostCalculator.ZERO,
             null,
             scheduler);
     return new AgentLoop(
+        new LoopCollaborators(hooks, dispatch, queue, events::add, contextFactory(), CLOCK),
         runner,
         new StopClassifier(),
-        hooks,
-        dispatch,
-        queue,
-        events::add,
-        contextFactory(),
-        CLOCK,
         TokenCounter.charBased(),
         ContextCompactor.disabled());
   }
@@ -241,8 +231,8 @@ final class HookIntegrationTest {
     var state = freshState();
     buildLoop(model, ToolRegistry.empty(), hooks, queue).run(state, SessionLimits.defaults());
     // History's user message should carry the rewritten text.
-    assertEquals("REDACTED", state.historySnapshot().get(0).content());
-    assertEquals(List.of(reference), state.historySnapshot().get(0).fileReferences());
+    assertEquals("REDACTED", state.history().snapshot().get(0).content());
+    assertEquals(List.of(reference), state.history().snapshot().get(0).fileReferences());
   }
 
   @Test
@@ -526,7 +516,7 @@ final class HookIntegrationTest {
     buildLoop(model, tools, hooks, queue).run(state, SessionLimits.defaults());
 
     // History's tool message should carry the REWRITTEN output.
-    var history = state.historySnapshot();
+    var history = state.history().snapshot();
     var toolMsg =
         history.stream()
             .filter(m -> m.role() == com.standardapplied.helios.core.model.Role.TOOL)
@@ -609,7 +599,7 @@ final class HookIntegrationTest {
     assertEquals("after-tool-stop", success.result());
     // Tool message was appended before the Stop fired
     var toolMsg =
-        state.historySnapshot().stream()
+        state.history().snapshot().stream()
             .filter(m -> m.role() == com.standardapplied.helios.core.model.Role.TOOL)
             .findFirst()
             .orElseThrow();

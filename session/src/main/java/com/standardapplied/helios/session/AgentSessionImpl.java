@@ -9,17 +9,14 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
-import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.ask.QuestionGateway;
-import com.standardapplied.helios.session.execution.ExecutionProvider;
-import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
 import com.standardapplied.helios.session.hooks.Hook;
-import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.loop.AgentLoop;
+import com.standardapplied.helios.session.loop.LoopCollaborators;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StopClassifier;
 import com.standardapplied.helios.session.loop.ToolDispatch;
@@ -29,32 +26,22 @@ import com.standardapplied.helios.session.memory.MemoryWriteTool;
 import com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolRegistry;
-import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.Objects;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Function;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Concrete {@link AgentSession} implementation.
  *
  * <p>One instance per session. Builds the loop substrate ({@link SessionState}, {@link
- * SteeringQueue}, {@link HookRegistry}, {@link ToolDispatch}, {@link TurnRunner}, {@link
- * StopClassifier}, {@link AgentLoop}) in the constructor; defers starting the agent-loop virtual
- * thread until the first {@link #send(UserMessage)} or {@link #interrupt(String)} call so
- * subscribers attached between construction and first send observe every event.
+ * SteeringQueue}, {@link HookRegistry}, {@link ToolDispatch}, {@link LoopCollaborators}, {@link
+ * TurnRunner}, {@link StopClassifier}, {@link AgentLoop}) in the constructor; its {@link
+ * SessionLifecycle} defers starting the agent-loop virtual thread until the first {@link
+ * #send(UserMessage)} or {@link #interrupt(String)} call so subscribers attached between
+ * construction and first send observe every event. Open {@code AskUserQuestion} questions are its
+ * {@link PendingQuestions}.
  *
  * <h2>Event delivery</h2>
  *
@@ -72,25 +59,16 @@ import java.util.logging.Logger;
  */
 public final class AgentSessionImpl implements AgentSession {
 
-  private static final Logger LOGGER = Logger.getLogger(AgentSessionImpl.class.getName());
-
   private final String sessionId;
   private final SessionState state;
-  private final SessionContext sessionContext;
-  private final ExecutionProvider executionProvider;
-  private final boolean providerAccepted;
   private final SteeringQueue steeringQueue;
   private final SessionLimits limits;
   private final SessionEventPublisher events;
-  private final ScheduledExecutorService deadlineScheduler;
-  private volatile ScheduledFuture<?> wallClockDeadline;
+  private final SessionLifecycle lifecycle;
   private final AgentLoop loop;
   private final CompletableFuture<ResultMessage> resultFuture = new CompletableFuture<>();
-  private final AtomicBoolean started = new AtomicBoolean(false);
   private final AtomicBoolean closed = new AtomicBoolean(false);
-  private final ConcurrentHashMap<String, CompletableFuture<AskUserQuestionResponse>>
-      pendingQuestions = new ConcurrentHashMap<>();
-  private final InstantSource clock;
+  private final PendingQuestions pendingQuestions;
   private final RawOutputCapturePolicy rawOutputCapturePolicy;
 
   /**
@@ -103,27 +81,21 @@ public final class AgentSessionImpl implements AgentSession {
     Objects.requireNonNull(options, "options must not be null");
     this.sessionId = options.sessionId();
     this.limits = options.limits();
-    this.clock = options.clock();
-    this.executionProvider = options.executionProvider();
     this.rawOutputCapturePolicy = options.model().rawOutputCapturePolicy();
+    var clock = options.clock();
     var concurrency = options.concurrency();
     var cancellation = new CancellationToken();
     this.state = new SessionState(sessionId, cancellation, clock);
-    options.systemPrompt().ifPresent(prompt -> this.state.appendMessage(Message.system(prompt)));
-    this.sessionContext = new SessionContext(sessionId, cancellation, clock);
+    options.systemPrompt().ifPresent(prompt -> this.state.history().append(Message.system(prompt)));
+    var sessionContext = new SessionContext(sessionId, cancellation, clock);
     this.steeringQueue = new SteeringQueue(concurrency.maxQueuedUserMessages());
     this.events = new SessionEventPublisher(sessionId);
-    this.deadlineScheduler =
-        Executors.newSingleThreadScheduledExecutor(
-            r -> {
-              var t = new Thread(r, "helios-deadline-" + sessionId);
-              t.setDaemon(true);
-              return t;
-            });
-    var sessionGateway = new SessionQuestionGateway();
-    var combinedTools = withBuiltins(options.tools(), options, sessionGateway);
+    this.pendingQuestions = new PendingQuestions(state, events, clock);
+    var combinedTools = withBuiltins(options.tools(), options, pendingQuestions);
     var toolDispatch = new ToolDispatch(sessionContext, combinedTools, concurrency);
-    this.providerAccepted = invokeOnSessionStart();
+    this.lifecycle =
+        new SessionLifecycle(
+            state, sessionContext, options.executionProvider(), events, resultFuture);
     var combinedHooks = new ArrayList<Hook>(options.hooks().size() + 1);
     options
         .permission()
@@ -131,35 +103,34 @@ public final class AgentSessionImpl implements AgentSession {
             p ->
                 combinedHooks.add(
                     DefaultPermissionEvaluator.newBuilder(p, combinedTools)
-                        .withQuestionGateway(sessionGateway)
+                        .withQuestionGateway(pendingQuestions)
                         .build()));
     combinedHooks.addAll(options.hooks());
-    var hookRegistry = new HookRegistry(combinedHooks);
     var model = options.model();
-    Function<SessionState, HookContext> contextFactory =
-        s -> new DefaultHookContext(s.sessionId(), s.currentTurnIndex(), s.cancellation(), model);
+    var collaborators =
+        LoopCollaborators.newBuilder()
+            .withHooks(new HookRegistry(combinedHooks))
+            .withToolDispatch(toolDispatch)
+            .withSteeringQueue(steeringQueue)
+            .withEventSink(events::emit)
+            .withHookContextFactory(
+                s ->
+                    new DefaultHookContext(
+                        s.sessionId(), s.currentTurnIndex(), s.cancellation(), model))
+            .withClock(clock)
+            .build();
     var turnRunner =
         new TurnRunner(
+            collaborators,
             model,
-            hookRegistry,
-            toolDispatch,
-            steeringQueue,
-            events::emit,
-            contextFactory,
-            clock,
             options.costCalculator(),
             options.outputSchema().orElse(null),
-            deadlineScheduler);
+            lifecycle.scheduler());
     this.loop =
         new AgentLoop(
+            collaborators,
             turnRunner,
             new StopClassifier(),
-            hookRegistry,
-            toolDispatch,
-            steeringQueue,
-            events::emit,
-            contextFactory,
-            clock,
             options.tokenCounter(),
             options.contextCompactor());
   }
@@ -167,51 +138,6 @@ public final class AgentSessionImpl implements AgentSession {
   @Override
   public RawOutputCapturePolicy rawOutputCapturePolicy() {
     return rawOutputCapturePolicy;
-  }
-
-  /**
-   * Fire {@code executionProvider.onSessionStart(sessionContext)} and react to its outcome. When
-   * the provider returns {@link SessionStartOutcome.Refuse}, settle the result future immediately
-   * with {@link ResultMessage.ErrorProviderUnavailable} and mark the started flag so subsequent
-   * {@link #send} / {@link #interrupt} calls observe a terminal session.
-   *
-   * @return {@code true} when the provider accepted (so {@link #closeRuntime} must fire {@code
-   *     onSessionEnd}); {@code false} when the session was refused
-   */
-  private boolean invokeOnSessionStart() {
-    SessionStartOutcome outcome;
-    try {
-      outcome = executionProvider.onSessionStart(sessionContext);
-    } catch (RuntimeException e) {
-      markRefused(
-          "onSessionStart threw "
-              + e.getClass().getSimpleName()
-              + ": "
-              + (e.getMessage() == null ? "(no message)" : e.getMessage()),
-          e);
-      return false;
-    }
-    Objects.requireNonNull(outcome, "onSessionStart returned null");
-    if (outcome instanceof SessionStartOutcome.Refuse refuse) {
-      markRefused(refuse.reason(), refuse.cause());
-      return false;
-    }
-    return true;
-  }
-
-  private void markRefused(String reason, Throwable cause) {
-    var serialised = cause == null ? null : SerializedError.of(cause);
-    var refusal =
-        new ResultMessage.ErrorProviderUnavailable(
-            sessionId,
-            executionProvider.getClass().getSimpleName(),
-            reason,
-            serialised,
-            state.usage(),
-            state.cost(),
-            state.elapsed());
-    state.setTerminal(refusal);
-    resultFuture.complete(refusal);
   }
 
   @Override
@@ -227,7 +153,7 @@ public final class AgentSessionImpl implements AgentSession {
       throw new IllegalStateException(
           "steering queue full at capacity " + steeringQueue.capacity());
     }
-    startIfNeeded();
+    lifecycle.startIfNeeded(loop, limits);
   }
 
   @Override
@@ -249,7 +175,7 @@ public final class AgentSessionImpl implements AgentSession {
               + steeringQueue.capacity()
               + " — cannot enqueue interrupt");
     }
-    startIfNeeded();
+    lifecycle.startIfNeeded(loop, limits);
   }
 
   @Override
@@ -278,54 +204,16 @@ public final class AgentSessionImpl implements AgentSession {
       return;
     }
     state.cancellation().cancel("session closed");
-    cancelPendingQuestions();
-    // If the loop has never started, complete the future ourselves so result().get() doesn't
+    pendingQuestions.cancelAll();
+    // If the loop has never started, the lifecycle completes the future so result().get() doesn't
     // hang. If the loop is running, it will observe the cancellation on its next iteration and
-    // complete the future via runLoop's finally block — we leave it alone here.
-    if (started.compareAndSet(false, true)) {
-      // Pre-start close: write a Cancelled terminal unless one is already recorded (a refused
-      // session set ErrorProviderUnavailable in the constructor). state.setTerminal and
-      // resultFuture.complete are both first-wins so re-attempting is a no-op.
-      if (!state.isTerminal()) {
-        var preStartResult =
-            new ResultMessage.Cancelled(
-                sessionId, "session closed", state.usage(), state.cost(), state.elapsed());
-        state.setTerminal(preStartResult);
-        resultFuture.complete(preStartResult);
-      }
-      closeRuntime();
-    }
+    // complete the future itself.
+    lifecycle.closeBeforeStart();
   }
 
-  /**
-   * End the session's runtime: notify the execution provider, close the event stream and stop the
-   * wall-clock deadline. Called from exactly one of two mutually-exclusive paths — {@link
-   * #close()}'s pre-start branch, or {@link #runLoop()} (after the loop returns, BEFORE the result
-   * future settles) — and never both, because the {@code started} CAS gates entry.
-   *
-   * <p>{@link SessionEventPublisher#close()} waits a bounded grace period for live subscribers to
-   * drain, so by the time this method returns every responsive subscriber has observed every
-   * emitted event including the terminal {@link QueryEvent.LoopEnded}.
-   */
-  private void closeRuntime() {
-    if (providerAccepted) {
-      try {
-        executionProvider.onSessionEnd(sessionContext);
-      } catch (RuntimeException e) {
-        LOGGER.log(Level.WARNING, "onSessionEnd threw — continuing shutdown", e);
-      }
-    }
-    events.close();
-    var deadline = wallClockDeadline;
-    if (deadline != null) {
-      deadline.cancel(false);
-    }
-    deadlineScheduler.shutdownNow();
-  }
-
-  /** Package-private accessor for tests that need to assert executor shutdown. */
-  ExecutorService publisherExecutorForTests() {
-    return events.executor();
+  /** Package-private accessor for tests that assert the runtime's executors shut down. */
+  SessionLifecycle lifecycleForTests() {
+    return lifecycle;
   }
 
   @Override
@@ -346,15 +234,10 @@ public final class AgentSessionImpl implements AgentSession {
     if (closed.get()) {
       throw new IllegalStateException("session is closed");
     }
-    var pending = pendingQuestions.remove(questionId);
-    if (pending == null) {
-      throw new IllegalArgumentException(
-          "no pending question with id '" + questionId + "' — already answered or unknown");
-    }
-    pending.complete(response);
+    pendingQuestions.answer(questionId, response);
   }
 
-  private ToolRegistry withBuiltins(
+  private static ToolRegistry withBuiltins(
       ToolRegistry userTools, SessionOptions options, QuestionGateway gateway) {
     var combined = new ArrayList<ToolBinding>(userTools.bindings().size() + 3);
     combined.addAll(userTools.bindings());
@@ -367,144 +250,5 @@ public final class AgentSessionImpl implements AgentSession {
               combined.add(MemoryWriteTool.binding(b));
             });
     return new ToolRegistry(combined);
-  }
-
-  private void cancelPendingQuestions() {
-    // Snapshot to avoid concurrent-mutation surprises while completing.
-    for (var entry : new ArrayList<>(pendingQuestions.entrySet())) {
-      var future = pendingQuestions.remove(entry.getKey());
-      if (future != null) {
-        future.completeExceptionally(new CancellationException("session cancelled"));
-      }
-    }
-  }
-
-  /**
-   * Session-internal gateway that emits the {@code QuestionAsked} event and blocks on a future.
-   *
-   * <p>Cancellation is wired via {@link CancellationToken#onCancel(Runnable)} — when the session
-   * cancels, the registered callback completes the pending future with a {@link
-   * CancellationException}, waking {@code future.get()} immediately. No polling.
-   *
-   * <p>{@link CompletableFuture#get()} special-cases {@code CancellationException}-shaped results
-   * and re-throws them directly rather than wrapping in {@code ExecutionException}, so the only
-   * checked throwables we have to propagate are {@link InterruptedException} and {@link
-   * CancellationException}. A defensive {@code ExecutionException} catch covers the theoretical
-   * case where some future caller completes the future with a non-cancellation throwable; we
-   * re-wrap as cancellation so the agent loop's tool dispatcher sees a coherent failure.
-   */
-  private final class SessionQuestionGateway implements QuestionGateway {
-
-    @Override
-    public AskUserQuestionResponse ask(AskUserQuestionRequest request)
-        throws InterruptedException, CancellationException {
-      Objects.requireNonNull(request, "request must not be null");
-      var future = new CompletableFuture<AskUserQuestionResponse>();
-      pendingQuestions.put(request.questionId(), future);
-      // Capture the Registration so we can remove the callback in finally. Without this every
-      // AskUserQuestion call accumulates a permanent closure on the session's long-lived
-      // CancellationToken — a session with N questions over its life leaks N callbacks (each
-      // pinning the completed future via the closure capture). Mirrors the pattern in
-      // LocalProcessExecutionProvider.runProcess.
-      var cancelRegistration =
-          state
-              .cancellation()
-              .onCancel(
-                  () ->
-                      future.completeExceptionally(
-                          new CancellationException(
-                              state.cancellation().reason().orElse("session cancelled"))));
-      try {
-        events.emit(
-            new QueryEvent.QuestionAsked(
-                sessionId, state.currentTurnIndex(), clock.instant(), request));
-        return future.get();
-      } catch (ExecutionException e) {
-        var cause = e.getCause();
-        throw new CancellationException(
-            "question "
-                + request.questionId()
-                + " failed: "
-                + (cause == null ? "no cause" : cause.getMessage()));
-      } finally {
-        cancelRegistration.remove();
-        pendingQuestions.remove(request.questionId());
-      }
-    }
-  }
-
-  private void startIfNeeded() {
-    if (started.compareAndSet(false, true)) {
-      scheduleWallClockDeadline();
-      Thread.ofVirtual().name("helios-agent-loop-" + sessionId).start(this::runLoop);
-    }
-  }
-
-  /**
-   * Arm a one-shot task that cancels the session's {@link CancellationToken} when {@code
-   * limits.maxWallClock()} elapses. Without this, {@code maxWallClock} is only checked at turn
-   * boundaries by {@link StopClassifier}, so a turn whose model stream never delivers {@code
-   * onComplete} / {@code onError} (silent socket, hung edge / proxy / load balancer) blocks the
-   * loop indefinitely. The wall-clock cancellation flips the token; {@link
-   * com.standardapplied.helios.session.loop.TurnSubscriber#awaitDone(CancellationToken)} observes
-   * it and unblocks; the loop proceeds to its next iteration, where {@link StopClassifier} sees
-   * {@code state.elapsed() > maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}.
-   *
-   * <p>The future is captured so {@link #close()} can cancel it before shutdown; the scheduler
-   * itself is owned by this session and drained by {@link #closeRuntime()}.
-   */
-  private void scheduleWallClockDeadline() {
-    var millis = limits.maxWallClock().toMillis();
-    wallClockDeadline =
-        deadlineScheduler.schedule(
-            () -> state.cancellation().cancel("maxWallClock exceeded after " + millis + "ms"),
-            millis,
-            TimeUnit.MILLISECONDS);
-  }
-
-  /**
-   * Drive the loop to terminal, drain the per-session publisher so every subscriber observes the
-   * final {@link QueryEvent.LoopEnded}, then settle {@link #resultFuture}. The ordering
-   * (closeRuntime BEFORE the future resolves) is the happens-before guarantee that lets deployers
-   * read aggregates set by a {@code LoopEnded} subscriber immediately after {@code result().get()}
-   * / {@code runBlocking(...)} unblocks. Without it, a subscriber that captures usage / cost from
-   * {@code LoopEnded} races against the caller's read and silently drops data — observed as the
-   * matchmaking baseline's 3/24 viewers with {@code tokens=0/0 cost=$0.0000}.
-   *
-   * <p>{@link AgentLoop#run} catches {@code Exception} and {@link
-   * com.standardapplied.helios.session.hooks.HookRegistry} catches {@code RuntimeException}; in
-   * practice only {@link Error} subtypes (OOM, StackOverflow, LinkageError, AssertionError from a
-   * hook) reach the outer {@code catch}. We still capture {@link Throwable} as defense-in-depth
-   * against future contract drift — without it a RuntimeException escape would leave callers
-   * blocked on {@code result().join()} forever. The failure is held across the publisher drain so
-   * {@code closeRuntime} always runs; {@link #rethrowSneakily} preserves the original throwable
-   * type without an {@code instanceof} cascade that would leave unreachable branches in coverage.
-   */
-  private void runLoop() {
-    ResultMessage terminal = null;
-    Throwable failure = null;
-    try {
-      terminal = loop.run(state, limits);
-    } catch (Throwable t) {
-      failure = t;
-    }
-    closeRuntime();
-    if (failure == null) {
-      resultFuture.complete(terminal);
-      return;
-    }
-    resultFuture.completeExceptionally(failure);
-    rethrowSneakily(failure);
-  }
-
-  /**
-   * Throw any {@link Throwable} as if it were unchecked, without an {@code instanceof} cascade. The
-   * cast is erased at runtime; the JVM rethrows the original type. Used by {@link #runLoop()} to
-   * propagate an escaping {@link Error} (the only realistic shape reaching it) without leaving
-   * unreachable RuntimeException / checked-exception branches behind.
-   */
-  @SuppressWarnings("unchecked")
-  private static <E extends Throwable> void rethrowSneakily(Throwable t) throws E {
-    throw (E) t;
   }
 }

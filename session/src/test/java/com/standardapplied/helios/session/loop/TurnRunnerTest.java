@@ -90,7 +90,7 @@ final class TurnRunnerTest {
 
   private SessionState freshState() {
     var s = new SessionState(SID, new CancellationToken(), CLOCK);
-    s.appendMessage(Message.user("hello"));
+    s.history().append(Message.user("hello"));
     s.beginTurn();
     return s;
   }
@@ -120,16 +120,21 @@ final class TurnRunnerTest {
 
   private TurnRunner runner(Model model) {
     return new TurnRunner(
+        new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
         model,
-        hooks,
-        dispatch,
-        queue,
-        events::add,
-        CTX_FACTORY,
-        CLOCK,
         CostCalculator.ZERO,
         null,
         scheduler);
+  }
+
+  @Test
+  void nullCollaboratorsRejected() {
+    var model = textModel("x", FinishReason.STOP, Usage.of(1, 1));
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new TurnRunner(null, model, CostCalculator.ZERO, null, scheduler));
+    assertEquals("collaborators must not be null", ex.getMessage());
   }
 
   @Test
@@ -139,143 +144,12 @@ final class TurnRunnerTest {
             NullPointerException.class,
             () ->
                 new TurnRunner(
+                    new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
                     null,
-                    hooks,
-                    dispatch,
-                    queue,
-                    events::add,
-                    CTX_FACTORY,
-                    CLOCK,
                     CostCalculator.ZERO,
                     null,
                     scheduler));
     assertEquals("model must not be null", ex.getMessage());
-  }
-
-  @Test
-  void nullHooksRejected() {
-    var model = textModel("x", FinishReason.STOP, Usage.of(1, 1));
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new TurnRunner(
-                    model,
-                    null,
-                    dispatch,
-                    queue,
-                    events::add,
-                    CTX_FACTORY,
-                    CLOCK,
-                    CostCalculator.ZERO,
-                    null,
-                    scheduler));
-    assertEquals("hooks must not be null", ex.getMessage());
-  }
-
-  @Test
-  void nullToolDispatchRejected() {
-    var model = textModel("x", FinishReason.STOP, Usage.of(1, 1));
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new TurnRunner(
-                    model,
-                    hooks,
-                    null,
-                    queue,
-                    events::add,
-                    CTX_FACTORY,
-                    CLOCK,
-                    CostCalculator.ZERO,
-                    null,
-                    scheduler));
-    assertEquals("toolDispatch must not be null", ex.getMessage());
-  }
-
-  @Test
-  void nullSteeringQueueRejected() {
-    var model = textModel("x", FinishReason.STOP, Usage.of(1, 1));
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new TurnRunner(
-                    model,
-                    hooks,
-                    dispatch,
-                    null,
-                    events::add,
-                    CTX_FACTORY,
-                    CLOCK,
-                    CostCalculator.ZERO,
-                    null,
-                    scheduler));
-    assertEquals("steeringQueue must not be null", ex.getMessage());
-  }
-
-  @Test
-  void nullEventSinkRejected() {
-    var model = textModel("x", FinishReason.STOP, Usage.of(1, 1));
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new TurnRunner(
-                    model,
-                    hooks,
-                    dispatch,
-                    queue,
-                    null,
-                    CTX_FACTORY,
-                    CLOCK,
-                    CostCalculator.ZERO,
-                    null,
-                    scheduler));
-    assertEquals("eventSink must not be null", ex.getMessage());
-  }
-
-  @Test
-  void nullHookContextFactoryRejected() {
-    var model = textModel("x", FinishReason.STOP, Usage.of(1, 1));
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new TurnRunner(
-                    model,
-                    hooks,
-                    dispatch,
-                    queue,
-                    events::add,
-                    null,
-                    CLOCK,
-                    CostCalculator.ZERO,
-                    null,
-                    scheduler));
-    assertEquals("hookContextFactory must not be null", ex.getMessage());
-  }
-
-  @Test
-  void nullClockRejected() {
-    var model = textModel("x", FinishReason.STOP, Usage.of(1, 1));
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new TurnRunner(
-                    model,
-                    hooks,
-                    dispatch,
-                    queue,
-                    events::add,
-                    CTX_FACTORY,
-                    null,
-                    CostCalculator.ZERO,
-                    null,
-                    scheduler));
-    assertEquals("clock must not be null", ex.getMessage());
   }
 
   @Test
@@ -286,13 +160,8 @@ final class TurnRunnerTest {
             NullPointerException.class,
             () ->
                 new TurnRunner(
+                    new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
                     model,
-                    hooks,
-                    dispatch,
-                    queue,
-                    events::add,
-                    CTX_FACTORY,
-                    CLOCK,
                     null,
                     null,
                     scheduler));
@@ -307,13 +176,8 @@ final class TurnRunnerTest {
             NullPointerException.class,
             () ->
                 new TurnRunner(
+                    new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
                     model,
-                    hooks,
-                    dispatch,
-                    queue,
-                    events::add,
-                    CTX_FACTORY,
-                    CLOCK,
                     CostCalculator.ZERO,
                     null,
                     null));
@@ -362,7 +226,7 @@ final class TurnRunnerTest {
     runner(textModel("answer", FinishReason.STOP, Usage.of(2, 1)))
         .runTurn(state, SessionLimits.defaults());
 
-    var history = state.historySnapshot();
+    var history = state.history().snapshot();
     assertEquals(2, history.size());
     assertEquals("hello", history.get(0).content());
     assertEquals("answer", history.get(1).content());
@@ -375,7 +239,7 @@ final class TurnRunnerTest {
     runner(textModel("", FinishReason.STOP, Usage.of(2, 0)))
         .runTurn(state, SessionLimits.defaults());
 
-    var history = state.historySnapshot();
+    var history = state.history().snapshot();
     assertEquals(1, history.size(), "no assistant message appended for empty content");
   }
 
@@ -384,8 +248,8 @@ final class TurnRunnerTest {
     var state = freshState();
     runner(textModel("answer", FinishReason.STOP, Usage.of(5, 3)))
         .runTurn(state, SessionLimits.defaults());
-    assertEquals(5, state.usage().inputTokens());
-    assertEquals(3, state.usage().outputTokens());
+    assertEquals(5, state.totals().usage().inputTokens());
+    assertEquals(3, state.totals().usage().outputTokens());
   }
 
   @Test
@@ -496,7 +360,7 @@ final class TurnRunnerTest {
         events.stream()
             .noneMatch(e -> e instanceof QueryEvent.ToolUse || e instanceof QueryEvent.ToolResult),
         "a refused turn's partial output is discarded, tool calls included");
-    assertTrue(state.historySnapshot().stream().noneMatch(Message::hasToolCalls));
+    assertTrue(state.history().snapshot().stream().noneMatch(Message::hasToolCalls));
   }
 
   @Test
@@ -560,7 +424,8 @@ final class TurnRunnerTest {
     var outcome = runner(model).runTurn(state, SessionLimits.defaults());
     assertEquals(FinishReason.ERROR, outcome.finishReason());
     assertEquals("upstream boom", outcome.assistantContent());
-    assertEquals(1, state.historySnapshot().size(), "error turn does not append assistant message");
+    assertEquals(
+        1, state.history().snapshot().size(), "error turn does not append assistant message");
     var ended = assertInstanceOf(QueryEvent.TurnEnded.class, events.get(events.size() - 1));
     assertEquals(StopReason.ERROR, ended.reason());
   }
@@ -833,13 +698,8 @@ final class TurnRunnerTest {
     var model = new DispatchRecordingModel();
     var runner =
         new TurnRunner(
+            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
             model,
-            hooks,
-            dispatch,
-            queue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
             CostCalculator.ZERO,
             null,
             scheduler);
@@ -854,13 +714,8 @@ final class TurnRunnerTest {
     var model = new DispatchRecordingModel();
     var runner =
         new TurnRunner(
+            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
             model,
-            hooks,
-            dispatch,
-            queue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
             CostCalculator.ZERO,
             schema,
             scheduler);
@@ -928,13 +783,8 @@ final class TurnRunnerTest {
         };
     var runner =
         new TurnRunner(
+            new LoopCollaborators(hooks, dispatch, saturatedQueue, events::add, CTX_FACTORY, CLOCK),
             model,
-            hooks,
-            dispatch,
-            saturatedQueue,
-            events::add,
-            CTX_FACTORY,
-            CLOCK,
             CostCalculator.ZERO,
             schema,
             scheduler);

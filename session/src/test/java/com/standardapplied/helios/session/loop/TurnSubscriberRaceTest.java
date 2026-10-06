@@ -29,8 +29,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unit coverage for the race-handling guards in {@link TurnSubscriber#armIdleTimer()} — the paths
- * the end-to-end {@link com.standardapplied.helios.session.AgentSessionStreamIdleTest} can't reach
+ * Unit coverage for the race-handling guards in {@link IdleWatchdog#arm()} — the paths the
+ * end-to-end {@link com.standardapplied.helios.session.AgentSessionStreamIdleTest} can't reach
  * deterministically because they depend on the relative ordering of producer / scheduler / runner
  * threads.
  *
@@ -68,7 +68,7 @@ final class TurnSubscriberRaceTest {
     assertEquals(
         scheduledAtArm,
         scheduler.scheduleCount.get(),
-        "armIdleTimer after onComplete must not schedule a new task");
+        "arm after onComplete must not schedule a new task");
   }
 
   @Test
@@ -85,7 +85,7 @@ final class TurnSubscriberRaceTest {
     assertEquals(
         scheduledBeforeRace,
         scheduler.scheduleCount.get(),
-        "armIdleTimer after onError must not schedule a new task");
+        "arm after onError must not schedule a new task");
   }
 
   @Test
@@ -95,11 +95,11 @@ final class TurnSubscriberRaceTest {
 
     subscriber.onSubscribe(new NoopSubscription());
     subscriber.onComplete();
-    subscriber.awaitDone(new CancellationToken());
+    var streamed = subscriber.awaitDone(new CancellationToken());
 
     // After awaitDone returns, no task should still be holding the scheduler — the prior task
     // was cancelled by onComplete, and awaitDone's finally clause cancels any successor.
-    assertNull(subscriber.error(), "normal completion records no error");
+    assertNull(streamed.error(), "normal completion records no error");
     assertEquals(0, scheduler.outstandingCount(), "no scheduled task should outlive the turn");
   }
 
