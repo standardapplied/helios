@@ -9,8 +9,10 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.RecordComponent;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Generates a JShell pre-eval snippet that exposes each top-level component of an input record as a
@@ -158,9 +160,9 @@ public final class InputBindings {
    * <ul>
    *   <li>Primitives are boxed ({@code int} → {@code java.lang.Integer}) — JShell can't cast {@code
    *       Object} to a primitive.
-   *   <li>Non-{@code java.*} classes (and unrecognised type forms) render as {@code
-   *       java.lang.Object}. Preserves the surrounding container shape while erasing user types
-   *       JShell can't see.
+   *   <li>Non-{@code java.*} classes and every type form other than a class or a parameterized type
+   *       (wildcards, type variables, generic arrays) render as {@code java.lang.Object}. Preserves
+   *       the surrounding container shape while erasing types JShell can't see.
    * </ul>
    *
    * <p>Examples assuming user-defined record {@code Foo}:
@@ -174,30 +176,30 @@ public final class InputBindings {
    * </pre>
    */
   static String renderTypeAsJavaSource(Type type) {
-    if (type instanceof Class<?> c) {
-      if (c.isPrimitive()) {
-        return boxedCanonicalName(c);
-      }
-      if (c.isArray()) {
-        return renderTypeAsJavaSource(c.getComponentType()) + "[]";
-      }
-      if (c.getPackageName().startsWith("java.")) {
-        return c.getCanonicalName();
-      }
-      return "java.lang.Object";
+    return switch (type) {
+      case Class<?> c -> renderClass(c);
+      case ParameterizedType pt -> renderParameterized(pt);
+      case null, default -> "java.lang.Object";
+    };
+  }
+
+  private static String renderClass(Class<?> c) {
+    if (c.isPrimitive()) {
+      return boxedCanonicalName(c);
     }
-    if (type instanceof ParameterizedType pt) {
-      var raw = ((Class<?>) pt.getRawType()).getCanonicalName();
-      var args = new StringBuilder();
-      for (var arg : pt.getActualTypeArguments()) {
-        if (args.length() > 0) {
-          args.append(", ");
-        }
-        args.append(renderTypeAsJavaSource(arg));
-      }
-      return raw + "<" + args + ">";
+    if (c.isArray()) {
+      return renderTypeAsJavaSource(c.getComponentType()) + "[]";
     }
-    return "java.lang.Object";
+    return c.getPackageName().startsWith("java.") ? c.getCanonicalName() : "java.lang.Object";
+  }
+
+  private static String renderParameterized(ParameterizedType pt) {
+    var raw = ((Class<?>) pt.getRawType()).getCanonicalName();
+    var args =
+        Arrays.stream(pt.getActualTypeArguments())
+            .map(InputBindings::renderTypeAsJavaSource)
+            .collect(Collectors.joining(", "));
+    return raw + "<" + args + ">";
   }
 
   private static String boxedCanonicalName(Class<?> primitive) {

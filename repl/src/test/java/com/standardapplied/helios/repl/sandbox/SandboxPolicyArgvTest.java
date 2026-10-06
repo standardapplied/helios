@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * End-to-end test that a {@link SandboxPolicy} configured on the host side round-trips through the
- * launch-command argv into {@link JvmSandboxBootstrap#parseSandboxPolicyArg}. Avoids actually
+ * launch-command argv into {@link BootstrapArguments#parseSandboxPolicyArg}. Avoids actually
  * launching a subprocess — exercises the encode + buildLaunchCommand + parse path against the
  * argv-builder.
  */
@@ -26,7 +26,7 @@ class SandboxPolicyArgvTest {
   @Test
   void permissivePolicyDoesNotAppearInLaunchCommand() {
     var config = JvmSandboxConfig.newBuilder().build();
-    var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config);
+    var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", config);
     for (var arg : cmd) {
       assertFalse(
           arg.startsWith("--sandbox-policy="),
@@ -45,7 +45,7 @@ class SandboxPolicyArgvTest {
             .withDenyDynamicClassDefinition(true)
             .build();
     var config = JvmSandboxConfig.newBuilder().withSandboxPolicy(original).build();
-    var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config, "/tmp/rpc.sock");
+    var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", config, "/tmp/rpc.sock");
 
     var policyArg =
         cmd.stream()
@@ -62,7 +62,7 @@ class SandboxPolicyArgvTest {
     assertEquals(original.denyDynamicClassDefinition(), decoded.denyDynamicClassDefinition());
 
     var parsed =
-        JvmSandboxBootstrap.parseSandboxPolicyArg(new String[] {"--rpc-socket=/x", policyArg});
+        BootstrapArguments.parseSandboxPolicyArg(new String[] {"--rpc-socket=/x", policyArg});
     assertEquals(original.deniedClasses(), parsed.deniedClasses());
     assertEquals(original.deniedPackages(), parsed.deniedPackages());
     assertTrue(parsed.denyReflection());
@@ -70,13 +70,13 @@ class SandboxPolicyArgvTest {
 
   @Test
   void parseSandboxPolicyArgReturnsPermissiveWhenAbsent() {
-    var parsed = JvmSandboxBootstrap.parseSandboxPolicyArg(new String[] {"--rpc-socket=/x"});
+    var parsed = BootstrapArguments.parseSandboxPolicyArg(new String[] {"--rpc-socket=/x"});
     assertTrue(parsed.enforcesNothing());
   }
 
   @Test
   void parseSandboxPolicyArgWithEmptyArgsReturnsPermissive() {
-    assertTrue(JvmSandboxBootstrap.parseSandboxPolicyArg(new String[0]).enforcesNothing());
+    assertTrue(BootstrapArguments.parseSandboxPolicyArg(new String[0]).enforcesNothing());
   }
 
   @Test
@@ -91,7 +91,7 @@ class SandboxPolicyArgvTest {
   void policyArgvFlagAppearsAtEndOfLaunchCommand() {
     var policy = SandboxPolicy.newBuilder().withDenyReflection(true).build();
     var config = JvmSandboxConfig.newBuilder().withSandboxPolicy(policy).build();
-    var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config, "/tmp/rpc.sock");
+    var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", config, "/tmp/rpc.sock");
     var last = cmd.get(cmd.size() - 1);
     assertTrue(
         last.startsWith("--sandbox-policy="),
@@ -102,7 +102,7 @@ class SandboxPolicyArgvTest {
   void rpcSocketArgPrecedesPolicyArgWhenBothPresent() {
     var policy = SandboxPolicy.newBuilder().withDenyReflection(true).build();
     var config = JvmSandboxConfig.newBuilder().withSandboxPolicy(policy).build();
-    var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config, "/tmp/rpc.sock");
+    var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", config, "/tmp/rpc.sock");
     var rpcIdx = -1;
     var policyIdx = -1;
     for (var i = 0; i < cmd.size(); i++) {

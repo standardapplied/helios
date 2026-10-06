@@ -117,7 +117,7 @@ class IsolatedDeploymentTest {
       listener.configureBlocking(false);
       var command = new ArrayList<>(baseCommand);
       var javaBin = System.getProperty("java.home") + "/bin/java";
-      var launch = JvmSandbox.buildLaunchCommand(javaBin, JvmSandboxConfig.defaults());
+      var launch = SandboxLauncher.buildLaunchCommand(javaBin, JvmSandboxConfig.defaults());
       var jvmArgs = launch.subList(1, launch.indexOf(JvmSandboxBootstrap.class.getName()));
       for (var mount : hostPathsReferencedBy(jvmArgs)) {
         command.addAll(List.of("-v", mount + ":" + mount + ":ro"));

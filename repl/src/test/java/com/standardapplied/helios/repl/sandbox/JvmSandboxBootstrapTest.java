@@ -15,8 +15,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.repl.protocol.RpcError;
 import com.standardapplied.helios.repl.protocol.RpcMessage;
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
+import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
@@ -57,13 +60,20 @@ class JvmSandboxBootstrapTest {
 
   private static final String SNIPPET_THREAD_GROUP = "JShell process local execution";
 
+  private static final String UNSTOPPABLE =
+      "The timed-out snippet could not be stopped; the sandbox is shutting down";
+
   private BootstrapEnvironment env;
-  private JvmSandboxBootstrap bootstrap;
+  private HostBridgeState bridge;
+  private SnippetEvaluator evaluator;
+  private BootstrapRpc rpc;
 
   @BeforeEach
   void setUp() {
     env = new BootstrapEnvironment();
-    bootstrap = env.bootstrap();
+    bridge = env.bridge();
+    evaluator = env.evaluator();
+    rpc = env.rpc();
   }
 
   @AfterEach
@@ -81,7 +91,7 @@ class JvmSandboxBootstrapTest {
     // not trigger the WARNING.
     var buffer = new ByteArrayOutputStream();
     var stream = new PrintStream(buffer, true, StandardCharsets.UTF_8);
-    JvmSandboxBootstrap.warnIfReducedIsolation(stream);
+    BootstrapArguments.warnIfReducedIsolation(stream);
     var written = buffer.toString(StandardCharsets.UTF_8);
     assertTrue(
         written.startsWith("WARNING:"),
@@ -107,7 +117,7 @@ class JvmSandboxBootstrapTest {
       return;
     }
     var buffer = new ByteArrayOutputStream();
-    JvmSandboxBootstrap.warnIfReducedIsolation(
+    BootstrapArguments.warnIfReducedIsolation(
         new PrintStream(buffer, true, StandardCharsets.UTF_8));
     assertEquals("", buffer.toString(StandardCharsets.UTF_8));
   }
@@ -126,7 +136,7 @@ class JvmSandboxBootstrapTest {
   @Test
   void executeSimpleExpression() {
     var result =
-        bootstrap.handleExecute(Map.of("code", "1 + 1", "timeoutMs", BEYOND_HANG_GUARD_MS));
+        evaluator.handleExecute(Map.of("code", "1 + 1", "timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals(0, result.get("exitCode"));
     assertTrue(((String) result.get("stdout")).contains("2"));
@@ -136,7 +146,7 @@ class JvmSandboxBootstrapTest {
   @Test
   void executePrintln() {
     var result =
-        bootstrap.handleExecute(
+        evaluator.handleExecute(
             Map.of("code", "System.out.println(\"hello\")", "timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals(0, result.get("exitCode"));
@@ -146,7 +156,7 @@ class JvmSandboxBootstrapTest {
   @Test
   void executeMultiSnippet() {
     var code = "var x = 5; var y = x + 10; y";
-    var result = bootstrap.handleExecute(Map.of("code", code, "timeoutMs", BEYOND_HANG_GUARD_MS));
+    var result = evaluator.handleExecute(Map.of("code", code, "timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals(0, result.get("exitCode"));
     assertTrue(((String) result.get("stdout")).contains("15"));
@@ -155,7 +165,7 @@ class JvmSandboxBootstrapTest {
   @Test
   void executeCompilationError() {
     var result =
-        bootstrap.handleExecute(
+        evaluator.handleExecute(
             Map.of("code", "int x = \"not-an-int\";", "timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals(1, result.get("exitCode"));
@@ -165,7 +175,7 @@ class JvmSandboxBootstrapTest {
   @Test
   void executeRuntimeException() {
     var result =
-        bootstrap.handleExecute(
+        evaluator.handleExecute(
             Map.of(
                 "code",
                 "throw new RuntimeException(\"boom\");",
@@ -179,17 +189,17 @@ class JvmSandboxBootstrapTest {
   @Test
   void blockedSnippetIsStoppedAtTimeout() {
     var result =
-        bootstrap.handleExecute(Map.of("code", BLOCK_UNTIL_INTERRUPTED, "timeoutMs", TIMEOUT_MS));
+        evaluator.handleExecute(Map.of("code", BLOCK_UNTIL_INTERRUPTED, "timeoutMs", TIMEOUT_MS));
 
-    assertTimedOut(result);
+    assertStopped(result);
     assertEquals(List.of(), liveSnippetThreads());
   }
 
   @Test
   void loopingSnippetIsStoppedAtTimeout() {
-    var result = bootstrap.handleExecute(Map.of("code", LOOP_FOREVER, "timeoutMs", TIMEOUT_MS));
+    var result = evaluator.handleExecute(Map.of("code", LOOP_FOREVER, "timeoutMs", TIMEOUT_MS));
 
-    assertTimedOut(result);
+    assertStopped(result);
     assertEquals(List.of(), liveSnippetThreads());
   }
 
@@ -202,9 +212,9 @@ class JvmSandboxBootstrapTest {
   @ParameterizedTest
   @ValueSource(strings = {LOOP_FOREVER, BLOCK_UNTIL_INTERRUPTED})
   void timeoutBeforeTheSnippetRunsStillStopsIt(String snippet) {
-    var result = bootstrap.handleExecute(Map.of("code", snippet, "timeoutMs", 1));
+    var result = evaluator.handleExecute(Map.of("code", snippet, "timeoutMs", 1));
 
-    assertTimedOut(result);
+    assertStopped(result);
     assertEquals(List.of(), liveSnippetThreads());
   }
 
@@ -219,9 +229,11 @@ class JvmSandboxBootstrapTest {
     env =
         BootstrapEnvironment.failingStop(
             SHORT_STOP_GRACE, new IllegalStateException("the engine failed to stop"));
-    bootstrap = env.bootstrap();
+    bridge = env.bridge();
+    evaluator = env.evaluator();
+    rpc = env.rpc();
 
-    bootstrap.dispatch(
+    rpc.dispatch(
         new RpcMessage.Request(
             "1",
             "execute",
@@ -249,7 +261,7 @@ class JvmSandboxBootstrapTest {
 
   @Test
   void installPreludeIsAnsweredThroughTheDispatcher() {
-    bootstrap.dispatch(
+    rpc.dispatch(
         new RpcMessage.Request("1", "installPrelude", Map.of("snippet", "int fromPrelude = 7;")));
 
     var response = assertInstanceOf(RpcMessage.Response.class, env.nextMessage());
@@ -261,13 +273,16 @@ class JvmSandboxBootstrapTest {
   @Test
   void requestWhoseHandlerThrowsIsAnsweredWithAnInternalError() {
     env.close();
+    var params = Map.<String, Object>of("snippet", "int fromPrelude = 7;");
+    var handlerFailure =
+        assertThrows(IllegalStateException.class, () -> evaluator.handleInstallPrelude(params));
 
-    bootstrap.dispatch(
-        new RpcMessage.Request("1", "installPrelude", Map.of("snippet", "int fromPrelude = 7;")));
+    rpc.dispatch(new RpcMessage.Request("1", "installPrelude", params));
 
     var error = assertInstanceOf(RpcMessage.ErrorResponse.class, env.nextMessage());
     assertEquals("1", error.id());
     assertEquals(RpcError.INTERNAL_ERROR, error.error().code());
+    assertEquals(handlerFailure.getMessage(), error.error().message());
   }
 
   @Test
@@ -275,14 +290,14 @@ class JvmSandboxBootstrapTest {
     var grace = Duration.ofNanos(1_500_001);
     var config = JvmSandboxConfig.newBuilder().withStopGrace(grace).build();
 
-    var command = JvmSandbox.buildLaunchCommand("/fake/java", config, "/tmp/rpc.sock");
+    var command = SandboxLauncher.buildLaunchCommand("/fake/java", config, "/tmp/rpc.sock");
 
-    assertEquals(grace, JvmSandboxBootstrap.parseStopGraceArg(command.toArray(String[]::new)));
+    assertEquals(grace, BootstrapArguments.parseStopGraceArg(command.toArray(String[]::new)));
   }
 
   @Test
   void stopGraceDefaultsWhenTheLaunchCommandHasNone() {
-    var parsed = JvmSandboxBootstrap.parseStopGraceArg(new String[] {"--rpc-socket=/x"});
+    var parsed = BootstrapArguments.parseStopGraceArg(new String[] {"--rpc-socket=/x"});
 
     assertEquals(JvmSandboxConfig.DEFAULT_STOP_GRACE, parsed);
   }
@@ -294,7 +309,7 @@ class JvmSandboxBootstrapTest {
 
     var thrown =
         assertThrows(
-            IllegalArgumentException.class, () -> JvmSandboxBootstrap.parseStopGraceArg(args));
+            IllegalArgumentException.class, () -> BootstrapArguments.parseStopGraceArg(args));
 
     assertEquals("--stop-grace=" + value + " " + problem, thrown.getMessage());
   }
@@ -302,13 +317,13 @@ class JvmSandboxBootstrapTest {
   /** The follow-up execute that reads the variable is what shows the second statement never ran. */
   @Test
   void noStatementAfterTheTimedOutOneRuns() {
-    bootstrap.handleExecute(Map.of("code", "int after = 0;", "timeoutMs", BEYOND_HANG_GUARD_MS));
+    evaluator.handleExecute(Map.of("code", "int after = 0;", "timeoutMs", BEYOND_HANG_GUARD_MS));
     var timedOut =
-        bootstrap.handleExecute(
+        evaluator.handleExecute(
             Map.of("code", BLOCK_UNTIL_INTERRUPTED + " after = 1;", "timeoutMs", TIMEOUT_MS));
-    assertTimedOut(timedOut);
+    assertStopped(timedOut);
 
-    var read = bootstrap.handleExecute(Map.of("code", "after", "timeoutMs", BEYOND_HANG_GUARD_MS));
+    var read = evaluator.handleExecute(Map.of("code", "after", "timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals("0", ((String) read.get("stdout")).strip());
   }
@@ -332,7 +347,7 @@ class JvmSandboxBootstrapTest {
     timeoutsFiredByTheTest();
     var holding = holdMonitorOutsideTheSnippetGroup();
 
-    bootstrap.dispatch(
+    rpc.dispatch(
         new RpcMessage.Request(
             "2",
             "execute",
@@ -355,7 +370,7 @@ class JvmSandboxBootstrapTest {
     timeoutsFiredByTheTest();
     var holding = holdMonitorOutsideTheSnippetGroup();
 
-    bootstrap.dispatch(
+    rpc.dispatch(
         new RpcMessage.Request(
             "2",
             "execute",
@@ -392,7 +407,7 @@ class JvmSandboxBootstrapTest {
     var unstoppable =
         env.inSandbox(
             () ->
-                bootstrap.handleExecute(
+                evaluator.handleExecute(
                     Map.of(
                         "code",
                         runningThen("synchronized (monitor) { }"),
@@ -406,7 +421,7 @@ class JvmSandboxBootstrapTest {
         "another execute served",
         env.inSandbox(
             () -> {
-              bootstrap.serveExecute(
+              rpc.serveExecute(
                   new RpcMessage.Request(
                       "3", "execute", Map.of("code", "1 + 1", "timeoutMs", BEYOND_HANG_GUARD_MS)));
               return null;
@@ -420,11 +435,11 @@ class JvmSandboxBootstrapTest {
   @Test
   void executeStatefulSession() {
     var result1 =
-        bootstrap.handleExecute(Map.of("code", "var x = 5;", "timeoutMs", BEYOND_HANG_GUARD_MS));
+        evaluator.handleExecute(Map.of("code", "var x = 5;", "timeoutMs", BEYOND_HANG_GUARD_MS));
     assertEquals(0, result1.get("exitCode"));
 
     var result2 =
-        bootstrap.handleExecute(Map.of("code", "x + 10", "timeoutMs", BEYOND_HANG_GUARD_MS));
+        evaluator.handleExecute(Map.of("code", "x + 10", "timeoutMs", BEYOND_HANG_GUARD_MS));
     assertEquals(0, result2.get("exitCode"));
     assertTrue(((String) result2.get("stdout")).contains("15"));
   }
@@ -451,18 +466,18 @@ class JvmSandboxBootstrapTest {
 
   @Test
   void callHostRegistersAndWaits() {
-    var result = env.inSandbox(() -> bootstrap.callHost("test", Map.of("key", "val")));
+    var result = env.inSandbox(() -> bridge.callHost("test", Map.of("key", "val")));
     var request = env.nextRequest();
     assertEquals("test", request.method());
 
-    bootstrap.dispatch(new RpcMessage.Response(request.id(), Map.of("answer", 42)));
+    rpc.dispatch(new RpcMessage.Response(request.id(), Map.of("answer", 42)));
 
     assertEquals(Map.of("answer", 42), Await.value("the host call's result", result));
   }
 
   @Test
   void sendRpcPrefixesOutput() throws Exception {
-    bootstrap.sendRpc(new RpcMessage.Response("42", Map.of("result", "ok")));
+    bridge.sendRpc(new RpcMessage.Response("42", Map.of("result", "ok")));
 
     var msg = assertInstanceOf(RpcMessage.Response.class, env.nextMessage());
     assertEquals("42", msg.id());
@@ -470,9 +485,9 @@ class JvmSandboxBootstrapTest {
 
   @Test
   void instanceAccessor() {
-    assertEquals(bootstrap, JvmSandboxBootstrap.instance());
-    JvmSandboxBootstrap.setInstance(null);
-    assertNull(JvmSandboxBootstrap.instance());
+    assertEquals(bridge, HostBridgeState.instance());
+    HostBridgeState.setInstance(null);
+    assertNull(HostBridgeState.instance());
   }
 
   @Test
@@ -500,7 +515,7 @@ class JvmSandboxBootstrapTest {
     env.feedLine("not valid json at all");
     env.endInput();
 
-    bootstrap.readLoop();
+    rpc.readLoop();
 
     var err = assertInstanceOf(RpcMessage.ErrorResponse.class, env.nextMessage());
     assertNull(err.id());
@@ -509,35 +524,35 @@ class JvmSandboxBootstrapTest {
 
   @Test
   void dispatchErrorResponseCompletesExceptionally() {
-    var result = env.inSandbox(() -> bootstrap.callHost("test", Map.of("key", "val")));
+    var result = env.inSandbox(() -> bridge.callHost("test", Map.of("key", "val")));
     var request = env.nextRequest();
 
-    bootstrap.dispatch(
+    rpc.dispatch(
         new RpcMessage.ErrorResponse(request.id(), RpcError.internalError("something broke")));
 
     var failure = Await.failure("the host call answered with an error", result);
     assertInstanceOf(RuntimeException.class, failure);
-    assertTrue(failure.getMessage().contains("something broke"));
+    assertEquals("Host call failed: Host error [-32603]: something broke", failure.getMessage());
   }
 
   @Test
   void dispatchResponseWithUnknownIdIgnored() {
-    bootstrap.dispatch(new RpcMessage.Response("unknown-id", "data"));
+    rpc.dispatch(new RpcMessage.Response("unknown-id", "data"));
   }
 
   @Test
   void dispatchErrorResponseWithNullIdIgnored() {
-    bootstrap.dispatch(new RpcMessage.ErrorResponse(null, RpcError.internalError("orphan")));
+    rpc.dispatch(new RpcMessage.ErrorResponse(null, RpcError.internalError("orphan")));
   }
 
   @Test
   void dispatchNotificationIgnored() {
-    bootstrap.dispatch(new RpcMessage.Notification("event", Map.of("key", "val")));
+    rpc.dispatch(new RpcMessage.Notification("event", Map.of("key", "val")));
   }
 
   @Test
   void executeWithMissingCodeParam() {
-    var result = bootstrap.handleExecute(Map.of("timeoutMs", BEYOND_HANG_GUARD_MS));
+    var result = evaluator.handleExecute(Map.of("timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals(0, result.get("exitCode"));
     assertEquals("", result.get("stdout"));
@@ -545,7 +560,7 @@ class JvmSandboxBootstrapTest {
 
   @Test
   void executeWithNonStringCode() {
-    var result = bootstrap.handleExecute(Map.of("code", 12345, "timeoutMs", BEYOND_HANG_GUARD_MS));
+    var result = evaluator.handleExecute(Map.of("code", 12345, "timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals(0, result.get("exitCode"));
     assertEquals("", result.get("stdout"));
@@ -553,7 +568,7 @@ class JvmSandboxBootstrapTest {
 
   @Test
   void executeWithMissingTimeout() {
-    var result = bootstrap.handleExecute(Map.of("code", "1 + 1"));
+    var result = evaluator.handleExecute(Map.of("code", "1 + 1"));
 
     assertEquals(0, result.get("exitCode"));
     assertTrue(((String) result.get("stdout")).contains("2"));
@@ -561,7 +576,7 @@ class JvmSandboxBootstrapTest {
 
   @Test
   void executeEmptyCode() {
-    var result = bootstrap.handleExecute(Map.of("code", "", "timeoutMs", BEYOND_HANG_GUARD_MS));
+    var result = evaluator.handleExecute(Map.of("code", "", "timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals(0, result.get("exitCode"));
     assertEquals("", result.get("stdout"));
@@ -571,7 +586,7 @@ class JvmSandboxBootstrapTest {
   @Test
   void executeWhitespaceOnlyCode() {
     var result =
-        bootstrap.handleExecute(Map.of("code", "   \n  ", "timeoutMs", BEYOND_HANG_GUARD_MS));
+        evaluator.handleExecute(Map.of("code", "   \n  ", "timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals(0, result.get("exitCode"));
   }
@@ -579,7 +594,7 @@ class JvmSandboxBootstrapTest {
   @Test
   @SuppressWarnings("unchecked")
   void executeViaDispatchWithNullParams() {
-    bootstrap.dispatch(new RpcMessage.Request("1", "execute", null));
+    rpc.dispatch(new RpcMessage.Request("1", "execute", null));
 
     var resp = assertInstanceOf(RpcMessage.Response.class, env.nextMessage());
     assertEquals("1", resp.id());
@@ -589,22 +604,91 @@ class JvmSandboxBootstrapTest {
 
   @Test
   void submittedValueResetOnExecute() {
-    bootstrap.setSubmittedValue("old");
-    bootstrap.handleExecute(Map.of("code", "1 + 1", "timeoutMs", BEYOND_HANG_GUARD_MS));
-    assertNull(bootstrap.submittedValue());
+    bridge.setSubmittedValue("old");
+    evaluator.handleExecute(Map.of("code", "1 + 1", "timeoutMs", BEYOND_HANG_GUARD_MS));
+    assertNull(bridge.submittedValue());
   }
 
   @Test
   void readLoopCleansPendingCallbacksOnEof() {
-    var call = env.inSandbox(() -> bootstrap.callHost("test", Map.of("key", "val")));
+    var call = env.inSandbox(() -> bridge.callHost("test", Map.of("key", "val")));
     env.nextRequest();
     env.endInput();
 
-    bootstrap.readLoop();
+    rpc.readLoop();
 
     var failure = Await.failure("the host call pending at end of input", call);
     assertInstanceOf(RuntimeException.class, failure);
-    assertTrue(failure.getMessage().contains("Sandbox stdin closed"));
+    assertEquals("Host call failed: Sandbox stdin closed", failure.getMessage());
+  }
+
+  @Test
+  void readFailureFailsThePendingHostCalls() {
+    var call = env.inSandbox(() -> bridge.callHost("test", Map.of("key", "val")));
+    env.nextRequest();
+    var failingSocket =
+        new BufferedReader(
+            new Reader() {
+              @Override
+              public int read(char[] buffer, int offset, int length) throws IOException {
+                throw new IOException("connection reset");
+              }
+
+              @Override
+              public void close() {}
+            });
+
+    new BootstrapRpc(failingSocket, bridge, evaluator, status -> {}).readLoop();
+
+    var failure = Await.failure("the host call pending when the read failed", call);
+    assertEquals("Host call failed: Sandbox stdin closed", failure.getMessage());
+  }
+
+  @Test
+  void interruptedHostCallFailsAndKeepsTheInterrupt() {
+    var call =
+        env.inSandbox(
+            () -> {
+              Thread.currentThread().interrupt();
+              var failure =
+                  assertThrows(RuntimeException.class, () -> bridge.callHost("test", Map.of()));
+              return Map.entry(failure.getMessage(), Thread.currentThread().isInterrupted());
+            });
+
+    assertEquals(
+        Map.entry("Host call interrupted", true), Await.value("the interrupted host call", call));
+  }
+
+  /**
+   * The warning goes to {@code System.err}, which an execute captures while its snippet runs, so
+   * the warning is written while a snippet is parked in a host call and read from that execute's
+   * stderr.
+   */
+  @Test
+  void classpathThatCannotBeExtendedIsWarnedAbout() {
+    var closed = JShell.create();
+    closed.close();
+    var execute =
+        env.inSandbox(
+            () ->
+                evaluator.handleExecute(
+                    Map.of(
+                        "code",
+                        "predict(\"hold\", \"the captured streams\");",
+                        "timeoutMs",
+                        BEYOND_HANG_GUARD_MS,
+                        "captureBindings",
+                        false)));
+    var parked = env.nextRequest();
+
+    JvmSandboxBootstrap.addHostBridgeToJShellClasspath(closed);
+    answer(parked);
+
+    assertEquals(
+        "Warning: could not add HostBridge location to JShell classpath: JShell ("
+            + closed
+            + ") has been closed.\n",
+        Await.value("the execute capturing the warning", execute).get("stderr"));
   }
 
   @Test
@@ -612,7 +696,7 @@ class JvmSandboxBootstrapTest {
     var before = System.out;
     var beforeErr = System.err;
 
-    bootstrap.handleExecute(
+    evaluator.handleExecute(
         Map.of("code", "System.out.println(\"x\")", "timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals(before, System.out);
@@ -624,10 +708,11 @@ class JvmSandboxBootstrapTest {
     var before = System.out;
     var beforeErr = System.err;
 
-    bootstrap.handleExecute(Map.of("code", LOOP_FOREVER, "timeoutMs", TIMEOUT_MS));
+    var result = evaluator.handleExecute(Map.of("code", LOOP_FOREVER, "timeoutMs", TIMEOUT_MS));
 
     assertEquals(before, System.out);
     assertEquals(beforeErr, System.err);
+    assertStopped(result);
   }
 
   /**
@@ -640,7 +725,7 @@ class JvmSandboxBootstrapTest {
     var first =
         env.inSandbox(
             () ->
-                bootstrap.handleExecute(
+                evaluator.handleExecute(
                     Map.of(
                         "code",
                         "predict(\"hold\", \"the lock\")",
@@ -649,11 +734,12 @@ class JvmSandboxBootstrapTest {
     var heldBy = env.nextRequest();
 
     var result =
-        bootstrap.handleExecute(Map.of("code", "1 + 1", "timeoutMs", BEYOND_HANG_GUARD_MS));
+        evaluator.handleExecute(Map.of("code", "1 + 1", "timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals(1, result.get("exitCode"));
-    assertTrue(((String) result.get("stderr")).contains("Concurrent execution rejected"));
-    bootstrap.dispatch(new RpcMessage.Response(heldBy.id(), Map.of("output", "released")));
+    assertEquals(
+        "Concurrent execution rejected — only one execute may run at a time", result.get("stderr"));
+    rpc.dispatch(new RpcMessage.Response(heldBy.id(), Map.of("output", "released")));
     assertEquals(0, Await.value("the first execute", first).get("exitCode"));
   }
 
@@ -672,11 +758,13 @@ class JvmSandboxBootstrapTest {
   private void timeoutsFiredByTheTest() {
     env.close();
     env = BootstrapEnvironment.timedOutByTheTest(SHORT_STOP_GRACE);
-    bootstrap = env.bootstrap();
+    bridge = env.bridge();
+    evaluator = env.evaluator();
+    rpc = env.rpc();
   }
 
   private void answer(RpcMessage.Request hostCall) {
-    bootstrap.dispatch(new RpcMessage.Response(hostCall.id(), Map.of("output", "answered")));
+    rpc.dispatch(new RpcMessage.Response(hostCall.id(), Map.of("output", "answered")));
   }
 
   /**
@@ -686,7 +774,7 @@ class JvmSandboxBootstrapTest {
    * woven; the bindings snapshot is off because the vector's {@code toString} needs it too.
    */
   private RpcMessage.Request holdMonitorOutsideTheSnippetGroup() {
-    bootstrap.handleExecute(
+    evaluator.handleExecute(
         Map.of(
             "code",
             """
@@ -703,7 +791,7 @@ class JvmSandboxBootstrapTest {
   /** Lets every snippet thread blocked on the monitor end, so none is left for the next test. */
   private void releaseMonitor(RpcMessage.Request holding) {
     var stuck = liveSnippetThreads();
-    bootstrap.dispatch(new RpcMessage.Response(holding.id(), Map.of("output", "released")));
+    rpc.dispatch(new RpcMessage.Response(holding.id(), Map.of("output", "released")));
     stuck.forEach(thread -> Await.termination("a snippet thread let into the monitor", thread));
   }
 
@@ -715,8 +803,17 @@ class JvmSandboxBootstrapTest {
   private static void assertUnstoppable(Map<String, Object> result) {
     assertTimedOut(result);
     assertTrue(
-        ((String) result.get("stderr")).contains("could not be stopped"),
+        ((String) result.get("stderr")).contains(UNSTOPPABLE + "\n"),
         "stderr was: " + result.get("stderr"));
+  }
+
+  /** Timed out, and stopped rather than given up as unstoppable. */
+  private void assertStopped(Map<String, Object> result) {
+    assertTimedOut(result);
+    assertFalse(
+        ((String) result.get("stderr")).contains(UNSTOPPABLE),
+        "stderr was: " + result.get("stderr"));
+    assertFalse(evaluator.isUnstoppableOn(Thread.currentThread()));
   }
 
   private static void assertTimedOut(Map<String, Object> result) {

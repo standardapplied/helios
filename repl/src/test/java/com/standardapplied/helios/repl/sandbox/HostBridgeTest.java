@@ -27,7 +27,10 @@ class HostBridgeTest {
 
   @Test
   void predictWithNoBootstrapThrows() {
-    assertThrows(IllegalStateException.class, () -> HostBridge.predict("instructions", "input"));
+    var thrown =
+        assertThrows(
+            IllegalStateException.class, () -> HostBridge.predict("instructions", "input"));
+    assertEquals("HostBridge can only be called from within a sandbox", thrown.getMessage());
   }
 
   @Test
@@ -112,7 +115,7 @@ class HostBridgeTest {
       answer(env, Map.of("status", "accepted"));
 
       Await.value("submit to return", submitted);
-      assertEquals("stored-value", env.bootstrap().submittedValue());
+      assertEquals("stored-value", env.bridge().submittedValue());
     }
   }
 
@@ -242,6 +245,74 @@ class HostBridgeTest {
       answer(env, List.of());
 
       assertTrue(Await.value("query's rows", queried).isEmpty());
+    }
+  }
+
+  @Test
+  void queryDropsRowsThatAreNotObjects() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var queried = env.inSandbox(() -> HostBridge.query("SELECT 1"));
+
+      answer(env, List.of(Map.of("x", 1), "not-a-row", Map.of("x", 2)));
+
+      assertEquals(List.of(Map.of("x", 1), Map.of("x", 2)), Await.value("query's rows", queried));
+    }
+  }
+
+  @Test
+  void getInputDelegatesToBootstrapAndIsUnmodifiable() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var input = env.inSandbox(HostBridge::getInput);
+
+      var request = answer(env, Map.of("topic", "rust", "count", 3));
+
+      assertEquals("__getInput", request.method());
+      assertEquals(Map.of(), request.params());
+      var fields = Await.value("getInput's fields", input);
+      assertEquals(Map.of("topic", "rust", "count", 3), fields);
+      assertThrows(UnsupportedOperationException.class, () -> fields.put("x", 1));
+    }
+  }
+
+  @Test
+  void getInputWithNonMapResultReturnsEmpty() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var input = env.inSandbox(HostBridge::getInput);
+
+      answer(env, "not-a-map");
+
+      assertEquals(Map.of(), Await.value("getInput's fields", input));
+    }
+  }
+
+  @Test
+  void getInputWithNoBootstrapThrows() {
+    assertThrows(IllegalStateException.class, HostBridge::getInput);
+  }
+
+  @Test
+  void callForwardsTheNamedFunctionWithItsArguments() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var called = env.inSandbox(() -> HostBridge.__call("marketQuote", Map.of("ticker", "AAPL")));
+
+      var request = answer(env, 187.5);
+
+      assertEquals("marketQuote", request.method());
+      assertEquals(Map.of("ticker", "AAPL"), request.params());
+      assertEquals(187.5, Await.value("the call's result", called));
+    }
+  }
+
+  @Test
+  void callWithoutArgumentsSendsAnEmptyObject() {
+    try (var env = BootstrapEnvironment.reading()) {
+      var called = env.inSandbox(() -> HostBridge.__call("ping", null));
+
+      var request = answer(env, "pong");
+
+      assertEquals("ping", request.method());
+      assertEquals(Map.of(), request.params());
+      assertEquals("pong", Await.value("the call's result", called));
     }
   }
 

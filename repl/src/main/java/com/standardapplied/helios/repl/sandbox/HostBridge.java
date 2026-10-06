@@ -13,8 +13,7 @@ import java.util.Map;
 
 /**
  * Static bridge for sandbox code to call host functions. Sandbox code evaluated by JShell calls
- * these static methods directly, which delegate to the running {@link JvmSandboxBootstrap}
- * instance.
+ * these static methods directly, which delegate to the sandbox's installed {@link HostBridgeState}.
  *
  * <p>Usage from sandbox code (after {@code import static} pre-eval):
  *
@@ -28,8 +27,8 @@ import java.util.Map;
  * <p>The set of reachable methods must match the set of {@code HostFunction}s registered on the
  * parent. {@link #fetch} and {@link #query} return empty collections when the corresponding host
  * function is not registered — the underlying RPC call fails and is surfaced as an exception from
- * {@link JvmSandboxBootstrap#callHost}; this wrapper lets that propagate rather than silently
- * returning empty.
+ * {@link HostBridgeState#callHost}; this wrapper lets that propagate rather than silently returning
+ * empty.
  */
 public final class HostBridge {
 
@@ -155,8 +154,8 @@ public final class HostBridge {
     return bootstrap.callHost(name, args == null ? Map.of() : args);
   }
 
-  private static JvmSandboxBootstrap requireBootstrap() {
-    var bootstrap = JvmSandboxBootstrap.instance();
+  private static HostBridgeState requireBootstrap() {
+    var bootstrap = HostBridgeState.instance();
     if (bootstrap == null) {
       throw new IllegalStateException("HostBridge can only be called from within a sandbox");
     }

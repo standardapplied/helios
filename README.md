@@ -461,7 +461,7 @@ The `helios-repl` module runs Java code in a JVM subprocess sandbox brokering ac
 record Input(String query, List<String> documents) {}
 record Output(String answer, List<String> sources, int totalCount) {}
 
-try (var executionProvider = JShellExecutionProvider.singleSandbox(ReplConfig.newBuilder().build(), null);
+try (var executionProvider = JShellExecutionProvider.create(ReplConfig.newBuilder().build());
      var session = AgentSession.create(
          SessionOptions.newBuilder()
              .withModel(model)
