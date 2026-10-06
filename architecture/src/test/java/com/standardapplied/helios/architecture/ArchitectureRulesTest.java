@@ -32,6 +32,7 @@ import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.PrintStream;
 import java.lang.module.ModuleFinder;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
@@ -85,6 +86,9 @@ class ArchitectureRulesTest {
 
   /** The one launcher outside core.process: the REPL sandbox starts its own JVM. */
   private static final String SANDBOX_LAUNCHER = HELIOS + ".repl.sandbox.SandboxLauncher";
+
+  /** The one class that swaps the JVM-global standard streams: the sandbox's snippet evaluator. */
+  private static final String STREAM_SWAPPER = HELIOS + ".repl.sandbox.SnippetEvaluator";
 
   private static final String TIME_SEAM =
       "a class that needs the time takes a java.time.InstantSource through withClock(...) and"
@@ -421,6 +425,36 @@ class ArchitectureRulesTest {
             "a child process is started through core.process.BoundedProcess, which owns the"
                 + " explicit argv and environment, bounded output, timeout kill and working"
                 + " directory; only repl.sandbox.SandboxLauncher launches its own JVM")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void jshellIsUsedOnlyOnTheBootstrapSideOfTheSandbox() {
+    noClasses()
+        .that()
+        .resideOutsideOfPackage(HELIOS + ".repl.sandbox..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAPackage("jdk.jshell..")
+        .because(
+            "JShell runs inside the sandbox subprocess: only repl.sandbox and its sub-packages, the"
+                + " bootstrap side of the process boundary, use jdk.jshell; the host reaches a"
+                + " snippet through JvmSandbox's RPC")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void theStandardStreamsAreSwappedOnlyBySnippetEvaluator() {
+    noClasses()
+        .that()
+        .doNotHaveFullyQualifiedName(STREAM_SWAPPER)
+        .should()
+        .callMethod(System.class, "setOut", PrintStream.class)
+        .orShould()
+        .callMethod(System.class, "setErr", PrintStream.class)
+        .because(
+            "System.out and System.err are JVM-global: only repl.sandbox.SnippetEvaluator swaps"
+                + " them, under the lock that admits one execute at a time")
         .check(LIBRARY);
   }
 
