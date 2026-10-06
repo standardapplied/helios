@@ -160,6 +160,18 @@ class ExecutionResultMappingTest {
   }
 
   @Test
+  void bindingsWhoseNameIsNotAStringAreDropped() {
+    var bindings = new LinkedHashMap<Object, Object>();
+    bindings.put(1, "one");
+    bindings.put("kept", 2);
+
+    var result = ExecutionReplies.toExecutionResult(CODE, Map.of("bindings", bindings), "");
+
+    assertEquals(
+        new ExecutionResult(CODE, "", "", 0, null, Map.of("kept", "2"), Duration.ZERO), result);
+  }
+
+  @Test
   void replyWithoutTheBootstrapsFields() throws Exception {
     var result = execute(Map.of("unexpected", true));
 
