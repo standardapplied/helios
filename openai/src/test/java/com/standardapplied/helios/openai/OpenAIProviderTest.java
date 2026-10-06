@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.provider.StreamingModel;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -92,7 +93,7 @@ class OpenAIProviderTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var model = provider.create("gpt-4o", config);
     assertNotNull(model);
-    assertInstanceOf(OpenAIModel.class, model);
+    assertInstanceOf(StreamingModel.class, model);
     assertEquals("gpt-4o", model.id());
   }
 

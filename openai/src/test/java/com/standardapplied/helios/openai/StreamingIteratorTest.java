@@ -155,7 +155,7 @@ class StreamingIteratorTest {
       var done = (StreamEvent.Done) events.getLast();
       assertNotNull(done.response().thinking());
       assertEquals("Let me think about this.", done.response().thinking());
-      assertTrue(done.response().metadata().containsKey(OpenAIModel.REASONING_KEY));
+      assertTrue(done.response().metadata().containsKey(OpenAIResponseAssembler.REASONING_KEY));
 
       // Streaming surface: each reasoning delta arrives as ThinkingDelta.
       var thinkingDeltas =
@@ -418,7 +418,7 @@ class StreamingIteratorTest {
       }
       var done = (StreamEvent.Done) events.getLast();
       assertNull(done.response().thinking());
-      assertFalse(done.response().metadata().containsKey(OpenAIModel.REASONING_KEY));
+      assertFalse(done.response().metadata().containsKey(OpenAIResponseAssembler.REASONING_KEY));
     }
   }
 

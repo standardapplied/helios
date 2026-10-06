@@ -12,9 +12,11 @@ import java.util.Map;
 
 /**
  * Assembles the response at the end of a streamed turn: its text, tool calls, finish reason, usage
- * and reasoning summary, which also rides as {@link OpenAIModel#REASONING_KEY} metadata.
+ * and reasoning summary, which also rides as {@link #REASONING_KEY} metadata.
  */
 final class OpenAIResponseAssembler {
+
+  static final String REASONING_KEY = "openai.reasoning";
 
   private OpenAIResponseAssembler() {}
 
@@ -32,7 +34,7 @@ final class OpenAIResponseAssembler {
             .withFinishReason(calls.isEmpty() ? mapStatus(status) : FinishReason.TOOL_CALLS)
             .withUsage(usage(usage))
             .withThinking(thinking)
-            .withMetadata(thinking == null ? Map.of() : Map.of(OpenAIModel.REASONING_KEY, thinking))
+            .withMetadata(thinking == null ? Map.of() : Map.of(REASONING_KEY, thinking))
             .build();
     return new StreamEvent.Done(response);
   }

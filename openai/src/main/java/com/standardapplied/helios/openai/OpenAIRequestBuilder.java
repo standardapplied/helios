@@ -5,6 +5,7 @@ package com.standardapplied.helios.openai;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.ToolChoice;
+import com.standardapplied.helios.core.provider.RequestFactory;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.openai.api.ResponsesRequest;
 import com.standardapplied.helios.openai.api.ToolDefinition;
@@ -15,7 +16,7 @@ import java.util.Map;
  * Builds the Responses API request for one turn of one model: the conversation, tools and tool
  * choice, reasoning and sampling settings, and the output schema.
  */
-final class OpenAIRequestBuilder {
+final class OpenAIRequestBuilder implements RequestFactory<ResponsesRequest> {
 
   private final String wireModelId;
   private final OpenAIModelId.EffortSupport effortSupport;
@@ -42,7 +43,8 @@ final class OpenAIRequestBuilder {
    * The request for {@code messages}, offering {@code tools} and, when {@code outputSchema} is not
    * null, asking for JSON matching it.
    */
-  ResponsesRequest build(
+  @Override
+  public ResponsesRequest build(
       List<Message> messages, List<Tool> tools, Map<String, Object> outputSchema) {
     var input = OpenAIInput.of(messages);
     var toolDefinitions = definitions(tools);

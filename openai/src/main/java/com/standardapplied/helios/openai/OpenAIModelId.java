@@ -88,8 +88,7 @@ public enum OpenAIModelId {
 
   /**
    * The {@code reasoning.effort} range this model accepts. Drives the {@code ThinkingLevel} → wire
-   * mapping in {@code OpenAIModel}: tiers above the model's ceiling clamp down so requests stay
-   * valid.
+   * mapping: tiers above the model's ceiling clamp down so requests stay valid.
    *
    * @return the effort-support tier
    */
