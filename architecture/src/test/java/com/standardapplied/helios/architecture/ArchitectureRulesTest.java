@@ -32,7 +32,6 @@ import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.io.PrintStream;
 import java.lang.module.ModuleFinder;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
@@ -449,9 +448,8 @@ class ArchitectureRulesTest {
         .that()
         .doNotHaveFullyQualifiedName(STREAM_SWAPPER)
         .should()
-        .callMethod(System.class, "setOut", PrintStream.class)
-        .orShould()
-        .callMethod(System.class, "setErr", PrintStream.class)
+        .accessTargetWhere(
+            targetOwner(type(System.class)).and(target(name("setOut").or(name("setErr")))))
         .because(
             "System.out and System.err are JVM-global: only repl.sandbox.SnippetEvaluator swaps"
                 + " them, under the lock that admits one execute at a time")
