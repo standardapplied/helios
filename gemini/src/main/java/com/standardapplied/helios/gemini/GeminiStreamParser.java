@@ -75,7 +75,7 @@ final class GeminiStreamParser implements SseReader.Parser {
       if (error.get("message") != null) {
         message = "API error: " + error.get("message");
       }
-      if (error.get("code") instanceof Number code) {
+      if (error.get("code") instanceof Number code && code.intValue() > 0) {
         statusCode = code.intValue();
       }
     }
