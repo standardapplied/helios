@@ -178,6 +178,13 @@ unchanged.
 | `state.tryFireContextWarning()`, `state.resetContextWarningFlag()`, `state.contextWarningFired()` | removed from the public API: the context watermark is the loop's |
 | `AgentSession.JacksonJsonAdapter` | removed: it had a private constructor and a package-private instance, so no caller could use it; typed `runBlocking` parses through the session module's one Jackson mapper |
 
+**`JShellExecutionProvider.singleSandbox` is removed.** It was a second shortcut for the builder,
+and its name suggested one sandbox where the provider spawns one per session.
+
+| 2.x | 3.0 |
+|---|---|
+| `JShellExecutionProvider.singleSandbox(config, snippet)` | `JShellExecutionProvider.newBuilder().withReplConfig(config).withStartupSnippet(snippet).build()`, or `create(config)` when there is no snippet |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`

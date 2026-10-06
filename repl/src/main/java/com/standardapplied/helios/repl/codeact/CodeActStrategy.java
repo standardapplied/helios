@@ -4,10 +4,8 @@
  */
 package com.standardapplied.helios.repl.codeact;
 
-import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.repl.host.HostFunction;
-import com.standardapplied.helios.repl.sandbox.SandboxPrelude;
 import java.util.List;
 import java.util.Objects;
 
@@ -91,27 +89,8 @@ public final class CodeActStrategy {
         the deliverable.
 
         """);
-    if (!Strings.isBlank(strategyText)) {
-      sb.append("## Task strategy\n").append(strategyText.strip()).append("\n\n");
-    }
-    sb.append("## Input\n");
-    if (boundFieldNames != null && !boundFieldNames.isEmpty()) {
-      sb.append(
-          "These input fields are already bound as JShell variables in your sandbox. Use them"
-              + " directly — no need to parse JSON or copy values. The variables are:\n");
-      PromptRendering.appendFields(sb, inputSchema);
-      sb.append('\n');
-      sb.append(
-          "(The same JSON is also delivered as the user message for your reference, but the"
-              + " variables above are the canonical source — read them.)\n");
-    } else {
-      sb.append(
-          "The user message in the next turn is a JSON document with these fields. The values are"
-              + " not pre-bound as JShell variables — read each one as a literal from the user"
-              + " message in your first execute_code call.\n");
-      PromptRendering.appendFields(sb, inputSchema);
-    }
-    sb.append('\n');
+    PromptRendering.appendTaskStrategy(sb, strategyText);
+    PromptRendering.appendInput(sb, inputSchema, boundFieldNames);
     sb.append("## Required output schema\n");
     sb.append(
         "Your final assistant message must be a JSON object with these fields. The session parses"
@@ -119,32 +98,10 @@ public final class CodeActStrategy {
             + " it:\n");
     PromptRendering.appendFields(sb, outputSchema);
     sb.append('\n');
-    sb.append("## Sandbox conveniences\n")
-        .append(SandboxPrelude.modelFacingSummary())
-        .append("\n\n");
-    sb.append("## Your tools\n");
-    sb.append(
-        """
-        - Execute(runtime, script) — run code via the session's execution provider. For this \
-        session, runtime must be "JSHELL" and script is the Java/JShell snippet to evaluate. \
-        Sandbox state persists across calls.
-        """);
+    PromptRendering.appendConveniencesAndExecuteTool(sb);
     PromptRendering.appendCustomHostFunctions(sb, extraHostFunctions);
     sb.append('\n');
-    sb.append(
-        """
-        ## How to work
-        1. Explore first. On your first iteration, print samples of the inputs to confirm types \
-        and shapes. Don't extract before you've looked.
-        2. Persist intermediate work in JShell variables. Variables live across iterations; \
-        printed output does not. If you need a value later, save it to a named variable.
-        """);
-    sb.append("3. Printed output you see in tool results is truncated to ~")
-        .append(maxOutputCharsToModel)
-        .append(
-            " characters. The variables themselves retain their full values. If you want to \"see\""
-                + " a long value, slice it (e.g. var.substring(0, 500)) — don't rely on seeing the"
-                + " full print output.\n");
+    PromptRendering.appendHowToWork(sb, maxOutputCharsToModel);
     sb.append(
         """
         4. When you have the answer, stop calling Execute and return it. Your final assistant \

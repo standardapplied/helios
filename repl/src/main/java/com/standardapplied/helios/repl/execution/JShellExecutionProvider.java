@@ -5,13 +5,10 @@
 package com.standardapplied.helios.repl.execution;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
-import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.repl.ReplConfig;
-import com.standardapplied.helios.repl.ReplException;
 import com.standardapplied.helios.repl.ReplSession;
-import com.standardapplied.helios.repl.SandboxBindingsListener;
 import com.standardapplied.helios.session.execution.ExecutionCapabilities;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
 import com.standardapplied.helios.session.execution.ExecutionRequest;
@@ -19,20 +16,11 @@ import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import java.time.Duration;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * {@link ExecutionProvider} that dispatches {@link Runtime#JSHELL} requests to a per-session
@@ -83,8 +71,6 @@ import java.util.logging.Logger;
  */
 public final class JShellExecutionProvider implements ExecutionProvider, AutoCloseable {
 
-  private static final Logger LOGGER = Logger.getLogger(JShellExecutionProvider.class.getName());
-
   /**
    * Disambiguated alias for {@code java.lang.Runtime} — the simple name {@code Runtime} resolves to
    * the {@link com.standardapplied.helios.session.execution.Runtime} enum used as a dispatch key
@@ -95,23 +81,22 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
   private static final int DEFAULT_MAX_CONCURRENT_SESSIONS = 4;
   private static final Duration DEFAULT_MAX_TIMEOUT = Duration.ofMinutes(5);
 
-  private final ReplConfig replConfig;
-  private final int maxConcurrentSessions;
-  private final Semaphore sessionPermits;
+  private final SandboxPool pool;
   private final ExecutionCapabilities capabilities;
   private final SecretRegistry secretRegistry;
-  private final Map<String, ReplSession> sessions = new ConcurrentHashMap<>();
+  private final OutputRedaction redaction;
   private final AtomicBoolean closed = new AtomicBoolean();
   private final Thread shutdownHook;
   private final boolean shutdownHookRegistered;
-  private final String startupSnippet;
 
   private JShellExecutionProvider(Builder b) {
-    var bareConfig = b.replConfig;
     this.secretRegistry = b.secretRegistry != null ? b.secretRegistry : new SecretRegistry();
-    this.replConfig = withRedactingBindingsListener(bareConfig, this.secretRegistry);
-    this.maxConcurrentSessions = b.maxConcurrentSessions;
-    this.sessionPermits = new Semaphore(maxConcurrentSessions);
+    this.redaction = new OutputRedaction(secretRegistry);
+    this.pool =
+        new SandboxPool(
+            redaction.withRedactingBindingsListener(b.replConfig),
+            b.startupSnippet,
+            b.maxConcurrentSessions);
     this.capabilities =
         ExecutionCapabilities.newBuilder()
             .withSupportedRuntimes(Set.of(Runtime.JSHELL))
@@ -119,8 +104,7 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
             .withFilesystemWriteAllowed(b.filesystemWriteAllowed)
             .withMaxTimeout(b.maxTimeout)
             .build();
-    this.startupSnippet = b.startupSnippet;
-    this.shutdownHook = new Thread(this::reapAllSessions, "helios-jshell-shutdown");
+    this.shutdownHook = new Thread(pool::reapAll, "helios-jshell-shutdown");
     this.shutdownHookRegistered = b.registerShutdownHook;
     if (shutdownHookRegistered) {
       JVM.addShutdownHook(shutdownHook);
@@ -153,25 +137,6 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
   }
 
   /**
-   * Convenience factory for the CodeAct-shaped single-session usage: one persistent sandbox per
-   * Helios session with the supplied {@link ReplConfig} (carrying host functions registered
-   * up-front, e.g. {@code submit}, {@code predict}, {@code __getInput}) and an optional startup
-   * snippet executed before the model's first {@code execute_code} call (typically the {@link
-   * com.standardapplied.helios.repl.InputBindings}-generated input-variable bindings).
-   *
-   * @param replConfig the configuration used to spawn each session's sandbox; non-null
-   * @param startupSnippet the snippet to execute once per sandbox after creation; may be {@code
-   *     null} or blank to skip
-   * @return a fresh provider
-   * @throws NullPointerException if {@code replConfig} is null
-   */
-  public static JShellExecutionProvider singleSandbox(
-      ReplConfig replConfig, String startupSnippet) {
-    Objects.requireNonNull(replConfig, "replConfig must not be null");
-    return newBuilder().withReplConfig(replConfig).withStartupSnippet(startupSnippet).build();
-  }
-
-  /**
    * Start a builder.
    *
    * @return a fresh builder
@@ -191,7 +156,7 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
    * @return the cap passed via {@link Builder#withMaxConcurrentSessions(int)}
    */
   public int maxConcurrentSessions() {
-    return maxConcurrentSessions;
+    return pool.maxConcurrentSessions();
   }
 
   /**
@@ -200,7 +165,7 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
    * @return non-negative count
    */
   public int liveSessionCount() {
-    return sessions.size();
+    return pool.liveCount();
   }
 
   /**
@@ -218,84 +183,13 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     if (closed.get()) {
       return SessionStartOutcome.refuse("provider is closed");
     }
-    if (sessions.containsKey(ctx.sessionId())) {
-      return SessionStartOutcome.refuse(
-          "session " + ctx.sessionId() + " already has a JShell sandbox bound");
-    }
-    if (!sessionPermits.tryAcquire()) {
-      return SessionStartOutcome.refuse(
-          "JShell session pool saturated (cap=" + maxConcurrentSessions + ")");
-    }
-    ReplSession session;
-    try {
-      // ReplSession.create takes a Semaphore for its own concurrency accounting; we pass a fresh
-      // single-permit semaphore so the ReplSession releases it on close without touching our
-      // pool-wide permit (which we manage explicitly above).
-      var perSessionPermit = new Semaphore(1);
-      session = ReplSession.create(replConfig, perSessionPermit);
-    } catch (RuntimeException e) {
-      sessionPermits.release();
-      return SessionStartOutcome.refuse(
-          "failed to spawn JShell sandbox for session " + ctx.sessionId() + ": " + e.getMessage(),
-          e);
-    }
-    var existing = sessions.putIfAbsent(ctx.sessionId(), session);
-    if (existing != null) {
-      // Lost the race against another onSessionStart for the same id; close the one we just
-      // built and refuse. The pre-check above narrows this window but a concurrent caller could
-      // still slip through.
-      safeClose(session);
-      sessionPermits.release();
-      return SessionStartOutcome.refuse(
-          "session " + ctx.sessionId() + " already has a JShell sandbox bound");
-    }
-    if (!Strings.isBlank(startupSnippet)) {
-      try {
-        var result = session.execute(startupSnippet);
-        if (result.exitCode() != 0) {
-          var detail = result.stderr().isBlank() ? result.stdout() : result.stderr();
-          sessions.remove(ctx.sessionId());
-          safeClose(session);
-          sessionPermits.release();
-          return SessionStartOutcome.refuse(
-              "JShell startup snippet failed for session "
-                  + ctx.sessionId()
-                  + " (exit="
-                  + result.exitCode()
-                  + "): "
-                  + detail);
-        }
-      } catch (RuntimeException e) {
-        sessions.remove(ctx.sessionId());
-        safeClose(session);
-        sessionPermits.release();
-        return SessionStartOutcome.refuse(
-            "JShell startup snippet failed for session " + ctx.sessionId() + ": " + e.getMessage(),
-            e);
-      }
-    }
-    // Defense-in-depth: session-scoped cancellation also tears down, in case the host bypasses
-    // onSessionEnd (uncaught error during loop construction, crashed cleanup path).
-    ctx.cancellation()
-        .onCancel(
-            () -> {
-              var stale = sessions.remove(ctx.sessionId());
-              if (stale != null) {
-                safeClose(stale);
-                sessionPermits.release();
-              }
-            });
-    return SessionStartOutcome.accept();
+    return pool.start(ctx);
   }
 
   @Override
   public void onSessionEnd(SessionContext ctx) {
     Objects.requireNonNull(ctx, "ctx must not be null");
-    var session = sessions.remove(ctx.sessionId());
-    if (session != null) {
-      safeClose(session);
-      sessionPermits.release();
-    }
+    pool.end(ctx.sessionId());
   }
 
   @Override
@@ -308,76 +202,20 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
       return CompletableFuture.failedFuture(new IllegalStateException("provider is closed"));
     }
     if (request.runtime() != Runtime.JSHELL) {
-      return CompletableFuture.completedFuture(refusal(request, "runtime not supported"));
+      return CompletableFuture.completedFuture(
+          SessionExecution.refusal(request, "runtime not supported"));
     }
-    var replSession = sessions.get(session.sessionId());
+    var replSession = pool.session(session.sessionId());
     if (replSession == null) {
       return CompletableFuture.completedFuture(
-          refusal(
+          SessionExecution.refusal(
               request,
               "no JShell session registered for sessionId="
                   + session.sessionId()
                   + " — onSessionStart not called or already onSessionEnd'd"));
     }
-    var future = new CompletableFuture<ExecutionResult>();
-    Thread.ofVirtual()
-        .name("helios-jshell-" + session.sessionId())
-        .start(
-            () -> {
-              var killed = new AtomicBoolean();
-              Runnable killCallback =
-                  () -> {
-                    if (killed.compareAndSet(false, true)) {
-                      safeClose(replSession);
-                    }
-                  };
-              var killRegistration = cancellation.onCancel(killCallback);
-              var startNanos = System.nanoTime();
-              try {
-                var raw = replSession.execute(request.script());
-                var elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
-                if (cancellation.isCancelled()) {
-                  future.completeExceptionally(
-                      new CancellationException(
-                          "JShell snippet cancelled: " + cancellation.reason().orElse("")));
-                  return;
-                }
-                var redacted = redactRaw(raw);
-                future.complete(
-                    new ExecutionResult(
-                        raw.exitCode(),
-                        redacted.stdout(),
-                        redacted.stderr(),
-                        elapsed,
-                        false,
-                        redacted.counts()));
-              } catch (ReplException e) {
-                if (cancellation.isCancelled()) {
-                  future.completeExceptionally(
-                      new CancellationException(
-                          "JShell snippet cancelled: " + cancellation.reason().orElse("")));
-                  return;
-                }
-                future.complete(
-                    refusal(
-                        request,
-                        "JShell execution failed: "
-                            + (e.getMessage() == null
-                                ? e.getClass().getSimpleName()
-                                : e.getMessage())));
-              } catch (Throwable t) {
-                future.completeExceptionally(t);
-              } finally {
-                // Mark the kill callback inert regardless of outcome — the session is in a known
-                // post-call state and a later token fire must not double-close. Idempotent close
-                // covers the race, but the gate avoids the spurious work. Also detach the
-                // callback from the (long-lived) session token's list so per-call references do
-                // not accumulate.
-                killed.set(true);
-                killRegistration.remove();
-              }
-            });
-    return future;
+    return SessionExecution.start(
+        session.sessionId(), replSession, request, cancellation, redaction);
   }
 
   /**
@@ -390,7 +228,7 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     if (!closed.compareAndSet(false, true)) {
       return;
     }
-    reapAllSessions();
+    pool.reapAll();
     if (shutdownHookRegistered) {
       try {
         JVM.removeShutdownHook(shutdownHook);
@@ -398,92 +236,6 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
         // JVM already shutting down — hook is firing or has fired.
       }
     }
-  }
-
-  private void reapAllSessions() {
-    for (var entry : List.copyOf(sessions.entrySet())) {
-      sessions.remove(entry.getKey());
-      safeClose(entry.getValue());
-      sessionPermits.release();
-    }
-  }
-
-  private RedactedOutput redactRaw(com.standardapplied.helios.repl.sandbox.ExecutionResult raw) {
-    var redactor = secretRegistry.redactor();
-    var stdoutResult = redactor.redact(raw.stdout());
-    var stderrResult = redactor.redact(raw.stderr());
-    return new RedactedOutput(
-        stdoutResult.text(), stderrResult.text(), stdoutResult.mergeCounts(stderrResult));
-  }
-
-  /**
-   * Return a copy of {@code config} whose {@link SandboxBindingsListener} is wrapped to scrub every
-   * binding value through {@code registry}'s redactor before delivery. {@code stdout} and {@code
-   * stderr} are redacted upstream by {@link #redactRaw}; without this wrapper, operator telemetry
-   * receiving the bindings snapshot would see {@code var apiKey = "sk-..."} verbatim.
-   *
-   * <p>Returns {@code config} unchanged when no listener is configured.
-   */
-  private static ReplConfig withRedactingBindingsListener(
-      ReplConfig config, SecretRegistry registry) {
-    var listener = redactingBindingsListener(registry, config.sandboxBindingsListener());
-    if (listener == config.sandboxBindingsListener()) {
-      return config;
-    }
-    return new ReplConfig(
-        config.sandboxFactory(),
-        config.executionTimeout(),
-        config.maxConcurrentSessions(),
-        config.hostFunctions(),
-        config.maxOutputCharsToModel(),
-        listener,
-        config.maxBindingValueChars(),
-        config.maxBindingSnapshotChars(),
-        config.maxExecutedCodeChars());
-  }
-
-  /**
-   * Build a {@link SandboxBindingsListener} that decorates {@code delegate} with per-value
-   * redaction against {@code registry}. Returns {@code null} when {@code delegate} is null
-   * (preserves the null-disables semantics of {@link ReplConfig#sandboxBindingsListener()}).
-   *
-   * <p>Package-private for testing — the wrapping logic is the security-critical bit and is worth
-   * exercising directly without needing a full sandbox subprocess.
-   */
-  static SandboxBindingsListener redactingBindingsListener(
-      SecretRegistry registry, SandboxBindingsListener delegate) {
-    if (delegate == null) {
-      return null;
-    }
-    return (bindings, result) -> {
-      if (bindings.isEmpty()) {
-        delegate.onBindings(bindings, result);
-        return;
-      }
-      var redactor = registry.redactor();
-      var redacted = new LinkedHashMap<String, String>(bindings.size());
-      for (var entry : bindings.entrySet()) {
-        var value = entry.getValue();
-        redacted.put(entry.getKey(), value == null ? null : redactor.redact(value).text());
-      }
-      // Preserve declaration order — Map.copyOf would lose it. The listener never mutates.
-      delegate.onBindings(Collections.unmodifiableMap(redacted), result);
-    };
-  }
-
-  private record RedactedOutput(String stdout, String stderr, Map<String, Integer> counts) {}
-
-  private static void safeClose(ReplSession session) {
-    try {
-      session.close();
-    } catch (RuntimeException e) {
-      LOGGER.log(Level.WARNING, "failed to close ReplSession", e);
-    }
-  }
-
-  private static ExecutionResult refusal(ExecutionRequest request, String reason) {
-    return ExecutionResult.refusal(
-        "JShellExecutionProvider: " + reason + " (runtime=" + request.runtime() + ")");
   }
 
   /** Mutable builder for {@link JShellExecutionProvider}. */

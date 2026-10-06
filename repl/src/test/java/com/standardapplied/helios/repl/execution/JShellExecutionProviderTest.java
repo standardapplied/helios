@@ -8,10 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
@@ -159,6 +161,32 @@ final class JShellExecutionProviderTest {
     var b = JShellExecutionProvider.newBuilder();
     var ex = assertThrows(IllegalArgumentException.class, () -> b.withMaxTimeout(Duration.ZERO));
     assertTrue(ex.getMessage().startsWith("maxTimeout must be strictly positive"));
+  }
+
+  @Test
+  void builderRejectsNegativeMaxTimeout() {
+    var b = JShellExecutionProvider.newBuilder();
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> b.withMaxTimeout(Duration.ofSeconds(-1)));
+    assertEquals("maxTimeout must be strictly positive, got PT-1S", ex.getMessage());
+  }
+
+  @Test
+  void secretRegistryIsTheConfiguredOneOrAFreshEmptyOne() {
+    var registry = new SecretRegistry();
+    try (var configured =
+            JShellExecutionProvider.newBuilder()
+                .withReplConfig(configWithSandbox(new StubSandbox()))
+                .withSecretRegistry(registry)
+                .withShutdownHook(false)
+                .build();
+        var defaulted = providerFor(new StubSandbox())) {
+      assertSame(registry, configured.secretRegistry());
+      assertNotNull(defaulted.secretRegistry());
+      assertNotSame(registry, defaulted.secretRegistry());
+      assertEquals(0, defaulted.secretRegistry().size());
+    }
   }
 
   @Test
@@ -654,6 +682,49 @@ final class JShellExecutionProviderTest {
 
       assertInstanceOf(
           CancellationException.class, Await.failure("the cancelled execution", future));
+    }
+  }
+
+  /**
+   * A token fires its callbacks in registration order, so a callback registered before the execute
+   * can hold the cancellation until the execute's thread has finished. The execute's kill callback
+   * then fires after the call is over and must leave the session alone.
+   */
+  @Test
+  void killCallbackFiringAfterTheCallFinishedLeavesTheSessionOpen() {
+    var runThread = new java.util.concurrent.CompletableFuture<Thread>();
+    var fired = new CountDownLatch(1);
+    var sandbox =
+        new StubSandbox() {
+          @Override
+          public com.standardapplied.helios.repl.sandbox.ExecutionResult execute(
+              com.standardapplied.helios.repl.sandbox.ExecutionRequest request) {
+            runThread.complete(Thread.currentThread());
+            Await.latch("the cancellation to start firing", fired);
+            return super.execute(request);
+          }
+        };
+    try (var provider = providerFor(sandbox)) {
+      var c = ctx("late-kill");
+      provider.onSessionStart(c);
+      var token = new CancellationToken();
+      token.onCancel(
+          () -> {
+            fired.countDown();
+            Await.termination(
+                "the execute's thread", Await.value("the execute's thread", runThread));
+          });
+      var req = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("x").build();
+      var future = provider.execute(c, req, token).toCompletableFuture();
+      Await.value("the execute's thread", runThread);
+
+      var canceller = Thread.ofPlatform().start(() -> token.cancel("late"));
+      Await.termination("the cancellation to finish firing", canceller);
+
+      assertInstanceOf(
+          CancellationException.class, Await.failure("the cancelled execution", future));
+      assertTrue(sandbox.isAlive(), "a kill callback that fires after the call must not close");
+      assertEquals(1, provider.liveSessionCount());
     }
   }
 

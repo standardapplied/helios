@@ -57,7 +57,7 @@ class JvmSandboxTest {
   @Test
   void buildLaunchCommandIncludesMainClassAndClasspath() {
     var config = JvmSandboxConfig.defaults();
-    var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config);
+    var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", config);
     assertEquals("/fake/java", cmd.get(0));
     assertTrue(cmd.contains("-cp"), "must pass -cp so non-JPMS callers work");
     assertTrue(
@@ -89,7 +89,7 @@ class JvmSandboxTest {
       System.setProperty(
           "java.class.path", "target/cron.jar" + sep + "libs/repository-1.0.0-SNAPSHOT.jar");
       var config = JvmSandboxConfig.defaults();
-      var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config);
+      var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", config);
 
       var cpIdx = cmd.indexOf("-cp");
       assertTrue(cpIdx >= 0, "command must contain a -cp flag");
@@ -130,7 +130,7 @@ class JvmSandboxTest {
       var absoluteEntry = "/opt/lib/foo.jar";
       var relativeEntry = "build/bar.jar";
       System.setProperty("java.class.path", absoluteEntry + sep + relativeEntry);
-      var cmd = JvmSandbox.buildLaunchCommand("/fake/java", JvmSandboxConfig.defaults());
+      var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", JvmSandboxConfig.defaults());
       var cpArg = cmd.get(cmd.indexOf("-cp") + 1);
       assertTrue(
           cpArg.contains(absoluteEntry),
@@ -147,7 +147,7 @@ class JvmSandboxTest {
   @Test
   void buildLaunchCommandRespectsConfigMaxHeap() {
     var config = JvmSandboxConfig.newBuilder().withMaxHeapMb(1234).build();
-    var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config);
+    var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", config);
     assertTrue(cmd.contains("-Xmx1234m"), "config max heap should be applied; got: " + cmd);
   }
 
@@ -158,7 +158,7 @@ class JvmSandboxTest {
     // since the sandbox runs user code with access to System.getProperties().
     var parentArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
     var config = JvmSandboxConfig.defaults();
-    var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config);
+    var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", config);
     var parentHasDArgs = parentArgs.stream().anyMatch(a -> a.startsWith("-D"));
     if (parentHasDArgs) {
       assertTrue(
@@ -174,67 +174,70 @@ class JvmSandboxTest {
     // parent args from a test, but we can assert the ones this JVM was started with don't make the
     // subprocess command list have conflicting -Xmx entries.
     var config = JvmSandboxConfig.newBuilder().withMaxHeapMb(512).build();
-    var cmd = JvmSandbox.buildLaunchCommand("/fake/java", config);
+    var cmd = SandboxLauncher.buildLaunchCommand("/fake/java", config);
     var xmxCount = cmd.stream().filter(a -> a.startsWith("-Xmx")).count();
     assertEquals(1, xmxCount, "exactly one -Xmx expected; got: " + cmd);
   }
 
   @Test
   void hostNativeAccessIsNotGrantedToSandbox() {
-    assertFalse(JvmSandbox.shouldPropagateJvmArg("--enable-native-access=ALL-UNNAMED"));
+    assertFalse(SandboxLauncher.shouldPropagateJvmArg("--enable-native-access=ALL-UNNAMED"));
     assertFalse(
-        JvmSandbox.shouldPropagateJvmArg(
+        SandboxLauncher.shouldPropagateJvmArg(
             "--enable-native-access=com.standardapplied.helios.session"));
-    assertTrue(JvmSandbox.shouldPropagateJvmArg("--illegal-native-access=deny"));
-    var command = JvmSandbox.buildLaunchCommand("/fake/java", JvmSandboxConfig.defaults());
+    assertTrue(SandboxLauncher.shouldPropagateJvmArg("--illegal-native-access=deny"));
+    var command = SandboxLauncher.buildLaunchCommand("/fake/java", JvmSandboxConfig.defaults());
     assertTrue(command.stream().noneMatch(arg -> arg.startsWith("--enable-native-access")));
   }
 
   @Test
   void shouldPropagateJvmArgFiltersHeapArgs() {
-    assertFalse(JvmSandbox.shouldPropagateJvmArg("-Xmx512m"));
-    assertFalse(JvmSandbox.shouldPropagateJvmArg("-Xms128m"));
+    assertFalse(SandboxLauncher.shouldPropagateJvmArg("-Xmx512m"));
+    assertFalse(SandboxLauncher.shouldPropagateJvmArg("-Xms128m"));
   }
 
   @Test
   void shouldPropagateJvmArgFiltersAgentArgs() {
-    assertFalse(JvmSandbox.shouldPropagateJvmArg("-javaagent:/path/to/agent.jar"));
-    assertFalse(JvmSandbox.shouldPropagateJvmArg("-agentlib:jdwp=transport=dt_socket"));
-    assertFalse(JvmSandbox.shouldPropagateJvmArg("-agentpath:/path/to/libagent.so"));
+    assertFalse(SandboxLauncher.shouldPropagateJvmArg("-javaagent:/path/to/agent.jar"));
+    assertFalse(SandboxLauncher.shouldPropagateJvmArg("-agentlib:jdwp=transport=dt_socket"));
+    assertFalse(SandboxLauncher.shouldPropagateJvmArg("-agentpath:/path/to/libagent.so"));
   }
 
   @Test
   void shouldPropagateJvmArgFiltersSystemProperties() {
-    assertFalse(JvmSandbox.shouldPropagateJvmArg("-Dauth.token=sekrit"));
-    assertFalse(JvmSandbox.shouldPropagateJvmArg("-Djavax.net.ssl.trustStorePassword=changeit"));
-    assertFalse(JvmSandbox.shouldPropagateJvmArg("-Dfile.encoding=UTF-8"));
+    assertFalse(SandboxLauncher.shouldPropagateJvmArg("-Dauth.token=sekrit"));
+    assertFalse(
+        SandboxLauncher.shouldPropagateJvmArg("-Djavax.net.ssl.trustStorePassword=changeit"));
+    assertFalse(SandboxLauncher.shouldPropagateJvmArg("-Dfile.encoding=UTF-8"));
   }
 
   @Test
   void shouldPropagateJvmArgPropagatesOtherArgs() {
-    assertTrue(JvmSandbox.shouldPropagateJvmArg("--module-path"));
-    assertTrue(JvmSandbox.shouldPropagateJvmArg("--enable-preview"));
-    assertTrue(JvmSandbox.shouldPropagateJvmArg("--add-opens=java.base/java.lang=ALL-UNNAMED"));
-    assertTrue(JvmSandbox.shouldPropagateJvmArg("-XX:+UseZGC"));
+    assertTrue(SandboxLauncher.shouldPropagateJvmArg("--module-path"));
+    assertTrue(SandboxLauncher.shouldPropagateJvmArg("--enable-preview"));
+    assertTrue(
+        SandboxLauncher.shouldPropagateJvmArg("--add-opens=java.base/java.lang=ALL-UNNAMED"));
+    assertTrue(SandboxLauncher.shouldPropagateJvmArg("-XX:+UseZGC"));
   }
 
   @Test
   void parentUsesModulePathDetectsAllForms() {
-    assertTrue(JvmSandbox.parentUsesModulePath(List.of("--module-path", "/libs")));
-    assertTrue(JvmSandbox.parentUsesModulePath(List.of("--module-path=/libs")));
-    assertTrue(JvmSandbox.parentUsesModulePath(List.of("-p", "/libs")));
-    assertTrue(JvmSandbox.parentUsesModulePath(List.of("-p=/libs")));
+    assertTrue(SandboxLauncher.parentUsesModulePath(List.of("--module-path", "/libs")));
+    assertTrue(SandboxLauncher.parentUsesModulePath(List.of("--module-path=/libs")));
+    assertTrue(SandboxLauncher.parentUsesModulePath(List.of("-p", "/libs")));
+    assertTrue(SandboxLauncher.parentUsesModulePath(List.of("-p=/libs")));
   }
 
   @Test
   void parentUsesModulePathReturnsFalseWhenAbsent() {
-    assertFalse(JvmSandbox.parentUsesModulePath(List.of("-cp", "/libs", "-Xmx1g")));
-    assertFalse(JvmSandbox.parentUsesModulePath(List.of()));
+    assertFalse(SandboxLauncher.parentUsesModulePath(List.of("-cp", "/libs", "-Xmx1g")));
+    assertFalse(SandboxLauncher.parentUsesModulePath(List.of()));
   }
 
   @Test
   void factoryWithNullConfigThrows() {
-    assertThrows(IllegalArgumentException.class, () -> JvmSandbox.factory(null));
+    var thrown = assertThrows(IllegalArgumentException.class, () -> JvmSandbox.factory(null));
+    assertEquals("Config must not be null", thrown.getMessage());
   }
 
   @Test
@@ -423,8 +426,8 @@ class JvmSandboxTest {
     var sandbox = new JvmSandbox(process, transport, channel, config);
 
     assertEquals(process, sandbox.process());
-    assertEquals(transport, sandbox.transport());
-    assertEquals(channel, sandbox.channel());
+    assertEquals(transport, sandbox.rpc().transport());
+    assertEquals(channel, sandbox.rpc().channel());
 
     sandbox.close();
   }
@@ -959,7 +962,7 @@ class JvmSandboxTest {
       try (var client = SocketChannel.open(StandardProtocolFamily.UNIX)) {
         client.connect(UnixDomainSocketAddress.of(socketPath));
 
-        var accepted = JvmSandbox.acceptWithTimeout(listener, BEYOND_HANG_GUARD);
+        var accepted = SandboxRpc.acceptWithTimeout(listener, BEYOND_HANG_GUARD);
 
         assertNotNull(accepted, "successful accept must return the client channel");
         assertFalse(
@@ -985,7 +988,7 @@ class JvmSandboxTest {
     try {
       listener.bind(UnixDomainSocketAddress.of(socketPath), 1);
       assertThrows(
-          IOException.class, () -> JvmSandbox.acceptWithTimeout(listener, Duration.ofMillis(50)));
+          IOException.class, () -> SandboxRpc.acceptWithTimeout(listener, Duration.ofMillis(50)));
       assertFalse(
           listener.isOpen(),
           "acceptWithTimeout must close the listener on timeout so the blocked accept thread"
@@ -1016,7 +1019,12 @@ class JvmSandboxTest {
         assertThrows(
             com.standardapplied.helios.repl.ReplException.class,
             () -> JvmSandbox.create(config, registry));
+    assertEquals("Failed to start JVM sandbox subprocess", thrown.getMessage());
     assertNotNull(thrown.getCause(), "expected wrapped cause");
+    assertEquals(
+        "Subprocess did not connect to the RPC socket within PT0.05S; the launch probably failed"
+            + " — check stderr for the cause",
+        thrown.getCause().getMessage());
     var causeMessage = thrown.getCause().getMessage();
     assertNotNull(causeMessage, "cause must carry a message");
     assertTrue(
@@ -1034,8 +1042,8 @@ class JvmSandboxTest {
     // C1 moved the RPC channel off the subprocess's stdout onto a dedicated Unix domain socket,
     // so a snippet writing to FileDescriptor.out can no longer forge an RPC frame the host parser
     // sees (covered by rawStdoutWriteDoesNotForgeAnRpcCallToHost). But the underlying capability
-    // is still in-JVM and reachable through reflection against JvmSandboxBootstrap's private
-    // fields: a snippet that can call setAccessible(true) on the bootstrap's static `instance`
+    // is still in-JVM and reachable through reflection against HostBridgeState's private
+    // fields: a snippet that can call setAccessible(true) on the bridge state's static `instance`
     // and private `realOut` fields can grab the RPC socket's PrintStream and write a forged
     // Request directly to the host.
     //
@@ -1048,7 +1056,7 @@ class JvmSandboxTest {
     // `--add-opens=com.standardapplied.helios.repl/com.standardapplied.helios.repl.sandbox=...` (as
     // Surefire does, and
     // as common testing/instrumentation setups do) leaks that into the subprocess via
-    // JvmSandbox.shouldPropagateJvmArg, opening the package even under modulepath.
+    // SandboxLauncher.shouldPropagateJvmArg, opening the package even under modulepath.
     //
     // This test documents that limit: it runs the reflection attack against the production launch
     // path and asserts the forged auditCallback IS invoked. The fix path is documentation
@@ -1067,12 +1075,12 @@ class JvmSandboxTest {
               return null;
             }));
     try (var sandbox = JvmSandbox.create(END_TO_END, registry)) {
-      // The attack: Class.forName the bootstrap (its location is on the JShell classpath via
+      // The attack: Class.forName the bridge state (its location is on the JShell classpath via
       // addHostBridgeToJShellClasspath, since HostBridge sits in the same jar), grab the static
       // `instance` field reflectively, then pull `realOut` (which IS the RPC socket PrintStream
       // post-C1) and write a fully-formed JSON-RPC Request frame.
       var attack =
-          "var c = Class.forName(\"com.standardapplied.helios.repl.sandbox.JvmSandboxBootstrap\");"
+          "var c = Class.forName(\"com.standardapplied.helios.repl.sandbox.HostBridgeState\");"
               + "var instField = c.getDeclaredField(\"instance\");"
               + "instField.setAccessible(true);"
               + "var b = instField.get(null);"
@@ -1107,7 +1115,7 @@ class JvmSandboxTest {
     // security-critical invariant; this test prevents an unwitting future revert to
     // `catch (Exception e)`.
     var sourcePath =
-        Path.of("src/main/java/com/standardapplied/helios/repl/sandbox/JvmSandboxBootstrap.java");
+        Path.of("src/main/java/com/standardapplied/helios/repl/sandbox/SnippetEvaluator.java");
     var source = Files.readString(sourcePath, StandardCharsets.UTF_8);
     var collectBindingsStart = source.indexOf("Map<String, String> collectBindings(");
     assertTrue(collectBindingsStart > 0, "collectBindings method declaration not found");

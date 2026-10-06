@@ -5,14 +5,8 @@
 
 package com.standardapplied.helios.repl.sandbox;
 
-import com.standardapplied.helios.repl.protocol.ProcessTransport;
-import com.standardapplied.helios.repl.protocol.RpcError;
-import com.standardapplied.helios.repl.protocol.RpcMessage;
 import com.standardapplied.helios.repl.sandbox.policy.GuardedExecutionControlProvider;
-import com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy;
-import com.standardapplied.helios.repl.sandbox.policy.SandboxPolicySerialization;
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
@@ -21,106 +15,34 @@ import java.net.UnixDomainSocketAddress;
 import java.nio.channels.Channels;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
-import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Function;
-import java.util.function.IntConsumer;
 import jdk.jshell.JShell;
-import jdk.jshell.Snippet;
-import jdk.jshell.SourceCodeAnalysis;
 
 /**
- * JShell subprocess entry point. Reads JSON-RPC execute requests on stdin, evaluates Java code via
- * JShell with {@link jdk.jshell.execution.LocalExecutionControl LocalExecutionControl}, and returns
- * structured results on stdout. Host function calls from sandbox code flow back through the same
- * stdin/stdout channel using reverse RPC.
+ * JShell subprocess entry point. Connects to the host's RPC socket, evaluates the Java code the
+ * host sends via JShell with {@link jdk.jshell.execution.LocalExecutionControl
+ * LocalExecutionControl} behind the configured sandbox policy, and returns structured results. Host
+ * function calls from sandbox code flow back through the same socket using reverse RPC.
  *
  * <p>Threading model:
  *
  * <ul>
- *   <li>Main thread runs {@link #readLoop()} — reads stdin, dispatches requests, routes responses
- *   <li>Virtual thread per execute — captures stdout/stderr and runs the JShell eval on a platform
- *       thread in a thread group of its own, so a timeout can find every thread the snippet started
- *   <li>Sandbox code calling {@link HostBridge#predict} blocks on a {@link CompletableFuture} until
- *       the main thread routes the host response
+ *   <li>Main thread runs {@link BootstrapRpc#readLoop()} — reads the socket, dispatches requests,
+ *       routes responses
+ *   <li>Virtual thread per execute — {@link SnippetEvaluator} captures stdout/stderr and runs the
+ *       JShell eval on a platform thread in a thread group of its own, so a timeout can find every
+ *       thread the snippet started
+ *   <li>Sandbox code calling {@link HostBridge#predict} blocks on a {@link
+ *       java.util.concurrent.CompletableFuture} until the main thread routes the host response
  * </ul>
- *
- * <p>Only one execute may run at a time. {@code System.out}/{@code System.err} are redirected to
- * capture buffers during eval — concurrent executes would corrupt each other's streams. A {@link
- * Semaphore} enforces this invariant; the host side ({@link
- * com.standardapplied.helios.repl.protocol.RpcChannel#call RpcChannel.call}) also serializes
- * naturally by blocking until each response arrives.
  */
 public final class JvmSandboxBootstrap {
 
-  private static final long CALL_TIMEOUT_MS = 300_000;
-
-  private static final long STOP_RETRY_NANOS = Duration.ofMillis(20).toNanos();
-
   static final int UNSTOPPABLE_SNIPPET_EXIT_CODE = 3;
 
-  static final String STOP_GRACE_ARG = "--stop-grace=";
-
-  private static volatile JvmSandboxBootstrap instance;
-
-  private final JShell jshell;
-  private final BufferedReader stdinReader;
-  private final PrintStream realOut;
-  private final ConcurrentHashMap<String, CompletableFuture<Object>> pendingCallbacks =
-      new ConcurrentHashMap<>();
-  private final AtomicLong idCounter = new AtomicLong(0);
-  private final Semaphore executeLock = new Semaphore(1);
-  private final ExecutionTimer timer;
-  private final Duration stopGrace;
-  private final IntConsumer exit;
-  private volatile Object submittedValue;
-  private volatile Thread unstoppableExecution;
-
-  /** Waits for an execute's eval thread, the one wait that ends an execute by its timeout. */
-  @FunctionalInterface
-  interface ExecutionTimer {
-
-    /** {@code true} if {@code evalThread} ended within {@code timeout}. */
-    boolean awaitEnd(Thread evalThread, Duration timeout) throws InterruptedException;
-  }
-
-  /**
-   * @param timer waits for each execute's eval thread; {@link Thread#join(Duration)} outside tests
-   * @param stopGrace how long a timed-out snippet has to end after {@link JShell#stop()} before the
-   *     sandbox gives it up as unstoppable
-   * @param exit terminates the sandbox JVM with the given status once a snippet proved unstoppable,
-   *     without running shutdown hooks: a hook the snippet registered could block the exit and
-   *     leave the sandbox serving requests after it said it was shutting down
-   */
-  JvmSandboxBootstrap(
-      JShell jshell,
-      BufferedReader stdinReader,
-      PrintStream realOut,
-      ExecutionTimer timer,
-      Duration stopGrace,
-      IntConsumer exit) {
-    this.jshell = jshell;
-    this.stdinReader = stdinReader;
-    this.realOut = realOut;
-    this.timer = timer;
-    this.stopGrace = stopGrace;
-    this.exit = exit;
-  }
+  private JvmSandboxBootstrap() {}
 
   /**
    * Subprocess entry point. Expects exactly one argument, {@code --rpc-socket=<path>}, identifying
@@ -137,7 +59,7 @@ public final class JvmSandboxBootstrap {
    * rawStdoutWriteDoesNotForgeAnRpcCallToHost} regression test pins down.
    *
    * <p><strong>What C1 does not close.</strong> The {@code realOut} {@code PrintStream} wrapping
-   * the RPC socket is a private field on this class. A snippet that can call {@code
+   * the RPC socket is a private field of {@link HostBridgeState}. A snippet that can call {@code
    * setAccessible(true)} on that field grabs the same handle the legitimate dispatcher uses and
    * forges frames directly into the host. {@code setAccessible(true)} is gated by JPMS module
    * accessibility:
@@ -153,8 +75,8 @@ public final class JvmSandboxBootstrap {
    *   <li><strong>JPMS launch with {@code
    *       --add-opens=com.standardapplied.helios.repl/com.standardapplied.helios.repl.sandbox=...}
    *       inherited from the parent</strong>: equivalent to classpath launch for this gap. {@link
-   *       JvmSandbox#shouldPropagateJvmArg} forwards {@code --add-opens} into the subprocess, so
-   *       any parent that opened the package — including common test runners and JVM
+   *       SandboxLauncher#shouldPropagateJvmArg} forwards {@code --add-opens} into the subprocess,
+   *       so any parent that opened the package — including common test runners and JVM
    *       instrumentation — leaks the open into the sandbox.
    * </ul>
    *
@@ -171,12 +93,12 @@ public final class JvmSandboxBootstrap {
    * took a classpath launch by accident notice in development.
    */
   public static void main(String[] args) {
-    warnIfReducedIsolation(System.err);
-    var socketPath = parseRpcSocketArg(args);
-    var policy = parseSandboxPolicyArg(args);
+    BootstrapArguments.warnIfReducedIsolation(System.err);
+    var socketPath = BootstrapArguments.parseRpcSocketArg(args);
+    var policy = BootstrapArguments.parseSandboxPolicyArg(args);
     Duration stopGrace;
     try {
-      stopGrace = parseStopGraceArg(args);
+      stopGrace = BootstrapArguments.parseStopGraceArg(args);
     } catch (IllegalArgumentException e) {
       System.err.println("JvmSandboxBootstrap: " + e.getMessage());
       System.exit(2);
@@ -207,12 +129,11 @@ public final class JvmSandboxBootstrap {
     jshell.eval("import com.standardapplied.helios.repl.sandbox.HostBridge;");
     SandboxPrelude.install(jshell);
 
-    var bootstrap =
-        new JvmSandboxBootstrap(
-            jshell, rpcIn, rpcOut, Thread::join, stopGrace, Runtime.getRuntime()::halt);
-    setInstance(bootstrap);
+    var bridge = new HostBridgeState(rpcOut);
+    var evaluator = new SnippetEvaluator(jshell, bridge, Thread::join, stopGrace);
+    HostBridgeState.setInstance(bridge);
 
-    bootstrap.readLoop();
+    new BootstrapRpc(rpcIn, bridge, evaluator, Runtime.getRuntime()::halt).readLoop();
 
     jshell.close();
     try {
@@ -221,126 +142,6 @@ public final class JvmSandboxBootstrap {
       // best-effort
     }
     System.exit(0);
-  }
-
-  /**
-   * Emit a single {@code WARNING} line on the provided stream when the bootstrap is running in an
-   * unnamed module (classpath launch) or when its package has been opened to all unnamed modules
-   * (typically via {@code --add-opens} inherited from a test runner or instrumentation parent). In
-   * either regime the {@code realOut} RPC socket reachable through {@code setAccessible(true)}; the
-   * WARNING surfaces the reduced isolation so deployers don't take it on accident. Visible for
-   * testing.
-   */
-  static void warnIfReducedIsolation(PrintStream err) {
-    var module = JvmSandboxBootstrap.class.getModule();
-    String reason;
-    if (!module.isNamed()) {
-      reason = "running in the unnamed module (classpath launch)";
-    } else if (isSandboxPackageOpenToUnnamedModules(module)) {
-      reason =
-          "running in module "
-              + module.getName()
-              + " but package com.standardapplied.helios.repl.sandbox is opened to unnamed modules"
-              + " (typically via --add-opens inherited from the parent JVM)";
-    } else {
-      return;
-    }
-    err.println(
-        "WARNING: com.standardapplied.helios.repl JvmSandboxBootstrap is "
-            + reason
-            + ". A JShell snippet can use setAccessible(true) on private bootstrap fields to"
-            + " obtain the RPC socket PrintStream and forge calls into the host. C1 closes the"
-            + " stdout-RPC forgery path only; closing the reflection forgery path requires both"
-            + " JPMS isolation (modulepath launch, no --add-opens to com.standardapplied.helios.repl.sandbox) AND"
-            + " an externally-arranged OS-level isolation boundary around the host process for"
-            + " untrusted workloads. See the JvmSandboxBootstrap#main javadoc for the full"
-            + " isolation regime.");
-  }
-
-  /**
-   * Detect whether {@code com.standardapplied.helios.repl.sandbox} is open to the unnamed module of
-   * some classloader — the regime in which JShell-evaluated snippets, which live in their own
-   * classloader's unnamed module, can call {@code setAccessible(true)} on this class's private
-   * fields. {@link Module#isOpen(String)} checks only unconditional opens, so it misses {@code
-   * --add-opens=...=ALL-UNNAMED}; the two-argument overload with an unnamed-module probe catches
-   * it.
-   */
-  private static boolean isSandboxPackageOpenToUnnamedModules(Module module) {
-    var probe = ClassLoader.getPlatformClassLoader().getUnnamedModule();
-    return module.isOpen("com.standardapplied.helios.repl.sandbox", probe);
-  }
-
-  /**
-   * Parse the optional {@code --sandbox-policy=<encoded>} argument. The host omits the flag when
-   * the configured policy is {@link SandboxPolicy#permissive() permissive}, so a missing flag means
-   * "permissive" — equivalent to no L2 policy layer. A present-but-malformed value is fatal (exit
-   * code 2) rather than silently degrading to permissive: under-enforcing without telling anyone is
-   * worse than refusing to launch.
-   */
-  static SandboxPolicy parseSandboxPolicyArg(String[] args) {
-    for (var arg : args) {
-      if (arg.startsWith("--sandbox-policy=")) {
-        var encoded = arg.substring("--sandbox-policy=".length());
-        try {
-          return SandboxPolicySerialization.decode(encoded);
-        } catch (IllegalArgumentException e) {
-          System.err.println(
-              "JvmSandboxBootstrap: malformed --sandbox-policy argument: " + e.getMessage());
-          System.exit(2);
-          throw new IllegalStateException("unreachable");
-        }
-      }
-    }
-    return SandboxPolicy.permissive();
-  }
-
-  /**
-   * Parse the optional {@code --stop-grace=<ISO-8601 duration>} argument, how long a stopped
-   * snippet has to end before the sandbox exits. The host always passes {@link
-   * JvmSandboxConfig#stopGrace()}; absent means {@link JvmSandboxConfig#DEFAULT_STOP_GRACE}.
-   *
-   * @throws IllegalArgumentException if the value is not a positive duration
-   */
-  static Duration parseStopGraceArg(String[] args) {
-    for (var arg : args) {
-      if (arg.startsWith(STOP_GRACE_ARG)) {
-        return positiveDuration(arg.substring(STOP_GRACE_ARG.length()));
-      }
-    }
-    return JvmSandboxConfig.DEFAULT_STOP_GRACE;
-  }
-
-  private static Duration positiveDuration(String value) {
-    Duration duration;
-    try {
-      duration = Duration.parse(value);
-    } catch (DateTimeParseException e) {
-      throw new IllegalArgumentException(STOP_GRACE_ARG + value + " is not a duration", e);
-    }
-    if (duration.isNegative() || duration.isZero()) {
-      throw new IllegalArgumentException(STOP_GRACE_ARG + value + " is not positive");
-    }
-    return duration;
-  }
-
-  /**
-   * Parse the mandatory {@code --rpc-socket=<path>} argument. Failing fast with exit code 2 if
-   * absent or malformed: the bootstrap has no usable fallback once stdout is no longer the RPC
-   * channel.
-   */
-  private static Path parseRpcSocketArg(String[] args) {
-    for (var arg : args) {
-      if (arg.startsWith("--rpc-socket=")) {
-        return Path.of(arg.substring("--rpc-socket=".length()));
-      }
-    }
-    System.err.println(
-        "JvmSandboxBootstrap: missing required --rpc-socket=<path> argument. The sandbox host"
-            + " (JvmSandbox) is responsible for binding the socket and passing the path; if you"
-            + " are seeing this manually, you are running the bootstrap outside its intended"
-            + " harness.");
-    System.exit(2);
-    throw new IllegalStateException("unreachable");
   }
 
   /**
@@ -367,416 +168,5 @@ public final class JvmSandboxBootstrap {
       System.err.println(
           "Warning: could not add HostBridge location to JShell classpath: " + e.getMessage());
     }
-  }
-
-  static JvmSandboxBootstrap instance() {
-    return instance;
-  }
-
-  static void setInstance(JvmSandboxBootstrap inst) {
-    instance = inst;
-  }
-
-  void readLoop() {
-    try {
-      String line;
-      while ((line = stdinReader.readLine()) != null) {
-        RpcMessage message;
-        try {
-          message = ProcessTransport.deserializeMessage(line);
-        } catch (Exception e) {
-          try {
-            sendRpc(
-                new RpcMessage.ErrorResponse(
-                    null, RpcError.of(RpcError.PARSE_ERROR, e.getMessage())));
-          } catch (IOException sendErr) {
-          }
-          continue;
-        }
-        dispatch(message);
-      }
-    } catch (IOException e) {
-    } finally {
-      pendingCallbacks.forEach(
-          (id, future) ->
-              future.completeExceptionally(new RuntimeException("Sandbox stdin closed")));
-      pendingCallbacks.clear();
-    }
-  }
-
-  Map<String, Object> handleExecute(Map<String, Object> params) {
-    if (!executeLock.tryAcquire()) {
-      var error = new LinkedHashMap<String, Object>();
-      error.put("stdout", "");
-      error.put("stderr", "Concurrent execution rejected — only one execute may run at a time");
-      error.put("exitCode", 1);
-      error.put("submitted", null);
-      return error;
-    }
-    try {
-      return doExecute(params);
-    } finally {
-      executeLock.release();
-    }
-  }
-
-  /**
-   * Evaluate a registry-derived JShell snippet at boot time. Called by {@code JvmSandbox} via the
-   * {@code installPrelude} RPC after the subprocess starts but before the first user execute. Any
-   * REJECTED snippet event is collected into the response so the parent can surface the error
-   * without having to dig through stderr.
-   */
-  Map<String, Object> handleInstallPrelude(Map<String, Object> params) {
-    var snippet = params.get("snippet") instanceof String s ? s : "";
-    if (snippet.isBlank()) {
-      return Map.of("success", true);
-    }
-    var errors = new ArrayList<String>();
-    var analysis = jshell.sourceCodeAnalysis();
-    var remaining = snippet;
-    while (!remaining.isBlank()) {
-      var info = analysis.analyzeCompletion(remaining);
-      if (!info.completeness().isComplete()) {
-        errors.add("Incomplete snippet at: " + info.source());
-        break;
-      }
-      var events = jshell.eval(info.source());
-      for (var event : events) {
-        if (event.status() == Snippet.Status.REJECTED) {
-          jshell.diagnostics(event.snippet()).forEach(d -> errors.add(d.getMessage(null)));
-        }
-        if (event.exception() != null) {
-          errors.add(event.exception().toString());
-        }
-      }
-      remaining = info.remaining();
-    }
-    var result = new LinkedHashMap<String, Object>();
-    result.put("success", errors.isEmpty());
-    if (!errors.isEmpty()) {
-      result.put("errors", List.copyOf(errors));
-    }
-    return result;
-  }
-
-  /**
-   * Send a JSON-RPC message to the host over the dedicated RPC channel. The {@link
-   * ProcessTransport#RPC_PREFIX} magic prefix is required, not decorative: the host-side {@link
-   * ProcessTransport#receive} parser distinguishes RPC frames from incidental subprocess writes by
-   * the prefix, and would drop unprefixed lines into its stdout buffer (which the host no longer
-   * drains as a side channel since C1). The prefix is not strictly necessary on this dedicated
-   * socket — both peers know every byte is RPC — but the parser's contract still requires it. Do
-   * not remove it without changing {@code ProcessTransport.receive} in lockstep.
-   */
-  void sendRpc(RpcMessage message) throws IOException {
-    var json = ProcessTransport.serializeMessage(message);
-    synchronized (realOut) {
-      realOut.print(ProcessTransport.RPC_PREFIX + json + "\n");
-      realOut.flush();
-    }
-  }
-
-  Object callHost(String method, Map<String, Object> params) {
-    var id = "sub-" + idCounter.incrementAndGet();
-    var future = new CompletableFuture<Object>();
-    pendingCallbacks.put(id, future);
-    try {
-      sendRpc(new RpcMessage.Request(id, method, params));
-      return future.get(CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-    } catch (IOException e) {
-      throw new RuntimeException("Failed to send host call", e);
-    } catch (TimeoutException e) {
-      throw new RuntimeException("Host call timed out after " + CALL_TIMEOUT_MS + "ms", e);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new RuntimeException("Host call interrupted", e);
-    } catch (ExecutionException e) {
-      throw new RuntimeException("Host call failed: " + e.getCause().getMessage(), e.getCause());
-    } finally {
-      pendingCallbacks.remove(id);
-    }
-  }
-
-  void setSubmittedValue(Object value) {
-    this.submittedValue = value;
-  }
-
-  Object submittedValue() {
-    return submittedValue;
-  }
-
-  void dispatch(RpcMessage message) {
-    switch (message) {
-      case RpcMessage.Request req -> {
-        switch (req.method()) {
-          case "execute" ->
-              Thread.ofVirtual().name("jshell-execute").start(() -> serveExecute(req));
-          case "installPrelude" ->
-              Thread.ofVirtual()
-                  .name("jshell-install-prelude")
-                  .start(() -> respond(req, this::handleInstallPrelude));
-          default -> {
-            try {
-              sendRpc(
-                  new RpcMessage.ErrorResponse(req.id(), RpcError.methodNotFound(req.method())));
-            } catch (IOException e) {
-            }
-          }
-        }
-      }
-      case RpcMessage.Response resp -> {
-        var future = pendingCallbacks.remove(resp.id());
-        if (future != null) {
-          future.complete(resp.result());
-        }
-      }
-      case RpcMessage.ErrorResponse err -> {
-        var future = err.id() != null ? pendingCallbacks.remove(err.id()) : null;
-        if (future != null) {
-          future.completeExceptionally(
-              new RuntimeException(
-                  "Host error [" + err.error().code() + "]: " + err.error().message()));
-        }
-      }
-      case RpcMessage.Notification _ -> {}
-    }
-  }
-
-  @SuppressWarnings("unchecked")
-  private void respond(
-      RpcMessage.Request req, Function<Map<String, Object>, Map<String, Object>> handler) {
-    try {
-      var params =
-          req.params() instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.<String, Object>of();
-      sendRpc(new RpcMessage.Response(req.id(), handler.apply(params)));
-    } catch (Exception e) {
-      try {
-        sendRpc(new RpcMessage.ErrorResponse(req.id(), RpcError.internalError(e.getMessage())));
-      } catch (IOException sendErr) {
-      }
-    }
-  }
-
-  /**
-   * A snippet that outlived {@link JShell#stop()} still holds the captured system streams and runs
-   * on, so no later execute can be trusted. Only the execute that found the snippet unstoppable
-   * exits, and only after its own response has been sent, so the host learns why the sandbox is
-   * going away before the process ends; any other request exiting could beat that response.
-   */
-  void serveExecute(RpcMessage.Request req) {
-    respond(req, this::handleExecute);
-    if (unstoppableExecution == Thread.currentThread()) {
-      exit.accept(UNSTOPPABLE_SNIPPET_EXIT_CODE);
-    }
-  }
-
-  private Map<String, Object> doExecute(Map<String, Object> params) {
-    var code = params.get("code") instanceof String s ? s : "";
-    var timeoutMs = params.get("timeoutMs") instanceof Number n ? n.longValue() : 30000L;
-    var maxBindingValueChars =
-        params.get("maxBindingValueChars") instanceof Number bn ? bn.intValue() : 200;
-    var maxBindingSnapshotChars =
-        params.get("maxBindingSnapshotChars") instanceof Number tn ? tn.intValue() : 16 * 1024;
-    var captureBindings = params.get("captureBindings") instanceof Boolean cb ? cb : Boolean.TRUE;
-
-    submittedValue = null;
-
-    var stdoutCapture = new ByteArrayOutputStream();
-    var stderrCapture = new ByteArrayOutputStream();
-    var captureOut = new PrintStream(stdoutCapture, true, StandardCharsets.UTF_8);
-    var captureErr = new PrintStream(stderrCapture, true, StandardCharsets.UTF_8);
-    var timeoutCapture = new ByteArrayOutputStream();
-    var timeoutErr = new PrintStream(timeoutCapture, true, StandardCharsets.UTF_8);
-
-    var originalOut = System.out;
-    var originalErr = System.err;
-    var exitCode = new AtomicInteger(0);
-    var timedOut = new AtomicBoolean();
-
-    System.setOut(captureOut);
-    System.setErr(captureErr);
-    try {
-      var executionThreads = new ThreadGroup("jshell-execution");
-      var evalThread =
-          Thread.ofPlatform()
-              .group(executionThreads)
-              .daemon()
-              .name("jshell-eval")
-              .start(
-                  () -> {
-                    try {
-                      if (!evalCode(code, timedOut, captureOut, captureErr)) {
-                        exitCode.set(1);
-                      }
-                    } catch (Exception e) {
-                      e.printStackTrace(captureErr);
-                      exitCode.set(1);
-                    }
-                  });
-
-      try {
-        if (!timer.awaitEnd(evalThread, Duration.ofMillis(timeoutMs))) {
-          stopTimedOutSnippet(executionThreads, timedOut, timeoutErr);
-          exitCode.set(1);
-        }
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        exitCode.set(1);
-      }
-    } finally {
-      System.setOut(originalOut);
-      System.setErr(originalErr);
-    }
-
-    var result = new LinkedHashMap<String, Object>();
-    result.put("stdout", stdoutCapture.toString(StandardCharsets.UTF_8));
-    result.put(
-        "stderr",
-        stderrCapture.toString(StandardCharsets.UTF_8)
-            + timeoutCapture.toString(StandardCharsets.UTF_8));
-    result.put("exitCode", exitCode.get());
-    result.put("submitted", submittedValue);
-    if (Boolean.TRUE.equals(captureBindings) && unstoppableExecution == null) {
-      result.put("bindings", collectBindings(maxBindingValueChars, maxBindingSnapshotChars));
-    }
-    return result;
-  }
-
-  /**
-   * Ends a snippet that outlived its timeout. Interrupting the eval thread would end the wait and
-   * leave the snippet running, so the snippet is stopped through {@link JShell#stop()} instead. The
-   * eval thread ending proves nothing about a thread the snippet started after JShell took its one
-   * snapshot of the snippet's threads, so every thread of the execution must end within {@link
-   * #stopGrace}. One still running is blocked where neither the interrupt nor JShell's stop check
-   * reaches it, and marks the sandbox for exit.
-   *
-   * @param err a stream of its own: the snippet may hold the monitor of its captured streams
-   */
-  private void stopTimedOutSnippet(
-      ThreadGroup executionThreads, AtomicBoolean timedOut, PrintStream err)
-      throws InterruptedException {
-    timedOut.set(true);
-    err.println("Execution timed out");
-    if (!stopWithinGrace(executionThreads, err)) {
-      err.println("The timed-out snippet could not be stopped; the sandbox is shutting down");
-      unstoppableExecution = Thread.currentThread();
-    }
-  }
-
-  /**
-   * {@link JShell#stop()} does nothing while the statement in flight is still compiling or
-   * starting, and starting a statement clears the stop JShell may already have requested, so a
-   * single stop can be lost. It is repeated until every thread of the execution has ended,
-   * rescanning each round because a thread can start another. A stop that fails is reported once
-   * and not retried.
-   */
-  private boolean stopWithinGrace(ThreadGroup threads, PrintStream err)
-      throws InterruptedException {
-    var deadline = System.nanoTime() + stopGrace.toNanos();
-    var stopping = true;
-    for (var live = anyLiveThread(threads); live != null; live = anyLiveThread(threads)) {
-      var remaining = deadline - System.nanoTime();
-      if (remaining <= 0) {
-        return false;
-      }
-      stopping = stopping && requestStop(err);
-      live.join(Duration.ofNanos(Math.min(remaining, STOP_RETRY_NANOS)));
-    }
-    return true;
-  }
-
-  private boolean requestStop(PrintStream err) {
-    try {
-      jshell.stop();
-      return true;
-    } catch (RuntimeException jshellStopErr) {
-      jshellStopErr.printStackTrace(err);
-      return false;
-    }
-  }
-
-  /** A live thread of the group or any of its subgroups, or {@code null} once none is left. */
-  private static Thread anyLiveThread(ThreadGroup threads) {
-    var live = new Thread[1];
-    return threads.enumerate(live) == 0 ? null : live[0];
-  }
-
-  /**
-   * Snapshot every user-declared {@code var} in JShell, filtered to exclude harness-internal {@code
-   * __}-prefixed names, with each value's {@code toString} repr capped per-value and the total
-   * snapshot capped to a budget. The repr is whatever JShell's {@code varValue} returns (which is
-   * itself the runtime {@code toString}); a custom {@code toString} that throws gets its message
-   * folded into the value as {@code "<error: ...>"} rather than aborting the snapshot.
-   */
-  Map<String, String> collectBindings(int maxValueChars, int maxSnapshotChars) {
-    var snapshot = new LinkedHashMap<String, String>();
-    var totalChars = 0;
-    var snippets = jshell.variables().toList();
-    for (var snippet : snippets) {
-      var name = snippet.name();
-      if (name.startsWith("__")) {
-        continue;
-      }
-      String repr;
-      try {
-        repr = jshell.varValue(snippet);
-      } catch (Throwable e) {
-        // Catch Throwable here (not just Exception): a malicious toString() can throw
-        // StackOverflowError, OutOfMemoryError, or AssertionError. Aborting the snapshot would
-        // kill the response with no bindings map, and propagate out of doExecute into the virtual
-        // thread's uncaught handler. The "<error: …>" stub is a recoverable substitute regardless
-        // of the failure mode.
-        repr = "<error: " + e.getClass().getSimpleName() + ": " + e.getMessage() + ">";
-      }
-      if (repr == null) {
-        repr = "null";
-      }
-      if (maxValueChars > 0 && repr.length() > maxValueChars) {
-        repr = repr.substring(0, maxValueChars) + "... (len=" + repr.length() + ")";
-      }
-      if (maxSnapshotChars > 0 && totalChars + name.length() + repr.length() > maxSnapshotChars) {
-        snapshot.put(
-            "__truncated__",
-            "(snapshot exceeded " + maxSnapshotChars + " chars; remaining vars dropped)");
-        break;
-      }
-      totalChars += name.length() + repr.length();
-      snapshot.put(name, repr);
-    }
-    return snapshot;
-  }
-
-  private boolean evalCode(String code, AtomicBoolean timedOut, PrintStream out, PrintStream err) {
-    var analysis = jshell.sourceCodeAnalysis();
-    var remaining = code;
-    var success = true;
-
-    while (!remaining.isEmpty() && !timedOut.get()) {
-      var info = analysis.analyzeCompletion(remaining);
-      if (info.completeness() == SourceCodeAnalysis.Completeness.EMPTY) {
-        break;
-      }
-      var events = jshell.eval(info.source());
-
-      for (var event : events) {
-        if (event.status() == Snippet.Status.REJECTED) {
-          jshell.diagnostics(event.snippet()).forEach(d -> err.println(d.getMessage(null)));
-          success = false;
-        }
-        if (event.exception() != null) {
-          event.exception().printStackTrace(err);
-          success = false;
-        }
-        if (event.value() != null
-            && (event.snippet().subKind() == Snippet.SubKind.TEMP_VAR_EXPRESSION_SUBKIND
-                || event.snippet().kind() == Snippet.Kind.EXPRESSION)) {
-          out.println(event.value());
-        }
-      }
-
-      remaining = info.remaining();
-    }
-
-    return success;
   }
 }

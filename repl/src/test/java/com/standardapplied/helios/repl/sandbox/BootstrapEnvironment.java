@@ -29,14 +29,16 @@ import jdk.jshell.JShell;
 import jdk.jshell.execution.LocalExecutionControl;
 import jdk.jshell.execution.LocalExecutionControlProvider;
 import jdk.jshell.spi.ExecutionControl;
+import jdk.jshell.spi.ExecutionControl.EngineTerminationException;
 import jdk.jshell.spi.ExecutionControlProvider;
 import jdk.jshell.spi.ExecutionEnv;
 
 /**
- * A {@link JvmSandboxBootstrap} standing in for the sandbox subprocess, installed as the instance
- * {@link HostBridge} calls into, with the test as its host. The test feeds the lines the host would
- * send and takes the lines the bootstrap writes, one at a time, so it reads a request only once the
- * bootstrap has written it and no stream fails because a thread exited.
+ * The sandbox bootstrap's read loop, evaluator and host-bridge state standing in for the sandbox
+ * subprocess, the state installed as the instance {@link HostBridge} calls into, with the test as
+ * its host. The test feeds the lines the host would send and takes the lines the bootstrap writes,
+ * one at a time, so it reads a request only once the bootstrap has written it and no stream fails
+ * because a thread exited.
  */
 final class BootstrapEnvironment implements AutoCloseable {
 
@@ -44,7 +46,9 @@ final class BootstrapEnvironment implements AutoCloseable {
   private final FeedableInputStream fromHost = new FeedableInputStream();
   private final LineSink toHost = new LineSink();
   private final CompletableFuture<Integer> exitStatus = new CompletableFuture<>();
-  private final JvmSandboxBootstrap bootstrap;
+  private final HostBridgeState bridge;
+  private final SnippetEvaluator evaluator;
+  private final BootstrapRpc rpc;
   private volatile CompletableFuture<Void> nextTimeout = new CompletableFuture<>();
   private Thread readLoop;
 
@@ -65,17 +69,17 @@ final class BootstrapEnvironment implements AutoCloseable {
   private BootstrapEnvironment(
       Duration stopGrace, ExecutionControlProvider engine, boolean timedOutByTheTest) {
     jshell = newJShell(engine);
-    JvmSandboxBootstrap.ExecutionTimer timer =
+    SnippetEvaluator.ExecutionTimer timer =
         timedOutByTheTest ? this::endsBeforeTheTestTimesItOut : Thread::join;
-    bootstrap =
-        new JvmSandboxBootstrap(
-            jshell,
+    bridge = new HostBridgeState(new PrintStream(toHost, true, StandardCharsets.UTF_8));
+    evaluator = new SnippetEvaluator(jshell, bridge, timer, stopGrace);
+    rpc =
+        new BootstrapRpc(
             new BufferedReader(new InputStreamReader(fromHost, StandardCharsets.UTF_8)),
-            new PrintStream(toHost, true, StandardCharsets.UTF_8),
-            timer,
-            stopGrace,
+            bridge,
+            evaluator,
             exitStatus::complete);
-    JvmSandboxBootstrap.setInstance(bootstrap);
+    HostBridgeState.setInstance(bridge);
   }
 
   /**
@@ -109,6 +113,29 @@ final class BootstrapEnvironment implements AutoCloseable {
         true);
   }
 
+  /**
+   * An environment whose executes time out by the clock and whose engine has terminated by the time
+   * a variable's value is read, so JShell fails every read with {@code message}.
+   */
+  static BootstrapEnvironment failingVarValue(String message) {
+    return new BootstrapEnvironment(
+        Await.HANG_GUARD.multipliedBy(5),
+        new LocalExecutionControlProvider() {
+          @Override
+          public ExecutionControl createExecutionControl(
+              ExecutionEnv env, Map<String, String> parameters) {
+            return new LocalExecutionControl() {
+              @Override
+              public String varValue(String className, String varName)
+                  throws EngineTerminationException {
+                throw new EngineTerminationException(message);
+              }
+            };
+          }
+        },
+        false);
+  }
+
   /** An environment whose bootstrap is already reading what the test feeds. */
   static BootstrapEnvironment reading() {
     var environment = new BootstrapEnvironment();
@@ -116,8 +143,16 @@ final class BootstrapEnvironment implements AutoCloseable {
     return environment;
   }
 
-  JvmSandboxBootstrap bootstrap() {
-    return bootstrap;
+  HostBridgeState bridge() {
+    return bridge;
+  }
+
+  SnippetEvaluator evaluator() {
+    return evaluator;
+  }
+
+  BootstrapRpc rpc() {
+    return rpc;
   }
 
   /**
@@ -134,7 +169,7 @@ final class BootstrapEnvironment implements AutoCloseable {
   }
 
   void startReadLoop() {
-    readLoop = Thread.ofVirtual().name("test-readloop").start(bootstrap::readLoop);
+    readLoop = Thread.ofVirtual().name("test-readloop").start(rpc::readLoop);
   }
 
   /** Runs {@code sandboxCode} on its own thread, as a snippet calling into the host would run. */
@@ -189,7 +224,7 @@ final class BootstrapEnvironment implements AutoCloseable {
     if (readLoop != null) {
       awaitReadLoopEnd();
     }
-    JvmSandboxBootstrap.setInstance(null);
+    HostBridgeState.setInstance(null);
     jshell.close();
   }
 
@@ -215,6 +250,12 @@ final class BootstrapEnvironment implements AutoCloseable {
   /**
    * In the test JVM the module's classes are not on JShell's own classpath, so snippets that call
    * {@link HostBridge} need the build output added to it.
+   *
+   * <p>The source analysis is taken last, on the test's thread, as the bootstrap's {@code main}
+   * takes it installing the prelude after its imports: the first analysis in a JVM starts JShell's
+   * indexing thread, which never ends. Started by an execute's eval thread it would join that
+   * execute's thread group, and a timed-out snippet would be given up as unstoppable once the stop
+   * grace expired.
    */
   private static JShell newJShell(ExecutionControlProvider engine) {
     var jshell = JShell.builder().executionEngine(engine, Map.of()).build();
@@ -224,6 +265,7 @@ final class BootstrapEnvironment implements AutoCloseable {
     }
     jshell.eval("import static com.standardapplied.helios.repl.sandbox.HostBridge.*;");
     jshell.eval("import com.standardapplied.helios.repl.sandbox.HostBridge;");
+    jshell.sourceCodeAnalysis();
     return jshell;
   }
 }
