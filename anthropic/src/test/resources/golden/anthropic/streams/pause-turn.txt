@@ -1,0 +1,7 @@
+== chatStream
+TextDelta[text=Done.]
+Done[response=Response[content=Done., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=50, outputTokens=7, cacheCreationInputTokens=10, cacheReadInputTokens=14, totalTokens=81], thinking=null, citations=[], metadata={anthropic.rawContent=[{"id":"srv1","input":{"query":"q"},"name":"web_search","type":"server_tool_use"},{"text":"Done.","type":"text"}], anthropic.stopReason=end_turn}]]
+== chat
+Response[content=Done., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=50, outputTokens=7, cacheCreationInputTokens=10, cacheReadInputTokens=14, totalTokens=81], thinking=null, citations=[], metadata={anthropic.rawContent=[{"id":"srv1","input":{"query":"q"},"name":"web_search","type":"server_tool_use"},{"text":"Done.","type":"text"}], anthropic.stopReason=end_turn}]
+== follow-up request
+{"max_tokens":128000,"messages":[{"content":[{"cache_control":{"type":"ephemeral"},"text":"Hi","type":"text"}],"role":"user"},{"content":[{"id":"srv1","input":{"query":"q"},"name":"web_search","type":"server_tool_use"}],"role":"assistant"}],"model":"claude-opus-5-5","stream":true}

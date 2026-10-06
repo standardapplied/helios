@@ -1,0 +1,5 @@
+== chatStream
+TextDelta[text=Answer.]
+Done[response=Response[content=Answer., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=25, outputTokens=12, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=49], thinking=null, citations=[], metadata={anthropic.rawContent=[{"data":"ENCRYPTED-PAYLOAD","type":"redacted_thinking"},{"text":"Answer.","type":"text"}], anthropic.stopReason=end_turn}]]
+== chat
+Response[content=Answer., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=25, outputTokens=12, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=49], thinking=null, citations=[], metadata={anthropic.rawContent=[{"data":"ENCRYPTED-PAYLOAD","type":"redacted_thinking"},{"text":"Answer.","type":"text"}], anthropic.stopReason=end_turn}]

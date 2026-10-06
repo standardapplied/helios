@@ -1,0 +1,12 @@
+data: {"event_type":"interaction.created","interaction":{"id":"int_xyz","status":"in_progress"}}
+
+data: {"event_type":"step.start","index":0,"step":{"type":"model_output","content":[{"type":"text","text":"Paris ","annotations":[{"type":"url_citation","url":"https://a.example","title":"a.example","start_index":0,"end_index":5}]}]}}
+
+data: {"event_type":"step.delta","index":0,"delta":{"type":"text","text":"is lovely.","annotations":[{"type":"url_citation","url":"https://b.example","title":"b.example","start_index":6,"end_index":16}]}}
+
+data: {"event_type":"step.delta","index":0,"delta":{"type":"text_annotation_delta","annotations":[{"type":"url_citation","url":"https://c.example","title":"c.example","start_index":0,"end_index":16},{"type":"file_citation","url":"ignored"}]}}
+
+data: {"event_type":"step.stop","index":0,"status":"done"}
+
+data: {"event_type":"interaction.completed","interaction":{"id":"int_xyz","status":"completed","usage":{"total_input_tokens":2006,"total_output_tokens":150,"total_tokens":2156,"total_cached_tokens":1920}}}
+

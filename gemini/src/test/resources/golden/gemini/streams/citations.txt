@@ -1,0 +1,6 @@
+== chatStream
+TextDelta[text=Paris ]
+TextDelta[text=is lovely.]
+Done[response=Response[content=Paris is lovely., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[Citation[sourceId=https://a.example, title=a.example, content=null, startIndex=0, endIndex=5, metadata={}], Citation[sourceId=https://b.example, title=b.example, content=null, startIndex=6, endIndex=16, metadata={}], Citation[sourceId=https://c.example, title=c.example, content=null, startIndex=0, endIndex=16, metadata={}]], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]]
+== chat
+Response[content=Paris is lovely., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[Citation[sourceId=https://a.example, title=a.example, content=null, startIndex=0, endIndex=5, metadata={}], Citation[sourceId=https://b.example, title=b.example, content=null, startIndex=6, endIndex=16, metadata={}], Citation[sourceId=https://c.example, title=c.example, content=null, startIndex=0, endIndex=16, metadata={}]], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]

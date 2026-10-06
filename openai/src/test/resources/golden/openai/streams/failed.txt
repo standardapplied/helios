@@ -1,0 +1,5 @@
+== chatStream
+TextDelta[text=Partial]
+Error[message=API response failed: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"server_error","message":"boom"}}}, cause=null]
+== chat
+threw OpenAIException(API response failed: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"server_error","message":"boom"}}}) status=0
