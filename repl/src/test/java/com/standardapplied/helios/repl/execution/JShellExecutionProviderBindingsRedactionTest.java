@@ -5,6 +5,7 @@ package com.standardapplied.helios.repl.execution;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
@@ -16,7 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests for {@link JShellExecutionProvider#redactingBindingsListener(SecretRegistry,
+ * Tests for {@link OutputRedaction#redactingBindingsListener(SecretRegistry,
  * SandboxBindingsListener)}. {@code stdout}/{@code stderr} are already redacted by the provider;
  * the bindings snapshot delivered to {@link SandboxBindingsListener#onBindings} used to bypass the
  * redaction and leak {@code var apiKey = "sk-..."} verbatim to operator-facing telemetry.
@@ -73,6 +74,39 @@ final class JShellExecutionProviderBindingsRedactionTest {
     wrapped.onBindings(snapshot, stubResult());
 
     assertEquals(snapshot, captured.get());
+  }
+
+  @Test
+  void wrapperDeliversAnEmptySnapshotAsIs() {
+    var registry = new SecretRegistry();
+    registry.register("API_KEY", "sk-supersecret-token-xyz");
+    var captured = new AtomicReference<Map<String, String>>();
+    SandboxBindingsListener inner = (bindings, result) -> captured.set(bindings);
+    var wrapped = OutputRedaction.redactingBindingsListener(registry, inner);
+
+    Map<String, String> snapshot = Map.of();
+    wrapped.onBindings(snapshot, stubResult());
+
+    assertSame(snapshot, captured.get());
+  }
+
+  @Test
+  void wrapperKeepsANullBindingValueNull() {
+    var registry = new SecretRegistry();
+    registry.register("API_KEY", "sk-supersecret-token-xyz");
+    var captured = new AtomicReference<Map<String, String>>();
+    SandboxBindingsListener inner = (bindings, result) -> captured.set(bindings);
+    var wrapped = OutputRedaction.redactingBindingsListener(registry, inner);
+
+    var snapshot = new java.util.LinkedHashMap<String, String>();
+    snapshot.put("unset", null);
+    snapshot.put("apiKey", "sk-supersecret-token-xyz");
+    wrapped.onBindings(snapshot, stubResult());
+
+    var expected = new java.util.LinkedHashMap<String, String>();
+    expected.put("unset", null);
+    expected.put("apiKey", "<redacted:API_KEY>");
+    assertEquals(expected, captured.get());
   }
 
   @Test
