@@ -13,7 +13,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class OpenAIRedirectTest {
 
   private static Model trapped(ModelConfig config) {
-    return new OpenAIModel(OpenAIModelId.GPT_4O, config);
+    return new OpenAIProvider().create(OpenAIModelId.GPT_4O.id(), config);
   }
 
   @ParameterizedTest

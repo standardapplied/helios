@@ -22,10 +22,6 @@ import java.util.Map;
 public record TextFormatConfig(
     String type, String name, Map<String, Object> schema, Boolean strict) {
 
-  public static TextFormatConfig jsonSchema(String name, Map<String, Object> schema) {
-    return jsonSchema(name, schema, true);
-  }
-
   /**
    * Build a {@code json_schema} format config with explicit {@code strict} mode.
    *
@@ -37,9 +33,5 @@ public record TextFormatConfig(
   public static TextFormatConfig jsonSchema(
       String name, Map<String, Object> schema, boolean strict) {
     return new TextFormatConfig("json_schema", name, schema, strict);
-  }
-
-  public static TextFormatConfig text() {
-    return new TextFormatConfig("text", null, null, null);
   }
 }

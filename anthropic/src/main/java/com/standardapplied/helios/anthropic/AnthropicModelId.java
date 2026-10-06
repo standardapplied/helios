@@ -42,7 +42,7 @@ public enum AnthropicModelId {
 
   /**
    * The thinking request shape a Claude model accepts, and what omitting the {@code thinking} field
-   * means there. Drives {@code AnthropicModel}'s per-model request build; shapes whose {@link
+   * means there. Drives the per-model request build; shapes whose {@link
    * #acceptsSamplingParameters()} is false reject {@code temperature}/{@code top_p} with a 400 on
    * every request, so the request builder never sends them.
    */
@@ -140,8 +140,8 @@ public enum AnthropicModelId {
   /**
    * Whether this model accepts forced tool use ({@code tool_choice.type} {@code any} or {@code
    * tool}). Fable 5.1, Mythos 5.1, Opus 5.5 and Sonnet 5.5 reject both with a 400 on every request;
-   * {@code auto} and {@code none} are unaffected. {@link AnthropicModel} fails fast at construction
-   * rather than letting the request 400.
+   * {@code auto} and {@code none} are unaffected. {@link AnthropicProvider} fails fast when
+   * creating such a model rather than letting the request 400.
    *
    * @return false for {@link #CLAUDE_FABLE_5_1}, {@link #CLAUDE_MYTHOS_5_1}, {@link
    *     #CLAUDE_OPUS_5_5} and {@link #CLAUDE_SONNET_5_5}, true otherwise

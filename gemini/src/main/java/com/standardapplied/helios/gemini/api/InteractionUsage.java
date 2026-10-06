@@ -27,9 +27,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *
  * <p>On the wire, {@code total_input_tokens} is the <i>total</i> prompt-side count and {@code
  * total_cached_tokens} is the <i>subset</i> served from cache. The {@link
- * com.standardapplied.helios.gemini.GeminiModel} provider re-projects this into the disjoint {@link
- * com.standardapplied.helios.core.model.Response.Usage} shape so cost accounting never
- * double-counts cached tokens at the base input rate.
+ * com.standardapplied.helios.gemini.GeminiProvider Gemini} provider re-projects this into the
+ * disjoint {@link com.standardapplied.helios.core.model.Response.Usage} shape so cost accounting
+ * never double-counts cached tokens at the base input rate.
  *
  * @param totalTokens total tokens used
  * @param inputTokens prompt / input tokens (wire field {@code total_input_tokens}) — TOTAL,

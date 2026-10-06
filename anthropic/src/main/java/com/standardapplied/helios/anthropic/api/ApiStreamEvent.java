@@ -56,32 +56,4 @@ public record ApiStreamEvent(
           || "rate_limit_error".equals(type);
     }
   }
-
-  public boolean hasTypeMessageStart() {
-    return "message_start".equals(type);
-  }
-
-  public boolean hasTypeContentBlockStart() {
-    return "content_block_start".equals(type);
-  }
-
-  public boolean hasTypeContentBlockDelta() {
-    return "content_block_delta".equals(type);
-  }
-
-  public boolean hasTypeContentBlockStop() {
-    return "content_block_stop".equals(type);
-  }
-
-  public boolean hasTypeMessageDelta() {
-    return "message_delta".equals(type);
-  }
-
-  public boolean hasTypeMessageStop() {
-    return "message_stop".equals(type);
-  }
-
-  public boolean hasTypeError() {
-    return "error".equals(type);
-  }
 }

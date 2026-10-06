@@ -1,0 +1,6 @@
+== chatStream
+TextDelta[text=Hello]
+TextDelta[text=, world.]
+Done[response=Response[content=Hello, world., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]]
+== chat
+Response[content=Hello, world., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]

@@ -53,27 +53,11 @@ public record InputItem(
         "message", "assistant", List.of(ContentPart.outputText(text)), null, null, null, null);
   }
 
-  public static InputItem assistantMessage(List<ContentPart> parts) {
-    return new InputItem("message", "assistant", parts, null, null, null, null);
-  }
-
   public static InputItem functionCall(String callId, String name, String arguments) {
     return new InputItem("function_call", null, null, callId, name, arguments, null);
   }
 
   public static InputItem functionCallOutput(String callId, String output) {
     return new InputItem("function_call_output", null, null, callId, null, null, output);
-  }
-
-  public boolean hasTypeMessage() {
-    return "message".equals(type);
-  }
-
-  public boolean hasTypeFunctionCall() {
-    return "function_call".equals(type);
-  }
-
-  public boolean hasTypeFunctionCallOutput() {
-    return "function_call_output".equals(type);
   }
 }

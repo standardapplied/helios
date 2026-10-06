@@ -1,0 +1,6 @@
+== chatStream
+TextDelta[text=Partial]
+Error[message=API stream error: {"type":"error","code":"server_error","message":"something went wrong"}, cause=null]
+Done[response=Response[content=Partial, parsed=null, toolCalls=[], finishReason=STOP, usage=null, thinking=null, citations=[], metadata={}]]
+== chat
+threw OpenAIException(API stream error: {"type":"error","code":"server_error","message":"something went wrong"}) status=0

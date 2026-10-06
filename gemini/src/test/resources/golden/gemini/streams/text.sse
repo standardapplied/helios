@@ -1,0 +1,14 @@
+data: {"event_type":"interaction.created","interaction":{"id":"int_xyz","status":"in_progress"}}
+
+data: {"event_type":"interaction.in_progress","interaction_id":"int_xyz"}
+
+data: {"event_type":"step.start","index":0,"step":{"type":"model_output","content":[{"type":"text","text":"Hello"}]}}
+
+data: {"event_type":"step.delta","index":0,"delta":{"type":"text","text":", world."}}
+
+data: {"event_type":"step.stop","index":0,"status":"done"}
+
+data: {"event_type":"interaction.completed","interaction":{"id":"int_xyz","status":"completed","usage":{"total_input_tokens":2006,"total_output_tokens":150,"total_tokens":2156,"total_cached_tokens":1920}}}
+
+data: [DONE]
+

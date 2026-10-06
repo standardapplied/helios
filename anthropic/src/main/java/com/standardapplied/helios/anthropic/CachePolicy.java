@@ -8,9 +8,10 @@ package com.standardapplied.helios.anthropic;
 import com.standardapplied.helios.anthropic.api.CacheControl;
 
 /**
- * Anthropic prompt-caching policy for an {@link AnthropicModel} instance. Supply a policy through
- * {@link AnthropicProvider#create(String, com.standardapplied.helios.core.model.ModelConfig,
- * CachePolicy)}; the two-argument provider factory uses {@link #shortLived()}.
+ * Anthropic prompt-caching policy for a model the {@link AnthropicProvider} creates. Supply a
+ * policy through {@link AnthropicProvider#create(String,
+ * com.standardapplied.helios.core.model.ModelConfig, CachePolicy)}; the two-argument provider
+ * factory uses {@link #shortLived()}.
  *
  * <p>Sealed: three concrete shapes covering every supported TTL plus an opt-out. New TTLs that
  * Anthropic introduces require adding a new permitted subtype, which is a deliberate breaking
@@ -26,11 +27,11 @@ import com.standardapplied.helios.anthropic.api.CacheControl;
  *   <tr><td>{@link #disabled() disabled}</td><td>n/a</td><td>n/a</td><td>n/a</td></tr>
  * </table>
  *
- * <p>The short-lived TTL is the default for {@link AnthropicModel}. The long-lived TTL costs more
- * to write (2× vs 1.25×) but reads at the same 0.10× discount — pick it when the cache prefix is
- * expected to be reused for more than 5 minutes between turns (e.g. an SME reviewing a long report,
- * an agent that wakes up periodically against a stable system prompt). Disabled is the right choice
- * for one-shot calls where the cache write premium never pays back.
+ * <p>The short-lived TTL is the default. The long-lived TTL costs more to write (2× vs 1.25×) but
+ * reads at the same 0.10× discount — pick it when the cache prefix is expected to be reused for
+ * more than 5 minutes between turns (e.g. an SME reviewing a long report, an agent that wakes up
+ * periodically against a stable system prompt). Disabled is the right choice for one-shot calls
+ * where the cache write premium never pays back.
  *
  * <h2>Ordering constraint when mixing TTLs in the same request</h2>
  *
@@ -44,8 +45,8 @@ public sealed interface CachePolicy
     permits CachePolicy.Disabled, CachePolicy.ShortLived, CachePolicy.LongLived {
 
   /**
-   * Prompt caching disabled. {@link AnthropicModel#buildRequest} emits no {@code cache_control}
-   * annotations; the server returns billing with {@code cache_creation_input_tokens=0} and {@code
+   * Prompt caching disabled. Requests carry no {@code cache_control} annotations; the server
+   * returns billing with {@code cache_creation_input_tokens=0} and {@code
    * cache_read_input_tokens=0}. Use for one-shot calls or compliance environments that prohibit
    * server-side caching.
    *

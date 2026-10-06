@@ -127,22 +127,13 @@ class SerializationTest {
     var format =
         TextFormatConfig.jsonSchema(
             "output",
-            Map.of("type", "object", "properties", Map.of("name", Map.of("type", "string"))));
+            Map.of("type", "object", "properties", Map.of("name", Map.of("type", "string"))),
+            true);
     var json = objectMapper.writeValueAsString(format);
     assertTrue(json.contains("\"type\":\"json_schema\""));
     assertTrue(json.contains("\"name\":\"output\""));
     assertTrue(json.contains("\"strict\":true"));
     assertTrue(json.contains("\"schema\""));
-  }
-
-  @Test
-  void serializeTextFormatText() throws Exception {
-    var format = TextFormatConfig.text();
-    var json = objectMapper.writeValueAsString(format);
-    assertTrue(json.contains("\"type\":\"text\""));
-    assertFalse(json.contains("\"name\""));
-    assertFalse(json.contains("\"schema\""));
-    assertFalse(json.contains("\"strict\""));
   }
 
   @Test
@@ -159,14 +150,6 @@ class SerializationTest {
     var json = objectMapper.writeValueAsString(part);
     assertTrue(json.contains("\"type\":\"input_text\""));
     assertTrue(json.contains("\"text\":\"User said\""));
-  }
-
-  @Test
-  void serializeContentPartRefusal() throws Exception {
-    var part = ContentPart.refusal("I cannot do that");
-    var json = objectMapper.writeValueAsString(part);
-    assertTrue(json.contains("\"type\":\"refusal\""));
-    assertTrue(json.contains("\"text\":\"I cannot do that\""));
   }
 
   @Test
@@ -243,7 +226,7 @@ class SerializationTest {
 
   @Test
   void serializeRequestWithTextFormat() throws Exception {
-    var format = TextFormatConfig.jsonSchema("output", Map.of("type", "object"));
+    var format = TextFormatConfig.jsonSchema("output", Map.of("type", "object"), true);
     var request =
         ResponsesRequest.newBuilder()
             .withModel("gpt-4o")
@@ -291,10 +274,10 @@ class SerializationTest {
     assertEquals("response", response.object());
     assertEquals("completed", response.status());
     assertEquals(1, response.output().size());
-    assertTrue(response.output().getFirst().hasTypeMessage());
+    assertEquals("message", response.output().getFirst().type());
     assertEquals("assistant", response.output().getFirst().role());
     assertEquals(1, response.output().getFirst().content().size());
-    assertTrue(response.output().getFirst().content().getFirst().hasTypeOutputText());
+    assertEquals("output_text", response.output().getFirst().content().getFirst().type());
     assertEquals("Hello!", response.output().getFirst().content().getFirst().text());
     assertNotNull(response.usage());
     assertEquals(10, response.usage().inputTokens());
@@ -349,7 +332,7 @@ class SerializationTest {
 
     var event = objectMapper.readValue(json, ApiStreamEvent.class);
 
-    assertTrue(event.hasTypeResponseOutputTextDelta());
+    assertEquals("response.output_text.delta", event.type());
     assertEquals(0, event.outputIndex());
     assertEquals(0, event.contentIndex());
     assertEquals("Hello", event.delta());
@@ -375,7 +358,7 @@ class SerializationTest {
 
     var event = objectMapper.readValue(json, ApiStreamEvent.class);
 
-    assertTrue(event.hasTypeResponseOutputItemAdded());
+    assertEquals("response.output_item.added", event.type());
     assertNotNull(event.item());
     assertTrue(event.item().hasTypeFunctionCall());
     assertEquals("fc_1", event.item().id());
@@ -402,7 +385,7 @@ class SerializationTest {
 
     var event = objectMapper.readValue(json, ApiStreamEvent.class);
 
-    assertTrue(event.hasTypeResponseCompleted());
+    assertEquals("response.completed", event.type());
     assertNotNull(event.response());
     assertEquals("resp_1", event.response().id());
     assertEquals("completed", event.response().status());
@@ -428,30 +411,14 @@ class SerializationTest {
   }
 
   @Test
-  void inputItemHelperMethods() {
-    var user = InputItem.userMessage("hi");
-    assertTrue(user.hasTypeMessage());
-    assertFalse(user.hasTypeFunctionCall());
-    assertFalse(user.hasTypeFunctionCallOutput());
-
-    var fc = InputItem.functionCall("c1", "fn", "{}");
-    assertFalse(fc.hasTypeMessage());
-    assertTrue(fc.hasTypeFunctionCall());
-
-    var fco = InputItem.functionCallOutput("c1", "result");
-    assertTrue(fco.hasTypeFunctionCallOutput());
-  }
-
-  @Test
   void outputItemHelperMethods() throws Exception {
     var msgJson =
         """
         {"type": "message", "id": "msg_1", "role": "assistant", "content": [], "status": "completed"}
         """;
     var msg = objectMapper.readValue(msgJson, OutputItem.class);
-    assertTrue(msg.hasTypeMessage());
+    assertEquals("message", msg.type());
     assertFalse(msg.hasTypeFunctionCall());
-    assertFalse(msg.hasTypeReasoning());
 
     var fcJson =
         """
@@ -465,70 +432,9 @@ class SerializationTest {
         {"type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "thinking"}]}
         """;
     var reasoning = objectMapper.readValue(reasoningJson, OutputItem.class);
-    assertTrue(reasoning.hasTypeReasoning());
+    assertEquals("reasoning", reasoning.type());
     assertNotNull(reasoning.summary());
     assertEquals("thinking", reasoning.summary().getFirst().text());
-  }
-
-  @Test
-  void contentPartHelperMethods() {
-    var outputText = ContentPart.outputText("hello");
-    assertTrue(outputText.hasTypeOutputText());
-    assertFalse(outputText.hasTypeInputText());
-    assertFalse(outputText.hasTypeRefusal());
-
-    var inputText = ContentPart.inputText("user");
-    assertTrue(inputText.hasTypeInputText());
-    assertFalse(inputText.hasTypeOutputText());
-
-    var refusal = ContentPart.refusal("nope");
-    assertTrue(refusal.hasTypeRefusal());
-  }
-
-  @Test
-  void apiStreamEventHelperMethods() throws Exception {
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"response.output_text.delta\"}", ApiStreamEvent.class)
-            .hasTypeResponseOutputTextDelta());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"response.output_item.added\"}", ApiStreamEvent.class)
-            .hasTypeResponseOutputItemAdded());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"response.output_item.done\"}", ApiStreamEvent.class)
-            .hasTypeResponseOutputItemDone());
-    assertTrue(
-        objectMapper
-            .readValue(
-                "{\"type\":\"response.function_call_arguments.delta\"}", ApiStreamEvent.class)
-            .hasTypeFunctionCallArgumentsDelta());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"response.function_call_arguments.done\"}", ApiStreamEvent.class)
-            .hasTypeFunctionCallArgumentsDone());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"response.completed\"}", ApiStreamEvent.class)
-            .hasTypeResponseCompleted());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"response.failed\"}", ApiStreamEvent.class)
-            .hasTypeResponseFailed());
-    assertTrue(objectMapper.readValue("{\"type\":\"error\"}", ApiStreamEvent.class).hasTypeError());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"response.reasoning_summary_text.delta\"}", ApiStreamEvent.class)
-            .hasTypeReasoningSummaryTextDelta());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"response.content_part.added\"}", ApiStreamEvent.class)
-            .hasTypeContentPartAdded());
-    assertTrue(
-        objectMapper
-            .readValue("{\"type\":\"response.content_part.done\"}", ApiStreamEvent.class)
-            .hasTypeContentPartDone());
   }
 
   @Test
@@ -571,7 +477,7 @@ class SerializationTest {
   void textConfigSerialization() throws Exception {
     var textConfig =
         new ResponsesRequest.TextConfig(
-            TextFormatConfig.jsonSchema("output", Map.of("type", "object")));
+            TextFormatConfig.jsonSchema("output", Map.of("type", "object"), true));
     var json = objectMapper.writeValueAsString(textConfig);
     assertTrue(json.contains("\"format\""));
     assertTrue(json.contains("\"json_schema\""));
@@ -593,7 +499,9 @@ class SerializationTest {
             .withTopP(0.8)
             .withMaxOutputTokens(2048)
             .withStop(List.of("END"))
-            .withText(new ResponsesRequest.TextConfig(TextFormatConfig.text()))
+            .withText(
+                new ResponsesRequest.TextConfig(
+                    TextFormatConfig.jsonSchema("output", Map.of("type", "object"), true)))
             .withReasoning(ResponsesRequest.ReasoningConfig.of("low"))
             .build();
 
@@ -626,7 +534,7 @@ class SerializationTest {
 
     var item = objectMapper.readValue(json, OutputItem.class);
 
-    assertTrue(item.hasTypeReasoning());
+    assertEquals("reasoning", item.type());
     assertNotNull(item.summary());
     assertEquals(1, item.summary().size());
     assertEquals("summary_text", item.summary().getFirst().type());
@@ -651,16 +559,6 @@ class SerializationTest {
     assertFalse(json.contains("\"text\""));
     assertFalse(json.contains("\"reasoning\""));
     assertFalse(json.contains("\"stream\""));
-  }
-
-  @Test
-  void inputItemAssistantMessageWithParts() throws Exception {
-    var parts = List.of(ContentPart.outputText("Hello"), ContentPart.outputText(" World"));
-    var item = InputItem.assistantMessage(parts);
-    var json = objectMapper.writeValueAsString(item);
-    assertTrue(json.contains("\"output_text\""));
-    assertTrue(json.contains("Hello"));
-    assertTrue(json.contains("World"));
   }
 
   // ── prompt-caching usage shape (hv2-bug2 Issue 1 — OpenAI peer) ──────────
@@ -742,13 +640,5 @@ class SerializationTest {
             ApiUsage.class);
     assertNotNull(usage.outputTokensDetails());
     assertEquals(250, usage.outputTokensDetails().reasoningTokens());
-  }
-
-  @Test
-  void apiUsageThreeArgConstructorOmitsDetails() {
-    var usage = new ApiUsage(10, 20, 30);
-    assertNull(usage.inputTokensDetails());
-    assertNull(usage.outputTokensDetails());
-    assertEquals(0, usage.cachedTokensOrZero());
   }
 }

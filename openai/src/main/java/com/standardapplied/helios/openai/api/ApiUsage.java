@@ -37,17 +37,6 @@ public record ApiUsage(
     @JsonProperty("output_tokens_details") OutputTokensDetails outputTokensDetails) {
 
   /**
-   * Pre-cache-aware ctor used by tests and any caller that only cares about the top-level counts.
-   *
-   * @param inputTokens total prompt tokens
-   * @param outputTokens output tokens
-   * @param totalTokens sum
-   */
-  public ApiUsage(Integer inputTokens, Integer outputTokens, Integer totalTokens) {
-    this(inputTokens, outputTokens, totalTokens, null, null);
-  }
-
-  /**
    * Return the cached-tokens count or zero when the details object is absent. OpenAI populates
    * {@code input_tokens_details.cached_tokens=0} for prompts below the 1024-token caching threshold
    * rather than omitting the field, but earlier API versions and some proxies do omit it — the

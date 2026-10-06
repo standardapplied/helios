@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.tool.ParameterType;
@@ -36,13 +37,13 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 @EnabledIfEnvironmentVariable(named = "GEMINI_API_KEY", matches = ".+")
 class GeminiContinuationIntegrationTest {
 
-  private static GeminiModel model;
+  private static Model model;
 
   @BeforeAll
   static void setUp() {
     var apiKey = System.getenv("GEMINI_API_KEY");
     var config = ModelConfig.newBuilder().withApiKey(apiKey).build();
-    model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    model = new GeminiProvider().create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
   }
 
   @AfterAll
@@ -91,7 +92,7 @@ class GeminiContinuationIntegrationTest {
 
     // Verify interactionId was captured (needed for continuation)
     assertNotNull(
-        response1.metadata().get(GeminiModel.INTERACTION_ID_KEY),
+        response1.metadata().get(ContinuationPoint.INTERACTION_ID_KEY),
         "response must carry interactionId for continuation");
 
     // Turn 2: send tool results back — this exercises the continuation path

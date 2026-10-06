@@ -9,15 +9,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.provider.StreamingModel;
 import org.junit.jupiter.api.Test;
 
 class AnthropicProviderTest {
 
   private final AnthropicProvider provider = new AnthropicProvider();
+
+  @Test
+  void aMissingConfigFailsBeforeTheModelIdIsResolved() {
+    var thrown =
+        assertThrows(IllegalArgumentException.class, () -> provider.create("acme-unknown", null));
+
+    assertEquals("config is required", thrown.getMessage());
+  }
 
   @Test
   void name() {
@@ -58,45 +68,48 @@ class AnthropicProviderTest {
   }
 
   @Test
-  void createModelReturnsAnthropicModel() {
+  void createModelReturnsAStreamingModelWithShortLivedCaching() {
     var config = ModelConfig.of("test-api-key");
 
-    AnthropicModel model = provider.create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
+    var model = provider.create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
 
     assertNotNull(model);
     assertEquals(AnthropicModelId.CLAUDE_SONNET_4_6.id(), model.id());
     assertEquals("anthropic", model.provider());
-    assertInstanceOf(CachePolicy.ShortLived.class, model.cachePolicy());
+    assertEquals(
+        SentCacheControl.SHORT_LIVED,
+        SentCacheControl.onSystemPrompt(
+            at -> provider.create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), at)));
   }
 
   @Test
   void createModelAcceptsExplicitCachePolicy() {
-    var config = ModelConfig.of("test-api-key");
-
-    AnthropicModel model =
-        provider.create(AnthropicModelId.CLAUDE_OPUS_5.id(), config, CachePolicy.longLived());
-
-    assertInstanceOf(CachePolicy.LongLived.class, model.cachePolicy());
+    assertEquals(
+        SentCacheControl.LONG_LIVED,
+        SentCacheControl.onSystemPrompt(
+            at ->
+                provider.create(AnthropicModelId.CLAUDE_OPUS_5.id(), at, CachePolicy.longLived())));
   }
 
   @Test
   void createModelCanDisablePromptCaching() {
-    var config = ModelConfig.of("test-api-key");
-
-    AnthropicModel model =
-        provider.create(AnthropicModelId.CLAUDE_OPUS_5.id(), config, CachePolicy.disabled());
-
-    assertFalse(model.promptCachingEnabled());
+    assertNull(
+        SentCacheControl.onSystemPrompt(
+            at ->
+                provider.create(AnthropicModelId.CLAUDE_OPUS_5.id(), at, CachePolicy.disabled())));
   }
 
   @Test
   void createUnknownClaudeModelAcceptsExplicitCachePolicy() {
     var config = ModelConfig.of("test-api-key");
 
-    AnthropicModel model = provider.create("claude-future-model", config, CachePolicy.longLived());
+    var model = provider.create("claude-future-model", config, CachePolicy.longLived());
 
     assertEquals("claude-future-model", model.id());
-    assertInstanceOf(CachePolicy.LongLived.class, model.cachePolicy());
+    assertEquals(
+        SentCacheControl.LONG_LIVED,
+        SentCacheControl.onSystemPrompt(
+            at -> provider.create("claude-future-model", at, CachePolicy.longLived())));
   }
 
   @Test
@@ -118,7 +131,7 @@ class AnthropicProviderTest {
     var model = provider.create("claude-sonnet-4-6", config);
 
     assertNotNull(model);
-    assertInstanceOf(AnthropicModel.class, model);
+    assertInstanceOf(StreamingModel.class, model);
     assertEquals(AnthropicModelId.CLAUDE_SONNET_4_6.id(), model.id());
   }
 
@@ -129,7 +142,7 @@ class AnthropicProviderTest {
     var model = provider.create("claude-opus-4-8", config);
 
     assertNotNull(model);
-    assertInstanceOf(AnthropicModel.class, model);
+    assertInstanceOf(StreamingModel.class, model);
     assertEquals("claude-opus-4-8", model.id());
   }
 

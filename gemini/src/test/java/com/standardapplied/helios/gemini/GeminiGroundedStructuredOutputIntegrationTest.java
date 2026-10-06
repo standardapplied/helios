@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.schema.OutputSchema;
@@ -43,7 +44,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 @EnabledIfEnvironmentVariable(named = "GEMINI_API_KEY", matches = ".+")
 class GeminiGroundedStructuredOutputIntegrationTest {
 
-  private static GeminiModel model;
+  private static Model model;
 
   /**
    * Structured result the model must return after grounding its answer in a web search.
@@ -57,7 +58,7 @@ class GeminiGroundedStructuredOutputIntegrationTest {
   static void setUp() {
     var apiKey = System.getenv("GEMINI_API_KEY");
     var config = ModelConfig.newBuilder().withApiKey(apiKey).withWebSearch(true).build();
-    model = new GeminiModel(GeminiModelId.GEMINI_3_5_FLASH, config);
+    model = new GeminiProvider().create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
   }
 
   @AfterAll

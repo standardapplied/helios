@@ -83,10 +83,6 @@ public record Step(
     return new Step("thought", null, null, signature, null, null, null, null, null, null, null);
   }
 
-  public static Step thought(String signature, List<ContentItem> summary) {
-    return new Step("thought", null, summary, signature, null, null, null, null, null, null, null);
-  }
-
   public static Step functionCall(String id, String name, Map<String, Object> arguments) {
     return new Step(
         "function_call",
@@ -111,63 +107,12 @@ public record Step(
         "function_result", null, null, null, null, name, null, callId, result, errorFlag, null);
   }
 
-  public static Step googleSearchCall(
-      String id, Map<String, Object> arguments, String searchType, String signature) {
-    return new Step(
-        "google_search_call",
-        null,
-        null,
-        signature,
-        id,
-        null,
-        arguments == null ? Map.of() : arguments,
-        null,
-        null,
-        null,
-        searchType);
-  }
-
-  public static Step googleSearchResult(String callId, Object result, String signature) {
-    return new Step(
-        "google_search_result",
-        null,
-        null,
-        signature,
-        null,
-        null,
-        null,
-        callId,
-        result,
-        null,
-        null);
-  }
-
-  public boolean hasTypeUserInput() {
-    return "user_input".equals(type);
-  }
-
   public boolean hasTypeModelOutput() {
     return "model_output".equals(type);
   }
 
   public boolean hasTypeThought() {
     return "thought".equals(type);
-  }
-
-  public boolean hasTypeFunctionCall() {
-    return "function_call".equals(type);
-  }
-
-  public boolean hasTypeFunctionResult() {
-    return "function_result".equals(type);
-  }
-
-  public boolean hasTypeGoogleSearchCall() {
-    return "google_search_call".equals(type);
-  }
-
-  public boolean hasTypeGoogleSearchResult() {
-    return "google_search_result".equals(type);
   }
 
   public boolean hasContent() {

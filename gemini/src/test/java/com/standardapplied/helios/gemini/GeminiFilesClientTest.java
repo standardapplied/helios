@@ -7,11 +7,14 @@ package com.standardapplied.helios.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.ConversationFixture;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -26,6 +29,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -36,6 +40,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
@@ -44,8 +49,6 @@ import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import tools.jackson.databind.DeserializationFeature;
-import tools.jackson.databind.json.JsonMapper;
 
 class GeminiFilesClientTest {
 
@@ -57,7 +60,7 @@ class GeminiFilesClientTest {
   void productionHttpClientNeverFollowsRedirects() {
     var config = ModelConfig.newBuilder().withApiKey("key").build();
 
-    try (var http = GeminiFilesClient.createHttpClient(config)) {
+    try (var http = FilesEndpoint.createHttpClient(config)) {
       assertEquals(HttpClient.Redirect.NEVER, http.followRedirects());
     }
   }
@@ -601,6 +604,189 @@ class GeminiFilesClientTest {
     return new StubHttpClient();
   }
 
+  @Test
+  void managedUploadInfersTheMimeType() throws Exception {
+    var video = tempDir.resolve("inferred-managed.mp4");
+    Files.write(video, new byte[] {1});
+    var http = managedUpload(httpClient(), "files/inferred-managed", "https://files.example/x");
+
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video);
+
+    assertEquals("video/mp4", managed.reference().mimeType());
+  }
+
+  @Test
+  void pollingWaitsThePollIntervalAndRidesOutAnUnreportedState() throws Exception {
+    var video = tempDir.resolve("stateless.mp4");
+    Files.write(video, new byte[] {1});
+    var http = uploadClient("{\"file\":{\"name\":\"files/stateless\"}}");
+    http.enqueue(
+        200,
+        Map.of(),
+        "{\"name\":\"files/stateless\",\"mimeType\":\"video/mp4\","
+            + "\"uri\":\"https://api.example/v1beta/files/stateless\",\"state\":\"ACTIVE\"}");
+    var config =
+        ModelConfig.newBuilder().withApiKey("g-key").withBaseUrl("https://api.example/v1").build();
+
+    var reference =
+        new GeminiFilesClient(config, http, Duration.ofMillis(1), PROCESSING_NEVER_TIMES_OUT, false)
+            .upload(video, "video/mp4");
+
+    assertEquals("https://api.example/v1beta/files/stateless", reference.uri());
+    assertEquals(3, http.requests.size());
+  }
+
+  @Test
+  void anActiveFileMissingItsUriOrMimeTypeIsRejected() throws Exception {
+    var video = tempDir.resolve("incomplete.mp4");
+    Files.write(video, new byte[] {1});
+    var noUri =
+        uploadClient(
+            "{\"file\":{\"name\":\"files/a\",\"mimeType\":\"video/mp4\",\"state\":\"ACTIVE\"}}");
+    var noMimeType =
+        uploadClient(
+            "{\"file\":{\"name\":\"files/b\",\"uri\":\"https://x\",\"state\":\"ACTIVE\"}}");
+
+    for (var http : List.of(noUri, noMimeType)) {
+      var error =
+          assertThrows(
+              GeminiException.class,
+              () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
+      assertEquals("Active Gemini file is missing its URI or MIME type", error.getMessage());
+    }
+  }
+
+  @Test
+  void failedProcessingWithoutADescribedErrorSaysOnlyThatItFailed() throws Exception {
+    var video = tempDir.resolve("failed-quietly.mp4");
+    Files.write(video, new byte[] {1});
+    var noError = uploadClient("{\"file\":{\"name\":\"files/c\",\"state\":\"FAILED\"}}");
+    var blankMessage =
+        uploadClient(
+            "{\"file\":{\"name\":\"files/d\",\"state\":\"FAILED\",\"error\":{\"message\":\" \"}}}");
+
+    for (var http : List.of(noError, blankMessage)) {
+      var error =
+          assertThrows(
+              GeminiException.class,
+              () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
+      assertEquals("Gemini file processing failed", error.getMessage());
+    }
+  }
+
+  @Test
+  void deleteTransportFailuresHideTheirCauseAndKeepTheInterrupt() throws Exception {
+    var video = tempDir.resolve("delete-transport.mp4");
+    Files.write(video, new byte[] {1});
+    var ioHttp = managedUpload(httpClient(), "files/io-delete", "https://files.example/io");
+    var interruptedHttp =
+        managedUpload(httpClient(), "files/interrupted-delete", "https://files.example/int");
+    var ioManaged = client(ioHttp, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
+    var interruptedManaged =
+        client(interruptedHttp, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
+    ioHttp.sendFailure = new IOException("network down");
+    interruptedHttp.interruptOnSend = true;
+
+    var ioError = assertThrows(GeminiException.class, ioManaged::delete);
+    var interruptedError = assertThrows(GeminiException.class, interruptedManaged::delete);
+
+    assertEquals(
+        "Failed to communicate with the Gemini Files API during delete", ioError.getMessage());
+    assertNull(ioError.getCause());
+    assertTrue(Thread.interrupted());
+    assertEquals("Gemini file deletion interrupted", interruptedError.getMessage());
+  }
+
+  @Test
+  void uploadUrlsWithUserInfoAFragmentOrAnotherSchemeOrPortAreRejected() {
+    var endpoint = new FilesEndpoint(URI.create("https://api.example"));
+
+    for (var url :
+        List.of(
+            "https://user@api.example/upload",
+            "https://api.example/upload#fragment",
+            "http://api.example/upload",
+            "https://api.example:8443/upload")) {
+      assertThrows(GeminiException.class, () -> endpoint.uploadUrl(url), url);
+    }
+    assertEquals(
+        URI.create("https://api.example:443/upload"),
+        endpoint.uploadUrl("https://api.example:443/upload"));
+    assertEquals(
+        URI.create("http://proxy.local:80/upload"),
+        new FilesEndpoint(URI.create("http://proxy.local"))
+            .uploadUrl("http://proxy.local:80/upload"));
+  }
+
+  @Test
+  void aRequestBodyThatCannotBeWrittenFailsBeforeSending() {
+    var config = ModelConfig.newBuilder().withApiKey("g-key").build();
+    var http = new FilesHttp(config, httpClient(), FilesEndpoint.of(config));
+    var looped = ConversationFixture.selfReferencing();
+
+    var error = assertThrows(GeminiException.class, () -> http.serialize(looped));
+
+    assertEquals("Failed to serialize Gemini Files API request", error.getMessage());
+  }
+
+  @Test
+  void aStatusBelowTwoHundredIsAFailure() throws Exception {
+    var video = tempDir.resolve("informational.mp4");
+    Files.write(video, new byte[] {1});
+    var startHttp = httpClient();
+    startHttp.enqueue(199, Map.of(), "early");
+    var deleteHttp = managedUpload(httpClient(), "files/informational", "https://files.example/i");
+    deleteHttp.enqueue(199, Map.of(), "");
+
+    var startError =
+        assertThrows(
+            GeminiException.class,
+            () -> client(startHttp, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
+    var managed = client(deleteHttp, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
+    var deleteError = assertThrows(GeminiException.class, managed::delete);
+
+    assertEquals("Files API error (status 199): early", startError.getMessage());
+    assertEquals(199, deleteError.statusCode());
+  }
+
+  @Test
+  void anUnreadableFileIsRejectedBeforeSending() throws Exception {
+    var video = tempDir.resolve("unreadable.mp4");
+    Files.write(video, new byte[] {1});
+    Files.setPosixFilePermissions(video, Set.of());
+    assumeFalse(Files.isReadable(video), "the file stays readable to this user");
+    var http = httpClient();
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
+    assertTrue(http.requests.isEmpty());
+  }
+
+  @Test
+  void aFileNameOverFiveHundredTwelveCharactersIsRejectedBeforeSending() throws Exception {
+    try (var zip =
+        FileSystems.newFileSystem(tempDir.resolve("long-names.zip"), Map.of("create", "true"))) {
+      var video = zip.getPath("a".repeat(509) + ".mp4");
+      Files.write(video, new byte[] {1});
+      var http = httpClient();
+
+      var error =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
+
+      assertEquals(
+          "file name exceeds the Gemini Files API 512-character limit", error.getMessage());
+      assertTrue(http.requests.isEmpty());
+    }
+  }
+
+  @Test
+  void aBlankResourceNameIsInvalid() {
+    assertThrows(GeminiException.class, () -> GeminiFileResource.requireName(" "));
+  }
+
   private static StubHttpClient managedUpload(
       StubHttpClient http, String resourceName, String fileUri) {
     http.enqueue(
@@ -645,9 +831,7 @@ class GeminiFilesClientTest {
 
   private GeminiFilesClient client(
       ModelConfig config, StubHttpClient http, Duration processingTimeout) {
-    var mapper =
-        JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
-    return new GeminiFilesClient(config, http, mapper, Duration.ZERO, processingTimeout, false);
+    return new GeminiFilesClient(config, http, Duration.ZERO, processingTimeout, false);
   }
 
   private static String header(HttpRequest request, String name) {

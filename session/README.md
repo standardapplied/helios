@@ -48,8 +48,8 @@ requires com.standardapplied.helios.anthropic;
 ## Quickstart — minimal session
 
 ```java
-var model = new AnthropicModel(
-    AnthropicModelId.CLAUDE_SONNET_4_6,
+var model = new AnthropicProvider().create(
+    AnthropicModelId.CLAUDE_SONNET_4_6.id(),
     ModelConfig.of(System.getenv("ANTHROPIC_API_KEY")));
 
 try (var session = AgentSession.create(

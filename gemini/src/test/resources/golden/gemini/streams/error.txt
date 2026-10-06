@@ -1,0 +1,5 @@
+== chatStream
+TextDelta[text=Partial]
+Error[message=API error: The model is overloaded, cause=GeminiException(API error: The model is overloaded) status=503]
+== chat
+threw GeminiException(API error: The model is overloaded) status=503

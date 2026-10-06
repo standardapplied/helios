@@ -1,0 +1,6 @@
+data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"{\"summary\":\"ok\"}"}
+
+data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[],"model":"gpt-5.6","usage":{"input_tokens":2006,"output_tokens":150,"total_tokens":2156,"input_tokens_details":{"cached_tokens":1920,"cache_write_tokens":40}}}}
+
+data: [DONE]
+
