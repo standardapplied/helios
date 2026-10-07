@@ -98,6 +98,7 @@ final class SessionDemoIntegrationTest {
               + " one-line content summary based on what you just read.\n"
               + "After step 3, reply with a short confirmation. Do NOT explore further.";
       var result = session.runBlocking(UserMessage.text(prompt));
+      events.awaitDone();
 
       // The framework guarantees we care about here:
       //   - The agent loop reaches a defined terminal state (no hang, no provider crash). Both
@@ -180,6 +181,7 @@ final class SessionDemoIntegrationTest {
           "Please use MemoryWrite with op=create to save a note at /memories/test.md with content"
               + " 'hello world'. Just attempt it once.";
       session.runBlocking(UserMessage.text(prompt));
+      events.awaitDone();
     }
 
     // Permission blocks happen BEFORE dispatch — the loop emits ToolBlocked directly without a

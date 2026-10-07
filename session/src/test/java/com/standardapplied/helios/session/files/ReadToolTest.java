@@ -379,11 +379,10 @@ final class ReadToolTest {
   @Test
   void realPngReachesProviderAsInlineFileBytesUnchanged(@TempDir Path tmp) throws IOException {
     // Higher-fidelity than the 8-byte-header tests above: an actual valid 1x1 PNG with
-    // IHDR/IDAT/IEND
-    // and correct CRCs, from bytes rather than ImageIO so the test stays inside java.base (the
-    // session module doesn't read java.desktop). Proves the bytes are pristine from filesystem →
-    // ToolResult.attachments — no UTF-8 mangling, no line-ending rewriting, no partial-buffer
-    // reads.
+    // IHDR/IDAT/IEND chunks and correct CRCs, from bytes rather than ImageIO so the test stays
+    // inside java.base (the session module doesn't read java.desktop). Proves the bytes are
+    // pristine from filesystem → ToolResult.attachments — no UTF-8 mangling, no line-ending
+    // rewriting, no partial-buffer reads.
     var pngBytes = SampleDocuments.pixelPng();
     Files.write(tmp.resolve("real.png"), pngBytes);
 

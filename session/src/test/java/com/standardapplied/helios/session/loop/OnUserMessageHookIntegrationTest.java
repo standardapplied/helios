@@ -57,7 +57,6 @@ final class OnUserMessageHookIntegrationTest {
         UserMessage.newBuilder().withText("PII data").withFileReference(reference).build();
     var model = ScriptedModel.newBuilder().withTextTurn("ok").build();
     loop.run(model, message, rewriter);
-    // History's user message should carry the rewritten text.
     assertEquals("REDACTED", loop.history().get(0).content());
     assertEquals(List.of(reference), loop.history().get(0).fileReferences());
   }

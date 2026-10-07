@@ -37,8 +37,6 @@ final class PostToolUseHookIntegrationTest {
   void postToolUseMutateRewritesResultOutput() {
     PostToolUseHook rewriter = (call, result, ctx) -> HookOutcome.mutateResult("REWRITTEN");
     callEcho(echoTurn().withTextTurn("done"), rewriter);
-
-    // History's tool message should carry the REWRITTEN output.
     assertEquals("REWRITTEN", loop.toolMessage().content());
   }
 
