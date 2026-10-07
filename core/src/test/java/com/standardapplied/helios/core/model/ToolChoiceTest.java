@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.DeclarationOrderFixture;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -92,22 +93,20 @@ class ToolChoiceTest {
 
   @Test
   void requiredKeepsTheGivenOrderAndTheFirstOfARepeatedName() {
-    var required =
-        (ToolChoice.Required) ToolChoice.required("search_web", "get_weather", "search_web");
+    var names = new ArrayList<>(DeclarationOrderFixture.ARGUMENTS);
+    names.add(names.getFirst());
 
-    assertEquals(List.of("search_web", "get_weather"), List.copyOf(required.allowedTools()));
+    var required = (ToolChoice.Required) ToolChoice.required(names.toArray(String[]::new));
+
+    assertEquals(DeclarationOrderFixture.ARGUMENTS, List.copyOf(required.allowedTools()));
     assertThrows(UnsupportedOperationException.class, () -> required.allowedTools().add("x"));
   }
 
   @Test
-  void requiredKeepsTheOrderOfEightNamesThroughVarargsAndTheRecord() {
-    var names = DeclarationOrderFixture.ARGUMENTS;
+  void requiredRecordKeepsTheOrderItIsGiven() {
+    var required = new ToolChoice.Required(new LinkedHashSet<>(DeclarationOrderFixture.ARGUMENTS));
 
-    var fromVarargs = (ToolChoice.Required) ToolChoice.required(names.toArray(String[]::new));
-    var fromRecord = new ToolChoice.Required(new LinkedHashSet<>(names));
-
-    assertEquals(names, List.copyOf(fromVarargs.allowedTools()));
-    assertEquals(names, List.copyOf(fromRecord.allowedTools()));
+    assertEquals(DeclarationOrderFixture.ARGUMENTS, List.copyOf(required.allowedTools()));
   }
 
   @Test

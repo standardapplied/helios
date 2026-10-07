@@ -201,8 +201,7 @@ public final class DeclarationOrderFixture {
     var previous = -1;
     for (var name : names) {
       var at = text.indexOf(name);
-      var after = previous;
-      assertTrue(at > after, () -> name + " is out of declared order " + names + " in " + text);
+      assertTrue(at > previous, () -> name + " is out of declared order " + names + " in " + text);
       previous = at;
     }
   }

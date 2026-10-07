@@ -24,13 +24,7 @@ public final class ChildJvm {
 
   private ChildJvm() {}
 
-  /**
-   * The command that runs {@code main}, a class name or a Java source file, in a fresh JVM.
-   *
-   * @param main the main class or source file to launch
-   * @return the command line
-   */
-  public static List<String> command(String main) {
+  private static List<String> command(String main) {
     var command = new ArrayList<String>();
     command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
     var classpath = new ArrayList<String>();
@@ -53,20 +47,20 @@ public final class ChildJvm {
    * JVM that outlives the wait, by a timeout or an interrupt, is killed rather than left running.
    *
    * @param dir a directory for the captured output
-   * @param main the class whose {@code main} runs
+   * @param main the main class name or Java source file to launch
    * @return the standard output, exactly
    */
-  public static String output(Path dir, Class<?> main) {
+  public static String output(Path dir, String main) {
     try {
       var stdout = Files.createTempFile(dir, "stdout", ".txt");
       var stderr = Files.createTempFile(dir, "stderr", ".txt");
       var process =
-          new ProcessBuilder(command(main.getName()))
+          new ProcessBuilder(command(main))
               .redirectOutput(stdout.toFile())
               .redirectError(stderr.toFile())
               .start();
       try {
-        Await.termination("the JVM running " + main.getName() + " to exit", process);
+        Await.termination("the JVM running " + main + " to exit", process);
         assertEquals(0, process.exitValue(), () -> read(stderr));
         return Files.readString(stdout);
       } finally {
@@ -85,20 +79,14 @@ public final class ChildJvm {
    * @return the output every run printed
    */
   public static String sameInEveryJvm(Path dir, Class<?> main) {
-    var first = output(dir, main);
+    var first = output(dir, main.getName());
     for (var run = 2; run <= RUNS; run++) {
-      assertEquals(first, output(dir, main), "run " + run + " of " + main.getName());
+      assertEquals(first, output(dir, main.getName()), "run " + run + " of " + main.getName());
     }
     return first;
   }
 
-  /**
-   * The text of {@code file}, or why it could not be read.
-   *
-   * @param file the file to read
-   * @return its content
-   */
-  public static String read(Path file) {
+  private static String read(Path file) {
     try {
       return Files.readString(file);
     } catch (IOException e) {

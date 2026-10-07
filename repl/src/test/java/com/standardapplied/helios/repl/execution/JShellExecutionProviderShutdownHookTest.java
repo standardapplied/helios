@@ -3,7 +3,6 @@ package com.standardapplied.helios.repl.execution;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.ChildJvm;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -55,21 +54,12 @@ class JShellExecutionProviderShutdownHookTest {
       @TempDir Path dir) throws Exception {
     var source = dir.resolve("ShutdownHookProbe.java");
     Files.writeString(source, PROBE);
-    var stdout = dir.resolve("stdout.txt");
-    var stderr = dir.resolve("stderr.txt");
 
-    var process =
-        new ProcessBuilder(ChildJvm.command(source.toString()))
-            .redirectOutput(stdout.toFile())
-            .redirectError(stderr.toFile())
-            .start();
-    Await.termination("the probe JVM to exit", process);
+    var output = ChildJvm.output(dir, source.toString());
 
-    assertEquals(0, process.exitValue(), () -> ChildJvm.read(stderr));
     assertEquals(
         List.of(
             "closed-during-shutdown=true", "reaped-by=helios-jshell-shutdown", "started=Accept[]"),
-        Files.readAllLines(stdout).stream().sorted().toList(),
-        () -> ChildJvm.read(stderr));
+        output.lines().sorted().toList());
   }
 }
