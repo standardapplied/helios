@@ -23,12 +23,11 @@ import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Flow;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
@@ -79,7 +78,7 @@ final class Claude55AgentSessionIntegrationTest {
             .withThinkingLevel(level)
             .withMaxOutputTokens(16_000)
             .build();
-    var events = new CopyOnWriteArrayList<QueryEvent>();
+    var events = new CollectingSubscriber();
     try (var model =
             new AnthropicProvider().create(modelId.id(), config, CachePolicy.shortLived());
         var session =
@@ -91,16 +90,17 @@ final class Claude55AgentSessionIntegrationTest {
                     .withCostCalculator(AnthropicPricing.calculator(CachePolicy.shortLived()))
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(12).build())
                     .build())) {
-      session.events().subscribe(collector(events));
+      session.events().subscribe(events);
 
       var terminal = session.runBlocking(UserMessage.text(VIEWER));
+      events.awaitDone();
 
       var success =
           assertInstanceOf(
               ResultMessage.Success.class, terminal, () -> modelId.id() + " ended as " + terminal);
       assertTrue(!success.result().isBlank(), modelId.id());
       assertTrue(
-          events.stream().filter(QueryEvent.ToolUse.class::isInstance).count() >= 2,
+          events.eventsOf(QueryEvent.ToolUse.class).size() >= 2,
           () -> modelId.id() + " must have called its tools");
       assertTrue(
           success.usage().cacheReadInputTokens() > 0,
@@ -108,7 +108,7 @@ final class Claude55AgentSessionIntegrationTest {
       assertTrue(
           success.cost().microUsd() > 0,
           () -> modelId.id() + " must be priced by the rate card: " + success.cost());
-      return new Run(success, List.copyOf(events));
+      return new Run(success, events.events());
     }
   }
 
@@ -146,25 +146,5 @@ final class Claude55AgentSessionIntegrationTest {
             .withExecutor((args, ctx) -> ToolResult.success(output))
             .build();
     return ToolBinding.newBuilder(tool).withCategory(ToolCategory.SEARCH).build();
-  }
-
-  private static Flow.Subscriber<QueryEvent> collector(List<QueryEvent> sink) {
-    return new Flow.Subscriber<>() {
-      @Override
-      public void onSubscribe(Flow.Subscription subscription) {
-        subscription.request(Long.MAX_VALUE);
-      }
-
-      @Override
-      public void onNext(QueryEvent event) {
-        sink.add(event);
-      }
-
-      @Override
-      public void onError(Throwable throwable) {}
-
-      @Override
-      public void onComplete() {}
-    };
   }
 }
