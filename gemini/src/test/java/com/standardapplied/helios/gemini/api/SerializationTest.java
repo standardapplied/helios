@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -138,113 +140,56 @@ class SerializationTest {
 
   // --- Content union: text, image, audio, document (PDF), video ---
 
-  @Test
-  void serializeImageInlineDataContentItem() throws Exception {
-    var item = ContentItem.inlineData("image", "image/png", "iVBORw0KGgo=");
-    var json = objectMapper.writeValueAsString(item);
+  @ParameterizedTest(name = "{0} inline data ({1})")
+  @CsvSource({
+    "image, image/png, iVBORw0KGgo=",
+    "document, application/pdf, JVBERi0=",
+    "audio, audio/wav, AAAA",
+    "video, video/mp4, BBBB"
+  })
+  void serializeInlineDataContentItem(String type, String mimeType, String data) throws Exception {
+    var json = objectMapper.writeValueAsString(ContentItem.inlineData(type, mimeType, data));
 
-    assertTrue(json.contains("\"type\":\"image\""));
-    assertTrue(json.contains("\"mime_type\":\"image/png\""));
-    assertTrue(json.contains("\"data\":\"iVBORw0KGgo=\""));
+    assertTrue(json.contains("\"type\":\"" + type + "\""));
+    assertTrue(json.contains("\"mime_type\":\"" + mimeType + "\""));
+    assertTrue(json.contains("\"data\":\"" + data + "\""));
     assertFalse(json.contains("\"text\""));
     assertFalse(json.contains("\"uri\""));
   }
 
-  @Test
-  void serializeImageUriContentItem() throws Exception {
-    var item = ContentItem.fileUri("image", "image/jpeg", "https://example.com/cat.jpg");
-    var json = objectMapper.writeValueAsString(item);
+  @ParameterizedTest(name = "{0} uri ({1})")
+  @CsvSource({
+    "image, image/jpeg, https://example.com/cat.jpg",
+    "document, application/pdf, https://example.com/spec.pdf",
+    "audio, audio/mp3, https://example.com/track.mp3",
+    "video, video/mp4, https://example.com/clip.mp4"
+  })
+  void serializeUriContentItem(String type, String mimeType, String uri) throws Exception {
+    var json = objectMapper.writeValueAsString(ContentItem.fileUri(type, mimeType, uri));
 
-    assertTrue(json.contains("\"type\":\"image\""));
-    assertTrue(json.contains("\"mime_type\":\"image/jpeg\""));
-    assertTrue(json.contains("\"uri\":\"https://example.com/cat.jpg\""));
+    assertTrue(json.contains("\"type\":\"" + type + "\""));
+    assertTrue(json.contains("\"mime_type\":\"" + mimeType + "\""));
+    assertTrue(json.contains("\"uri\":\"" + uri + "\""));
     assertFalse(json.contains("\"data\""));
   }
 
-  @Test
-  void serializePdfDocumentContentItem() throws Exception {
-    var item = ContentItem.inlineData("document", "application/pdf", "JVBERi0=");
-    var json = objectMapper.writeValueAsString(item);
-
-    assertTrue(json.contains("\"type\":\"document\""));
-    assertTrue(json.contains("\"mime_type\":\"application/pdf\""));
-    assertTrue(json.contains("\"data\":\"JVBERi0=\""));
-  }
-
-  @Test
-  void serializeDocumentUriContentItem() throws Exception {
-    var item = ContentItem.fileUri("document", "application/pdf", "https://example.com/spec.pdf");
-    var json = objectMapper.writeValueAsString(item);
-
-    assertTrue(json.contains("\"type\":\"document\""));
-    assertTrue(json.contains("\"uri\":\"https://example.com/spec.pdf\""));
-  }
-
-  @Test
-  void serializeAudioContentItem() throws Exception {
-    var item = ContentItem.inlineData("audio", "audio/wav", "AAAA");
-    var json = objectMapper.writeValueAsString(item);
-
-    assertTrue(json.contains("\"type\":\"audio\""));
-    assertTrue(json.contains("\"mime_type\":\"audio/wav\""));
-    assertTrue(json.contains("\"data\":\"AAAA\""));
-  }
-
-  @Test
-  void serializeAudioUriContentItem() throws Exception {
-    var item = ContentItem.fileUri("audio", "audio/mp3", "https://example.com/track.mp3");
-    var json = objectMapper.writeValueAsString(item);
-
-    assertTrue(json.contains("\"uri\":\"https://example.com/track.mp3\""));
-  }
-
-  @Test
-  void serializeVideoContentItem() throws Exception {
-    var item = ContentItem.inlineData("video", "video/mp4", "BBBB");
-    var json = objectMapper.writeValueAsString(item);
-
-    assertTrue(json.contains("\"type\":\"video\""));
-    assertTrue(json.contains("\"mime_type\":\"video/mp4\""));
-    assertTrue(json.contains("\"data\":\"BBBB\""));
-  }
-
-  @Test
-  void serializeVideoUriContentItem() throws Exception {
-    var item = ContentItem.fileUri("video", "video/mp4", "https://example.com/clip.mp4");
-    var json = objectMapper.writeValueAsString(item);
-
-    assertTrue(json.contains("\"uri\":\"https://example.com/clip.mp4\""));
-  }
-
-  @Test
-  void serializeUserInputWithPdfAndText() throws Exception {
+  @ParameterizedTest(name = "user input with {0} and text")
+  @CsvSource({
+    "document, application/pdf, JVBERi0=, Extract text from this PDF",
+    "image, image/png, iVBORw0KGgo=, Caption this image"
+  })
+  void serializeUserInputWithMediaAndText(String type, String mimeType, String data, String text)
+      throws Exception {
     var step =
         Step.userInput(
-            List.of(
-                ContentItem.inlineData("document", "application/pdf", "JVBERi0="),
-                ContentItem.text("Extract text from this PDF")));
+            List.of(ContentItem.inlineData(type, mimeType, data), ContentItem.text(text)));
 
     var json = objectMapper.writeValueAsString(step);
     assertTrue(json.contains("\"type\":\"user_input\""));
-    assertTrue(json.contains("\"type\":\"document\""));
-    assertTrue(json.contains("\"mime_type\":\"application/pdf\""));
+    assertTrue(json.contains("\"type\":\"" + type + "\""));
+    assertTrue(json.contains("\"mime_type\":\"" + mimeType + "\""));
     assertTrue(json.contains("\"type\":\"text\""));
-    assertTrue(json.contains("Extract text from this PDF"));
-  }
-
-  @Test
-  void serializeUserInputWithImageAndText() throws Exception {
-    var step =
-        Step.userInput(
-            List.of(
-                ContentItem.inlineData("image", "image/png", "iVBORw0KGgo="),
-                ContentItem.text("Caption this image")));
-
-    var json = objectMapper.writeValueAsString(step);
-    assertTrue(json.contains("\"type\":\"image\""));
-    assertTrue(json.contains("\"mime_type\":\"image/png\""));
-    assertTrue(json.contains("\"type\":\"text\""));
-    assertTrue(json.contains("Caption this image"));
+    assertTrue(json.contains(text));
   }
 
   // --- Tools, tool_choice (must live inside generation_config) ---

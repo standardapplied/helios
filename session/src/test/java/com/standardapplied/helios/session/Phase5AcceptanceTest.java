@@ -11,16 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
-import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.ModelChunk;
-import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.process.BinaryResolver;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.execution.LocalProcessExecutionProvider;
@@ -28,15 +21,14 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.tools.ToolRegistry;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -47,50 +39,6 @@ import org.junit.jupiter.api.Test;
  */
 final class Phase5AcceptanceTest {
 
-  private static final class ScriptedModel implements Model {
-    private final List<List<ModelChunk>> turns;
-    private int turnIndex = 0;
-
-    ScriptedModel(List<List<ModelChunk>> turns) {
-      this.turns = turns;
-    }
-
-    @Override
-    public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-      throw new AssertionError("unused");
-    }
-
-    @Override
-    public Flow.Publisher<ModelChunk> chatStream(
-        List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-      var chunks = turnIndex < turns.size() ? turns.get(turnIndex++) : List.<ModelChunk>of();
-      return subscriber ->
-          subscriber.onSubscribe(
-              new Flow.Subscription() {
-                @Override
-                public void request(long n) {
-                  for (var c : chunks) {
-                    subscriber.onNext(c);
-                  }
-                  subscriber.onComplete();
-                }
-
-                @Override
-                public void cancel() {}
-              });
-    }
-
-    @Override
-    public String id() {
-      return "phase5-script";
-    }
-
-    @Override
-    public String provider() {
-      return "test";
-    }
-  }
-
   /**
    * A test that fails before its children are reaped must not leave one running; nothing else in
    * this JVM starts a process while a test of this class runs.
@@ -100,55 +48,57 @@ final class Phase5AcceptanceTest {
     ProcessHandle.current().descendants().forEach(ProcessHandle::destroyForcibly);
   }
 
-  @Test
-  void agentRunsPythonScriptAndReceivesStdout() throws Exception {
-    assumePythonAvailable();
+  private record Run(ResultMessage result, CollectingSubscriber events) {}
+
+  /** A model that calls Execute once with {@code arguments}, then answers "done". */
+  private static ScriptedModel executing(Map<String, Object> arguments) {
+    return ScriptedModel.newBuilder()
+        .withToolCallsTurn(Usage.of(1, 1), new ToolCall("c1", ExecuteTool.NAME, arguments))
+        .withTextTurn("done", Usage.of(1, 1))
+        .build();
+  }
+
+  /**
+   * Allows Execute — DEFAULT mode otherwise routes to ASK and blocks — and applies {@code deny}.
+   */
+  private static Permission allowingExecute(PermissionRule... deny) {
+    return new Permission(
+        PermissionMode.DEFAULT,
+        List.of(PermissionRule.any(PermissionEffect.ALLOW, ExecuteTool.NAME)),
+        List.of(),
+        List.of(deny));
+  }
+
+  /** Runs {@code prompt} through a session with Execute on a local process provider. */
+  private static Run run(
+      String sessionPrefix, ScriptedModel model, Permission permission, String prompt) {
     var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
-
-    var turns =
-        List.<List<ModelChunk>>of(
-            List.of(
-                new ModelChunk.ToolUseStop(
-                    new ToolCall(
-                        "c1",
-                        ExecuteTool.NAME,
-                        Map.of("runtime", "PYTHON", "script", "print('phase-5')"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
-            List.of(
-                new ModelChunk.TextDelta("done"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
-
-    // Permission policy must allow Execute — DEFAULT mode otherwise routes to ASK and blocks.
-    var permission =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.any(PermissionEffect.ALLOW, ExecuteTool.NAME)),
-            List.of(),
-            List.of());
-
     var options =
         SessionOptions.newBuilder()
-            .withModel(new ScriptedModel(turns))
-            .withSessionId("phase5-py-" + UUID.randomUUID())
+            .withModel(model)
+            .withSessionId(sessionPrefix + UUID.randomUUID())
             .withTools(new ToolRegistry(List.of(ExecuteTool.binding(provider))))
             .withExecutionProvider(provider)
             .withPermission(permission)
             .build();
-
-    var events = new CopyOnWriteArrayList<QueryEvent>();
-    var done = new CountDownLatch(1);
+    var sub = new CollectingSubscriber();
     try (var session = AgentSession.create(options)) {
-      session.events().subscribe(collectingSubscriber(events, done));
-      var result = session.runBlocking(UserMessage.text("run a python script"));
-      assertInstanceOf(ResultMessage.Success.class, result);
-      Await.latch("the event stream to complete", done);
+      session.events().subscribe(sub);
+      var result = session.runBlocking(UserMessage.text(prompt));
+      sub.awaitDone();
+      return new Run(result, sub);
     }
+  }
 
-    var toolResults =
-        events.stream()
-            .filter(e -> e instanceof QueryEvent.ToolResult)
-            .map(e -> (QueryEvent.ToolResult) e)
-            .toList();
+  @Test
+  void agentRunsPythonScriptAndReceivesStdout() throws Exception {
+    assumePythonAvailable();
+    var model = executing(Map.of("runtime", "PYTHON", "script", "print('phase-5')"));
+
+    var run = run("phase5-py-", model, allowingExecute(), "run a python script");
+    assertInstanceOf(ResultMessage.Success.class, run.result());
+
+    var toolResults = run.events().eventsOf(QueryEvent.ToolResult.class);
     assertEquals(1, toolResults.size());
     var execResult = assertInstanceOf(ExecutionResult.class, toolResults.get(0).result().data());
     assertEquals(0, execResult.exitCode());
@@ -159,51 +109,15 @@ final class Phase5AcceptanceTest {
   @Test
   void denyRuleBlocksBashCallToForbiddenBinary() throws Exception {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
-
-    var turns =
-        List.<List<ModelChunk>>of(
-            List.of(
-                new ModelChunk.ToolUseStop(
-                    new ToolCall(
-                        "c1",
-                        ExecuteTool.NAME,
-                        Map.of("runtime", "BASH", "script", "rm -rf /tmp/should-not-happen"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
-            List.of(
-                new ModelChunk.TextDelta("done"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
-
+    var model = executing(Map.of("runtime", "BASH", "script", "rm -rf /tmp/should-not-happen"));
     var permission =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.any(PermissionEffect.ALLOW, ExecuteTool.NAME)),
-            List.of(),
-            List.of(PermissionRule.withGlob(PermissionEffect.DENY, ExecuteTool.NAME, "BASH/rm")));
+        allowingExecute(
+            PermissionRule.withGlob(PermissionEffect.DENY, ExecuteTool.NAME, "BASH/rm"));
 
-    var options =
-        SessionOptions.newBuilder()
-            .withModel(new ScriptedModel(turns))
-            .withSessionId("phase5-deny-" + UUID.randomUUID())
-            .withTools(new ToolRegistry(List.of(ExecuteTool.binding(provider))))
-            .withExecutionProvider(provider)
-            .withPermission(permission)
-            .build();
-
-    var events = new CopyOnWriteArrayList<QueryEvent>();
-    var done = new CountDownLatch(1);
-    try (var session = AgentSession.create(options)) {
-      session.events().subscribe(collectingSubscriber(events, done));
-      session.runBlocking(UserMessage.text("try a forbidden command"));
-      Await.latch("the event stream to complete", done);
-    }
+    var run = run("phase5-deny-", model, permission, "try a forbidden command");
 
     var blocked =
-        events.stream()
-            .filter(e -> e instanceof QueryEvent.ToolBlocked)
-            .map(e -> (QueryEvent.ToolBlocked) e)
-            .findFirst()
-            .orElse(null);
+        run.events().eventsOf(QueryEvent.ToolBlocked.class).stream().findFirst().orElse(null);
     assertNotNull(blocked, "expected Execute(BASH/rm) to be blocked by deny rule");
     assertEquals(ExecuteTool.NAME, blocked.call().name());
   }
@@ -211,86 +125,20 @@ final class Phase5AcceptanceTest {
   @Test
   void slowBashCallAgainstTightTimeoutSurfacesTimedOutTrue() throws Exception {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
-
     // The script cannot finish on its own before the hang guard, so only the one-second execution
     // timeout can end it; ExecuteTool surfaces timedOut=true in the structured tool result.
-    var turns =
-        List.<List<ModelChunk>>of(
-            List.of(
-                new ModelChunk.ToolUseStop(
-                    new ToolCall(
-                        "c1",
-                        ExecuteTool.NAME,
-                        Map.of(
-                            "runtime", "BASH", "script", "exec sleep 600", "timeoutSeconds", 1))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
-            List.of(
-                new ModelChunk.TextDelta("done"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
+    var model =
+        executing(Map.of("runtime", "BASH", "script", "exec sleep 600", "timeoutSeconds", 1));
 
-    var permission =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.any(PermissionEffect.ALLOW, ExecuteTool.NAME)),
-            List.of(),
-            List.of());
-
-    var options =
-        SessionOptions.newBuilder()
-            .withModel(new ScriptedModel(turns))
-            .withSessionId("phase5-timeout-" + UUID.randomUUID())
-            .withTools(new ToolRegistry(List.of(ExecuteTool.binding(provider))))
-            .withExecutionProvider(provider)
-            .withPermission(permission)
-            .build();
-
-    var events = new CopyOnWriteArrayList<QueryEvent>();
-    var done = new CountDownLatch(1);
-    try (var session = AgentSession.create(options)) {
-      session.events().subscribe(collectingSubscriber(events, done));
-      var result = session.runBlocking(UserMessage.text("trigger timeout"));
-      assertInstanceOf(ResultMessage.Success.class, result);
-      Await.latch("the event stream to complete", done);
-    }
+    var run = run("phase5-timeout-", model, allowingExecute(), "trigger timeout");
+    assertInstanceOf(ResultMessage.Success.class, run.result());
 
     var toolResult =
-        events.stream()
-            .filter(e -> e instanceof QueryEvent.ToolResult)
-            .map(e -> (QueryEvent.ToolResult) e)
-            .findFirst()
-            .orElseThrow();
+        run.events().eventsOf(QueryEvent.ToolResult.class).stream().findFirst().orElseThrow();
     var execResult = assertInstanceOf(ExecutionResult.class, toolResult.result().data());
     assertTrue(execResult.timedOut(), "expected timedOut=true on the structured result");
     assertEquals(-1, execResult.exitCode());
     assertTrue(toolResult.result().output().contains("TIMEOUT"));
-  }
-
-  // ── helpers ──────────────────────────────────────────────────────────────
-
-  private static Flow.Subscriber<QueryEvent> collectingSubscriber(
-      List<QueryEvent> sink, CountDownLatch done) {
-    return new Flow.Subscriber<>() {
-      @Override
-      public void onSubscribe(Flow.Subscription s) {
-        s.request(Long.MAX_VALUE);
-      }
-
-      @Override
-      public void onNext(QueryEvent ev) {
-        sink.add(ev);
-      }
-
-      @Override
-      public void onError(Throwable t) {
-        done.countDown();
-      }
-
-      @Override
-      public void onComplete() {
-        done.countDown();
-      }
-    };
   }
 
   private static void assumeBashAvailable() {

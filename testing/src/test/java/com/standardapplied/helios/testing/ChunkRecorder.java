@@ -1,0 +1,85 @@
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
+
+package com.standardapplied.helios.testing;
+
+import com.standardapplied.helios.core.model.ModelChunk;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Flow;
+import java.util.function.Consumer;
+
+/**
+ * Records every signal a model stream sends, as text, and requests chunks only when told to, so a
+ * test controls the demand.
+ */
+final class ChunkRecorder implements Flow.Subscriber<ModelChunk> {
+
+  final List<String> signals = new ArrayList<>();
+  private Flow.Subscription subscription;
+  private Consumer<Flow.Subscription> onChunk = subscription -> {};
+  private Runnable onSignal = () -> {};
+
+  static ChunkRecorder drain(Flow.Publisher<ModelChunk> stream) {
+    var recorder = new ChunkRecorder();
+    stream.subscribe(recorder);
+    recorder.request(Long.MAX_VALUE);
+    return recorder;
+  }
+
+  ChunkRecorder cancellingOnEveryChunk() {
+    onChunk = Flow.Subscription::cancel;
+    return this;
+  }
+
+  ChunkRecorder requestingOneOnEveryChunk() {
+    onChunk = subscription -> subscription.request(1);
+    return this;
+  }
+
+  ChunkRecorder pausingOnEverySignal(CountDownLatch paused, CountDownLatch release) {
+    onSignal =
+        () -> {
+          paused.countDown();
+          try {
+            release.await();
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+          }
+        };
+    return this;
+  }
+
+  void request(long n) {
+    subscription.request(n);
+  }
+
+  void cancel() {
+    subscription.cancel();
+  }
+
+  @Override
+  public void onSubscribe(Flow.Subscription subscription) {
+    this.subscription = subscription;
+    signals.add("subscribed");
+  }
+
+  @Override
+  public void onNext(ModelChunk chunk) {
+    signals.add(chunk.toString());
+    onSignal.run();
+    onChunk.accept(subscription);
+  }
+
+  @Override
+  public void onError(Throwable throwable) {
+    signals.add("error: " + throwable.getMessage());
+    onSignal.run();
+  }
+
+  @Override
+  public void onComplete() {
+    signals.add("complete");
+  }
+}

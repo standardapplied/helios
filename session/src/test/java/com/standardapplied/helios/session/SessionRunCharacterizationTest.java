@@ -10,14 +10,11 @@ import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
-import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.test.Await;
@@ -31,19 +28,20 @@ import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
+import com.standardapplied.helios.testing.ModelStreams;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.InstantSource;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -77,6 +75,7 @@ class SessionRunCharacterizationTest {
     try (var session = run.start()) {
       var terminal = Await.value("the scripted run's terminal", session.result());
       var events = run.awaitEvents();
+      run.assertEveryCallCarriedTheSchema();
 
       var success = assertInstanceOf(ResultMessage.Success.class, terminal);
       assertEquals("{\"answer\":\"final\"}", success.result());
@@ -86,10 +85,10 @@ class SessionRunCharacterizationTest {
           EXPECTED_EVENTS, events.stream().map(SessionRunCharacterizationTest::describe).toList());
       assertEquals(
           EXPECTED_FINAL_MODEL_INPUT,
-          run.model.inputs.getLast().stream()
+          run.model.calls().getLast().stream()
               .map(SessionRunCharacterizationTest::describe)
               .toList());
-      assertEquals(5, run.model.inputs.size());
+      assertEquals(5, run.model.calls().size());
       var payload = postCompactPayload.get();
       assertEquals(6, payload.historyBefore().size());
       assertEquals(2, payload.historyAfter().size());
@@ -117,6 +116,7 @@ class SessionRunCharacterizationTest {
       var terminal = Await.value("the wall-clock terminal", session.result());
 
       assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, terminal);
+      run.assertEveryCallCarriedTheSchema();
       assertShutDown(session);
     }
   }
@@ -126,10 +126,10 @@ class SessionRunCharacterizationTest {
     var run = new Run();
     run.limits = run.limits().withStreamIdleTimeout(Duration.ofHours(1));
     var stalled = new CountDownLatch(1);
-    run.model.replies.removeLast();
-    run.model.replies.removeLast();
-    run.model.replies.removeLast();
-    run.model.replies.add(ScriptedModel.stall(stalled));
+    run.replies.removeLast();
+    run.replies.removeLast();
+    run.replies.removeLast();
+    run.replies.add(ModelStreams.stalled(stalled::countDown));
 
     var session = run.start();
     Await.latch("the stalled schema turn", stalled);
@@ -138,6 +138,7 @@ class SessionRunCharacterizationTest {
 
     var cancelled = assertInstanceOf(ResultMessage.Cancelled.class, terminal);
     assertEquals("session closed", cancelled.reason());
+    run.assertEveryCallCarriedTheSchema();
     assertShutDown(session);
   }
 
@@ -154,6 +155,7 @@ class SessionRunCharacterizationTest {
 
       assertInstanceOf(AssertionError.class, failure);
       assertEquals("hook bug", failure.getMessage());
+      run.assertEveryCallCarriedTheSchema();
       assertShutDown(session);
     }
   }
@@ -209,9 +211,26 @@ class SessionRunCharacterizationTest {
   private static final class Run {
 
     final AtomicReference<Instant> now = new AtomicReference<>(START);
-    final ScriptedModel model = new ScriptedModel();
-    final List<QueryEvent> events = new CopyOnWriteArrayList<>();
-    final CountDownLatch eventsComplete = new CountDownLatch(1);
+    final List<Flow.Publisher<ModelChunk>> replies =
+        new ArrayList<>(
+            List.of(
+                transientFailure(),
+                ModelStreams.of(
+                    new ModelChunk.ToolUseStop(new ToolCall("c1", "echo", Map.of("v", "one"))),
+                    new ModelChunk.ToolUseStop(new ToolCall("c2", "echo", Map.of("v", "two"))),
+                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(10, 5), Map.of(), List.of())),
+                ModelStreams.failing(
+                    new StructuredOutputParseException(
+                        List.of("answer is required but missing"), "not json"),
+                    new ModelChunk.TextDelta("not json")),
+                ModelStreams.of(
+                    new ModelChunk.TextDelta("{\"answer\":\"draft\"}"),
+                    new ModelChunk.MessageStop("STOP", Usage.of(20, 6), Map.of(), List.of())),
+                ModelStreams.of(
+                    new ModelChunk.TextDelta("{\"answer\":\"final\"}"),
+                    new ModelChunk.MessageStop("STOP", Usage.of(30, 7), Map.of(), List.of()))));
+    final CollectingSubscriber events = new CollectingSubscriber();
+    ScriptedModel model;
     SessionLimits.Builder limits;
     PreModelTurnHook preModelTurn =
         (history, ctx) ->
@@ -260,6 +279,9 @@ class SessionRunCharacterizationTest {
                   Usage.of(3, 4),
                   "compactor-model");
       InstantSource clock = now::get;
+      var script = ScriptedModel.newBuilder();
+      replies.forEach(script::withStreamTurn);
+      model = script.build();
       var session =
           AgentSession.create(
               SessionOptions.newBuilder()
@@ -281,7 +303,7 @@ class SessionRunCharacterizationTest {
                   .withHook(postCompact)
                   .withHook(preStop)
                   .build());
-      session.events().subscribe(new CollectingSubscriber(events, eventsComplete));
+      session.events().subscribe(events);
       session.send(
           UserMessage.newBuilder()
               .withText("start")
@@ -291,8 +313,22 @@ class SessionRunCharacterizationTest {
     }
 
     List<QueryEvent> awaitEvents() {
-      Await.latch("the event stream's completion", eventsComplete);
-      return List.copyOf(events);
+      events.awaitDone();
+      return events.events();
+    }
+
+    /** The session has an output schema, so every model call must carry it. */
+    void assertEveryCallCarriedTheSchema() {
+      assertTrue(
+          model.outputSchemas().stream().allMatch(Optional::isPresent),
+          "the session has an output schema");
+    }
+
+    static Flow.Publisher<ModelChunk> transientFailure() {
+      return subscriber -> {
+        throw new TransientStreamException(
+            "Stream read error", new IOException("connection reset"), "test");
+      };
     }
 
     private static ToolBinding echo() {
@@ -303,142 +339,6 @@ class SessionRunCharacterizationTest {
               .withExecutor((args, ctx) -> ToolResult.success("echoed: " + args.get("v")))
               .build();
       return ToolBinding.newBuilder(tool).withCategory(ToolCategory.READ).build();
-    }
-  }
-
-  private record CollectingSubscriber(List<QueryEvent> events, CountDownLatch complete)
-      implements Flow.Subscriber<QueryEvent> {
-
-    @Override
-    public void onSubscribe(Flow.Subscription subscription) {
-      subscription.request(Long.MAX_VALUE);
-    }
-
-    @Override
-    public void onNext(QueryEvent item) {
-      events.add(item);
-    }
-
-    @Override
-    public void onError(Throwable throwable) {
-      complete.countDown();
-    }
-
-    @Override
-    public void onComplete() {
-      complete.countDown();
-    }
-  }
-
-  /** Replays one scripted reply per stream call and records every call's input history. */
-  private static final class ScriptedModel implements Model {
-
-    final List<List<Message>> inputs = new CopyOnWriteArrayList<>();
-    final Deque<Flow.Publisher<ModelChunk>> replies =
-        new ArrayDeque<>(
-            List.of(
-                transientFailure(),
-                chunks(
-                    new ModelChunk.ToolUseStop(new ToolCall("c1", "echo", Map.of("v", "one"))),
-                    new ModelChunk.ToolUseStop(new ToolCall("c2", "echo", Map.of("v", "two"))),
-                    new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(10, 5), Map.of(), List.of())),
-                textThenError(
-                    "not json",
-                    new StructuredOutputParseException(
-                        List.of("answer is required but missing"), "not json")),
-                chunks(
-                    new ModelChunk.TextDelta("{\"answer\":\"draft\"}"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(20, 6), Map.of(), List.of())),
-                chunks(
-                    new ModelChunk.TextDelta("{\"answer\":\"final\"}"),
-                    new ModelChunk.MessageStop("STOP", Usage.of(30, 7), Map.of(), List.of()))));
-
-    @Override
-    public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-      throw new AssertionError("the loop streams");
-    }
-
-    @Override
-    public Flow.Publisher<ModelChunk> chatStream(
-        List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-      throw new AssertionError("the session has an output schema");
-    }
-
-    @Override
-    public Flow.Publisher<ModelChunk> chatStream(
-        List<Message> messages,
-        List<Tool> tools,
-        OutputSchema<?> outputSchema,
-        CancellationToken cancellation) {
-      inputs.add(messages);
-      var reply = replies.poll();
-      if (reply == null) {
-        throw new AssertionError("script exhausted");
-      }
-      return reply;
-    }
-
-    @Override
-    public String id() {
-      return "scripted";
-    }
-
-    @Override
-    public String provider() {
-      return "test";
-    }
-
-    static Flow.Publisher<ModelChunk> transientFailure() {
-      return subscriber -> {
-        throw new TransientStreamException(
-            "Stream read error", new IOException("connection reset"), "test");
-      };
-    }
-
-    static Flow.Publisher<ModelChunk> chunks(ModelChunk... chunks) {
-      return subscriber ->
-          subscriber.onSubscribe(
-              new Flow.Subscription() {
-                @Override
-                public void request(long n) {
-                  for (var chunk : chunks) {
-                    subscriber.onNext(chunk);
-                  }
-                  subscriber.onComplete();
-                }
-
-                @Override
-                public void cancel() {}
-              });
-    }
-
-    static Flow.Publisher<ModelChunk> textThenError(String text, Throwable error) {
-      return subscriber ->
-          subscriber.onSubscribe(
-              new Flow.Subscription() {
-                @Override
-                public void request(long n) {
-                  subscriber.onNext(new ModelChunk.TextDelta(text));
-                  subscriber.onError(error);
-                }
-
-                @Override
-                public void cancel() {}
-              });
-    }
-
-    static Flow.Publisher<ModelChunk> stall(CountDownLatch stalled) {
-      return subscriber ->
-          subscriber.onSubscribe(
-              new Flow.Subscription() {
-                @Override
-                public void request(long n) {
-                  stalled.countDown();
-                }
-
-                @Override
-                public void cancel() {}
-              });
     }
   }
 

@@ -39,7 +39,8 @@ Production-grade agentic framework for Java. Simple, explicit, no magic.
 ## Quality gate
 
 `mvn verify` fails on complexity, duplication and architecture violations, for main and test
-code. Every 3.0 spec's work passes the gate without adding exclusions.
+code. The burn-down of what violated when the gate was installed is complete: from here on a
+violation is fixed, never excluded.
 
 | Tool | Enforces | Where |
 |---|---|---|
@@ -117,7 +118,8 @@ stays.
 A test passes or fails for the same reason on a machine a hundred times slower, and on one that
 stalls for several seconds at any statement. The fixtures live in
 `com.standardapplied.helios.core.test` (core's test sources, shared through core's `test-jar`;
-the package must never exist in core's main code): `Await`, `LineSink`, `FeedableInputStream`,
+the package must never exist in core's main code; session's equivalent is
+`com.standardapplied.helios.session.test`): `Await`, `LineSink`, `FeedableInputStream`,
 and for HTTP clients `StubHttpServer` and `RedirectTrap`.
 
 - **Wait for an event, never for time.** Wait on what the other thread produces: a latch, a
@@ -170,18 +172,16 @@ sources of the modules in the reactor, so only a whole-reactor build checks dupl
 - **No suppression in source.** Neither PMD's suppression comment marker nor a
   `@SuppressWarnings` annotation naming a PMD rule; `git grep` for both stays empty.
 - **`config/quality/pmd-exclusions.properties`** (`fully.qualified.Class=Rule1,Rule2`; a nested
-  class is `Outer.Nested`; one line per class, because a repeated key replaces the earlier one). Its burn-down section lists what violated when the gate was
-  installed, grouped by the follow-up spec that removes it; entries may only be removed. Its
-  accepted section holds only entries a spec names explicitly, each with a comment stating why.
-- **`config/quality/cpd-exclusions.txt`** (one comma-separated group of class names per line, no
-  blank lines). A line silences every duplication among exactly the classes it names, so lines
-  may only be removed. Duplication is never accepted; the file is deleted when it is empty.
+  class is `Outer.Nested`; one line per class, because a repeated key replaces the earlier one)
+  holds only entries a spec names explicitly, each with a comment stating why.
+- **No duplication is accepted.** CPD has no exclusion file; its executions clear the parameter,
+  so no class is ever silenced.
 - **Adding an ArchUnit rule.** A spec that establishes or consolidates a pattern adds one `@Test`
   method to `ArchitectureRulesTest`, named for the rule, with a `because(...)` clause that states
   the one allowed way. A new library module is added to `architecture/pom.xml` as a test
   dependency so the rules see it.
 
-The rule sets and exclusion files are resolved through `${maven.multiModuleProjectDirectory}`,
+The rule sets and the exclusion file are resolved through `${maven.multiModuleProjectDirectory}`,
 which Maven sets to the nearest ancestor directory holding `.mvn/` — that is why the otherwise
 empty `.mvn/maven.config` is checked in. The plugin wiring constraints are commented in the root
 `pom.xml`.
@@ -277,8 +277,8 @@ means changing `SCANNER_VERSION` and both checksums in `advisory_scan.py` togeth
 
 ```
 helios/
-├── core/                           # Zero deps - Model + tool + common + fault + process + provider + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream, StubHttpServer, RedirectTrap, and for provider characterization ModelHarness, SseReplies, Transcript, Golden, ConversationFixture) ship as its test-jar.
-├── session/                        # v2 SDK - AgentSession, SessionPresets, hooks, permissions, file tools, memory backend, agent loop
+├── core/                           # Zero deps - Model + tool + common + fault + process + provider + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream, FailingInputStream, StubHttpServer, RedirectTrap, SseEvents, and for provider characterization ModelHarness, SseReplies, Transcript, Golden, ConversationFixture) and the abstract `*Contract` tests ship as its test-jar.
+├── session/                        # v2 SDK - AgentSession, SessionPresets, hooks, permissions, file tools, memory backend, agent loop. Test fixtures (CollectingSubscriber, QuestionAnswers, HookInputs, SampleDocuments in `session.test`) ship as its test-jar.
 ├── runtime/                        # Helidon HTTP/SSE surface for session — POST /sessions, SSE /events, long-poll /result
 ├── gemini/                         # Gemini Interactions API + Jackson 3.x
 ├── anthropic/                      # Claude Messages API + Jackson 3.x
@@ -286,7 +286,7 @@ helios/
 ├── repl/                           # Sandboxed JShell substrate (JvmSandbox, ReplSession, CodeExecutionTool, InputBindings, HostFunction infrastructure)
 ├── onnx/                           # Local embeddings via ONNX Runtime
 ├── persistence/                    # PostgreSQL persistence — PgTraceStore + PgAnnotationStore + PgDurability via Helidon DbClient
-├── testing/                        # helios-testing — ScriptedModel test double for deterministic CI evals
+├── testing/                        # helios-testing — ScriptedModel test double (scripted text, tool-call, response and stream turns) + ModelStreams, for deterministic CI evals
 ├── architecture/                   # helios-architecture — ArchUnit rules over every library module; build-only, never deployed
 ├── config/quality/                 # PMD rule sets + PMD/CPD exclusion files shared by every module
 ├── config/security/                # Advisory scan (OSV-Scanner wrapper + tests), its canary inventory and the exception file

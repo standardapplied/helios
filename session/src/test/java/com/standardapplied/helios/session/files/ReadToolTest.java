@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.tool.ToolContext;
+import com.standardapplied.helios.session.test.SampleDocuments;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -377,13 +378,12 @@ final class ReadToolTest {
 
   @Test
   void realPngReachesProviderAsInlineFileBytesUnchanged(@TempDir Path tmp) throws IOException {
-    // Higher-fidelity than the 8-byte-header tests above: an actual valid 1x1 RGBA PNG (67 bytes
-    // including IHDR/IDAT/IEND with correct CRCs). Embedded inline rather than generated via
-    // ImageIO so the test stays inside java.base (the session module doesn't read java.desktop).
-    // Provider integration is still a manual smoke check; this proves the bytes are pristine
-    // from filesystem → ToolResult.attachments — no UTF-8 mangling, no line-ending rewriting,
-    // no partial-buffer reads.
-    var pngBytes = minimalValid1x1PngBytes();
+    // Higher-fidelity than the 8-byte-header tests above: an actual valid 1x1 PNG with
+    // IHDR/IDAT/IEND chunks and correct CRCs, from bytes rather than ImageIO so the test stays
+    // inside java.base (the session module doesn't read java.desktop). Proves the bytes are
+    // pristine from filesystem → ToolResult.attachments — no UTF-8 mangling, no line-ending
+    // rewriting, no partial-buffer reads.
+    var pngBytes = SampleDocuments.pixelPng();
     Files.write(tmp.resolve("real.png"), pngBytes);
 
     var result =
@@ -406,97 +406,13 @@ final class ReadToolTest {
     assertEquals((byte) 'G', attachment.data()[3]);
   }
 
-  /**
-   * 67-byte minimal valid 1x1 PNG with correct IHDR / IDAT / IEND chunks and CRC checksums.
-   * Decodable by any PNG reader (including the vision channels of Anthropic, Gemini, OpenAI).
-   * Inlined here so the test stays in {@code java.base} — the session module doesn't read {@code
-   * java.desktop} and the JPMS layer rejects {@code BufferedImage} access at runtime.
-   */
-  private static byte[] minimalValid1x1PngBytes() {
-    return new byte[] {
-      // PNG signature
-      (byte) 0x89,
-      0x50,
-      0x4E,
-      0x47,
-      0x0D,
-      0x0A,
-      0x1A,
-      0x0A,
-      // IHDR chunk: length=13, "IHDR", width=1, height=1, bit-depth=8, color-type=0 (grayscale),
-      // compression=0, filter=0, interlace=0, CRC
-      0x00,
-      0x00,
-      0x00,
-      0x0D,
-      'I',
-      'H',
-      'D',
-      'R',
-      0x00,
-      0x00,
-      0x00,
-      0x01,
-      0x00,
-      0x00,
-      0x00,
-      0x01,
-      0x08,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x3A,
-      0x7E,
-      (byte) 0x9B,
-      0x55,
-      // IDAT chunk: length=10, "IDAT", deflate-compressed single grey pixel, CRC
-      0x00,
-      0x00,
-      0x00,
-      0x0A,
-      'I',
-      'D',
-      'A',
-      'T',
-      0x78,
-      (byte) 0x9C,
-      0x63,
-      0x00,
-      0x01,
-      0x00,
-      0x00,
-      0x00,
-      0x05,
-      0x00,
-      0x01,
-      0x0D,
-      0x0A,
-      0x2D,
-      (byte) 0xB4,
-      // IEND chunk: length=0, "IEND", CRC
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      'I',
-      'E',
-      'N',
-      'D',
-      (byte) 0xAE,
-      0x42,
-      0x60,
-      (byte) 0x82
-    };
-  }
-
   @Test
   void realPdfDocumentReachesProviderAsInlineFile(@TempDir Path tmp) throws IOException {
     // Hand-rolled minimal PDF — a single-page document with "Hello, world!" content. This is a
     // STRUCTURALLY valid PDF (parseable by PDF readers, accepted by Anthropic / Gemini document
     // channels), not just the %PDF-1.4 magic. Bytes are written verbatim and re-checked at the
     // attachment boundary to prove no UTF-8 or line-ending mangling.
-    var pdfBytes = minimalValidPdfBytes();
+    var pdfBytes = SampleDocuments.helloWorldPdf();
     Files.write(tmp.resolve("paper.pdf"), pdfBytes);
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
@@ -515,60 +431,6 @@ final class ReadToolTest {
     assertTrue(content.startsWith("%PDF-1.4"), "PDF header preserved");
     assertTrue(content.contains("%%EOF"), "PDF EOF marker preserved");
     assertTrue(content.contains("Hello, world!"), "PDF text content preserved");
-  }
-
-  /**
-   * Build a minimal valid PDF in memory: 1 page, "Hello, world!" rendered via the Helvetica
-   * standard font. ~500 bytes, parseable by any PDF reader. Used to prove the ReadTool's attachment
-   * path doesn't mangle binary content (cross-reference offsets, stream lengths, and the EOF
-   * trailer all have to line up byte-for-byte).
-   */
-  private static byte[] minimalValidPdfBytes() {
-    // Use ISO_8859_1 so each char is exactly one byte; PDFs store binary streams as latin-1
-    // text and the xref offsets are byte counts.
-    var charset = java.nio.charset.StandardCharsets.ISO_8859_1;
-    // Compute /Length from the actual stream bytes — getting this wrong silently corrupts the
-    // page (a previous version had /Length 51 when the stream was 46 bytes; Gemini accepted the
-    // file but extracted no text, then chewed through maxTurns retrying. Real PDF spec violation,
-    // real model failure mode).
-    var streamContent = "BT /F1 24 Tf 100 700 Td (Hello, world!) Tj ET\n";
-    var streamBytes = streamContent.getBytes(charset);
-    var objects =
-        new String[] {
-          "<< /Type /Catalog /Pages 2 0 R >>",
-          "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-          "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
-              + "/Resources << /Font << /F1 5 0 R >> >> >>",
-          "<< /Length " + streamBytes.length + " >>\nstream\n" + streamContent + "endstream",
-          "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
-        };
-    var out = new java.io.ByteArrayOutputStream();
-    var offsets = new int[objects.length];
-    try {
-      out.write("%PDF-1.4\n%âãÏÓ\n".getBytes(charset));
-      for (var i = 0; i < objects.length; i++) {
-        offsets[i] = out.size();
-        out.write(((i + 1) + " 0 obj\n" + objects[i] + "\nendobj\n").getBytes(charset));
-      }
-      var xrefStart = out.size();
-      var xref = new StringBuilder();
-      xref.append("xref\n0 ").append(objects.length + 1).append('\n');
-      xref.append("0000000000 65535 f \n");
-      for (var off : offsets) {
-        xref.append(String.format("%010d 00000 n %n", off));
-      }
-      out.write(xref.toString().getBytes(charset));
-      out.write(
-          ("trailer\n<< /Size "
-                  + (objects.length + 1)
-                  + " /Root 1 0 R >>\nstartxref\n"
-                  + xrefStart
-                  + "\n%%EOF\n")
-              .getBytes(charset));
-    } catch (java.io.IOException impossible) {
-      throw new AssertionError(impossible);
-    }
-    return out.toByteArray();
   }
 
   @Test

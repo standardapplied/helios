@@ -27,6 +27,8 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.QuestionAnswers;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -34,8 +36,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Flow;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -84,9 +84,9 @@ final class SessionDemoIntegrationTest {
             .withLimits(SessionLimits.newBuilder().withMaxTurns(12).build())
             .build();
 
-    var events = new CopyOnWriteArrayList<QueryEvent>();
+    var events = new CollectingSubscriber();
     try (var session = AgentSession.create(options)) {
-      session.events().subscribe(collector(events));
+      session.events().subscribe(events);
       // Directive prompt: each tool used at most once. An open-ended "look at the repo" prompt
       // gives Gemini Flash too much rope and it loops re-running LS forever. maxTurns=12 above is
       // the belt-and-braces ceiling so a misbehaving model still terminates the test in seconds.
@@ -98,6 +98,7 @@ final class SessionDemoIntegrationTest {
               + " one-line content summary based on what you just read.\n"
               + "After step 3, reply with a short confirmation. Do NOT explore further.";
       var result = session.runBlocking(UserMessage.text(prompt));
+      events.awaitDone();
 
       // The framework guarantees we care about here:
       //   - The agent loop reaches a defined terminal state (no hang, no provider crash). Both
@@ -111,15 +112,12 @@ final class SessionDemoIntegrationTest {
           () -> "session did not reach a clean terminal: " + result);
 
       var toolNamesObserved =
-          events.stream()
-              .filter(e -> e instanceof QueryEvent.ToolUse)
-              .map(e -> ((QueryEvent.ToolUse) e).call().name())
-              .toList();
+          events.eventsOf(QueryEvent.ToolUse.class).stream().map(e -> e.call().name()).toList();
       assertTrue(
           toolNamesObserved.stream().anyMatch(FILE_READ_TOOLS::contains),
           () -> "expected at least one file-read tool call, got " + toolNamesObserved);
 
-      var failedToolEvents = events.stream().filter(e -> e instanceof QueryEvent.Error).toList();
+      var failedToolEvents = events.eventsOf(QueryEvent.Error.class);
       assertTrue(
           failedToolEvents.isEmpty(),
           () -> "no provider-level errors expected, got " + failedToolEvents);
@@ -133,9 +131,8 @@ final class SessionDemoIntegrationTest {
     var options =
         SessionOptions.newBuilder().withModel(model).withSessionId("session-demo-att-test").build();
 
-    var events = new CopyOnWriteArrayList<QueryEvent>();
     try (var session = AgentSession.create(options)) {
-      session.events().subscribe(collector(events));
+      session.events().subscribe(new CollectingSubscriber());
       var msg =
           UserMessage.newBuilder()
               .withText("I'm sending a small generated image. Briefly describe what you see.")
@@ -173,50 +170,25 @@ final class SessionDemoIntegrationTest {
             .withMemoryBackend(memoryBackend)
             .build();
 
-    var events = new CopyOnWriteArrayList<QueryEvent>();
+    CollectingSubscriber events;
     try (var session = AgentSession.create(options)) {
       // Subscribe with an auto-denier — every QuestionAsked the permission system surfaces gets a
       // synthetic "Deny" answer so the loop unblocks. Without this, runBlocking would deadlock
       // waiting on session.answer.
-      session
-          .events()
-          .subscribe(
-              new Flow.Subscriber<>() {
-                @Override
-                public void onSubscribe(Flow.Subscription s) {
-                  s.request(Long.MAX_VALUE);
-                }
-
-                @Override
-                public void onNext(QueryEvent ev) {
-                  events.add(ev);
-                  if (ev instanceof QueryEvent.QuestionAsked qa) {
-                    session.answer(
-                        qa.request().questionId(),
-                        com.standardapplied.helios.session.ask.AskUserQuestionResponse.single(
-                            qa.request().questionId(), "Deny"));
-                  }
-                }
-
-                @Override
-                public void onError(Throwable t) {}
-
-                @Override
-                public void onComplete() {}
-              });
+      events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
+      session.events().subscribe(events);
       var prompt =
           "Please use MemoryWrite with op=create to save a note at /memories/test.md with content"
               + " 'hello world'. Just attempt it once.";
       session.runBlocking(UserMessage.text(prompt));
+      events.awaitDone();
     }
 
     // Permission blocks happen BEFORE dispatch — the loop emits ToolBlocked directly without a
     // preceding ToolUse. So the right check is: no successful MemoryWrite ToolResult fired, and
     // nothing landed on disk.
     var successfulMemoryWrites =
-        events.stream()
-            .filter(e -> e instanceof QueryEvent.ToolResult)
-            .map(e -> (QueryEvent.ToolResult) e)
+        events.eventsOf(QueryEvent.ToolResult.class).stream()
             .filter(r -> r.call().name().equals(MemoryWriteTool.NAME))
             .filter(r -> r.result().success())
             .count();
@@ -257,29 +229,5 @@ final class SessionDemoIntegrationTest {
       }
     }
     ImageIO.write(img, "PNG", target.toFile());
-  }
-
-  private static Flow.Subscriber<QueryEvent> collector(List<QueryEvent> sink) {
-    return new Flow.Subscriber<>() {
-      @Override
-      public void onSubscribe(Flow.Subscription s) {
-        s.request(Long.MAX_VALUE);
-      }
-
-      @Override
-      public void onNext(QueryEvent ev) {
-        sink.add(ev);
-      }
-
-      @Override
-      public void onError(Throwable t) {
-        // ignore
-      }
-
-      @Override
-      public void onComplete() {
-        // ignore
-      }
-    };
   }
 }

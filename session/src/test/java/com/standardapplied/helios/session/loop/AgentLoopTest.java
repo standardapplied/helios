@@ -15,103 +15,63 @@ import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
-import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.CompactionResult;
-import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.ContextCompactor;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
-import java.time.Clock;
+import com.standardapplied.helios.session.hooks.CompactionPayload;
+import com.standardapplied.helios.session.hooks.Hook;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.hooks.PostCompactHook;
+import com.standardapplied.helios.session.hooks.PreCompactHook;
+import com.standardapplied.helios.session.hooks.PreModelTurnHook;
+import com.standardapplied.helios.session.tools.ToolRegistry;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 final class AgentLoopTest {
 
-  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-
-  @AfterEach
-  void shutDownScheduler() {
-    scheduler.shutdownNow();
-  }
-
   private static final String SID = "sess-1";
   private static final Instant FIXED = Instant.parse("2026-05-14T19:00:00Z");
-  private static final Clock CLOCK = Clock.fixed(FIXED, ZoneOffset.UTC);
 
-  private final List<QueryEvent> events = new ArrayList<>();
-  private final com.standardapplied.helios.session.hooks.HookRegistry hooks =
-      com.standardapplied.helios.session.hooks.HookRegistry.empty();
-  private final ToolDispatch dispatch =
-      new ToolDispatch(
-          SessionContext.forTesting("loop-test"),
-          com.standardapplied.helios.session.tools.ToolRegistry.empty(),
-          ConcurrencyLimits.defaults());
+  private final LoopFixture fixture = new LoopFixture(SID, FIXED);
+  private final List<QueryEvent> events = fixture.events;
+  private final HookRegistry hooks = HookRegistry.empty();
+  private final ToolDispatch dispatch = fixture.dispatch(ToolRegistry.empty());
 
-  private static final Model CTX_MODEL =
-      new Model() {
-        @Override
-        public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-          return Response.newBuilder().build();
-        }
-
-        @Override
-        public String id() {
-          return "stub";
-        }
-
-        @Override
-        public String provider() {
-          return "stub";
-        }
-      };
-
-  private static final java.util.function.Function<
-          SessionState, com.standardapplied.helios.session.hooks.HookContext>
-      CTX_FACTORY =
-          s ->
-              new com.standardapplied.helios.session.hooks.DefaultHookContext(
-                  s.sessionId(), s.currentTurnIndex(), s.cancellation(), CTX_MODEL);
-
-  private SessionState freshState() {
-    return new SessionState(SID, new CancellationToken(), CLOCK);
+  @AfterEach
+  void closeFixture() {
+    fixture.close();
   }
 
-  private static Model fixedModel(String content, FinishReason reason, Usage usage) {
-    return new Model() {
-      @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        return Response.newBuilder()
-            .withContent(content)
-            .withFinishReason(reason)
-            .withUsage(usage)
-            .build();
-      }
+  private SessionState freshState() {
+    return fixture.state();
+  }
 
-      @Override
-      public String id() {
-        return "test";
-      }
+  private static ScriptedModel fixedModel(String content, FinishReason reason, Usage usage) {
+    return LoopModels.answering(content, reason, usage);
+  }
 
-      @Override
-      public String provider() {
-        return "test";
-      }
-    };
+  /** A model answering {@code count} calls, the n-th with {@code "step-n"}, each ending STOP. */
+  private static ScriptedModel steps(int count) {
+    var script = ScriptedModel.newBuilder();
+    for (var n = 1; n <= count; n++) {
+      script.withTextTurn("step-" + n, Usage.of(1, 1));
+    }
+    return script.build();
   }
 
   private AgentLoop buildLoop(Model model, SteeringQueue queue) {
@@ -124,19 +84,7 @@ final class AgentLoopTest {
 
   private AgentLoop buildLoopWith(
       Model model, SteeringQueue queue, TokenCounter counter, ContextCompactor compactor) {
-    var runner =
-        new TurnRunner(
-            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-            model,
-            CostCalculator.ZERO,
-            null,
-            scheduler);
-    return new AgentLoop(
-        new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-        runner,
-        new StopClassifier(),
-        counter,
-        compactor);
+    return fixture.loop(fixture.collaborators(hooks, dispatch, queue), model, counter, compactor);
   }
 
   // ── construction ──────────────────────────────────────────────────────────
@@ -144,73 +92,48 @@ final class AgentLoopTest {
   @Test
   void constructorRejectsNullDependencies() {
     var queue = new SteeringQueue(8);
-    var runner =
-        new TurnRunner(
-            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-            fixedModel("x", FinishReason.STOP, Usage.of(1, 1)),
-            CostCalculator.ZERO,
-            null,
-            scheduler);
+    var collaborators = fixture.collaborators(hooks, dispatch, queue);
+    var runner = fixture.runner(collaborators, fixedModel("x", FinishReason.STOP, Usage.of(1, 1)));
     var classifier = new StopClassifier();
     var counter = TokenCounter.charBased();
     var compactor = ContextCompactor.disabled();
+    var clock = fixture.clock;
     assertThrows(
         NullPointerException.class,
         () -> new AgentLoop(null, runner, classifier, counter, compactor));
     assertThrows(
         NullPointerException.class,
-        () ->
-            new AgentLoop(
-                new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-                null,
-                classifier,
-                counter,
-                compactor));
+        () -> new AgentLoop(collaborators, null, classifier, counter, compactor));
+    assertThrows(
+        NullPointerException.class,
+        () -> new AgentLoop(collaborators, runner, null, counter, compactor));
     assertThrows(
         NullPointerException.class,
         () ->
-            new AgentLoop(
-                new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-                runner,
-                null,
-                counter,
-                compactor));
+            new LoopCollaborators(null, dispatch, queue, events::add, fixture::hookContext, clock));
     assertThrows(
         NullPointerException.class,
-        () -> new LoopCollaborators(null, dispatch, queue, events::add, CTX_FACTORY, CLOCK));
-    assertThrows(
-        NullPointerException.class,
-        () -> new LoopCollaborators(hooks, null, queue, events::add, CTX_FACTORY, CLOCK));
-    assertThrows(
-        NullPointerException.class,
-        () -> new LoopCollaborators(hooks, dispatch, null, events::add, CTX_FACTORY, CLOCK));
-    assertThrows(
-        NullPointerException.class,
-        () -> new LoopCollaborators(hooks, dispatch, queue, null, CTX_FACTORY, CLOCK));
-    assertThrows(
-        NullPointerException.class,
-        () -> new LoopCollaborators(hooks, dispatch, queue, events::add, null, CLOCK));
-    assertThrows(
-        NullPointerException.class,
-        () -> new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, null));
+        () -> new LoopCollaborators(hooks, null, queue, events::add, fixture::hookContext, clock));
     assertThrows(
         NullPointerException.class,
         () ->
-            new AgentLoop(
-                new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-                runner,
-                classifier,
-                null,
-                compactor));
+            new LoopCollaborators(hooks, dispatch, null, events::add, fixture::hookContext, clock));
+    assertThrows(
+        NullPointerException.class,
+        () -> new LoopCollaborators(hooks, dispatch, queue, null, fixture::hookContext, clock));
+    assertThrows(
+        NullPointerException.class,
+        () -> new LoopCollaborators(hooks, dispatch, queue, events::add, null, clock));
     assertThrows(
         NullPointerException.class,
         () ->
-            new AgentLoop(
-                new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-                runner,
-                classifier,
-                counter,
-                null));
+            new LoopCollaborators(hooks, dispatch, queue, events::add, fixture::hookContext, null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new AgentLoop(collaborators, runner, classifier, null, compactor));
+    assertThrows(
+        NullPointerException.class,
+        () -> new AgentLoop(collaborators, runner, classifier, counter, null));
   }
 
   @Test
@@ -299,8 +222,14 @@ final class AgentLoopTest {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
     // model always says TOOL_CALLS, never STOP → loop never naturally terminates
-    var loop =
-        buildLoop(fixedModel("tool tool tool", FinishReason.TOOL_CALLS, Usage.of(1, 1)), queue);
+    var toolCalls = LoopModels.response("tool tool tool", FinishReason.TOOL_CALLS, Usage.of(1, 1));
+    var model =
+        ScriptedModel.newBuilder()
+            .withResponseTurn(toolCalls)
+            .withResponseTurn(toolCalls)
+            .withResponseTurn(toolCalls)
+            .build();
+    var loop = buildLoop(model, queue);
     var limits = SessionLimits.newBuilder().withMaxTurns(3).build();
     var result = loop.run(freshState(), limits);
     var t = assertInstanceOf(ResultMessage.ErrorMaxTurns.class, result);
@@ -314,45 +243,27 @@ final class AgentLoopTest {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("first"));
 
-    var modelCalls = new AtomicInteger(0);
-    Model adaptive =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            var call = modelCalls.incrementAndGet();
-            // On turn 1, enqueue a follow-up before signalling STOP.
-            // The classifier sees pending messages → continues to turn 2.
-            // On turn 2, signal STOP cleanly with queue empty.
-            if (call == 1) {
-              queue.offer(UserMessage.text("follow-up"));
-              return Response.newBuilder()
-                  .withContent("partial")
-                  .withFinishReason(FinishReason.STOP)
-                  .withUsage(Usage.of(2, 1))
-                  .build();
-            }
-            return Response.newBuilder()
-                .withContent("done")
-                .withFinishReason(FinishReason.STOP)
-                .withUsage(Usage.of(3, 2))
-                .build();
-          }
-
-          @Override
-          public String id() {
-            return "test";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
+    var script =
+        ScriptedModel.newBuilder()
+            .withTextTurn("partial", Usage.of(2, 1))
+            .withTextTurn("done", Usage.of(3, 2))
+            .build();
+    // On turn 1, enqueue a follow-up before signalling STOP.
+    // The classifier sees pending messages → continues to turn 2.
+    // On turn 2, signal STOP cleanly with queue empty.
+    var adaptive =
+        LoopModels.onEachCall(
+            script,
+            call -> {
+              if (call == 1) {
+                queue.offer(UserMessage.text("follow-up"));
+              }
+            });
     var state = freshState();
     var loop = buildLoop(adaptive, queue);
     var result = loop.run(state, SessionLimits.defaults());
 
-    assertEquals(2, modelCalls.get());
+    assertEquals(2, script.calls().size());
     var success = assertInstanceOf(ResultMessage.Success.class, result);
     assertEquals("done", success.result());
   }
@@ -362,7 +273,7 @@ final class AgentLoopTest {
   @Test
   void preCancelledTokenProducesCancelledImmediatelyAfterFirstTurn() {
     var token = new CancellationToken();
-    var state = new SessionState(SID, token, CLOCK);
+    var state = fixture.state(token);
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
     token.cancel("user-stop");
@@ -401,21 +312,21 @@ final class AgentLoopTest {
     queue.offer(UserMessage.text("hi"));
     // Sabotage by passing an event sink that throws on the very first emission.
     var runner =
-        new TurnRunner(
-            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-            fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)),
-            CostCalculator.ZERO,
-            null,
-            scheduler);
-    java.util.function.Consumer<QueryEvent> throwingSink =
-        e -> {
-          throw new RuntimeException("sink boom");
-        };
+        fixture.runner(
+            fixture.collaborators(hooks, dispatch, queue),
+            fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)));
     var sabotaged =
-        new AgentLoop(
-            new LoopCollaborators(hooks, dispatch, queue, throwingSink, CTX_FACTORY, CLOCK),
+        fixture.loop(
+            new LoopCollaborators(
+                hooks,
+                dispatch,
+                queue,
+                e -> {
+                  throw new RuntimeException("sink boom");
+                },
+                fixture::hookContext,
+                fixture.clock),
             runner,
-            new StopClassifier(),
             TokenCounter.charBased(),
             ContextCompactor.disabled());
     var result = sabotaged.run(freshState(), SessionLimits.defaults());
@@ -483,31 +394,9 @@ final class AgentLoopTest {
   void contextWatermarkFiresAtMostOnceAcrossManyTurns() {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
-    var turns = new AtomicInteger(0);
-    Model neverStops =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            var n = turns.incrementAndGet();
-            // Enqueue a follow-up on every turn so the loop keeps going up to maxTurns.
-            queue.offer(UserMessage.text("turn-" + n));
-            return Response.newBuilder()
-                .withContent("step-" + n)
-                .withFinishReason(FinishReason.STOP)
-                .withUsage(Usage.of(1, 1))
-                .build();
-          }
-
-          @Override
-          public String id() {
-            return "test";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
+    // Enqueue a follow-up on every turn so the loop keeps going up to maxTurns.
+    var neverStops =
+        LoopModels.onEachCall(steps(5), n -> queue.offer(UserMessage.text("turn-" + n)));
     TokenCounter alwaysOver = msgs -> 95L;
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).withMaxTurns(5).build();
     buildLoopWithCounter(neverStops, queue, alwaysOver).run(freshState(), limits);
@@ -521,39 +410,21 @@ final class AgentLoopTest {
   void contextWatermarkResetAllowsReFire() {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
-    var turns = new AtomicInteger(0);
     var state = freshState();
-    Model adaptive =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            var n = turns.incrementAndGet();
-            if (n == 1) {
-              // Turn 1 enqueues a follow-up so the loop runs a second turn after the
-              // watermark fires for the first time.
-              queue.offer(UserMessage.text("again"));
-            } else if (n == 2) {
-              // Turn 2 simulates the Day-2 compactor clearing the flag before the
-              // watermark check fires again for this turn.
-              state.contextWatermark().reset();
-            }
-            return Response.newBuilder()
-                .withContent("step-" + n)
-                .withFinishReason(FinishReason.STOP)
-                .withUsage(Usage.of(1, 1))
-                .build();
-          }
-
-          @Override
-          public String id() {
-            return "test";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
+    var adaptive =
+        LoopModels.onEachCall(
+            steps(2),
+            n -> {
+              if (n == 1) {
+                // Turn 1 enqueues a follow-up so the loop runs a second turn after the
+                // watermark fires for the first time.
+                queue.offer(UserMessage.text("again"));
+              } else if (n == 2) {
+                // Turn 2 simulates the Day-2 compactor clearing the flag before the
+                // watermark check fires again for this turn.
+                state.contextWatermark().reset();
+              }
+            });
     TokenCounter alwaysOver = msgs -> 90L;
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
     buildLoopWithCounter(adaptive, queue, alwaysOver).run(state, limits);
@@ -682,32 +553,14 @@ final class AgentLoopTest {
   void contextEditedResetsWarningFlagSoFutureClimbReFires() {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
-    var turns = new AtomicInteger(0);
-    Model multi =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            var n = turns.incrementAndGet();
-            if (n < 3) {
-              queue.offer(UserMessage.text("turn-" + n));
-            }
-            return Response.newBuilder()
-                .withContent("step-" + n)
-                .withFinishReason(FinishReason.STOP)
-                .withUsage(Usage.of(1, 1))
-                .build();
-          }
-
-          @Override
-          public String id() {
-            return "test";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
+    var multi =
+        LoopModels.onEachCall(
+            steps(3),
+            n -> {
+              if (n < 3) {
+                queue.offer(UserMessage.text("turn-" + n));
+              }
+            });
     TokenCounter loud = msgs -> 96L;
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
     ContextCompactor shrinking =
@@ -729,24 +582,15 @@ final class AgentLoopTest {
     queue.offer(UserMessage.text("second"));
     queue.offer(UserMessage.text("third"));
     var replacement = List.of(Message.system("compacted system"), Message.user("merged turn"));
-    com.standardapplied.helios.session.hooks.PreModelTurnHook trimmer =
-        (history, ctx) ->
-            com.standardapplied.helios.session.hooks.HookOutcome.mutateHistory(replacement);
-    var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(trimmer));
-    var runner =
-        new TurnRunner(
-            new LoopCollaborators(hookRegistry, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-            fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)),
-            CostCalculator.ZERO,
-            null,
-            scheduler);
+    PreModelTurnHook trimmer = (history, ctx) -> HookOutcome.mutateHistory(replacement);
+    var hookRegistry = new HookRegistry(List.of(trimmer));
     var loop =
-        new AgentLoop(
-            new LoopCollaborators(hookRegistry, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-            runner,
-            new StopClassifier(),
+        buildLoopWithHooks(
+            fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)),
+            queue,
             TokenCounter.charBased(),
-            ContextCompactor.disabled());
+            ContextCompactor.disabled(),
+            hookRegistry);
     var state = freshState();
     loop.run(state, SessionLimits.defaults());
     var history = state.history().snapshot();
@@ -770,7 +614,6 @@ final class AgentLoopTest {
   void preTurnWatermarkFiresBeforeModelCallWhenHistoryAlreadyExceeds() {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
-    var modelCalls = new AtomicInteger(0);
     TokenCounter perMessage = msgs -> 96L * msgs.size();
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
     var compacted = new AtomicInteger(0);
@@ -779,33 +622,12 @@ final class AgentLoopTest {
           compacted.incrementAndGet();
           return CompactionResult.noOp(history.subList(history.size() - 1, history.size()));
         };
-    Model recorder =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            modelCalls.incrementAndGet();
-            return Response.newBuilder()
-                .withContent("ok")
-                .withFinishReason(FinishReason.STOP)
-                .withUsage(Usage.of(1, 1))
-                .build();
-          }
-
-          @Override
-          public String id() {
-            return "test";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
+    var recorder = LoopModels.answering("ok", FinishReason.STOP, Usage.of(1, 1));
     buildLoopWith(recorder, queue, perMessage, shrinking).run(freshState(), limits);
     // Pre-turn check fires BEFORE the model call. Counter returns 96*size; after drainAndAppend
     // history has 1 message → tokens=96, usage=0.96 ≥ 0.95 → compactor invoked at PRE-TURN.
     assertTrue(compacted.get() >= 1, "pre-turn compaction must fire");
-    assertEquals(1, modelCalls.get(), "model is called once after pre-turn compaction");
+    assertEquals(1, recorder.calls().size(), "model is called once after pre-turn compaction");
   }
 
   // ── compaction cost accumulation (P0-2b) ─────────────────────────────────
@@ -856,31 +678,8 @@ final class AgentLoopTest {
    * value, so tests can exercise the auto-resolution paths without depending on a real provider.
    */
   private static Model modelWithContextWindow(int contextWindow) {
-    return new Model() {
-      @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        return Response.newBuilder()
-            .withContent("ok")
-            .withFinishReason(FinishReason.STOP)
-            .withUsage(Usage.of(1, 1))
-            .build();
-      }
-
-      @Override
-      public String id() {
-        return "ctx-window-test";
-      }
-
-      @Override
-      public String provider() {
-        return "test";
-      }
-
-      @Override
-      public int contextWindow() {
-        return contextWindow;
-      }
-    };
+    return LoopModels.withContextWindow(
+        fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), contextWindow);
   }
 
   @Test
@@ -1014,19 +813,16 @@ final class AgentLoopTest {
                 history.subList(history.size() - 1, history.size()),
                 Usage.of(1_000_000, 100_000),
                 "summary-model");
-    var model = fixedModel("ok", FinishReason.STOP, Usage.of(0, 0));
-    var runner =
-        new TurnRunner(
-            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-            model,
-            calculator,
-            null,
-            scheduler);
+    var model =
+        ScriptedModel.newBuilder()
+            .withId("test")
+            .withResponseTurn(LoopModels.response("ok", FinishReason.STOP, Usage.of(0, 0)))
+            .build();
+    var collaborators = fixture.collaborators(hooks, dispatch, queue);
     var loop =
-        new AgentLoop(
-            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-            runner,
-            new StopClassifier(),
+        fixture.loop(
+            collaborators,
+            fixture.runner(collaborators, model, calculator, null),
             staged,
             reporting);
     var state = freshState();
@@ -1081,46 +877,50 @@ final class AgentLoopTest {
       SteeringQueue queue,
       TokenCounter counter,
       ContextCompactor compactor,
-      com.standardapplied.helios.session.hooks.HookRegistry hookRegistry) {
-    var runner =
-        new TurnRunner(
-            new LoopCollaborators(hookRegistry, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-            model,
-            CostCalculator.ZERO,
-            null,
-            scheduler);
-    return new AgentLoop(
-        new LoopCollaborators(hookRegistry, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-        runner,
-        new StopClassifier(),
-        counter,
-        compactor);
+      HookRegistry hookRegistry) {
+    return fixture.loop(
+        fixture.collaborators(hookRegistry, dispatch, queue), model, counter, compactor);
+  }
+
+  /**
+   * Runs the loop over {@code messages} with {@code hook} registered, against a counter that puts
+   * every history at 96 tokens a message, so the 0.95 compaction trigger of a 100-token window
+   * fires and hands the history to {@code compactor}.
+   */
+  private ResultMessage runOverCompactionTrigger(
+      ContextCompactor compactor, Hook hook, String... messages) {
+    var queue = new SteeringQueue(8);
+    for (var message : messages) {
+      queue.offer(UserMessage.text(message));
+    }
+    TokenCounter trigger = msgs -> 96L * msgs.size();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
+    return buildLoopWithHooks(
+            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
+            queue,
+            trigger,
+            compactor,
+            new HookRegistry(List.of(hook)))
+        .run(freshState(), limits);
+  }
+
+  private static ContextCompactor summarisingTo(String summary) {
+    return (history, state) ->
+        new CompactionResult(
+            List.of(Message.user("[Earlier context summary]\n" + summary)), Usage.of(0, 0), "");
   }
 
   @Test
   void preCompactHookCanMutateHistoryHandedToCompactor() {
-    var queue = new SteeringQueue(8);
-    queue.offer(UserMessage.text("original"));
-    TokenCounter trigger = msgs -> 96L * msgs.size();
-    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
-    var compactorSawHistory = new java.util.concurrent.atomic.AtomicReference<List<Message>>();
+    var compactorSawHistory = new AtomicReference<List<Message>>();
     ContextCompactor capturing =
         (history, state) -> {
           compactorSawHistory.set(history);
           return CompactionResult.noOp(history);
         };
     var replacement = List.<Message>of(Message.user("rewritten by hook"));
-    com.standardapplied.helios.session.hooks.PreCompactHook mutator =
-        (history, ctx) ->
-            com.standardapplied.helios.session.hooks.HookOutcome.mutateHistory(replacement);
-    var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(mutator));
-    buildLoopWithHooks(
-            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
-            queue,
-            trigger,
-            capturing,
-            hookRegistry)
-        .run(freshState(), limits);
+    PreCompactHook mutator = (history, ctx) -> HookOutcome.mutateHistory(replacement);
+    runOverCompactionTrigger(capturing, mutator, "original");
     var observed = compactorSawHistory.get();
     assertEquals(1, observed.size(), "compactor must receive the rewritten history");
     assertEquals("rewritten by hook", observed.get(0).content());
@@ -1136,32 +936,13 @@ final class AgentLoopTest {
 
   @Test
   void postCompactHookFiresWithBeforeAfterPayloadOnSuccessfulShrink() {
-    var queue = new SteeringQueue(8);
-    queue.offer(UserMessage.text("hi"));
-    queue.offer(UserMessage.text("hi2"));
-    TokenCounter trigger = msgs -> 96L * msgs.size();
-    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
-    // Real shrink: return single-message list from the supplied history.
-    ContextCompactor shrinking =
-        (history, state) ->
-            new CompactionResult(
-                List.of(Message.user("[Earlier context summary]\nthe gist")), Usage.of(0, 0), "");
-    var payloadSeen =
-        new java.util.concurrent.atomic.AtomicReference<
-            com.standardapplied.helios.session.hooks.CompactionPayload>();
-    com.standardapplied.helios.session.hooks.PostCompactHook observer =
+    var payloadSeen = new AtomicReference<CompactionPayload>();
+    PostCompactHook observer =
         (payload, ctx) -> {
           payloadSeen.set(payload);
-          return com.standardapplied.helios.session.hooks.HookOutcome.cont();
+          return HookOutcome.cont();
         };
-    var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(observer));
-    buildLoopWithHooks(
-            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
-            queue,
-            trigger,
-            shrinking,
-            hookRegistry)
-        .run(freshState(), limits);
+    runOverCompactionTrigger(summarisingTo("the gist"), observer, "hi", "hi2");
     var payload = payloadSeen.get();
     assertTrue(payload != null, "PostCompactHook must fire on a real shrink");
     assertTrue(payload.removedBlocks() > 0, "payload must report removed-block count");
@@ -1170,21 +951,14 @@ final class AgentLoopTest {
 
   @Test
   void postCompactHookNotFiredOnNoOpCompaction() {
-    var queue = new SteeringQueue(8);
-    queue.offer(UserMessage.text("hi"));
-    TokenCounter trigger = msgs -> 96L * msgs.size();
-    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
     ContextCompactor noOp = (history, state) -> CompactionResult.noOp(history);
     var fired = new AtomicInteger(0);
-    com.standardapplied.helios.session.hooks.PostCompactHook observer =
+    PostCompactHook observer =
         (payload, ctx) -> {
           fired.incrementAndGet();
-          return com.standardapplied.helios.session.hooks.HookOutcome.cont();
+          return HookOutcome.cont();
         };
-    var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(observer));
-    buildLoopWithHooks(
-            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)), queue, trigger, noOp, hookRegistry)
-        .run(freshState(), limits);
+    runOverCompactionTrigger(noOp, observer, "hi");
     assertEquals(0, fired.get(), "PostCompactHook must not fire when compactor returned no shrink");
   }
 
@@ -1200,10 +974,8 @@ final class AgentLoopTest {
           observed.add(history);
           return CompactionResult.noOp(history);
         };
-    com.standardapplied.helios.session.hooks.PreCompactHook empty =
-        (history, ctx) ->
-            com.standardapplied.helios.session.hooks.HookOutcome.mutateHistory(List.of());
-    var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(empty));
+    PreCompactHook empty = (history, ctx) -> HookOutcome.mutateHistory(List.of());
+    var hookRegistry = new HookRegistry(List.of(empty));
     buildLoopWithHooks(
             fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
             queue,
@@ -1223,29 +995,18 @@ final class AgentLoopTest {
     // Continue so the compactor still runs against the unmodified history.
     var outcomes =
         List.of(
-            com.standardapplied.helios.session.hooks.HookOutcome.block("nope"),
-            com.standardapplied.helios.session.hooks.HookOutcome.stop("would-stop"),
-            com.standardapplied.helios.session.hooks.HookOutcome.inject("would-inject"));
+            HookOutcome.block("nope"),
+            HookOutcome.stop("would-stop"),
+            HookOutcome.inject("would-inject"));
     for (var outcome : outcomes) {
-      var queue = new SteeringQueue(8);
-      queue.offer(UserMessage.text("hi"));
-      TokenCounter trigger = msgs -> 96L * msgs.size();
-      var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
       var compactorInvoked = new AtomicInteger(0);
       ContextCompactor capturing =
           (history, state) -> {
             compactorInvoked.incrementAndGet();
             return CompactionResult.noOp(history);
           };
-      com.standardapplied.helios.session.hooks.PreCompactHook hook = (history, ctx) -> outcome;
-      var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(hook));
-      buildLoopWithHooks(
-              fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
-              queue,
-              trigger,
-              capturing,
-              hookRegistry)
-          .run(freshState(), limits);
+      PreCompactHook hook = (history, ctx) -> outcome;
+      runOverCompactionTrigger(capturing, hook, "hi");
       assertTrue(
           compactorInvoked.get() >= 1,
           () ->
@@ -1260,32 +1021,13 @@ final class AgentLoopTest {
     // session terminates normally.
     var outcomes =
         List.of(
-            com.standardapplied.helios.session.hooks.HookOutcome.mutateArgs(
-                Map.of("ignored", "value")),
-            com.standardapplied.helios.session.hooks.HookOutcome.block("nope"),
-            com.standardapplied.helios.session.hooks.HookOutcome.inject("would-inject"));
+            HookOutcome.mutateArgs(Map.of("ignored", "value")),
+            HookOutcome.block("nope"),
+            HookOutcome.inject("would-inject"));
     for (var outcome : outcomes) {
-      var queue = new SteeringQueue(8);
-      queue.offer(UserMessage.text("hi"));
-      queue.offer(UserMessage.text("hi2"));
-      TokenCounter trigger = msgs -> 96L * msgs.size();
-      var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
-      ContextCompactor shrinking =
-          (history, state) ->
-              new CompactionResult(
-                  List.of(Message.user("[Earlier context summary]\nshort")), Usage.of(0, 0), "");
-      com.standardapplied.helios.session.hooks.PostCompactHook hook = (payload, ctx) -> outcome;
-      var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(hook));
-      var freshEventBuffer = new ArrayList<QueryEvent>(events);
-      freshEventBuffer.clear();
+      PostCompactHook hook = (payload, ctx) -> outcome;
       events.clear();
-      buildLoopWithHooks(
-              fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
-              queue,
-              trigger,
-              shrinking,
-              hookRegistry)
-          .run(freshState(), limits);
+      runOverCompactionTrigger(summarisingTo("short"), hook, "hi", "hi2");
       assertTrue(
           events.stream().anyMatch(e -> e instanceof QueryEvent.ContextEdited),
           () ->
@@ -1296,28 +1038,8 @@ final class AgentLoopTest {
 
   @Test
   void postCompactHookStopTerminatesSession() {
-    var queue = new SteeringQueue(8);
-    queue.offer(UserMessage.text("hi"));
-    queue.offer(UserMessage.text("hi2"));
-    TokenCounter trigger = msgs -> 96L * msgs.size();
-    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
-    ContextCompactor shrinking =
-        (history, state) ->
-            new CompactionResult(
-                List.of(Message.user("[Earlier context summary]\nshort")), Usage.of(0, 0), "");
-    com.standardapplied.helios.session.hooks.PostCompactHook stopper =
-        (payload, ctx) ->
-            com.standardapplied.helios.session.hooks.HookOutcome.stop("post-compact veto");
-    var hookRegistry = new com.standardapplied.helios.session.hooks.HookRegistry(List.of(stopper));
-    var state = freshState();
-    var result =
-        buildLoopWithHooks(
-                fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
-                queue,
-                trigger,
-                shrinking,
-                hookRegistry)
-            .run(state, limits);
+    PostCompactHook stopper = (payload, ctx) -> HookOutcome.stop("post-compact veto");
+    var result = runOverCompactionTrigger(summarisingTo("short"), stopper, "hi", "hi2");
     var success = assertInstanceOf(ResultMessage.Success.class, result);
     assertEquals("post-compact veto", success.result());
     assertTrue(

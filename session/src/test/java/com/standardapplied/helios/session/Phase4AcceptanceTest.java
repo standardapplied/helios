@@ -5,19 +5,13 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.ModelChunk;
-import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.Tool;
-import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
 import com.standardapplied.helios.session.memory.MemoryReadTool;
@@ -26,14 +20,14 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.QuestionAnswers;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -45,48 +39,35 @@ import org.junit.jupiter.api.io.TempDir;
  */
 final class Phase4AcceptanceTest {
 
-  private static final class ScriptedModel implements Model {
-    private final List<List<ModelChunk>> turns;
-    private int turnIndex = 0;
+  private static final Usage USAGE = Usage.of(1, 1);
 
-    ScriptedModel(List<List<ModelChunk>> turns) {
-      this.turns = turns;
-    }
+  private static Permission allowing(PermissionRule... rules) {
+    return new Permission(PermissionMode.DEFAULT, List.of(rules), List.of(), List.of());
+  }
 
-    @Override
-    public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-      throw new AssertionError("unused");
-    }
+  private static PermissionRule allowUnderMemories(String tool) {
+    return PermissionRule.withGlob(PermissionEffect.ALLOW, tool, "/memories/**");
+  }
 
-    @Override
-    public Flow.Publisher<ModelChunk> chatStream(
-        List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-      var chunks = turnIndex < turns.size() ? turns.get(turnIndex++) : List.<ModelChunk>of();
-      return subscriber ->
-          subscriber.onSubscribe(
-              new Flow.Subscription() {
-                @Override
-                public void request(long n) {
-                  for (var c : chunks) {
-                    subscriber.onNext(c);
-                  }
-                  subscriber.onComplete();
-                }
+  private static SessionOptions options(
+      String sessionId, ScriptedModel model, FileSystemMemoryBackend backend, Permission rules) {
+    return SessionOptions.newBuilder()
+        .withModel(model)
+        .withSessionId(sessionId + UUID.randomUUID())
+        .withMemoryBackend(backend)
+        .withPermission(rules)
+        .build();
+  }
 
-                @Override
-                public void cancel() {}
-              });
-    }
-
-    @Override
-    public String id() {
-      return "phase4-script";
-    }
-
-    @Override
-    public String provider() {
-      return "test";
-    }
+  /** A model that calls MemoryWrite to create {@code /memories/x.md} holding {@code content}. */
+  private static ScriptedModel.Builder creatingMemory(String content) {
+    return ScriptedModel.newBuilder()
+        .withToolCallsTurn(
+            USAGE,
+            new ToolCall(
+                "c1",
+                MemoryWriteTool.NAME,
+                Map.of("op", "create", "path", "/memories/x.md", "content", content)));
   }
 
   @Test
@@ -96,97 +77,52 @@ final class Phase4AcceptanceTest {
     backend.create("/memories/INDEX.md", "- nothing yet\n");
 
     // Permission: ALLOW MemoryRead + MemoryWrite under /memories/**, default-deny WRITE elsewhere.
-    var permission =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(
-                PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryRead", "/memories/**"),
-                PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryWrite", "/memories/**")),
-            List.of(),
-            List.of());
+    var permission = allowing(allowUnderMemories("MemoryRead"), allowUnderMemories("MemoryWrite"));
 
     // 4-turn script:
     //   1: read INDEX.md
     //   2: create new note
     //   3: str_replace INDEX.md to register it
     //   4: terminal text
-    var turns =
-        List.<List<ModelChunk>>of(
-            List.of(
-                new ModelChunk.ToolUseStop(
-                    new ToolCall("c1", MemoryReadTool.NAME, Map.of("path", "/memories/INDEX.md"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
-            List.of(
-                new ModelChunk.ToolUseStop(
-                    new ToolCall(
-                        "c2",
-                        MemoryWriteTool.NAME,
-                        Map.of(
-                            "op",
-                            "create",
-                            "path",
-                            "/memories/user/preferences.md",
-                            "content",
-                            "User prefers terse responses.\n"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
-            List.of(
-                new ModelChunk.ToolUseStop(
-                    new ToolCall(
-                        "c3",
-                        MemoryWriteTool.NAME,
-                        Map.of(
-                            "op",
-                            "str_replace",
-                            "path",
-                            "/memories/INDEX.md",
-                            "oldString",
-                            "- nothing yet",
-                            "newString",
-                            "- /memories/user/preferences.md"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
-            List.of(
-                new ModelChunk.TextDelta("done"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
-
-    var options =
-        SessionOptions.newBuilder()
-            .withModel(new ScriptedModel(turns))
-            .withSessionId("phase4-" + UUID.randomUUID())
-            .withMemoryBackend(backend)
-            .withPermission(permission)
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(
+                USAGE,
+                new ToolCall("c1", MemoryReadTool.NAME, Map.of("path", "/memories/INDEX.md")))
+            .withToolCallsTurn(
+                USAGE,
+                new ToolCall(
+                    "c2",
+                    MemoryWriteTool.NAME,
+                    Map.of(
+                        "op",
+                        "create",
+                        "path",
+                        "/memories/user/preferences.md",
+                        "content",
+                        "User prefers terse responses.\n")))
+            .withToolCallsTurn(
+                USAGE,
+                new ToolCall(
+                    "c3",
+                    MemoryWriteTool.NAME,
+                    Map.of(
+                        "op",
+                        "str_replace",
+                        "path",
+                        "/memories/INDEX.md",
+                        "oldString",
+                        "- nothing yet",
+                        "newString",
+                        "- /memories/user/preferences.md")))
+            .withTextTurn("done", USAGE)
             .build();
 
-    var events = new CopyOnWriteArrayList<QueryEvent>();
-    var done = new CountDownLatch(1);
-
-    try (var session = AgentSession.create(options)) {
-      session
-          .events()
-          .subscribe(
-              new Flow.Subscriber<>() {
-                @Override
-                public void onSubscribe(Flow.Subscription s) {
-                  s.request(Long.MAX_VALUE);
-                }
-
-                @Override
-                public void onNext(QueryEvent ev) {
-                  events.add(ev);
-                }
-
-                @Override
-                public void onError(Throwable t) {
-                  done.countDown();
-                }
-
-                @Override
-                public void onComplete() {
-                  done.countDown();
-                }
-              });
-
+    var sub = new CollectingSubscriber();
+    try (var session = AgentSession.create(options("phase4-", model, backend, permission))) {
+      session.events().subscribe(sub);
       var result = session.runBlocking(UserMessage.text("update my preferences"));
-      Await.latch("the event stream to complete", done);
+      sub.awaitDone();
       assertInstanceOf(ResultMessage.Success.class, result);
     }
 
@@ -195,11 +131,7 @@ final class Phase4AcceptanceTest {
     assertEquals("- /memories/user/preferences.md\n", backend.view("/memories/INDEX.md"));
 
     // Verify all three tool calls succeeded.
-    var toolResults =
-        events.stream()
-            .filter(e -> e instanceof QueryEvent.ToolResult)
-            .map(e -> (QueryEvent.ToolResult) e)
-            .toList();
+    var toolResults = sub.eventsOf(QueryEvent.ToolResult.class);
     assertEquals(3, toolResults.size());
     for (var r : toolResults) {
       assertTrue(r.result().success(), r.call().name() + " failed: " + r.result().output());
@@ -216,70 +148,23 @@ final class Phase4AcceptanceTest {
 
     // No explicit MemoryWrite allow rule — falls to ASK. Our subscriber answers "Allow", so the
     // call goes through and the file lands on disk.
-    var permission =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryRead", "/memories/**")),
-            List.of(),
-            List.of());
-
-    var turns =
-        List.<List<ModelChunk>>of(
-            List.of(
-                new ModelChunk.ToolUseStop(
-                    new ToolCall(
-                        "c1",
-                        MemoryWriteTool.NAME,
-                        Map.of("op", "create", "path", "/memories/x.md", "content", "permitted"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
-            List.of(
-                new ModelChunk.TextDelta("ok"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
-
+    var model = creatingMemory("permitted").withTextTurn("ok", USAGE).build();
     var options =
-        SessionOptions.newBuilder()
-            .withModel(new ScriptedModel(turns))
-            .withSessionId("phase4-allow-" + UUID.randomUUID())
-            .withMemoryBackend(backend)
-            .withPermission(permission)
-            .build();
+        options("phase4-allow-", model, backend, allowing(allowUnderMemories("MemoryRead")));
 
-    var events = new CopyOnWriteArrayList<QueryEvent>();
+    CollectingSubscriber sub;
     try (var session = AgentSession.create(options)) {
-      session
-          .events()
-          .subscribe(
-              new Flow.Subscriber<>() {
-                @Override
-                public void onSubscribe(Flow.Subscription s) {
-                  s.request(Long.MAX_VALUE);
-                }
-
-                @Override
-                public void onNext(QueryEvent ev) {
-                  events.add(ev);
-                  if (ev instanceof QueryEvent.QuestionAsked qa) {
-                    session.answer(
-                        qa.request().questionId(),
-                        AskUserQuestionResponse.single(qa.request().questionId(), "Allow"));
-                  }
-                }
-
-                @Override
-                public void onError(Throwable t) {}
-
-                @Override
-                public void onComplete() {}
-              });
+      sub = new CollectingSubscriber(QuestionAnswers.selecting(session, "Allow"));
+      session.events().subscribe(sub);
 
       var result = session.runBlocking(UserMessage.text("try to write"));
       assertInstanceOf(ResultMessage.Success.class, result);
     }
 
     // Verify the question fired.
-    var question =
-        events.stream().filter(e -> e instanceof QueryEvent.QuestionAsked).findFirst().orElse(null);
-    assertTrue(question != null, "expected a QuestionAsked event from the ASK fallback");
+    assertFalse(
+        sub.eventsOf(QueryEvent.QuestionAsked.class).isEmpty(),
+        "expected a QuestionAsked event from the ASK fallback");
     // Verify the write went through.
     assertEquals("permitted", backend.view("/memories/x.md"));
   }
@@ -292,80 +177,22 @@ final class Phase4AcceptanceTest {
     // No explicit MemoryWrite allow rule. Under DEFAULT mode, WRITE category falls to ASK; the
     // session's QuestionGateway surfaces an AskUserQuestion. Our subscriber answers "Deny" so the
     // permission system blocks the call.
-    var permission =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryRead", "/memories/**")),
-            List.of(),
-            List.of());
-
-    var turns =
-        List.<List<ModelChunk>>of(
-            List.of(
-                new ModelChunk.ToolUseStop(
-                    new ToolCall(
-                        "c1",
-                        MemoryWriteTool.NAME,
-                        Map.of("op", "create", "path", "/memories/x.md", "content", "x"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())),
-            List.of(
-                new ModelChunk.TextDelta("ok"),
-                new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of(), List.of())));
-
+    var model = creatingMemory("x").withTextTurn("ok", USAGE).build();
     var options =
-        SessionOptions.newBuilder()
-            .withModel(new ScriptedModel(turns))
-            .withSessionId("phase4-deny-" + UUID.randomUUID())
-            .withMemoryBackend(backend)
-            .withPermission(permission)
-            .build();
+        options("phase4-deny-", model, backend, allowing(allowUnderMemories("MemoryRead")));
 
-    var events = new CopyOnWriteArrayList<QueryEvent>();
-    var done = new CountDownLatch(1);
-
+    CollectingSubscriber sub;
     try (var session = AgentSession.create(options)) {
-      session
-          .events()
-          .subscribe(
-              new Flow.Subscriber<>() {
-                @Override
-                public void onSubscribe(Flow.Subscription s) {
-                  s.request(Long.MAX_VALUE);
-                }
-
-                @Override
-                public void onNext(QueryEvent ev) {
-                  events.add(ev);
-                  if (ev instanceof QueryEvent.QuestionAsked qa) {
-                    session.answer(
-                        qa.request().questionId(),
-                        AskUserQuestionResponse.single(qa.request().questionId(), "Deny"));
-                  }
-                }
-
-                @Override
-                public void onError(Throwable t) {
-                  done.countDown();
-                }
-
-                @Override
-                public void onComplete() {
-                  done.countDown();
-                }
-              });
+      sub = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
+      session.events().subscribe(sub);
 
       session.runBlocking(UserMessage.text("try to write"));
-      Await.latch("the event stream to complete", done);
+      sub.awaitDone();
     }
 
-    var blocked =
-        events.stream()
-            .filter(e -> e instanceof QueryEvent.ToolBlocked)
-            .map(e -> (QueryEvent.ToolBlocked) e)
-            .findFirst()
-            .orElse(null);
-    assertTrue(blocked != null, "expected MemoryWrite to be blocked");
-    assertEquals(MemoryWriteTool.NAME, blocked.call().name());
+    var blocked = sub.eventsOf(QueryEvent.ToolBlocked.class);
+    assertFalse(blocked.isEmpty(), "expected MemoryWrite to be blocked");
+    assertEquals(MemoryWriteTool.NAME, blocked.getFirst().call().name());
     // And nothing should have been written to disk.
     assertEquals(List.<String>of(), backend.list("/memories/"));
   }
@@ -379,61 +206,25 @@ final class Phase4AcceptanceTest {
     // letting the loop terminate cleanly as Cancelled rather than hanging on the future.
     var workspace = WorkspaceRoot.of(tmp);
     var backend = FileSystemMemoryBackend.of(workspace);
-
-    var permission =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryRead", "/memories/**")),
-            List.of(),
-            List.of());
-
-    var turns =
-        List.<List<ModelChunk>>of(
-            List.of(
-                new ModelChunk.ToolUseStop(
-                    new ToolCall(
-                        "c1",
-                        MemoryWriteTool.NAME,
-                        Map.of("op", "create", "path", "/memories/x.md", "content", "x"))),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of(), List.of())));
-
+    var model = creatingMemory("x").build();
     var options =
-        SessionOptions.newBuilder()
-            .withModel(new ScriptedModel(turns))
-            .withSessionId("phase4-cancel-" + UUID.randomUUID())
-            .withMemoryBackend(backend)
-            .withPermission(permission)
-            .build();
+        options("phase4-cancel-", model, backend, allowing(allowUnderMemories("MemoryRead")));
 
     var questionLatch = new CountDownLatch(1);
     var session = AgentSession.create(options);
     session
         .events()
         .subscribe(
-            new Flow.Subscriber<>() {
-              @Override
-              public void onSubscribe(Flow.Subscription s) {
-                s.request(Long.MAX_VALUE);
-              }
-
-              @Override
-              public void onNext(QueryEvent ev) {
-                if (ev instanceof QueryEvent.QuestionAsked) {
-                  questionLatch.countDown();
-                }
-              }
-
-              @Override
-              public void onError(Throwable t) {}
-
-              @Override
-              public void onComplete() {}
-            });
+            new CollectingSubscriber(
+                event -> {
+                  if (event instanceof QueryEvent.QuestionAsked) {
+                    questionLatch.countDown();
+                  }
+                }));
     session.send(UserMessage.text("trigger write"));
     Await.latch("the agent to reach the ASK question", questionLatch);
     session.close();
     var terminal = Await.value("the closed session to settle its result", session.result());
     assertInstanceOf(ResultMessage.Cancelled.class, terminal);
-    var _unused = Optional.empty();
   }
 }

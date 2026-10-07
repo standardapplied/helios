@@ -17,114 +17,61 @@ import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.StopReason;
+import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.tools.ToolRegistry;
+import com.standardapplied.helios.testing.ModelStreams;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.InstantSource;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 final class TurnRunnerTest {
 
-  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+  private static final String SID = "sess-1";
+
+  private final LoopFixture fixture = new LoopFixture(SID, Instant.parse("2026-05-14T19:00:00Z"));
+  private final List<QueryEvent> events = fixture.events;
+  private final HookRegistry hooks = HookRegistry.empty();
+  private final SteeringQueue queue = new SteeringQueue(8);
+  private final ToolDispatch dispatch = fixture.dispatch(ToolRegistry.empty());
 
   @AfterEach
-  void shutDownScheduler() {
-    scheduler.shutdownNow();
+  void closeFixture() {
+    fixture.close();
   }
 
-  private static final String SID = "sess-1";
-  private static final InstantSource CLOCK =
-      InstantSource.fixed(Instant.parse("2026-05-14T19:00:00Z"));
-
-  private final List<QueryEvent> events = new ArrayList<>();
-  private final com.standardapplied.helios.session.hooks.HookRegistry hooks =
-      com.standardapplied.helios.session.hooks.HookRegistry.empty();
-  private final com.standardapplied.helios.session.SteeringQueue queue =
-      new com.standardapplied.helios.session.SteeringQueue(8);
-  private final ToolDispatch dispatch =
-      new ToolDispatch(
-          SessionContext.forTesting("turn-runner-test"),
-          com.standardapplied.helios.session.tools.ToolRegistry.empty(),
-          com.standardapplied.helios.session.ConcurrencyLimits.defaults());
-
-  private static final Model CTX_MODEL =
-      new Model() {
-        @Override
-        public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-          return Response.newBuilder().build();
-        }
-
-        @Override
-        public String id() {
-          return "stub";
-        }
-
-        @Override
-        public String provider() {
-          return "stub";
-        }
-      };
-
-  private static final java.util.function.Function<
-          SessionState, com.standardapplied.helios.session.hooks.HookContext>
-      CTX_FACTORY =
-          s ->
-              new com.standardapplied.helios.session.hooks.DefaultHookContext(
-                  s.sessionId(), s.currentTurnIndex(), s.cancellation(), CTX_MODEL);
-
   private SessionState freshState() {
-    var s = new SessionState(SID, new CancellationToken(), CLOCK);
+    var s = fixture.state();
     s.history().append(Message.user("hello"));
     s.beginTurn();
     return s;
   }
 
   private static Model textModel(String content, FinishReason finishReason, Usage usage) {
-    return new Model() {
-      @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        return Response.newBuilder()
-            .withContent(content)
-            .withFinishReason(finishReason)
-            .withUsage(usage)
-            .build();
-      }
+    return LoopModels.answering(content, finishReason, usage);
+  }
 
-      @Override
-      public String id() {
-        return "test";
-      }
-
-      @Override
-      public String provider() {
-        return "test";
-      }
-    };
+  private static Model streaming(Flow.Publisher<ModelChunk> stream) {
+    return ScriptedModel.newBuilder().withStreamTurn(stream).build();
   }
 
   private TurnRunner runner(Model model) {
-    return new TurnRunner(
-        new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-        model,
-        CostCalculator.ZERO,
-        null,
-        scheduler);
+    return fixture.runner(fixture.collaborators(hooks, dispatch, queue), model);
   }
 
   @Test
@@ -133,7 +80,7 @@ final class TurnRunnerTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new TurnRunner(null, model, CostCalculator.ZERO, null, scheduler));
+            () -> new TurnRunner(null, model, CostCalculator.ZERO, null, fixture.scheduler()));
     assertEquals("collaborators must not be null", ex.getMessage());
   }
 
@@ -144,11 +91,11 @@ final class TurnRunnerTest {
             NullPointerException.class,
             () ->
                 new TurnRunner(
-                    new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
+                    fixture.collaborators(hooks, dispatch, queue),
                     null,
                     CostCalculator.ZERO,
                     null,
-                    scheduler));
+                    fixture.scheduler()));
     assertEquals("model must not be null", ex.getMessage());
   }
 
@@ -160,11 +107,11 @@ final class TurnRunnerTest {
             NullPointerException.class,
             () ->
                 new TurnRunner(
-                    new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
+                    fixture.collaborators(hooks, dispatch, queue),
                     model,
                     null,
                     null,
-                    scheduler));
+                    fixture.scheduler()));
     assertEquals("costCalculator must not be null", ex.getMessage());
   }
 
@@ -176,7 +123,7 @@ final class TurnRunnerTest {
             NullPointerException.class,
             () ->
                 new TurnRunner(
-                    new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
+                    fixture.collaborators(hooks, dispatch, queue),
                     model,
                     CostCalculator.ZERO,
                     null,
@@ -279,43 +226,9 @@ final class TurnRunnerTest {
     assertEquals(StopReason.REFUSAL, ended.reason());
   }
 
-  /** Build a synchronous publisher that emits the given chunks then onComplete on first request. */
+  /** A model whose one turn streams {@code chunks}, then completes. */
   private static Model syntheticStreamingModel(List<ModelChunk> chunks) {
-    return new Model() {
-      @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        throw new AssertionError("unused — direct chatStream override");
-      }
-
-      @Override
-      public Flow.Publisher<ModelChunk> chatStream(
-          List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-        return subscriber ->
-            subscriber.onSubscribe(
-                new Flow.Subscription() {
-                  @Override
-                  public void request(long n) {
-                    for (var c : chunks) {
-                      subscriber.onNext(c);
-                    }
-                    subscriber.onComplete();
-                  }
-
-                  @Override
-                  public void cancel() {}
-                });
-      }
-
-      @Override
-      public String id() {
-        return "test";
-      }
-
-      @Override
-      public String provider() {
-        return "test";
-      }
-    };
+    return streaming(ModelStreams.of(chunks.toArray(ModelChunk[]::new)));
   }
 
   @Test
@@ -386,40 +299,7 @@ final class TurnRunnerTest {
 
   @Test
   void onErrorPublisherProducesErrorOutcomeAndNoAssistantMessage() {
-    var model =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            throw new AssertionError("unused");
-          }
-
-          @Override
-          public Flow.Publisher<ModelChunk> chatStream(
-              List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-            return subscriber -> {
-              subscriber.onSubscribe(
-                  new Flow.Subscription() {
-                    @Override
-                    public void request(long n) {
-                      subscriber.onError(new RuntimeException("upstream boom"));
-                    }
-
-                    @Override
-                    public void cancel() {}
-                  });
-            };
-          }
-
-          @Override
-          public String id() {
-            return "test";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
+    var model = streaming(ModelStreams.failing(new RuntimeException("upstream boom")));
     var state = freshState();
     var outcome = runner(model).runTurn(state, SessionLimits.defaults());
     assertEquals(FinishReason.ERROR, outcome.finishReason());
@@ -432,40 +312,7 @@ final class TurnRunnerTest {
 
   @Test
   void onErrorWithNullMessageFallsBackToExceptionClassName() {
-    var model =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            throw new AssertionError("unused");
-          }
-
-          @Override
-          public Flow.Publisher<ModelChunk> chatStream(
-              List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-            return subscriber -> {
-              subscriber.onSubscribe(
-                  new Flow.Subscription() {
-                    @Override
-                    public void request(long n) {
-                      subscriber.onError(new RuntimeException());
-                    }
-
-                    @Override
-                    public void cancel() {}
-                  });
-            };
-          }
-
-          @Override
-          public String id() {
-            return "test";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
+    var model = streaming(ModelStreams.failing(new RuntimeException()));
     var outcome = runner(model).runTurn(freshState(), SessionLimits.defaults());
     assertEquals("RuntimeException", outcome.assistantContent());
   }
@@ -473,43 +320,10 @@ final class TurnRunnerTest {
   @Test
   void unknownStopReasonStringFallsBackToStop() {
     var model =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            throw new AssertionError("unused");
-          }
-
-          @Override
-          public Flow.Publisher<ModelChunk> chatStream(
-              List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-            return subscriber -> {
-              subscriber.onSubscribe(
-                  new Flow.Subscription() {
-                    @Override
-                    public void request(long n) {
-                      subscriber.onNext(new ModelChunk.TextDelta("hi"));
-                      subscriber.onNext(
-                          new ModelChunk.MessageStop(
-                              "unknown_reason", Usage.of(1, 1), Map.of(), List.of()));
-                      subscriber.onComplete();
-                    }
-
-                    @Override
-                    public void cancel() {}
-                  });
-            };
-          }
-
-          @Override
-          public String id() {
-            return "test";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
+        syntheticStreamingModel(
+            List.of(
+                new ModelChunk.TextDelta("hi"),
+                new ModelChunk.MessageStop("unknown_reason", Usage.of(1, 1), Map.of(), List.of())));
     var outcome = runner(model).runTurn(freshState(), SessionLimits.defaults());
     assertEquals(FinishReason.STOP, outcome.finishReason());
   }
@@ -528,38 +342,7 @@ final class TurnRunnerTest {
    * runner's thread once it has requested the stream, just before it starts waiting on it.
    */
   private static Model stalledModel(Runnable onRequest) {
-    return new Model() {
-      @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        throw new AssertionError("unused");
-      }
-
-      @Override
-      public Flow.Publisher<ModelChunk> chatStream(
-          List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-        return subscriber ->
-            subscriber.onSubscribe(
-                new Flow.Subscription() {
-                  @Override
-                  public void request(long n) {
-                    onRequest.run();
-                  }
-
-                  @Override
-                  public void cancel() {}
-                });
-      }
-
-      @Override
-      public String id() {
-        return "test";
-      }
-
-      @Override
-      public String provider() {
-        return "test";
-      }
-    };
+    return streaming(ModelStreams.stalled(onRequest));
   }
 
   /**
@@ -618,176 +401,74 @@ final class TurnRunnerTest {
    */
   public record Sample(String field) {}
 
-  /**
-   * Model that records which {@code chatStream} overload was invoked — the untyped variant or the
-   * typed-with-schema variant — and replays a single-text-delta turn either way. Lets a test assert
-   * that {@link TurnRunner} picks the typed dispatch precisely when {@code outputSchema} is
-   * non-null at construction time.
-   */
-  private static final class DispatchRecordingModel implements Model {
-    final AtomicReference<com.standardapplied.helios.core.schema.OutputSchema<?>> seenSchema =
-        new AtomicReference<>();
-    final java.util.concurrent.atomic.AtomicBoolean typedDispatch =
-        new java.util.concurrent.atomic.AtomicBoolean(false);
-    final java.util.concurrent.atomic.AtomicBoolean untypedDispatch =
-        new java.util.concurrent.atomic.AtomicBoolean(false);
-
-    @Override
-    public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-      return Response.newBuilder().withContent("untyped").build();
-    }
-
-    @Override
-    public Flow.Publisher<ModelChunk> chatStream(
-        List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-      untypedDispatch.set(true);
-      return chunksOnce("untyped");
-    }
-
-    @Override
-    public Flow.Publisher<ModelChunk> chatStream(
-        List<Message> messages,
-        List<Tool> tools,
-        com.standardapplied.helios.core.schema.OutputSchema<?> outputSchema,
-        CancellationToken cancellation) {
-      typedDispatch.set(true);
-      seenSchema.set(outputSchema);
-      return chunksOnce("typed-with-schema");
-    }
-
-    private static Flow.Publisher<ModelChunk> chunksOnce(String content) {
-      return subscriber -> {
-        subscriber.onSubscribe(
-            new Flow.Subscription() {
-              private int i = 0;
-
-              @Override
-              public void request(long n) {
-                if (i == 0) {
-                  subscriber.onNext(new ModelChunk.TextDelta(content));
-                  i = 1;
-                }
-                if (i == 1) {
-                  subscriber.onNext(
-                      new ModelChunk.MessageStop(
-                          FinishReason.STOP.name(), Usage.of(1, 1), Map.of()));
-                  i = 2;
-                  subscriber.onComplete();
-                }
-              }
-
-              @Override
-              public void cancel() {}
-            });
-      };
-    }
-
-    @Override
-    public String id() {
-      return "dispatch-recorder";
-    }
-
-    @Override
-    public String provider() {
-      return "test";
-    }
+  /** A model whose one turn streams {@code content} as a finished text answer. */
+  private static ScriptedModel answeringStream(String content) {
+    return ScriptedModel.newBuilder()
+        .withStreamTurn(
+            ModelStreams.of(
+                new ModelChunk.TextDelta(content),
+                new ModelChunk.MessageStop(FinishReason.STOP.name(), Usage.of(1, 1), Map.of())))
+        .build();
   }
 
   @Test
   void dispatchUsesUntypedChatStreamWhenOutputSchemaIsNull() {
-    var model = new DispatchRecordingModel();
-    var runner =
-        new TurnRunner(
-            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-            model,
-            CostCalculator.ZERO,
-            null,
-            scheduler);
-    runner.runTurn(freshState(), SessionLimits.defaults());
-    assertTrue(model.untypedDispatch.get(), "no outputSchema configured: must use untyped path");
-    assertEquals(false, model.typedDispatch.get(), "typed dispatch must not fire");
+    var model = answeringStream("untyped");
+    var outcome = runner(model).runTurn(freshState(), SessionLimits.defaults());
+    assertEquals(FinishReason.STOP, outcome.finishReason());
+    assertEquals("untyped", outcome.assistantContent());
+    var schemas = model.outputSchemas();
+    assertTrue(
+        schemas.contains(Optional.empty()), "no outputSchema configured: must use untyped path");
+    assertEquals(
+        false, schemas.stream().anyMatch(Optional::isPresent), "typed dispatch must not fire");
   }
 
   @Test
   void dispatchUsesTypedChatStreamWhenOutputSchemaIsConfigured() {
-    var schema = com.standardapplied.helios.core.schema.OutputSchema.of(Sample.class);
-    var model = new DispatchRecordingModel();
+    var schema = OutputSchema.of(Sample.class);
+    var model = answeringStream("typed-with-schema");
     var runner =
-        new TurnRunner(
-            new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-            model,
-            CostCalculator.ZERO,
-            schema,
-            scheduler);
-    runner.runTurn(freshState(), SessionLimits.defaults());
-    assertTrue(model.typedDispatch.get(), "outputSchema set: must use typed-with-schema path");
+        fixture.runner(
+            fixture.collaborators(hooks, dispatch, queue), model, CostCalculator.ZERO, schema);
+    var outcome = runner.runTurn(freshState(), SessionLimits.defaults());
+    assertEquals(FinishReason.STOP, outcome.finishReason());
+    assertEquals("typed-with-schema", outcome.assistantContent());
+    var schemas = model.outputSchemas();
+    assertTrue(
+        schemas.stream().anyMatch(Optional::isPresent),
+        "outputSchema set: must use typed-with-schema path");
     assertEquals(
         false,
-        model.untypedDispatch.get(),
+        schemas.contains(Optional.empty()),
         "untyped dispatch must not fire — that's the bug the wiring fixes");
     assertEquals(
-        schema,
-        model.seenSchema.get(),
+        Optional.of(schema),
+        schemas.getFirst(),
         "schema delivered to the provider must be the configured one");
   }
 
   /**
-   * Defensive: when {@link com.standardapplied.helios.core.schema.StructuredOutputParseException}
-   * fires <i>and</i> the steering queue is full so the correction message can't be enqueued, the
-   * runner must let the underlying parse error surface (returns {@link FinishReason#ERROR}) rather
-   * than silently swallowing it.
+   * Defensive: when {@link StructuredOutputParseException} fires <i>and</i> the steering queue is
+   * full so the correction message can't be enqueued, the runner must let the underlying parse
+   * error surface (returns {@link FinishReason#ERROR}) rather than silently swallowing it.
    */
   @Test
   void parseFailureWithFullSteeringQueueFallsThroughToErrorOutcome() {
-    var schema = com.standardapplied.helios.core.schema.OutputSchema.of(Sample.class);
-    var saturatedQueue = new com.standardapplied.helios.session.SteeringQueue(1);
-    saturatedQueue.offer(com.standardapplied.helios.session.UserMessage.text("pre-existing"));
+    var schema = OutputSchema.of(Sample.class);
+    var saturatedQueue = new SteeringQueue(1);
+    saturatedQueue.offer(UserMessage.text("pre-existing"));
     var model =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            return Response.newBuilder().build();
-          }
-
-          @Override
-          public Flow.Publisher<ModelChunk> chatStream(
-              List<Message> messages,
-              List<Tool> tools,
-              com.standardapplied.helios.core.schema.OutputSchema<?> outputSchema,
-              CancellationToken cancellation) {
-            return subscriber ->
-                subscriber.onSubscribe(
-                    new Flow.Subscription() {
-                      @Override
-                      public void request(long n) {
-                        subscriber.onError(
-                            new com.standardapplied.helios.core.schema
-                                .StructuredOutputParseException(
-                                List.of("field is required"), "{\"wrong\":\"shape\"}"));
-                      }
-
-                      @Override
-                      public void cancel() {}
-                    });
-          }
-
-          @Override
-          public String id() {
-            return "test";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
+        streaming(
+            ModelStreams.failing(
+                new StructuredOutputParseException(
+                    List.of("field is required"), "{\"wrong\":\"shape\"}")));
     var runner =
-        new TurnRunner(
-            new LoopCollaborators(hooks, dispatch, saturatedQueue, events::add, CTX_FACTORY, CLOCK),
+        fixture.runner(
+            fixture.collaborators(hooks, dispatch, saturatedQueue),
             model,
             CostCalculator.ZERO,
-            schema,
-            scheduler);
+            schema);
     var outcome = runner.runTurn(freshState(), SessionLimits.defaults());
     assertEquals(
         FinishReason.ERROR,

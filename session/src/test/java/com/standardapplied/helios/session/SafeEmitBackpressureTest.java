@@ -17,13 +17,11 @@ import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
-import java.util.ArrayList;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
@@ -50,7 +48,7 @@ final class SafeEmitBackpressureTest {
     var backlogDelivered = new CountDownLatch(1 + SUBSCRIBER_BUFFER);
     var overflowEmitted = new CountDownLatch(1);
     var subscriber =
-        new RecordingSubscriber(
+        new CollectingSubscriber(
             event -> {
               if (event instanceof QueryEvent.UserMessageReceived) {
                 stalled.countDown();
@@ -74,7 +72,7 @@ final class SafeEmitBackpressureTest {
       Await.latch("the loop to emit past the stalled subscriber's full buffer", overflowEmitted);
       release.countDown();
       var terminal = Await.value("the session to finish", session.result());
-      subscriber.awaitCompletion();
+      awaitCompletion(subscriber);
 
       var success = assertInstanceOf(ResultMessage.Success.class, terminal);
       assertEquals(
@@ -83,9 +81,9 @@ final class SafeEmitBackpressureTest {
           "the dropped event must not cost the turn its content");
       assertEquals(
           chunks(SUBSCRIBER_BUFFER),
-          subscriber.texts(),
+          texts(subscriber),
           "exactly the one event offered to the full buffer is dropped");
-      var last = assertInstanceOf(QueryEvent.LoopEnded.class, subscriber.events.getLast());
+      var last = assertInstanceOf(QueryEvent.LoopEnded.class, subscriber.events().getLast());
       assertEquals(terminal, last.result());
     }
   }
@@ -93,7 +91,7 @@ final class SafeEmitBackpressureTest {
   @Test
   void offerSucceedsForFastSubscriber() {
     var burst = 100;
-    var subscriber = new RecordingSubscriber(event -> {});
+    var subscriber = new CollectingSubscriber();
 
     try (var session = session("sess-backpressure-fast", burstModel(burst, () -> {}, () -> {}))) {
       session.events().subscribe(subscriber);
@@ -101,9 +99,9 @@ final class SafeEmitBackpressureTest {
 
       assertInstanceOf(
           ResultMessage.Success.class, Await.value("the session to finish", session.result()));
-      subscriber.awaitCompletion();
+      awaitCompletion(subscriber);
 
-      assertEquals(chunks(burst), subscriber.texts(), "fast subscriber should not see drops");
+      assertEquals(chunks(burst), texts(subscriber), "fast subscriber should not see drops");
     }
   }
 
@@ -171,50 +169,14 @@ final class SafeEmitBackpressureTest {
     };
   }
 
-  /** Records every event, running {@code afterEach} on the delivery thread once it has. */
-  private static final class RecordingSubscriber implements Flow.Subscriber<QueryEvent> {
+  private static void awaitCompletion(CollectingSubscriber subscriber) {
+    subscriber.awaitDone();
+    assertNull(subscriber.error().orElse(null), "the event stream must complete without an error");
+  }
 
-    final List<QueryEvent> events = new ArrayList<>();
-    private final CountDownLatch finished = new CountDownLatch(1);
-    private final AtomicReference<Throwable> failure = new AtomicReference<>();
-    private final Consumer<QueryEvent> afterEach;
-
-    RecordingSubscriber(Consumer<QueryEvent> afterEach) {
-      this.afterEach = afterEach;
-    }
-
-    @Override
-    public void onSubscribe(Flow.Subscription subscription) {
-      subscription.request(Long.MAX_VALUE);
-    }
-
-    @Override
-    public void onNext(QueryEvent event) {
-      events.add(event);
-      afterEach.accept(event);
-    }
-
-    @Override
-    public void onError(Throwable throwable) {
-      failure.set(throwable);
-      finished.countDown();
-    }
-
-    @Override
-    public void onComplete() {
-      finished.countDown();
-    }
-
-    void awaitCompletion() {
-      Await.latch("the event stream to complete", finished);
-      assertNull(failure.get(), "the event stream must complete without an error");
-    }
-
-    List<String> texts() {
-      return events.stream()
-          .filter(QueryEvent.AssistantText.class::isInstance)
-          .map(event -> ((QueryEvent.AssistantText) event).text())
-          .toList();
-    }
+  private static List<String> texts(CollectingSubscriber subscriber) {
+    return subscriber.eventsOf(QueryEvent.AssistantText.class).stream()
+        .map(QueryEvent.AssistantText::text)
+        .toList();
   }
 }
