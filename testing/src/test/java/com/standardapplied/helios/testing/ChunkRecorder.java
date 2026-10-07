@@ -6,6 +6,7 @@ import com.standardapplied.helios.core.model.ModelChunk;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Flow;
+import java.util.function.Consumer;
 
 /**
  * Records every signal a model stream sends, as text, and requests chunks only when told to, so a
@@ -15,7 +16,7 @@ final class ChunkRecorder implements Flow.Subscriber<ModelChunk> {
 
   final List<String> signals = new ArrayList<>();
   private Flow.Subscription subscription;
-  private boolean cancelOnNext;
+  private Consumer<Flow.Subscription> onChunk = subscription -> {};
 
   static ChunkRecorder drain(Flow.Publisher<ModelChunk> stream) {
     var recorder = new ChunkRecorder();
@@ -25,7 +26,12 @@ final class ChunkRecorder implements Flow.Subscriber<ModelChunk> {
   }
 
   ChunkRecorder cancellingOnEveryChunk() {
-    cancelOnNext = true;
+    onChunk = Flow.Subscription::cancel;
+    return this;
+  }
+
+  ChunkRecorder requestingOneOnEveryChunk() {
+    onChunk = subscription -> subscription.request(1);
     return this;
   }
 
@@ -46,9 +52,7 @@ final class ChunkRecorder implements Flow.Subscriber<ModelChunk> {
   @Override
   public void onNext(ModelChunk chunk) {
     signals.add(chunk.toString());
-    if (cancelOnNext) {
-      subscription.cancel();
-    }
+    onChunk.accept(subscription);
   }
 
   @Override
