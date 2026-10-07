@@ -104,62 +104,11 @@ final class LinuxFilesTest {
     var ready = new CountDownLatch(1);
     var attacker =
         Thread.ofPlatform()
-            .start(
-                () -> {
-                  try {
-                    while (!stop.get()) {
-                      Files.move(parent, held, StandardCopyOption.ATOMIC_MOVE);
-                      try {
-                        Files.createSymbolicLink(parent, outside);
-                        ready.countDown();
-                        Thread.yield();
-                      } finally {
-                        Files.deleteIfExists(parent);
-                        Files.move(held, parent, StandardCopyOption.ATOMIC_MOVE);
-                      }
-                    }
-                  } catch (Throwable error) {
-                    failure.set(error);
-                    ready.countDown();
-                  }
-                });
+            .start(() -> substituteUntilStopped(parent, held, outside, stop, failure, ready));
     try {
       Await.latch("the attacker's first substitution", ready);
       for (var round = 0; round < SUBSTITUTION_RACE_ROUNDS; round++) {
-        try (var input = workspace.newInputStream(parent.resolve("file"))) {
-          assertEquals(
-              "inside", new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
-        } catch (IOException raced) {
-        }
-        try (var output =
-            workspace.newOutputStream(parent.resolve("file"), StandardOpenOption.WRITE)) {
-          output.write("inside".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        } catch (IOException raced) {
-        }
-        if (swapRoot) {
-          try {
-            workspace.createDirectories(parent.resolve("created/nested"));
-          } catch (IOException raced) {
-          }
-        }
-        try {
-          workspace.deleteFile(parent.resolve("delete"));
-        } catch (IOException raced) {
-        }
-        workspace.walkFileTree(
-            parent,
-            new SimpleFileVisitor<>() {
-              @Override
-              public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                assertFalse(file.getFileName().toString().equals("outside-only"));
-                return FileVisitResult.CONTINUE;
-              }
-
-              @Override
-              public FileVisitResult visitFileFailed(Path file, IOException error) {
-                return FileVisitResult.CONTINUE;
-              }
-            });
+        attemptEveryOperationInside(workspace, parent, swapRoot);
       }
     } finally {
       stop.set(true);
@@ -169,6 +118,88 @@ final class LinuxFilesTest {
     assertEquals("sentinel", Files.readString(outside.resolve("file")));
     assertEquals("sentinel", Files.readString(outside.resolve("delete")));
     assertFalse(Files.exists(outside.resolve("created")));
+  }
+
+  /**
+   * Swaps {@code parent} for a link to {@code outside} and back until {@code stop} is set, counting
+   * {@code ready} down after the first swap or on a failure, which it records in {@code failure}.
+   */
+  private static void substituteUntilStopped(
+      Path parent,
+      Path held,
+      Path outside,
+      AtomicBoolean stop,
+      AtomicReference<Throwable> failure,
+      CountDownLatch ready) {
+    try {
+      while (!stop.get()) {
+        Files.move(parent, held, StandardCopyOption.ATOMIC_MOVE);
+        try {
+          Files.createSymbolicLink(parent, outside);
+          ready.countDown();
+          Thread.yield();
+        } finally {
+          Files.deleteIfExists(parent);
+          Files.move(held, parent, StandardCopyOption.ATOMIC_MOVE);
+        }
+      }
+    } catch (Throwable error) {
+      failure.set(error);
+      ready.countDown();
+    }
+  }
+
+  /**
+   * Reads, writes, creates (when the root itself is swapped), deletes and lists under {@code
+   * parent} once. An operation the substitution races may fail with an {@link IOException}; one
+   * that reaches outside the workspace fails the test.
+   */
+  private static void attemptEveryOperationInside(
+      WorkspaceRoot workspace, Path parent, boolean swapRoot) throws IOException {
+    toleratingRace(
+        () -> {
+          try (var input = workspace.newInputStream(parent.resolve("file"))) {
+            assertEquals(
+                "inside",
+                new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+          }
+        });
+    toleratingRace(
+        () -> {
+          try (var output =
+              workspace.newOutputStream(parent.resolve("file"), StandardOpenOption.WRITE)) {
+            output.write("inside".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+          }
+        });
+    if (swapRoot) {
+      toleratingRace(() -> workspace.createDirectories(parent.resolve("created/nested")));
+    }
+    toleratingRace(() -> workspace.deleteFile(parent.resolve("delete")));
+    workspace.walkFileTree(
+        parent,
+        new SimpleFileVisitor<>() {
+          @Override
+          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+            assertFalse(file.getFileName().toString().equals("outside-only"));
+            return FileVisitResult.CONTINUE;
+          }
+
+          @Override
+          public FileVisitResult visitFileFailed(Path file, IOException error) {
+            return FileVisitResult.CONTINUE;
+          }
+        });
+  }
+
+  private interface IoOperation {
+    void run() throws IOException;
+  }
+
+  private static void toleratingRace(IoOperation operation) {
+    try {
+      operation.run();
+    } catch (IOException raced) {
+    }
   }
 
   @Test

@@ -19,6 +19,7 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -330,7 +331,15 @@ class StreamReadErrorReproTest {
                     SessionLimits.newBuilder().withStreamRetryPolicy(unreachableBackoff).build())
                 .build())) {
       var retryAnnounced = new CountDownLatch(1);
-      session.events().subscribe(new RetryWatcher(retryAnnounced));
+      session
+          .events()
+          .subscribe(
+              new CollectingSubscriber(
+                  event -> {
+                    if (event instanceof QueryEvent.TurnRetried) {
+                      retryAnnounced.countDown();
+                    }
+                  }));
       var run = new FutureTask<>(() -> session.runBlocking(UserMessage.text("emit JSON")));
       Thread.startVirtualThread(run);
 
@@ -347,28 +356,5 @@ class StreamReadErrorReproTest {
           model.chatStreamInvocations.get(),
           "cancellation must short-circuit the retry loop before a second attempt");
     }
-  }
-
-  /** Counts down when the loop emits {@link QueryEvent.TurnRetried}, just before it backs off. */
-  private record RetryWatcher(CountDownLatch retryAnnounced)
-      implements Flow.Subscriber<QueryEvent> {
-
-    @Override
-    public void onSubscribe(Flow.Subscription subscription) {
-      subscription.request(Long.MAX_VALUE);
-    }
-
-    @Override
-    public void onNext(QueryEvent event) {
-      if (event instanceof QueryEvent.TurnRetried) {
-        retryAnnounced.countDown();
-      }
-    }
-
-    @Override
-    public void onError(Throwable throwable) {}
-
-    @Override
-    public void onComplete() {}
   }
 }

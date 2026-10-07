@@ -9,17 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.ModelChunk;
-import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.Tool;
-import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
-import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
@@ -33,20 +24,18 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolRegistry;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -57,93 +46,6 @@ import org.junit.jupiter.api.io.TempDir;
  * answer via session.answer(...), and terminates with Success.
  */
 final class Phase2AcceptanceTest {
-
-  /**
-   * Scripted streaming Model: dispenses one prepared chunk sequence per call to {@code chatStream},
-   * in declaration order. After the last script runs the model returns an empty stream — the agent
-   * loop's stop classifier turns that into a sensible terminal.
-   */
-  private static final class ScriptedModel implements Model {
-
-    private final List<List<ModelChunk>> turns;
-    private int turnIndex = 0;
-
-    ScriptedModel(List<List<ModelChunk>> turns) {
-      this.turns = turns;
-    }
-
-    @Override
-    public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-      throw new AssertionError("unused — scripted model only streams");
-    }
-
-    @Override
-    public Flow.Publisher<ModelChunk> chatStream(
-        List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-      var chunks = turnIndex < turns.size() ? turns.get(turnIndex++) : List.<ModelChunk>of();
-      return subscriber ->
-          subscriber.onSubscribe(
-              new Flow.Subscription() {
-                @Override
-                public void request(long n) {
-                  for (var c : chunks) {
-                    subscriber.onNext(c);
-                  }
-                  subscriber.onComplete();
-                }
-
-                @Override
-                public void cancel() {}
-              });
-    }
-
-    @Override
-    public String id() {
-      return "phase2-script";
-    }
-
-    @Override
-    public String provider() {
-      return "test";
-    }
-  }
-
-  /**
-   * Collects every event and hands each {@link QueryEvent.QuestionAsked} to {@code onQuestion} on
-   * the delivery thread, while the agent loop is blocked on that question.
-   */
-  private static final class CollectingSubscriber implements Flow.Subscriber<QueryEvent> {
-    final List<QueryEvent> events = new CopyOnWriteArrayList<>();
-    final CountDownLatch done = new CountDownLatch(1);
-    private final Consumer<AskUserQuestionRequest> onQuestion;
-
-    CollectingSubscriber(Consumer<AskUserQuestionRequest> onQuestion) {
-      this.onQuestion = onQuestion;
-    }
-
-    @Override
-    public void onSubscribe(Flow.Subscription subscription) {
-      subscription.request(Long.MAX_VALUE);
-    }
-
-    @Override
-    public void onNext(QueryEvent event) {
-      events.add(event);
-      if (event instanceof QueryEvent.QuestionAsked asked) {
-        onQuestion.accept(asked.request());
-      }
-    }
-
-    @Override
-    public void onError(Throwable throwable) {
-      done.countDown();
-    }
-
-    @Override
-    public void onComplete() {
-      done.countDown();
-    }
-  }
 
   @Test
   void modelNavigatesRepoAsksAndRespectsDenyRule(@TempDir Path tmp) throws Exception {
@@ -202,27 +104,19 @@ final class Phase2AcceptanceTest {
                 List.of(
                     Map.of("label", "Yes", "description", "done"),
                     Map.of("label", "No", "description", "keep going"))));
-    var turns =
-        List.<List<ModelChunk>>of(
-            List.of(
-                new ModelChunk.ToolUseStop(grepCall),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of(), List.of())),
-            List.of(
-                new ModelChunk.ToolUseStop(readAllowed),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of(), List.of())),
-            List.of(
-                new ModelChunk.ToolUseStop(readDenied),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of(), List.of())),
-            List.of(
-                new ModelChunk.ToolUseStop(askCall),
-                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of(), List.of())),
-            List.of(
-                new ModelChunk.TextDelta("all done"),
-                new ModelChunk.MessageStop("STOP", Usage.of(2, 1), Map.of(), List.of())));
+    var usage = Usage.of(2, 1);
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(usage, grepCall)
+            .withToolCallsTurn(usage, readAllowed)
+            .withToolCallsTurn(usage, readDenied)
+            .withToolCallsTurn(usage, askCall)
+            .withTextTurn("all done", usage)
+            .build();
 
     var options =
         SessionOptions.newBuilder()
-            .withModel(new ScriptedModel(turns))
+            .withModel(model)
             .withSessionId("phase2-sess-" + UUID.randomUUID())
             .withTools(tools)
             .withPermission(permission)
@@ -233,23 +127,24 @@ final class Phase2AcceptanceTest {
       var answered = new AtomicBoolean(false);
       var sub =
           new CollectingSubscriber(
-              request -> {
-                session.answer(
-                    request.questionId(),
-                    AskUserQuestionResponse.single(request.questionId(), "Yes"));
-                answered.set(true);
-              });
+              QuestionAnswers.selecting(session, "Yes")
+                  .andThen(
+                      event -> {
+                        if (event instanceof QueryEvent.QuestionAsked) {
+                          answered.set(true);
+                        }
+                      }));
       session.events().subscribe(sub);
 
       var result = session.runBlocking(UserMessage.text("explore the repo"));
-      Await.latch("the event stream to complete", sub.done);
+      sub.awaitDone();
       assertTrue(answered.get(), "AskUserQuestion was never answered");
 
       // Verify terminal Success.
       assertInstanceOf(ResultMessage.Success.class, result);
 
       // Verify Grep ran successfully and the result names the seeded files.
-      var grepResult = findToolResult(sub.events, GrepTool.NAME);
+      var grepResult = findToolResult(sub.events(), GrepTool.NAME);
       assertNotNull(grepResult);
       assertTrue(grepResult.result().success());
       var grepOut = grepResult.result().output();
@@ -257,13 +152,13 @@ final class Phase2AcceptanceTest {
       assertTrue(grepOut.contains("Hello.java"), grepOut);
 
       // Verify the allowed Read ran successfully and surfaced the file's content.
-      var allowedResult = findToolResult(sub.events, ReadTool.NAME);
+      var allowedResult = findToolResult(sub.events(), ReadTool.NAME);
       assertNotNull(allowedResult);
       assertTrue(allowedResult.result().success());
       assertTrue(allowedResult.result().output().contains("Hello"));
 
       // Verify the denied Read was BLOCKED by the permission system.
-      var blocked = findEvent(sub.events, QueryEvent.ToolBlocked.class);
+      var blocked = findEvent(sub.events(), QueryEvent.ToolBlocked.class);
       assertNotNull(blocked, "expected the deny rule to surface a ToolBlocked event");
       assertEquals("Read", blocked.call().name());
       assertTrue(
@@ -271,12 +166,12 @@ final class Phase2AcceptanceTest {
           "reason should reference the deny rule, got: " + blocked.reason());
 
       // Verify a QuestionAsked event surfaced.
-      var question = findEvent(sub.events, QueryEvent.QuestionAsked.class);
+      var question = findEvent(sub.events(), QueryEvent.QuestionAsked.class);
       assertNotNull(question);
       assertEquals("Did you find what you needed?", question.request().question());
 
       // Verify the AskUserQuestion tool returned the user's selection.
-      var askResult = findToolResult(sub.events, AskUserQuestionTool.NAME);
+      var askResult = findToolResult(sub.events(), AskUserQuestionTool.NAME);
       assertNotNull(askResult);
       assertTrue(askResult.result().success());
       assertTrue(askResult.result().output().contains("- Yes"));
@@ -289,7 +184,7 @@ final class Phase2AcceptanceTest {
   }
 
   private static QueryEvent.ToolResult findToolResult(List<QueryEvent> events, String toolName) {
-    for (var ev : new ArrayList<>(events)) {
+    for (var ev : events) {
       if (ev instanceof QueryEvent.ToolResult tr && tr.call().name().equals(toolName)) {
         return tr;
       }
@@ -298,11 +193,6 @@ final class Phase2AcceptanceTest {
   }
 
   private static <T extends QueryEvent> T findEvent(List<QueryEvent> events, Class<T> cls) {
-    for (var ev : new ArrayList<>(events)) {
-      if (cls.isInstance(ev)) {
-        return cls.cast(ev);
-      }
-    }
-    return null;
+    return events.stream().filter(cls::isInstance).map(cls::cast).findFirst().orElse(null);
   }
 }
