@@ -2,7 +2,6 @@
 
 package com.standardapplied.helios.openai;
 
-import static com.standardapplied.helios.openai.OpenAIFixture.createModel;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,7 +18,6 @@ class OpenAIInputTest {
 
   @Test
   void convertAssistantMessageSimpleText() {
-    var model = createModel();
     var message = Message.assistant("Hello");
 
     var items = OpenAIInput.assistant(message);
@@ -31,7 +29,6 @@ class OpenAIInputTest {
 
   @Test
   void convertAssistantMessageWithToolCalls() {
-    var model = createModel();
     var tc =
         ToolCall.newBuilder()
             .withId("call_1")
@@ -51,7 +48,6 @@ class OpenAIInputTest {
 
   @Test
   void convertAssistantMessageToolCallsOnly() {
-    var model = createModel();
     var tc =
         ToolCall.newBuilder()
             .withId("call_1")
@@ -68,7 +64,6 @@ class OpenAIInputTest {
 
   @Test
   void convertAssistantMessageNullContentBecomesEmpty() {
-    var model = createModel();
     var message = new Message(Role.ASSISTANT, null, List.of(), null, null, Map.of(), List.of());
 
     var items = OpenAIInput.assistant(message);
@@ -79,7 +74,6 @@ class OpenAIInputTest {
 
   @Test
   void convertAssistantMessageEmptyContentBecomesEmpty() {
-    var model = createModel();
     var message = new Message(Role.ASSISTANT, "", List.of(), null, null, Map.of(), List.of());
 
     var items = OpenAIInput.assistant(message);
@@ -90,7 +84,6 @@ class OpenAIInputTest {
 
   @Test
   void convertAssistantMessageWithNullArguments() {
-    var model = createModel();
     var tc = ToolCall.newBuilder().withId("call_1").withName("fn").build();
     var message = Message.assistant(List.of(tc));
 
