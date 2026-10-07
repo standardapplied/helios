@@ -326,6 +326,24 @@ class HeliosEventTest {
   }
 
   @Test
+  void runStartedAttributesAndCustomDataKeepTheOrderTheyWereGiven() {
+    var attributes = new LinkedHashMap<String, String>();
+    var data = new LinkedHashMap<String, Object>();
+    for (var name : DeclarationOrderFixture.ARGUMENTS) {
+      attributes.put(name, name);
+      data.put(name, name.length());
+    }
+
+    var started =
+        new HeliosEvent.RunStarted(NOW, Ids.newId(), Optional.empty(), "agent", attributes);
+    var custom = new HeliosEvent.Custom(NOW, Ids.newId(), Optional.empty(), "case.filed", data);
+
+    assertEquals(
+        DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(started.attributes()));
+    assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(custom.data()));
+  }
+
+  @Test
   void toolCallStartedAcceptsNullArgs() {
     var event =
         new HeliosEvent.ToolCallStarted(

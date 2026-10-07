@@ -15,6 +15,7 @@ import io.helidon.webserver.http.HttpRules;
 import io.helidon.webserver.http.HttpService;
 import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -119,13 +120,10 @@ public final class AgentHttpService implements HttpService {
               + options.sessionId());
     }
     registry.create(options);
-    resp.status(Status.CREATED_201)
-        .send(
-            Map.of(
-                "sessionId",
-                options.sessionId(),
-                "eventsUrl",
-                eventsPathPrefix + "/sessions/" + options.sessionId() + "/events"));
+    var created = new LinkedHashMap<String, String>();
+    created.put("sessionId", options.sessionId());
+    created.put("eventsUrl", eventsPathPrefix + "/sessions/" + options.sessionId() + "/events");
+    resp.status(Status.CREATED_201).send(created);
   }
 
   private void messageHandler(ServerRequest req, ServerResponse resp) {

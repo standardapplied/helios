@@ -5,13 +5,12 @@
 
 package com.standardapplied.helios.core.schema;
 
+import com.standardapplied.helios.core.common.OrderedMaps;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.SequencedMap;
 
 /**
@@ -19,7 +18,7 @@ import java.util.SequencedMap;
  *
  * @param type the JSON type (object, array, string, number, integer, boolean)
  * @param properties property schemas for object types, in the order they are sent to a model;
- *     stored as an unmodifiable copy in the given order
+ *     stored as an unmodifiable copy in the given order; a null name or schema is rejected
  * @param items item schema for array types
  * @param required list of required property names
  * @param enumValues allowed values for enum types
@@ -39,13 +38,7 @@ public record JsonSchema(
 
   public JsonSchema {
     if (properties != null) {
-      properties.forEach(
-          (name, schema) -> {
-            Objects.requireNonNull(name, "property name must not be null");
-            Objects.requireNonNull(
-                schema, () -> "schema of property " + name + " must not be null");
-          });
-      properties = Collections.unmodifiableSequencedMap(new LinkedHashMap<>(properties));
+      properties = OrderedMaps.copyOf(properties);
     }
   }
 

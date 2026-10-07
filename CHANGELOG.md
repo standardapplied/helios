@@ -195,6 +195,8 @@ and an unordered map or set no longer compiles in their place.
 | `JsonSchema.properties` is a `Map<String, JsonSchema>` | a `SequencedMap<String, JsonSchema>`, stored as an unmodifiable copy in the given order; a null name or schema is rejected. Pass a `LinkedHashMap`, or build with `JsonSchema.object().withProperty(...).build()` |
 | `ToolChoice.Required.allowedTools` is a `Set<String>` | a `SequencedSet<String>`, stored as an unmodifiable copy in the given order. Construct it through `ToolChoice.required(String...)`, which keeps the varargs order and drops a repeated name |
 | `gemini.api.ToolChoiceConfig.allowedTools` and `validated(Set<String>)` | `SequencedSet<String>` |
+| `Prompt.variables`, `Prompt.extractVariables(String)` and `Prompt.Builder.withVariables(Set<String>)` are a `Set<String>` | a `SequencedSet<String>` in order of first occurrence, stored as an unmodifiable copy; a null name is rejected. Pass a `LinkedHashSet`, or let `build()` extract them |
+| `persistence.mapper.DbTypeMapperProvider.readStringSet` returns a `Set<String>` | a `SequencedSet<String>` in the array's order |
 | `ModelIntegrationContract` (core test-jar) declares `model()` | also declares `model(ModelConfig.Builder)`: a subclass completes the builder with its API key and model id and returns a model the caller closes |
 
 ### Added
@@ -217,9 +219,11 @@ and an unordered map or set no longer compiles in their place.
   `ModelIntegrationContract` (live provider parity), `BoundedErrorBodyContract`,
   `PromptRegistryContract` and `ToolCallJournalContract`. Depend on it with
   `<type>test-jar</type>` and `<scope>test</scope>`.
-- **`ToolCall.copyOfArguments(Map)`** is the one copy of tool-call arguments: unmodifiable, in
-  the given order, and rejecting a null name or value as before. `ToolCall.Builder.withArguments`
-  and `HookOutcome.MutateArgs` both store it.
+- **`core.common.OrderedMaps.copyOf(Map)`** is the one ordered copy of a map Helios sends to a
+  model or reports to a user: unmodifiable, in the given iteration order, and rejecting a null map,
+  key or value as `Map.copyOf` does, the value message naming its key. Tool-call, `MutateArgs`
+  and event arguments, event attributes and data, `JsonSchema` properties and REPL bindings are
+  stored through it.
 - **`helios-session` publishes its test fixtures as `helios-session-<version>-tests.jar`**, in
   `com.standardapplied.helios.session.test`: `CollectingSubscriber` (records a session's events,
   optionally reacting to each, and waits for the stream to end through `Await`), `QuestionAnswers`
@@ -350,8 +354,14 @@ and an unordered map or set no longer compiles in their place.
   `ExecutionCapabilities.supportedRuntimes()`, which an `Execute` refusal names, iterates in
   `Runtime` declaration order, and `ReplSession.calledHostFunctions()` is sorted by name. The
   sandbox's `countBy` helper lists its keys in the order they first occur, the arguments of
-  `QueryEvent.ToolMutated` and `HeliosEvent.ToolCallStarted` keep the call's order, and REPL
-  bindings still reject a null name or repr.
+  `QueryEvent.ToolMutated` and `HeliosEvent.ToolCallStarted`, the attributes of
+  `HeliosEvent.RunStarted` and the data of `HeliosEvent.Custom` keep their given order in the
+  session stream and the JSONL event log, the runtime's `POST /sessions` and result bodies list
+  their fields in a fixed order, and REPL bindings still reject a null name or repr.
+- **`Prompt.variables` lost the first-occurrence order `Prompt.extractVariables` documents.** It
+  was frozen with `Set.copyOf`, so a prompt's variables, and the `variables` array
+  `PgPromptRegistry` stores and reads back, came in a different order in every JVM. They now keep
+  the order they first occur in the template, through the database round trip.
 - **OpenAI forced a random tool when `ToolChoice.required` named several.** It sent the first name
   a hash set returned as a single forced function. Several names are now sent as the Responses
   API's `allowed_tools` choice, `{"type": "allowed_tools", "mode": "required", "tools": [...]}`, in

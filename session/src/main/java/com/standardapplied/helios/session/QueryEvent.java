@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session;
 
+import com.standardapplied.helios.core.common.OrderedMaps;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.ToolCall;
@@ -485,8 +486,8 @@ public sealed interface QueryEvent
       }
       Objects.requireNonNull(inputBefore, "inputBefore must not be null");
       Objects.requireNonNull(inputAfter, "inputAfter must not be null");
-      inputBefore = ToolCall.copyOfArguments(inputBefore);
-      inputAfter = ToolCall.copyOfArguments(inputAfter);
+      inputBefore = OrderedMaps.copyOf(inputBefore);
+      inputAfter = OrderedMaps.copyOf(inputAfter);
     }
   }
 
