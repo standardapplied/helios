@@ -49,7 +49,8 @@ public final class ChildJvm {
   }
 
   /**
-   * What {@code main} prints to standard output in a fresh JVM, which must exit with status 0.
+   * What {@code main} prints to standard output in a fresh JVM, which must exit with status 0. A
+   * JVM that outlives the wait, by a timeout or an interrupt, is killed rather than left running.
    *
    * @param dir a directory for the captured output
    * @param main the class whose {@code main} runs
@@ -64,9 +65,13 @@ public final class ChildJvm {
               .redirectOutput(stdout.toFile())
               .redirectError(stderr.toFile())
               .start();
-      Await.termination("the JVM running " + main.getName() + " to exit", process);
-      assertEquals(0, process.exitValue(), () -> read(stderr));
-      return Files.readString(stdout);
+      try {
+        Await.termination("the JVM running " + main.getName() + " to exit", process);
+        assertEquals(0, process.exitValue(), () -> read(stderr));
+        return Files.readString(stdout);
+      } finally {
+        process.destroyForcibly();
+      }
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
