@@ -17,14 +17,15 @@ class ChildJvmTest {
 
   @Test
   void outputIsWhatTheChildPrints() {
-    assertEquals("hello\n", ChildJvm.output(dir, Prints.class));
+    assertEquals("hello\n", ChildJvm.output(dir, Prints.class.getName()));
   }
 
   @Test
   void aChildStillRunningWhenTheWaitIsInterruptedIsKilled() {
     Thread.currentThread().interrupt();
     try {
-      var failure = assertThrows(AssertionError.class, () -> ChildJvm.output(dir, Blocks.class));
+      var failure =
+          assertThrows(AssertionError.class, () -> ChildJvm.output(dir, Blocks.class.getName()));
       assertTrue(failure.getMessage().startsWith("Interrupted while waiting for"));
     } finally {
       Thread.interrupted();

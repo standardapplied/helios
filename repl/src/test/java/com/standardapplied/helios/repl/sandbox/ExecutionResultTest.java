@@ -44,6 +44,12 @@ class ExecutionResultTest {
   }
 
   @Test
+  void nullBindingsDefaultToEmpty() {
+    var result = new ExecutionResult("c", "out", "err", 0, null, null, Duration.ZERO);
+    assertEquals(java.util.Map.of(), result.bindings());
+  }
+
+  @Test
   void succeededWhenExitCodeZero() {
     assertTrue(ExecutionResult.success("ok").succeeded());
   }
