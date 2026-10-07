@@ -69,7 +69,7 @@ class GeminiFilesClientTest {
   void uploadStreamsFileAndWaitsUntilActive() throws Exception {
     var video = tempDir.resolve("sample.mp4");
     Files.write(video, new byte[] {1, 2, 3, 4});
-    var http = new StubHttpClient();
+    var http = new StubExchanges();
     http.enqueue(
         200,
         Map.of("X-Goog-Upload-URL", List.of("https://api.example/upload/session-1?upload_id=abc")),
@@ -121,7 +121,7 @@ class GeminiFilesClientTest {
   void activeUploadResponseDoesNotPoll() throws Exception {
     var video = tempDir.resolve("ready.mp4");
     Files.write(video, new byte[] {1});
-    var http = new StubHttpClient();
+    var http = new StubExchanges();
     http.enqueue(
         200, Map.of("x-goog-upload-url", List.of("https://api.example/upload/session-2")), "");
     http.enqueue(
@@ -139,7 +139,7 @@ class GeminiFilesClientTest {
   void managedUploadExposesReferenceAndDeletesOnlyByValidatedResourceName() throws Exception {
     var video = tempDir.resolve("managed.mp4");
     Files.write(video, new byte[] {1, 2, 3});
-    var http = new StubHttpClient();
+    var http = new StubExchanges();
     http.enqueue(
         200, Map.of("x-goog-upload-url", List.of("https://api.example/upload/managed")), "");
     http.enqueue(
@@ -170,7 +170,8 @@ class GeminiFilesClientTest {
   void managedDeleteTreatsAlreadyAbsentFileAsSuccess() throws Exception {
     var video = tempDir.resolve("absent.mp4");
     Files.write(video, new byte[] {1});
-    var http = managedUpload(httpClient(), "files/already-absent", "https://files.example/private");
+    var http =
+        managedUpload(stubExchanges(), "files/already-absent", "https://files.example/private");
     http.enqueue(404, Map.of(), "{\"error\":{\"message\":\"not found\"}}");
 
     try (var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4")) {
@@ -186,7 +187,7 @@ class GeminiFilesClientTest {
     Files.write(video, new byte[] {1});
     var apiKey = "api-key-canary-never-retain";
     var fileUri = "https://files.example/file-uri-canary-never-retain";
-    var http = managedUpload(httpClient(), "files/private-1", fileUri);
+    var http = managedUpload(stubExchanges(), "files/private-1", fileUri);
     http.enqueue(
         500, Map.of(), "{\"error\":{\"message\":\"failed " + apiKey + " " + fileUri + "\"}}");
     var config =
@@ -207,7 +208,7 @@ class GeminiFilesClientTest {
   void managedDeleteCanRetryAfterFailureAndStopsAfterSuccess() throws Exception {
     var video = tempDir.resolve("retry-delete.mp4");
     Files.write(video, new byte[] {1});
-    var http = managedUpload(httpClient(), "files/retry-delete", "https://files.example/retry");
+    var http = managedUpload(stubExchanges(), "files/retry-delete", "https://files.example/retry");
     http.enqueue(503, Map.of(), "temporary");
     http.enqueue(204, Map.of(), "");
     var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
@@ -224,7 +225,7 @@ class GeminiFilesClientTest {
     var video = tempDir.resolve("redirect-delete.mp4");
     Files.write(video, new byte[] {1});
     var http =
-        managedUpload(httpClient(), "files/redirect-delete", "https://files.example/private");
+        managedUpload(stubExchanges(), "files/redirect-delete", "https://files.example/private");
     http.enqueue(
         302, Map.of("location", List.of("https://attacker.example/collect")), "redirecting");
     var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
@@ -242,7 +243,7 @@ class GeminiFilesClientTest {
   void managedUploadRejectsInvalidResourceNameBeforeItCanBeDeleted() throws Exception {
     var video = tempDir.resolve("invalid-name.mp4");
     Files.write(video, new byte[] {1});
-    var http = managedUpload(httpClient(), "files/good/../../other", "https://files.example/x");
+    var http = managedUpload(stubExchanges(), "files/good/../../other", "https://files.example/x");
 
     var error =
         assertThrows(
@@ -257,7 +258,7 @@ class GeminiFilesClientTest {
   void failedProcessingSurfacesApiError() throws Exception {
     var video = tempDir.resolve("failed.mp4");
     Files.write(video, new byte[] {1});
-    var http = new StubHttpClient();
+    var http = new StubExchanges();
     http.enqueue(
         200, Map.of("x-goog-upload-url", List.of("https://api.example/upload/session-3")), "");
     http.enqueue(
@@ -284,12 +285,12 @@ class GeminiFilesClientTest {
   void rejectsMissingOrCrossOriginUploadUrl() throws Exception {
     var video = tempDir.resolve("unsafe.mp4");
     Files.write(video, new byte[] {1});
-    var missing = new StubHttpClient();
+    var missing = new StubExchanges();
     missing.enqueue(200, Map.of(), "");
-    var crossOrigin = new StubHttpClient();
+    var crossOrigin = new StubExchanges();
     crossOrigin.enqueue(
         200, Map.of("x-goog-upload-url", List.of("https://attacker.example/upload")), "");
-    var invalid = new StubHttpClient();
+    var invalid = new StubExchanges();
     invalid.enqueue(200, Map.of("x-goog-upload-url", List.of("/relative/upload")), "");
 
     var missingError =
@@ -315,7 +316,7 @@ class GeminiFilesClientTest {
   void rejectsInvalidFilesBeforeSending() throws Exception {
     var empty = tempDir.resolve("empty.mp4");
     Files.createFile(empty);
-    var http = new StubHttpClient();
+    var http = new StubExchanges();
     var client = client(http, PROCESSING_NEVER_TIMES_OUT);
 
     assertThrows(IllegalArgumentException.class, () -> client.upload(tempDir, "video/mp4"));
@@ -335,7 +336,7 @@ class GeminiFilesClientTest {
       channel.position(2L * 1024 * 1024 * 1024);
       channel.write(ByteBuffer.wrap(new byte[] {1}));
     }
-    var http = new StubHttpClient();
+    var http = new StubExchanges();
 
     var error =
         assertThrows(
@@ -350,7 +351,7 @@ class GeminiFilesClientTest {
   void nonSuccessResponseIsBoundedAndCarriesStatus() throws Exception {
     var video = tempDir.resolve("rate-limited.mp4");
     Files.write(video, new byte[] {1});
-    var http = new StubHttpClient();
+    var http = new StubExchanges();
     http.enqueue(429, Map.of(), "quota exceeded");
 
     var error =
@@ -367,7 +368,7 @@ class GeminiFilesClientTest {
   void processingTimeoutStopsPolling() throws Exception {
     var video = tempDir.resolve("slow.mp4");
     Files.write(video, new byte[] {1});
-    var http = new StubHttpClient();
+    var http = new StubExchanges();
     http.enqueue(
         200, Map.of("x-goog-upload-url", List.of("https://api.example/upload/session-4")), "");
     http.enqueue(
@@ -448,7 +449,7 @@ class GeminiFilesClientTest {
   void inferredMimeTypeUsesDefaultFilesEndpoint() throws Exception {
     var video = tempDir.resolve("inferred.mp4");
     Files.write(video, new byte[] {1});
-    var http = new StubHttpClient();
+    var http = new StubExchanges();
     http.enqueue(
         200,
         Map.of(
@@ -475,7 +476,7 @@ class GeminiFilesClientTest {
   void inferredMimeTypeFailsClearlyWhenUnknown() throws Exception {
     var file = tempDir.resolve("unknown.helios-unknown-media");
     Files.write(file, new byte[] {1});
-    var http = new StubHttpClient();
+    var http = new StubExchanges();
 
     var error =
         assertThrows(
@@ -490,7 +491,7 @@ class GeminiFilesClientTest {
   void transportFailuresPreserveCauseAndInterruptStatus() throws Exception {
     var video = tempDir.resolve("transport.mp4");
     Files.write(video, new byte[] {1});
-    var ioHttp = new StubHttpClient();
+    var ioHttp = new StubExchanges();
     ioHttp.sendFailure = new IOException("network down");
 
     var ioError =
@@ -500,7 +501,7 @@ class GeminiFilesClientTest {
 
     assertEquals("network down", ioError.getCause().getMessage());
 
-    var interruptedHttp = new StubHttpClient();
+    var interruptedHttp = new StubExchanges();
     interruptedHttp.interruptOnSend = true;
     try {
       var interrupted =
@@ -519,7 +520,7 @@ class GeminiFilesClientTest {
   void oversizedResponsesAndDurationsFailFast() throws Exception {
     var video = tempDir.resolve("oversized.mp4");
     Files.write(video, new byte[] {1});
-    var http = new StubHttpClient();
+    var http = new StubExchanges();
     http.enqueue(
         200,
         Map.of("x-goog-upload-url", List.of("https://api.example/upload/session")),
@@ -538,7 +539,7 @@ class GeminiFilesClientTest {
         () -> client.upload(video, "video/mp4", Duration.ofSeconds(-1)));
     assertThrows(NullPointerException.class, () -> client.upload(video, "video/mp4", null));
 
-    var jsonHttp = new StubHttpClient();
+    var jsonHttp = new StubExchanges();
     jsonHttp.enqueue(
         200, Map.of("x-goog-upload-url", List.of("https://api.example/upload/session")), "");
     jsonHttp.enqueue(200, Map.of(), "x".repeat(1024 * 1024 + 1));
@@ -553,7 +554,7 @@ class GeminiFilesClientTest {
 
   @Test
   void closeSupportsOwnedAndInjectedHttpClients() {
-    client(new StubHttpClient(), PROCESSING_NEVER_TIMES_OUT).close();
+    client(new StubExchanges(), PROCESSING_NEVER_TIMES_OUT).close();
 
     var config =
         ModelConfig.newBuilder()
@@ -567,7 +568,7 @@ class GeminiFilesClientTest {
   void customProxyPathPortHeadersAndTimeoutArePreserved() throws Exception {
     var video = tempDir.resolve("proxy.mp4");
     Files.write(video, new byte[] {1});
-    var http = new StubHttpClient();
+    var http = new StubExchanges();
     http.enqueue(
         200,
         Map.of("x-goog-upload-url", List.of("http://api.example:8080/proxy/upload/session")),
@@ -594,21 +595,21 @@ class GeminiFilesClientTest {
     assertTrue(start.timeout().isEmpty());
   }
 
-  private GeminiException uploadError(StubHttpClient http, Path video) {
+  private GeminiException uploadError(StubExchanges http, Path video) {
     return assertThrows(
         GeminiException.class,
         () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
   }
 
-  private static StubHttpClient httpClient() {
-    return new StubHttpClient();
+  private static StubExchanges stubExchanges() {
+    return new StubExchanges();
   }
 
   @Test
   void managedUploadInfersTheMimeType() throws Exception {
     var video = tempDir.resolve("inferred-managed.mp4");
     Files.write(video, new byte[] {1});
-    var http = managedUpload(httpClient(), "files/inferred-managed", "https://files.example/x");
+    var http = managedUpload(stubExchanges(), "files/inferred-managed", "https://files.example/x");
 
     var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video);
 
@@ -629,7 +630,8 @@ class GeminiFilesClientTest {
         ModelConfig.newBuilder().withApiKey("g-key").withBaseUrl("https://api.example/v1").build();
 
     var reference =
-        new GeminiFilesClient(config, http, Duration.ofMillis(1), PROCESSING_NEVER_TIMES_OUT, false)
+        new GeminiFilesClient(
+                config, http.client(), Duration.ofMillis(1), PROCESSING_NEVER_TIMES_OUT, false)
             .upload(video, "video/mp4");
 
     assertEquals("https://api.example/v1beta/files/stateless", reference.uri());
@@ -678,9 +680,9 @@ class GeminiFilesClientTest {
   void deleteTransportFailuresHideTheirCauseAndKeepTheInterrupt() throws Exception {
     var video = tempDir.resolve("delete-transport.mp4");
     Files.write(video, new byte[] {1});
-    var ioHttp = managedUpload(httpClient(), "files/io-delete", "https://files.example/io");
+    var ioHttp = managedUpload(stubExchanges(), "files/io-delete", "https://files.example/io");
     var interruptedHttp =
-        managedUpload(httpClient(), "files/interrupted-delete", "https://files.example/int");
+        managedUpload(stubExchanges(), "files/interrupted-delete", "https://files.example/int");
     var ioManaged = client(ioHttp, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
     var interruptedManaged =
         client(interruptedHttp, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
@@ -721,7 +723,7 @@ class GeminiFilesClientTest {
   @Test
   void aRequestBodyThatCannotBeWrittenFailsBeforeSending() {
     var config = ModelConfig.newBuilder().withApiKey("g-key").build();
-    var http = new FilesHttp(config, httpClient(), FilesEndpoint.of(config));
+    var http = new FilesHttp(config, stubExchanges().client(), FilesEndpoint.of(config));
     var looped = ConversationFixture.selfReferencing();
 
     var error = assertThrows(GeminiException.class, () -> http.serialize(looped));
@@ -733,9 +735,10 @@ class GeminiFilesClientTest {
   void aStatusBelowTwoHundredIsAFailure() throws Exception {
     var video = tempDir.resolve("informational.mp4");
     Files.write(video, new byte[] {1});
-    var startHttp = httpClient();
+    var startHttp = stubExchanges();
     startHttp.enqueue(199, Map.of(), "early");
-    var deleteHttp = managedUpload(httpClient(), "files/informational", "https://files.example/i");
+    var deleteHttp =
+        managedUpload(stubExchanges(), "files/informational", "https://files.example/i");
     deleteHttp.enqueue(199, Map.of(), "");
 
     var startError =
@@ -755,7 +758,7 @@ class GeminiFilesClientTest {
     Files.write(video, new byte[] {1});
     Files.setPosixFilePermissions(video, Set.of());
     assumeFalse(Files.isReadable(video), "the file stays readable to this user");
-    var http = httpClient();
+    var http = stubExchanges();
 
     assertThrows(
         IllegalArgumentException.class,
@@ -769,7 +772,7 @@ class GeminiFilesClientTest {
         FileSystems.newFileSystem(tempDir.resolve("long-names.zip"), Map.of("create", "true"))) {
       var video = zip.getPath("a".repeat(509) + ".mp4");
       Files.write(video, new byte[] {1});
-      var http = httpClient();
+      var http = stubExchanges();
 
       var error =
           assertThrows(
@@ -787,8 +790,8 @@ class GeminiFilesClientTest {
     assertThrows(GeminiException.class, () -> GeminiFileResource.requireName(" "));
   }
 
-  private static StubHttpClient managedUpload(
-      StubHttpClient http, String resourceName, String fileUri) {
+  private static StubExchanges managedUpload(
+      StubExchanges http, String resourceName, String fileUri) {
     http.enqueue(
         200, Map.of("x-goog-upload-url", List.of("https://api.example/upload/managed")), "");
     http.enqueue(
@@ -811,15 +814,15 @@ class GeminiFilesClientTest {
     return false;
   }
 
-  private StubHttpClient uploadClient(String uploadResponse) {
-    var http = new StubHttpClient();
+  private StubExchanges uploadClient(String uploadResponse) {
+    var http = new StubExchanges();
     http.enqueue(
         200, Map.of("x-goog-upload-url", List.of("https://api.example/upload/session")), "");
     http.enqueue(200, Map.of(), uploadResponse);
     return http;
   }
 
-  private GeminiFilesClient client(StubHttpClient http, Duration processingTimeout) {
+  private GeminiFilesClient client(StubExchanges http, Duration processingTimeout) {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("g-key")
@@ -830,8 +833,8 @@ class GeminiFilesClientTest {
   }
 
   private GeminiFilesClient client(
-      ModelConfig config, StubHttpClient http, Duration processingTimeout) {
-    return new GeminiFilesClient(config, http, Duration.ZERO, processingTimeout, false);
+      ModelConfig config, StubExchanges http, Duration processingTimeout) {
+    return new GeminiFilesClient(config, http.client(), Duration.ZERO, processingTimeout, false);
   }
 
   private static String header(HttpRequest request, String name) {
@@ -872,7 +875,10 @@ class GeminiFilesClientTest {
     return output.toString(StandardCharsets.UTF_8);
   }
 
-  private static final class StubHttpClient extends HttpClient {
+  /**
+   * The responses a {@link StubHttpClient} answers with, in order, and the requests it received.
+   */
+  private static final class StubExchanges {
     private final Deque<StubResponse> responses = new ArrayDeque<>();
     private final List<HttpRequest> requests = new ArrayList<>();
     private IOException sendFailure;
@@ -882,11 +888,11 @@ class GeminiFilesClientTest {
       responses.addLast(new StubResponse(status, headers, body));
     }
 
-    @Override
-    @SuppressWarnings("unchecked")
-    public <T> HttpResponse<T> send(
-        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
-        throws IOException, InterruptedException {
+    HttpClient client() {
+      return new StubHttpClient(this);
+    }
+
+    HttpResponse<InputStream> answer(HttpRequest request) throws IOException, InterruptedException {
       requests.add(request);
       if (sendFailure != null) {
         throw sendFailure;
@@ -897,7 +903,23 @@ class GeminiFilesClientTest {
       if (responses.isEmpty()) {
         throw new IOException("No stub response queued");
       }
-      return (HttpResponse<T>) responses.removeFirst().toResponse(request);
+      return responses.removeFirst().toResponse(request);
+    }
+  }
+
+  private static final class StubHttpClient extends HttpClient {
+    private final StubExchanges exchanges;
+
+    StubHttpClient(StubExchanges exchanges) {
+      this.exchanges = exchanges;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public <T> HttpResponse<T> send(
+        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
+        throws IOException, InterruptedException {
+      return (HttpResponse<T>) exchanges.answer(request);
     }
 
     @Override
