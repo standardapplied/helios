@@ -214,8 +214,8 @@ and an unordered map or set no longer compiles in their place.
   `ChildJvm` runs a class of the test classpath in fresh JVMs, the JaCoCo agent passed through, and
   asserts its output is the same in each; `DeclarationOrderFixture` is a conversation whose
   schema, tool parameters and replayed arguments each have eight or more names in a declared
-  order, and asserts a request body or prompt keeps it. `FailingInputStream` fails on read or close, and `SseEvents` writes and drains server-sent
-  events. Abstract contract tests run one set of cases against every implementation:
+  order, and asserts a request body or prompt keeps it. `FailingInputStream` fails on read or
+  close, and `SseEvents` writes and drains server-sent events. Abstract contract tests run one set of cases against every implementation:
   `ModelIntegrationContract` (live provider parity), `BoundedErrorBodyContract`,
   `PromptRegistryContract` and `ToolCallJournalContract`. Depend on it with
   `<type>test-jar</type>` and `<scope>test</scope>`.
@@ -342,11 +342,11 @@ and an unordered map or set no longer compiles in their place.
   HTTP client had no connect timeout, so a connection attempt to Hugging Face that went
   unanswered lasted as long as the host's TCP settings allowed. It now takes its client from
   `HttpClientFactory.createForDownloads()`, and a connection attempt fails after 10 seconds.
-
 - **Schemas, tool definitions and replayed tool calls reached providers in a different order in
   every JVM.** A record's schema properties, `JsonSchema.object()` builds, the provenance schemas,
-  `Tool.parametersAsJsonSchema()`, tool-call and `MutateArgs` arguments, `Provenanced.provenanceByField()`
-  and the REPL's bindings were frozen with `Map.copyOf`, and OpenAI's strict-schema transform
+  `Tool.parametersAsJsonSchema()`, tool-call and `MutateArgs` arguments,
+  `Provenanced.provenanceByField()` and the REPL's bindings were frozen with `Map.copyOf`, and
+  OpenAI's strict-schema transform
   rebuilt every map as a `HashMap`. Each now keeps declaration order (record components, builder
   insertion, parameter lists, parsed JSON), so request bodies, CodeAct and RLM prompts and
   messages to the model are byte-identical across JVMs. This fixes prompt-cache misses across
