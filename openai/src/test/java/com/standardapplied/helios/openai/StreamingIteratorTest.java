@@ -15,22 +15,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.SseReader;
-import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.FailingInputStream;
 import com.standardapplied.helios.core.test.FeedableInputStream;
-import java.io.ByteArrayInputStream;
+import com.standardapplied.helios.core.test.SseEvents;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
-import tools.jackson.databind.DeserializationFeature;
-import tools.jackson.databind.json.JsonMapper;
+import org.junit.jupiter.api.Test;
 
 class StreamingIteratorTest {
 
   private static final Duration SHORT_IDLE_TIMEOUT = Duration.ofMillis(200);
-  private static final Duration NEVER_IDLE = Duration.ofMinutes(10);
 
   private static final String TEXT_DELTA =
       "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,"
@@ -63,29 +60,18 @@ class StreamingIteratorTest {
           + "\"usage\":{\"input_tokens\":50,\"output_tokens\":15,\"total_tokens\":65,"
           + "\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n";
 
-  private final tools.jackson.databind.ObjectMapper objectMapper =
-      JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
-
-  @org.junit.jupiter.api.Test
+  @Test
   void textDeltaEvents() {
-    var sse = TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-      assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
-      assertEquals("Hello", ((StreamEvent.TextDelta) events.get(0)).text());
-      assertInstanceOf(StreamEvent.Done.class, events.get(1));
+    var events = drain(TEXT_DELTA + RESPONSE_COMPLETED);
 
-      var done = (StreamEvent.Done) events.get(1);
-      assertEquals("Hello", done.response().content());
-      assertEquals(FinishReason.STOP, done.response().finishReason());
-    }
+    assertEquals(2, events.size());
+    assertEquals("Hello", assertInstanceOf(StreamEvent.TextDelta.class, events.get(0)).text());
+    var done = assertInstanceOf(StreamEvent.Done.class, events.get(1));
+    assertEquals("Hello", done.response().content());
+    assertEquals(FinishReason.STOP, done.response().finishReason());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void toolCallFromStreaming() {
     var toolItemAdded =
         "data: {\"type\":\"response.output_item.added\",\"output_index\":0,"
@@ -111,30 +97,25 @@ class StreamingIteratorTest {
 
     var sse = toolItemAdded + argsDelta1 + argsDelta2 + argsDone + RESPONSE_COMPLETED;
 
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(3, events.size());
-      assertInstanceOf(StreamEvent.ToolCallStart.class, events.get(0));
-      var start = (StreamEvent.ToolCallStart) events.get(0);
-      assertEquals("call_1", start.callId());
-      assertEquals("get_weather", start.toolName());
+    var events = drain(sse);
+    assertEquals(3, events.size());
+    assertInstanceOf(StreamEvent.ToolCallStart.class, events.get(0));
+    var start = (StreamEvent.ToolCallStart) events.get(0);
+    assertEquals("call_1", start.callId());
+    assertEquals("get_weather", start.toolName());
 
-      assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(1));
-      var tc = ((StreamEvent.ToolCallComplete) events.get(1)).toolCall();
-      assertEquals("get_weather", tc.name());
-      assertEquals("call_1", tc.id());
-      assertEquals(Map.of("city", "NYC"), tc.arguments());
+    assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(1));
+    var tc = ((StreamEvent.ToolCallComplete) events.get(1)).toolCall();
+    assertEquals("get_weather", tc.name());
+    assertEquals("call_1", tc.id());
+    assertEquals(Map.of("city", "NYC"), tc.arguments());
 
-      var done = (StreamEvent.Done) events.get(2);
-      assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
-      assertFalse(done.response().toolCalls().isEmpty());
-    }
+    var done = (StreamEvent.Done) events.get(2);
+    assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
+    assertFalse(done.response().toolCalls().isEmpty());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void reasoningSummaryCapture() {
     var reasoningDelta1 =
         "data: {\"type\":\"response.reasoning_summary_text.delta\","
@@ -146,25 +127,20 @@ class StreamingIteratorTest {
 
     var sse = reasoningDelta1 + reasoningDelta2 + TEXT_DELTA + RESPONSE_COMPLETED;
 
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
+    var events = drain(sse);
 
-      var done = (StreamEvent.Done) events.getLast();
-      assertNotNull(done.response().thinking());
-      assertEquals("Let me think about this.", done.response().thinking());
-      assertTrue(done.response().metadata().containsKey(OpenAIResponseAssembler.REASONING_KEY));
+    var done = (StreamEvent.Done) events.getLast();
+    assertNotNull(done.response().thinking());
+    assertEquals("Let me think about this.", done.response().thinking());
+    assertTrue(done.response().metadata().containsKey(OpenAIResponseAssembler.REASONING_KEY));
 
-      // Streaming surface: each reasoning delta arrives as ThinkingDelta.
-      var thinkingDeltas =
-          events.stream().filter(StreamEvent.ThinkingDelta.class::isInstance).count();
-      assertEquals(2, thinkingDeltas);
-    }
+    // Streaming surface: each reasoning delta arrives as ThinkingDelta.
+    var thinkingDeltas =
+        events.stream().filter(StreamEvent.ThinkingDelta.class::isInstance).count();
+    assertEquals(2, thinkingDeltas);
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void reasoningSummaryEmitsThinkingComplete() {
     var reasoningDelta =
         "data: {\"type\":\"response.reasoning_summary_text.delta\","
@@ -173,75 +149,50 @@ class StreamingIteratorTest {
         "data: {\"type\":\"response.reasoning_summary_text.done\"," + "\"output_index\":0}\n\n";
     var sse = reasoningDelta + reasoningDone + TEXT_DELTA + RESPONSE_COMPLETED;
 
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var complete =
-          events.stream()
-              .filter(StreamEvent.ThinkingComplete.class::isInstance)
-              .map(StreamEvent.ThinkingComplete.class::cast)
-              .findFirst()
-              .orElseThrow();
-      assertEquals("Done thinking.", complete.fullThinking());
-    }
+    var events = drain(sse);
+    var complete =
+        events.stream()
+            .filter(StreamEvent.ThinkingComplete.class::isInstance)
+            .map(StreamEvent.ThinkingComplete.class::cast)
+            .findFirst()
+            .orElseThrow();
+    assertEquals("Done thinking.", complete.fullThinking());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void usageFromCompletedEvent() {
     var sse = TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      assertNotNull(done.response().usage());
-      assertEquals(25, done.response().usage().inputTokens());
-      assertEquals(15, done.response().usage().outputTokens());
-    }
+    var events = drain(sse);
+    var done = (StreamEvent.Done) events.getLast();
+    assertNotNull(done.response().usage());
+    assertEquals(25, done.response().usage().inputTokens());
+    assertEquals(15, done.response().usage().outputTokens());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void emptyAndDoneDataLinesAreSkipped() {
     var sse = "data: \n\ndata: [DONE]\n\n" + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-      assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
-    }
+    var events = drain(sse);
+    assertEquals(2, events.size());
+    assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void nonDataLinesAreIgnored() {
     var sse = "event: ping\n\n" + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-    }
+    var events = drain(sse);
+    assertEquals(2, events.size());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void malformedJsonEmitsErrorEvent() {
     var sse = "data: {not valid json}\n\n" + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertTrue(events.size() >= 2);
-      assertInstanceOf(StreamEvent.Error.class, events.get(0));
-    }
+    var events = drain(sse);
+    assertTrue(events.size() >= 2);
+    assertInstanceOf(StreamEvent.Error.class, events.get(0));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void idleTimeoutEmitsErrorEvent() {
     var neverDelivers = new FeedableInputStream();
 
@@ -249,127 +200,102 @@ class StreamingIteratorTest {
         new SseReader(
             neverDelivers, SHORT_IDLE_TIMEOUT, new OpenAIStreamParser(), OpenAIException::new)) {
       assertTrue(iterator.hasNext());
-      var event = iterator.next();
-      assertInstanceOf(StreamEvent.Error.class, event);
-      var error = (StreamEvent.Error) event;
+      var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().contains("idle timeout"));
-      assertInstanceOf(OpenAIException.class, error.cause());
-      assertTrue(((OpenAIException) error.cause()).isRetryable());
+      assertTrue(assertInstanceOf(OpenAIException.class, error.cause()).isRetryable());
     }
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void closeIsIdempotent() {
-    var sse = TEXT_DELTA + RESPONSE_COMPLETED;
-    var iterator = createIterator(sse, NEVER_IDLE);
+    var iterator = reader(SseEvents.body(TEXT_DELTA + RESPONSE_COMPLETED));
     iterator.close();
     iterator.close();
     assertFalse(iterator.hasNext());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void closeAfterPartialConsumption() {
-    var sse = TEXT_DELTA + RESPONSE_COMPLETED;
-    var iterator = createIterator(sse, NEVER_IDLE);
+    var iterator = reader(SseEvents.body(TEXT_DELTA + RESPONSE_COMPLETED));
     assertTrue(iterator.hasNext());
     iterator.next();
     iterator.close();
     assertFalse(iterator.hasNext());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void multipleTextDeltas() {
     var delta2 =
         "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,"
             + "\"content_index\":0,\"delta\":\" World\"}\n\n";
 
     var sse = TEXT_DELTA + delta2 + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(3, events.size());
-      var done = (StreamEvent.Done) events.getLast();
-      assertEquals("Hello World", done.response().content());
-    }
+    var events = drain(sse);
+    assertEquals(3, events.size());
+    var done = (StreamEvent.Done) events.getLast();
+    assertEquals("Hello World", done.response().content());
   }
 
   // ── prompt-caching usage surfacing (hv2-bug2 Issue 1 — OpenAI peer) ──────
 
-  @org.junit.jupiter.api.Test
+  @Test
   void cachedTokensSurfaceThroughResponseUsageInDisjointShape() {
     // OpenAI reports input_tokens as the TOTAL (cached + uncached), with
     // input_tokens_details.cached_tokens as the cached subset. The Helios provider must
     // re-project into the disjoint Response.Usage shape so cost accounting doesn't
     // double-count cached tokens at the base input rate.
     var sse = TEXT_DELTA + RESPONSE_COMPLETED_WITH_CACHED_TOKENS;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      var usage = done.response().usage();
-      assertEquals(
-          2006 - 1920,
-          usage.inputTokens(),
-          "Helios inputTokens must be UNCACHED only — wire input_tokens minus cached_tokens");
-      assertEquals(150, usage.outputTokens());
-      assertEquals(
-          0,
-          usage.cacheCreationInputTokens(),
-          "OpenAI does not premium cache writes, so cacheCreation is always 0");
-      assertEquals(
-          1920,
-          usage.cacheReadInputTokens(),
-          "cached_tokens from input_tokens_details surfaces as cacheReadInputTokens");
-      assertEquals(
-          (2006 - 1920) + 150 + 0 + 1920,
-          usage.totalTokens(),
-          "totalTokens sums every billable token across all four classes");
-    }
+    var events = drain(sse);
+    var done = (StreamEvent.Done) events.getLast();
+    var usage = done.response().usage();
+    assertEquals(
+        2006 - 1920,
+        usage.inputTokens(),
+        "Helios inputTokens must be UNCACHED only — wire input_tokens minus cached_tokens");
+    assertEquals(150, usage.outputTokens());
+    assertEquals(
+        0,
+        usage.cacheCreationInputTokens(),
+        "OpenAI does not premium cache writes, so cacheCreation is always 0");
+    assertEquals(
+        1920,
+        usage.cacheReadInputTokens(),
+        "cached_tokens from input_tokens_details surfaces as cacheReadInputTokens");
+    assertEquals(
+        (2006 - 1920) + 150 + 0 + 1920,
+        usage.totalTokens(),
+        "totalTokens sums every billable token across all four classes");
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void cachedTokensZeroProducesUsageWithDisjointSplit() {
     // Below the 1024-token cache threshold, OpenAI reports cached_tokens=0 explicitly.
     // Re-projection still applies: inputTokens stays at the full wire value, cache fields 0.
     var sse = TEXT_DELTA + RESPONSE_COMPLETED_WITH_ZERO_CACHED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      var usage = done.response().usage();
-      assertEquals(50, usage.inputTokens());
-      assertEquals(15, usage.outputTokens());
-      assertEquals(0, usage.cacheReadInputTokens());
-      assertEquals(0, usage.cacheCreationInputTokens());
-      assertEquals(65, usage.totalTokens());
-    }
+    var events = drain(sse);
+    var done = (StreamEvent.Done) events.getLast();
+    var usage = done.response().usage();
+    assertEquals(50, usage.inputTokens());
+    assertEquals(15, usage.outputTokens());
+    assertEquals(0, usage.cacheReadInputTokens());
+    assertEquals(0, usage.cacheCreationInputTokens());
+    assertEquals(65, usage.totalTokens());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void absentInputTokensDetailsTreatsCachedAsZero() {
     // Older API versions and OpenAI-compatible proxies omit input_tokens_details entirely.
     // The provider's cachedTokensOrZero() helper normalizes to 0 so we never NPE.
     var sse = TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      var usage = done.response().usage();
-      assertEquals(25, usage.inputTokens());
-      assertEquals(15, usage.outputTokens());
-      assertEquals(0, usage.cacheReadInputTokens());
-    }
+    var events = drain(sse);
+    var done = (StreamEvent.Done) events.getLast();
+    var usage = done.response().usage();
+    assertEquals(25, usage.inputTokens());
+    assertEquals(15, usage.outputTokens());
+    assertEquals(0, usage.cacheReadInputTokens());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void cachedTokensExceedingInputTokensDoesNotProduceNegativeUncached() {
     // Defensive: an OpenAI accounting bug that reports cached_tokens > input_tokens would
     // produce a negative uncached value in naive arithmetic. The provider clamps at zero —
@@ -381,48 +307,33 @@ class StreamingIteratorTest {
             + "\"usage\":{\"input_tokens\":100,\"output_tokens\":20,\"total_tokens\":120,"
             + "\"input_tokens_details\":{\"cached_tokens\":500}}}}\n\n";
     var sse = TEXT_DELTA + pathological;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      var usage = done.response().usage();
-      assertEquals(0, usage.inputTokens(), "clamped to zero — never negative");
-      assertEquals(500, usage.cacheReadInputTokens());
-    }
+    var events = drain(sse);
+    var done = (StreamEvent.Done) events.getLast();
+    var usage = done.response().usage();
+    assertEquals(0, usage.inputTokens(), "clamped to zero — never negative");
+    assertEquals(500, usage.cacheReadInputTokens());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void emptyStreamProducesDoneWithEmptyContent() {
     var sse = RESPONSE_COMPLETED_NO_USAGE;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(1, events.size());
-      var done = (StreamEvent.Done) events.getFirst();
-      assertEquals("", done.response().content());
-      assertEquals(FinishReason.STOP, done.response().finishReason());
-    }
+    var events = drain(sse);
+    assertEquals(1, events.size());
+    var done = (StreamEvent.Done) events.getFirst();
+    assertEquals("", done.response().content());
+    assertEquals(FinishReason.STOP, done.response().finishReason());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void noReasoningMetadataWhenNotPresent() {
     var sse = TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      assertNull(done.response().thinking());
-      assertFalse(done.response().metadata().containsKey(OpenAIResponseAssembler.REASONING_KEY));
-    }
+    var events = drain(sse);
+    var done = (StreamEvent.Done) events.getLast();
+    assertNull(done.response().thinking());
+    assertFalse(done.response().metadata().containsKey(OpenAIResponseAssembler.REASONING_KEY));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void toolCallWithEmptyArgs() {
     var toolItemAdded =
         "data: {\"type\":\"response.output_item.added\",\"output_index\":0,"
@@ -438,225 +349,155 @@ class StreamingIteratorTest {
 
     var sse = toolItemAdded + argsDone + RESPONSE_COMPLETED;
 
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var tcComplete =
-          events.stream()
-              .filter(e -> e instanceof StreamEvent.ToolCallComplete)
-              .map(e -> (StreamEvent.ToolCallComplete) e)
-              .findFirst()
-              .orElseThrow();
-      assertEquals("list_items", tcComplete.toolCall().name());
-      assertEquals(Map.of(), tcComplete.toolCall().arguments());
-    }
+    var events = drain(sse);
+    var tcComplete =
+        events.stream()
+            .filter(e -> e instanceof StreamEvent.ToolCallComplete)
+            .map(e -> (StreamEvent.ToolCallComplete) e)
+            .findFirst()
+            .orElseThrow();
+    assertEquals("list_items", tcComplete.toolCall().name());
+    assertEquals(Map.of(), tcComplete.toolCall().arguments());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void responseFailedEmitsError() {
     var failed =
         "data: {\"type\":\"response.failed\",\"response\":{"
             + "\"id\":\"resp_1\",\"status\":\"failed\"}}\n\n";
     var sse = TEXT_DELTA + failed;
 
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertTrue(events.stream().anyMatch(e -> e instanceof StreamEvent.Error));
-    }
+    var events = drain(sse);
+    assertTrue(events.stream().anyMatch(e -> e instanceof StreamEvent.Error));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void errorEventEmitsError() {
     var error = "data: {\"type\":\"error\",\"message\":\"something went wrong\"}\n\n";
     var sse = error + TEXT_DELTA + RESPONSE_COMPLETED;
 
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertInstanceOf(StreamEvent.Error.class, events.get(0));
-    }
+    var events = drain(sse);
+    assertInstanceOf(StreamEvent.Error.class, events.get(0));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void textDeltaNullDeltaIsSkipped() {
     var nullDelta =
         "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,"
             + "\"content_index\":0}\n\n";
     var sse = nullDelta + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-      assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
-      assertEquals("Hello", ((StreamEvent.TextDelta) events.get(0)).text());
-    }
+    var events = drain(sse);
+    assertEquals(2, events.size());
+    assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
+    assertEquals("Hello", ((StreamEvent.TextDelta) events.get(0)).text());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void outputItemAddedNullItemIsSkipped() {
     var nullItem = "data: {\"type\":\"response.output_item.added\",\"output_index\":0}\n\n";
     var sse = nullItem + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-      assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
-    }
+    var events = drain(sse);
+    assertEquals(2, events.size());
+    assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void outputItemAddedNonFunctionCallIsSkipped() {
     var messageItem =
         "data: {\"type\":\"response.output_item.added\",\"output_index\":0,"
             + "\"item\":{\"type\":\"message\",\"id\":\"msg_1\","
             + "\"role\":\"assistant\",\"content\":[],\"status\":\"in_progress\"}}\n\n";
     var sse = messageItem + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-      assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
-    }
+    var events = drain(sse);
+    assertEquals(2, events.size());
+    assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void argsDeltaNullDeltaIsSkipped() {
     var nullDelta =
         "data: {\"type\":\"response.function_call_arguments.delta\","
             + "\"output_index\":0,\"item_id\":\"fc_1\"}\n\n";
     var sse = nullDelta + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-    }
+    var events = drain(sse);
+    assertEquals(2, events.size());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void argsDeltaNullItemIdIsSkipped() {
     var nullItemId =
         "data: {\"type\":\"response.function_call_arguments.delta\","
             + "\"output_index\":0,\"delta\":\"test\"}\n\n";
     var sse = nullItemId + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-    }
+    var events = drain(sse);
+    assertEquals(2, events.size());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void argsDoneNullItemIdIsSkipped() {
     var nullItemId =
         "data: {\"type\":\"response.function_call_arguments.done\"," + "\"output_index\":0}\n\n";
     var sse = nullItemId + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-    }
+    var events = drain(sse);
+    assertEquals(2, events.size());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void argsDoneUnknownItemIdIsSkipped() {
     var unknownId =
         "data: {\"type\":\"response.function_call_arguments.done\","
             + "\"output_index\":0,\"item_id\":\"unknown_id\"}\n\n";
     var sse = unknownId + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-    }
+    var events = drain(sse);
+    assertEquals(2, events.size());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void responseCompletedNullResponseUsesDefaults() {
     var noResponse = "data: {\"type\":\"response.completed\"}\n\n";
     var sse = TEXT_DELTA + noResponse;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-      var done = (StreamEvent.Done) events.getLast();
-      assertNull(done.response().usage());
-      assertEquals(FinishReason.STOP, done.response().finishReason());
-    }
+    var events = drain(sse);
+    assertEquals(2, events.size());
+    var done = (StreamEvent.Done) events.getLast();
+    assertNull(done.response().usage());
+    assertEquals(FinishReason.STOP, done.response().finishReason());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void responseCompletedNullUsage() {
     var noUsage =
         "data: {\"type\":\"response.completed\",\"response\":{"
             + "\"id\":\"resp_1\",\"status\":\"completed\"}}\n\n";
     var sse = TEXT_DELTA + noUsage;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      assertNull(done.response().usage());
-    }
+    var events = drain(sse);
+    var done = (StreamEvent.Done) events.getLast();
+    assertNull(done.response().usage());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void responseCompletedPartialUsageTokens() {
     var partialUsage =
         "data: {\"type\":\"response.completed\",\"response\":{"
             + "\"id\":\"resp_1\",\"status\":\"completed\","
             + "\"usage\":{\"input_tokens\":10,\"total_tokens\":10}}}\n\n";
     var sse = TEXT_DELTA + partialUsage;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      assertNotNull(done.response().usage());
-      assertEquals(10, done.response().usage().inputTokens());
-    }
+    var events = drain(sse);
+    var done = (StreamEvent.Done) events.getLast();
+    assertNotNull(done.response().usage());
+    assertEquals(10, done.response().usage().inputTokens());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void reasoningSummaryNullTextIsSkipped() {
     var nullText =
         "data: {\"type\":\"response.reasoning_summary_text.delta\"," + "\"output_index\":0}\n\n";
     var sse = nullText + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      assertNull(done.response().thinking());
-    }
+    var events = drain(sse);
+    var done = (StreamEvent.Done) events.getLast();
+    assertNull(done.response().thinking());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void malformedToolCallArgsUseFallback() {
     var toolItemAdded =
         "data: {\"type\":\"response.output_item.added\",\"output_index\":0,"
@@ -675,66 +516,49 @@ class StreamingIteratorTest {
 
     var sse = toolItemAdded + argsDelta + argsDone + RESPONSE_COMPLETED;
 
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var tcComplete =
-          events.stream()
-              .filter(e -> e instanceof StreamEvent.ToolCallComplete)
-              .map(e -> (StreamEvent.ToolCallComplete) e)
-              .findFirst()
-              .orElseThrow();
-      assertTrue(tcComplete.toolCall().arguments().containsKey("_raw"));
-      assertEquals("not valid json", tcComplete.toolCall().arguments().get("_raw"));
-    }
+    var events = drain(sse);
+    var tcComplete =
+        events.stream()
+            .filter(e -> e instanceof StreamEvent.ToolCallComplete)
+            .map(e -> (StreamEvent.ToolCallComplete) e)
+            .findFirst()
+            .orElseThrow();
+    assertTrue(tcComplete.toolCall().arguments().containsKey("_raw"));
+    assertEquals("not valid json", tcComplete.toolCall().arguments().get("_raw"));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void argsDeltaUnknownAccumulatorIsIgnored() {
     var delta =
         "data: {\"type\":\"response.function_call_arguments.delta\","
             + "\"output_index\":0,\"item_id\":\"unknown_id\","
             + "\"delta\":\"some data\"}\n\n";
     var sse = delta + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-    }
+    var events = drain(sse);
+    assertEquals(2, events.size());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void unknownEventTypeIsSkipped() {
     var unknown = "data: {\"type\":\"response.some_unknown_event\"}\n\n";
     var sse = unknown + TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-      assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
-    }
+    var events = drain(sse);
+    assertEquals(2, events.size());
+    assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void nextWithoutHasNextWorks() {
-    var sse = TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
+    try (var iterator = reader(SseEvents.body(TEXT_DELTA + RESPONSE_COMPLETED))) {
       var event = iterator.next();
       assertNotNull(event);
       assertInstanceOf(StreamEvent.TextDelta.class, event);
     }
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void hasNextCalledTwiceReturnsCachedEvent() {
-    var sse = TEXT_DELTA + RESPONSE_COMPLETED;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
+    try (var iterator = reader(SseEvents.body(TEXT_DELTA + RESPONSE_COMPLETED))) {
       assertTrue(iterator.hasNext());
       assertTrue(iterator.hasNext());
       var event = iterator.next();
@@ -742,85 +566,41 @@ class StreamingIteratorTest {
     }
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void usageWithOnlyOutputTokens() {
     var response =
         "data: {\"type\":\"response.completed\",\"response\":{"
             + "\"id\":\"resp_1\",\"status\":\"completed\","
             + "\"usage\":{\"output_tokens\":42,\"total_tokens\":42}}}\n\n";
     var sse = TEXT_DELTA + response;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      assertNotNull(done.response().usage());
-      assertEquals(42, done.response().usage().outputTokens());
-      assertEquals(0, done.response().usage().inputTokens());
-    }
+    var events = drain(sse);
+    var done = (StreamEvent.Done) events.getLast();
+    assertNotNull(done.response().usage());
+    assertEquals(42, done.response().usage().outputTokens());
+    assertEquals(0, done.response().usage().inputTokens());
   }
 
-  @org.junit.jupiter.api.Test
-  void ioExceptionDuringReadEmitsError() throws Exception {
-    var failingStream =
-        new InputStream() {
-          @Override
-          public int read() throws IOException {
-            throw new IOException("Simulated network error");
-          }
-        };
-    try (var iterator =
-        new SseReader(failingStream, NEVER_IDLE, new OpenAIStreamParser(), OpenAIException::new)) {
-      assertTrue(iterator.hasNext());
-      var event = iterator.next();
-      assertInstanceOf(StreamEvent.Error.class, event);
-    }
+  @Test
+  void ioExceptionDuringReadEmitsError() {
+    firstError(FailingInputStream.onRead(new IOException("Simulated network error")));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void runtimeExceptionFromReaderEmitsErrorEvent() {
-    var failingStream =
-        new InputStream() {
-          @Override
-          public int read() {
-            throw new RuntimeException("Unexpected failure");
-          }
-        };
-    try (var iterator =
-        new SseReader(failingStream, NEVER_IDLE, new OpenAIStreamParser(), OpenAIException::new)) {
-      assertTrue(iterator.hasNext());
-      var event = iterator.next();
-      assertInstanceOf(StreamEvent.Error.class, event);
-      var error = (StreamEvent.Error) event;
-      assertTrue(error.message().contains("Stream read error"));
-    }
+    var error = firstError(FailingInputStream.onRead(new RuntimeException("Unexpected failure")));
+
+    assertTrue(error.message().contains("Stream read error"));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void interruptedThreadEmitsErrorEvent() {
-    var neverDelivers = new FeedableInputStream();
-    var events = new ArrayList<StreamEvent>();
-    var thread =
-        new Thread(
-            () -> {
-              try (var iterator =
-                  new SseReader(
-                      neverDelivers, NEVER_IDLE, new OpenAIStreamParser(), OpenAIException::new)) {
-                while (iterator.hasNext()) {
-                  events.add(iterator.next());
-                }
-              }
-            });
-    thread.start();
-    neverDelivers.awaitBlockedRead();
-    thread.interrupt();
-    Await.termination("the interrupted consumer thread", thread);
+    var events = SseEvents.drainInterrupted(StreamingIteratorTest::reader);
+
     assertFalse(events.isEmpty());
     assertInstanceOf(StreamEvent.Error.class, events.getFirst());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void incompleteStatusMapsToLength() {
     var incompleteResponse =
         "data: {\"type\":\"response.completed\",\"response\":{"
@@ -830,18 +610,21 @@ class StreamingIteratorTest {
 
     var sse = TEXT_DELTA + incompleteResponse;
 
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      assertEquals(FinishReason.LENGTH, done.response().finishReason());
-    }
+    var events = drain(sse);
+    var done = (StreamEvent.Done) events.getLast();
+    assertEquals(FinishReason.LENGTH, done.response().finishReason());
   }
 
-  private SseReader createIterator(String sseData, Duration idleTimeout) {
-    var inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8));
-    return new SseReader(inputStream, idleTimeout, new OpenAIStreamParser(), OpenAIException::new);
+  private static SseReader reader(InputStream body) {
+    return new SseReader(
+        body, SseEvents.NEVER_IDLE, new OpenAIStreamParser(), OpenAIException::new);
+  }
+
+  private static List<StreamEvent> drain(String sse) {
+    return SseEvents.drain(reader(SseEvents.body(sse)));
+  }
+
+  private static StreamEvent.Error firstError(InputStream body) {
+    return assertInstanceOf(StreamEvent.Error.class, SseEvents.drain(reader(body)).getFirst());
   }
 }
