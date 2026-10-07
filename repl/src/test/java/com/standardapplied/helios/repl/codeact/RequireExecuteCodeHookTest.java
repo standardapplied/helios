@@ -4,59 +4,22 @@
  */
 package com.standardapplied.helios.repl.codeact;
 
+import static com.standardapplied.helios.session.test.HookInputs.call;
+import static com.standardapplied.helios.session.test.HookInputs.context;
+import static com.standardapplied.helios.session.test.HookInputs.stopResponse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.execution.ExecuteTool;
-import com.standardapplied.helios.session.hooks.DefaultHookContext;
-import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 final class RequireExecuteCodeHookTest {
-
-  private static final Model STUB_MODEL =
-      new Model() {
-        @Override
-        public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-          return Response.newBuilder().build();
-        }
-
-        @Override
-        public String id() {
-          return "stub";
-        }
-
-        @Override
-        public String provider() {
-          return "stub";
-        }
-      };
-
-  private static HookContext ctx() {
-    return new DefaultHookContext("sess", 0, new CancellationToken(), STUB_MODEL);
-  }
-
-  private static ToolCall call(String name) {
-    return new ToolCall("c-" + name, name, Map.of());
-  }
-
-  private static Response<Void> stop() {
-    return Response.newBuilder().withContent("done").build();
-  }
 
   @Test
   void implementsBothHookPhases() {
@@ -69,29 +32,29 @@ final class RequireExecuteCodeHookTest {
   void unmetByDefault() {
     var hook = new RequireExecuteCodeHook();
     assertFalse(hook.hasExecutedCode());
-    assertInstanceOf(HookOutcome.Inject.class, hook.beforeStop(stop(), ctx()));
+    assertInstanceOf(HookOutcome.Inject.class, hook.beforeStop(stopResponse(), context()));
   }
 
   @Test
   void unrelatedToolDoesNotSatisfy() {
     var hook = new RequireExecuteCodeHook();
-    hook.afterTool(call("Other"), ToolResult.success("x"), ctx());
+    hook.afterTool(call("Other"), ToolResult.success("x"), context());
     assertFalse(hook.hasExecutedCode());
-    assertInstanceOf(HookOutcome.Inject.class, hook.beforeStop(stop(), ctx()));
+    assertInstanceOf(HookOutcome.Inject.class, hook.beforeStop(stopResponse(), context()));
   }
 
   @Test
   void executeCodeCallFlipsState() {
     var hook = new RequireExecuteCodeHook();
-    hook.afterTool(call(ExecuteTool.NAME), ToolResult.success("ok"), ctx());
+    hook.afterTool(call(ExecuteTool.NAME), ToolResult.success("ok"), context());
     assertTrue(hook.hasExecutedCode());
-    assertInstanceOf(HookOutcome.Continue.class, hook.beforeStop(stop(), ctx()));
+    assertInstanceOf(HookOutcome.Continue.class, hook.beforeStop(stopResponse(), context()));
   }
 
   @Test
   void injectMessageMentionsExecuteCode() {
     var hook = new RequireExecuteCodeHook();
-    var decision = hook.beforeStop(stop(), ctx());
+    var decision = hook.beforeStop(stopResponse(), context());
     var msg = ((HookOutcome.Inject) decision).userMessage();
     assertTrue(msg.contains(ExecuteTool.NAME));
   }

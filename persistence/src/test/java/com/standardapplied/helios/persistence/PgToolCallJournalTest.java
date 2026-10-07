@@ -7,135 +7,39 @@ package com.standardapplied.helios.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.runtime.ToolCallJournal;
 import com.standardapplied.helios.core.runtime.ToolCallRecord;
-import com.standardapplied.helios.core.runtime.ToolCallStatus;
+import com.standardapplied.helios.core.test.ToolCallJournalContract;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-class PgToolCallJournalTest {
+class PgToolCallJournalTest extends ToolCallJournalContract {
 
-  private PgToolCallJournal journal;
-
-  @BeforeEach
-  void setUp() {
+  @Override
+  protected ToolCallJournal createJournal() {
     PgTestSupport.truncateRuntime();
-    journal = new PgToolCallJournal(PgTestSupport.pgConfig());
+    return new PgToolCallJournal(PgTestSupport.pgConfig());
   }
 
-  private static ToolCallRecord started(UUID runId, String callId, String toolName) {
-    return ToolCallRecord.newBuilder()
-        .withRunId(runId)
-        .withIteration(0)
-        .withToolCallId(callId)
-        .withToolName(toolName)
-        .withArgs(Map.of("k", "v"))
-        .withStartedAt(Ids.now())
-        .build();
+  @Override
+  protected UUID newRunId() {
+    return PgTestSupport.newSeededRunId();
   }
 
   @Test
-  void startThenComplete() {
-    var runId = PgTestSupport.newSeededRunId();
-    journal.start(started(runId, "c1", "weather"));
-    journal.complete(runId, "c1", "sunny");
-
-    var all = journal.all(runId);
-    assertEquals(1, all.size());
-    assertEquals(ToolCallStatus.SUCCEEDED, all.get(0).status());
-    assertEquals("sunny", all.get(0).output());
-    assertNotNull(all.get(0).endedAt());
-    assertNull(all.get(0).error());
-    assertEquals(Map.of("k", "v"), all.get(0).args());
-  }
-
-  @Test
-  void startThenFail() {
-    var runId = PgTestSupport.newSeededRunId();
-    journal.start(started(runId, "c1", "weather"));
-    journal.fail(runId, "c1", "boom");
-
-    var rec = journal.all(runId).get(0);
-    assertEquals(ToolCallStatus.FAILED, rec.status());
-    assertEquals("boom", rec.error());
-    assertNull(rec.output());
-  }
-
-  @Test
-  void inflightExcludesTerminal() {
-    var runId = PgTestSupport.newSeededRunId();
-    journal.start(started(runId, "c1", "send"));
-    journal.start(started(runId, "c2", "send"));
-    journal.start(started(runId, "c3", "send"));
-    journal.complete(runId, "c1", "ok");
-    journal.fail(runId, "c2", "boom");
-
-    var inflight = journal.inflight(runId);
-    assertEquals(1, inflight.size());
-    assertEquals("c3", inflight.get(0).toolCallId());
-  }
-
-  @Test
-  void completeNoMatchIsNoOp() {
-    var runId = PgTestSupport.newSeededRunId();
-    journal.complete(runId, "missing", "irrelevant");
-    assertTrue(journal.all(runId).isEmpty());
-  }
-
-  @Test
-  void completeAfterTerminalIsNoOp() {
-    var runId = PgTestSupport.newSeededRunId();
-    journal.start(started(runId, "c1", "send"));
-    journal.fail(runId, "c1", "first");
-    journal.complete(runId, "c1", "second");
-    var rec = journal.all(runId).get(0);
-    assertEquals(ToolCallStatus.FAILED, rec.status());
-    assertEquals("first", rec.error());
-  }
-
-  @Test
-  void inflightUnknownReturnsEmpty() {
-    assertTrue(journal.inflight(Ids.newId()).isEmpty());
+  void inflightOnNullRunIsEmpty() {
     assertTrue(journal.inflight(null).isEmpty());
   }
 
   @Test
-  void allUnknownReturnsEmpty() {
-    assertTrue(journal.all(Ids.newId()).isEmpty());
+  void allOnNullRunIsEmpty() {
     assertTrue(journal.all(null).isEmpty());
-  }
-
-  @Test
-  void rejectsNullStart() {
-    assertThrows(NullPointerException.class, () -> journal.start(null));
-  }
-
-  @Test
-  void rejectsNullCompleteRunId() {
-    assertThrows(NullPointerException.class, () -> journal.complete(null, "c1", "ok"));
-  }
-
-  @Test
-  void rejectsNullCompleteCallId() {
-    assertThrows(NullPointerException.class, () -> journal.complete(Ids.newId(), null, "ok"));
-  }
-
-  @Test
-  void rejectsNullFailRunId() {
-    assertThrows(NullPointerException.class, () -> journal.fail(null, "c1", "boom"));
-  }
-
-  @Test
-  void rejectsNullFailCallId() {
-    assertThrows(NullPointerException.class, () -> journal.fail(Ids.newId(), null, "boom"));
   }
 
   @Test
@@ -144,22 +48,6 @@ class PgToolCallJournalTest {
     var record = started(runId, "c1", "send");
     journal.start(record);
     assertThrows(PgException.class, () -> journal.start(record));
-  }
-
-  @Test
-  void argsNullPersistsAsNull() {
-    var runId = PgTestSupport.newSeededRunId();
-    var record =
-        ToolCallRecord.newBuilder()
-            .withRunId(runId)
-            .withIteration(0)
-            .withToolCallId("c1")
-            .withToolName("send")
-            .withArgs(null)
-            .withStartedAt(Ids.now())
-            .build();
-    journal.start(record);
-    assertNull(journal.all(runId).get(0).args());
   }
 
   // ── opt-in journal-side redaction (PgConfig.withRedactor) ─────────────────
