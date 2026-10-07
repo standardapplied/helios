@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.schema.SchemaGenerator;
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -519,5 +520,19 @@ class ToolTest {
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
     assertFalse(tool.idempotent());
+  }
+
+  @Test
+  void parametersAsJsonSchemaListsKeysAndParametersInDeclaredOrder() {
+    var report = DeclarationOrderFixture.tools().getFirst();
+    var schema = report.parametersAsJsonSchema();
+    @SuppressWarnings("unchecked")
+    var properties = (Map<String, Object>) schema.get("properties");
+
+    assertEquals(List.of("type", "properties", "required"), DeclarationOrderFixture.keys(schema));
+    assertEquals(
+        DeclarationOrderFixture.REPORT_PARAMETERS, DeclarationOrderFixture.keys(properties));
+    assertEquals(DeclarationOrderFixture.REPORT_PARAMETERS, schema.get("required"));
+    assertThrows(UnsupportedOperationException.class, () -> schema.put("x", "y"));
   }
 }

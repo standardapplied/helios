@@ -64,7 +64,7 @@ record AnthropicTools(List<ToolDefinition> client, List<ToolDefinition> server) 
               "Claude tool choice supports only a single tool name, got: "
                   + required.allowedTools());
         }
-        yield ToolChoiceConfig.tool(required.allowedTools().iterator().next());
+        yield ToolChoiceConfig.tool(required.allowedTools().getFirst());
       }
     };
   }

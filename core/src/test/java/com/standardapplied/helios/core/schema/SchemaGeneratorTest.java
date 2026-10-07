@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.List;
@@ -872,5 +873,20 @@ class SchemaGeneratorTest {
 
     assertEquals(Map.of("is", JsonSchema.bool(), "isbn", JsonSchema.string()), schema.properties());
     assertEquals(List.of("is", "isbn"), schema.required());
+  }
+
+  @Test
+  void recordPropertiesAndRequiredFollowComponentDeclarationOrder() {
+    var schema = SchemaGenerator.generate(DeclarationOrderFixture.Dossier.class);
+
+    assertEquals(
+        DeclarationOrderFixture.DOSSIER_FIELDS, DeclarationOrderFixture.keys(schema.properties()));
+    assertEquals(DeclarationOrderFixture.DOSSIER_FIELDS, schema.required());
+    assertEquals(
+        List.of("northing", "easting"),
+        DeclarationOrderFixture.keys(schema.properties().get("scene").properties()));
+    assertEquals(
+        List.of("alias", "testimony", "credibility"),
+        DeclarationOrderFixture.keys(schema.properties().get("witnesses").items().properties()));
   }
 }

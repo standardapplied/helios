@@ -3,6 +3,7 @@ package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import com.standardapplied.helios.repl.protocol.RpcError;
 import com.standardapplied.helios.repl.protocol.RpcMessage;
@@ -225,5 +226,21 @@ class ExecutionResultMappingTest {
     reply.put("submitted", submitted);
     reply.put("bindings", bindings);
     return reply;
+  }
+
+  @Test
+  void bindingsKeepTheSandboxsDeclarationOrder() {
+    var bindings = new LinkedHashMap<String, Object>();
+    for (var name : DeclarationOrderFixture.ARGUMENTS) {
+      bindings.put(name, name.length());
+    }
+
+    var result = ExecutionReplies.toExecutionResult(CODE, Map.of("bindings", bindings), "");
+
+    assertEquals(
+        DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(result.bindings()));
+    assertEquals(
+        DeclarationOrderFixture.ARGUMENTS,
+        DeclarationOrderFixture.keys(result.withDuration(Duration.ofSeconds(1)).bindings()));
   }
 }

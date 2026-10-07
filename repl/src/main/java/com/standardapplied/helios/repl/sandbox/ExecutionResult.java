@@ -6,6 +6,8 @@
 package com.standardapplied.helios.repl.sandbox;
 
 import java.time.Duration;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -49,7 +51,8 @@ public record ExecutionResult(
     if (stderr == null) {
       stderr = "";
     }
-    bindings = bindings == null ? Map.of() : Map.copyOf(bindings);
+    bindings =
+        bindings == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(bindings));
     if (duration == null || duration.isNegative()) {
       duration = Duration.ZERO;
     }

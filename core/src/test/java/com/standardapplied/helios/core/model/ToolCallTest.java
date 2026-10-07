@@ -6,8 +6,11 @@
 package com.standardapplied.helios.core.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -55,5 +58,37 @@ class ToolCallTest {
 
     assertEquals(1, toolCall.arguments().size());
     assertEquals("value", toolCall.arguments().get("key"));
+  }
+
+  @Test
+  void argumentsKeepTheOrderTheyWereGiven() {
+    var arguments = new LinkedHashMap<String, Object>();
+    for (var name : DeclarationOrderFixture.ARGUMENTS) {
+      arguments.put(name, name);
+    }
+
+    var call = ToolCall.newBuilder().withArguments(arguments).build();
+
+    assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(call.arguments()));
+    assertEquals(
+        DeclarationOrderFixture.ARGUMENTS,
+        DeclarationOrderFixture.keys(ToolCall.copyOfArguments(arguments)));
+  }
+
+  @Test
+  void copyOfArgumentsRejectsANullNameOrValue() {
+    var nullValue = new LinkedHashMap<String, Object>();
+    nullValue.put("city", null);
+    var nullName = new LinkedHashMap<String, Object>();
+    nullName.put(null, "Paris");
+
+    assertEquals(
+        "argument city must not be null",
+        assertThrows(NullPointerException.class, () -> ToolCall.copyOfArguments(nullValue))
+            .getMessage());
+    assertEquals(
+        "argument name must not be null",
+        assertThrows(NullPointerException.class, () -> ToolCall.copyOfArguments(nullName))
+            .getMessage());
   }
 }

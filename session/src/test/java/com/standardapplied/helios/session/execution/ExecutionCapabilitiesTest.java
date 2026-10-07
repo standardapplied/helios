@@ -10,8 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -169,5 +173,20 @@ final class ExecutionCapabilitiesTest {
         assertThrows(
             IllegalArgumentException.class, () -> b.withMaxTimeout(Duration.ofSeconds(-1)));
     assertTrue(ex.getMessage().startsWith("maxTimeout must be strictly positive"));
+  }
+
+  @Test
+  void supportedRuntimesIterateInDeclarationOrder() {
+    var reversed = new ArrayList<>(List.of(Runtime.values()));
+    Collections.reverse(reversed);
+
+    var capabilities =
+        new ExecutionCapabilities(
+            new LinkedHashSet<>(reversed), false, false, Duration.ofSeconds(1));
+
+    assertEquals(List.of(Runtime.values()), List.copyOf(capabilities.supportedRuntimes()));
+    assertThrows(
+        UnsupportedOperationException.class,
+        () -> capabilities.supportedRuntimes().add(Runtime.BASH));
   }
 }

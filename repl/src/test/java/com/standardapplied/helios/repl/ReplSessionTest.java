@@ -229,6 +229,7 @@ class ReplSessionTest {
     var counts = session.calledHostFunctions();
     assertEquals(3, counts.get("marketQuote"));
     assertEquals(1, counts.get("fredIndicator"));
+    assertEquals(List.of("fredIndicator", "marketQuote"), List.copyOf(counts.keySet()));
     session.close();
   }
 

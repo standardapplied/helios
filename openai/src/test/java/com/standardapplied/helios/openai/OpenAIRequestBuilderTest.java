@@ -16,9 +16,11 @@ import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.core.test.ConversationFixture;
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.openai.api.ContentPart;
+import com.standardapplied.helios.openai.api.OpenAIJson;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -453,5 +455,32 @@ class OpenAIRequestBuilderTest {
     @SuppressWarnings("unchecked")
     var schemaMap = (Map<String, Object>) format.schema();
     assertEquals(false, schemaMap.get("additionalProperties"));
+  }
+
+  @Test
+  void requiredToolChoiceOfOneNameForcesThatFunction() {
+    assertEquals(
+        "{\"type\":\"function\",\"name\":\"file_report\"}",
+        sentToolChoice(ToolChoice.required("file_report")));
+  }
+
+  @Test
+  void requiredToolChoiceOfSeveralNamesAllowsExactlyThoseFunctionsInOrder() {
+    assertEquals(
+        "{\"type\":\"allowed_tools\",\"mode\":\"required\",\"tools\":["
+            + "{\"type\":\"function\",\"name\":\"file_report\"},"
+            + "{\"type\":\"function\",\"name\":\"lookup_case\"}]}",
+        sentToolChoice(DeclarationOrderFixture.requiredTools()));
+  }
+
+  private static String sentToolChoice(ToolChoice toolChoice) {
+    var config = ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(toolChoice).build();
+    var request =
+        requests(OpenAIModelId.GPT_4O, config)
+            .build(List.of(Message.user("File it")), DeclarationOrderFixture.tools(), null);
+    return OpenAIJson.LENIENT
+        .readTree(OpenAIJson.LENIENT.writeValueAsString(request))
+        .get("tool_choice")
+        .toString();
   }
 }

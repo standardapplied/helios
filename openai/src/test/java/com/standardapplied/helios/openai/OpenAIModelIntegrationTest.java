@@ -22,12 +22,23 @@ class OpenAIModelIntegrationTest extends ModelIntegrationContract {
 
   @BeforeAll
   static void setUp() {
-    var config = ModelConfig.newBuilder().withApiKey(System.getenv("OPENAI_API_KEY")).build();
-    model = new OpenAIProvider().create(OpenAIModelId.GPT_4_1_MINI.id(), config);
+    model = gpt41Mini(ModelConfig.newBuilder());
+  }
+
+  private static Model gpt41Mini(ModelConfig.Builder config) {
+    return new OpenAIProvider()
+        .create(
+            OpenAIModelId.GPT_4_1_MINI.id(),
+            config.withApiKey(System.getenv("OPENAI_API_KEY")).build());
   }
 
   @Override
   protected Model model() {
     return model;
+  }
+
+  @Override
+  protected Model model(ModelConfig.Builder config) {
+    return gpt41Mini(config);
   }
 }

@@ -125,17 +125,10 @@ final class PromptRenderingTest {
     // OutputSchema.of with a record marks all fields as required. We construct a JsonSchema
     // manually to exercise the optional branch without depending on schema-of semantics.
     var schema =
-        new JsonSchema(
-            "object",
-            Map.of(
-                "required", JsonSchema.string("required field"),
-                "optional", JsonSchema.string("optional field")),
-            null,
-            List.of("required"),
-            null,
-            null,
-            null,
-            null);
+        JsonSchema.object()
+            .withProperty("required", JsonSchema.string("required field"), true)
+            .withProperty("optional", JsonSchema.string("optional field"))
+            .build();
     var sb = new StringBuilder();
     PromptRendering.appendFields(sb, new OutputSchema<>(Map.class, schema, null, null, null));
     var rendered = sb.toString();
@@ -152,9 +145,7 @@ final class PromptRenderingTest {
 
   @Test
   void appendFieldsWithoutARequiredListMarksEveryFieldOptional() {
-    var schema =
-        new JsonSchema(
-            "object", Map.of("topic", JsonSchema.string()), null, null, null, null, null, null);
+    var schema = JsonSchema.object().withProperty("topic", JsonSchema.string()).build();
     var sb = new StringBuilder();
     PromptRendering.appendFields(sb, new OutputSchema<>(Map.class, schema, null, null, null));
     assertEquals("  - topic (String) [optional]\n", sb.toString());
@@ -200,16 +191,7 @@ final class PromptRenderingTest {
 
   @Test
   void appendFieldsWithoutDescriptionsOmitsEmDash() {
-    var schema =
-        new JsonSchema(
-            "object",
-            Map.of("topic", JsonSchema.string()),
-            null,
-            List.of("topic"),
-            null,
-            null,
-            null,
-            null);
+    var schema = JsonSchema.object().withProperty("topic", JsonSchema.string(), true).build();
     var sb = new StringBuilder();
     PromptRendering.appendFields(sb, new OutputSchema<>(Map.class, schema, null, null, null));
     assertFalse(sb.toString().contains("—"));

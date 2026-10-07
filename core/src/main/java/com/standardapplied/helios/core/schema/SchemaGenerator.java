@@ -11,7 +11,6 @@ import java.lang.reflect.WildcardType;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -84,7 +83,7 @@ public final class SchemaGenerator {
         properties.add(
             component.getName(), generateForType(component.getGenericType(), visited), component);
       }
-      return properties.toSchema(recordClass, Map::copyOf);
+      return properties.toSchema(recordClass);
     } finally {
       visited.remove(recordClass);
     }
@@ -105,7 +104,7 @@ public final class SchemaGenerator {
           properties.add(name, generateForType(method.getGenericReturnType(), visited), method);
         }
       }
-      return properties.toSchema(clazz, Collections::unmodifiableMap);
+      return properties.toSchema(clazz);
     } finally {
       visited.remove(clazz);
     }
