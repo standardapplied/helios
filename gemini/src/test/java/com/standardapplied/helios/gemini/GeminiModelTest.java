@@ -40,6 +40,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class GeminiModelTest {
 
@@ -123,29 +125,17 @@ class GeminiModelTest {
     assertEquals(2_000_000, model.contextWindow());
   }
 
-  @Test
-  void interactionsContentTypeImage() {
-    assertEquals("image", GeminiConversation.interactionsContentType("image/png"));
-    assertEquals("image", GeminiConversation.interactionsContentType("image/jpeg"));
-    assertEquals("image", GeminiConversation.interactionsContentType("image/webp"));
-  }
-
-  @Test
-  void interactionsContentTypeAudio() {
-    assertEquals("audio", GeminiConversation.interactionsContentType("audio/mp3"));
-    assertEquals("audio", GeminiConversation.interactionsContentType("audio/wav"));
-  }
-
-  @Test
-  void interactionsContentTypeVideo() {
-    assertEquals("video", GeminiConversation.interactionsContentType("video/mp4"));
-  }
-
-  @Test
-  void interactionsContentTypeDocument() {
-    assertEquals("document", GeminiConversation.interactionsContentType("application/pdf"));
-    assertEquals("document", GeminiConversation.interactionsContentType("text/plain"));
-    assertEquals("document", GeminiConversation.interactionsContentType("application/json"));
+  @ParameterizedTest(name = "interactionsContentType {0}: {1}")
+  @CsvSource({
+    "image, image/png image/jpeg image/webp",
+    "audio, audio/mp3 audio/wav",
+    "video, video/mp4",
+    "document, application/pdf text/plain application/json"
+  })
+  void interactionsContentType(String contentType, String mimeTypes) {
+    for (var mimeType : mimeTypes.split(" ")) {
+      assertEquals(contentType, GeminiConversation.interactionsContentType(mimeType), mimeType);
+    }
   }
 
   @Test
