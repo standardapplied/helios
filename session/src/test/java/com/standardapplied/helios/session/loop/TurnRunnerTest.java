@@ -414,7 +414,9 @@ final class TurnRunnerTest {
   @Test
   void dispatchUsesUntypedChatStreamWhenOutputSchemaIsNull() {
     var model = answeringStream("untyped");
-    runner(model).runTurn(freshState(), SessionLimits.defaults());
+    var outcome = runner(model).runTurn(freshState(), SessionLimits.defaults());
+    assertEquals(FinishReason.STOP, outcome.finishReason());
+    assertEquals("untyped", outcome.assistantContent());
     var schemas = model.outputSchemas();
     assertTrue(
         schemas.contains(Optional.empty()), "no outputSchema configured: must use untyped path");
@@ -429,7 +431,9 @@ final class TurnRunnerTest {
     var runner =
         fixture.runner(
             fixture.collaborators(hooks, dispatch, queue), model, CostCalculator.ZERO, schema);
-    runner.runTurn(freshState(), SessionLimits.defaults());
+    var outcome = runner.runTurn(freshState(), SessionLimits.defaults());
+    assertEquals(FinishReason.STOP, outcome.finishReason());
+    assertEquals("typed-with-schema", outcome.assistantContent());
     var schemas = model.outputSchemas();
     assertTrue(
         schemas.stream().anyMatch(Optional::isPresent),

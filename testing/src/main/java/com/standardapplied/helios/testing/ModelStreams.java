@@ -42,24 +42,54 @@ public final class ModelStreams {
   /**
    * A stream that never delivers a chunk or ends, as a stalled provider connection does. {@code
    * onRequest} runs on the requesting thread each time the subscriber requests chunks, so a test
-   * learns the consumer is now waiting.
+   * learns the consumer is now waiting. A non-positive request fails the stream with {@link
+   * IllegalArgumentException} instead, as {@link Flow.Subscription#request} requires.
    *
    * @param onRequest what to run on each request
    * @return the stream
    */
   public static Flow.Publisher<ModelChunk> stalled(Runnable onRequest) {
     Objects.requireNonNull(onRequest, "onRequest must not be null");
-    return subscriber ->
-        subscriber.onSubscribe(
-            new Flow.Subscription() {
-              @Override
-              public void request(long n) {
-                onRequest.run();
-              }
+    return subscriber -> {
+      Objects.requireNonNull(subscriber, "subscriber must not be null");
+      subscriber.onSubscribe(new StalledSubscription(onRequest, subscriber));
+    };
+  }
 
-              @Override
-              public void cancel() {}
-            });
+  private static final class StalledSubscription implements Flow.Subscription {
+
+    private final Runnable onRequest;
+    private final Flow.Subscriber<? super ModelChunk> subscriber;
+    private boolean ended;
+
+    StalledSubscription(Runnable onRequest, Flow.Subscriber<? super ModelChunk> subscriber) {
+      this.onRequest = onRequest;
+      this.subscriber = subscriber;
+    }
+
+    @Override
+    public void request(long n) {
+      synchronized (this) {
+        if (ended) {
+          return;
+        }
+        if (n <= 0) {
+          ended = true;
+          subscriber.onError(nonPositiveRequest(n));
+          return;
+        }
+      }
+      onRequest.run();
+    }
+
+    @Override
+    public synchronized void cancel() {
+      ended = true;
+    }
+  }
+
+  private static IllegalArgumentException nonPositiveRequest(long n) {
+    return new IllegalArgumentException("non-positive subscription request: " + n);
   }
 
   private record Replay(List<ModelChunk> chunks, Throwable error)
@@ -77,6 +107,8 @@ public final class ModelStreams {
     private final Replay replay;
     private final Flow.Subscriber<? super ModelChunk> subscriber;
     private int next;
+    private long demand;
+    private boolean draining;
     private boolean ended;
 
     ReplaySubscription(Replay replay, Flow.Subscriber<? super ModelChunk> subscriber) {
@@ -91,17 +123,33 @@ public final class ModelStreams {
       }
       if (n <= 0) {
         ended = true;
-        subscriber.onError(new IllegalArgumentException("non-positive subscription request: " + n));
+        subscriber.onError(nonPositiveRequest(n));
         return;
       }
-      for (var remaining = n;
-          remaining > 0 && next < replay.chunks().size() && !ended;
-          remaining--) {
-        subscriber.onNext(replay.chunks().get(next++));
+      demand = n >= Long.MAX_VALUE - demand ? Long.MAX_VALUE : demand + n;
+      if (!draining) {
+        drain();
       }
-      if (next == replay.chunks().size() && !ended) {
-        ended = true;
-        end();
+    }
+
+    /**
+     * Delivers demanded chunks in a loop rather than by recursion: a subscriber that requests from
+     * {@code onNext} re-enters this monitor and only adds to {@code demand}, so the stack stays
+     * flat however long the sequence.
+     */
+    private void drain() {
+      draining = true;
+      try {
+        while (demand > 0 && next < replay.chunks().size() && !ended) {
+          demand--;
+          subscriber.onNext(replay.chunks().get(next++));
+        }
+        if (next == replay.chunks().size() && !ended) {
+          ended = true;
+          end();
+        }
+      } finally {
+        draining = false;
       }
     }
 
