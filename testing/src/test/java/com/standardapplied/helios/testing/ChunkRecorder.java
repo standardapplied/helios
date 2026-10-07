@@ -15,12 +15,18 @@ final class ChunkRecorder implements Flow.Subscriber<ModelChunk> {
 
   final List<String> signals = new ArrayList<>();
   private Flow.Subscription subscription;
+  private boolean cancelOnNext;
 
   static ChunkRecorder drain(Flow.Publisher<ModelChunk> stream) {
     var recorder = new ChunkRecorder();
     stream.subscribe(recorder);
     recorder.request(Long.MAX_VALUE);
     return recorder;
+  }
+
+  ChunkRecorder cancellingOnEveryChunk() {
+    cancelOnNext = true;
+    return this;
   }
 
   void request(long n) {
@@ -40,6 +46,9 @@ final class ChunkRecorder implements Flow.Subscriber<ModelChunk> {
   @Override
   public void onNext(ModelChunk chunk) {
     signals.add(chunk.toString());
+    if (cancelOnNext) {
+      subscription.cancel();
+    }
   }
 
   @Override
