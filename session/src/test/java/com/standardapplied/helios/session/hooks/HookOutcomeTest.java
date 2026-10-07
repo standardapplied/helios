@@ -10,8 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -188,5 +190,17 @@ final class HookOutcomeTest {
   void continueRecordIsCheap() {
     var via = new HookOutcome.Continue();
     assertInstanceOf(HookOutcome.Continue.class, via);
+  }
+
+  @Test
+  void mutateArgsKeepsTheOrderTheHookGave() {
+    var args = new LinkedHashMap<String, Object>();
+    for (var name : DeclarationOrderFixture.ARGUMENTS) {
+      args.put(name, name);
+    }
+
+    var outcome = new HookOutcome.MutateArgs(args);
+
+    assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(outcome.args()));
   }
 }

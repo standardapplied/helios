@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -85,5 +87,22 @@ class ToolChoiceTest {
       case ToolChoice.None _ -> "none";
       case ToolChoice.Required r -> "required:" + r.allowedTools();
     };
+  }
+
+  @Test
+  void requiredKeepsTheGivenOrderAndTheFirstOfARepeatedName() {
+    var required =
+        (ToolChoice.Required) ToolChoice.required("search_web", "get_weather", "search_web");
+
+    assertEquals(List.of("search_web", "get_weather"), List.copyOf(required.allowedTools()));
+    assertThrows(UnsupportedOperationException.class, () -> required.allowedTools().add("x"));
+  }
+
+  @Test
+  void requiredRejectsANullName() {
+    var names = new LinkedHashSet<String>();
+    names.add(null);
+
+    assertThrows(NullPointerException.class, () -> new ToolChoice.Required(names));
   }
 }

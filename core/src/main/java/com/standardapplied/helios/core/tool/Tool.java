@@ -7,6 +7,7 @@ package com.standardapplied.helios.core.tool;
 
 import com.standardapplied.helios.core.common.Strings;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -92,7 +93,10 @@ public record Tool(
     return parameters.stream().filter(ToolParameter::required).map(ToolParameter::name).toList();
   }
 
-  /** Convert parameters to JSON Schema format (for model APIs). */
+  /**
+   * Convert parameters to JSON Schema format (for model APIs): keys {@code type}, {@code
+   * properties} and {@code required}, with properties in declared parameter order.
+   */
   public Map<String, Object> parametersAsJsonSchema() {
     var properties = new LinkedHashMap<String, Object>();
     for (var param : parameters) {
@@ -105,7 +109,7 @@ public record Tool(
     if (!required.isEmpty()) {
       schema.put("required", required);
     }
-    return Map.copyOf(schema);
+    return Collections.unmodifiableMap(schema);
   }
 
   /** Fluent builder to prepare a Tool. */

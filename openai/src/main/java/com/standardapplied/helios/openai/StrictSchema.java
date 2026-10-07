@@ -4,7 +4,7 @@ package com.standardapplied.helios.openai;
 
 import com.standardapplied.helios.openai.api.ResponsesRequest;
 import com.standardapplied.helios.openai.api.TextFormatConfig;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -13,7 +13,8 @@ import java.util.stream.Stream;
  * every object to set {@code additionalProperties: false}, so the transformation adds it
  * throughout. An open-keyed object — a {@code Map<String, X>}, whose {@code additionalProperties}
  * is a value schema — cannot be expressed that way, so a schema holding one is sent as is, in
- * non-strict mode, which keeps structured output without the strict validator.
+ * non-strict mode, which keeps structured output without the strict validator. The transformation
+ * keeps the order of every map, so properties reach the model in their declared order.
  */
 final class StrictSchema {
 
@@ -43,7 +44,7 @@ final class StrictSchema {
    * value schema is transformed in place of being overwritten.
    */
   static Map<String, Object> addAdditionalPropertiesFalse(Map<String, Object> schema) {
-    var result = new HashMap<>(schema);
+    var result = new LinkedHashMap<>(schema);
     if ("object".equals(result.get("type"))) {
       result.put(
           "additionalProperties",
@@ -61,7 +62,7 @@ final class StrictSchema {
   }
 
   private static Map<String, Object> strictProperties(Map<String, Object> properties) {
-    var strict = new HashMap<String, Object>();
+    var strict = new LinkedHashMap<String, Object>();
     properties.forEach(
         (name, property) ->
             strict.put(

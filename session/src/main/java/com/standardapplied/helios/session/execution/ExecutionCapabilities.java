@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session.execution;
 
 import java.time.Duration;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Objects;
@@ -17,7 +18,7 @@ import java.util.Set;
  * subprocess.
  *
  * @param supportedRuntimes the set of {@link Runtime} values this provider can dispatch; non-null,
- *     defensively copied as an immutable set
+ *     defensively copied as an unmodifiable set iterating in {@link Runtime} declaration order
  * @param networkAllowed whether the provider's execution environment can reach outbound networks.
  *     Informational — the provider is still responsible for actually enforcing the boundary
  * @param filesystemWriteAllowed whether scripts can write files inside their execution environment.
@@ -44,8 +45,9 @@ public record ExecutionCapabilities(
     if (maxTimeout.isZero() || maxTimeout.isNegative()) {
       throw new IllegalArgumentException("maxTimeout must be strictly positive, got " + maxTimeout);
     }
-    supportedRuntimes =
-        supportedRuntimes.isEmpty() ? Set.of() : Set.copyOf(EnumSet.copyOf(supportedRuntimes));
+    var ordered = EnumSet.noneOf(Runtime.class);
+    ordered.addAll(supportedRuntimes);
+    supportedRuntimes = Collections.unmodifiableSet(ordered);
   }
 
   /**

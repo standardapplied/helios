@@ -26,7 +26,8 @@ import org.junit.jupiter.params.provider.CsvSource;
  * java.lang.Class} next to its plain members, user code outside the allow-list, and a trusted
  * language bootstrap whose argument is denied. The {@code overlapping} allow-list policy denies
  * reflection and names classes and packages that other rules also match, so each row of it shows
- * which of two matching rules comes first.
+ * which of two matching rules comes first. The {@code nested} policy denies a package and one
+ * inside it, so each of its rows shows which of two matching packages the label names.
  *
  * <p>A reference is written {@code kind owner member}: {@code call} invokes a static method, {@code
  * new} instantiates, {@code class} loads a class literal, {@code lambda} is a {@code
@@ -98,6 +99,8 @@ class PolicyDecisionTableTest {
     "overlapping, call,  java.nio.channels.Channels,            newReader,           deniedPackages:java.nio.channels",
     "overlapping, call,  java.lang.Class,                       forName,             denyReflection",
     "overlapping, call,  java.net.URI,                          create,              allowedPackages-default-deny",
+    "nested,     call,   java.lang.reflect.Method,              invoke,              deniedPackages:java.lang.reflect",
+    "nested,     call,   java.lang.Thread,                      sleep,               deniedPackages:java.lang",
   })
   void decision(String policy, String kind, String owner, String member, String expected) {
     var bytes = referencing(kind, ClassDesc.of(owner), member);
@@ -172,6 +175,8 @@ class PolicyDecisionTableTest {
               .withDeniedPackages("java.util.concurrent", "java.lang.reflect", "java.nio.channels")
               .withDenyReflection(true)
               .build();
+      case "nested" ->
+          SandboxPolicy.newBuilder().withDeniedPackages("java.lang", "java.lang.reflect").build();
       default -> throw new IllegalArgumentException(name);
     };
   }
