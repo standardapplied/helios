@@ -7,10 +7,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.test.Await;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -101,6 +106,25 @@ class ModelStreamsTest {
   }
 
   @Test
+  void cancelFromAnotherThreadReturnsDuringDeliveryAndStopsTheRemainingChunks() {
+    var recorder =
+        actWhileFirstSignalIsPaused(
+            ModelStreams.of(TEXT, STOP), r -> r.request(Long.MAX_VALUE), ChunkRecorder::cancel);
+
+    assertEquals(List.of("subscribed", TEXT.toString()), recorder.signals);
+  }
+
+  @Test
+  void requestFromAnotherThreadReturnsDuringDeliveryAndLeavesItToTheDeliveringThread() {
+    var recorder =
+        actWhileFirstSignalIsPaused(
+            ModelStreams.of(TEXT, STOP), r -> r.request(1), r -> r.request(1));
+
+    assertEquals(
+        List.of("subscribed", TEXT.toString(), STOP.toString(), "complete"), recorder.signals);
+  }
+
+  @Test
   void aNonPositiveRequestFailsTheStreamOnce() {
     var recorder = new ChunkRecorder();
     ModelStreams.of(TEXT).subscribe(recorder);
@@ -172,6 +196,16 @@ class ModelStreamsTest {
   }
 
   @Test
+  void stalledCancelFromAnotherThreadReturnsWhileTheErrorIsDelivered() {
+    var recorder =
+        actWhileFirstSignalIsPaused(
+            ModelStreams.stalled(() -> {}), r -> r.request(0), ChunkRecorder::cancel);
+
+    assertEquals(
+        List.of("subscribed", "error: non-positive subscription request: 0"), recorder.signals);
+  }
+
+  @Test
   void nullArgumentsAreRejected() {
     var error = new IllegalStateException("cut");
     assertThrows(NullPointerException.class, () -> ModelStreams.failing(null, TEXT));
@@ -179,5 +213,26 @@ class ModelStreamsTest {
     assertThrows(NullPointerException.class, () -> ModelStreams.stalled(() -> {}).subscribe(null));
     assertThrows(NullPointerException.class, () -> ModelStreams.of(TEXT).subscribe(null));
     assertThrows(NullPointerException.class, () -> ModelStreams.failing(error, (ModelChunk) null));
+  }
+
+  private static ChunkRecorder actWhileFirstSignalIsPaused(
+      Flow.Publisher<ModelChunk> stream,
+      Consumer<ChunkRecorder> deliver,
+      Consumer<ChunkRecorder> act) {
+    var paused = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var recorder = new ChunkRecorder().pausingOnEverySignal(paused, release);
+    stream.subscribe(recorder);
+    var deliverer = Thread.ofVirtual().start(() -> deliver.accept(recorder));
+    try {
+      Await.latch("the first signal", paused);
+      Await.value(
+          "a subscription call made while a signal is paused",
+          CompletableFuture.runAsync(() -> act.accept(recorder)));
+    } finally {
+      release.countDown();
+    }
+    Await.termination("the delivering thread", deliverer);
+    return recorder;
   }
 }
