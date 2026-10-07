@@ -14,6 +14,14 @@
     <name>helios-core</name>
     <description>Core abstractions: Agent, Memory, Tools, Fault Tolerance, Workflows</description>
 
+    <properties>
+        <!--
+          Surefire opens a test package of the module only when a selected test class lives in
+          it, so a filtered run of a contract subclass could not reach the contract in core.test.
+        -->
+        <helios.test.opens>--add-opens com.standardapplied.helios.core/com.standardapplied.helios.core.test=ALL-UNNAMED</helios.test.opens>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

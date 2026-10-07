@@ -51,6 +51,7 @@
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <helios.test.native-access>ALL-UNNAMED</helios.test.native-access>
+        <helios.test.opens></helios.test.opens>
         <helios.quality.config>${maven.multiModuleProjectDirectory}/config/quality</helios.quality.config>
     </properties>
 
@@ -107,6 +108,7 @@
                         --enable-native-access=${helios.test.native-access}
                         --add-opens java.base/java.util=ALL-UNNAMED
                         --add-opens java.base/java.lang=ALL-UNNAMED
+                        ${helios.test.opens}
                     </argLine>
                     <!--
                       Turns a deadlocked test into a failure instead of a hung CI job. It is not
