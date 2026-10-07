@@ -17,6 +17,7 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -267,17 +268,11 @@ class SerializationTest {
   }
 
   @Test
-  void toolChoiceValidatedSerializesAsAllowedToolsObject() throws Exception {
-    var validated = ToolChoiceConfig.validated(Set.of("a", "b"));
-    var json = objectMapper.writeValueAsString(validated);
-    @SuppressWarnings("unchecked")
-    var top = (Map<String, Object>) objectMapper.readValue(json, Map.class);
-    @SuppressWarnings("unchecked")
-    var allowed = (Map<String, Object>) top.get("allowed_tools");
-    assertEquals("validated", allowed.get("mode"));
-    @SuppressWarnings("unchecked")
-    var tools = (List<String>) allowed.get("tools");
-    assertEquals(Set.of("a", "b"), Set.copyOf(tools));
+  void toolChoiceValidatedSerializesAsAllowedToolsObjectInGivenOrder() throws Exception {
+    var validated = ToolChoiceConfig.validated(new LinkedHashSet<>(List.of("b", "a")));
+    assertEquals(
+        "{\"allowed_tools\":{\"mode\":\"validated\",\"tools\":[\"b\",\"a\"]}}",
+        objectMapper.writeValueAsString(validated));
   }
 
   @Test
@@ -286,7 +281,7 @@ class SerializationTest {
     assertNull(ToolChoiceConfig.auto().allowedTools());
     assertEquals("any", ToolChoiceConfig.any().mode());
     assertEquals("none", ToolChoiceConfig.none().mode());
-    var validated = ToolChoiceConfig.validated(Set.of("a"));
+    var validated = ToolChoiceConfig.validated(new LinkedHashSet<>(List.of("a")));
     assertEquals("validated", validated.mode());
     assertEquals(Set.of("a"), validated.allowedTools());
   }

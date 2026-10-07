@@ -13,10 +13,10 @@ import com.standardapplied.helios.repl.sandbox.ExecutionResult;
 import com.standardapplied.helios.repl.sandbox.Sandbox;
 import java.time.Duration;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Semaphore;
@@ -187,14 +187,15 @@ public final class ReplSession implements AutoCloseable {
    * framework-reserved names ({@code getInput}, {@code __getInput}, {@code __call}); contains
    * exactly the user-registered host functions that the model invoked.
    *
-   * @return immutable map of {@code name -> callCount}; absent keys mean zero calls
+   * @return unmodifiable map of {@code name -> callCount}, sorted by name; absent keys mean zero
+   *     calls
    */
   public Map<String, Integer> calledHostFunctions() {
-    var snapshot = new LinkedHashMap<String, Integer>();
+    var snapshot = new TreeMap<String, Integer>();
     for (var entry : hostFnCounts.entrySet()) {
       snapshot.put(entry.getKey(), entry.getValue().get());
     }
-    return Map.copyOf(snapshot);
+    return Collections.unmodifiableMap(snapshot);
   }
 
   /**

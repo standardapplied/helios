@@ -6,9 +6,10 @@
 package com.standardapplied.helios.gemini.api;
 
 import com.fasterxml.jackson.annotation.JsonValue;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.SequencedSet;
 
 /**
  * Tool-choice policy for the Interactions API, serialized to match the spec's {@code tool_choice}
@@ -18,16 +19,17 @@ import java.util.Set;
  *   <li>Bare {@code ToolChoiceType} string ({@code auto}, {@code any}, {@code none}) when no
  *       allowed-tools restriction is given.
  *   <li>{@code ToolChoiceConfig} object {@code {"allowed_tools": {"mode": "validated", "tools":
- *       [...]}}} when {@link #validated(Set)} is used to lock the model down to a specific subset.
+ *       [...]}}} when {@link #validated(SequencedSet)} is used to lock the model down to a specific
+ *       subset.
  * </ul>
  *
  * Goes inside {@link InteractionGenerationConfig#toolChoice()}, not at the root of the request.
  *
  * @param mode the {@code ToolChoiceType} discriminator
- * @param allowedTools the {@code tools} restriction; non-null only when {@link #validated(Set)} is
- *     used
+ * @param allowedTools the {@code tools} restriction; non-null only when {@link
+ *     #validated(SequencedSet)} is used
  */
-public record ToolChoiceConfig(String mode, Set<String> allowedTools) {
+public record ToolChoiceConfig(String mode, SequencedSet<String> allowedTools) {
 
   public static ToolChoiceConfig auto() {
     return new ToolChoiceConfig("auto", null);
@@ -41,7 +43,7 @@ public record ToolChoiceConfig(String mode, Set<String> allowedTools) {
     return new ToolChoiceConfig("none", null);
   }
 
-  public static ToolChoiceConfig validated(Set<String> allowedTools) {
+  public static ToolChoiceConfig validated(SequencedSet<String> allowedTools) {
     return new ToolChoiceConfig("validated", allowedTools);
   }
 
@@ -50,6 +52,9 @@ public record ToolChoiceConfig(String mode, Set<String> allowedTools) {
     if (allowedTools == null) {
       return mode;
     }
-    return Map.of("allowed_tools", Map.of("mode", mode, "tools", List.copyOf(allowedTools)));
+    var restriction = new LinkedHashMap<String, Object>();
+    restriction.put("mode", mode);
+    restriction.put("tools", List.copyOf(allowedTools));
+    return Map.of("allowed_tools", restriction);
   }
 }

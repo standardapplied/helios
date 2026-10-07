@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -191,5 +192,26 @@ class StrictSchemaTest {
     assertNotNull(addlProps);
     assertEquals("object", addlProps.get("type"));
     assertEquals(false, addlProps.get("additionalProperties"));
+  }
+
+  @Test
+  void strictSchemaKeepsEveryMapInDeclaredOrder() {
+    var schema = DeclarationOrderFixture.schema().schema().toMap();
+
+    var strict = StrictSchema.addAdditionalPropertiesFalse(schema);
+
+    assertEquals(
+        List.of("type", "properties", "required", "additionalProperties"),
+        DeclarationOrderFixture.keys(strict));
+    assertEquals(
+        DeclarationOrderFixture.DOSSIER_FIELDS, DeclarationOrderFixture.keys(properties(strict)));
+    assertEquals(
+        List.of("northing", "easting"),
+        DeclarationOrderFixture.keys(properties(properties(strict).get("scene"))));
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> properties(Object schema) {
+    return (Map<String, Object>) ((Map<String, Object>) schema).get("properties");
   }
 }

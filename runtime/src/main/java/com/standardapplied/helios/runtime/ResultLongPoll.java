@@ -8,6 +8,7 @@ import com.standardapplied.helios.session.ResultMessage;
 import io.helidon.http.Status;
 import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -74,8 +75,10 @@ final class ResultLongPoll {
       CompletableFuture<ResultMessage> future, long timeoutSeconds, String sessionIdForLog) {
     try {
       var terminal = future.get(timeoutSeconds, TimeUnit.SECONDS);
-      return new Outcome(
-          Status.OK_200, Map.of("type", terminal.getClass().getSimpleName(), "result", terminal));
+      var body = new LinkedHashMap<String, Object>();
+      body.put("type", terminal.getClass().getSimpleName());
+      body.put("result", terminal);
+      return new Outcome(Status.OK_200, body);
     } catch (TimeoutException e) {
       return new Outcome(Status.NO_CONTENT_204, null);
     } catch (InterruptedException e) {

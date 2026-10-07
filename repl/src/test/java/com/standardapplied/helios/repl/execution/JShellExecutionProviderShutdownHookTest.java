@@ -3,13 +3,9 @@ package com.standardapplied.helios.repl.execution;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.standardapplied.helios.core.test.Await;
-import java.io.File;
-import java.io.IOException;
-import java.lang.management.ManagementFactory;
+import com.standardapplied.helios.core.test.ChildJvm;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -58,48 +54,12 @@ class JShellExecutionProviderShutdownHookTest {
       @TempDir Path dir) throws Exception {
     var source = dir.resolve("ShutdownHookProbe.java");
     Files.writeString(source, PROBE);
-    var stdout = dir.resolve("stdout.txt");
-    var stderr = dir.resolve("stderr.txt");
 
-    var process =
-        new ProcessBuilder(probeCommand(source))
-            .redirectOutput(stdout.toFile())
-            .redirectError(stderr.toFile())
-            .start();
-    Await.termination("the probe JVM to exit", process);
+    var output = ChildJvm.output(dir, source.toString());
 
-    assertEquals(0, process.exitValue(), () -> read(stderr));
     assertEquals(
         List.of(
             "closed-during-shutdown=true", "reaped-by=helios-jshell-shutdown", "started=Accept[]"),
-        Files.readAllLines(stdout).stream().sorted().toList(),
-        () -> read(stderr));
-  }
-
-  private static List<String> probeCommand(Path source) {
-    var command = new ArrayList<String>();
-    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
-    var parentArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
-    var classpath = new ArrayList<String>();
-    for (var arg : parentArgs) {
-      if (arg.startsWith("--module-path=")) {
-        classpath.add(arg.substring("--module-path=".length()));
-      } else if (arg.startsWith("-javaagent:") && arg.contains("jacoco")) {
-        command.add(arg);
-      }
-    }
-    classpath.add(System.getProperty("java.class.path"));
-    command.add("-cp");
-    command.add(String.join(File.pathSeparator, classpath));
-    command.add(source.toString());
-    return command;
-  }
-
-  private static String read(Path file) {
-    try {
-      return Files.readString(file);
-    } catch (IOException e) {
-      return "unreadable: " + e;
-    }
+        output.lines().sorted().toList());
   }
 }

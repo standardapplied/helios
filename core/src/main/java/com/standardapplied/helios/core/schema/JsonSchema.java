@@ -5,17 +5,20 @@
 
 package com.standardapplied.helios.core.schema;
 
+import com.standardapplied.helios.core.common.OrderedMaps;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.SequencedMap;
 
 /**
  * Represents a JSON Schema for structured output validation.
  *
  * @param type the JSON type (object, array, string, number, integer, boolean)
- * @param properties property schemas for object types
+ * @param properties property schemas for object types, in the order they are sent to a model;
+ *     stored as an unmodifiable copy in the given order; a null name or schema is rejected
  * @param items item schema for array types
  * @param required list of required property names
  * @param enumValues allowed values for enum types
@@ -25,13 +28,19 @@ import java.util.Map;
  */
 public record JsonSchema(
     String type,
-    Map<String, JsonSchema> properties,
+    SequencedMap<String, JsonSchema> properties,
     JsonSchema items,
     List<String> required,
     List<String> enumValues,
     String description,
     String format,
     JsonSchema additionalProperties) {
+
+  public JsonSchema {
+    if (properties != null) {
+      properties = OrderedMaps.copyOf(properties);
+    }
+  }
 
   public static JsonSchema string() {
     return new JsonSchema("string", null, null, null, null, null, null, null);
@@ -130,7 +139,7 @@ public record JsonSchema(
   }
 
   public static class Builder {
-    private final Map<String, JsonSchema> properties = new LinkedHashMap<>();
+    private final SequencedMap<String, JsonSchema> properties = new LinkedHashMap<>();
     private final LinkedHashSet<String> required = new LinkedHashSet<>();
     private String description;
 
@@ -162,7 +171,7 @@ public record JsonSchema(
     public JsonSchema build() {
       return new JsonSchema(
           "object",
-          Map.copyOf(properties),
+          properties,
           null,
           required.isEmpty() ? null : List.copyOf(required.stream().toList()),
           null,

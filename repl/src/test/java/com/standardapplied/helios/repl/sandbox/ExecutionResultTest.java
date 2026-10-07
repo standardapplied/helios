@@ -10,9 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import org.junit.jupiter.api.Test;
 
 class ExecutionResultTest {
@@ -39,6 +41,12 @@ class ExecutionResultTest {
   void nullStderrDefaultsToEmpty() {
     var result = new ExecutionResult("c", "out", null, 0, null, java.util.Map.of(), Duration.ZERO);
     assertEquals("", result.stderr());
+  }
+
+  @Test
+  void nullBindingsDefaultToEmpty() {
+    var result = new ExecutionResult("c", "out", "err", 0, null, null, Duration.ZERO);
+    assertEquals(java.util.Map.of(), result.bindings());
   }
 
   @Test
@@ -199,5 +207,26 @@ class ExecutionResultTest {
   void failureFactoryHasZeroDuration() {
     assertSame(Duration.ZERO, ExecutionResult.failure("err").duration());
     assertSame(Duration.ZERO, ExecutionResult.failure("err", 137).duration());
+  }
+
+  @Test
+  void bindingsRejectANullNameOrRepr() {
+    var nullRepr = new LinkedHashMap<String, String>();
+    nullRepr.put("n", null);
+    var nullName = new LinkedHashMap<String, String>();
+    nullName.put(null, "5");
+
+    assertEquals(
+        "value of key n must not be null",
+        assertThrows(
+                NullPointerException.class,
+                () -> ExecutionResult.newBuilder().withBindings(nullRepr).build())
+            .getMessage());
+    assertEquals(
+        "key must not be null",
+        assertThrows(
+                NullPointerException.class,
+                () -> ExecutionResult.newBuilder().withBindings(nullName).build())
+            .getMessage());
   }
 }

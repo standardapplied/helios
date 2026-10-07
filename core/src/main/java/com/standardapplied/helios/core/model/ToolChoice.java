@@ -5,9 +5,11 @@
 
 package com.standardapplied.helios.core.model;
 
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
+import java.util.SequencedSet;
 
 /**
  * Controls how the model uses tools during generation.
@@ -53,11 +55,12 @@ public sealed interface ToolChoice {
   /**
    * Model must use one of the specified tools.
    *
-   * @param toolNames the names of the allowed tools
+   * @param toolNames the names of the allowed tools, in the order they are sent; a repeated name
+   *     keeps its first position
    * @return required tool choice with allowed tools
    */
   static ToolChoice required(String... toolNames) {
-    return new Required(Set.copyOf(List.of(toolNames)));
+    return new Required(new LinkedHashSet<>(List.of(toolNames)));
   }
 
   /** Model decides whether to use tools. */
@@ -78,14 +81,17 @@ public sealed interface ToolChoice {
   /**
    * Model must use one of the specified tools.
    *
-   * @param allowedTools the names of the tools the model can use
+   * @param allowedTools the names of the tools the model can use, in the order they are sent;
+   *     stored as an unmodifiable copy in the given order
    */
-  record Required(Set<String> allowedTools) implements ToolChoice {
+  record Required(SequencedSet<String> allowedTools) implements ToolChoice {
     public Required {
       Objects.requireNonNull(allowedTools, "allowedTools must not be null");
       if (allowedTools.isEmpty()) {
         throw new IllegalArgumentException("allowedTools must not be empty");
       }
+      allowedTools.forEach(name -> Objects.requireNonNull(name, "tool name must not be null"));
+      allowedTools = Collections.unmodifiableSequencedSet(new LinkedHashSet<>(allowedTools));
     }
   }
 }

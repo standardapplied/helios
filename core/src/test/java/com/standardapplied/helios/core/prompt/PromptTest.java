@@ -8,10 +8,14 @@ package com.standardapplied.helios.core.prompt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -44,7 +48,7 @@ class PromptTest {
             .withContent("Hi {user}!")
             .withVersion(3)
             .withActive(false)
-            .withVariables(Set.of("user", "extra"))
+            .withVariables(new LinkedHashSet<>(List.of("user", "extra")))
             .withCreatedAt(createdAt)
             .build();
 
@@ -183,9 +187,54 @@ class PromptTest {
         Prompt.newBuilder()
             .withName("test")
             .withContent("{greeting}, {name}!")
-            .withVariables(Set.of("custom"))
+            .withVariables(new LinkedHashSet<>(List.of("custom")))
             .build();
 
     assertEquals(Set.of("custom"), prompt.variables());
+  }
+
+  @Test
+  void variablesKeepTheOrderTheyFirstOccurIn() {
+    var names = DeclarationOrderFixture.ARGUMENTS;
+    var content = new StringBuilder();
+    names.forEach(name -> content.append('{').append(name).append("} "));
+    content.append('{').append(names.getFirst()).append('}');
+
+    var extracted = Prompt.extractVariables(content.toString());
+    var built = Prompt.newBuilder().withName("test").withContent(content.toString()).build();
+    var given = Prompt.newBuilder(built).withVariables(new LinkedHashSet<>(names)).build();
+
+    assertEquals(names, List.copyOf(extracted));
+    assertEquals(names, List.copyOf(built.variables()));
+    assertEquals(names, List.copyOf(given.variables()));
+  }
+
+  @Test
+  void variablesRejectANullName() {
+    var names = new LinkedHashSet<String>();
+    names.add(null);
+    var builder = Prompt.newBuilder().withName("test").withContent("x").withVariables(names);
+
+    assertEquals(
+        "variable name must not be null",
+        assertThrows(NullPointerException.class, builder::build).getMessage());
+  }
+
+  @Test
+  void nullVariablesAreRejected() {
+    var failure =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new Prompt(
+                    UUID.randomUUID(),
+                    "test",
+                    "x",
+                    1,
+                    true,
+                    null,
+                    OffsetDateTime.parse("2026-01-01T00:00:00Z")));
+
+    assertEquals("variables must not be null", failure.getMessage());
   }
 }

@@ -277,7 +277,7 @@ means changing `SCANNER_VERSION` and both checksums in `advisory_scan.py` togeth
 
 ```
 helios/
-├── core/                           # Zero deps - Model + tool + common + fault + process + provider + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream, FailingInputStream, StubHttpServer, RedirectTrap, SseEvents, and for provider characterization ModelHarness, SseReplies, Transcript, Golden, ConversationFixture) and the abstract `*Contract` tests ship as its test-jar.
+├── core/                           # Zero deps - Model + tool + common + fault + process + provider + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream, FailingInputStream, StubHttpServer, RedirectTrap, SseEvents, ChildJvm, and for provider characterization ModelHarness, SseReplies, Transcript, Golden, ConversationFixture, DeclarationOrderFixture) and the abstract `*Contract` tests ship as its test-jar.
 ├── session/                        # v2 SDK - AgentSession, SessionPresets, hooks, permissions, file tools, memory backend, agent loop. Test fixtures (CollectingSubscriber, QuestionAnswers, HookInputs, SampleDocuments in `session.test`) ship as its test-jar.
 ├── runtime/                        # Helidon HTTP/SSE surface for session — POST /sessions, SSE /events, long-poll /result
 ├── gemini/                         # Gemini Interactions API + Jackson 3.x

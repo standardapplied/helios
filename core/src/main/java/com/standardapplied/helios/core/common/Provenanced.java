@@ -5,6 +5,7 @@
 
 package com.standardapplied.helios.core.common;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,13 +65,13 @@ public record Provenanced<T>(T output, List<FieldProvenance> provenance) {
    * the schema-level validator would normally reject) the last one wins, matching {@code
    * Map.of}-style "last write" semantics.
    *
-   * @return an immutable map keyed by field name
+   * @return an unmodifiable map keyed by field name, in provenance order
    */
   public Map<String, FieldProvenance> provenanceByField() {
     var map = new LinkedHashMap<String, FieldProvenance>();
     for (var entry : provenance) {
       map.put(entry.field(), entry);
     }
-    return Map.copyOf(map);
+    return Collections.unmodifiableMap(map);
   }
 }
