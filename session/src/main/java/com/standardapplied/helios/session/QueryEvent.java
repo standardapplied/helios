@@ -463,8 +463,8 @@ public sealed interface QueryEvent
    * @param timestamp the event timestamp
    * @param call the original call; non-null
    * @param hookName the name of the hook that mutated the input; non-null and non-blank
-   * @param inputBefore the original arguments; non-null (defensively copied)
-   * @param inputAfter the replacement arguments; non-null (defensively copied)
+   * @param inputBefore the original arguments; non-null, defensively copied in the given order
+   * @param inputAfter the replacement arguments; non-null, defensively copied in the given order
    */
   record ToolMutated(
       String sessionId,
@@ -485,8 +485,8 @@ public sealed interface QueryEvent
       }
       Objects.requireNonNull(inputBefore, "inputBefore must not be null");
       Objects.requireNonNull(inputAfter, "inputAfter must not be null");
-      inputBefore = Map.copyOf(inputBefore);
-      inputAfter = Map.copyOf(inputAfter);
+      inputBefore = ToolCall.copyOfArguments(inputBefore);
+      inputAfter = ToolCall.copyOfArguments(inputAfter);
     }
   }
 

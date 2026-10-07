@@ -258,6 +258,19 @@ class JsonSchemaTest {
   }
 
   @Test
+  void schemaRejectsANullPropertyNameOrSchema() {
+    var nullName = JsonSchema.object().withProperty(null, JsonSchema.string());
+    var nullSchema = JsonSchema.object().withProperty("city", null);
+
+    assertEquals(
+        "property name must not be null",
+        assertThrows(NullPointerException.class, nullName::build).getMessage());
+    assertEquals(
+        "schema of property city must not be null",
+        assertThrows(NullPointerException.class, nullSchema::build).getMessage());
+  }
+
+  @Test
   void builderKeepsPropertyAndRequiredOrder() {
     var builder = JsonSchema.object();
     for (var name : DeclarationOrderFixture.DOSSIER_FIELDS) {

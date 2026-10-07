@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.SequencedMap;
 
 /**
@@ -38,6 +39,12 @@ public record JsonSchema(
 
   public JsonSchema {
     if (properties != null) {
+      properties.forEach(
+          (name, schema) -> {
+            Objects.requireNonNull(name, "property name must not be null");
+            Objects.requireNonNull(
+                schema, () -> "schema of property " + name + " must not be null");
+          });
       properties = Collections.unmodifiableSequencedMap(new LinkedHashMap<>(properties));
     }
   }

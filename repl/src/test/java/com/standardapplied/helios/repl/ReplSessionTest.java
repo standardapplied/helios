@@ -13,7 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import com.standardapplied.helios.repl.host.HostFunction;
+import com.standardapplied.helios.repl.host.HostFunctionRegistry;
 import com.standardapplied.helios.repl.sandbox.ExecutionRequest;
 import com.standardapplied.helios.repl.sandbox.ExecutionResult;
 import com.standardapplied.helios.repl.sandbox.Sandbox;
@@ -231,6 +233,35 @@ class ReplSessionTest {
     assertEquals(1, counts.get("fredIndicator"));
     assertEquals(List.of("fredIndicator", "marketQuote"), List.copyOf(counts.keySet()));
     session.close();
+  }
+
+  @Test
+  void calledHostFunctionsListsEightNamesSortedWhateverOrderTheyWereCalledIn() throws Exception {
+    var names = DeclarationOrderFixture.ARGUMENTS;
+    var sandbox = new RecordingSandbox();
+    var builder = ReplConfig.newBuilder().withExecutionTimeout(Duration.ofSeconds(1));
+    names.forEach(name -> builder.withHostFunction(new HostFunction(name, "fake", p -> name)));
+    builder.withSandboxFactory(
+        registry -> {
+          sandbox.setRegistry(registry);
+          return sandbox;
+        });
+    var session = ReplSession.create(builder.build(), new Semaphore(1));
+    sandbox.behavior = registry -> names.forEach(name -> handle(registry, name));
+
+    session.execute("noop");
+
+    assertEquals(
+        names.stream().sorted().toList(), List.copyOf(session.calledHostFunctions().keySet()));
+    session.close();
+  }
+
+  private static void handle(HostFunctionRegistry registry, String name) {
+    try {
+      registry.get(name).handler().handle(Map.of());
+    } catch (Exception e) {
+      throw new IllegalStateException(e);
+    }
   }
 
   @Test

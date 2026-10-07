@@ -192,7 +192,7 @@ and an unordered map or set no longer compiles in their place.
 
 | 2.x | 3.0 |
 |---|---|
-| `JsonSchema.properties` is a `Map<String, JsonSchema>` | a `SequencedMap<String, JsonSchema>`, stored as an unmodifiable copy in the given order. Pass a `LinkedHashMap`, or build with `JsonSchema.object().withProperty(...).build()` |
+| `JsonSchema.properties` is a `Map<String, JsonSchema>` | a `SequencedMap<String, JsonSchema>`, stored as an unmodifiable copy in the given order; a null name or schema is rejected. Pass a `LinkedHashMap`, or build with `JsonSchema.object().withProperty(...).build()` |
 | `ToolChoice.Required.allowedTools` is a `Set<String>` | a `SequencedSet<String>`, stored as an unmodifiable copy in the given order. Construct it through `ToolChoice.required(String...)`, which keeps the varargs order and drops a repeated name |
 | `gemini.api.ToolChoiceConfig.allowedTools` and `validated(Set<String>)` | `SequencedSet<String>` |
 | `ModelIntegrationContract` (core test-jar) declares `model()` | also declares `model(ModelConfig.Builder)`: a subclass completes the builder with its API key and model id and returns a model the caller closes |
@@ -348,7 +348,10 @@ and an unordered map or set no longer compiles in their place.
   messages to the model are byte-identical across JVMs. This fixes prompt-cache misses across
   restarts and across instances, and structured output generated out of its declared field order.
   `ExecutionCapabilities.supportedRuntimes()`, which an `Execute` refusal names, iterates in
-  `Runtime` declaration order, and `ReplSession.calledHostFunctions()` is sorted by name.
+  `Runtime` declaration order, and `ReplSession.calledHostFunctions()` is sorted by name. The
+  sandbox's `countBy` helper lists its keys in the order they first occur, the arguments of
+  `QueryEvent.ToolMutated` and `HeliosEvent.ToolCallStarted` keep the call's order, and REPL
+  bindings still reject a null name or repr.
 - **OpenAI forced a random tool when `ToolChoice.required` named several.** It sent the first name
   a hash set returned as a single forced function. Several names are now sent as the Responses
   API's `allowed_tools` choice, `{"type": "allowed_tools", "mode": "required", "tools": [...]}`, in

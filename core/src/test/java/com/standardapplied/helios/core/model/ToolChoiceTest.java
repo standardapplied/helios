@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -96,6 +97,17 @@ class ToolChoiceTest {
 
     assertEquals(List.of("search_web", "get_weather"), List.copyOf(required.allowedTools()));
     assertThrows(UnsupportedOperationException.class, () -> required.allowedTools().add("x"));
+  }
+
+  @Test
+  void requiredKeepsTheOrderOfEightNamesThroughVarargsAndTheRecord() {
+    var names = DeclarationOrderFixture.ARGUMENTS;
+
+    var fromVarargs = (ToolChoice.Required) ToolChoice.required(names.toArray(String[]::new));
+    var fromRecord = new ToolChoice.Required(new LinkedHashSet<>(names));
+
+    assertEquals(names, List.copyOf(fromVarargs.allowedTools()));
+    assertEquals(names, List.copyOf(fromRecord.allowedTools()));
   }
 
   @Test
