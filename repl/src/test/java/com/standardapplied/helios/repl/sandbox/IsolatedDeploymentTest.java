@@ -167,24 +167,31 @@ class IsolatedDeploymentTest {
     var paths = new LinkedHashSet<Path>();
     paths.add(Path.of(System.getProperty("java.home")));
     for (var i = 0; i < jvmArgs.size(); i++) {
-      var arg = jvmArgs.get(i);
-      String value = null;
-      if (PATH_FLAGS.contains(arg) && i + 1 < jvmArgs.size()) {
-        value = jvmArgs.get(i + 1);
+      var next = i + 1 < jvmArgs.size() ? jvmArgs.get(i + 1) : null;
+      var value = pathFlagValue(jvmArgs.get(i), next);
+      if (value != null) {
+        paths.addAll(existingPaths(value));
       }
-      for (var flag : PATH_FLAGS) {
-        if (arg.startsWith(flag + "=")) {
-          value = arg.substring(flag.length() + 1);
-        }
+    }
+    return paths;
+  }
+
+  private static String pathFlagValue(String arg, String next) {
+    var value = PATH_FLAGS.contains(arg) ? next : null;
+    for (var flag : PATH_FLAGS) {
+      if (arg.startsWith(flag + "=")) {
+        value = arg.substring(flag.length() + 1);
       }
-      if (value == null) {
-        continue;
-      }
-      for (var entry : value.split(File.pathSeparator)) {
-        var path = Path.of(entry).toAbsolutePath();
-        if (Files.exists(path)) {
-          paths.add(path);
-        }
+    }
+    return value;
+  }
+
+  private static List<Path> existingPaths(String pathList) {
+    var paths = new ArrayList<Path>();
+    for (var entry : pathList.split(File.pathSeparator)) {
+      var path = Path.of(entry).toAbsolutePath();
+      if (Files.exists(path)) {
+        paths.add(path);
       }
     }
     return paths;
