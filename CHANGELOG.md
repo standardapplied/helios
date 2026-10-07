@@ -196,8 +196,22 @@ and its name suggested one sandbox where the provider spawns one per session.
   `Model` against a stub that replays recorded server-sent events (`SseReplies`), `Transcript`
   renders what it streamed and returned as canonical text, `Golden` compares it with a file under
   `src/test/resources/golden` (`-Dgolden.update=true` rewrites the files), and
-  `ConversationFixture` is the conversation every provider's request snapshots share. Depend on it
-  with `<type>test-jar</type>` and `<scope>test</scope>`.
+  `ConversationFixture` is the conversation every provider's request snapshots share.
+  `FailingInputStream` fails on read or close, and `SseEvents` writes and drains server-sent
+  events. Abstract contract tests run one set of cases against every implementation:
+  `ModelIntegrationContract` (live provider parity), `BoundedErrorBodyContract`,
+  `PromptRegistryContract` and `ToolCallJournalContract`. Depend on it with
+  `<type>test-jar</type>` and `<scope>test</scope>`.
+- **`helios-session` publishes its test fixtures as `helios-session-<version>-tests.jar`**, in
+  `com.standardapplied.helios.session.test`: `CollectingSubscriber` (records a session's events,
+  optionally reacting to each, and waits for the stream to end through `Await`), `QuestionAnswers`
+  (answers every `AskUserQuestion` with one label), `HookInputs` and `SampleDocuments`.
+- **`helios-testing` scripts any response and any stream.**
+  `ScriptedModel.Builder.withResponseTurn(Response)` returns exactly the given response, metadata,
+  thinking and citations included; `withStreamTurn(Flow.Publisher<ModelChunk>)` answers
+  `chatStream` with the given publisher and fails a `chat` call; `ScriptedModel.outputSchemas()`
+  records the output schema each call carried. `ModelStreams.of(chunks...)`,
+  `failing(error, chunks...)` and `stalled(onRequest)` build the publishers.
 - **`CircuitBreaker.Builder.withClock(InstantSource)`.** The breaker reads the current instant from
   an injectable source (default `Clock.systemUTC()`), so the half-open delay can be driven by hand
   instead of by sleeping. A `java.time.Clock` is an `InstantSource` and can be passed directly.
