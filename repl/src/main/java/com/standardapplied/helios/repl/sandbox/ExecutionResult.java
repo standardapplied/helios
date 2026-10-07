@@ -5,6 +5,7 @@
 
 package com.standardapplied.helios.repl.sandbox;
 
+import com.standardapplied.helios.core.common.OrderedMaps;
 import java.time.Duration;
 import java.util.Map;
 
@@ -24,7 +25,8 @@ import java.util.Map;
  *     to a length-capped {@code toString} repr. Excludes harness-internal {@code __}-prefixed
  *     names. Empty (not {@code null}) when no bindings were captured (sandbox not configured to
  *     emit them, or no user vars exist yet). Drives the {@code SandboxBindingsListener} callback so
- *     live observers can watch the agent's working memory across iterations
+ *     live observers can watch the agent's working memory across iterations. Kept in the given
+ *     order, the sandbox's declaration order; a null name or repr is rejected
  * @param duration wall-clock time the sandbox spent on this execute, measured around {@link
  *     Sandbox#execute}. {@link Duration#ZERO} when not measured. Used by the {@code
  *     CodeExecutionTool} budget header to give the model {@code last_exec=...} visibility — the
@@ -49,7 +51,7 @@ public record ExecutionResult(
     if (stderr == null) {
       stderr = "";
     }
-    bindings = bindings == null ? Map.of() : Map.copyOf(bindings);
+    bindings = bindings == null ? Map.of() : OrderedMaps.copyOf(bindings);
     if (duration == null || duration.isNegative()) {
       duration = Duration.ZERO;
     }

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -115,5 +116,17 @@ class ProvenancedTest {
     assertThrows(
         UnsupportedOperationException.class,
         () -> p.provenanceByField().put("name", FieldProvenance.lowConfidence("name", "r")));
+  }
+
+  @Test
+  void provenanceByFieldKeepsProvenanceOrder() {
+    var entries = new ArrayList<FieldProvenance>();
+    for (var field : DeclarationOrderFixture.DOSSIER_FIELDS) {
+      entries.add(new FieldProvenance(field, List.of(), "because", Confidence.LOW));
+    }
+
+    var byField = new Provenanced<>("output", entries).provenanceByField();
+
+    assertEquals(DeclarationOrderFixture.DOSSIER_FIELDS, DeclarationOrderFixture.keys(byField));
   }
 }

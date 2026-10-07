@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.prompt.PromptRegistry;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -194,6 +195,19 @@ public abstract class PromptRegistryContract {
 
     var resolved = registry.resolve("greet");
     assertEquals(Set.of("name", "place"), resolved.variables());
+  }
+
+  @Test
+  void variablesRoundTripInTheOrderTheyFirstOccur() {
+    var names = DeclarationOrderFixture.ARGUMENTS;
+    var content = new StringBuilder();
+    names.reversed().forEach(name -> content.append('{').append(name).append("} "));
+    var expected = names.reversed();
+
+    var prompt = registry.register("ordered", content.toString());
+
+    assertEquals(expected, List.copyOf(prompt.variables()));
+    assertEquals(expected, List.copyOf(registry.resolve("ordered").variables()));
   }
 
   @Test

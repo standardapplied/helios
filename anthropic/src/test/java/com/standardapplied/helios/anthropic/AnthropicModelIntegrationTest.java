@@ -44,13 +44,22 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   @BeforeAll
   static void setUp() {
     apiKey = System.getenv("ANTHROPIC_API_KEY");
-    var config = ModelConfig.newBuilder().withApiKey(apiKey).build();
-    model = new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
+    model = sonnet46(ModelConfig.newBuilder());
+  }
+
+  private static Model sonnet46(ModelConfig.Builder config) {
+    return new AnthropicProvider()
+        .create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config.withApiKey(apiKey).build());
   }
 
   @Override
   protected Model model() {
     return model;
+  }
+
+  @Override
+  protected Model model(ModelConfig.Builder config) {
+    return sonnet46(config);
   }
 
   @Test

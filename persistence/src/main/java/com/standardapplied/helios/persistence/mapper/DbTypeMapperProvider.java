@@ -13,7 +13,9 @@ import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Arrays;
-import java.util.Set;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.SequencedSet;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -34,29 +36,34 @@ public class DbTypeMapperProvider implements MapperProvider {
   }
 
   /**
-   * Reads a PostgreSQL TEXT[] column as a set of strings.
+   * Reads a PostgreSQL TEXT[] column as a set of strings in the array's order.
    *
    * @param row the database row
    * @param columnName the array column name
-   * @return the values as an immutable set, or an empty set if the column is empty or null
+   * @return the values as an unmodifiable set in array order, or an empty set if the column is
+   *     empty or null
    */
-  public static Set<String> readStringSet(DbRow row, String columnName) {
+  public static SequencedSet<String> readStringSet(DbRow row, String columnName) {
     try {
       var arrayObj = row.column(columnName).get(Object.class);
-      if (arrayObj == null) {
-        return Set.of();
-      }
       if (arrayObj instanceof Array sqlArray) {
-        var array = (String[]) sqlArray.getArray();
-        return array != null && array.length > 0 ? Set.copyOf(Arrays.asList(array)) : Set.of();
+        return ordered((String[]) sqlArray.getArray());
       }
       if (arrayObj instanceof String[] stringArray) {
-        return stringArray.length > 0 ? Set.copyOf(Arrays.asList(stringArray)) : Set.of();
+        return ordered(stringArray);
       }
-      return Set.of();
+      return ordered(null);
     } catch (Exception e) {
       LOG.log(Level.WARNING, "Failed to read string set from column: " + columnName, e);
-      return Set.of();
+      return ordered(null);
     }
+  }
+
+  private static SequencedSet<String> ordered(String[] values) {
+    var set = new LinkedHashSet<String>();
+    if (values != null) {
+      set.addAll(Arrays.asList(values));
+    }
+    return Collections.unmodifiableSequencedSet(set);
   }
 }

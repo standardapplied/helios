@@ -4,13 +4,16 @@ package com.standardapplied.helios.core.test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
@@ -25,7 +28,8 @@ import org.junit.jupiter.api.Test;
  * The live cases every provider's model passes against its real API: a simple chat, a system
  * message, usage, streaming, a tool call, a multi-turn conversation, its metadata, a full tool
  * round trip and structured output. A provider's integration test extends this, supplies its model
- * through {@link #model()} and gates itself on its API key.
+ * through {@link #model()}, builds a model from a given configuration through {@link
+ * #model(ModelConfig.Builder)} and gates itself on its API key.
  */
 public abstract class ModelIntegrationContract {
 
@@ -56,6 +60,15 @@ public abstract class ModelIntegrationContract {
    * @return the model under test
    */
   protected abstract Model model();
+
+  /**
+   * A model of the same id as {@link #model()}, built from {@code config} completed with the
+   * provider's API key. The caller closes it.
+   *
+   * @param config the configuration the case needs, without the API key
+   * @return a new model the caller owns
+   */
+  protected abstract Model model(ModelConfig.Builder config);
 
   @Test
   void simpleChat() {
@@ -148,14 +161,15 @@ public abstract class ModelIntegrationContract {
 
     var messages = List.of(Message.user("What's the weather in San Francisco?"));
 
-    var response = model().chat(messages, List.of(weatherTool));
+    try (var forced =
+        model(ModelConfig.newBuilder().withToolChoice(ToolChoice.required("get_weather")))) {
+      var response = forced.chat(messages, List.of(weatherTool));
 
-    assertNotNull(response);
-    if (response.hasToolCalls()) {
       assertEquals(1, response.toolCalls().size());
       var toolCall = response.toolCalls().getFirst();
       assertEquals("get_weather", toolCall.name());
-      assertNotNull(toolCall.arguments());
+      var location = assertInstanceOf(String.class, toolCall.arguments().get("location"));
+      assertFalse(location.isBlank());
     }
   }
 

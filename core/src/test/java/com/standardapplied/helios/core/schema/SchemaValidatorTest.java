@@ -8,6 +8,7 @@ package com.standardapplied.helios.core.schema;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -187,7 +188,7 @@ class SchemaValidatorTest {
     var schema =
         new JsonSchema(
             "object",
-            Map.of("declared", JsonSchema.string()),
+            new LinkedHashMap<>(Map.of("declared", JsonSchema.string())),
             null,
             null,
             null,

@@ -6,8 +6,7 @@ import java.lang.reflect.AnnotatedElement;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.function.UnaryOperator;
+import java.util.SequencedMap;
 
 /**
  * Collects the properties of one object schema in declaration order, applying each member's {@link
@@ -15,7 +14,7 @@ import java.util.function.UnaryOperator;
  */
 final class ObjectProperties {
 
-  private final Map<String, JsonSchema> properties = new LinkedHashMap<>();
+  private final SequencedMap<String, JsonSchema> properties = new LinkedHashMap<>();
   private final List<String> required = new ArrayList<>();
 
   boolean contains(String name) {
@@ -29,16 +28,12 @@ final class ObjectProperties {
     }
   }
 
-  /**
-   * The object schema of {@code type}, described by its own {@link Description}.
-   *
-   * @param freeze how the collected properties are made unmodifiable
-   */
-  JsonSchema toSchema(AnnotatedElement type, UnaryOperator<Map<String, JsonSchema>> freeze) {
+  /** The object schema of {@code type}, described by its own {@link Description}. */
+  JsonSchema toSchema(AnnotatedElement type) {
     return described(
         new JsonSchema(
             "object",
-            freeze.apply(properties),
+            properties,
             null,
             required.isEmpty() ? null : List.copyOf(required),
             null,

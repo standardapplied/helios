@@ -18,8 +18,9 @@
         <!--
           Surefire opens a test package of the module only when a selected test class lives in
           it, so a filtered run of a contract subclass could not reach the contract in core.test.
+          ChildJvm's own test runs it inside the module, which reads java.management only here.
         -->
-        <helios.test.opens>--add-opens com.standardapplied.helios.core/com.standardapplied.helios.core.test=ALL-UNNAMED</helios.test.opens>
+        <helios.test.opens>--add-opens com.standardapplied.helios.core/com.standardapplied.helios.core.test=ALL-UNNAMED --add-modules java.management --add-reads com.standardapplied.helios.core=java.management</helios.test.opens>
     </properties>
 
     <dependencies>
@@ -32,6 +33,27 @@
 
     <build>
         <plugins>
+            <plugin>
+                <!--
+                  ChildJvm in core.test reads the test JVM's arguments through java.management,
+                  which the main module does not require.
+                -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>default-testCompile</id>
+                        <configuration>
+                            <compilerArgs>
+                                <arg>--add-modules</arg>
+                                <arg>java.management</arg>
+                                <arg>--add-reads</arg>
+                                <arg>com.standardapplied.helios.core=java.management</arg>
+                            </compilerArgs>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <!--
                   Publishes the test fixtures and abstract contract tests of

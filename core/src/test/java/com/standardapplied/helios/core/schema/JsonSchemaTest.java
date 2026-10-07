@@ -7,7 +7,10 @@ package com.standardapplied.helios.core.schema;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -162,7 +165,8 @@ class JsonSchemaTest {
 
   @Test
   void toMapWithEmptyProperties() {
-    var schema = new JsonSchema("object", Map.of(), null, null, null, null, null, null);
+    var schema =
+        new JsonSchema("object", new LinkedHashMap<>(), null, null, null, null, null, null);
     var map = schema.toMap();
 
     assertEquals("object", map.get("type"));
@@ -236,5 +240,49 @@ class JsonSchemaTest {
     @SuppressWarnings("unchecked")
     var properties = (Map<String, Object>) map.get("properties");
     assertEquals(2, properties.size());
+  }
+
+  @Test
+  void schemaPropertiesAreAnUnmodifiableCopyInTheGivenOrder() {
+    var properties = new LinkedHashMap<String, JsonSchema>();
+    properties.put("zeta", JsonSchema.string());
+    properties.put("alpha", JsonSchema.integer());
+    var schema = new JsonSchema("object", properties, null, null, null, null, null, null);
+    properties.put("later", JsonSchema.bool());
+
+    assertEquals(List.of("zeta", "alpha"), DeclarationOrderFixture.keys(schema.properties()));
+    assertThrows(
+        UnsupportedOperationException.class,
+        () -> schema.properties().put("x", JsonSchema.string()));
+    assertNull(JsonSchema.string().properties());
+  }
+
+  @Test
+  void schemaRejectsANullPropertyNameOrSchema() {
+    var nullName = JsonSchema.object().withProperty(null, JsonSchema.string());
+    var nullSchema = JsonSchema.object().withProperty("city", null);
+
+    assertEquals(
+        "key must not be null",
+        assertThrows(NullPointerException.class, nullName::build).getMessage());
+    assertEquals(
+        "value of key city must not be null",
+        assertThrows(NullPointerException.class, nullSchema::build).getMessage());
+  }
+
+  @Test
+  void builderKeepsPropertyAndRequiredOrder() {
+    var builder = JsonSchema.object();
+    for (var name : DeclarationOrderFixture.DOSSIER_FIELDS) {
+      builder.withProperty(name, JsonSchema.string(), true);
+    }
+    var schema = builder.build();
+    @SuppressWarnings("unchecked")
+    var sent = (Map<String, Object>) schema.toMap().get("properties");
+
+    assertEquals(
+        DeclarationOrderFixture.DOSSIER_FIELDS, DeclarationOrderFixture.keys(schema.properties()));
+    assertEquals(DeclarationOrderFixture.DOSSIER_FIELDS, schema.required());
+    assertEquals(DeclarationOrderFixture.DOSSIER_FIELDS, DeclarationOrderFixture.keys(sent));
   }
 }

@@ -40,6 +40,7 @@ final class ResultLongPollAwaitResultTest {
     var body = (Map<String, Object>) outcome.body();
     assertEquals("Success", body.get("type"));
     assertEquals(stubSuccess(), body.get("result"));
+    assertEquals(List.of("type", "result"), List.copyOf(body.keySet()));
   }
 
   @Test

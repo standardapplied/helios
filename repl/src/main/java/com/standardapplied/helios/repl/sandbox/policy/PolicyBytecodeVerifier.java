@@ -21,6 +21,7 @@ import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.NewObjectInstruction;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.DirectMethodHandleDesc;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -78,7 +79,9 @@ import java.util.stream.Collectors;
  * SandboxPolicy#deniedPackages()} match before the categorical flags ({@link
  * SandboxPolicy#denyReflection()}, {@link SandboxPolicy#denyNativeAccess()}, {@link
  * SandboxPolicy#denyDynamicClassDefinition()}). This means the exception's {@code rule} label names
- * the most specific user-configured rule when overlap occurs.
+ * the most specific user-configured rule when overlap occurs. Among nested denied packages the
+ * label names the longest matching one: with {@code java.lang} and {@code java.lang.reflect}
+ * denied, {@code java.lang.reflect.Method} is reported as {@code deniedPackages:java.lang.reflect}.
  *
  * <p><strong>Static-receiver-type limitation.</strong> {@code INVOKEVIRTUAL} and {@code
  * INVOKEINTERFACE} carry the receiver's <em>static</em> compile-time type as the instruction owner,
@@ -274,7 +277,7 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
             (owner, member) ->
                 deniedPackagesInternal.stream()
                     .filter(owner::startsWith)
-                    .findFirst()
+                    .max(Comparator.comparingInt(String::length))
                     .map(
                         pkg ->
                             "deniedPackages:"

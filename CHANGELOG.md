@@ -185,6 +185,20 @@ and its name suggested one sandbox where the provider spawns one per session.
 |---|---|
 | `JShellExecutionProvider.singleSandbox(config, snippet)` | `JShellExecutionProvider.newBuilder().withReplConfig(config).withStartupSnippet(snippet).build()`, or `create(config)` when there is no snippet |
 
+**Schema properties and required tool names are ordered types.** The iteration order of
+`Map.of` and `Set.of` changes with every JVM start, so a schema or tool choice built from one
+reached the model in a different order in every process. The components now name an ordered type,
+and an unordered map or set no longer compiles in their place.
+
+| 2.x | 3.0 |
+|---|---|
+| `JsonSchema.properties` is a `Map<String, JsonSchema>` | a `SequencedMap<String, JsonSchema>`, stored as an unmodifiable copy in the given order; a null name or schema is rejected. Pass a `LinkedHashMap`, or build with `JsonSchema.object().withProperty(...).build()` |
+| `ToolChoice.Required.allowedTools` is a `Set<String>` | a `SequencedSet<String>`, stored as an unmodifiable copy in the given order. Construct it through `ToolChoice.required(String...)`, which keeps the varargs order and drops a repeated name |
+| `gemini.api.ToolChoiceConfig.allowedTools` and `validated(Set<String>)` | `SequencedSet<String>` |
+| `Prompt.variables`, `Prompt.extractVariables(String)` and `Prompt.Builder.withVariables(Set<String>)` are a `Set<String>` | a `SequencedSet<String>` in order of first occurrence, stored as an unmodifiable copy; a null name is rejected. Pass a `LinkedHashSet`, or let `build()` extract them |
+| `persistence.mapper.DbTypeMapperProvider.readStringSet` returns a `Set<String>` | a `SequencedSet<String>` in the array's order |
+| `ModelIntegrationContract` (core test-jar) declares `model()` | also declares `model(ModelConfig.Builder)`: a subclass completes the builder with its API key and model id and returns a model the caller closes |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
@@ -197,11 +211,19 @@ and its name suggested one sandbox where the provider spawns one per session.
   renders what it streamed and returned as canonical text, `Golden` compares it with a file under
   `src/test/resources/golden` (`-Dgolden.update=true` rewrites the files), and
   `ConversationFixture` is the conversation every provider's request snapshots share.
-  `FailingInputStream` fails on read or close, and `SseEvents` writes and drains server-sent
-  events. Abstract contract tests run one set of cases against every implementation:
+  `ChildJvm` runs a class of the test classpath in fresh JVMs, the JaCoCo agent passed through, and
+  asserts its output is the same in each; `DeclarationOrderFixture` is a conversation whose
+  schema, tool parameters and replayed arguments each have eight or more names in a declared
+  order, and asserts a request body or prompt keeps it. `FailingInputStream` fails on read or
+  close, and `SseEvents` writes and drains server-sent events. Abstract contract tests run one set of cases against every implementation:
   `ModelIntegrationContract` (live provider parity), `BoundedErrorBodyContract`,
   `PromptRegistryContract` and `ToolCallJournalContract`. Depend on it with
   `<type>test-jar</type>` and `<scope>test</scope>`.
+- **`core.common.OrderedMaps.copyOf(Map)`** is the one ordered copy of a map Helios sends to a
+  model or reports to a user: unmodifiable, in the given iteration order, and rejecting a null map,
+  key or value as `Map.copyOf` does, the value message naming its key. Tool-call, `MutateArgs`
+  and event arguments, event attributes and data, `JsonSchema` properties and REPL bindings are
+  stored through it.
 - **`helios-session` publishes its test fixtures as `helios-session-<version>-tests.jar`**, in
   `com.standardapplied.helios.session.test`: `CollectingSubscriber` (records a session's events,
   optionally reacting to each, and waits for the stream to end through `Await`), `QuestionAnswers`
@@ -320,6 +342,34 @@ and its name suggested one sandbox where the provider spawns one per session.
   HTTP client had no connect timeout, so a connection attempt to Hugging Face that went
   unanswered lasted as long as the host's TCP settings allowed. It now takes its client from
   `HttpClientFactory.createForDownloads()`, and a connection attempt fails after 10 seconds.
+- **Schemas, tool definitions and replayed tool calls reached providers in a different order in
+  every JVM.** A record's schema properties, `JsonSchema.object()` builds, the provenance schemas,
+  `Tool.parametersAsJsonSchema()`, tool-call and `MutateArgs` arguments,
+  `Provenanced.provenanceByField()` and the REPL's bindings were frozen with `Map.copyOf`, and
+  OpenAI's strict-schema transform
+  rebuilt every map as a `HashMap`. Each now keeps declaration order (record components, builder
+  insertion, parameter lists, parsed JSON), so request bodies, CodeAct and RLM prompts and
+  messages to the model are byte-identical across JVMs. This fixes prompt-cache misses across
+  restarts and across instances, and structured output generated out of its declared field order.
+  `ExecutionCapabilities.supportedRuntimes()`, which an `Execute` refusal names, iterates in
+  `Runtime` declaration order, and `ReplSession.calledHostFunctions()` is sorted by name. The
+  sandbox's `countBy` helper lists its keys in the order they first occur, the arguments of
+  `QueryEvent.ToolMutated` and `HeliosEvent.ToolCallStarted`, the attributes of
+  `HeliosEvent.RunStarted` and the data of `HeliosEvent.Custom` keep their given order in the
+  session stream and the JSONL event log, the runtime's `POST /sessions` and result bodies list
+  their fields in a fixed order, and REPL bindings still reject a null name or repr.
+- **`Prompt.variables` lost the first-occurrence order `Prompt.extractVariables` documents.** It
+  was frozen with `Set.copyOf`, so a prompt's variables, and the `variables` array
+  `PgPromptRegistry` stores and reads back, came in a different order in every JVM. They now keep
+  the order they first occur in the template, through the database round trip.
+- **OpenAI forced a random tool when `ToolChoice.required` named several.** It sent the first name
+  a hash set returned as a single forced function. Several names are now sent as the Responses
+  API's `allowed_tools` choice, `{"type": "allowed_tools", "mode": "required", "tools": [...]}`, in
+  the given order; one name is still sent as `{"type": "function", "name": ...}`.
+- **The sandbox verifier named an arbitrary one of nested denied packages.** With `java.lang` and
+  `java.lang.reflect` denied, a reference to `java.lang.reflect.Method` was labelled with either
+  package depending on the JVM run. It is now labelled with the most specific one,
+  `deniedPackages:java.lang.reflect`.
 
 ### Security
 

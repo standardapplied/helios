@@ -5,6 +5,7 @@
 
 package com.standardapplied.helios.core.model;
 
+import com.standardapplied.helios.core.common.OrderedMaps;
 import java.util.Map;
 
 /**
@@ -38,7 +39,7 @@ public record ToolCall(String id, String name, Map<String, Object> arguments) {
     }
 
     public Builder withArguments(Map<String, Object> arguments) {
-      this.arguments = arguments != null ? Map.copyOf(arguments) : Map.of();
+      this.arguments = arguments != null ? OrderedMaps.copyOf(arguments) : Map.of();
       return this;
     }
 

@@ -10,9 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -145,6 +147,21 @@ final class QueryEventToolAndHookTest {
     after.put("k", "tampered");
     assertEquals("v", e.inputBefore().get("k"), "inputBefore must be defensively copied");
     assertEquals("v2", e.inputAfter().get("k"), "inputAfter must be defensively copied");
+  }
+
+  @Test
+  void toolMutatedKeepsTheArgumentOrderItWasGiven() {
+    var before = new LinkedHashMap<String, Object>();
+    var after = new LinkedHashMap<String, Object>();
+    for (var name : DeclarationOrderFixture.ARGUMENTS) {
+      before.put(name, name);
+      after.put(name, name.length());
+    }
+
+    var e = new QueryEvent.ToolMutated(SID, TURN, TS, CALL, "h", before, after);
+
+    assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(e.inputBefore()));
+    assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(e.inputAfter()));
   }
 
   @Test

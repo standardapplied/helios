@@ -12,11 +12,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.core.trace.Trace;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -307,6 +309,38 @@ class HeliosEventTest {
             NOW, Ids.newId(), Optional.empty(), "call_1", "search", args);
     args.put("k", "v2");
     assertEquals("v1", event.args().get("k"));
+  }
+
+  @Test
+  void toolCallStartedKeepsTheArgumentOrderItWasGiven() {
+    var args = new LinkedHashMap<String, Object>();
+    for (var name : DeclarationOrderFixture.ARGUMENTS) {
+      args.put(name, name);
+    }
+
+    var event =
+        new HeliosEvent.ToolCallStarted(
+            NOW, Ids.newId(), Optional.empty(), "call_1", "search", args);
+
+    assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(event.args()));
+  }
+
+  @Test
+  void runStartedAttributesAndCustomDataKeepTheOrderTheyWereGiven() {
+    var attributes = new LinkedHashMap<String, String>();
+    var data = new LinkedHashMap<String, Object>();
+    for (var name : DeclarationOrderFixture.ARGUMENTS) {
+      attributes.put(name, name);
+      data.put(name, name.length());
+    }
+
+    var started =
+        new HeliosEvent.RunStarted(NOW, Ids.newId(), Optional.empty(), "agent", attributes);
+    var custom = new HeliosEvent.Custom(NOW, Ids.newId(), Optional.empty(), "case.filed", data);
+
+    assertEquals(
+        DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(started.attributes()));
+    assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(custom.data()));
   }
 
   @Test

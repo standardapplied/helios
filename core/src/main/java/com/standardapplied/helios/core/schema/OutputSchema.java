@@ -258,43 +258,42 @@ public record OutputSchema<T>(
   }
 
   private static JsonSchema sourceSchema() {
-    return new JsonSchema(
-        "object",
-        Map.of(
-            "title", JsonSchema.string("Human-readable title of the source; may be omitted"),
+    return JsonSchema.object()
+        .withProperty(
+            "title", JsonSchema.string("Human-readable title of the source; may be omitted"))
+        .withProperty(
             "url",
-                JsonSchema.string(
-                    "Canonical URL of the source. May be a non-HTTP URI scheme such as"
-                        + " cdisc-ct://CL.AGEU/YEARS for non-web provenance."),
+            JsonSchema.string(
+                "Canonical URL of the source. May be a non-HTTP URI scheme such as"
+                    + " cdisc-ct://CL.AGEU/YEARS for non-web provenance."))
+        .withProperty(
             "excerpts",
-                JsonSchema.array(JsonSchema.string("Verbatim excerpt supporting the field value"))),
-        null,
-        List.of("url", "excerpts"),
-        null,
-        "Source citation: where this field's value came from.",
-        null,
-        null);
+            JsonSchema.array(JsonSchema.string("Verbatim excerpt supporting the field value")))
+        .withRequired("url", "excerpts")
+        .withDescription("Source citation: where this field's value came from.")
+        .build();
   }
 
   private static JsonSchema fieldProvenanceSchema() {
-    return new JsonSchema(
-        "object",
-        Map.of(
+    return JsonSchema.object()
+        .withProperty(
             "field",
-                JsonSchema.string(
-                    "Name of the output field this entry describes; must match a field of `output`"),
-            "sources", JsonSchema.array(sourceSchema()),
+            JsonSchema.string(
+                "Name of the output field this entry describes; must match a field of `output`"),
+            true)
+        .withProperty("sources", JsonSchema.array(sourceSchema()), true)
+        .withProperty(
             "reasoning",
-                JsonSchema.string("One or two sentences justifying the value of this field"),
+            JsonSchema.string("One or two sentences justifying the value of this field"),
+            true)
+        .withProperty(
             "confidence",
-                JsonSchema.enumOf(List.of("LOW", "MEDIUM", "HIGH"))
-                    .withDescription(
-                        "Ordinal confidence. MEDIUM and HIGH require at least one source.")),
-        null,
-        List.of("field", "sources", "reasoning", "confidence"),
-        null,
-        "Per-field provenance entry. Include exactly one per top-level field of `output`.",
-        null,
-        null);
+            JsonSchema.enumOf(List.of("LOW", "MEDIUM", "HIGH"))
+                .withDescription(
+                    "Ordinal confidence. MEDIUM and HIGH require at least one source."),
+            true)
+        .withDescription(
+            "Per-field provenance entry. Include exactly one per top-level field of `output`.")
+        .build();
   }
 }

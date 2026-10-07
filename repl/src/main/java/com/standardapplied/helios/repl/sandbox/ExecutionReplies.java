@@ -2,6 +2,7 @@
 package com.standardapplied.helios.repl.sandbox;
 
 import java.time.Duration;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -78,7 +79,7 @@ final class ExecutionReplies {
         bindings.put(key, String.valueOf(entry.getValue()));
       }
     }
-    return Map.copyOf(bindings);
+    return Collections.unmodifiableMap(bindings);
   }
 
   private static String precededBy(String capturedStdout, String stdout) {

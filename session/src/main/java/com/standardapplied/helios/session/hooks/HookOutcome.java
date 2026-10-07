@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.hooks;
 
+import com.standardapplied.helios.core.common.OrderedMaps;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Message;
 import java.util.List;
@@ -142,13 +143,13 @@ public sealed interface HookOutcome
   /**
    * Replace tool arguments at {@link PreToolUseHook}.
    *
-   * @param args the replacement arguments; non-null, defensively copied
+   * @param args the replacement arguments; non-null, defensively copied in the given order
    */
   record MutateArgs(Map<String, Object> args) implements HookOutcome {
 
     public MutateArgs {
       Objects.requireNonNull(args, "args must not be null");
-      args = Map.copyOf(args);
+      args = OrderedMaps.copyOf(args);
     }
   }
 

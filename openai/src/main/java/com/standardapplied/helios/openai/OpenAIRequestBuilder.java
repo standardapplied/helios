@@ -9,8 +9,10 @@ import com.standardapplied.helios.core.provider.RequestFactory;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.openai.api.ResponsesRequest;
 import com.standardapplied.helios.openai.api.ToolDefinition;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SequencedSet;
 
 /**
  * Builds the Responses API request for one turn of one model: the conversation, tools and tool
@@ -84,15 +86,35 @@ final class OpenAIRequestBuilder implements RequestFactory<ResponsesRequest> {
         .toList();
   }
 
-  /** The wire tool choice: a mode string, or the one function a required choice names. */
+  /**
+   * The wire tool choice: a mode string, the one function a required choice names, or the
+   * allowed-tools choice requiring one of several functions, in order.
+   */
   private static Object choice(ToolChoice toolChoice) {
     return switch (toolChoice) {
       case null -> null;
       case ToolChoice.Auto auto -> "auto";
       case ToolChoice.Any any -> "required";
       case ToolChoice.None none -> "none";
-      case ToolChoice.Required required ->
-          Map.of("type", "function", "name", required.allowedTools().iterator().next());
+      case ToolChoice.Required required -> required(required.allowedTools());
     };
+  }
+
+  private static Map<String, Object> required(SequencedSet<String> names) {
+    if (names.size() == 1) {
+      return function(names.getFirst());
+    }
+    var choice = new LinkedHashMap<String, Object>();
+    choice.put("type", "allowed_tools");
+    choice.put("mode", "required");
+    choice.put("tools", names.stream().map(OpenAIRequestBuilder::function).toList());
+    return choice;
+  }
+
+  private static Map<String, Object> function(String name) {
+    var function = new LinkedHashMap<String, Object>();
+    function.put("type", "function");
+    function.put("name", name);
+    return function;
   }
 }
