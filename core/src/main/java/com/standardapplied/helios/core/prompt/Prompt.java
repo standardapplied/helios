@@ -32,7 +32,7 @@ import java.util.regex.Pattern;
  * @param version the version number (1-based, monotonically increasing per name)
  * @param active whether this is the active version for its name
  * @param variables the variable names extracted from the content, in order of first occurrence;
- *     stored as an unmodifiable copy in the given order, with no null name
+ *     non-null, stored as an unmodifiable copy in the given order, with no null name
  * @param createdAt when this version was created
  */
 public record Prompt(
@@ -45,11 +45,10 @@ public record Prompt(
     OffsetDateTime createdAt) {
 
   public Prompt {
-    if (variables != null) {
-      variables.forEach(
-          variable -> Objects.requireNonNull(variable, "variable name must not be null"));
-      variables = Collections.unmodifiableSequencedSet(new LinkedHashSet<>(variables));
-    }
+    Objects.requireNonNull(variables, "variables must not be null");
+    variables.forEach(
+        variable -> Objects.requireNonNull(variable, "variable name must not be null"));
+    variables = Collections.unmodifiableSequencedSet(new LinkedHashSet<>(variables));
   }
 
   private static final Pattern VARIABLE_PATTERN = Pattern.compile("\\{(\\w+)}");
