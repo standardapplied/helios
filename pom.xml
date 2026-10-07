@@ -162,9 +162,9 @@
                   so the main rule set, the PMD exclusions and the shared settings live here; the
                   test-code PMD analysis and the main-and-test CPD analysis are the explicit
                   executions below, each followed by a check pointed at its output directory.
-                  The analysis goals apply the exclusion file too, so both CPD executions name
-                  the CPD file: read as CPD exclusions, the blank lines of the PMD properties
-                  file would silence every duplication inside a single file.
+                  The analysis goals apply the exclusion file too, so both CPD executions clear
+                  it: no duplication is accepted, and read as CPD exclusions, the blank lines of
+                  the PMD properties file would silence every duplication inside a single file.
                 -->
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-pmd-plugin</artifactId>
@@ -247,7 +247,7 @@
                         <configuration>
                             <includeTests>true</includeTests>
                             <targetDirectory>${project.build.directory}/cpd</targetDirectory>
-                            <excludeFromFailureFile>${helios.quality.config}/cpd-exclusions.txt</excludeFromFailureFile>
+                            <excludeFromFailureFile combine.self="override"/>
                         </configuration>
                     </execution>
                     <execution>
@@ -258,7 +258,7 @@
                         </goals>
                         <configuration>
                             <targetDirectory>${project.build.directory}/cpd</targetDirectory>
-                            <excludeFromFailureFile>${helios.quality.config}/cpd-exclusions.txt</excludeFromFailureFile>
+                            <excludeFromFailureFile combine.self="override"/>
                         </configuration>
                     </execution>
                 </executions>
