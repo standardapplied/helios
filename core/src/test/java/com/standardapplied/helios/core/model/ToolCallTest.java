@@ -70,25 +70,24 @@ class ToolCallTest {
     var call = ToolCall.newBuilder().withArguments(arguments).build();
 
     assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(call.arguments()));
-    assertEquals(
-        DeclarationOrderFixture.ARGUMENTS,
-        DeclarationOrderFixture.keys(ToolCall.copyOfArguments(arguments)));
   }
 
   @Test
-  void copyOfArgumentsRejectsANullNameOrValue() {
+  void withArgumentsRejectsANullNameOrValue() {
     var nullValue = new LinkedHashMap<String, Object>();
     nullValue.put("city", null);
     var nullName = new LinkedHashMap<String, Object>();
     nullName.put(null, "Paris");
 
+    var builder = ToolCall.newBuilder();
+
     assertEquals(
-        "argument city must not be null",
-        assertThrows(NullPointerException.class, () -> ToolCall.copyOfArguments(nullValue))
+        "value of key city must not be null",
+        assertThrows(NullPointerException.class, () -> builder.withArguments(nullValue))
             .getMessage());
     assertEquals(
-        "argument name must not be null",
-        assertThrows(NullPointerException.class, () -> ToolCall.copyOfArguments(nullName))
+        "key must not be null",
+        assertThrows(NullPointerException.class, () -> builder.withArguments(nullName))
             .getMessage());
   }
 }

@@ -4,9 +4,9 @@
  */
 package com.standardapplied.helios.session.hooks;
 
+import com.standardapplied.helios.core.common.OrderedMaps;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.ToolCall;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -149,7 +149,7 @@ public sealed interface HookOutcome
 
     public MutateArgs {
       Objects.requireNonNull(args, "args must not be null");
-      args = ToolCall.copyOfArguments(args);
+      args = OrderedMaps.copyOf(args);
     }
   }
 

@@ -8,9 +8,11 @@ package com.standardapplied.helios.core.prompt;
 import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.common.Strings;
 import java.time.OffsetDateTime;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Map;
-import java.util.Set;
+import java.util.Objects;
+import java.util.SequencedSet;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -29,7 +31,8 @@ import java.util.regex.Pattern;
  * @param content the template text with {variable} placeholders
  * @param version the version number (1-based, monotonically increasing per name)
  * @param active whether this is the active version for its name
- * @param variables the set of variable names extracted from the content
+ * @param variables the variable names extracted from the content, in order of first occurrence;
+ *     stored as an unmodifiable copy in the given order, with no null name
  * @param createdAt when this version was created
  */
 public record Prompt(
@@ -38,8 +41,16 @@ public record Prompt(
     String content,
     int version,
     boolean active,
-    Set<String> variables,
+    SequencedSet<String> variables,
     OffsetDateTime createdAt) {
+
+  public Prompt {
+    if (variables != null) {
+      variables.forEach(
+          variable -> Objects.requireNonNull(variable, "variable name must not be null"));
+      variables = Collections.unmodifiableSequencedSet(new LinkedHashSet<>(variables));
+    }
+  }
 
   private static final Pattern VARIABLE_PATTERN = Pattern.compile("\\{(\\w+)}");
 
@@ -61,16 +72,15 @@ public record Prompt(
    * @param content the template text with {variable} placeholders
    * @return the set of variable names found, in order of first occurrence
    */
-  public static Set<String> extractVariables(String content) {
-    if (Strings.isBlank(content)) {
-      return Set.of();
-    }
-    var matcher = VARIABLE_PATTERN.matcher(content);
+  public static SequencedSet<String> extractVariables(String content) {
     var vars = new LinkedHashSet<String>();
-    while (matcher.find()) {
-      vars.add(matcher.group(1));
+    if (content != null) {
+      var matcher = VARIABLE_PATTERN.matcher(content);
+      while (matcher.find()) {
+        vars.add(matcher.group(1));
+      }
     }
-    return Set.copyOf(vars);
+    return Collections.unmodifiableSequencedSet(vars);
   }
 
   public static Builder newBuilder() {
@@ -88,7 +98,7 @@ public record Prompt(
     private String content;
     private int version = 1;
     private boolean active = true;
-    private Set<String> variables;
+    private SequencedSet<String> variables;
     private OffsetDateTime createdAt;
 
     private Builder() {}
@@ -128,7 +138,7 @@ public record Prompt(
       return this;
     }
 
-    public Builder withVariables(Set<String> variables) {
+    public Builder withVariables(SequencedSet<String> variables) {
       this.variables = variables;
       return this;
     }
@@ -152,7 +162,7 @@ public record Prompt(
       if (variables == null) {
         variables = Prompt.extractVariables(content);
       }
-      return new Prompt(id, name, content, version, active, Set.copyOf(variables), createdAt);
+      return new Prompt(id, name, content, version, active, variables, createdAt);
     }
   }
 }

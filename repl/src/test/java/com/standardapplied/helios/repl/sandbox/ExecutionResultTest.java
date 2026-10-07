@@ -211,13 +211,13 @@ class ExecutionResultTest {
     nullName.put(null, "5");
 
     assertEquals(
-        "binding n must not be null",
+        "value of key n must not be null",
         assertThrows(
                 NullPointerException.class,
                 () -> ExecutionResult.newBuilder().withBindings(nullRepr).build())
             .getMessage());
     assertEquals(
-        "binding name must not be null",
+        "key must not be null",
         assertThrows(
                 NullPointerException.class,
                 () -> ExecutionResult.newBuilder().withBindings(nullName).build())

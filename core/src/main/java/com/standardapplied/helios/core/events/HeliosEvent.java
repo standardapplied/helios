@@ -2,9 +2,9 @@
 
 package com.standardapplied.helios.core.events;
 
+import com.standardapplied.helios.core.common.OrderedMaps;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.core.trace.Trace;
 import java.time.Duration;
@@ -100,7 +100,7 @@ public sealed interface HeliosEvent
       if (Strings.isBlank(harnessKind)) {
         throw new IllegalArgumentException("harnessKind must not be blank");
       }
-      attributes = attributes == null ? Map.of() : Map.copyOf(attributes);
+      attributes = attributes == null ? Map.of() : OrderedMaps.copyOf(attributes);
     }
   }
 
@@ -341,7 +341,7 @@ public sealed interface HeliosEvent
       if (Strings.isBlank(toolName)) {
         throw new IllegalArgumentException("toolName must not be blank");
       }
-      args = args == null ? Map.of() : ToolCall.copyOfArguments(args);
+      args = args == null ? Map.of() : OrderedMaps.copyOf(args);
     }
   }
 
@@ -584,7 +584,7 @@ public sealed interface HeliosEvent
       if (Strings.isBlank(kind)) {
         throw new IllegalArgumentException("Custom.kind must not be blank");
       }
-      data = data == null ? Map.of() : Map.copyOf(data);
+      data = data == null ? Map.of() : OrderedMaps.copyOf(data);
     }
   }
 

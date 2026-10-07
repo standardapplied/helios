@@ -263,10 +263,10 @@ class JsonSchemaTest {
     var nullSchema = JsonSchema.object().withProperty("city", null);
 
     assertEquals(
-        "property name must not be null",
+        "key must not be null",
         assertThrows(NullPointerException.class, nullName::build).getMessage());
     assertEquals(
-        "schema of property city must not be null",
+        "value of key city must not be null",
         assertThrows(NullPointerException.class, nullSchema::build).getMessage());
   }
 

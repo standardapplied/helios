@@ -609,6 +609,9 @@ final class AgentHttpServiceIntegrationTest {
     Map<String, Object> body = mapper.readValue(resp.body(), Map.class);
     var id = (String) body.get("sessionId");
     assertTrue(id != null && !id.isBlank());
+    assertEquals(
+        "{\"sessionId\":\"" + id + "\",\"eventsUrl\":\"/v1/sessions/" + id + "/events\"}",
+        resp.body());
     return id;
   }
 

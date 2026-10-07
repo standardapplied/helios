@@ -5,10 +5,8 @@
 
 package com.standardapplied.helios.core.model;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
+import com.standardapplied.helios.core.common.OrderedMaps;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * Represents a tool call requested by the model.
@@ -18,24 +16,6 @@ import java.util.Objects;
  * @param arguments the arguments to pass to the tool
  */
 public record ToolCall(String id, String name, Map<String, Object> arguments) {
-
-  /**
-   * An unmodifiable copy of tool-call {@code arguments} that keeps their order, so a replayed call
-   * reaches the model exactly as it was made.
-   *
-   * @param arguments the arguments; non-null, with no null name or value
-   * @return the ordered copy
-   * @throws NullPointerException if {@code arguments}, a name or a value is null
-   */
-  public static Map<String, Object> copyOfArguments(Map<String, Object> arguments) {
-    var copy = new LinkedHashMap<String, Object>();
-    arguments.forEach(
-        (name, value) ->
-            copy.put(
-                Objects.requireNonNull(name, "argument name must not be null"),
-                Objects.requireNonNull(value, () -> "argument " + name + " must not be null")));
-    return Collections.unmodifiableMap(copy);
-  }
 
   public static Builder newBuilder() {
     return new Builder();
@@ -59,7 +39,7 @@ public record ToolCall(String id, String name, Map<String, Object> arguments) {
     }
 
     public Builder withArguments(Map<String, Object> arguments) {
-      this.arguments = arguments != null ? copyOfArguments(arguments) : Map.of();
+      this.arguments = arguments != null ? OrderedMaps.copyOf(arguments) : Map.of();
       return this;
     }
 

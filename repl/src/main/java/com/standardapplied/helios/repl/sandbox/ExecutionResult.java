@@ -5,11 +5,9 @@
 
 package com.standardapplied.helios.repl.sandbox;
 
+import com.standardapplied.helios.core.common.OrderedMaps;
 import java.time.Duration;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * Result of executing code in a sandbox.
@@ -53,20 +51,10 @@ public record ExecutionResult(
     if (stderr == null) {
       stderr = "";
     }
-    bindings = bindings == null ? Map.of() : orderedCopy(bindings);
+    bindings = bindings == null ? Map.of() : OrderedMaps.copyOf(bindings);
     if (duration == null || duration.isNegative()) {
       duration = Duration.ZERO;
     }
-  }
-
-  private static Map<String, String> orderedCopy(Map<String, String> bindings) {
-    var copy = new LinkedHashMap<String, String>();
-    bindings.forEach(
-        (name, repr) ->
-            copy.put(
-                Objects.requireNonNull(name, "binding name must not be null"),
-                Objects.requireNonNull(repr, () -> "binding " + name + " must not be null")));
-    return Collections.unmodifiableMap(copy);
   }
 
   /**
