@@ -67,6 +67,18 @@ class ModelStreamsTest {
   }
 
   @Test
+  void aStreamCancelledFromItsSubscriberStopsAtThatChunkAndNeverCompletes() {
+    for (var stream : List.of(ModelStreams.of(TEXT), ModelStreams.of(TEXT, STOP))) {
+      var recorder = new ChunkRecorder().cancellingOnEveryChunk();
+      stream.subscribe(recorder);
+
+      recorder.request(Long.MAX_VALUE);
+
+      assertEquals(List.of("subscribed", TEXT.toString()), recorder.signals);
+    }
+  }
+
+  @Test
   void aNonPositiveRequestFailsTheStreamOnce() {
     var recorder = new ChunkRecorder();
     ModelStreams.of(TEXT).subscribe(recorder);
@@ -101,6 +113,7 @@ class ModelStreamsTest {
 
     recorder.request(1);
     recorder.request(Long.MAX_VALUE);
+    recorder.cancel();
 
     assertEquals(2, requests.get());
     assertEquals(List.of("subscribed"), recorder.signals);
