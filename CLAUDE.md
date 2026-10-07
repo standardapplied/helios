@@ -118,7 +118,8 @@ stays.
 A test passes or fails for the same reason on a machine a hundred times slower, and on one that
 stalls for several seconds at any statement. The fixtures live in
 `com.standardapplied.helios.core.test` (core's test sources, shared through core's `test-jar`;
-the package must never exist in core's main code): `Await`, `LineSink`, `FeedableInputStream`,
+the package must never exist in core's main code; session's equivalent is
+`com.standardapplied.helios.session.test`): `Await`, `LineSink`, `FeedableInputStream`,
 and for HTTP clients `StubHttpServer` and `RedirectTrap`.
 
 - **Wait for an event, never for time.** Wait on what the other thread produces: a latch, a
@@ -276,8 +277,8 @@ means changing `SCANNER_VERSION` and both checksums in `advisory_scan.py` togeth
 
 ```
 helios/
-├── core/                           # Zero deps - Model + tool + common + fault + process + provider + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream, StubHttpServer, RedirectTrap, and for provider characterization ModelHarness, SseReplies, Transcript, Golden, ConversationFixture) ship as its test-jar.
-├── session/                        # v2 SDK - AgentSession, SessionPresets, hooks, permissions, file tools, memory backend, agent loop
+├── core/                           # Zero deps - Model + tool + common + fault + process + provider + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream, FailingInputStream, StubHttpServer, RedirectTrap, SseEvents, and for provider characterization ModelHarness, SseReplies, Transcript, Golden, ConversationFixture) and the abstract `*Contract` tests ship as its test-jar.
+├── session/                        # v2 SDK - AgentSession, SessionPresets, hooks, permissions, file tools, memory backend, agent loop. Test fixtures (CollectingSubscriber, QuestionAnswers, HookInputs, SampleDocuments in `session.test`) ship as its test-jar.
 ├── runtime/                        # Helidon HTTP/SSE surface for session — POST /sessions, SSE /events, long-poll /result
 ├── gemini/                         # Gemini Interactions API + Jackson 3.x
 ├── anthropic/                      # Claude Messages API + Jackson 3.x
@@ -285,7 +286,7 @@ helios/
 ├── repl/                           # Sandboxed JShell substrate (JvmSandbox, ReplSession, CodeExecutionTool, InputBindings, HostFunction infrastructure)
 ├── onnx/                           # Local embeddings via ONNX Runtime
 ├── persistence/                    # PostgreSQL persistence — PgTraceStore + PgAnnotationStore + PgDurability via Helidon DbClient
-├── testing/                        # helios-testing — ScriptedModel test double for deterministic CI evals
+├── testing/                        # helios-testing — ScriptedModel test double (scripted text, tool-call, response and stream turns) + ModelStreams, for deterministic CI evals
 ├── architecture/                   # helios-architecture — ArchUnit rules over every library module; build-only, never deployed
 ├── config/quality/                 # PMD rule sets + PMD/CPD exclusion files shared by every module
 ├── config/security/                # Advisory scan (OSV-Scanner wrapper + tests), its canary inventory and the exception file
