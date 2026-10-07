@@ -3,6 +3,7 @@
 package com.standardapplied.helios.testing;
 
 import com.standardapplied.helios.core.model.ModelChunk;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Flow;
@@ -27,7 +28,7 @@ public final class ModelStreams {
    * @return the stream
    */
   public static Flow.Publisher<ModelChunk> of(ModelChunk... chunks) {
-    return new Replay(List.of(chunks), null);
+    return new Replay(sequence(chunks), null);
   }
 
   /**
@@ -39,7 +40,8 @@ public final class ModelStreams {
    * @return the stream
    */
   public static Flow.Publisher<ModelChunk> failing(Throwable error, ModelChunk... chunks) {
-    return new Replay(List.of(chunks), Objects.requireNonNull(error, "error must not be null"));
+    Objects.requireNonNull(error, "error must not be null");
+    return new Replay(sequence(chunks), error);
   }
 
   /**
@@ -83,6 +85,12 @@ public final class ModelStreams {
     public void cancel() {
       ended.set(true);
     }
+  }
+
+  private static List<ModelChunk> sequence(ModelChunk[] chunks) {
+    Objects.requireNonNull(chunks, "chunks must not be null");
+    Arrays.stream(chunks).forEach(chunk -> Objects.requireNonNull(chunk, "chunk must not be null"));
+    return List.of(chunks);
   }
 
   private static IllegalArgumentException nonPositiveRequest(long n) {

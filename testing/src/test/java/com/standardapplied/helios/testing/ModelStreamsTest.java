@@ -17,6 +17,7 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -208,11 +209,18 @@ class ModelStreamsTest {
   @Test
   void nullArgumentsAreRejected() {
     var error = new IllegalStateException("cut");
-    assertThrows(NullPointerException.class, () -> ModelStreams.failing(null, TEXT));
-    assertThrows(NullPointerException.class, () -> ModelStreams.stalled(null));
-    assertThrows(NullPointerException.class, () -> ModelStreams.stalled(() -> {}).subscribe(null));
-    assertThrows(NullPointerException.class, () -> ModelStreams.of(TEXT).subscribe(null));
-    assertThrows(NullPointerException.class, () -> ModelStreams.failing(error, (ModelChunk) null));
+    assertNullRejected("error must not be null", () -> ModelStreams.failing(null, TEXT));
+    assertNullRejected("onRequest must not be null", () -> ModelStreams.stalled(null));
+    assertNullRejected(
+        "subscriber must not be null", () -> ModelStreams.stalled(() -> {}).subscribe(null));
+    assertNullRejected("subscriber must not be null", () -> ModelStreams.of(TEXT).subscribe(null));
+    assertNullRejected("chunks must not be null", () -> ModelStreams.of((ModelChunk[]) null));
+    assertNullRejected(
+        "chunk must not be null", () -> ModelStreams.failing(error, TEXT, (ModelChunk) null));
+  }
+
+  private static void assertNullRejected(String message, Executable call) {
+    assertEquals(message, assertThrows(NullPointerException.class, call).getMessage());
   }
 
   private static ChunkRecorder actWhileFirstSignalIsPaused(

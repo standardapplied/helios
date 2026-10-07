@@ -272,7 +272,8 @@ class ScriptedModelTest {
     var ex =
         assertThrows(IllegalStateException.class, () -> model.chat(List.of(Message.user("hi"))));
     assertEquals(
-        "Scripted turn 1 is a stream turn: it answers chatStream, not chat", ex.getMessage());
+        "Scripted turn 1 is a stream turn: only chatStream with a CancellationToken answers it",
+        ex.getMessage());
   }
 
   @Test

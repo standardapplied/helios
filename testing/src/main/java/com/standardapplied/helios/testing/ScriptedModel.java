@@ -162,7 +162,7 @@ public final class ScriptedModel implements Model {
       var turn = next(messages, schema);
       if (turn.stream() != null) {
         throw new IllegalStateException(
-            "Scripted turn %d is a stream turn: it answers chatStream, not chat"
+            "Scripted turn %d is a stream turn: only chatStream with a CancellationToken answers it"
                 .formatted(calls.size()));
       }
       return turn.response();
