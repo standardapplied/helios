@@ -5,6 +5,7 @@
 
 package com.standardapplied.helios.anthropic;
 
+import static com.standardapplied.helios.core.test.SseEvents.named;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -13,308 +14,249 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.SseReader;
-import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.FailingInputStream;
 import com.standardapplied.helios.core.test.FeedableInputStream;
-import java.io.ByteArrayInputStream;
+import com.standardapplied.helios.core.test.SseEvents;
+import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.Test;
 import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 class StreamingIteratorTest {
 
   private static final Duration SHORT_IDLE_TIMEOUT = Duration.ofMillis(200);
-  private static final Duration NEVER_IDLE = Duration.ofMinutes(10);
 
   private static final String MESSAGE_START =
-      "event: message_start\n"
-          + "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\","
-          + "\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-6-20250514\","
-          + "\"stop_reason\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}\n\n";
+      named(
+          "message_start",
+          "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\","
+              + "\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-6-20250514\","
+              + "\"stop_reason\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}");
 
   private static final String TEXT_BLOCK_START =
-      "event: content_block_start\n"
-          + "data: {\"type\":\"content_block_start\",\"index\":0,"
-          + "\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n";
+      named(
+          "content_block_start",
+          "{\"type\":\"content_block_start\",\"index\":0,"
+              + "\"content_block\":{\"type\":\"text\",\"text\":\"\"}}");
 
   private static final String TEXT_DELTA =
-      "event: content_block_delta\n"
-          + "data: {\"type\":\"content_block_delta\",\"index\":0,"
-          + "\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n";
+      named(
+          "content_block_delta",
+          "{\"type\":\"content_block_delta\",\"index\":0,"
+              + "\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}");
 
   private static final String CONTENT_BLOCK_STOP_0 =
-      "event: content_block_stop\n" + "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
+      named("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
 
   private static final String MESSAGE_DELTA_END_TURN =
-      "event: message_delta\n"
-          + "data: {\"type\":\"message_delta\","
-          + "\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},"
-          + "\"usage\":{\"output_tokens\":15}}\n\n";
+      named(
+          "message_delta",
+          "{\"type\":\"message_delta\","
+              + "\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},"
+              + "\"usage\":{\"output_tokens\":15}}");
 
-  private static final String MESSAGE_STOP =
-      "event: message_stop\n" + "data: {\"type\":\"message_stop\"}\n\n";
+  private static final String MESSAGE_STOP = named("message_stop", "{\"type\":\"message_stop\"}");
 
-  private final tools.jackson.databind.ObjectMapper objectMapper =
+  private static final String HELLO_TURN =
+      MESSAGE_START
+          + TEXT_BLOCK_START
+          + TEXT_DELTA
+          + CONTENT_BLOCK_STOP_0
+          + MESSAGE_DELTA_END_TURN
+          + MESSAGE_STOP;
+
+  private final ObjectMapper objectMapper =
       JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
 
-  @org.junit.jupiter.api.Test
+  @Test
   void textDeltaEvents() {
-    var sse =
-        MESSAGE_START
-            + TEXT_BLOCK_START
-            + TEXT_DELTA
-            + CONTENT_BLOCK_STOP_0
-            + MESSAGE_DELTA_END_TURN
-            + MESSAGE_STOP;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-      assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
-      assertEquals("Hello", ((StreamEvent.TextDelta) events.get(0)).text());
-      assertInstanceOf(StreamEvent.Done.class, events.get(1));
+    var events = drain(HELLO_TURN);
 
-      var done = (StreamEvent.Done) events.get(1);
-      assertEquals("Hello", done.response().content());
-      assertEquals(FinishReason.STOP, done.response().finishReason());
-    }
+    assertEquals(2, events.size());
+    assertEquals("Hello", assertInstanceOf(StreamEvent.TextDelta.class, events.get(0)).text());
+    var done = assertInstanceOf(StreamEvent.Done.class, events.get(1));
+    assertEquals("Hello", done.response().content());
+    assertEquals(FinishReason.STOP, done.response().finishReason());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void toolCallFromStreaming() {
     var toolBlockStart =
-        "event: content_block_start\n"
-            + "data: {\"type\":\"content_block_start\",\"index\":1,"
-            + "\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\","
-            + "\"name\":\"get_weather\",\"input\":{}}}\n\n";
+        named(
+            "content_block_start",
+            "{\"type\":\"content_block_start\",\"index\":1,"
+                + "\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\","
+                + "\"name\":\"get_weather\",\"input\":{}}}");
 
     var toolDelta1 =
-        "event: content_block_delta\n"
-            + "data: {\"type\":\"content_block_delta\",\"index\":1,"
-            + "\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"city\\\"\"}}\n\n";
+        named(
+            "content_block_delta",
+            "{\"type\":\"content_block_delta\",\"index\":1,"
+                + "\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"city\\\"\"}}");
 
     var toolDelta2 =
-        "event: content_block_delta\n"
-            + "data: {\"type\":\"content_block_delta\",\"index\":1,"
-            + "\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\":\\\"NYC\\\"}\"}}\n\n";
+        named(
+            "content_block_delta",
+            "{\"type\":\"content_block_delta\",\"index\":1,"
+                + "\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\":\\\"NYC\\\"}\"}}");
 
     var contentBlockStop1 =
-        "event: content_block_stop\n" + "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n";
+        named("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":1}");
 
     var messageDeltaToolUse =
-        "event: message_delta\n"
-            + "data: {\"type\":\"message_delta\","
-            + "\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},"
-            + "\"usage\":{\"output_tokens\":30}}\n\n";
+        named(
+            "message_delta",
+            "{\"type\":\"message_delta\","
+                + "\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},"
+                + "\"usage\":{\"output_tokens\":30}}");
 
-    var sse =
-        MESSAGE_START
-            + toolBlockStart
-            + toolDelta1
-            + toolDelta2
-            + contentBlockStop1
-            + messageDeltaToolUse
-            + MESSAGE_STOP;
+    var events =
+        drain(
+            MESSAGE_START
+                + toolBlockStart
+                + toolDelta1
+                + toolDelta2
+                + contentBlockStop1
+                + messageDeltaToolUse
+                + MESSAGE_STOP);
 
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-      assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(0));
-      var tc = ((StreamEvent.ToolCallComplete) events.get(0)).toolCall();
-      assertEquals("get_weather", tc.name());
-      assertEquals("toolu_1", tc.id());
-      assertEquals(Map.of("city", "NYC"), tc.arguments());
+    assertEquals(2, events.size());
+    var tc = assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(0)).toolCall();
+    assertEquals("get_weather", tc.name());
+    assertEquals("toolu_1", tc.id());
+    assertEquals(Map.of("city", "NYC"), tc.arguments());
 
-      var done = (StreamEvent.Done) events.get(1);
-      assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
-      assertFalse(done.response().toolCalls().isEmpty());
-    }
+    var done = (StreamEvent.Done) events.get(1);
+    assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
+    assertFalse(done.response().toolCalls().isEmpty());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void thinkingEventCapturesContent() {
     var thinkingStart =
-        "event: content_block_start\n"
-            + "data: {\"type\":\"content_block_start\",\"index\":0,"
-            + "\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n";
+        named(
+            "content_block_start",
+            "{\"type\":\"content_block_start\",\"index\":0,"
+                + "\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}");
 
     var thinkingDelta =
-        "event: content_block_delta\n"
-            + "data: {\"type\":\"content_block_delta\",\"index\":0,"
-            + "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Let me think...\"}}\n\n";
+        named(
+            "content_block_delta",
+            "{\"type\":\"content_block_delta\",\"index\":0,"
+                + "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Let me think...\"}}");
 
     var signatureDelta =
-        "event: content_block_delta\n"
-            + "data: {\"type\":\"content_block_delta\",\"index\":0,"
-            + "\"delta\":{\"type\":\"signature_delta\",\"signature\":\"EqoB123\"}}\n\n";
+        named(
+            "content_block_delta",
+            "{\"type\":\"content_block_delta\",\"index\":0,"
+                + "\"delta\":{\"type\":\"signature_delta\",\"signature\":\"EqoB123\"}}");
 
-    var sse =
-        MESSAGE_START
-            + thinkingStart
-            + thinkingDelta
-            + signatureDelta
-            + CONTENT_BLOCK_STOP_0
-            + TEXT_BLOCK_START.replace("\"index\":0", "\"index\":1")
-            + TEXT_DELTA.replace("\"index\":0", "\"index\":1")
-            + "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n"
-            + MESSAGE_DELTA_END_TURN
-            + MESSAGE_STOP;
+    var events =
+        drain(
+            MESSAGE_START
+                + thinkingStart
+                + thinkingDelta
+                + signatureDelta
+                + CONTENT_BLOCK_STOP_0
+                + TEXT_BLOCK_START.replace("\"index\":0", "\"index\":1")
+                + TEXT_DELTA.replace("\"index\":0", "\"index\":1")
+                + named("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":1}")
+                + MESSAGE_DELTA_END_TURN
+                + MESSAGE_STOP);
 
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
+    var done = (StreamEvent.Done) events.getLast();
+    assertNotNull(done.response().thinking());
+    assertTrue(done.response().thinking().contains("Let me think..."));
 
-      var done = (StreamEvent.Done) events.getLast();
-      assertNotNull(done.response().thinking());
-      assertTrue(done.response().thinking().contains("Let me think..."));
+    var metadata = done.response().metadata();
+    assertEquals(
+        List.of(new ThinkingBlock("Let me think...", "EqoB123")),
+        ThinkingBlock.decodeAll(metadata));
+    assertFalse(metadata.containsKey("anthropic.thinking"));
+    assertFalse(metadata.containsKey("anthropic.thinkingSignature"));
 
-      var metadata = done.response().metadata();
-      assertEquals(
-          List.of(new ThinkingBlock("Let me think...", "EqoB123")),
-          ThinkingBlock.decodeAll(metadata));
-      assertFalse(metadata.containsKey("anthropic.thinking"));
-      assertFalse(metadata.containsKey("anthropic.thinkingSignature"));
-
-      // Streaming surface: each thinking_delta arrives as ThinkingDelta, and the closing
-      // content_block_stop emits ThinkingComplete with the assembled text + signature.
-      var thinkingDeltaEvent =
-          events.stream()
-              .filter(StreamEvent.ThinkingDelta.class::isInstance)
-              .map(StreamEvent.ThinkingDelta.class::cast)
-              .findFirst()
-              .orElseThrow();
-      assertEquals("Let me think...", thinkingDeltaEvent.text());
-      var thinkingComplete =
-          events.stream()
-              .filter(StreamEvent.ThinkingComplete.class::isInstance)
-              .map(StreamEvent.ThinkingComplete.class::cast)
-              .findFirst()
-              .orElseThrow();
-      assertEquals("Let me think...", thinkingComplete.fullThinking());
-      assertEquals("EqoB123", thinkingComplete.signature());
-    }
+    // Streaming surface: each thinking_delta arrives as ThinkingDelta, and the closing
+    // content_block_stop emits ThinkingComplete with the assembled text + signature.
+    var thinkingDeltaEvent =
+        events.stream()
+            .filter(StreamEvent.ThinkingDelta.class::isInstance)
+            .map(StreamEvent.ThinkingDelta.class::cast)
+            .findFirst()
+            .orElseThrow();
+    assertEquals("Let me think...", thinkingDeltaEvent.text());
+    var thinkingComplete =
+        events.stream()
+            .filter(StreamEvent.ThinkingComplete.class::isInstance)
+            .map(StreamEvent.ThinkingComplete.class::cast)
+            .findFirst()
+            .orElseThrow();
+    assertEquals("Let me think...", thinkingComplete.fullThinking());
+    assertEquals("EqoB123", thinkingComplete.signature());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void usageFromEvents() {
-    var sse =
-        MESSAGE_START
-            + TEXT_BLOCK_START
-            + TEXT_DELTA
-            + CONTENT_BLOCK_STOP_0
-            + MESSAGE_DELTA_END_TURN
-            + MESSAGE_STOP;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      assertNotNull(done.response().usage());
-      assertEquals(25, done.response().usage().inputTokens());
-      assertEquals(15, done.response().usage().outputTokens());
-    }
+    var done = (StreamEvent.Done) drain(HELLO_TURN).getLast();
+
+    assertNotNull(done.response().usage());
+    assertEquals(25, done.response().usage().inputTokens());
+    assertEquals(15, done.response().usage().outputTokens());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void maxTokensStopReason() {
     var messageDelta =
-        "event: message_delta\n"
-            + "data: {\"type\":\"message_delta\","
-            + "\"delta\":{\"stop_reason\":\"max_tokens\",\"stop_sequence\":null},"
-            + "\"usage\":{\"output_tokens\":4096}}\n\n";
+        named(
+            "message_delta",
+            "{\"type\":\"message_delta\","
+                + "\"delta\":{\"stop_reason\":\"max_tokens\",\"stop_sequence\":null},"
+                + "\"usage\":{\"output_tokens\":4096}}");
 
-    var sse =
-        MESSAGE_START
-            + TEXT_BLOCK_START
-            + TEXT_DELTA
-            + CONTENT_BLOCK_STOP_0
-            + messageDelta
-            + MESSAGE_STOP;
+    var done =
+        (StreamEvent.Done)
+            drain(
+                    MESSAGE_START
+                        + TEXT_BLOCK_START
+                        + TEXT_DELTA
+                        + CONTENT_BLOCK_STOP_0
+                        + messageDelta
+                        + MESSAGE_STOP)
+                .getLast();
 
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      assertEquals(FinishReason.LENGTH, done.response().finishReason());
-    }
+    assertEquals(FinishReason.LENGTH, done.response().finishReason());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void emptyAndDoneDataLinesAreSkipped() {
-    var sse =
-        "data: \n\ndata: [DONE]\n\n"
-            + MESSAGE_START
-            + TEXT_BLOCK_START
-            + TEXT_DELTA
-            + CONTENT_BLOCK_STOP_0
-            + MESSAGE_DELTA_END_TURN
-            + MESSAGE_STOP;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-      assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
-    }
+    var events = drain("data: \n\ndata: [DONE]\n\n" + HELLO_TURN);
+
+    assertEquals(2, events.size());
+    assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void nonDataLinesAreIgnored() {
-    var sse =
-        "event: ping\n\n"
-            + MESSAGE_START
-            + TEXT_BLOCK_START
-            + TEXT_DELTA
-            + CONTENT_BLOCK_STOP_0
-            + MESSAGE_DELTA_END_TURN
-            + MESSAGE_STOP;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-    }
+    assertEquals(2, drain("event: ping\n\n" + HELLO_TURN).size());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void malformedJsonEmitsErrorEvent() {
-    var sse =
-        "data: {not valid json}\n\n"
-            + MESSAGE_START
-            + TEXT_BLOCK_START
-            + TEXT_DELTA
-            + CONTENT_BLOCK_STOP_0
-            + MESSAGE_DELTA_END_TURN
-            + MESSAGE_STOP;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertTrue(events.size() >= 2);
-      assertInstanceOf(StreamEvent.Error.class, events.get(0));
-    }
+    var events = drain("data: {not valid json}\n\n" + HELLO_TURN);
+
+    assertTrue(events.size() >= 2);
+    assertInstanceOf(StreamEvent.Error.class, events.get(0));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void idleTimeoutEmitsErrorEvent() {
     var neverDelivers = new FeedableInputStream();
 
@@ -325,200 +267,112 @@ class StreamingIteratorTest {
             new AnthropicStreamParser(),
             AnthropicException::new)) {
       assertTrue(iterator.hasNext());
-      var event = iterator.next();
-      assertInstanceOf(StreamEvent.Error.class, event);
-      var error = (StreamEvent.Error) event;
+      var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().contains("idle timeout"));
-      assertInstanceOf(AnthropicException.class, error.cause());
-      assertTrue(((AnthropicException) error.cause()).isRetryable());
+      assertTrue(assertInstanceOf(AnthropicException.class, error.cause()).isRetryable());
     }
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void closeIsIdempotent() {
-    var sse =
-        MESSAGE_START
-            + TEXT_BLOCK_START
-            + TEXT_DELTA
-            + CONTENT_BLOCK_STOP_0
-            + MESSAGE_DELTA_END_TURN
-            + MESSAGE_STOP;
-    var iterator = createIterator(sse, NEVER_IDLE);
+    var iterator = reader(SseEvents.body(HELLO_TURN));
     iterator.close();
     iterator.close();
     assertFalse(iterator.hasNext());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void closeAfterPartialConsumption() {
-    var sse =
-        MESSAGE_START
-            + TEXT_BLOCK_START
-            + TEXT_DELTA
-            + CONTENT_BLOCK_STOP_0
-            + MESSAGE_DELTA_END_TURN
-            + MESSAGE_STOP;
-    var iterator = createIterator(sse, NEVER_IDLE);
+    var iterator = reader(SseEvents.body(HELLO_TURN));
     assertTrue(iterator.hasNext());
     iterator.next();
     iterator.close();
     assertFalse(iterator.hasNext());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void multipleTextDeltas() {
     var delta2 =
-        "event: content_block_delta\n"
-            + "data: {\"type\":\"content_block_delta\",\"index\":0,"
-            + "\"delta\":{\"type\":\"text_delta\",\"text\":\" World\"}}\n\n";
+        named(
+            "content_block_delta",
+            "{\"type\":\"content_block_delta\",\"index\":0,"
+                + "\"delta\":{\"type\":\"text_delta\",\"text\":\" World\"}}");
 
-    var sse =
-        MESSAGE_START
-            + TEXT_BLOCK_START
-            + TEXT_DELTA
-            + delta2
-            + CONTENT_BLOCK_STOP_0
-            + MESSAGE_DELTA_END_TURN
-            + MESSAGE_STOP;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(3, events.size());
-      var done = (StreamEvent.Done) events.getLast();
-      assertEquals("Hello World", done.response().content());
-    }
+    var events =
+        drain(
+            MESSAGE_START
+                + TEXT_BLOCK_START
+                + TEXT_DELTA
+                + delta2
+                + CONTENT_BLOCK_STOP_0
+                + MESSAGE_DELTA_END_TURN
+                + MESSAGE_STOP);
+
+    assertEquals(3, events.size());
+    assertEquals("Hello World", ((StreamEvent.Done) events.getLast()).response().content());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void emptyStreamProducesDoneWithEmptyContent() {
-    var sse = MESSAGE_START + MESSAGE_DELTA_END_TURN + MESSAGE_STOP;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(1, events.size());
-      var done = (StreamEvent.Done) events.getFirst();
-      assertEquals("", done.response().content());
-      assertEquals(FinishReason.STOP, done.response().finishReason());
-    }
+    var events = drain(MESSAGE_START + MESSAGE_DELTA_END_TURN + MESSAGE_STOP);
+
+    assertEquals(1, events.size());
+    var done = (StreamEvent.Done) events.getFirst();
+    assertEquals("", done.response().content());
+    assertEquals(FinishReason.STOP, done.response().finishReason());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void noThinkingMetadataWhenNotPresent() {
-    var sse =
-        MESSAGE_START
-            + TEXT_BLOCK_START
-            + TEXT_DELTA
-            + CONTENT_BLOCK_STOP_0
-            + MESSAGE_DELTA_END_TURN
-            + MESSAGE_STOP;
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      var done = (StreamEvent.Done) events.getLast();
-      assertNull(done.response().thinking());
-      assertFalse(done.response().metadata().containsKey(ThinkingBlock.THINKING_BLOCKS_KEY));
-    }
+    var done = (StreamEvent.Done) drain(HELLO_TURN).getLast();
+
+    assertNull(done.response().thinking());
+    assertFalse(done.response().metadata().containsKey(ThinkingBlock.THINKING_BLOCKS_KEY));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void toolCallWithEmptyArgs() {
     var toolBlockStart =
-        "event: content_block_start\n"
-            + "data: {\"type\":\"content_block_start\",\"index\":0,"
-            + "\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\","
-            + "\"name\":\"list_items\",\"input\":{}}}\n\n";
-
-    var contentBlockStop =
-        "event: content_block_stop\n" + "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
+        named(
+            "content_block_start",
+            "{\"type\":\"content_block_start\",\"index\":0,"
+                + "\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\","
+                + "\"name\":\"list_items\",\"input\":{}}}");
 
     var messageDelta =
-        "event: message_delta\n"
-            + "data: {\"type\":\"message_delta\","
-            + "\"delta\":{\"stop_reason\":\"tool_use\"},"
-            + "\"usage\":{\"output_tokens\":10}}\n\n";
+        named(
+            "message_delta",
+            "{\"type\":\"message_delta\","
+                + "\"delta\":{\"stop_reason\":\"tool_use\"},"
+                + "\"usage\":{\"output_tokens\":10}}");
 
-    var sse = MESSAGE_START + toolBlockStart + contentBlockStop + messageDelta + MESSAGE_STOP;
+    var events =
+        drain(MESSAGE_START + toolBlockStart + CONTENT_BLOCK_STOP_0 + messageDelta + MESSAGE_STOP);
 
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      assertEquals(2, events.size());
-      var tc = ((StreamEvent.ToolCallComplete) events.get(0)).toolCall();
-      assertEquals("list_items", tc.name());
-      assertEquals(Map.of(), tc.arguments());
-    }
+    assertEquals(2, events.size());
+    var tc = ((StreamEvent.ToolCallComplete) events.get(0)).toolCall();
+    assertEquals("list_items", tc.name());
+    assertEquals(Map.of(), tc.arguments());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void ioExceptionFromReaderEmitsErrorEvent() {
-    var failingStream =
-        new InputStream() {
-          @Override
-          public int read() throws java.io.IOException {
-            throw new java.io.IOException("Simulated I/O failure");
-          }
-        };
-    try (var iterator =
-        new SseReader(
-            failingStream, NEVER_IDLE, new AnthropicStreamParser(), AnthropicException::new)) {
-      assertTrue(iterator.hasNext());
-      var event = iterator.next();
-      assertInstanceOf(StreamEvent.Error.class, event);
-      var error = (StreamEvent.Error) event;
-      assertTrue(error.message().contains("Stream read error"));
-    }
+    var error = firstError(FailingInputStream.onRead(new IOException("Simulated I/O failure")));
+
+    assertTrue(error.message().contains("Stream read error"));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void runtimeExceptionFromReaderEmitsErrorEvent() {
-    var failingStream =
-        new InputStream() {
-          @Override
-          public int read() {
-            throw new RuntimeException("Unexpected failure");
-          }
-        };
-    try (var iterator =
-        new SseReader(
-            failingStream, NEVER_IDLE, new AnthropicStreamParser(), AnthropicException::new)) {
-      assertTrue(iterator.hasNext());
-      var event = iterator.next();
-      assertInstanceOf(StreamEvent.Error.class, event);
-      var error = (StreamEvent.Error) event;
-      assertTrue(error.message().contains("Stream read error"));
-    }
+    var error = firstError(FailingInputStream.onRead(new RuntimeException("Unexpected failure")));
+
+    assertTrue(error.message().contains("Stream read error"));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void interruptedThreadEmitsErrorEvent() {
-    var neverDelivers = new FeedableInputStream();
-    var events = new ArrayList<StreamEvent>();
-    var thread =
-        new Thread(
-            () -> {
-              try (var iterator =
-                  new SseReader(
-                      neverDelivers,
-                      NEVER_IDLE,
-                      new AnthropicStreamParser(),
-                      AnthropicException::new)) {
-                while (iterator.hasNext()) {
-                  events.add(iterator.next());
-                }
-              }
-            });
-    thread.start();
-    neverDelivers.awaitBlockedRead();
-    thread.interrupt();
-    Await.termination("the interrupted consumer thread", thread);
+    var events = SseEvents.drainInterrupted(StreamingIteratorTest::reader);
+
     assertFalse(events.isEmpty());
     assertInstanceOf(StreamEvent.Error.class, events.getFirst());
   }
@@ -526,23 +380,21 @@ class StreamingIteratorTest {
   // ── thinking blocks: verbatim echo, omitted display, redaction ────────────
 
   private static String blockStart(int index, String contentBlock) {
-    return "data: {\"type\":\"content_block_start\",\"index\":"
-        + index
-        + ",\"content_block\":"
-        + contentBlock
-        + "}\n\n";
+    return SseEvents.data(
+        "{\"type\":\"content_block_start\",\"index\":"
+            + index
+            + ",\"content_block\":"
+            + contentBlock
+            + "}");
   }
 
   private static String blockDelta(int index, String delta) {
-    return "data: {\"type\":\"content_block_delta\",\"index\":"
-        + index
-        + ",\"delta\":"
-        + delta
-        + "}\n\n";
+    return SseEvents.data(
+        "{\"type\":\"content_block_delta\",\"index\":" + index + ",\"delta\":" + delta + "}");
   }
 
   private static String blockStop(int index) {
-    return "data: {\"type\":\"content_block_stop\",\"index\":" + index + "}\n\n";
+    return SseEvents.data("{\"type\":\"content_block_stop\",\"index\":" + index + "}");
   }
 
   private static String thinkingBlock(int index, String text, String signature) {
@@ -569,19 +421,8 @@ class StreamingIteratorTest {
   }
 
   private static String messageDelta(String delta) {
-    return "data: {\"type\":\"message_delta\",\"delta\":"
-        + delta
-        + ",\"usage\":{\"output_tokens\":15}}\n\n";
-  }
-
-  private java.util.List<StreamEvent> drain(String sse) {
-    try (var iterator = createIterator(sse, NEVER_IDLE)) {
-      var events = new ArrayList<StreamEvent>();
-      while (iterator.hasNext()) {
-        events.add(iterator.next());
-      }
-      return events;
-    }
+    return SseEvents.data(
+        "{\"type\":\"message_delta\",\"delta\":" + delta + ",\"usage\":{\"output_tokens\":15}}");
   }
 
   private Map<String, String> doneMetadata(String sse) {
@@ -589,12 +430,11 @@ class StreamingIteratorTest {
   }
 
   @SuppressWarnings("unchecked")
-  private java.util.List<Map<String, Object>> rawContent(Map<String, String> metadata) {
-    return objectMapper.readValue(
-        metadata.get(RawContentEcho.RAW_CONTENT_KEY), java.util.List.class);
+  private List<Map<String, Object>> rawContent(Map<String, String> metadata) {
+    return objectMapper.readValue(metadata.get(RawContentEcho.RAW_CONTENT_KEY), List.class);
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void thinkingInterleavedWithTextAndParallelToolCallsIsEchoedInStreamOrder() {
     var sse =
         MESSAGE_START
@@ -609,7 +449,7 @@ class StreamingIteratorTest {
     var blocks = rawContent(doneMetadata(sse));
 
     assertEquals(
-        java.util.List.of("text", "thinking", "tool_use", "thinking", "tool_use"),
+        List.of("text", "thinking", "tool_use", "thinking", "tool_use"),
         blocks.stream().map(block -> block.get("type")).toList());
     assertEquals("SIG-1", blocks.get(1).get("signature"));
     assertEquals("Reading the first profile.", blocks.get(1).get("thinking"));
@@ -618,7 +458,7 @@ class StreamingIteratorTest {
     assertEquals("toolu_2", blocks.get(4).get("id"));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void thinkingAfterAToolCallAloneRequiresTheVerbatimEcho() {
     var sse =
         MESSAGE_START
@@ -631,11 +471,11 @@ class StreamingIteratorTest {
     var blocks = rawContent(doneMetadata(sse));
 
     assertEquals(
-        java.util.List.of("tool_use", "thinking", "tool_use"),
+        List.of("tool_use", "thinking", "tool_use"),
         blocks.stream().map(block -> block.get("type")).toList());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void thinkingAheadOfTextAndToolCallsKeepsTheTypedEcho() {
     var sse =
         MESSAGE_START
@@ -654,7 +494,7 @@ class StreamingIteratorTest {
     assertEquals(2, ThinkingBlock.decodeAll(metadata).size());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void blocksThatAreNeverEchoedDoNotForceTheVerbatimEcho() {
     var unsignedThinkingAfterText =
         MESSAGE_START
@@ -675,7 +515,7 @@ class StreamingIteratorTest {
     assertNull(doneMetadata(emptyTextBeforeThinking).get(RawContentEcho.RAW_CONTENT_KEY));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void redactedThinkingIsCapturedVerbatimAndEchoedInPlace() {
     var sse =
         MESSAGE_START
@@ -696,7 +536,7 @@ class StreamingIteratorTest {
     assertEquals("tool_use", blocks.get(2).get("type"));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void codeExecutionResultsFromWebSearchFilteringAreCapturedVerbatim() {
     var sse =
         MESSAGE_START
@@ -716,7 +556,7 @@ class StreamingIteratorTest {
     var blocks = rawContent(doneMetadata(sse));
 
     assertEquals(
-        java.util.List.of("server_tool_use", "code_execution_tool_result", "tool_use"),
+        List.of("server_tool_use", "code_execution_tool_result", "tool_use"),
         blocks.stream().map(block -> block.get("type")).toList(),
         "a server_tool_use echoed without its result block is a 400");
     assertEquals("srv_1", blocks.get(1).get("tool_use_id"));
@@ -724,7 +564,7 @@ class StreamingIteratorTest {
         Map.of("type", "code_execution_result", "stdout", "1839"), blocks.get(1).get("content"));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void anUnmodelledBlockTypeIsSkippedWithoutDisturbingTheTurn() {
     var sse =
         MESSAGE_START
@@ -742,7 +582,7 @@ class StreamingIteratorTest {
     assertNull(response.metadata().get(RawContentEcho.RAW_CONTENT_KEY));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void thinkingDeltaAheadOfItsBlockStartIsKept() {
     var sse =
         MESSAGE_START
@@ -757,7 +597,7 @@ class StreamingIteratorTest {
     assertEquals("Early. On time.", response.thinking());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void omittedDisplayThinkingKeepsItsSignatureAndEmitsNoThinkingEvents() {
     var sse =
         MESSAGE_START
@@ -785,7 +625,7 @@ class StreamingIteratorTest {
 
   // ── refusal stop details ──────────────────────────────────────────────────
 
-  @org.junit.jupiter.api.Test
+  @Test
   void refusalStopDetailsSurfaceAsProviderNeutralMetadata() {
     var sse =
         MESSAGE_START
@@ -798,19 +638,13 @@ class StreamingIteratorTest {
     var done = (StreamEvent.Done) drain(sse).getLast();
 
     assertEquals(FinishReason.REFUSAL, done.response().finishReason());
-    assertEquals(
-        "cyber",
-        done.response()
-            .metadata()
-            .get(com.standardapplied.helios.core.model.Response.REFUSAL_CATEGORY_KEY));
+    assertEquals("cyber", done.response().metadata().get(Response.REFUSAL_CATEGORY_KEY));
     assertEquals(
         "This request was declined because it could enable cyber harm.",
-        done.response()
-            .metadata()
-            .get(com.standardapplied.helios.core.model.Response.REFUSAL_EXPLANATION_KEY));
+        done.response().metadata().get(Response.REFUSAL_EXPLANATION_KEY));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void uncategorisedRefusalCarriesNoCategoryMetadata() {
     var sse =
         MESSAGE_START
@@ -822,14 +656,11 @@ class StreamingIteratorTest {
     var metadata = doneMetadata(sse);
 
     assertEquals("refusal", metadata.get(AnthropicResponseAssembler.STOP_REASON_KEY));
-    assertFalse(
-        metadata.containsKey(com.standardapplied.helios.core.model.Response.REFUSAL_CATEGORY_KEY));
-    assertFalse(
-        metadata.containsKey(
-            com.standardapplied.helios.core.model.Response.REFUSAL_EXPLANATION_KEY));
+    assertFalse(metadata.containsKey(Response.REFUSAL_CATEGORY_KEY));
+    assertFalse(metadata.containsKey(Response.REFUSAL_EXPLANATION_KEY));
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void nonRefusalStopsCarryNoRefusalMetadata() {
     var sse =
         MESSAGE_START
@@ -837,39 +668,31 @@ class StreamingIteratorTest {
             + messageDelta("{\"stop_reason\":\"end_turn\",\"stop_details\":null}")
             + MESSAGE_STOP;
 
-    assertFalse(
-        doneMetadata(sse)
-            .containsKey(com.standardapplied.helios.core.model.Response.REFUSAL_CATEGORY_KEY));
+    assertFalse(doneMetadata(sse).containsKey(Response.REFUSAL_CATEGORY_KEY));
   }
 
   // ── API errors reported mid-stream ────────────────────────────────────────
 
   private StreamEvent.Error streamError(String errorObject) {
-    var sse = MESSAGE_START + "event: error\ndata: {\"type\":\"error\"" + errorObject + "}\n\n";
+    var sse = MESSAGE_START + named("error", "{\"type\":\"error\"" + errorObject + "}");
     return assertInstanceOf(StreamEvent.Error.class, drain(sse).getFirst());
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void retryableApiErrorsMidStreamAreTransient() {
-    for (var type :
-        java.util.List.of("overloaded_error", "api_error", "timeout_error", "rate_limit_error")) {
+    for (var type : List.of("overloaded_error", "api_error", "timeout_error", "rate_limit_error")) {
       var error = streamError(",\"error\":{\"type\":\"" + type + "\",\"message\":\"try again\"}");
 
-      var cause =
-          assertInstanceOf(
-              com.standardapplied.helios.core.model.TransientStreamException.class,
-              error.cause(),
-              type);
+      var cause = assertInstanceOf(TransientStreamException.class, error.cause(), type);
       assertEquals("anthropic", cause.providerName());
       assertTrue(error.message().startsWith("API stream error:"), error.message());
       assertTrue(cause.getMessage().contains(type), cause.getMessage());
     }
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void nonRetryableApiErrorsMidStreamStayTerminal() {
-    for (var type :
-        java.util.List.of("invalid_request_error", "authentication_error", "permission_error")) {
+    for (var type : List.of("invalid_request_error", "authentication_error", "permission_error")) {
       var error = streamError(",\"error\":{\"type\":\"" + type + "\",\"message\":\"no\"}");
 
       assertNull(error.cause(), type);
@@ -877,7 +700,7 @@ class StreamingIteratorTest {
     }
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void anErrorEventWithoutAnErrorObjectStaysTerminal() {
     var missing = streamError("");
     var untyped = streamError(",\"error\":{\"message\":\"no type\"}");
@@ -886,9 +709,16 @@ class StreamingIteratorTest {
     assertNull(untyped.cause());
   }
 
-  private SseReader createIterator(String sseData, Duration idleTimeout) {
-    var inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8));
+  private static SseReader reader(InputStream body) {
     return new SseReader(
-        inputStream, idleTimeout, new AnthropicStreamParser(), AnthropicException::new);
+        body, SseEvents.NEVER_IDLE, new AnthropicStreamParser(), AnthropicException::new);
+  }
+
+  private static List<StreamEvent> drain(String sse) {
+    return SseEvents.drain(reader(SseEvents.body(sse)));
+  }
+
+  private static StreamEvent.Error firstError(InputStream body) {
+    return assertInstanceOf(StreamEvent.Error.class, SseEvents.drain(reader(body)).getFirst());
   }
 }
