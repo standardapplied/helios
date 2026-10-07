@@ -72,12 +72,9 @@ public final class ModelStreams {
 
     @Override
     public void request(long n) {
-      if (ended.get()) {
-        return;
-      }
-      if (n > 0) {
+      if (n > 0 && !ended.get()) {
         onRequest.run();
-      } else if (ended.compareAndSet(false, true)) {
+      } else if (n <= 0 && ended.compareAndSet(false, true)) {
         subscriber.onError(nonPositiveRequest(n));
       }
     }

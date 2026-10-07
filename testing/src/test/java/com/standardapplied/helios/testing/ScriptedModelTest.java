@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
@@ -34,8 +35,12 @@ class ScriptedModelTest {
     var builder = ScriptedModel.newBuilder();
 
     var thrown = assertThrows(IllegalArgumentException.class, () -> builder.withToolCallsTurn());
+    var thrownForNull =
+        assertThrows(
+            IllegalArgumentException.class, () -> builder.withToolCallsTurn((ToolCall[]) null));
 
     assertEquals("withToolCallsTurn requires at least one tool call", thrown.getMessage());
+    assertEquals("withToolCallsTurn requires at least one tool call", thrownForNull.getMessage());
   }
 
   public record Verdict(String answer, int score) {}
@@ -195,6 +200,24 @@ class ScriptedModelTest {
     assertEquals(new Verdict("yes", 4), response.parsed());
     assertEquals("sure", response.thinking());
     assertEquals(Map.of("k", "v"), response.metadata());
+  }
+
+  @Test
+  void structuredRefusalResponseTurnSkipsTheParseAndKeepsEveryField() {
+    var scripted =
+        Response.newBuilder()
+            .withContent("I can't judge that.")
+            .withFinishReason(FinishReason.REFUSAL)
+            .withUsage(Usage.of(412, 3, 2, 1))
+            .withThinking("weighing it")
+            .withCitations(List.of(Citation.of("doc-1", "policy")))
+            .withMetadata(Map.of(Response.REFUSAL_CATEGORY_KEY, "cyber"))
+            .build();
+    var model = ScriptedModel.newBuilder().withResponseTurn(scripted).build();
+
+    var response = model.chat(List.of(Message.user("judge")), OutputSchema.of(Verdict.class));
+
+    assertEquals(scripted, response);
   }
 
   @Test
