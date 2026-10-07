@@ -16,13 +16,11 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -80,35 +78,6 @@ final class CitationSurfacingTest {
         SessionOptions.newBuilder().withModel(model).withSessionId(SID).withClock(CLOCK).build());
   }
 
-  private static final class CollectingSubscriber implements Flow.Subscriber<QueryEvent> {
-    final List<QueryEvent> events = new ArrayList<>();
-    final CountDownLatch done = new CountDownLatch(1);
-
-    @Override
-    public void onSubscribe(Flow.Subscription s) {
-      s.request(Long.MAX_VALUE);
-    }
-
-    @Override
-    public void onNext(QueryEvent e) {
-      events.add(e);
-    }
-
-    @Override
-    public void onError(Throwable t) {
-      done.countDown();
-    }
-
-    @Override
-    public void onComplete() {
-      done.countDown();
-    }
-
-    void awaitDone() {
-      Await.latch("the event stream to complete", done);
-    }
-  }
-
   @Test
   void groundedRunSurfacesCitationsOnEventStreamAndTerminal() throws Exception {
     try (var s = session(groundedModel(List.of(WIKI, BRIT)))) {
@@ -121,9 +90,7 @@ final class CitationSurfacingTest {
 
       // Streaming surface.
       var event =
-          sub.events.stream()
-              .filter(e -> e instanceof QueryEvent.AssistantCitations)
-              .map(e -> (QueryEvent.AssistantCitations) e)
+          sub.eventsOf(QueryEvent.AssistantCitations.class).stream()
               .findFirst()
               .orElseThrow(() -> new AssertionError("expected an AssistantCitations event"));
       assertEquals(List.of(WIKI, BRIT), event.citations());
@@ -145,7 +112,7 @@ final class CitationSurfacingTest {
       sub.awaitDone();
 
       assertTrue(
-          sub.events.stream().noneMatch(e -> e instanceof QueryEvent.AssistantCitations),
+          sub.eventsOf(QueryEvent.AssistantCitations.class).isEmpty(),
           "a turn with no grounding must not emit an AssistantCitations event");
       assertTrue(assertInstanceOf(ResultMessage.Success.class, result).citations().isEmpty());
     }
