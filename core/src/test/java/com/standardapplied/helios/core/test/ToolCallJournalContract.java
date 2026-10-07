@@ -12,6 +12,7 @@ import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.runtime.ToolCallJournal;
 import com.standardapplied.helios.core.runtime.ToolCallRecord;
 import com.standardapplied.helios.core.runtime.ToolCallStatus;
+import java.time.OffsetDateTime;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,13 +55,18 @@ public abstract class ToolCallJournalContract {
    * @return the record, started now
    */
   protected static ToolCallRecord started(UUID runId, String callId, String toolName) {
+    return started(runId, callId, toolName, Ids.now());
+  }
+
+  private static ToolCallRecord started(
+      UUID runId, String callId, String toolName, OffsetDateTime startedAt) {
     return ToolCallRecord.newBuilder()
         .withRunId(runId)
         .withIteration(0)
         .withToolCallId(callId)
         .withToolName(toolName)
         .withArgs(Map.of("k", "v"))
-        .withStartedAt(Ids.now())
+        .withStartedAt(startedAt)
         .build();
   }
 
@@ -123,8 +129,9 @@ public abstract class ToolCallJournalContract {
   @Test
   void allOrdersByStartTime() {
     var runId = newRunId();
-    journal.start(started(runId, "c1", "weather"));
-    journal.start(started(runId, "c2", "weather"));
+    var earlier = OffsetDateTime.parse("2026-01-01T00:00:00Z");
+    journal.start(started(runId, "c2", "weather", earlier.plusSeconds(1)));
+    journal.start(started(runId, "c1", "weather", earlier));
     var all = journal.all(runId);
     assertEquals("c1", all.get(0).toolCallId());
     assertEquals("c2", all.get(1).toolCallId());
