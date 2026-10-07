@@ -4,11 +4,9 @@ package com.standardapplied.helios.examples.session;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
-import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
 import com.standardapplied.helios.session.AgentSession;
@@ -17,10 +15,7 @@ import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -57,31 +52,6 @@ final class GroundedCitationSurfacingIntegrationTest {
     }
   }
 
-  private static final class CollectingSubscriber implements Flow.Subscriber<QueryEvent> {
-    final List<QueryEvent> events = new ArrayList<>();
-    final CountDownLatch done = new CountDownLatch(1);
-
-    @Override
-    public void onSubscribe(Flow.Subscription s) {
-      s.request(Long.MAX_VALUE);
-    }
-
-    @Override
-    public void onNext(QueryEvent e) {
-      events.add(e);
-    }
-
-    @Override
-    public void onError(Throwable t) {
-      done.countDown();
-    }
-
-    @Override
-    public void onComplete() {
-      done.countDown();
-    }
-  }
-
   @Test
   void groundedSessionSurfacesCitationsOnEventStreamAndTerminal() throws Exception {
     var options =
@@ -102,7 +72,7 @@ final class GroundedCitationSurfacingIntegrationTest {
                   "What were the major AI announcements at Google I/O 2025? Summarize with"
                       + " specific facts and cite where each came from."));
 
-      Await.latch("the event stream to complete", sub.done);
+      sub.awaitDone();
 
       // Terminal surface — the run's accumulated grounding sources.
       var success = assertInstanceOf(ResultMessage.Success.class, terminal);
@@ -114,8 +84,8 @@ final class GroundedCitationSurfacingIntegrationTest {
           .forEach(c -> assertNotNull(c.sourceId(), "every citation must carry a sourceId"));
 
       // Streaming surface — at least one AssistantCitations event during the run.
-      assertTrue(
-          sub.events.stream().anyMatch(e -> e instanceof QueryEvent.AssistantCitations),
+      assertFalse(
+          sub.eventsOf(QueryEvent.AssistantCitations.class).isEmpty(),
           "grounded session must emit at least one AssistantCitations event");
     }
   }

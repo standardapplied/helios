@@ -24,11 +24,14 @@ This project publishes to Maven Central via the [Central Publishing Portal](http
 | `com.standardapplied:helios-repl` | Sandboxed JShell execution substrate |
 | `com.standardapplied:helios-testing` | `ScriptedModel` test double for deterministic evals |
 
-`helios-core` also publishes its test fixtures as an attached artifact with the `tests`
-classifier, `helios-core-<version>-tests.jar` (`Await`, `LineSink`, `FeedableInputStream`,
-`MockModel`, `TraceCollector` in `com.standardapplied.helios.core.test`). This is intended: every
-other module's tests depend on it as a `test-jar`, and `mvn deploy -Prelease` uploads it alongside
-the main jar. `release.yml` needs no change for it.
+`helios-core` and `helios-session` also publish their test fixtures as attached artifacts with
+the `tests` classifier: `helios-core-<version>-tests.jar` (`com.standardapplied.helios.core.test`:
+`Await`, `LineSink`, `FeedableInputStream`, the HTTP and SSE stubs, and the abstract contract tests
+every provider, prompt registry and tool-call journal test extends) and
+`helios-session-<version>-tests.jar` (`com.standardapplied.helios.session.test`:
+`CollectingSubscriber` and the fixtures session's, repl's and the examples' tests share). This is
+intended: other modules' tests depend on them as a `test-jar`, and `mvn deploy -Prelease` uploads
+them alongside the main jars. `release.yml` needs no change for them.
 
 ## One-Time Setup
 

@@ -2,9 +2,11 @@
 
 package com.standardapplied.helios.anthropic;
 
+import static com.standardapplied.helios.anthropic.AnthropicFixture.drainSseFixture;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -81,5 +83,59 @@ class AnthropicStreamParserTest {
 
     assertEquals("API stream error: {\"type\":\"error\"}", error.message());
     assertNull(error.cause());
+  }
+
+  @Test
+  void streamingIteratorCapturesCacheCreationAndReadTokensFromMessageStart() throws Exception {
+    var json =
+        "data: {\"type\":\"message_start\","
+            + "\"message\":{\"usage\":{\"input_tokens\":100,\"cache_creation_input_tokens\":900,"
+            + "\"cache_read_input_tokens\":500000,\"output_tokens\":0}}}\n"
+            + "data: {\"type\":\"content_block_start\",\"index\":0,"
+            + "\"content_block\":{\"type\":\"text\"}}\n"
+            + "data: {\"type\":\"content_block_delta\",\"index\":0,"
+            + "\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n"
+            + "data: {\"type\":\"content_block_stop\",\"index\":0}\n"
+            + "data: {\"type\":\"message_delta\","
+            + "\"delta\":{\"stop_reason\":\"end_turn\"},"
+            + "\"usage\":{\"output_tokens\":50}}\n"
+            + "data: {\"type\":\"message_stop\"}\n";
+    var done = drainSseFixture(json);
+    assertNotNull(done);
+    var usage = done.response().usage();
+    assertEquals(100, usage.inputTokens());
+    assertEquals(50, usage.outputTokens());
+    assertEquals(
+        900,
+        usage.cacheCreationInputTokens(),
+        "cache_creation_input_tokens from message_start surfaces in Response.Usage");
+    assertEquals(
+        500000,
+        usage.cacheReadInputTokens(),
+        "cache_read_input_tokens from message_start surfaces in Response.Usage");
+    assertEquals(
+        100 + 50 + 900 + 500000,
+        usage.totalTokens(),
+        "totalTokens sums every billable token class");
+  }
+
+  @Test
+  void streamingIteratorEmitsUsageWhenOnlyCacheTokensAreReported() throws Exception {
+    // Degenerate but legal: pure cache read, no uncached input. Anthropic still bills the cache
+    // read tokens; the Usage must surface so cost tracking accounts for it.
+    var json =
+        "data: {\"type\":\"message_start\","
+            + "\"message\":{\"usage\":{\"input_tokens\":0,\"cache_read_input_tokens\":1234,"
+            + "\"output_tokens\":0}}}\n"
+            + "data: {\"type\":\"message_delta\","
+            + "\"delta\":{\"stop_reason\":\"end_turn\"},"
+            + "\"usage\":{\"output_tokens\":0}}\n"
+            + "data: {\"type\":\"message_stop\"}\n";
+    var done = drainSseFixture(json);
+    assertNotNull(done);
+    assertNotNull(
+        done.response().usage(),
+        "any non-zero token class must surface a Usage record so cost tracking is not lost");
+    assertEquals(1234, done.response().usage().cacheReadInputTokens());
   }
 }

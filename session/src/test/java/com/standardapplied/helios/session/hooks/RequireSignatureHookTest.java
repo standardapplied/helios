@@ -4,53 +4,20 @@
  */
 package com.standardapplied.helios.session.hooks;
 
+import static com.standardapplied.helios.session.test.HookInputs.call;
+import static com.standardapplied.helios.session.test.HookInputs.context;
+import static com.standardapplied.helios.session.test.HookInputs.stopResponse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
-import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 final class RequireSignatureHookTest {
-
-  private static final Model STUB_MODEL =
-      new Model() {
-        @Override
-        public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-          return Response.newBuilder().build();
-        }
-
-        @Override
-        public String id() {
-          return "stub";
-        }
-
-        @Override
-        public String provider() {
-          return "stub";
-        }
-      };
-
-  private static HookContext ctx() {
-    return new DefaultHookContext("sess", 0, new CancellationToken(), STUB_MODEL);
-  }
-
-  private static ToolCall call(String name) {
-    return new ToolCall("c-" + name, name, Map.of());
-  }
-
-  private static Response<Void> stopResponse() {
-    return Response.newBuilder().withContent("done").build();
-  }
 
   // ── Signature record ────────────────────────────────────────────────────
 
@@ -107,16 +74,16 @@ final class RequireSignatureHookTest {
   @Test
   void requiringToolNameBlocksStopUntilCalled() {
     var hook = RequireSignatureHook.withToolName("Search");
-    assertInstanceOf(HookOutcome.Inject.class, hook.beforeStop(stopResponse(), ctx()));
-    hook.afterTool(call("Search"), ToolResult.success("hits"), ctx());
-    assertInstanceOf(HookOutcome.Continue.class, hook.beforeStop(stopResponse(), ctx()));
+    assertInstanceOf(HookOutcome.Inject.class, hook.beforeStop(stopResponse(), context()));
+    hook.afterTool(call("Search"), ToolResult.success("hits"), context());
+    assertInstanceOf(HookOutcome.Continue.class, hook.beforeStop(stopResponse(), context()));
   }
 
   @Test
   void unrelatedToolDoesNotSatisfy() {
     var hook = RequireSignatureHook.withToolName("Search");
-    hook.afterTool(call("Other"), ToolResult.success("x"), ctx());
-    assertInstanceOf(HookOutcome.Inject.class, hook.beforeStop(stopResponse(), ctx()));
+    hook.afterTool(call("Other"), ToolResult.success("x"), context());
+    assertInstanceOf(HookOutcome.Inject.class, hook.beforeStop(stopResponse(), context()));
   }
 
   // ── builder ─────────────────────────────────────────────────────────────
@@ -139,19 +106,19 @@ final class RequireSignatureHookTest {
   void multipleSignaturesAllMustBeMet() {
     var hook =
         RequireSignatureHook.newBuilder().withToolName("Search").withToolName("Submit").build();
-    hook.afterTool(call("Search"), ToolResult.success("x"), ctx());
-    var halfwayDecision = hook.beforeStop(stopResponse(), ctx());
+    hook.afterTool(call("Search"), ToolResult.success("x"), context());
+    var halfwayDecision = hook.beforeStop(stopResponse(), context());
     assertInstanceOf(HookOutcome.Inject.class, halfwayDecision);
     assertTrue(((HookOutcome.Inject) halfwayDecision).userMessage().contains("Submit"));
-    hook.afterTool(call("Submit"), ToolResult.success("x"), ctx());
-    assertInstanceOf(HookOutcome.Continue.class, hook.beforeStop(stopResponse(), ctx()));
+    hook.afterTool(call("Submit"), ToolResult.success("x"), context());
+    assertInstanceOf(HookOutcome.Continue.class, hook.beforeStop(stopResponse(), context()));
   }
 
   @Test
   void injectMessageListsEveryUnmetSignature() {
     var hook =
         RequireSignatureHook.newBuilder().withToolName("Search").withToolName("Submit").build();
-    var decision = hook.beforeStop(stopResponse(), ctx());
+    var decision = hook.beforeStop(stopResponse(), context());
     var msg = ((HookOutcome.Inject) decision).userMessage();
     assertTrue(msg.contains("Search"));
     assertTrue(msg.contains("Submit"));
@@ -168,11 +135,11 @@ final class RequireSignatureHookTest {
                 c -> c.name().equals("Submit") && Boolean.TRUE.equals(c.arguments().get("debug")))
             .build();
     hook.afterTool(
-        new ToolCall("c1", "Submit", Map.of("debug", false)), ToolResult.success("x"), ctx());
-    assertInstanceOf(HookOutcome.Inject.class, hook.beforeStop(stopResponse(), ctx()));
+        new ToolCall("c1", "Submit", Map.of("debug", false)), ToolResult.success("x"), context());
+    assertInstanceOf(HookOutcome.Inject.class, hook.beforeStop(stopResponse(), context()));
     hook.afterTool(
-        new ToolCall("c2", "Submit", Map.of("debug", true)), ToolResult.success("x"), ctx());
-    assertInstanceOf(HookOutcome.Continue.class, hook.beforeStop(stopResponse(), ctx()));
+        new ToolCall("c2", "Submit", Map.of("debug", true)), ToolResult.success("x"), context());
+    assertInstanceOf(HookOutcome.Continue.class, hook.beforeStop(stopResponse(), context()));
   }
 
   @Test
@@ -187,7 +154,7 @@ final class RequireSignatureHookTest {
   @Test
   void observedSnapshotIsImmutableCopy() {
     var hook = RequireSignatureHook.withToolName("Search");
-    hook.afterTool(call("Search"), ToolResult.success("x"), ctx());
+    hook.afterTool(call("Search"), ToolResult.success("x"), context());
     var snap = hook.observed();
     assertEquals(java.util.Set.of("Search"), snap);
     assertThrows(UnsupportedOperationException.class, () -> snap.add("Other"));

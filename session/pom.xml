@@ -52,6 +52,21 @@
     <build>
         <plugins>
             <plugin>
+                <!--
+                  Publishes the test fixtures of com.standardapplied.helios.session.test as the
+                  `tests` classifier jar that repl's and the examples' tests depend on.
+                -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <executions>

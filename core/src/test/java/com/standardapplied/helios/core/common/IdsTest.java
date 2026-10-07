@@ -207,43 +207,35 @@ class IdsTest {
   }
 
   @Test
-  void newIdConcurrentUniqueness() throws Exception {
+  void newIdConcurrentUniqueness() {
     var threadCount = 8;
     var idsPerThread = 5_000;
-    var executor = Executors.newFixedThreadPool(threadCount);
-    var latch = new CountDownLatch(1);
-
-    var futures = new ArrayList<Future<List<UUID>>>();
-    for (int t = 0; t < threadCount; t++) {
-      futures.add(
-          executor.submit(
-              () -> {
-                latch.await();
-                var ids = new ArrayList<UUID>(idsPerThread);
-                for (int i = 0; i < idsPerThread; i++) {
-                  ids.add(Ids.newId());
-                }
-                return ids;
-              }));
-    }
-
-    latch.countDown();
 
     var allIds = new HashSet<UUID>();
-    for (var future : futures) {
-      for (var id : Await.value("the ids a worker generated", future)) {
-        assertTrue(allIds.add(id));
-      }
+    for (var id : newIdsConcurrently(threadCount, idsPerThread)) {
+      assertTrue(allIds.add(id));
     }
 
     assertEquals(threadCount * idsPerThread, allIds.size());
-    executor.shutdown();
   }
 
   @Test
-  void newIdConcurrentMonotonicity() throws Exception {
-    var threadCount = 8;
-    var idsPerThread = 5_000;
+  void newIdConcurrentMonotonicity() {
+    var allIds = newIdsConcurrently(8, 5_000);
+
+    allIds.sort(
+        (a, b) -> Long.compareUnsigned(a.getMostSignificantBits(), b.getMostSignificantBits()));
+
+    for (int i = 1; i < allIds.size(); i++) {
+      assertTrue(
+          Long.compareUnsigned(
+                  allIds.get(i).getMostSignificantBits(),
+                  allIds.get(i - 1).getMostSignificantBits())
+              > 0);
+    }
+  }
+
+  private static List<UUID> newIdsConcurrently(int threadCount, int idsPerThread) {
     var executor = Executors.newFixedThreadPool(threadCount);
     var latch = new CountDownLatch(1);
 
@@ -267,19 +259,8 @@ class IdsTest {
     for (var future : futures) {
       allIds.addAll(Await.value("the ids a worker generated", future));
     }
-
-    allIds.sort(
-        (a, b) -> Long.compareUnsigned(a.getMostSignificantBits(), b.getMostSignificantBits()));
-
-    for (int i = 1; i < allIds.size(); i++) {
-      assertTrue(
-          Long.compareUnsigned(
-                  allIds.get(i).getMostSignificantBits(),
-                  allIds.get(i - 1).getMostSignificantBits())
-              > 0);
-    }
-
     executor.shutdown();
+    return allIds;
   }
 
   // ---------------------------------------------------------------------------
