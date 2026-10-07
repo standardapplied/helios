@@ -39,7 +39,8 @@ Production-grade agentic framework for Java. Simple, explicit, no magic.
 ## Quality gate
 
 `mvn verify` fails on complexity, duplication and architecture violations, for main and test
-code. Every 3.0 spec's work passes the gate without adding exclusions.
+code. The burn-down of what violated when the gate was installed is complete: from here on a
+violation is fixed, never excluded.
 
 | Tool | Enforces | Where |
 |---|---|---|
@@ -170,18 +171,16 @@ sources of the modules in the reactor, so only a whole-reactor build checks dupl
 - **No suppression in source.** Neither PMD's suppression comment marker nor a
   `@SuppressWarnings` annotation naming a PMD rule; `git grep` for both stays empty.
 - **`config/quality/pmd-exclusions.properties`** (`fully.qualified.Class=Rule1,Rule2`; a nested
-  class is `Outer.Nested`; one line per class, because a repeated key replaces the earlier one). Its burn-down section lists what violated when the gate was
-  installed, grouped by the follow-up spec that removes it; entries may only be removed. Its
-  accepted section holds only entries a spec names explicitly, each with a comment stating why.
-- **`config/quality/cpd-exclusions.txt`** (one comma-separated group of class names per line, no
-  blank lines). A line silences every duplication among exactly the classes it names, so lines
-  may only be removed. Duplication is never accepted; the file is deleted when it is empty.
+  class is `Outer.Nested`; one line per class, because a repeated key replaces the earlier one)
+  holds only entries a spec names explicitly, each with a comment stating why.
+- **No duplication is accepted.** CPD has no exclusion file; its executions clear the parameter,
+  so no class is ever silenced.
 - **Adding an ArchUnit rule.** A spec that establishes or consolidates a pattern adds one `@Test`
   method to `ArchitectureRulesTest`, named for the rule, with a `because(...)` clause that states
   the one allowed way. A new library module is added to `architecture/pom.xml` as a test
   dependency so the rules see it.
 
-The rule sets and exclusion files are resolved through `${maven.multiModuleProjectDirectory}`,
+The rule sets and the exclusion file are resolved through `${maven.multiModuleProjectDirectory}`,
 which Maven sets to the nearest ancestor directory holding `.mvn/` — that is why the otherwise
 empty `.mvn/maven.config` is checked in. The plugin wiring constraints are commented in the root
 `pom.xml`.
