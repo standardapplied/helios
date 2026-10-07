@@ -1215,7 +1215,9 @@ final class AgentSessionImplTest {
                 .withSessionId(SID)
                 .withClock(CLOCK)
                 .build())) {
-      session.runBlocking(UserMessage.text("go"));
+      var terminal = session.runBlocking(UserMessage.text("go"));
+      var success = assertInstanceOf(ResultMessage.Success.class, terminal);
+      assertEquals("{\"field\":\"untyped\"}", success.result());
     }
     assertTrue(
         model.outputSchemas().contains(Optional.empty()),
