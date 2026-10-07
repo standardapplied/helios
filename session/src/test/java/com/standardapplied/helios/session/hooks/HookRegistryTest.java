@@ -11,14 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,42 +30,8 @@ final class HookRegistryTest {
   private static final ToolResult OK = ToolResult.success("done");
 
   private static HookContext ctx() {
-    return new HookContext() {
-      @Override
-      public String sessionId() {
-        return "sess";
-      }
-
-      @Override
-      public long turnIndex() {
-        return 0;
-      }
-
-      @Override
-      public CancellationToken cancellation() {
-        return new CancellationToken();
-      }
-
-      @Override
-      public Model model() {
-        return new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            return Response.newBuilder().build();
-          }
-
-          @Override
-          public String id() {
-            return "stub";
-          }
-
-          @Override
-          public String provider() {
-            return "stub";
-          }
-        };
-      }
-    };
+    return new DefaultHookContext(
+        "sess", 0, new CancellationToken(), ScriptedModel.newBuilder().build());
   }
 
   // ── construction ──────────────────────────────────────────────────────────

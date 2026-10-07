@@ -18,6 +18,7 @@ import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.runtime.CancellationToken;
@@ -34,12 +35,15 @@ import com.standardapplied.helios.session.execution.ExecutionRequest;
 import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.hooks.PreStopHook;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.testing.ModelStreams;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -74,61 +78,20 @@ final class AgentSessionImplTest {
   }
 
   private static Model textOnceModel(String reply, FinishReason finishReason) {
-    return new Model() {
-      @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        return Response.newBuilder()
+    return respondingWith(
+        Response.newBuilder()
             .withContent(reply)
             .withFinishReason(finishReason)
             .withUsage(Usage.of(3, 2))
-            .build();
-      }
-
-      @Override
-      public String id() {
-        return "test";
-      }
-
-      @Override
-      public String provider() {
-        return "test";
-      }
-    };
+            .build());
   }
 
-  /** Subscriber that buffers events until {@link #onComplete} fires. */
-  private static final class CollectingSubscriber implements Flow.Subscriber<QueryEvent> {
+  private static Model respondingWith(Response<Void> response) {
+    return ScriptedModel.newBuilder().withResponseTurn(response).build();
+  }
 
-    final List<QueryEvent> events = new ArrayList<>();
-    final CountDownLatch done = new CountDownLatch(1);
-
-    @Override
-    public void onSubscribe(Flow.Subscription subscription) {
-      subscription.request(Long.MAX_VALUE);
-    }
-
-    @Override
-    public void onNext(QueryEvent event) {
-      events.add(event);
-    }
-
-    @Override
-    public void onError(Throwable throwable) {
-      done.countDown();
-    }
-
-    @Override
-    public void onComplete() {
-      done.countDown();
-    }
-
-    void awaitDone() {
-      Await.latch("the event stream to complete", done);
-    }
-
-    List<Class<?>> eventTypes() {
-      return events.stream().<Class<?>>map(QueryEvent::getClass).toList();
-    }
+  private static List<Class<?>> eventTypes(CollectingSubscriber sub) {
+    return sub.events().stream().<Class<?>>map(QueryEvent::getClass).toList();
   }
 
   private static ResultMessage terminalOf(AgentSession session) {
@@ -300,9 +263,9 @@ final class AgentSessionImplTest {
 
       var success = assertInstanceOf(ResultMessage.Success.class, result);
       assertEquals("hello back", success.result());
-      assertTrue(sub.events.stream().anyMatch(e -> e instanceof QueryEvent.UserMessageReceived));
-      assertTrue(sub.events.stream().anyMatch(e -> e instanceof QueryEvent.AssistantText));
-      assertTrue(sub.events.stream().anyMatch(e -> e instanceof QueryEvent.LoopEnded));
+      assertTrue(sub.events().stream().anyMatch(e -> e instanceof QueryEvent.UserMessageReceived));
+      assertTrue(sub.events().stream().anyMatch(e -> e instanceof QueryEvent.AssistantText));
+      assertTrue(sub.events().stream().anyMatch(e -> e instanceof QueryEvent.LoopEnded));
     }
   }
 
@@ -366,7 +329,7 @@ final class AgentSessionImplTest {
 
       var success = assertInstanceOf(ResultMessage.Success.class, result);
       var interruptedReceived =
-          sub.events.stream()
+          sub.events().stream()
               .filter(e -> e instanceof QueryEvent.UserMessageReceived)
               .map(e -> (QueryEvent.UserMessageReceived) e)
               .anyMatch(u -> u.message().text().contains("[interrupted by user: rethink]"));
@@ -584,8 +547,7 @@ final class AgentSessionImplTest {
 
   @Test
   void systemPromptLeadsTheHistoryTheModelSees() {
-    var model =
-        com.standardapplied.helios.testing.ScriptedModel.newBuilder().withTextTurn("ok").build();
+    var model = ScriptedModel.newBuilder().withTextTurn("ok").build();
     try (var s =
         AgentSession.create(
             SessionOptions.newBuilder()
@@ -871,8 +833,8 @@ final class AgentSessionImplTest {
               QueryEvent.AssistantText.class,
               QueryEvent.TurnEnded.class,
               QueryEvent.LoopEnded.class),
-          sub1.eventTypes());
-      assertEquals(sub1.events, sub2.events, "both subscribers see the same stream");
+          eventTypes(sub1));
+      assertEquals(sub1.events(), sub2.events(), "both subscribers see the same stream");
     }
   }
 
@@ -898,7 +860,7 @@ final class AgentSessionImplTest {
       s.send(UserMessage.text("hi"));
       terminalOf(s);
       sub.awaitDone();
-      for (var e : sub.events) {
+      for (var e : sub.events()) {
         assertEquals(FIXED, e.timestamp());
       }
     }
@@ -1000,25 +962,6 @@ final class AgentSessionImplTest {
 
   // ── provider-reported refusal detail and thinking reach the session surface ──
 
-  private static Model respondingWith(Response<Void> response) {
-    return new Model() {
-      @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        return response;
-      }
-
-      @Override
-      public String id() {
-        return "test";
-      }
-
-      @Override
-      public String provider() {
-        return "test";
-      }
-    };
-  }
-
   @Test
   void refusalTerminalCarriesTheProviderCategoryAndExplanation() {
     var declined =
@@ -1063,7 +1006,7 @@ final class AgentSessionImplTest {
       sub.awaitDone();
 
       var kinds =
-          sub.events.stream()
+          sub.events().stream()
               .filter(
                   e ->
                       e instanceof QueryEvent.AssistantThinking
@@ -1087,27 +1030,16 @@ final class AgentSessionImplTest {
             Map.of("test", CostCalculator.Pricing.ofUsdPerMillion(1.0, 1.0)));
     var limits = SessionLimits.newBuilder().withMaxBudgetMicroUsd(1_500_000L).build();
     var bigUsage = Usage.of(1_000_000, 1_000_000);
-    Model billy =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            return Response.newBuilder()
-                .withContent("here")
-                .withFinishReason(FinishReason.STOP)
-                .withUsage(bigUsage)
-                .build();
-          }
-
-          @Override
-          public String id() {
-            return "test";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
+    var billy =
+        ScriptedModel.newBuilder()
+            .withId("test")
+            .withResponseTurn(
+                Response.newBuilder()
+                    .withContent("here")
+                    .withFinishReason(FinishReason.STOP)
+                    .withUsage(bigUsage)
+                    .build())
+            .build();
     try (var s =
         AgentSession.create(
             SessionOptions.newBuilder()
@@ -1238,85 +1170,20 @@ final class AgentSessionImplTest {
   /** Sample record so we can build a real {@link OutputSchema} for the wiring tests. */
   public record Sample(String field) {}
 
-  /**
-   * Model that records whether the typed or the untyped {@code chatStream} overload was hit, and
-   * replays a single text turn either way. Mirrors {@code DispatchRecordingModel} in {@code
-   * TurnRunnerTest} but at the {@link AgentSession} layer so we observe the full wiring through
-   * {@link SessionOptions#transmitOutputSchemaToModel()}.
-   */
-  private static final class DispatchRecordingModel implements Model {
-    final java.util.concurrent.atomic.AtomicReference<OutputSchema<?>> seenSchema =
-        new java.util.concurrent.atomic.AtomicReference<>();
-    final AtomicBoolean typedDispatch = new AtomicBoolean(false);
-    final AtomicBoolean untypedDispatch = new AtomicBoolean(false);
-
-    @Override
-    public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-      return Response.newBuilder().withContent("{\"field\":\"untyped\"}").build();
-    }
-
-    @Override
-    public Flow.Publisher<com.standardapplied.helios.core.model.ModelChunk> chatStream(
-        List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-      untypedDispatch.set(true);
-      return one("{\"field\":\"untyped\"}");
-    }
-
-    @Override
-    public Flow.Publisher<com.standardapplied.helios.core.model.ModelChunk> chatStream(
-        List<Message> messages,
-        List<Tool> tools,
-        OutputSchema<?> outputSchema,
-        CancellationToken cancellation) {
-      typedDispatch.set(true);
-      seenSchema.set(outputSchema);
-      return one("{\"field\":\"typed-with-schema\"}");
-    }
-
-    private static Flow.Publisher<com.standardapplied.helios.core.model.ModelChunk> one(
-        String content) {
-      return subscriber -> {
-        subscriber.onSubscribe(
-            new Flow.Subscription() {
-              private int i = 0;
-
-              @Override
-              public void request(long n) {
-                if (i == 0) {
-                  subscriber.onNext(
-                      new com.standardapplied.helios.core.model.ModelChunk.TextDelta(content));
-                  i = 1;
-                }
-                if (i == 1) {
-                  subscriber.onNext(
-                      new com.standardapplied.helios.core.model.ModelChunk.MessageStop(
-                          FinishReason.STOP.name(), Usage.of(1, 1), Map.of()));
-                  i = 2;
-                  subscriber.onComplete();
-                }
-              }
-
-              @Override
-              public void cancel() {}
-            });
-      };
-    }
-
-    @Override
-    public String id() {
-      return "dispatch-recorder";
-    }
-
-    @Override
-    public String provider() {
-      return "test";
-    }
+  /** A model whose one turn streams {@code json} as a finished text answer. */
+  private static ScriptedModel streamingJson(String json) {
+    return ScriptedModel.newBuilder()
+        .withStreamTurn(
+            ModelStreams.of(
+                new ModelChunk.TextDelta(json),
+                new ModelChunk.MessageStop(FinishReason.STOP.name(), Usage.of(1, 1), Map.of())))
+        .build();
   }
 
   @Test
   void configuredOutputSchemaRidesEveryTurnAndCarriesThroughToTheProvider() throws Exception {
     var schema = OutputSchema.of(Sample.class);
-    var model = new DispatchRecordingModel();
+    var model = streamingJson("{\"field\":\"typed-with-schema\"}");
     try (var session =
         AgentSession.create(
             SessionOptions.newBuilder()
@@ -1328,18 +1195,19 @@ final class AgentSessionImplTest {
       var typed = session.runBlocking(UserMessage.text("go"), schema);
       assertEquals("typed-with-schema", typed.field());
     }
+    var schemas = model.outputSchemas();
     assertTrue(
-        model.typedDispatch.get(),
+        schemas.stream().anyMatch(Optional::isPresent),
         "configured outputSchema must route through the schema-bearing chatStream so the provider's"
             + " native structured-output channel sees the schema on every turn — the matchmaking"
             + " bug regression");
-    assertEquals(schema, model.seenSchema.get());
-    assertFalse(model.untypedDispatch.get());
+    assertEquals(Optional.of(schema), schemas.getFirst());
+    assertFalse(schemas.contains(Optional.empty()));
   }
 
   @Test
   void sessionWithoutOutputSchemaUsesTheUnconstrainedDispatch() throws Exception {
-    var model = new DispatchRecordingModel();
+    var model = streamingJson("{\"field\":\"untyped\"}");
     try (var session =
         AgentSession.create(
             SessionOptions.newBuilder()
@@ -1350,9 +1218,9 @@ final class AgentSessionImplTest {
       session.runBlocking(UserMessage.text("go"));
     }
     assertTrue(
-        model.untypedDispatch.get(),
+        model.outputSchemas().contains(Optional.empty()),
         "no outputSchema configured: the loop dispatches the unconstrained chatStream so the model"
             + " is free to produce arbitrary text");
-    assertFalse(model.typedDispatch.get());
+    assertFalse(model.outputSchemas().stream().anyMatch(Optional::isPresent));
   }
 }

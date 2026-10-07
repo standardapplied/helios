@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -17,24 +16,21 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SteeringQueue;
+import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
-import java.time.Clock;
+import com.standardapplied.helios.testing.ModelStreams;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
-import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -42,48 +38,17 @@ import org.junit.jupiter.api.Test;
 /** End-to-end TurnRunner tests exercising tool dispatch through a real ToolDispatch. */
 final class TurnRunnerToolDispatchTest {
 
-  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+  private static final String SID = "sess-tools";
+
+  private final LoopFixture fixture = new LoopFixture(SID, Instant.parse("2026-05-15T08:00:00Z"));
+  private final List<QueryEvent> events = fixture.events;
+  private final HookRegistry hooks = HookRegistry.empty();
+  private final SteeringQueue queue = new SteeringQueue(8);
 
   @AfterEach
-  void shutDownScheduler() {
-    scheduler.shutdownNow();
+  void closeFixture() {
+    fixture.close();
   }
-
-  private static final String SID = "sess-tools";
-  private static final SessionContext CTX = SessionContext.forTesting(SID);
-  private static final Instant FIXED = Instant.parse("2026-05-15T08:00:00Z");
-  private static final Clock CLOCK = Clock.fixed(FIXED, ZoneOffset.UTC);
-
-  private final List<QueryEvent> events = new ArrayList<>();
-  private final com.standardapplied.helios.session.hooks.HookRegistry hooks =
-      com.standardapplied.helios.session.hooks.HookRegistry.empty();
-  private final com.standardapplied.helios.session.SteeringQueue queue =
-      new com.standardapplied.helios.session.SteeringQueue(8);
-
-  private static final Model CTX_MODEL =
-      new Model() {
-        @Override
-        public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-          return Response.newBuilder().build();
-        }
-
-        @Override
-        public String id() {
-          return "stub";
-        }
-
-        @Override
-        public String provider() {
-          return "stub";
-        }
-      };
-
-  private static final java.util.function.Function<
-          SessionState, com.standardapplied.helios.session.hooks.HookContext>
-      CTX_FACTORY =
-          s ->
-              new com.standardapplied.helios.session.hooks.DefaultHookContext(
-                  s.sessionId(), s.currentTurnIndex(), s.cancellation(), CTX_MODEL);
 
   private static Tool echoTool() {
     return Tool.newBuilder()
@@ -98,64 +63,27 @@ final class TurnRunnerToolDispatchTest {
   }
 
   private SessionState freshState() {
-    var s = new SessionState(SID, new CancellationToken(), CLOCK);
+    var s = fixture.state();
     s.history().append(Message.user("call echo"));
     s.beginTurn();
     return s;
   }
 
-  /** A model that streams a fixed sequence of chunks. */
   private TurnRunner runner(Model model, ToolDispatch dispatch) {
-    return new TurnRunner(
-        new LoopCollaborators(hooks, dispatch, queue, events::add, CTX_FACTORY, CLOCK),
-        model,
-        CostCalculator.ZERO,
-        null,
-        scheduler);
+    return fixture.runner(fixture.collaborators(hooks, dispatch, queue), model);
   }
 
+  /** A model whose one turn streams {@code chunks}, then completes. */
   private static Model fixedChunkModel(List<ModelChunk> chunks) {
-    return new Model() {
-      @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        throw new AssertionError("unused");
-      }
-
-      @Override
-      public Flow.Publisher<ModelChunk> chatStream(
-          List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-        return subscriber ->
-            subscriber.onSubscribe(
-                new Flow.Subscription() {
-                  @Override
-                  public void request(long n) {
-                    for (var c : chunks) {
-                      subscriber.onNext(c);
-                    }
-                    subscriber.onComplete();
-                  }
-
-                  @Override
-                  public void cancel() {}
-                });
-      }
-
-      @Override
-      public String id() {
-        return "test";
-      }
-
-      @Override
-      public String provider() {
-        return "test";
-      }
-    };
+    return ScriptedModel.newBuilder()
+        .withStreamTurn(ModelStreams.of(chunks.toArray(ModelChunk[]::new)))
+        .build();
   }
 
   @Test
   void singleToolCallDispatchesEmitsEventsAppendsMessages() {
     var registry = new ToolRegistry(List.of(echoBinding()));
-    var dispatch = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
+    var dispatch = fixture.dispatch(registry);
     var call = new ToolCall("call-1", "echo", Map.of("v", "hello"));
     var model =
         fixedChunkModel(
@@ -195,7 +123,7 @@ final class TurnRunnerToolDispatchTest {
   @Test
   void multipleToolCallsDispatchInOrder() {
     var registry = new ToolRegistry(List.of(echoBinding()));
-    var dispatch = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
+    var dispatch = fixture.dispatch(registry);
     var c1 = new ToolCall("c1", "echo", Map.of("v", "one"));
     var c2 = new ToolCall("c2", "echo", Map.of("v", "two"));
     var model =
@@ -224,7 +152,7 @@ final class TurnRunnerToolDispatchTest {
   @Test
   void unknownToolStillCompletesTurnWithFailureResult() {
     var registry = new ToolRegistry(List.of(echoBinding()));
-    var dispatch = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
+    var dispatch = fixture.dispatch(registry);
     var call = new ToolCall("c1", "nope", Map.of());
     var model =
         fixedChunkModel(
@@ -249,7 +177,7 @@ final class TurnRunnerToolDispatchTest {
   void cancellationDuringDispatchSurfacesAsFailure() {
     var token = new CancellationToken();
     var registry = new ToolRegistry(List.of(echoBinding()));
-    var dispatch = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
+    var dispatch = fixture.dispatch(registry);
     var call = new ToolCall("c1", "echo", Map.of("v", "hi"));
     // Pre-cancel: dispatch sees the token and throws CancellationException, which TurnRunner
     // catches and converts to a synthetic failure ToolResult.
@@ -260,7 +188,7 @@ final class TurnRunnerToolDispatchTest {
                 new ModelChunk.ToolUseStop(call),
                 new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of())));
     var runner = runner(model, dispatch);
-    var state = new SessionState(SID, token, CLOCK);
+    var state = fixture.state(token);
     state.history().append(Message.user("call echo"));
     state.beginTurn();
     runner.runTurn(state, SessionLimits.defaults());
@@ -277,7 +205,7 @@ final class TurnRunnerToolDispatchTest {
   @Test
   void textOnlyTurnUnchanged() {
     var registry = ToolRegistry.empty();
-    var dispatch = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
+    var dispatch = fixture.dispatch(registry);
     var model =
         fixedChunkModel(
             List.of(
@@ -296,7 +224,7 @@ final class TurnRunnerToolDispatchTest {
   void toolsListPassedToModelMatchesVisibleBindings() {
     var capturedTools = new AtomicReference<List<Tool>>();
     var registry = new ToolRegistry(List.of(echoBinding()));
-    var dispatch = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
+    var dispatch = fixture.dispatch(registry);
     Model model =
         new Model() {
           @Override
@@ -308,21 +236,9 @@ final class TurnRunnerToolDispatchTest {
           public Flow.Publisher<ModelChunk> chatStream(
               List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
             capturedTools.set(tools);
-            return subscriber ->
-                subscriber.onSubscribe(
-                    new Flow.Subscription() {
-                      @Override
-                      public void request(long n) {
-                        subscriber.onNext(new ModelChunk.TextDelta("ok"));
-                        subscriber.onNext(
-                            new ModelChunk.MessageStop(
-                                "STOP", Usage.of(0, 0), Map.of(), List.of()));
-                        subscriber.onComplete();
-                      }
-
-                      @Override
-                      public void cancel() {}
-                    });
+            return ModelStreams.of(
+                new ModelChunk.TextDelta("ok"),
+                new ModelChunk.MessageStop("STOP", Usage.of(0, 0), Map.of(), List.of()));
           }
 
           @Override
@@ -363,7 +279,7 @@ final class TurnRunnerToolDispatchTest {
             .build();
     var binding = ToolBinding.newBuilder(attachmentTool).withCategory(ToolCategory.READ).build();
     var registry = new ToolRegistry(List.of(binding));
-    var dispatch = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
+    var dispatch = fixture.dispatch(registry);
     var call = new ToolCall("att-1", "returnPng", Map.of());
     var model =
         fixedChunkModel(
@@ -399,7 +315,7 @@ final class TurnRunnerToolDispatchTest {
     // Sanity: when no attachments, no synthetic user message is appended. The shape is the
     // pre-Layer-2 default (user + assistant + tool).
     var registry = new ToolRegistry(List.of(echoBinding()));
-    var dispatch = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
+    var dispatch = fixture.dispatch(registry);
     var call = new ToolCall("e", "echo", Map.of("v", "no-attach"));
     var model =
         fixedChunkModel(

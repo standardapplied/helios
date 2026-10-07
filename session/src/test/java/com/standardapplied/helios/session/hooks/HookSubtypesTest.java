@@ -13,10 +13,10 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -30,42 +30,8 @@ final class HookSubtypesTest {
   private static final HookContext CTX = ctx();
 
   private static HookContext ctx() {
-    return new HookContext() {
-      @Override
-      public String sessionId() {
-        return "sess-1";
-      }
-
-      @Override
-      public long turnIndex() {
-        return 0;
-      }
-
-      @Override
-      public CancellationToken cancellation() {
-        return new CancellationToken();
-      }
-
-      @Override
-      public Model model() {
-        return new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            return Response.newBuilder().build();
-          }
-
-          @Override
-          public String id() {
-            return "stub";
-          }
-
-          @Override
-          public String provider() {
-            return "stub";
-          }
-        };
-      }
-    };
+    return new DefaultHookContext(
+        "sess-1", 0, new CancellationToken(), ScriptedModel.newBuilder().build());
   }
 
   // ── default name() / priority() across all 7 subtypes ──────────────────────
@@ -217,23 +183,7 @@ final class HookSubtypesTest {
   @Test
   void hookContextAccessorsExposeConstructorValues() {
     var t = new CancellationToken();
-    Model m =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            return Response.newBuilder().build();
-          }
-
-          @Override
-          public String id() {
-            return "stub";
-          }
-
-          @Override
-          public String provider() {
-            return "stub";
-          }
-        };
+    Model m = ScriptedModel.newBuilder().build();
     HookContext ctx =
         new HookContext() {
           @Override
