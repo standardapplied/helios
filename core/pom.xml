@@ -34,9 +34,9 @@
         <plugins>
             <plugin>
                 <!--
-                  Publishes the test fixtures of com.standardapplied.helios.core.test (Await,
-                  LineSink, FeedableInputStream, MockModel, TraceCollector) as the `tests`
-                  classifier jar that every other module's tests depend on.
+                  Publishes the test fixtures and abstract contract tests of
+                  com.standardapplied.helios.core.test as the `tests` classifier jar that every
+                  other module's tests depend on.
                 -->
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
