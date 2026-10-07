@@ -10,9 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import org.junit.jupiter.api.Test;
 
 class ExecutionResultTest {
@@ -199,5 +201,26 @@ class ExecutionResultTest {
   void failureFactoryHasZeroDuration() {
     assertSame(Duration.ZERO, ExecutionResult.failure("err").duration());
     assertSame(Duration.ZERO, ExecutionResult.failure("err", 137).duration());
+  }
+
+  @Test
+  void bindingsRejectANullNameOrRepr() {
+    var nullRepr = new LinkedHashMap<String, String>();
+    nullRepr.put("n", null);
+    var nullName = new LinkedHashMap<String, String>();
+    nullName.put(null, "5");
+
+    assertEquals(
+        "binding n must not be null",
+        assertThrows(
+                NullPointerException.class,
+                () -> ExecutionResult.newBuilder().withBindings(nullRepr).build())
+            .getMessage());
+    assertEquals(
+        "binding name must not be null",
+        assertThrows(
+                NullPointerException.class,
+                () -> ExecutionResult.newBuilder().withBindings(nullName).build())
+            .getMessage());
   }
 }

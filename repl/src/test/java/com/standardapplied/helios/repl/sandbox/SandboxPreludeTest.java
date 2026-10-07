@@ -173,6 +173,20 @@ class SandboxPreludeTest {
   }
 
   @Test
+  void installedCountByListsKeysInTheOrderTheyFirstOccur() {
+    try (var jshell = JShell.builder().executionEngine("local").build()) {
+      SandboxPrelude.install(jshell);
+      jshell.eval(
+          "var xs = java.util.List.of(\"pear\", \"fig\", \"apple\", \"fig\", \"kiwi\", \"plum\","
+              + " \"pear\", \"date\", \"lime\", \"yuzu\");");
+      var events = jshell.eval("countBy(xs, s -> s);");
+      assertEquals(
+          "{pear=2, fig=2, apple=1, kiwi=1, plum=1, date=1, lime=1, yuzu=1}",
+          events.get(0).value());
+    }
+  }
+
+  @Test
   void preInstalledImportsLetStreamCodeCompileWithoutFqn() {
     try (var jshell = JShell.builder().executionEngine("local").build()) {
       SandboxPrelude.install(jshell);

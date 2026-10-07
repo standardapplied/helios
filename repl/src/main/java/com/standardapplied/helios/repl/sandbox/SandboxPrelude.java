@@ -93,7 +93,8 @@ public final class SandboxPrelude {
         return xs.stream().sorted().collect(Collectors.toList());
       }
       static <T, K> Map<K, Long> countBy(Collection<T> xs, Function<? super T, ? extends K> key) {
-        return xs.stream().collect(Collectors.groupingBy(key, Collectors.counting()));
+        return xs.stream()
+            .collect(Collectors.groupingBy(key, LinkedHashMap::new, Collectors.counting()));
       }
       """;
 
