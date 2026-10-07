@@ -42,24 +42,29 @@ final class LoopFixture implements AutoCloseable {
     this.clock = InstantSource.fixed(now);
   }
 
+  /** A tool dispatch over {@code tools}, with the default concurrency limits. */
   ToolDispatch dispatch(ToolRegistry tools) {
     return new ToolDispatch(
         SessionContext.forTesting(sessionId), tools, ConcurrencyLimits.defaults());
   }
 
+  /** The hook context of {@code state}'s current turn. */
   HookContext hookContext(SessionState state) {
     return new DefaultHookContext(
         state.sessionId(), state.currentTurnIndex(), state.cancellation(), hookModel);
   }
 
+  /** Collaborators that emit into {@link #events}, on this fixture's clock. */
   LoopCollaborators collaborators(HookRegistry hooks, ToolDispatch dispatch, SteeringQueue queue) {
     return new LoopCollaborators(hooks, dispatch, queue, events::add, this::hookContext, clock);
   }
 
+  /** A runner of {@code model} with no costs and no output schema. */
   TurnRunner runner(LoopCollaborators collaborators, Model model) {
     return runner(collaborators, model, CostCalculator.ZERO, null);
   }
 
+  /** A runner of {@code model} pricing turns with {@code costs}, typed when a schema is given. */
   TurnRunner runner(
       LoopCollaborators collaborators,
       Model model,
@@ -68,6 +73,7 @@ final class LoopFixture implements AutoCloseable {
     return new TurnRunner(collaborators, model, costs, outputSchema, scheduler);
   }
 
+  /** A loop over {@link #runner(LoopCollaborators, Model) a plain runner} of {@code model}. */
   AgentLoop loop(
       LoopCollaborators collaborators,
       Model model,
@@ -76,6 +82,7 @@ final class LoopFixture implements AutoCloseable {
     return loop(collaborators, runner(collaborators, model), counter, compactor);
   }
 
+  /** A loop over {@code runner} with the standard stop classifier. */
   AgentLoop loop(
       LoopCollaborators collaborators,
       TurnRunner runner,
@@ -89,10 +96,12 @@ final class LoopFixture implements AutoCloseable {
     return new SessionState(sessionId, cancellation, clock);
   }
 
+  /** A fresh state of this fixture's session with its own cancellation token. */
   SessionState state() {
     return state(new CancellationToken());
   }
 
+  /** The scheduler every runner of this fixture uses, shut down by {@link #close}. */
   ScheduledExecutorService scheduler() {
     return scheduler;
   }

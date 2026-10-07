@@ -54,7 +54,7 @@
             <plugin>
                 <!--
                   Publishes the test fixtures of com.standardapplied.helios.session.test as the
-                  `tests` classifier jar that runtime's, repl's and the examples' tests depend on.
+                  `tests` classifier jar that repl's and the examples' tests depend on.
                 -->
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>

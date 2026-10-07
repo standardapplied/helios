@@ -91,7 +91,7 @@ final class SafeEmitBackpressureTest {
   @Test
   void offerSucceedsForFastSubscriber() {
     var burst = 100;
-    var subscriber = new CollectingSubscriber(event -> {});
+    var subscriber = new CollectingSubscriber();
 
     try (var session = session("sess-backpressure-fast", burstModel(burst, () -> {}, () -> {}))) {
       session.events().subscribe(subscriber);

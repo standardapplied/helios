@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -161,8 +162,8 @@ final class Phase4AcceptanceTest {
     }
 
     // Verify the question fired.
-    assertTrue(
-        !sub.eventsOf(QueryEvent.QuestionAsked.class).isEmpty(),
+    assertFalse(
+        sub.eventsOf(QueryEvent.QuestionAsked.class).isEmpty(),
         "expected a QuestionAsked event from the ASK fallback");
     // Verify the write went through.
     assertEquals("permitted", backend.view("/memories/x.md"));
@@ -190,7 +191,7 @@ final class Phase4AcceptanceTest {
     }
 
     var blocked = sub.eventsOf(QueryEvent.ToolBlocked.class);
-    assertTrue(!blocked.isEmpty(), "expected MemoryWrite to be blocked");
+    assertFalse(blocked.isEmpty(), "expected MemoryWrite to be blocked");
     assertEquals(MemoryWriteTool.NAME, blocked.getFirst().call().name());
     // And nothing should have been written to disk.
     assertEquals(List.<String>of(), backend.list("/memories/"));

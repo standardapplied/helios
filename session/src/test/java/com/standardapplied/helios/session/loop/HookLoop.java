@@ -67,6 +67,7 @@ final class HookLoop implements AutoCloseable {
         .run(state, SessionLimits.defaults());
   }
 
+  /** The history the run built. */
   List<Message> history() {
     return state.history().snapshot();
   }

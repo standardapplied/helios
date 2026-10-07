@@ -16,6 +16,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -50,7 +51,11 @@ class SchemaParseSelfCorrectionReproTest {
                 .withOutputSchema(OutputSchema.of(Sample.class))
                 .withLimits(limits)
                 .build())) {
-      return session.runBlocking(UserMessage.text("go"));
+      var terminal = session.runBlocking(UserMessage.text("go"));
+      assertTrue(
+          model.outputSchemas().stream().allMatch(Optional::isPresent),
+          "every turn, the corrective retries included, must carry the session's output schema");
+      return terminal;
     }
   }
 
