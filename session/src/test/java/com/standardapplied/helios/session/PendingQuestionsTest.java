@@ -12,12 +12,12 @@ import com.standardapplied.helios.session.ask.AskUserQuestionOption;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.loop.SessionState;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
 import java.time.Instant;
 import java.time.InstantSource;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
 import org.junit.jupiter.api.Test;
 
@@ -39,7 +39,13 @@ final class PendingQuestionsTest {
     var state = new SessionState("pending", new CancellationToken(), CLOCK);
     var events = new SessionEventPublisher("pending");
     var asked = new CompletableFuture<AskUserQuestionRequest>();
-    events.subscribe(new QuestionWatcher(asked));
+    events.subscribe(
+        new CollectingSubscriber(
+            event -> {
+              if (event instanceof QueryEvent.QuestionAsked question) {
+                asked.complete(question.request());
+              }
+            }));
     var questions = new PendingQuestions(state, events, CLOCK);
     var asking = new FutureTask<>(() -> questions.ask(QUESTION));
     Thread.ofVirtual().start(asking);
@@ -57,27 +63,5 @@ final class PendingQuestionsTest {
     assertEquals(
         "no pending question with id 'q1' — already answered or unknown", unknown.getMessage());
     events.close();
-  }
-
-  private record QuestionWatcher(CompletableFuture<AskUserQuestionRequest> asked)
-      implements Flow.Subscriber<QueryEvent> {
-
-    @Override
-    public void onSubscribe(Flow.Subscription subscription) {
-      subscription.request(Long.MAX_VALUE);
-    }
-
-    @Override
-    public void onNext(QueryEvent event) {
-      if (event instanceof QueryEvent.QuestionAsked question) {
-        asked.complete(question.request());
-      }
-    }
-
-    @Override
-    public void onError(Throwable throwable) {}
-
-    @Override
-    public void onComplete() {}
   }
 }
