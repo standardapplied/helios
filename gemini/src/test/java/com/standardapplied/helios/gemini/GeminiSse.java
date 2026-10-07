@@ -51,16 +51,23 @@ final class GeminiSse {
             + "\"total_tokens\":15}}}");
   }
 
+  /** The {@code step.start} event opening step {@code index}, described by {@code stepJson}. */
   static String stepStart(int index, String stepJson) {
     return data(
         "{\"event_type\":\"step.start\",\"index\":" + index + ",\"step\":" + stepJson + "}");
   }
 
+  /** A {@code step.delta} event carrying {@code deltaJson} for step {@code index}. */
   static String stepDelta(int index, String deltaJson) {
     return data(
         "{\"event_type\":\"step.delta\",\"index\":" + index + ",\"delta\":" + deltaJson + "}");
   }
 
+  /**
+   * A {@code step.delta} event carrying a fragment of step {@code index}'s function call arguments.
+   *
+   * @param escapedJson the fragment, already escaped to sit inside a JSON string
+   */
   static String stepArgumentsDelta(int index, String escapedJson) {
     return data(
         "{\"event_type\":\"step.delta\",\"index\":"
@@ -70,6 +77,7 @@ final class GeminiSse {
             + "\"}");
   }
 
+  /** The {@code step.stop} event closing step {@code index}. */
   static String stepStop(int index) {
     return data("{\"event_type\":\"step.stop\",\"index\":" + index + ",\"status\":\"done\"}");
   }
