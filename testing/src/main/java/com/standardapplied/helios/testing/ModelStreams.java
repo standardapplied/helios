@@ -6,6 +6,9 @@ import com.standardapplied.helios.core.model.ModelChunk;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Flow;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Fixed model streams for tests: publishers of {@link ModelChunk} that replay a chunk sequence and
@@ -60,7 +63,7 @@ public final class ModelStreams {
 
     private final Runnable onRequest;
     private final Flow.Subscriber<? super ModelChunk> subscriber;
-    private boolean ended;
+    private final AtomicBoolean ended = new AtomicBoolean();
 
     StalledSubscription(Runnable onRequest, Flow.Subscriber<? super ModelChunk> subscriber) {
       this.onRequest = onRequest;
@@ -69,22 +72,19 @@ public final class ModelStreams {
 
     @Override
     public void request(long n) {
-      synchronized (this) {
-        if (ended) {
-          return;
-        }
-        if (n <= 0) {
-          ended = true;
-          subscriber.onError(nonPositiveRequest(n));
-          return;
-        }
+      if (ended.get()) {
+        return;
       }
-      onRequest.run();
+      if (n > 0) {
+        onRequest.run();
+      } else if (ended.compareAndSet(false, true)) {
+        subscriber.onError(nonPositiveRequest(n));
+      }
     }
 
     @Override
-    public synchronized void cancel() {
-      ended = true;
+    public void cancel() {
+      ended.set(true);
     }
   }
 
@@ -106,10 +106,11 @@ public final class ModelStreams {
 
     private final Replay replay;
     private final Flow.Subscriber<? super ModelChunk> subscriber;
+    private final AtomicLong demand = new AtomicLong();
+    private final AtomicInteger drainRequests = new AtomicInteger();
+    private volatile IllegalArgumentException invalidRequest;
+    private volatile boolean ended;
     private int next;
-    private long demand;
-    private boolean draining;
-    private boolean ended;
 
     ReplaySubscription(Replay replay, Flow.Subscriber<? super ModelChunk> subscriber) {
       this.replay = replay;
@@ -117,45 +118,57 @@ public final class ModelStreams {
     }
 
     @Override
-    public synchronized void request(long n) {
-      if (ended) {
-        return;
-      }
+    public void request(long n) {
       if (n <= 0) {
-        ended = true;
-        subscriber.onError(nonPositiveRequest(n));
-        return;
+        invalidRequest = nonPositiveRequest(n);
+      } else {
+        demand.accumulateAndGet(n, ReplaySubscription::saturatedAdd);
       }
-      demand = n >= Long.MAX_VALUE - demand ? Long.MAX_VALUE : demand + n;
-      if (!draining) {
-        drain();
-      }
-    }
-
-    /**
-     * Delivers demanded chunks in a loop rather than by recursion: a subscriber that requests from
-     * {@code onNext} re-enters this monitor and only adds to {@code demand}, so the stack stays
-     * flat however long the sequence.
-     */
-    private void drain() {
-      draining = true;
-      try {
-        while (demand > 0 && next < replay.chunks().size() && !ended) {
-          demand--;
-          subscriber.onNext(replay.chunks().get(next++));
-        }
-        if (next == replay.chunks().size() && !ended) {
-          ended = true;
-          end();
-        }
-      } finally {
-        draining = false;
-      }
+      drain();
     }
 
     @Override
-    public synchronized void cancel() {
+    public void cancel() {
       ended = true;
+    }
+
+    private static long saturatedAdd(long demand, long n) {
+      return n >= Long.MAX_VALUE - demand ? Long.MAX_VALUE : demand + n;
+    }
+
+    /**
+     * Delivers on one thread at a time, in a loop, and never under a lock. A request from {@code
+     * onNext} or from another thread only records its demand and leaves delivery to the thread
+     * already draining, which passes again until no request arrived since its last pass; so the
+     * stack stays flat however long the sequence, and neither {@code request} nor {@code cancel}
+     * waits on a subscriber callback.
+     */
+    private void drain() {
+      if (drainRequests.getAndIncrement() != 0) {
+        return;
+      }
+      var missed = 1;
+      do {
+        deliver();
+        missed = drainRequests.addAndGet(-missed);
+      } while (missed != 0);
+    }
+
+    private void deliver() {
+      while (!ended) {
+        if (invalidRequest != null) {
+          ended = true;
+          subscriber.onError(invalidRequest);
+        } else if (next == replay.chunks().size()) {
+          ended = true;
+          end();
+        } else if (demand.get() == 0) {
+          return;
+        } else {
+          demand.decrementAndGet();
+          subscriber.onNext(replay.chunks().get(next++));
+        }
+      }
     }
 
     private void end() {
