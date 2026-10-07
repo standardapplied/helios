@@ -219,4 +219,22 @@ class PromptTest {
         "variable name must not be null",
         assertThrows(NullPointerException.class, builder::build).getMessage());
   }
+
+  @Test
+  void nullVariablesAreRejected() {
+    var failure =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new Prompt(
+                    UUID.randomUUID(),
+                    "test",
+                    "x",
+                    1,
+                    true,
+                    null,
+                    OffsetDateTime.parse("2026-01-01T00:00:00Z")));
+
+    assertEquals("variables must not be null", failure.getMessage());
+  }
 }
