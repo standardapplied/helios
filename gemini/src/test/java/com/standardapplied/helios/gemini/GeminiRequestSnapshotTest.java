@@ -5,7 +5,9 @@ package com.standardapplied.helios.gemini;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
-import com.standardapplied.helios.core.model.ThinkingLevel;
+import com.standardapplied.helios.core.model.Reasoning;
+import com.standardapplied.helios.core.model.Reasoning.Display;
+import com.standardapplied.helios.core.model.Reasoning.Level;
 import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.core.test.ConversationFixture;
 import com.standardapplied.helios.core.test.Golden;
@@ -47,33 +49,31 @@ class GeminiRequestSnapshotTest {
   @Test
   void everyRequestMatchesItsSnapshot() {
     for (var id : GeminiModelId.values()) {
-      for (var level : List.of(ThinkingLevel.NONE, ThinkingLevel.MEDIUM)) {
-        snapshot(
-            id.id() + " " + level + " tools", modelAt(id, settings(level)), withTools(THOUGHTS));
-      }
+      snapshot(id.id() + " absent tools", modelAt(id, settings(null)), withTools(THOUGHTS));
+      snapshot(
+          id.id() + " medium summary tools",
+          modelAt(id, settings(new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))),
+          withTools(THOUGHTS));
     }
     var flash = GeminiModelId.GEMINI_3_5_FLASH;
-    var low = settings(ThinkingLevel.LOW);
+    var low = settings(new Reasoning.Effort(Level.LOW, Display.HIDDEN));
     snapshot("schema", modelAt(flash, low), withSchema(List.of()));
     snapshot("schema and tools", modelAt(flash, low), withSchema(ConversationFixture.tools()));
     snapshot("continuation", modelAt(flash, low), continuation());
     snapshot(
         "continuation disabled",
-        modelAt(flash, settings(ThinkingLevel.LOW).withProviderContinuation(false)),
+        modelAt(flash, settings(null).withProviderContinuation(false)),
         continuation());
-    snapshot(
-        "web search",
-        modelAt(flash, settings(ThinkingLevel.LOW).withWebSearch(true)),
-        withTools(THOUGHTS));
+    snapshot("web search", modelAt(flash, settings(null).withWebSearch(true)), withTools(THOUGHTS));
     snapshot(
         "url context",
-        modelAt(flash, settings(ThinkingLevel.LOW).withWebFetch(true)),
+        modelAt(flash, settings(null).withWebFetch(true)),
         model -> model.chat(List.of(Message.user("Summarise https://example.com"))));
     snapshot(
         "generation settings",
         modelAt(
             flash,
-            settings(ThinkingLevel.HIGH)
+            settings(new Reasoning.Effort(Level.HIGH, Display.SUMMARY))
                 .withStopSequences(List.of("END"))
                 .withSeed(7L)
                 .withMaxOutputTokens(2048)
@@ -108,8 +108,8 @@ class GeminiRequestSnapshotTest {
     };
   }
 
-  private static ModelConfig.Builder settings(ThinkingLevel level) {
-    return ModelConfig.newBuilder().withApiKey("test-key").withThinkingLevel(level);
+  private static ModelConfig.Builder settings(Reasoning reasoning) {
+    return ModelConfig.newBuilder().withApiKey("test-key").withReasoning(reasoning);
   }
 
   private static Function<URI, Model> modelAt(GeminiModelId id, ModelConfig.Builder settings) {

@@ -43,13 +43,6 @@ class GeminiRestructuredPartsTest {
   }
 
   @Test
-  void anUnsetThinkingLevelIsTheModelsFloor() {
-    assertEquals(
-        GeminiModelId.GEMINI_3_1_PRO_PREVIEW.lowestThinkingLevel(),
-        GeminiThinking.level(GeminiModelId.GEMINI_3_1_PRO_PREVIEW, null));
-  }
-
-  @Test
   void theModelReportsItsCatalogCeilingAndCapturePolicy() {
     var model =
         new GeminiProvider()

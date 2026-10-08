@@ -12,7 +12,9 @@ import com.standardapplied.helios.anthropic.AnthropicPricing;
 import com.standardapplied.helios.anthropic.AnthropicProvider;
 import com.standardapplied.helios.anthropic.CachePolicy;
 import com.standardapplied.helios.core.model.ModelConfig;
-import com.standardapplied.helios.core.model.ThinkingLevel;
+import com.standardapplied.helios.core.model.Reasoning;
+import com.standardapplied.helios.core.model.Reasoning.Display;
+import com.standardapplied.helios.core.model.Reasoning.Level;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
@@ -56,26 +58,29 @@ final class Claude55AgentSessionIntegrationTest {
 
   @Test
   void opus55RunsTheToolLoopAndSurfacesItsProgressNotes() {
-    var run = runMatchmaking(AnthropicModelId.CLAUDE_OPUS_5_5, ThinkingLevel.MEDIUM);
+    var run =
+        runMatchmaking(
+            AnthropicModelId.CLAUDE_OPUS_5_5, new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS));
 
     assertTrue(
         run.events().stream()
             .anyMatch(e -> e instanceof QueryEvent.AssistantThinking t && !t.text().isBlank()),
-        "Opus 5.5 writes its between-tool-call notes as thinking; the session must surface them");
+        "Opus 5.5 returns its between-tool-call notes under the progress display; the session"
+            + " must surface them");
   }
 
   @Test
   void sonnet55RunsTheToolLoopWithoutUpFrontThinking() {
-    runMatchmaking(AnthropicModelId.CLAUDE_SONNET_5_5, ThinkingLevel.NONE);
+    runMatchmaking(AnthropicModelId.CLAUDE_SONNET_5_5, new Reasoning.Off());
   }
 
   private record Run(ResultMessage.Success result, List<QueryEvent> events) {}
 
-  private static Run runMatchmaking(AnthropicModelId modelId, ThinkingLevel level) {
+  private static Run runMatchmaking(AnthropicModelId modelId, Reasoning reasoning) {
     var config =
         ModelConfig.newBuilder()
             .withApiKey(System.getenv("ANTHROPIC_API_KEY"))
-            .withThinkingLevel(level)
+            .withReasoning(reasoning)
             .withMaxOutputTokens(16_000)
             .build();
     var events = new CollectingSubscriber();
