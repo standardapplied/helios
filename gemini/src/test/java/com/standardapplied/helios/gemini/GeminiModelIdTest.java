@@ -42,17 +42,6 @@ class GeminiModelIdTest {
   }
 
   @Test
-  void lowestThinkingLevelFollowsPublishedSupportTable() {
-    assertEquals("minimal", GeminiModelId.GEMINI_3_FLASH_PREVIEW.lowestThinkingLevel());
-    assertEquals("low", GeminiModelId.GEMINI_3_1_PRO_PREVIEW.lowestThinkingLevel());
-    assertEquals("minimal", GeminiModelId.GEMINI_3_1_FLASH_LITE.lowestThinkingLevel());
-    assertEquals("minimal", GeminiModelId.GEMINI_3_5_FLASH.lowestThinkingLevel());
-    assertEquals("minimal", GeminiModelId.GEMINI_3_5_FLASH_LITE.lowestThinkingLevel());
-    assertEquals("minimal", GeminiModelId.GEMINI_3_6_FLASH.lowestThinkingLevel());
-    assertEquals("low", GeminiModelId.GEMINI_3_7_FLASH.lowestThinkingLevel());
-  }
-
-  @Test
   void fromIdReturnsMatchingEnum() {
     assertEquals(
         GeminiModelId.GEMINI_3_FLASH_PREVIEW, GeminiModelId.fromId("gemini-3-flash-preview"));
@@ -95,11 +84,10 @@ class GeminiModelIdTest {
   }
 
   @Test
-  void gemini38FlashIsCataloguedWithLowThinkingFloor() {
+  void gemini38FlashIsCatalogued() {
     assertEquals("gemini-3.8-flash", GeminiModelId.GEMINI_3_8_FLASH.id());
     assertEquals(1_048_576, GeminiModelId.GEMINI_3_8_FLASH.contextWindow());
     assertEquals(65_536, GeminiModelId.GEMINI_3_8_FLASH.maxOutputTokens());
-    assertEquals("low", GeminiModelId.GEMINI_3_8_FLASH.lowestThinkingLevel());
     assertEquals(GeminiModelId.GEMINI_3_8_FLASH, GeminiModelId.fromId("gemini-3.8-flash"));
     assertTrue(GeminiModelId.isSupported("gemini-3.8-flash"));
   }

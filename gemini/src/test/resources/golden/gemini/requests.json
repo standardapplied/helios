@@ -2,7 +2,8 @@
   "continuation" : {
     "generation_config" : {
       "max_output_tokens" : 65536,
-      "thinking_level" : "low"
+      "thinking_level" : "low",
+      "thinking_summaries" : "none"
     },
     "input" : [ {
       "call_id" : "call_1",
@@ -43,8 +44,7 @@
   },
   "continuation disabled" : {
     "generation_config" : {
-      "max_output_tokens" : 65536,
-      "thinking_level" : "low"
+      "max_output_tokens" : 65536
     },
     "input" : [ {
       "content" : [ {
@@ -112,10 +112,9 @@
       "type" : "function"
     } ]
   },
-  "gemini-3-flash-preview MEDIUM tools" : {
+  "gemini-3-flash-preview absent tools" : {
     "generation_config" : {
-      "max_output_tokens" : 65536,
-      "thinking_level" : "medium"
+      "max_output_tokens" : 65536
     },
     "input" : [ {
       "content" : [ {
@@ -177,10 +176,11 @@
       "type" : "function"
     } ]
   },
-  "gemini-3-flash-preview NONE tools" : {
+  "gemini-3-flash-preview medium summary tools" : {
     "generation_config" : {
       "max_output_tokens" : 65536,
-      "thinking_level" : "minimal"
+      "thinking_level" : "medium",
+      "thinking_summaries" : "auto"
     },
     "input" : [ {
       "content" : [ {
@@ -242,10 +242,9 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.1-flash-lite MEDIUM tools" : {
+  "gemini-3.1-flash-lite absent tools" : {
     "generation_config" : {
-      "max_output_tokens" : 65536,
-      "thinking_level" : "medium"
+      "max_output_tokens" : 65536
     },
     "input" : [ {
       "content" : [ {
@@ -307,10 +306,11 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.1-flash-lite NONE tools" : {
+  "gemini-3.1-flash-lite medium summary tools" : {
     "generation_config" : {
       "max_output_tokens" : 65536,
-      "thinking_level" : "minimal"
+      "thinking_level" : "medium",
+      "thinking_summaries" : "auto"
     },
     "input" : [ {
       "content" : [ {
@@ -372,10 +372,9 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.1-pro-preview MEDIUM tools" : {
+  "gemini-3.1-pro-preview absent tools" : {
     "generation_config" : {
-      "max_output_tokens" : 65536,
-      "thinking_level" : "medium"
+      "max_output_tokens" : 65536
     },
     "input" : [ {
       "content" : [ {
@@ -437,10 +436,11 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.1-pro-preview NONE tools" : {
+  "gemini-3.1-pro-preview medium summary tools" : {
     "generation_config" : {
       "max_output_tokens" : 65536,
-      "thinking_level" : "low"
+      "thinking_level" : "medium",
+      "thinking_summaries" : "auto"
     },
     "input" : [ {
       "content" : [ {
@@ -502,10 +502,9 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.5-flash MEDIUM tools" : {
+  "gemini-3.5-flash absent tools" : {
     "generation_config" : {
-      "max_output_tokens" : 65536,
-      "thinking_level" : "medium"
+      "max_output_tokens" : 65536
     },
     "input" : [ {
       "content" : [ {
@@ -567,10 +566,11 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.5-flash NONE tools" : {
+  "gemini-3.5-flash medium summary tools" : {
     "generation_config" : {
       "max_output_tokens" : 65536,
-      "thinking_level" : "minimal"
+      "thinking_level" : "medium",
+      "thinking_summaries" : "auto"
     },
     "input" : [ {
       "content" : [ {
@@ -632,10 +632,9 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.5-flash-lite MEDIUM tools" : {
+  "gemini-3.5-flash-lite absent tools" : {
     "generation_config" : {
-      "max_output_tokens" : 65536,
-      "thinking_level" : "medium"
+      "max_output_tokens" : 65536
     },
     "input" : [ {
       "content" : [ {
@@ -697,10 +696,11 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.5-flash-lite NONE tools" : {
+  "gemini-3.5-flash-lite medium summary tools" : {
     "generation_config" : {
       "max_output_tokens" : 65536,
-      "thinking_level" : "minimal"
+      "thinking_level" : "medium",
+      "thinking_summaries" : "auto"
     },
     "input" : [ {
       "content" : [ {
@@ -762,10 +762,9 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.6-flash MEDIUM tools" : {
+  "gemini-3.6-flash absent tools" : {
     "generation_config" : {
-      "max_output_tokens" : 65536,
-      "thinking_level" : "medium"
+      "max_output_tokens" : 65536
     },
     "input" : [ {
       "content" : [ {
@@ -827,10 +826,11 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.6-flash NONE tools" : {
+  "gemini-3.6-flash medium summary tools" : {
     "generation_config" : {
       "max_output_tokens" : 65536,
-      "thinking_level" : "minimal"
+      "thinking_level" : "medium",
+      "thinking_summaries" : "auto"
     },
     "input" : [ {
       "content" : [ {
@@ -892,10 +892,9 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.7-flash MEDIUM tools" : {
+  "gemini-3.7-flash absent tools" : {
     "generation_config" : {
-      "max_output_tokens" : 65536,
-      "thinking_level" : "medium"
+      "max_output_tokens" : 65536
     },
     "input" : [ {
       "content" : [ {
@@ -957,10 +956,11 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.7-flash NONE tools" : {
+  "gemini-3.7-flash medium summary tools" : {
     "generation_config" : {
       "max_output_tokens" : 65536,
-      "thinking_level" : "low"
+      "thinking_level" : "medium",
+      "thinking_summaries" : "auto"
     },
     "input" : [ {
       "content" : [ {
@@ -1022,10 +1022,9 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.8-flash MEDIUM tools" : {
+  "gemini-3.8-flash absent tools" : {
     "generation_config" : {
-      "max_output_tokens" : 65536,
-      "thinking_level" : "medium"
+      "max_output_tokens" : 65536
     },
     "input" : [ {
       "content" : [ {
@@ -1087,10 +1086,11 @@
       "type" : "function"
     } ]
   },
-  "gemini-3.8-flash NONE tools" : {
+  "gemini-3.8-flash medium summary tools" : {
     "generation_config" : {
       "max_output_tokens" : 65536,
-      "thinking_level" : "low"
+      "thinking_level" : "medium",
+      "thinking_summaries" : "auto"
     },
     "input" : [ {
       "content" : [ {
@@ -1158,6 +1158,7 @@
       "seed" : 7,
       "stop_sequences" : [ "END" ],
       "thinking_level" : "high",
+      "thinking_summaries" : "auto",
       "tool_choice" : {
         "allowed_tools" : {
           "mode" : "validated",
@@ -1228,7 +1229,8 @@
   "schema" : {
     "generation_config" : {
       "max_output_tokens" : 65536,
-      "thinking_level" : "low"
+      "thinking_level" : "low",
+      "thinking_summaries" : "none"
     },
     "input" : [ {
       "content" : [ {
@@ -1291,7 +1293,8 @@
   "schema and tools" : {
     "generation_config" : {
       "max_output_tokens" : 65536,
-      "thinking_level" : "low"
+      "thinking_level" : "low",
+      "thinking_summaries" : "none"
     },
     "input" : [ {
       "content" : [ {
@@ -1368,8 +1371,7 @@
   },
   "url context" : {
     "generation_config" : {
-      "max_output_tokens" : 65536,
-      "thinking_level" : "low"
+      "max_output_tokens" : 65536
     },
     "input" : [ {
       "content" : [ {
@@ -1386,8 +1388,7 @@
   },
   "web search" : {
     "generation_config" : {
-      "max_output_tokens" : 65536,
-      "thinking_level" : "low"
+      "max_output_tokens" : 65536
     },
     "input" : [ {
       "content" : [ {

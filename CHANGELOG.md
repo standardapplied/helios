@@ -199,6 +199,104 @@ and an unordered map or set no longer compiles in their place.
 | `persistence.mapper.DbTypeMapperProvider.readStringSet` returns a `Set<String>` | a `SequencedSet<String>` in the array's order |
 | `ModelIntegrationContract` (core test-jar) declares `model()` | also declares `model(ModelConfig.Builder)`: a subclass completes the builder with its API key and model id and returns a model the caller closes |
 
+**`ThinkingLevel` is replaced by `Reasoning`: exactly what is asked, or a rejection.**
+`ThinkingLevel` mixed three decisions (whether the model reasons, at what effort, and whether
+the reasoning is returned) and each provider resolved them differently: `NONE` meant thinking
+off on one model, the API's default effort on another and the lowest effort on a third, and
+`XHIGH`/`MAX` were sent on some models and clamped on others. `ModelConfig.thinkingLevel` and the
+enum are removed with no bridge.
+
+| 2.x | 3.0 |
+|---|---|
+| `core.model.ThinkingLevel` | `core.model.Reasoning`: `Reasoning.Off`, or `Reasoning.Effort(Level, Display)` with `Level` `MINIMAL`..`MAX` and `Display` `HIDDEN` / `SUMMARY` / `PROGRESS` |
+| `ModelConfig.thinkingLevel()`, default `NONE` | `ModelConfig.reasoning()`, an `Optional<Reasoning>`, empty by default |
+| `ModelConfig.Builder.withThinkingLevel(level)` | `withReasoning(reasoning)`; `null` clears it |
+| `AnthropicModelId.ThinkingShape`, `thinkingShape()`, `ThinkingShape.acceptsSamplingParameters()` | `AnthropicModelId.ReasoningRules`, `reasoning()`, with `Off`, `ReasoningSupport` and `Sampling` declarations |
+| `OpenAIModelId.EffortSupport`, `effortSupport()` | `OpenAIModelId.ReasoningRules`, `reasoning()` |
+| `GeminiModelId.lowestThinkingLevel()` | `GeminiModelId.reasoning()`, a `core.provider.ReasoningSupport` |
+| `anthropic.api.ThinkingConfig(type, budgetTokens, display)`, `enabled(int)`, `adaptive()` | `ThinkingConfig(type, display)`, `adaptive(display)`; `enabled` and `budget_tokens` are gone |
+| `anthropic.api.OutputConfig.LOW` ... `MAX` | `new OutputConfig("low")` ... |
+| `openai.api.ResponsesRequest.ReasoningConfig.of(effort)` (always `summary: "auto"`) | `new ReasoningConfig(effort, summary)`; `summary` null omits it |
+
+- **Absent sends nothing.** With `reasoning` empty no thinking, reasoning or effort field is sent
+  and the API's own defaults apply. In 2.x the builder default was `NONE`, so a caller who set
+  nothing now gets different behaviour wherever `NONE` sent a field: Opus 5 and Sonnet 5 think
+  (they were sent `disabled`), Sonnet 5.5 thinks up front (it was sent `between_tools`), OpenAI
+  gpt-5.5 and later reason at the API default `medium` (they were sent `none`, or `low` on
+  gpt-6-astra and gpt-6.1-sol), and Gemini 3.x thinks at its default level (it was pinned to its
+  lowest). Set `Reasoning.Off`, or an `Effort`, to keep the 2.x request.
+- **Exact or throw.** A present `Reasoning` is sent as asked or rejected by the provider's
+  `create`, before any I/O, with an `IllegalArgumentException` naming the model, the rejected
+  value and every value the model accepts. Nothing is clamped or substituted; `Off` on a model
+  that cannot stop reasoning (Fable, Mythos, Opus 5.5, gpt-6-astra, gpt-6.1-sol, o-series,
+  Gemini 3.x) throws. A model id the catalogue does not know accepts every value and is sent the
+  current shape (Anthropic: adaptive thinking with `output_config.effort`, `Off` as `disabled`;
+  OpenAI: `reasoning.effort`, `Off` as `none`); the API judges it. `Display.PROGRESS` has no
+  OpenAI or Gemini spelling and throws there.
+- **`Display.PROGRESS`** sends `thinking.display: "updates"` on Fable 5 / 5.1, Mythos 5.1, Opus 5.5
+  and Sonnet 5.5, and the Anthropic provider adds the `thinking-display-updates-2026-08-18` beta
+  to the `anthropic-beta` header itself, after any beta the configured headers already name.
+- **Haiku 4.5's invented budgets are gone.** `MINIMAL`..`HIGH` sent `enabled` with 1024 / 4096 /
+  10000 / 32000 `budget_tokens` and raised `max_tokens` above the budget; Haiku 4.5 now accepts no
+  `Effort`.
+- **Sampling parameters are exact or throw too.** 2.x dropped `temperature` and `topP` without a
+  word where the model would reject them. They are now sent as set, or rejected at construction
+  with the model, the parameter and the rule: Claude 4.7 and later (Opus 4.7 / 4.8 / 5 / 5.5,
+  Sonnet 5 / 5.5, Fable, Mythos) reject either whenever it is set; Opus 4.6 and Sonnet 4.6 reject
+  `temperature` alongside `Reasoning.Effort` and accept `topP` there only from 0.95 to 1; Opus 4.6,
+  Sonnet 4.6 and Haiku 4.5 reject the two together, which the API answers with a 400. On OpenAI,
+  gpt-6-astra, gpt-6.1-sol and the o-series reject both always; gpt-6-sol, gpt-6-luna, the gpt-5.6
+  family and gpt-5.5 accept them only with `Reasoning.Off` (effort `none`); the gpt-5.4 family
+  accepts them unless an `Effort` is set (its default effort is `none`); gpt-4.1 and gpt-4o accept
+  them always.
+- **One reader of the declaration.** A new architecture rule allows only the `*RequestBuilder`
+  classes to read a model's reasoning declaration, so effort and display have one interpretation
+  per provider.
+
+What each 2.x level sent, and the `Reasoning` that sends the same now. `E(L, D)` is
+`new Reasoning.Effort(Level.L, Display.D)`; "absent" is no `withReasoning` call.
+
+| Provider family | 2.x level | 2.x request | 3.0 |
+|---|---|---|---|
+| Fable 5 / 5.1, Mythos 5 / 5.1, Opus 5.5 | `NONE` | no `thinking`, no `output_config` (API default effort, reasoning not returned) | absent (`Off` throws) |
+| | `MINIMAL`, `LOW` | `adaptive`, `summarized`, effort `low` | `E(LOW, SUMMARY)` |
+| | `MEDIUM`, `HIGH`, `XHIGH`, `MAX` | `adaptive`, `summarized`, the same effort | `E(<same>, SUMMARY)` |
+| Sonnet 5.5 | `NONE` | `thinking.type=between_tools` | `Off` |
+| | `MINIMAL`..`MAX` | as Opus 5.5 | as Opus 5.5 |
+| Opus 5, Sonnet 5 | `NONE` | `thinking.type=disabled` | `Off` |
+| | `MINIMAL`..`MAX` | as Opus 5.5 | as Opus 5.5 |
+| Opus 4.7, 4.8, and an uncatalogued Claude id | `NONE` | no `thinking` | absent (or `Off` on 4.7 / 4.8; `Off` sends `disabled` on an uncatalogued id) |
+| | `MINIMAL`..`MAX` | as Opus 5.5 | as Opus 5.5 |
+| Opus 4.6, Sonnet 4.6 | `NONE` | no `thinking` | absent or `Off` |
+| | `MINIMAL`, `LOW`, `MEDIUM`, `HIGH`, `MAX` | as Opus 5.5 | as Opus 5.5 |
+| | `XHIGH` | threw | throws |
+| Haiku 4.5 | `NONE` | no `thinking` | absent or `Off` |
+| | `MINIMAL`, `LOW`, `MEDIUM`, `HIGH` | `enabled` with `budget_tokens` 1024 / 4096 / 10000 / 32000 | no equivalent: every `Effort` throws |
+| | `XHIGH`, `MAX` | threw | throws |
+| gpt-6-astra, gpt-6.1-sol | `NONE`, `MINIMAL`, `LOW` | `reasoning: {effort: low, summary: auto}` | `E(LOW, SUMMARY)` |
+| | `MEDIUM`..`MAX` | the same effort, `summary: auto` | `E(<same>, SUMMARY)` |
+| gpt-6-sol, gpt-6-luna, gpt-5.6 family | `NONE` | `reasoning: {effort: none, summary: auto}` | `Off` (sends `{effort: none}`, no summary) |
+| | `MINIMAL`, `LOW` | effort `low`, `summary: auto` | `E(LOW, SUMMARY)` |
+| | `MEDIUM`..`MAX` | the same effort, `summary: auto` | `E(<same>, SUMMARY)` |
+| gpt-5.5, gpt-5.4 family | `NONE` | `reasoning: {effort: none, summary: auto}` | `Off` |
+| | `MINIMAL`, `LOW` .. `XHIGH` | as gpt-5.6 | as gpt-5.6 |
+| | `MAX` | clamped to `xhigh` | `E(XHIGH, SUMMARY)`; `MAX` throws |
+| o3, o4-mini | `NONE` | no `reasoning` | absent (`Off` throws) |
+| | `MINIMAL`, `LOW`, `MEDIUM`, `HIGH` | effort `low` / `low` / `medium` / `high`, `summary: auto` | `E(LOW, SUMMARY)` / `E(MEDIUM, SUMMARY)` / `E(HIGH, SUMMARY)` |
+| | `XHIGH`, `MAX` | clamped to `high` | `E(HIGH, SUMMARY)`; `XHIGH` / `MAX` throw |
+| gpt-4.1, gpt-4o families | `NONE` | no `reasoning` | absent or `Off` |
+| | `MINIMAL`..`MAX` | a `reasoning` field these models do not take | no equivalent: every `Effort` throws |
+| an uncatalogued OpenAI id | `NONE` | no `reasoning` | absent |
+| | `MINIMAL`..`MAX` | `low`..`high`, `XHIGH` / `MAX` clamped to `high` | `E(<level>, SUMMARY)`, sent verbatim |
+| Gemini 3 Flash Preview, 3.1 Flash-Lite, 3.5 Flash, 3.5 Flash-Lite, 3.6 Flash | `NONE`, `MINIMAL` | `thinking_level: minimal` | `E(MINIMAL, HIDDEN)` (`Off` throws) |
+| Gemini 3.1 Pro Preview, 3.7 Flash, 3.8 Flash | `NONE`, `MINIMAL` | `thinking_level: low` | `E(LOW, HIDDEN)`; `MINIMAL` throws |
+| every Gemini 3.x | `LOW`, `MEDIUM`, `HIGH` | the same level | `E(<same>, HIDDEN)` (`SUMMARY` adds `thinking_summaries: auto`) |
+| | `XHIGH`, `MAX` | clamped to `high` | `E(HIGH, HIDDEN)`; `XHIGH` / `MAX` throw |
+
+| 2.x sampling | 3.0 |
+|---|---|
+| `temperature` / `topP` on a model that rejects them were dropped from the request | thrown at construction: `IllegalArgumentException("Model <id> does not accept <parameter> <rule>.")`; remove the parameter, or set `Reasoning.Off` where the model accepts sampling only without reasoning |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
