@@ -33,8 +33,8 @@ class AnthropicSamplingTest {
       mode = EnumSource.Mode.EXCLUDE,
       names = {"CLAUDE_OPUS_4_6", "CLAUDE_SONNET_4_6", "CLAUDE_HAIKU_4_5"})
   void aModelFromClaude47OnRejectsEachSamplingParameterWithoutReasoning(AnthropicModelId model) {
-    rejects(model, b -> b.withTemperature(0.5), "temperature is rejected whenever it is set");
-    rejects(model, b -> b.withTopP(0.9), "topP is rejected whenever it is set");
+    rejects(model, b -> b.withTemperature(0.5), "temperature whenever it is set");
+    rejects(model, b -> b.withTopP(0.9), "topP whenever it is set");
   }
 
   @ParameterizedTest
@@ -49,8 +49,9 @@ class AnthropicSamplingTest {
       })
   void aModelFromClaude47OnRejectsEachSamplingParameterWithOff(AnthropicModelId model) {
     var off = new Reasoning.Off();
-    rejects(model, b -> b.withReasoning(off).withTemperature(1.0), "temperature is rejected");
-    rejects(model, b -> b.withReasoning(off).withTopP(1.0), "topP is rejected");
+    rejects(
+        model, b -> b.withReasoning(off).withTemperature(1.0), "temperature whenever it is set");
+    rejects(model, b -> b.withReasoning(off).withTopP(1.0), "topP whenever it is set");
   }
 
   @ParameterizedTest
@@ -59,8 +60,9 @@ class AnthropicSamplingTest {
       mode = EnumSource.Mode.EXCLUDE,
       names = {"CLAUDE_OPUS_4_6", "CLAUDE_SONNET_4_6", "CLAUDE_HAIKU_4_5"})
   void aModelFromClaude47OnRejectsEachSamplingParameterWithEffort(AnthropicModelId model) {
-    rejects(model, b -> b.withReasoning(EFFORT).withTemperature(1.0), "temperature is rejected");
-    rejects(model, b -> b.withReasoning(EFFORT).withTopP(1.0), "topP is rejected");
+    rejects(
+        model, b -> b.withReasoning(EFFORT).withTemperature(1.0), "temperature whenever it is set");
+    rejects(model, b -> b.withReasoning(EFFORT).withTopP(1.0), "topP whenever it is set");
   }
 
   @ParameterizedTest

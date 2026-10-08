@@ -12,8 +12,9 @@ import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Reasoning;
 import com.standardapplied.helios.core.model.Reasoning.Display;
 import com.standardapplied.helios.core.model.Reasoning.Level;
+import com.standardapplied.helios.core.test.ReasoningMatrix;
+import com.standardapplied.helios.core.test.ReasoningMatrix.Accepts;
 import com.standardapplied.helios.gemini.api.GeminiJson;
-import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
@@ -58,37 +59,16 @@ class GeminiReasoningTest {
           GeminiModelId.GEMINI_3_7_FLASH, LOW_TO_HIGH,
           GeminiModelId.GEMINI_3_8_FLASH, LOW_TO_HIGH);
 
-  static Stream<Reasoning> everyReasoning() {
-    var efforts =
-        Arrays.stream(Level.values())
-            .flatMap(
-                level ->
-                    Arrays.stream(Display.values())
-                        .map(display -> (Reasoning) new Reasoning.Effort(level, display)));
-    return Stream.concat(Stream.of(new Reasoning.Off()), efforts);
-  }
-
   static Stream<Arguments> acceptedCells() {
-    return cells(true);
+    return ReasoningMatrix.cells(DOCUMENTED, GeminiReasoningTest::accepts, true);
   }
 
   static Stream<Arguments> rejectedCells() {
-    return cells(false);
+    return ReasoningMatrix.cells(DOCUMENTED, GeminiReasoningTest::accepts, false);
   }
 
-  private static Stream<Arguments> cells(boolean accepted) {
-    return DOCUMENTED.entrySet().stream()
-        .flatMap(
-            row ->
-                everyReasoning()
-                    .filter(reasoning -> accepts(row.getValue(), reasoning) == accepted)
-                    .map(reasoning -> Arguments.of(row.getKey(), reasoning)));
-  }
-
-  private static boolean accepts(Set<Level> levels, Reasoning reasoning) {
-    return reasoning instanceof Reasoning.Effort e
-        && levels.contains(e.level())
-        && DISPLAYS.contains(e.display());
+  private static Accepts accepts(Set<Level> levels) {
+    return new Accepts(false, levels, DISPLAYS);
   }
 
   @Test
@@ -122,10 +102,7 @@ class GeminiReasoningTest {
             .getMessage();
 
     assertTrue(rejection.contains("Model " + model.id() + " "), rejection);
-    assertTrue(
-        rejection.contains(
-            "it accepts no Off and Effort " + DOCUMENTED.get(model) + " with display " + DISPLAYS),
-        rejection);
+    assertTrue(rejection.contains(accepts(DOCUMENTED.get(model)).description()), rejection);
   }
 
   @ParameterizedTest
