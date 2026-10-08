@@ -57,6 +57,7 @@ final class JShellExecutionProviderTest {
     private final CountDownLatch executeEntered = new CountDownLatch(1);
     private final AtomicInteger calls = new AtomicInteger();
     private final AtomicReference<String> lastCode = new AtomicReference<>();
+    private final AtomicReference<Duration> lastTimeout = new AtomicReference<>();
     String stdoutPerCall = "ok";
     String stderrPerCall = "";
     int exitCodePerCall = 0;
@@ -73,6 +74,7 @@ final class JShellExecutionProviderTest {
         com.standardapplied.helios.repl.sandbox.ExecutionRequest request) {
       calls.incrementAndGet();
       lastCode.set(request.code());
+      lastTimeout.set(request.timeout());
       executeEntered.countDown();
       if (runsUntilClosed) {
         try {
@@ -359,6 +361,45 @@ final class JShellExecutionProviderTest {
   }
 
   // ── execute() routing + state persistence ─────────────────────────────────
+
+  @Test
+  void executeRunsTheSnippetUnderTheRequestedTimeout() {
+    var sandbox = new StubSandbox();
+    try (var provider = providerFor(sandbox)) {
+      var c = ctx("timeout");
+      provider.onSessionStart(c);
+      var req =
+          ExecutionRequest.newBuilder()
+              .withRuntime(Runtime.JSHELL)
+              .withScript("var x = 1;")
+              .withTimeout(Duration.ofSeconds(120))
+              .build();
+      awaitExecution(provider.execute(c, req, new CancellationToken()));
+      assertEquals(Duration.ofSeconds(120), sandbox.lastTimeout.get());
+    }
+  }
+
+  @Test
+  void executeClampsTheRequestedTimeoutToTheProviderMaximum() {
+    var sandbox = new StubSandbox();
+    try (var provider =
+        JShellExecutionProvider.newBuilder()
+            .withReplConfig(configWithSandbox(sandbox))
+            .withMaxTimeout(Duration.ofSeconds(60))
+            .withShutdownHook(false)
+            .build()) {
+      var c = ctx("clamp");
+      provider.onSessionStart(c);
+      var req =
+          ExecutionRequest.newBuilder()
+              .withRuntime(Runtime.JSHELL)
+              .withScript("var x = 1;")
+              .withTimeout(Duration.ofSeconds(600))
+              .build();
+      awaitExecution(provider.execute(c, req, new CancellationToken()));
+      assertEquals(Duration.ofSeconds(60), sandbox.lastTimeout.get());
+    }
+  }
 
   @Test
   void executeRoutesToPerSessionReplSession() throws Exception {

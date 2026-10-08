@@ -40,7 +40,8 @@ import java.util.concurrent.ExecutionException;
  *   <li>{@code workingDirectory} (optional, string) — absolute path for the child's working
  *       directory. When absent, the provider supplies a per-call temp directory.
  *   <li>{@code timeoutSeconds} (optional, integer) — wall-clock budget for the invocation. When
- *       absent, defaults to 30 seconds. The provider may further clamp against its capabilities.
+ *       absent, defaults to the tool call's deadline ({@code SessionLimits.toolTimeoutDefault()}).
+ *       The provider may further clamp against its capabilities.
  *   <li>{@code environment} (optional, object of string→string) — env vars injected into the child.
  *       Cannot leak the JVM environment because the provider clears it before injecting.
  *   <li>{@code stdin} (optional, string) — stdin content to feed the child.
@@ -114,8 +115,9 @@ public final class ExecuteTool {
                         .withName("timeoutSeconds")
                         .withType(ParameterType.INTEGER)
                         .withDescription(
-                            "Wall-clock budget in seconds. Defaults to 30; the provider may"
-                                + " further clamp against its capabilities.")
+                            "Wall-clock budget in seconds. Defaults to the session's per-tool"
+                                + " timeout; the provider may further clamp against its"
+                                + " capabilities.")
                         .withRequired(false)
                         .build(),
                     ToolParameter.newBuilder()
@@ -169,7 +171,7 @@ public final class ExecuteTool {
   private static ToolResult execute(
       ExecutionProvider provider, Map<String, Object> args, ToolContext ctx) {
     ctx.cancellation().throwIfCancelled();
-    return switch (ExecuteArguments.parse(provider, args)) {
+    return switch (ExecuteArguments.parse(provider, args, ctx.deadline())) {
       case Result.Failure<ExecutionRequest> failure -> ToolResult.failure(failure.error());
       case Result.Success<ExecutionRequest> request -> dispatch(provider, request.value(), ctx);
     };
