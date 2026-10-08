@@ -265,10 +265,8 @@ class ReplSessionTest {
   }
 
   @Test
-  void calledHostFunctionsExcludesGetInputWiring() throws Exception {
-    // __getInput is the framework-internal wiring for InputBindings; callers shouldn't see it in
-    // their per-call metric counts.
-    var getInput = new HostFunction("__getInput", "fake", params -> Map.of("query", "hi"));
+  void calledHostFunctionsExcludesReservedNames() throws Exception {
+    var reserved = new HostFunction("__call", "fake", params -> Map.of("query", "hi"));
     var sandbox = new RecordingSandbox();
     var config =
         ReplConfig.newBuilder()
@@ -278,19 +276,19 @@ class ReplSessionTest {
                   return sandbox;
                 })
             .withExecutionTimeout(Duration.ofSeconds(1))
-            .withHostFunction(getInput)
+            .withHostFunction(reserved)
             .build();
     var session = ReplSession.create(config, new Semaphore(1));
     sandbox.behavior =
         registry -> {
           try {
-            registry.get("__getInput").handler().handle(Map.of());
+            registry.get("__call").handler().handle(Map.of());
           } catch (Exception e) {
             throw new RuntimeException(e);
           }
         };
     session.execute("noop");
-    assertNull(session.calledHostFunctions().get("__getInput"));
+    assertNull(session.calledHostFunctions().get("__call"));
     session.close();
   }
 

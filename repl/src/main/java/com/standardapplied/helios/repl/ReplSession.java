@@ -28,10 +28,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * function registry, and execution history.
  *
  * <p>Sessions are bound to a single agent run and must be closed when done to release sandbox
- * resources and the concurrency semaphore permit. In v2, RLM/CodeAct harness flows are gone —
- * {@code predict} and {@code submit} live as session-level Tools on {@code AgentSession}, not as
- * sandbox host functions. {@code ReplSession} is the substrate the future CodeAct preset assembles
- * atop along with {@link com.standardapplied.helios.repl.CodeExecutionTool}.
+ * resources and the concurrency semaphore permit. {@link
+ * com.standardapplied.helios.repl.execution.JShellExecutionProvider} keeps one per Helios session
+ * behind the {@code Execute} tool.
  */
 public final class ReplSession implements AutoCloseable {
 
@@ -93,9 +92,9 @@ public final class ReplSession implements AutoCloseable {
   }
 
   /**
-   * Names excluded from {@link #calledHostFunctions()}. Framework-reserved primitives that the
-   * substrate registers itself ({@code getInput}, {@code __getInput}, {@code __call}); the map
-   * contains exactly the user-registered host functions.
+   * Names excluded from {@link #calledHostFunctions()}. Framework-reserved names ({@link
+   * HostFunctionRegistry#RESERVED_NAMES}); the map contains exactly the user-registered host
+   * functions.
    */
   private static final Set<String> CALLED_HOST_FN_EXCLUDES = HostFunctionRegistry.RESERVED_NAMES;
 
@@ -185,19 +184,13 @@ public final class ReplSession implements AutoCloseable {
     }
     var truncated = code.substring(0, cap) + "... (len=" + code.length() + ")";
     return new ExecutionResult(
-        truncated,
-        raw.stdout(),
-        raw.stderr(),
-        raw.exitCode(),
-        raw.submitted(),
-        raw.bindings(),
-        raw.duration());
+        truncated, raw.stdout(), raw.stderr(), raw.exitCode(), raw.bindings(), raw.duration());
   }
 
   /**
    * Per-host-function call counts for the trajectory, keyed by function name. Excludes the
-   * framework-reserved names ({@code getInput}, {@code __getInput}, {@code __call}); contains
-   * exactly the user-registered host functions that the model invoked.
+   * framework-reserved names ({@link HostFunctionRegistry#RESERVED_NAMES}); contains exactly the
+   * user-registered host functions that the model invoked.
    *
    * @return unmodifiable map of {@code name -> callCount}, sorted by name; absent keys mean zero
    *     calls

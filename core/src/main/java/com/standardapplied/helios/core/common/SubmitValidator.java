@@ -18,12 +18,11 @@ package com.standardapplied.helios.core.common;
  * keyword, etc.
  *
  * <p>Every path that accepts a final structured output runs it: {@code
- * com.standardapplied.helios.core.schema.StructuredContentParser} (providers, the session loop,
- * typed {@code runBlocking}) and the CodeAct {@code Submit} tool. A {@link
- * ValidationResult#failure(String)} reaches the model as a correction message and the loop retries
- * within its turn budget — the same machinery structural validation failures use — so a model that
- * cannot satisfy the validator terminates at {@code maxTurns} rather than looping forever or
- * handing back a rejected value.
+ * com.standardapplied.helios.core.schema.StructuredContentParser} (providers, the session loop and
+ * typed {@code runBlocking}). A {@link ValidationResult#failure(String)} reaches the model as a
+ * correction message and the loop retries within its turn budget — the same machinery structural
+ * validation failures use — so a model that cannot satisfy the validator terminates at {@code
+ * maxTurns} rather than looping forever or handing back a rejected value.
  *
  * <p>Callers invoke {@link #validateSafely(Object)}: an operator exception or a {@code null}
  * verdict becomes a validation failure so a buggy predicate doesn't tombstone the agent run.

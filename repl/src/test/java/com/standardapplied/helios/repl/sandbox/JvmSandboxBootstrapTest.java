@@ -378,7 +378,7 @@ class JvmSandboxBootstrapTest {
                 "code",
                 """
                 try {
-                  predict("park", "until stopped");
+                  __call("park", null);
                 } catch (RuntimeException stopped) {
                   new Thread(monitor::clear).start();
                 }
@@ -494,14 +494,14 @@ class JvmSandboxBootstrapTest {
   @SuppressWarnings("unchecked")
   void executeWithHostCallback() {
     env.startReadLoop();
-    var code = "var result = predict(\"concise\", \"2+2?\"); result";
+    var code = "var result = __call(\"compute\", null); result";
     env.feed(
         new RpcMessage.Request(
             "1", "execute", Map.of("code", code, "timeoutMs", BEYOND_HANG_GUARD_MS)));
 
-    var predict = env.nextRequest();
-    assertEquals("predict", predict.method());
-    env.feed(new RpcMessage.Response(predict.id(), Map.of("output", "4")));
+    var hostCall = env.nextRequest();
+    assertEquals("compute", hostCall.method());
+    env.feed(new RpcMessage.Response(hostCall.id(), 4));
 
     var resp = assertInstanceOf(RpcMessage.Response.class, env.nextMessage());
     assertEquals("1", resp.id());
@@ -603,13 +603,6 @@ class JvmSandboxBootstrapTest {
   }
 
   @Test
-  void submittedValueResetOnExecute() {
-    bridge.setSubmittedValue("old");
-    evaluator.handleExecute(Map.of("code", "1 + 1", "timeoutMs", BEYOND_HANG_GUARD_MS));
-    assertNull(bridge.submittedValue());
-  }
-
-  @Test
   void readLoopCleansPendingCallbacksOnEof() {
     var call = env.inSandbox(() -> bridge.callHost("test", Map.of("key", "val")));
     env.nextRequest();
@@ -674,7 +667,7 @@ class JvmSandboxBootstrapTest {
                 evaluator.handleExecute(
                     Map.of(
                         "code",
-                        "predict(\"hold\", \"the captured streams\");",
+                        "__call(\"hold\", null);",
                         "timeoutMs",
                         BEYOND_HANG_GUARD_MS,
                         "captureBindings",
@@ -726,11 +719,7 @@ class JvmSandboxBootstrapTest {
         env.inSandbox(
             () ->
                 evaluator.handleExecute(
-                    Map.of(
-                        "code",
-                        "predict(\"hold\", \"the lock\")",
-                        "timeoutMs",
-                        BEYOND_HANG_GUARD_MS)));
+                    Map.of("code", "__call(\"hold\", null)", "timeoutMs", BEYOND_HANG_GUARD_MS)));
     var heldBy = env.nextRequest();
 
     var result =
@@ -750,7 +739,7 @@ class JvmSandboxBootstrapTest {
    * check, and a later statement of a timed-out request would never run.
    */
   private static String runningThen(String code) {
-    return "{ try { predict(\"running\", \"now\"); } catch (RuntimeException stopped) { } "
+    return "{ try { __call(\"running\", null); } catch (RuntimeException stopped) { } "
         + code
         + " }";
   }
@@ -779,7 +768,7 @@ class JvmSandboxBootstrapTest {
             "code",
             """
             var monitor = new java.util.Vector<Object>();
-            Thread.startVirtualThread(() -> { synchronized (monitor) { predict("hold", "monitor"); } });
+            Thread.startVirtualThread(() -> { synchronized (monitor) { __call("hold", null); } });
             """,
             "timeoutMs",
             BEYOND_HANG_GUARD_MS,

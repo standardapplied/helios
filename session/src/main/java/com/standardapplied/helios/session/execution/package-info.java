@@ -24,8 +24,8 @@
  * <p>The {@code Execute} tool itself is a single tool that dispatches every runtime through the
  * configured provider, classified under {@link
  * com.standardapplied.helios.session.tools.ToolCategory#EXECUTION} so permission rules and audit
- * attribution treat it uniformly. The {@code Runtime.JSHELL} value is declared but its handler
- * lands in Phase 6 alongside the {@code CodeActPreset}.
+ * attribution treat it uniformly. {@code Runtime.JSHELL} is served by {@code helios-repl}'s {@code
+ * JShellExecutionProvider}.
  *
  * <p>Spec: {@code docs/specs/agentic-coding-sdk-java-v2.md} §11.
  */

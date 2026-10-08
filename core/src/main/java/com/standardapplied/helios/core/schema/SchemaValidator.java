@@ -15,9 +15,8 @@ import java.util.Map;
 /**
  * Lightweight {@link JsonSchema} validator that produces human-readable error messages suitable for
  * showing to a model. Implements a strict subset of JSON Schema sufficient for typed structured
- * output and {@code submit()} validation: object/array/string/integer/number/boolean types,
- * required properties, enum values, nested properties, array items, and {@code
- * additionalProperties}.
+ * output validation: object/array/string/integer/number/boolean types, required properties, enum
+ * values, nested properties, array items, and {@code additionalProperties}.
  *
  * <p>Errors are written model-first: every message names the failing field by JSON-pointer-ish path
  * and states what was expected, so the model can correct its next attempt without parsing schema

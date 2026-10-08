@@ -12,7 +12,7 @@
 
     <artifactId>helios-repl</artifactId>
     <name>helios-repl</name>
-    <description>Sandboxed code execution for RLM patterns</description>
+    <description>Sandboxed JShell execution for the Execute tool</description>
 
     <properties>
         <helios.test.native-access>ALL-UNNAMED,com.standardapplied.helios.session</helios.test.native-access>
@@ -46,6 +46,12 @@
             <artifactId>helios-session</artifactId>
             <version>${project.version}</version>
             <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.standardapplied</groupId>
+            <artifactId>helios-testing</artifactId>
+            <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>

@@ -25,20 +25,16 @@ import jdk.jshell.JShell;
  * marketQuote("AAPL")} from emitted Java code; the synthesized body packs arguments into a {@code
  * Map<String, Object>} keyed by parameter name and dispatches via {@code HostBridge.__call}.
  *
- * <p>Lives at the sandbox layer so every consumer benefits — direct {@code CodeExecutionTool}
- * users, the RLM harness, and any future composition all see the same surface. Running before any
- * user code guarantees the helpers are visible from the first {@code execute_code} call.
+ * <p>Running before any user code guarantees the helpers are visible from the first {@code Execute}
+ * call.
  */
 public final class SandboxPrelude {
 
   /**
-   * Function names skipped by the synthesizer because hardcoded {@code HostBridge} static methods
-   * already provide the typed signature, or because they are framework-internal relays.
-   * Synthesizing a wrapper for these would shadow the hand-written method.
+   * Function names skipped by the synthesizer: {@link HostFunctionRegistry#RESERVED_NAMES}, whose
+   * signatures {@code HostBridge} owns. Synthesizing a wrapper for these would shadow it.
    */
-  // Shared canonical reserved-name set — see HostFunctionRegistry.RESERVED_NAMES for the rationale.
-  static final Set<String> RESERVED_NAMES =
-      com.standardapplied.helios.repl.host.HostFunctionRegistry.RESERVED_NAMES;
+  static final Set<String> RESERVED_NAMES = HostFunctionRegistry.RESERVED_NAMES;
 
   private SandboxPrelude() {}
 
@@ -200,12 +196,12 @@ public final class SandboxPrelude {
   }
 
   /**
-   * Model-facing summary of the static preamble (helpers, imports, conveniences). Listed in the RLM
-   * system prompt so the LLM knows the surface without reading the source.
+   * Model-facing summary of the static preamble (helpers, imports, conveniences), for a system
+   * prompt that tells the LLM the surface without it reading the source.
    */
   public static String modelFacingSummary() {
     return """
-        Pre-installed in every execute_code call (no imports needed):
+        Pre-installed in every JShell Execute call (no imports needed):
           - Standard imports: java.util.*, java.util.stream.*, java.util.function.*, \
         java.util.regex.*, java.io.*, java.math.*, java.time.*, Collectors
           - print(x), println(), println(x), printf(fmt, args...)  — no need for System.out
@@ -224,8 +220,8 @@ public final class SandboxPrelude {
 
   /**
    * Model-facing summary of the synthesized custom-host-function wrappers. Returns an empty string
-   * when the registry has no non-reserved functions. Listed in the RLM system prompt right after
-   * {@link #modelFacingSummary()} so the LLM sees the full sandbox surface.
+   * when the registry has no non-reserved functions. Meant for a system prompt, right after {@link
+   * #modelFacingSummary()}, so the LLM sees the full sandbox surface.
    *
    * @param registry the host function registry whose wrappers will be synthesized
    * @return one line per synthesized wrapper, or an empty string if there are none

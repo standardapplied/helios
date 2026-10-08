@@ -18,23 +18,15 @@ import java.util.Set;
 public final class HostFunctionRegistry {
 
   /**
-   * Names reserved by the framework. The sandbox's {@code HostBridge} statically owns these
-   * signatures, so custom host functions cannot be registered against them — the prelude
-   * synthesizer skips them, the trajectory-trace tracking wrapper excludes them from the
-   * called-host-function count, and the system prompt does not advertise them as user-supplied.
+   * Names reserved by the framework: {@code __call}, the dispatcher on the sandbox's {@code
+   * HostBridge} that every synthesized wrapper calls. The prelude synthesizer emits no typed
+   * wrapper for a reserved name, so the dispatcher is never shadowed, and {@code ReplSession}
+   * excludes reserved names from its called-host-function counts.
    *
-   * <p>Not enforced at {@link #register(HostFunction)}: the framework itself legitimately registers
-   * some of these names ({@code submit} via {@code SubmitFunction} in {@code
-   * CodeActPreset.applyRlm}, {@code __getInput} via {@code InputFunction}). Reservation is a
-   * downstream concern handled by the prelude synthesizer (which won't emit typed wrappers for
-   * reserved names so {@code HostBridge.submit(...)} stays the canonical caller path) and the
-   * dispatch / trajectory-counting layer (which excludes these names from per-call metrics).
-   *
-   * <p>Canonical single source of truth — every component that filters reserved names reads this
-   * constant.
+   * <p>Not enforced at {@link #register(HostFunction)}; reservation is the concern of the
+   * components that read this constant, its single source of truth.
    */
-  public static final Set<String> RESERVED_NAMES =
-      Set.of("predict", "submit", "fetch", "query", "getInput", "__getInput", "__call");
+  public static final Set<String> RESERVED_NAMES = Set.of("__call");
 
   private final Map<String, HostFunction> functions = new LinkedHashMap<>();
   private volatile boolean frozen;

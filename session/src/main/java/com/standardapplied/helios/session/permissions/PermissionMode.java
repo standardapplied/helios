@@ -16,9 +16,8 @@ package com.standardapplied.helios.session.permissions;
  *   <li>{@link #BYPASS_PERMISSIONS} — allow everything. The sandbox is the real wall.
  *   <li>{@link #PLAN} — read-only mode. No writes, no execution; useful for an outline pass.
  *   <li>{@link #LOCKED_DOWN} — deny everything not explicitly allowed. The "sandbox is the world"
- *       mode used by CodeAct-style presets where every capability except code execution should
- *       refuse by default. Category defaults all flip to deny; only explicit {@code allow} rules
- *       open holes.
+ *       mode for sessions where every capability except code execution should refuse by default.
+ *       Category defaults all flip to deny; only explicit {@code allow} rules open holes.
  * </ul>
  */
 public enum PermissionMode {

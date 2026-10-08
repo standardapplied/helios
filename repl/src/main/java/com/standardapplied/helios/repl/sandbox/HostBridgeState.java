@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * The sandbox's end of the RPC socket as {@link HostBridge} reaches it from inside a snippet: the
  * one installed instance, the frames written to the host, the calls to the host still awaiting an
- * answer, and the value the snippet submitted during the current execute.
+ * answer.
  */
 final class HostBridgeState {
 
@@ -28,7 +28,6 @@ final class HostBridgeState {
   private final ConcurrentHashMap<String, CompletableFuture<Object>> pendingCallbacks =
       new ConcurrentHashMap<>();
   private final AtomicLong idCounter = new AtomicLong(0);
-  private volatile Object submittedValue;
 
   /**
    * @param realOut the stream over the RPC socket
@@ -108,13 +107,5 @@ final class HostBridgeState {
     pendingCallbacks.forEach(
         (id, future) -> future.completeExceptionally(new RuntimeException("Sandbox stdin closed")));
     pendingCallbacks.clear();
-  }
-
-  void setSubmittedValue(Object value) {
-    this.submittedValue = value;
-  }
-
-  Object submittedValue() {
-    return submittedValue;
   }
 }

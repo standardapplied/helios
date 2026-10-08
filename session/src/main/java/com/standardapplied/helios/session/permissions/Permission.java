@@ -101,8 +101,8 @@ public record Permission(
    * The "sandbox is the world" preset: every category default-denies under {@link
    * PermissionMode#LOCKED_DOWN}; the only explicit allows are {@code Execute} (so the sandbox can
    * run code) and {@code AskUserQuestion} (so the model can still ask for clarification). No
-   * filesystem reads, no writes, no memory I/O. Used by {@code CodeActPreset}-style sessions where
-   * the execution sandbox is the real security boundary and every other tool would be a hole.
+   * filesystem reads, no writes, no memory I/O. For sessions where the execution sandbox is the
+   * real security boundary and every other tool would be a hole.
    *
    * <p>Adding more tools to a session built with this preset will silently refuse them unless the
    * caller layers additional allow rules. That's intentional — a misconfigured tool registry should

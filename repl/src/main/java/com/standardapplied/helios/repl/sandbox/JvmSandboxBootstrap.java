@@ -34,7 +34,7 @@ import jdk.jshell.JShell;
  *   <li>Virtual thread per execute — {@link SnippetEvaluator} captures stdout/stderr and runs the
  *       JShell eval on a platform thread in a thread group of its own, so a timeout can find every
  *       thread the snippet started
- *   <li>Sandbox code calling {@link HostBridge#predict} blocks on a {@link
+ *   <li>Sandbox code calling a host function blocks on a {@link
  *       java.util.concurrent.CompletableFuture} until the main thread routes the host response
  * </ul>
  */
@@ -130,7 +130,7 @@ public final class JvmSandboxBootstrap {
     SandboxPrelude.install(jshell);
 
     var bridge = new HostBridgeState(rpcOut);
-    var evaluator = new SnippetEvaluator(jshell, bridge, Thread::join, stopGrace);
+    var evaluator = new SnippetEvaluator(jshell, Thread::join, stopGrace);
     HostBridgeState.setInstance(bridge);
 
     new BootstrapRpc(rpcIn, bridge, evaluator, Runtime.getRuntime()::halt).readLoop();
@@ -149,8 +149,8 @@ public final class JvmSandboxBootstrap {
    * JShell's compilation context. The sandbox subprocess is launched with {@code --add-modules
    * com.standardapplied.helios.repl} so the classes are on the boot layer at runtime — but JShell's
    * internal javac runs its own compilation unit that only sees explicit classpath entries. Without
-   * this, sandbox code calling {@code predict(...)}, {@code fetch(...)}, or any other bridge method
-   * fails to compile with {@code "cannot find symbol"}.
+   * this, sandbox code calling a synthesized host-function wrapper, which dispatches through {@code
+   * HostBridge.__call}, fails to compile with {@code "cannot find symbol"}.
    */
   static void addHostBridgeToJShellClasspath(JShell jshell) {
     try {
