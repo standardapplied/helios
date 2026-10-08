@@ -23,10 +23,10 @@ public enum OpenAIModelId {
   // (o3, o4-mini) carry higher caps because their output includes reasoning tokens.
   // ReasoningRules per model (model pages and the reasoning, GPT-5.4 and GPT-6 guides, 2026-10-08):
   // gpt-6-astra and gpt-6.1-sol take low..max and reject none; gpt-6-sol, gpt-6-luna and the
-  // gpt-5.6
-  // family take none..max; gpt-5.5 and the gpt-5.4 family take none..xhigh, gpt-5.4 defaulting to
-  // none; o-series take low..high; gpt-4.1 and gpt-4o do not reason. temperature / top_p ride only
-  // at effort none on the GPT-5.4+ reasoning models, never on o-series or gpt-6-astra/6.1-sol.
+  // gpt-5.6 family take none..max; gpt-5.5 and the gpt-5.4 family take none..xhigh, gpt-5.4
+  // defaulting to none; o-series take low..high; gpt-4.1 and gpt-4o do not reason. temperature /
+  // top_p ride only at effort none on the GPT-5.4+ reasoning models, never on o-series or
+  // gpt-6-astra/6.1-sol.
   GPT_6_ASTRA("gpt-6-astra", 1_050_000, 128_000, ReasoningRules.ALWAYS_REASONS),
   GPT_6_1_SOL("gpt-6.1-sol", 1_050_000, 128_000, ReasoningRules.ALWAYS_REASONS),
   GPT_6_SOL("gpt-6-sol", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
