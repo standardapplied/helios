@@ -217,11 +217,6 @@ public final class ReplSession implements AutoCloseable {
     return registry;
   }
 
-  /** The config this session was created from. */
-  public ReplConfig config() {
-    return config;
-  }
-
   /** Whether this session is still open. */
   public boolean isOpen() {
     return !closed.get() && sandbox.isAlive();

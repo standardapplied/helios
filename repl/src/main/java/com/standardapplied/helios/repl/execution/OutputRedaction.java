@@ -50,7 +50,6 @@ final class OutputRedaction {
         config.executionTimeout(),
         config.maxConcurrentSessions(),
         config.hostFunctions(),
-        config.maxOutputCharsToModel(),
         listener,
         config.maxBindingValueChars(),
         config.maxBindingSnapshotChars(),

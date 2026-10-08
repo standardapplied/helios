@@ -28,6 +28,19 @@ class ExecutionResultTest {
   }
 
   @Test
+  void nullExecutedCodeDefaultsToEmpty() {
+    var result = new ExecutionResult(null, "out", "err", 0, java.util.Map.of(), Duration.ZERO);
+    assertEquals("", result.executedCode());
+  }
+
+  @Test
+  void builderTreatsNullExecutedCodeAndBindingsAsEmpty() {
+    var result = ExecutionResult.newBuilder().withExecutedCode(null).withBindings(null).build();
+    assertEquals("", result.executedCode());
+    assertEquals(java.util.Map.of(), result.bindings());
+  }
+
+  @Test
   void nullStdoutDefaultsToEmpty() {
     var result = new ExecutionResult("c", null, "err", 0, java.util.Map.of(), Duration.ZERO);
     assertEquals("", result.stdout());
