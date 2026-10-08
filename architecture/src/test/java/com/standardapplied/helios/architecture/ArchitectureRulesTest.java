@@ -9,6 +9,8 @@ import static com.tngtech.archunit.core.domain.JavaAccess.Predicates.targetOwner
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.assignableTo;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.simpleName;
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.simpleNameEndingWith;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.type;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameStartingWith;
@@ -311,6 +313,31 @@ class ArchitectureRulesTest {
                 + " credential comes from HttpClientFactory.create(...), which never follows a"
                 + " redirect, and only the onnx module's unauthenticated model downloads use"
                 + " HttpClientFactory.createForDownloads()")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void onlyRequestBuildersReadAModelsReasoningDeclaration() {
+    var declaration =
+        targetOwner(simpleNameEndingWith("ModelId"))
+            .and(target(name("reasoning")))
+            .or(
+                targetOwner(simpleName("ReasoningRules"))
+                    .and(target(name("off").or(name("support")).or(name("sampling")))));
+    noClasses()
+        .that()
+        .haveSimpleNameNotEndingWith("RequestBuilder")
+        .and()
+        .haveSimpleNameNotEndingWith("ModelId")
+        .and()
+        .doNotHaveSimpleName("ReasoningRules")
+        .should()
+        .accessTargetWhere(declaration)
+        .because(
+            "a model's catalogue declares the reasoning and sampling it accepts and its request"
+                + " builder is the one reader: the builder checks the configuration against the"
+                + " declaration and looks up the wire fields, so effort and display have one"
+                + " interpretation per provider")
         .check(LIBRARY);
   }
 

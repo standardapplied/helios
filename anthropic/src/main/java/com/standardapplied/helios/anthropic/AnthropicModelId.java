@@ -6,103 +6,162 @@
 package com.standardapplied.helios.anthropic;
 
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Reasoning.Display;
+import com.standardapplied.helios.core.model.Reasoning.Level;
+import com.standardapplied.helios.core.provider.ReasoningSupport;
+import java.util.EnumSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
  * Curated Anthropic Claude model identifiers carrying known-good metadata.
  *
  * <p>Each enum constant maps to a specific Claude model available through the Messages API and
- * records the metadata the request builder needs (context window, output ceiling, thinking shape).
+ * records the metadata the request builder needs (context window, output ceiling, reasoning rules).
  * Membership here is <em>not</em> a gate: {@link AnthropicProvider} also accepts any {@code claude}
  * model ID it does not recognize, so deployers can adopt a new Claude release before this enum
- * catches up. An unrecognized ID falls back to {@link AnthropicProvider}'s defaults (adaptive
- * thinking, {@code 32_000} output tokens) — see {@link #hasClaudePrefix(String)}.
+ * catches up. An unrecognized ID falls back to {@link ReasoningRules#UNCATALOGUED} and {@code
+ * 32_000} output tokens — see {@link #hasClaudePrefix(String)}.
  */
 public enum AnthropicModelId {
   // contextWindow / maxOutputTokens mirror the documented per-model limits (Models overview, Oct
   // 2026) — operators can override per-call via ModelConfig.Builder.withMaxOutputTokens.
-  // ThinkingShape per model (Thinking "Configuring thinking" table, Oct 2026): Fable 5/5.1, Mythos
-  // 5/5.1 and Opus 5.5 always think; Sonnet 5.5 always thinks but can drop up-front thinking with
-  // between_tools; Opus 5 and Sonnet 5 run adaptive when the field is omitted; Opus 4.7/4.8 run
-  // thinking-off when omitted; Opus 4.6 / Sonnet 4.6 take adaptive without xhigh (their
-  // enabled+budget_tokens mode is deprecated); Haiku 4.5 supports extended thinking only.
-  CLAUDE_FABLE_5_1("claude-fable-5-1", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
-  CLAUDE_MYTHOS_5_1("claude-mythos-5-1", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
-  CLAUDE_FABLE_5("claude-fable-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
-  CLAUDE_MYTHOS_5("claude-mythos-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
-  CLAUDE_OPUS_5_5("claude-opus-5-5", 1_000_000, 128_000, ThinkingShape.ALWAYS_ON),
-  CLAUDE_OPUS_5("claude-opus-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_DEFAULT_ON),
-  CLAUDE_SONNET_5_5("claude-sonnet-5-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_BETWEEN_TOOLS),
-  CLAUDE_SONNET_5("claude-sonnet-5", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_DEFAULT_ON),
-  CLAUDE_OPUS_4_8("claude-opus-4-8", 1_000_000, 128_000, ThinkingShape.ADAPTIVE),
-  CLAUDE_OPUS_4_7("claude-opus-4-7", 1_000_000, 128_000, ThinkingShape.ADAPTIVE),
-  CLAUDE_OPUS_4_6("claude-opus-4-6", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_WITHOUT_XHIGH),
-  CLAUDE_SONNET_4_6("claude-sonnet-4-6", 1_000_000, 128_000, ThinkingShape.ADAPTIVE_WITHOUT_XHIGH),
-  CLAUDE_HAIKU_4_5("claude-haiku-4-5", 200_000, 64_000, ThinkingShape.LEGACY_BUDGET);
+  // ReasoningRules per model (Thinking "Configuring thinking" table and the Fable 5.1 / Opus 5.5 /
+  // Sonnet 5.5 migration notes, Oct 2026): Fable 5/5.1, Mythos 5/5.1 and Opus 5.5 always think;
+  // display "updates" exists on Fable 5/5.1, Mythos 5.1, Opus 5.5 and Sonnet 5.5; Sonnet 5.5 turns
+  // up-front thinking off with between_tools; Opus 5 and Sonnet 5 think unless sent disabled; Opus
+  // 4.6 / Sonnet 4.6 have no xhigh and accept sampling parameters; Haiku 4.5 takes no effort.
+  CLAUDE_FABLE_5_1("claude-fable-5-1", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
+  CLAUDE_MYTHOS_5_1(
+      "claude-mythos-5-1", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
+  CLAUDE_FABLE_5("claude-fable-5", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
+  CLAUDE_MYTHOS_5("claude-mythos-5", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON),
+  CLAUDE_OPUS_5_5("claude-opus-5-5", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
+  CLAUDE_OPUS_5("claude-opus-5", 1_000_000, 128_000, ReasoningRules.OFF_WHEN_DISABLED),
+  CLAUDE_SONNET_5_5("claude-sonnet-5-5", 1_000_000, 128_000, ReasoningRules.OFF_BETWEEN_TOOLS),
+  CLAUDE_SONNET_5("claude-sonnet-5", 1_000_000, 128_000, ReasoningRules.OFF_WHEN_DISABLED),
+  CLAUDE_OPUS_4_8("claude-opus-4-8", 1_000_000, 128_000, ReasoningRules.OFF_WHEN_OMITTED),
+  CLAUDE_OPUS_4_7("claude-opus-4-7", 1_000_000, 128_000, ReasoningRules.OFF_WHEN_OMITTED),
+  CLAUDE_OPUS_4_6("claude-opus-4-6", 1_000_000, 128_000, ReasoningRules.WITHOUT_XHIGH),
+  CLAUDE_SONNET_4_6("claude-sonnet-4-6", 1_000_000, 128_000, ReasoningRules.WITHOUT_XHIGH),
+  CLAUDE_HAIKU_4_5("claude-haiku-4-5", 200_000, 64_000, ReasoningRules.WITHOUT_EFFORT);
+
+  /** How a model is told to stop reasoning. */
+  public enum Off {
+    /** It cannot stop: {@code Reasoning.Off} is rejected. */
+    REJECTED,
+
+    /** The {@code thinking} field is left out; the model does not think without it. */
+    OMITTED,
+
+    /** {@code thinking.type=disabled}. */
+    DISABLED,
+
+    /**
+     * {@code thinking.type=between_tools}, with no other thinking field: no up-front thinking,
+     * while the notes written between tool calls still return.
+     */
+    BETWEEN_TOOLS
+  }
+
+  /** When a model accepts {@code temperature} and {@code top_p}. */
+  public enum Sampling {
+    /** Never: either one is rejected whenever it is set, with or without reasoning. */
+    REJECTED,
+
+    /** Either one, never both together. */
+    ONE_OF,
+
+    /**
+     * Either one, never both together; alongside {@code Reasoning.Effort} {@code temperature} is
+     * rejected and {@code top_p} must lie between 0.95 and 1 inclusive.
+     */
+    ONE_OF_WITHOUT_EFFORT,
+
+    /** Whatever is set is sent: the API judges a model the catalogue does not know. */
+    UNCHECKED
+  }
 
   /**
-   * The thinking request shape a Claude model accepts, and what omitting the {@code thinking} field
-   * means there. Drives the per-model request build; shapes whose {@link
-   * #acceptsSamplingParameters()} is false reject {@code temperature}/{@code top_p} with a 400 on
-   * every request, so the request builder never sends them.
+   * What a model accepts for reasoning and sampling, and how it is told to stop reasoning. An
+   * accepted {@code Reasoning.Effort} is sent as {@code thinking.type=adaptive} with its display
+   * and an {@code output_config.effort}.
    */
-  public enum ThinkingShape {
-    /**
-     * {@code thinking.type=enabled} + {@code budget_tokens}, the only mode on extended-thinking
-     * models (Haiku 4.5); {@code adaptive} is rejected. Omitting the field runs without thinking.
-     * Sampling parameters allowed when thinking is off; {@code xhigh}/{@code max} have no
-     * equivalent and fail fast.
-     */
-    LEGACY_BUDGET,
+  public enum ReasoningRules {
+    /** Always thinks, with progress updates (Fable 5 / 5.1, Mythos 5.1, Opus 5.5). */
+    ALWAYS_ON_WITH_PROGRESS(Off.REJECTED, Level.LOW, Display.PROGRESS, Sampling.REJECTED),
+
+    /** Always thinks (Mythos 5). */
+    ALWAYS_ON(Off.REJECTED, Level.LOW, Display.SUMMARY, Sampling.REJECTED),
+
+    /** Stops up-front thinking with {@code between_tools}, has progress updates (Sonnet 5.5). */
+    OFF_BETWEEN_TOOLS(Off.BETWEEN_TOOLS, Level.LOW, Display.PROGRESS, Sampling.REJECTED),
+
+    /** Thinks unless sent {@code disabled} (Opus 5, Sonnet 5). */
+    OFF_WHEN_DISABLED(Off.DISABLED, Level.LOW, Display.SUMMARY, Sampling.REJECTED),
+
+    /** Thinks only when asked to (Opus 4.7, 4.8). */
+    OFF_WHEN_OMITTED(Off.OMITTED, Level.LOW, Display.SUMMARY, Sampling.REJECTED),
+
+    /** Thinks only when asked to, has no {@code xhigh} (Opus 4.6, Sonnet 4.6). */
+    WITHOUT_XHIGH(
+        Off.OMITTED,
+        EnumSet.of(Level.LOW, Level.MEDIUM, Level.HIGH, Level.MAX),
+        Display.SUMMARY,
+        Sampling.ONE_OF_WITHOUT_EFFORT),
+
+    /** Takes no effort (Haiku 4.5). */
+    WITHOUT_EFFORT(Off.OMITTED, EnumSet.noneOf(Level.class), Display.SUMMARY, Sampling.ONE_OF),
 
     /**
-     * {@code thinking.type=adaptive} + sibling {@code output_config.effort} with {@code low},
-     * {@code medium}, {@code high} and {@code max} but not {@code xhigh}; omitting the field runs
-     * without thinking (Opus 4.6, Sonnet 4.6). Sampling parameters allowed when thinking is off.
-     * Their {@code enabled}+{@code budget_tokens} mode is deprecated and no longer sent.
+     * A model the catalogue does not know: accepts every value, sends the current-generation shape
+     * and spells off as {@code disabled}; the API judges what the model accepts.
      */
-    ADAPTIVE_WITHOUT_XHIGH,
+    UNCATALOGUED(Off.DISABLED, ReasoningSupport.ANY.levels(), Display.PROGRESS, Sampling.UNCHECKED);
+
+    private final Off off;
+    private final ReasoningSupport support;
+    private final Sampling sampling;
+
+    ReasoningRules(Off off, Level lowest, Display widest, Sampling sampling) {
+      this(off, EnumSet.range(lowest, Level.MAX), widest, sampling);
+    }
+
+    ReasoningRules(Off off, Set<Level> levels, Display widest, Sampling sampling) {
+      this.off = off;
+      this.support =
+          new ReasoningSupport(
+              off != Off.REJECTED,
+              levels,
+              levels.isEmpty() ? Set.of() : EnumSet.range(Display.HIDDEN, widest));
+      this.sampling = sampling;
+    }
 
     /**
-     * {@code thinking.type=adaptive} + sibling {@code output_config.effort} across the full {@code
-     * low}..{@code max} range; omitting the field runs without thinking (Opus 4.7, Opus 4.8).
-     */
-    ADAPTIVE,
-
-    /**
-     * Adaptive shape, but omitting the field runs <em>with</em> adaptive thinking — turning
-     * thinking off requires an explicit {@code thinking.type=disabled} (Opus 5, Sonnet 5).
-     */
-    ADAPTIVE_DEFAULT_ON,
-
-    /**
-     * Adaptive shape whose up-front thinking is turned off with {@code thinking.type=between_tools}
-     * instead of {@code disabled}, which returns a 400 (Sonnet 5.5). {@code between_tools} takes no
-     * sibling field, is accepted at effort {@code high} or below, and still returns the model's
-     * progress notes between tool calls as {@code thinking} blocks with text. {@code
-     * ThinkingLevel.NONE} sends it bare, so the API's default effort ({@code high}) applies.
-     */
-    ADAPTIVE_BETWEEN_TOOLS,
-
-    /**
-     * Thinking is always on: {@code disabled} and {@code enabled}+{@code budget_tokens} return a
-     * 400 at every effort, and depth is controlled solely via {@code output_config.effort} (Fable
-     * 5/5.1, Mythos 5/5.1, Opus 5.5). {@code ThinkingLevel.NONE} omits both fields, so the model
-     * thinks at the API's default effort ({@code medium} on Opus 5.5, {@code high} on the others)
-     * and returns no thinking text; every other level sends {@code thinking.type=adaptive} with a
-     * summarized display plus the effort.
-     */
-    ALWAYS_ON;
-
-    /**
-     * Whether the model accepts {@code temperature} / {@code top_p}. Claude 4.7 and later reject
-     * them with a 400 on every request regardless of thinking configuration; 4.6 and earlier accept
-     * them while thinking is off.
+     * How the model is told to stop reasoning.
      *
-     * @return true for {@link #LEGACY_BUDGET} and {@link #ADAPTIVE_WITHOUT_XHIGH}
+     * @return the off spelling; {@link Off#REJECTED} when it cannot stop
      */
-    public boolean acceptsSamplingParameters() {
-      return this == LEGACY_BUDGET || this == ADAPTIVE_WITHOUT_XHIGH;
+    public Off off() {
+      return off;
+    }
+
+    /**
+     * The reasoning values the model accepts.
+     *
+     * @return the support
+     */
+    public ReasoningSupport support() {
+      return support;
+    }
+
+    /**
+     * When the model accepts {@code temperature} and {@code top_p}.
+     *
+     * @return the sampling rule
+     */
+    public Sampling sampling() {
+      return sampling;
     }
   }
 
@@ -118,23 +177,23 @@ public enum AnthropicModelId {
   private final String id;
   private final int contextWindow;
   private final int maxOutputTokens;
-  private final ThinkingShape thinkingShape;
+  private final ReasoningRules reasoning;
 
-  AnthropicModelId(String id, int contextWindow, int maxOutputTokens, ThinkingShape thinkingShape) {
+  AnthropicModelId(String id, int contextWindow, int maxOutputTokens, ReasoningRules reasoning) {
     this.id = id;
     this.contextWindow = contextWindow;
     this.maxOutputTokens = maxOutputTokens;
-    this.thinkingShape = thinkingShape;
+    this.reasoning = reasoning;
   }
 
   /**
-   * The thinking request shape this model accepts. See {@link ThinkingShape} for the per-shape
-   * request semantics.
+   * What this model accepts for reasoning and sampling. Read only by the request builder, the one
+   * place that turns it into request fields.
    *
-   * @return the shape; non-null
+   * @return the rules; non-null
    */
-  public ThinkingShape thinkingShape() {
-    return thinkingShape;
+  public ReasoningRules reasoning() {
+    return reasoning;
   }
 
   /**
@@ -204,7 +263,7 @@ public enum AnthropicModelId {
    * Resolves a wire model ID to curated metadata, accepting dated snapshot variants: an exact match
    * wins, otherwise an ID of the form {@code <enum-id>-<yyyymmdd>} (e.g. {@code
    * claude-haiku-4-5-20251001}) resolves to its family so legacy snapshots keep legacy request
-   * semantics instead of falling into the adaptive default for unknown IDs.
+   * semantics instead of taking the uncatalogued rules.
    *
    * <p>Only an eight-digit snapshot date counts as a suffix. A newer release whose ID merely
    * extends an older one ({@code claude-opus-5-5} extends {@code claude-opus-5}) is a different

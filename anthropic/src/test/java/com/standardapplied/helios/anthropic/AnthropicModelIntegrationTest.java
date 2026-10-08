@@ -15,8 +15,10 @@ import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Reasoning;
+import com.standardapplied.helios.core.model.Reasoning.Display;
+import com.standardapplied.helios.core.model.Reasoning.Level;
 import com.standardapplied.helios.core.model.StreamEvent;
-import com.standardapplied.helios.core.model.ThinkingLevel;
 import com.standardapplied.helios.core.schema.Description;
 import com.standardapplied.helios.core.schema.Nullable;
 import com.standardapplied.helios.core.schema.OutputSchema;
@@ -26,7 +28,9 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -65,7 +69,10 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   @Test
   void chatWithThinking() {
     var config =
-        ModelConfig.newBuilder().withApiKey(apiKey).withThinkingLevel(ThinkingLevel.HIGH).build();
+        ModelConfig.newBuilder()
+            .withApiKey(apiKey)
+            .withReasoning(new Reasoning.Effort(Level.HIGH, Display.SUMMARY))
+            .build();
     var thinkingModel =
         new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
 
@@ -92,13 +99,19 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   private static final List<AnthropicModelId> THE_55_MODELS =
       List.of(AnthropicModelId.CLAUDE_OPUS_5_5, AnthropicModelId.CLAUDE_SONNET_5_5);
 
-  private static Model modelFor(String modelId, ThinkingLevel level) {
+  private static final List<AnthropicModelId> LIVE_MODELS =
+      List.of(
+          AnthropicModelId.CLAUDE_OPUS_5_5,
+          AnthropicModelId.CLAUDE_SONNET_5_5,
+          AnthropicModelId.CLAUDE_FABLE_5_1);
+
+  private static Model modelFor(String modelId, Reasoning reasoning) {
     return new AnthropicProvider()
         .create(
             modelId,
             ModelConfig.newBuilder()
                 .withApiKey(apiKey)
-                .withThinkingLevel(level)
+                .withReasoning(reasoning)
                 .withMaxOutputTokens(16_000)
                 .build());
   }
@@ -142,14 +155,35 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
     throw new AssertionError("tool loop did not finish within 8 turns");
   }
 
+  /**
+   * The documented reasoning matrix of a live model: absent, off where accepted, every level and
+   * every display.
+   */
+  private static List<Reasoning> documentedReasonings(AnthropicModelId modelId) {
+    var reasonings = new ArrayList<Reasoning>();
+    reasonings.add(null);
+    if (modelId == AnthropicModelId.CLAUDE_SONNET_5_5) {
+      reasonings.add(new Reasoning.Off());
+    }
+    for (var level : EnumSet.range(Level.LOW, Level.MAX)) {
+      reasonings.add(new Reasoning.Effort(level, Display.SUMMARY));
+    }
+    reasonings.add(new Reasoning.Effort(Level.LOW, Display.HIDDEN));
+    reasonings.add(new Reasoning.Effort(Level.LOW, Display.PROGRESS));
+    return reasonings;
+  }
+
   @Test
-  void the55ModelsAcceptEveryThinkingLevel() {
+  void the55AndFable51ModelsAcceptEveryDocumentedReasoning() {
     var calculator = AnthropicPricing.calculator(CachePolicy.shortLived());
-    for (var modelId : THE_55_MODELS) {
-      for (var level : ThinkingLevel.values()) {
-        var label = modelId.id() + " " + level;
-        try (var candidate = modelFor(modelId.id(), level)) {
-          var response = candidate.chat(List.of(Message.user("Reply with the single word: ok")));
+    for (var modelId : LIVE_MODELS) {
+      for (var reasoning : documentedReasonings(modelId)) {
+        var label = modelId.id() + " " + reasoning;
+        try (var candidate = modelFor(modelId.id(), reasoning)) {
+          var response =
+              availableOrSkip(
+                  modelId,
+                  () -> candidate.chat(List.of(Message.user("Reply with the single word: ok"))));
 
           assertEquals(FinishReason.STOP, response.finishReason(), label);
           assertFalse(response.content().isBlank(), label);
@@ -160,51 +194,83 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   }
 
   @Test
-  void alwaysOnFableModelsAcceptSummarizedAdaptiveThinking() {
-    for (var modelId :
-        List.of(AnthropicModelId.CLAUDE_FABLE_5_1, AnthropicModelId.CLAUDE_FABLE_5)) {
-      for (var level : List.of(ThinkingLevel.NONE, ThinkingLevel.LOW, ThinkingLevel.MAX)) {
-        var label = modelId.id() + " " + level;
-        try (var candidate = modelFor(modelId.id(), level)) {
-          var response = candidate.chat(List.of(Message.user("Reply with the single word: ok")));
-
-          assertEquals(FinishReason.STOP, response.finishReason(), label);
-        } catch (AnthropicException e) {
-          assumeTrue(
-              e.statusCode() != 403
-                  && e.statusCode() != 404
-                  && !e.getMessage().contains("data retention"),
-              () -> modelId.id() + " is not available to this API key");
-          throw e;
-        }
-      }
-    }
-  }
-
-  @Test
-  void the55ModelsReplayTheirThinkingBlocksAcrossAToolLoop() {
+  void the55AndFable51ModelsReplayTheirThinkingBlocksAcrossAToolLoop() {
     var weatherTool =
         stringTool("get_weather", "Get the current weather for a location", "location");
 
-    for (var modelId : THE_55_MODELS) {
-      for (var level : List.of(ThinkingLevel.NONE, ThinkingLevel.LOW, ThinkingLevel.MAX)) {
-        var label = modelId.id() + " " + level;
-        try (var candidate = modelFor(modelId.id(), level)) {
+    for (var modelId : LIVE_MODELS) {
+      for (var reasoning :
+          List.of(
+              new Reasoning.Effort(Level.LOW, Display.SUMMARY),
+              new Reasoning.Effort(Level.MAX, Display.PROGRESS))) {
+        var label = modelId.id() + " " + reasoning;
+        try (var candidate = modelFor(modelId.id(), reasoning)) {
           var turns =
-              runToolLoop(
-                  candidate,
-                  List.of(
-                      Message.user(
-                          "Use the get_weather tool for San Francisco and for Austin, then"
-                              + " compare them.")),
-                  List.of(weatherTool),
-                  "72°F, sunny");
+              availableOrSkip(
+                  modelId,
+                  () ->
+                      runToolLoop(
+                          candidate,
+                          List.of(
+                              Message.user(
+                                  "Use the get_weather tool for San Francisco and for Austin,"
+                                      + " then compare them.")),
+                          List.of(weatherTool),
+                          "72°F, sunny"));
 
           assertTrue(turns.size() >= 2, label);
           assertTrue(turns.getFirst().hasToolCalls(), label);
           assertEquals(FinishReason.STOP, turns.getLast().finishReason(), label);
         }
       }
+    }
+  }
+
+  @Test
+  void sonnet55ReplaysAToolLoopWithUpFrontThinkingOff() {
+    var weatherTool =
+        stringTool("get_weather", "Get the current weather for a location", "location");
+    try (var sonnet = modelFor(AnthropicModelId.CLAUDE_SONNET_5_5.id(), new Reasoning.Off())) {
+      var turns =
+          runToolLoop(
+              sonnet,
+              List.of(Message.user("Use the get_weather tool for Austin, then summarize it.")),
+              List.of(weatherTool),
+              "72°F, sunny");
+
+      assertEquals(FinishReason.STOP, turns.getLast().finishReason());
+    }
+  }
+
+  @Test
+  void sonnet46SendsATopPOfPoint95AlongsideEffort() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey(apiKey)
+            .withReasoning(new Reasoning.Effort(Level.LOW, Display.SUMMARY))
+            .withTopP(0.95)
+            .withMaxOutputTokens(4_000);
+    try (var sonnet = sonnet46(config)) {
+      var response = sonnet.chat(List.of(Message.user("Reply with the single word: ok")));
+
+      assertEquals(FinishReason.STOP, response.finishReason());
+    }
+  }
+
+  /**
+   * {@code call}'s result, or a skipped test when {@code modelId} is not available to this API key:
+   * Fable 5.1 needs an organization with 30-day data retention.
+   */
+  private static <T> T availableOrSkip(AnthropicModelId modelId, Supplier<T> call) {
+    try {
+      return call.get();
+    } catch (AnthropicException e) {
+      assumeTrue(
+          e.statusCode() != 403
+              && e.statusCode() != 404
+              && !e.getMessage().contains("data retention"),
+          () -> modelId.id() + " is not available to this API key");
+      throw e;
     }
   }
 
@@ -233,9 +299,10 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
             + " seeking early-stage climate deals. Related ids: p7, p12, p19.";
 
     for (var modelId : THE_55_MODELS) {
-      for (var level : List.of(ThinkingLevel.NONE, ThinkingLevel.MEDIUM)) {
-        var label = modelId.id() + " " + level;
-        try (var candidate = modelFor(modelId.id(), level)) {
+      for (var reasoning :
+          List.<Reasoning>of(new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))) {
+        var label = modelId.id() + " " + reasoning;
+        try (var candidate = modelFor(modelId.id(), reasoning)) {
           var turns = runToolLoop(candidate, opening, tools, profile);
 
           assertEquals(FinishReason.STOP, turns.getLast().finishReason(), label);
@@ -247,13 +314,16 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
       }
     }
 
-    try (var opus = modelFor(AnthropicModelId.CLAUDE_OPUS_5_5.id(), ThinkingLevel.MEDIUM)) {
+    try (var opus =
+        modelFor(
+            AnthropicModelId.CLAUDE_OPUS_5_5.id(),
+            new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS))) {
       var turns = runToolLoop(opus, opening, tools, profile);
 
       assertTrue(
           turns.stream().anyMatch(com.standardapplied.helios.core.model.Response::hasThinking),
-          "a level above NONE requests the summarized display, so the notes Opus 5.5 writes"
-              + " between tool calls arrive as thinking text instead of empty blocks");
+          "the progress display returns the notes Opus 5.5 writes between tool calls as"
+              + " thinking text instead of empty blocks");
     }
   }
 
@@ -265,7 +335,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
       var config =
           ModelConfig.newBuilder()
               .withApiKey(apiKey)
-              .withThinkingLevel(ThinkingLevel.MEDIUM)
+              .withReasoning(new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))
               .withMaxOutputTokens(16_000)
               .withWebSearch(true)
               .build();
@@ -291,7 +361,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
 
   @Test
   void datedSnapshotIdKeepsItsFamilyRequestShape() {
-    try (var haiku = modelFor("claude-haiku-4-5-20251001", ThinkingLevel.LOW)) {
+    try (var haiku = modelFor("claude-haiku-4-5-20251001", new Reasoning.Off())) {
       var response = haiku.chat(List.of(Message.user("What is 17 * 23? Think it through.")));
 
       assertEquals(FinishReason.STOP, response.finishReason());
@@ -301,7 +371,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
 
   @Test
   void streamingIteratorDeliversASonnet55TurnWithoutUpFrontThinking() {
-    try (var sonnet = modelFor(AnthropicModelId.CLAUDE_SONNET_5_5.id(), ThinkingLevel.NONE);
+    try (var sonnet = modelFor(AnthropicModelId.CLAUDE_SONNET_5_5.id(), new Reasoning.Off());
         var iterator =
             sonnet.chatStream(
                 List.of(Message.user("Count from 1 to 3, one per line.")), List.of())) {
@@ -329,7 +399,10 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
     // After dispatching to thinking.type=adaptive + output_config.effort, the call must succeed.
     // This is the regression test that fails in 1.1.4 and passes in 1.1.5.
     var config =
-        ModelConfig.newBuilder().withApiKey(apiKey).withThinkingLevel(ThinkingLevel.MEDIUM).build();
+        ModelConfig.newBuilder()
+            .withApiKey(apiKey)
+            .withReasoning(new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))
+            .build();
     var opus47 = new AnthropicProvider().create(AnthropicModelId.CLAUDE_OPUS_4_7.id(), config);
 
     var response = opus47.chat(List.of(Message.user("What is 2+2? Think briefly.")));
@@ -343,7 +416,10 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   void opus48ChatWithAdaptiveThinking() {
     // Validates the claude-opus-4-8 wire id is live and the adaptive thinking shape is accepted.
     var config =
-        ModelConfig.newBuilder().withApiKey(apiKey).withThinkingLevel(ThinkingLevel.MEDIUM).build();
+        ModelConfig.newBuilder()
+            .withApiKey(apiKey)
+            .withReasoning(new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))
+            .build();
     var opus48 = new AnthropicProvider().create(AnthropicModelId.CLAUDE_OPUS_4_8.id(), config);
 
     var response = opus48.chat(List.of(Message.user("What is 2+2? Think briefly.")));

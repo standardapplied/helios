@@ -7,7 +7,6 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.StreamEvent;
-import com.standardapplied.helios.core.model.ThinkingLevel;
 import com.standardapplied.helios.core.provider.SseReader;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -81,10 +80,9 @@ final class AnthropicFixture {
         wireModelId, AnthropicModelId.fromWireId(wireModelId), config, CachePolicy.shortLived());
   }
 
-  /** The request for a one-message conversation with {@code modelId} thinking at {@code level}. */
-  static MessagesRequest requestFor(AnthropicModelId modelId, ThinkingLevel level) {
-    var config = ModelConfig.newBuilder().withApiKey("test-key").withThinkingLevel(level).build();
-    return requests(modelId, config).build(List.of(Message.user("Hi")), List.of(), null);
+  /** The request for a one-message conversation with {@code wireModelId} under {@code config}. */
+  static MessagesRequest requestFor(String wireModelId, ModelConfig config) {
+    return requests(wireModelId, config).build(List.of(Message.user("Hi")), List.of(), null);
   }
 
   /** Reads {@code sseBody} through an {@link SseReader} and returns its last {@code Done} event. */
