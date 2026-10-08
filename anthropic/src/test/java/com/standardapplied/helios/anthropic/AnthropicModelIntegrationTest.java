@@ -407,7 +407,8 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
 
     var response = opus47.chat(List.of(Message.user("What is 2+2? Think briefly.")));
 
-    assertNotNull(response, "Opus 4.7 with thinking=MEDIUM must return a response (not 400)");
+    assertNotNull(
+        response, "Opus 4.7 with Effort(MEDIUM, SUMMARY) must return a response (not 400)");
     assertNotNull(response.content());
     assertFalse(response.content().isBlank());
   }
@@ -424,7 +425,8 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
 
     var response = opus48.chat(List.of(Message.user("What is 2+2? Think briefly.")));
 
-    assertNotNull(response, "Opus 4.8 with thinking=MEDIUM must return a response (not 400)");
+    assertNotNull(
+        response, "Opus 4.8 with Effort(MEDIUM, SUMMARY) must return a response (not 400)");
     assertNotNull(response.content());
     assertFalse(response.content().isBlank());
     assertTrue(response.content().contains("4"));
