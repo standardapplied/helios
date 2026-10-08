@@ -509,7 +509,7 @@ final class ExecuteToolTest {
     var request = provider.lastRequest;
     assertEquals(List.of(), request.args());
     assertEquals(null, request.workingDirectory());
-    assertEquals(Duration.ofSeconds(30), request.timeout());
+    assertEquals(Duration.ofSeconds(5), request.timeout());
     assertEquals(Map.of(), request.environment());
     assertTrue(request.stdin().isEmpty());
   }

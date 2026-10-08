@@ -131,14 +131,26 @@ public final class ReplSession implements AutoCloseable {
    * @throws ReplException if the session is closed or the sandbox is dead
    */
   public ExecutionResult execute(String code) {
+    return execute(code, config.executionTimeout());
+  }
+
+  /**
+   * Execute code in the sandbox under a caller-chosen wall-clock budget.
+   *
+   * @param code the source code to execute
+   * @param timeout the budget for this snippet; strictly positive
+   * @return the execution result
+   * @throws ReplException if the session is closed or the sandbox is dead
+   * @throws IllegalArgumentException if {@code timeout} is zero or negative
+   */
+  public ExecutionResult execute(String code, Duration timeout) {
     if (closed.get()) {
       throw new ReplException("Session is closed");
     }
     if (!sandbox.isAlive()) {
       throw new ReplException("Sandbox is no longer alive");
     }
-    var request =
-        ExecutionRequest.newBuilder().withCode(code).withTimeout(config.executionTimeout()).build();
+    var request = ExecutionRequest.newBuilder().withCode(code).withTimeout(timeout).build();
     var executeParams =
         new ExecuteParams(
             config.sandboxBindingsListener() != null,
