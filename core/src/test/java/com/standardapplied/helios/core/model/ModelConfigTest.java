@@ -277,6 +277,19 @@ class ModelConfigTest {
   }
 
   @Test
+  void toStringShowsTheReasoning() {
+    var effort = new Reasoning.Effort(Reasoning.Level.HIGH, Reasoning.Display.PROGRESS);
+
+    assertTrue(
+        ModelConfig.newBuilder()
+            .withReasoning(effort)
+            .build()
+            .toString()
+            .contains("reasoning=Optional[Effort[level=HIGH, display=PROGRESS]]"));
+    assertTrue(ModelConfig.newBuilder().build().toString().contains("reasoning=Optional.empty"));
+  }
+
+  @Test
   void streamIdleTimeoutDefaultsTo120Seconds() {
     var config = ModelConfig.of("key");
 

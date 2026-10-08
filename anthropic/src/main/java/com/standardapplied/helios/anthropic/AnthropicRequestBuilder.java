@@ -166,14 +166,13 @@ final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
         reject(model, "temperature", temperature != null, "whenever it is set");
         reject(model, "topP", topP != null, "whenever it is set");
       }
-      case ONE_OF, ONE_OF_WITHOUT_EFFORT -> {
+      case ONE_OF -> {
         reject(model, "temperature", temperature != null && topP != null, "and topP together");
-        var limited = sampling == Sampling.ONE_OF_WITHOUT_EFFORT && effort;
-        reject(model, "temperature", limited && temperature != null, "with Reasoning.Effort");
+        reject(model, "temperature", effort && temperature != null, "with Reasoning.Effort");
         reject(
             model,
             "topP",
-            limited && topP != null && (topP < LOWEST_TOP_P_WITH_EFFORT || topP > 1),
+            effort && topP != null && (topP < LOWEST_TOP_P_WITH_EFFORT || topP > 1),
             "outside 0.95-1 with Reasoning.Effort");
       }
     }
