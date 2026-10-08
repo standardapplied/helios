@@ -389,7 +389,7 @@ through `ReplConfig`. Sub-agents, planned for 3.1, replace in-sandbox sub-model 
   `session.events().subscribe(new ConsoleEventPrinter(System.out))`. Assistant text is written as
   it streams and flushed at once; citations, tool use, tool results, blocked tools, turn ends, the
   loop end and a stream error are written one line each. It writes only to the `PrintStream` it is
-  given. The session, CodeAct and RLM demos use it in place of their own copies.
+  given. The session demo uses it in place of its own copy.
 - **`HttpClientFactory.createForDownloads()`**, the one factory client that follows redirects, for
   unauthenticated downloads such as Hugging Face files served from its CDN. It uses
   `Redirect.NORMAL`, which never follows `https` to `http`, and the 10-second connect timeout of
@@ -482,8 +482,8 @@ through `ReplConfig`. Sub-agents, planned for 3.1, replace in-sandbox sub-model 
   `Provenanced.provenanceByField()` and the REPL's bindings were frozen with `Map.copyOf`, and
   OpenAI's strict-schema transform
   rebuilt every map as a `HashMap`. Each now keeps declaration order (record components, builder
-  insertion, parameter lists, parsed JSON), so request bodies, CodeAct and RLM prompts and
-  messages to the model are byte-identical across JVMs. This fixes prompt-cache misses across
+  insertion, parameter lists, parsed JSON), so request bodies and messages to the
+  model are byte-identical across JVMs. This fixes prompt-cache misses across
   restarts and across instances, and structured output generated out of its declared field order.
   `ExecutionCapabilities.supportedRuntimes()`, which an `Execute` refusal names, iterates in
   `Runtime` declaration order, and `ReplSession.calledHostFunctions()` is sorted by name. The
