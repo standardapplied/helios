@@ -27,7 +27,7 @@ Pick what you need — each jar is published independently:
 | `helios-gemini` | Google Gemini provider (Interactions API) | Jackson 3.x |
 | `helios-anthropic` | Anthropic Claude provider (Messages API) | Jackson 3.x |
 | `helios-openai` | OpenAI GPT provider (Responses API) | Jackson 3.x |
-| `helios-repl` | Sandboxed JShell substrate (`JvmSandbox`, `ReplSession`, `CodeExecutionTool`) + `CodeActPreset` for session-level RLM/CodeAct shapes | Jackson 3.x |
+| `helios-repl` | Sandboxed JShell execution for the `Execute` tool (`JShellExecutionProvider`, `JvmSandbox`, `ReplSession`, custom host functions) | Jackson 3.x |
 | `helios-onnx` | Local embeddings via ONNX Runtime | ONNX Runtime, DJL Tokenizers |
 | `helios-persistence` | PostgreSQL-backed `PromptRegistry`, `TraceStore`, and durability (`PgRunStore` + `PgToolCallJournal`) | Helidon DbClient |
 
@@ -399,7 +399,7 @@ Provenanced<MappingProposal> result = response.parsed();
 
 `ProvenanceValidator.DEFAULT` rejects `MEDIUM`/`HIGH` confidence entries that have no sources — the calibration mechanism that prevents the model from rubber-stamping HIGH on every field. Custom validators via `OutputSchema.provenancedOf(MyOutput.class, validator)`.
 
-Through `session.runBlocking(message, schema)`, the loop intercepts `StructuredOutputParseException`, injects a corrective USER turn carrying the diff, and re-iterates — same self-correction shape as the v1 RLM `submit()` had.
+Through `session.runBlocking(message, schema)`, the loop intercepts `StructuredOutputParseException`, injects a corrective USER turn carrying the diff, and re-iterates.
 
 ## Streaming
 
@@ -477,41 +477,29 @@ mode and persists sensitive content verbatim; it is unsuitable for customer-medi
 
 ## Sandboxed Code Execution (`helios-repl`)
 
-The `helios-repl` module runs Java code in a JVM subprocess sandbox brokering access to the host via a small set of host functions. The substrate is `JvmSandbox` + `ReplSession` + `CodeExecutionTool` + the `HostFunction` registry. `CodeActPreset` is the v2 way to wire that substrate into an `AgentSession` for tool-using sessions where the agent needs general computation:
+The `helios-repl` module runs Java snippets in a JVM subprocess sandbox. A session reaches it through the `Execute` tool with `runtime: JSHELL`: wire `JShellExecutionProvider` as the session's execution provider and bind `ExecuteTool`. Each session gets its own sandbox, so variables, imports and classes persist across its `Execute` calls. The sandbox reaches the host only through the custom host functions you register on `ReplConfig`:
 
 ```java
-record Input(String query, List<String> documents) {}
-record Output(String answer, List<String> sources, int totalCount) {}
+var quote = new HostFunction(
+    "marketQuote",
+    "Current price of a ticker",
+    List.of(HostParameter.required("ticker", ParameterType.STRING, "Ticker symbol")),
+    params -> prices.latest((String) params.get("ticker")));
 
-try (var executionProvider = JShellExecutionProvider.create(ReplConfig.newBuilder().build());
+try (var executionProvider = JShellExecutionProvider.create(
+         ReplConfig.newBuilder().withHostFunction(quote).build());
      var session = AgentSession.create(
          SessionOptions.newBuilder()
              .withModel(model)
+             .withTools(new ToolRegistry(List.of(ExecuteTool.binding(executionProvider))))
              .withExecutionProvider(executionProvider)
-             .apply(CodeActPreset.typed(Input.class, Output.class,
-                 new Input("what is helios?", docs)))
+             .withPermission(Permission.lockedDown())
              .build())) {
-  Output answer = session.runBlocking(
-      UserMessage.text("Answer the query."),
-      OutputSchema.of(Output.class));
+  session.runBlocking(UserMessage.text("What is AAPL trading at?"));
 }
 ```
 
-`CodeActPreset.withSubLm(I, O, input, subModel)` adds in-sandbox `predict()` / `submit()` host functions for RLM-style fan-out — code owns loops and aggregation, the sub-LM owns judgment with fresh context per call.
-
-Sandbox API — the host functions you register:
-
-| Function | Purpose | Security |
-|----------|---------|----------|
-| Custom host functions you register | Whatever your app needs | Argv-validated, registered before sandbox boot, frozen at startup |
-| `predict(instructions, input)` | Call model with fresh context (via `CodeActPreset.withSubLm`) | Host controls which model; per-session call budget |
-| `submit(output)` | Return structured final result (via `CodeActPreset.typed`) | Single-call enforced; validates against `OutputSchema` |
-
-Credentials never enter the sandbox. Variables persist across `execute_code` calls; printed output is truncated when shown to the model (default 5000 chars) so long results stay in sandbox variables instead of bloating the transcript.
-
-### Input bindings
-
-When a `CodeActPreset.typed` session runs with a record input, every top-level field is pre-bound as a typed JShell `var` before the model writes any code. Given `record Stats(List<Integer> numbers, String operation)`, the model can write `numbers.size()` or `operation.equals("sum")` directly — no JSON parsing.
+The model calls `Execute` with `{"runtime": "JSHELL", "script": "println(marketQuote(\"AAPL\"))"}` and gets back the snippet's stdout, stderr and exit code. Credentials never enter the sandbox: a host function runs in the host process and returns only what it chooses to.
 
 ### Scripting prelude
 

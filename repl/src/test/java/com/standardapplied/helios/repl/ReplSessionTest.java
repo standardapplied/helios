@@ -418,6 +418,24 @@ class ReplSessionTest {
   }
 
   @Test
+  void bindingsListenerThatThrowsDoesNotFailTheExecute() {
+    var config =
+        ReplConfig.newBuilder()
+            .withSandboxFactory(registry -> new FakeSandbox())
+            .withSandboxBindingsListener(
+                (bindings, result) -> {
+                  throw new IllegalStateException("listener broke");
+                })
+            .build();
+    var session = ReplSession.create(config, new Semaphore(1));
+
+    var result = session.execute("x");
+
+    assertEquals(List.of(result), session.history());
+    session.close();
+  }
+
+  @Test
   void multipleExecutionsAccumulate() {
     var session = ReplSession.create(configWith(new FakeSandbox()), new Semaphore(1));
 

@@ -22,10 +22,6 @@ import java.util.List;
  * @param executionTimeout default timeout per code execution
  * @param maxConcurrentSessions maximum concurrent sessions (enforced via semaphore)
  * @param hostFunctions additional host functions registered for each session
- * @param maxOutputCharsToModel cap on the size of the {@code Execute} tool result returned to the
- *     model. The full untruncated output stays in {@link ReplSession#history()} for operators.
- *     Variables persist fully across executions in the sandbox; the printed output the model sees
- *     on each turn is bounded. Defaults to 5000. Set to {@code 0} to disable truncation
  * @param sandboxBindingsListener optional observer of the sandbox's working memory after each
  *     {@code Execute}. Fires synchronously inside {@link ReplSession#execute(String)} after the
  *     underlying sandbox returns. {@code null} disables the callback (default)
@@ -45,7 +41,6 @@ public record ReplConfig(
     Duration executionTimeout,
     int maxConcurrentSessions,
     List<HostFunction> hostFunctions,
-    int maxOutputCharsToModel,
     SandboxBindingsListener sandboxBindingsListener,
     int maxBindingValueChars,
     int maxBindingSnapshotChars,
@@ -56,9 +51,6 @@ public record ReplConfig(
 
   /** Default max concurrent sessions. */
   public static final int DEFAULT_MAX_CONCURRENT_SESSIONS = 50;
-
-  /** Default {@code Execute} output cap shown to the model: 5000 chars. */
-  public static final int DEFAULT_MAX_OUTPUT_CHARS_TO_MODEL = 5000;
 
   /** Default per-value cap on the {@code toString} repr in a bindings snapshot. */
   public static final int DEFAULT_MAX_BINDING_VALUE_CHARS = 200;
@@ -82,10 +74,6 @@ public record ReplConfig(
     }
     if (maxConcurrentSessions <= 0) {
       throw new IllegalArgumentException("Max concurrent sessions must be positive");
-    }
-    if (maxOutputCharsToModel < 0) {
-      throw new IllegalArgumentException(
-          "maxOutputCharsToModel must be >= 0 (0 disables truncation)");
     }
     if (maxBindingValueChars < 0) {
       throw new IllegalArgumentException(
@@ -113,7 +101,6 @@ public record ReplConfig(
     private Duration executionTimeout = DEFAULT_EXECUTION_TIMEOUT;
     private int maxConcurrentSessions = DEFAULT_MAX_CONCURRENT_SESSIONS;
     private final List<HostFunction> hostFunctions = new ArrayList<>();
-    private int maxOutputCharsToModel = DEFAULT_MAX_OUTPUT_CHARS_TO_MODEL;
     private SandboxBindingsListener sandboxBindingsListener;
     private int maxBindingValueChars = DEFAULT_MAX_BINDING_VALUE_CHARS;
     private int maxBindingSnapshotChars = DEFAULT_MAX_BINDING_SNAPSHOT_CHARS;
@@ -148,12 +135,6 @@ public record ReplConfig(
     /** Register several host functions in one call. */
     public Builder withHostFunctions(List<HostFunction> functions) {
       this.hostFunctions.addAll(functions);
-      return this;
-    }
-
-    /** Cap on the printable {@code Execute} output shown to the model. */
-    public Builder withMaxOutputCharsToModel(int maxOutputCharsToModel) {
-      this.maxOutputCharsToModel = maxOutputCharsToModel;
       return this;
     }
 
@@ -194,7 +175,6 @@ public record ReplConfig(
           executionTimeout,
           maxConcurrentSessions,
           hostFunctions,
-          maxOutputCharsToModel,
           sandboxBindingsListener,
           maxBindingValueChars,
           maxBindingSnapshotChars,
