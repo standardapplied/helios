@@ -43,13 +43,6 @@ class GeminiRestructuredPartsTest {
   }
 
   @Test
-  void anUnsetThinkingLevelIsTheModelsFloor() {
-    assertEquals(
-        GeminiModelId.GEMINI_3_1_PRO_PREVIEW.lowestThinkingLevel(),
-        GeminiThinking.level(GeminiModelId.GEMINI_3_1_PRO_PREVIEW, null));
-  }
-
-  @Test
   void theModelReportsItsCatalogCeilingAndCapturePolicy() {
     var model =
         new GeminiProvider()
@@ -215,6 +208,6 @@ class GeminiRestructuredPartsTest {
   }
 
   private static ContentItem item(String type, String text, String arguments) {
-    return new ContentItem(type, text, null, null, null, null, null, arguments);
+    return new ContentItem(type, text, null, null, null, null, null, arguments, null);
   }
 }

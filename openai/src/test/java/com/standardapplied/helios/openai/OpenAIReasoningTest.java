@@ -2,377 +2,310 @@
 
 package com.standardapplied.helios.openai;
 
+import static com.standardapplied.helios.openai.OpenAIFixture.createModel;
 import static com.standardapplied.helios.openai.OpenAIFixture.requestFor;
-import static com.standardapplied.helios.openai.OpenAIFixture.requests;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
-import com.standardapplied.helios.core.model.ThinkingLevel;
-import java.util.List;
+import com.standardapplied.helios.core.model.Reasoning;
+import com.standardapplied.helios.core.model.Reasoning.Display;
+import com.standardapplied.helios.core.model.Reasoning.Level;
+import com.standardapplied.helios.core.test.ReasoningMatrix;
+import com.standardapplied.helios.core.test.ReasoningMatrix.Accepts;
+import com.standardapplied.helios.openai.api.OpenAIJson;
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.json.JsonMapper;
 
+/**
+ * Every catalogued OpenAI model against no reasoning, {@code Reasoning.Off} and every level and
+ * display, alone and with a sampling parameter: each cell sends exactly the fields OpenAI documents
+ * for the model, or is rejected when the model is created. The expectations are written out here
+ * from the documentation, not read from the catalogue.
+ */
 class OpenAIReasoningTest {
 
-  @Test
-  void buildRequestWithReasoningMedium() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.MEDIUM)
-            .build();
-    var requests = requests(OpenAIModelId.O3, config);
+  private static final JsonMapper JSON = JsonMapper.builder().build();
 
-    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
+  private static final Set<Display> DISPLAYS = EnumSet.of(Display.HIDDEN, Display.SUMMARY);
 
-    assertNotNull(request.reasoning());
-    assertEquals("medium", request.reasoning().effort());
+  /** When {@code temperature} and {@code top_p} are accepted. */
+  private enum Sampling {
+    ALWAYS,
+    ONLY_WITH_OFF,
+    NOT_WITH_EFFORT,
+    NEVER
   }
 
-  @Test
-  void buildRequestWithReasoningLow() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.LOW)
-            .build();
-    var requests = requests(OpenAIModelId.O3, config);
+  private static final Documented ALWAYS_REASONS =
+      new Documented(null, EnumSet.range(Level.LOW, Level.MAX), DISPLAYS, Sampling.NEVER);
 
-    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
+  private static final Documented NONE_TO_MAX =
+      new Documented(
+          Map.of("effort", "none"),
+          EnumSet.range(Level.LOW, Level.MAX),
+          DISPLAYS,
+          Sampling.ONLY_WITH_OFF);
 
-    assertNotNull(request.reasoning());
-    assertEquals("low", request.reasoning().effort());
-  }
+  private static final Documented NONE_BY_DEFAULT =
+      new Documented(
+          Map.of("effort", "none"),
+          EnumSet.range(Level.LOW, Level.XHIGH),
+          DISPLAYS,
+          Sampling.NOT_WITH_EFFORT);
 
-  @Test
-  void buildRequestWithReasoningMinimal() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.MINIMAL)
-            .build();
-    var requests = requests(OpenAIModelId.O3, config);
+  private static final Documented NOT_REASONING =
+      new Documented(Map.of(), Set.of(), Set.of(), Sampling.ALWAYS);
 
-    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
+  private static final Documented O_SERIES =
+      new Documented(null, EnumSet.range(Level.LOW, Level.HIGH), DISPLAYS, Sampling.NEVER);
 
-    assertNotNull(request.reasoning());
-    assertEquals("low", request.reasoning().effort());
-  }
+  private static final Map<OpenAIModelId, Documented> DOCUMENTED =
+      Map.ofEntries(
+          Map.entry(OpenAIModelId.GPT_6_ASTRA, ALWAYS_REASONS),
+          Map.entry(OpenAIModelId.GPT_6_1_SOL, ALWAYS_REASONS),
+          Map.entry(OpenAIModelId.GPT_6_SOL, NONE_TO_MAX),
+          Map.entry(OpenAIModelId.GPT_6_LUNA, NONE_TO_MAX),
+          Map.entry(OpenAIModelId.GPT_5_6, NONE_TO_MAX),
+          Map.entry(OpenAIModelId.GPT_5_6_SOL, NONE_TO_MAX),
+          Map.entry(OpenAIModelId.GPT_5_6_TERRA, NONE_TO_MAX),
+          Map.entry(OpenAIModelId.GPT_5_6_LUNA, NONE_TO_MAX),
+          Map.entry(
+              OpenAIModelId.GPT_5_5,
+              new Documented(
+                  Map.of("effort", "none"),
+                  EnumSet.range(Level.LOW, Level.XHIGH),
+                  DISPLAYS,
+                  Sampling.ONLY_WITH_OFF)),
+          Map.entry(OpenAIModelId.GPT_5_4, NONE_BY_DEFAULT),
+          Map.entry(OpenAIModelId.GPT_5_4_MINI, NONE_BY_DEFAULT),
+          Map.entry(OpenAIModelId.GPT_5_4_NANO, NONE_BY_DEFAULT),
+          Map.entry(OpenAIModelId.GPT_4_1, NOT_REASONING),
+          Map.entry(OpenAIModelId.GPT_4_1_MINI, NOT_REASONING),
+          Map.entry(OpenAIModelId.GPT_4_1_NANO, NOT_REASONING),
+          Map.entry(OpenAIModelId.GPT_4O, NOT_REASONING),
+          Map.entry(OpenAIModelId.GPT_4O_MINI, NOT_REASONING),
+          Map.entry(OpenAIModelId.O3, O_SERIES),
+          Map.entry(OpenAIModelId.O4_MINI, O_SERIES));
 
-  @Test
-  void buildRequestWithReasoningHigh() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.HIGH)
-            .build();
-    var requests = requests(OpenAIModelId.O3, config);
+  /**
+   * What a model accepts and how its off is spelled.
+   *
+   * @param off the {@code reasoning} field sent for {@code Reasoning.Off}: empty when it is left
+   *     out, {@code null} when off is rejected
+   * @param levels the accepted levels
+   * @param displays the accepted displays
+   * @param sampling when sampling parameters are accepted
+   */
+  private record Documented(
+      Map<String, Object> off, Set<Level> levels, Set<Display> displays, Sampling sampling) {
 
-    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
+    Accepts accepts() {
+      return new Accepts(off != null, levels, displays);
+    }
 
-    assertNotNull(request.reasoning());
-    assertEquals("high", request.reasoning().effort());
-  }
-
-  @Test
-  void gpt56MaxMapsToMaxWireString() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.MAX)
-            .build();
-    var requests = requests(OpenAIModelId.GPT_5_6, config);
-
-    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
-
-    assertEquals("max", request.reasoning().effort());
-  }
-
-  @Test
-  void gpt55MaxClampsToXhigh() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.MAX)
-            .build();
-    var requests = requests(OpenAIModelId.GPT_5_5, config);
-
-    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
-
-    assertEquals("xhigh", request.reasoning().effort());
-  }
-
-  @Test
-  void gpt56NoneMapsToExplicitNoneEffort() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.NONE)
-            .build();
-    var requests = requests(OpenAIModelId.GPT_5_6, config);
-
-    var request = requests.build(List.of(Message.user("Quick")), List.of(), null);
-
-    assertNotNull(request.reasoning());
-    assertEquals("none", request.reasoning().effort());
-  }
-
-  @Test
-  void gpt55NoneSendsExplicitNoneInsteadOfDefaultMedium() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.NONE)
-            .build();
-    var requests = requests(OpenAIModelId.GPT_5_5, config);
-
-    var request = requests.build(List.of(Message.user("Quick")), List.of(), null);
-
-    assertNotNull(request.reasoning(), "omitting reasoning runs gpt-5.5's default medium effort");
-    assertEquals("none", request.reasoning().effort());
-  }
-
-  @Test
-  void gpt6ModelsWithoutNoneEffortPinLowForThinkingNone() {
-    for (var modelId : List.of(OpenAIModelId.GPT_6_ASTRA, OpenAIModelId.GPT_6_1_SOL)) {
-      var request = requestFor(modelId, ThinkingLevel.NONE);
-
-      assertEquals(
-          "low",
-          request.reasoning().effort(),
-          modelId.id() + " returns a 400 for none; low is its lowest effort");
+    boolean acceptsSampling(Reasoning reasoning) {
+      return switch (sampling) {
+        case ALWAYS -> true;
+        case ONLY_WITH_OFF -> reasoning instanceof Reasoning.Off;
+        case NOT_WITH_EFFORT -> !(reasoning instanceof Reasoning.Effort);
+        case NEVER -> false;
+      };
     }
   }
 
-  @Test
-  void gpt6ModelsWithNoneEffortSendItForThinkingNone() {
-    for (var modelId : List.of(OpenAIModelId.GPT_6_SOL, OpenAIModelId.GPT_6_LUNA)) {
-      assertEquals("none", requestFor(modelId, ThinkingLevel.NONE).reasoning().effort());
-    }
+  static Stream<Arguments> acceptedCells() {
+    return cells(true);
+  }
+
+  static Stream<Arguments> rejectedCells() {
+    return cells(false);
+  }
+
+  private static Stream<Arguments> cells(boolean accepted) {
+    return ReasoningMatrix.cells(DOCUMENTED, Documented::accepts, accepted);
+  }
+
+  static Stream<Arguments> acceptedSamplingCells() {
+    return samplingCells(true);
+  }
+
+  static Stream<Arguments> rejectedSamplingCells() {
+    return samplingCells(false);
+  }
+
+  /**
+   * Every model, with no reasoning and with each reasoning it accepts, and each sampling parameter,
+   * where the model accepts the parameter or where it does not.
+   */
+  private static Stream<Arguments> samplingCells(boolean accepted) {
+    return DOCUMENTED.entrySet().stream()
+        .flatMap(
+            row ->
+                Stream.<Reasoning>of(
+                        null, new Reasoning.Off(), new Reasoning.Effort(Level.LOW, Display.SUMMARY))
+                    .filter(reasoning -> row.getValue().accepts().test(reasoning))
+                    .filter(reasoning -> row.getValue().acceptsSampling(reasoning) == accepted)
+                    .flatMap(
+                        reasoning ->
+                            Stream.of("temperature", "top_p")
+                                .map(name -> Arguments.of(row.getKey(), reasoning, name))));
   }
 
   @Test
-  void gpt6FamilySendsEveryHigherEffortVerbatim() {
-    var expected =
-        Map.of(
-            ThinkingLevel.MINIMAL, "low",
-            ThinkingLevel.LOW, "low",
-            ThinkingLevel.MEDIUM, "medium",
-            ThinkingLevel.HIGH, "high",
-            ThinkingLevel.XHIGH, "xhigh",
-            ThinkingLevel.MAX, "max");
-    for (var modelId :
-        List.of(
-            OpenAIModelId.GPT_6_ASTRA,
-            OpenAIModelId.GPT_6_1_SOL,
-            OpenAIModelId.GPT_6_SOL,
-            OpenAIModelId.GPT_6_LUNA)) {
-      for (var entry : expected.entrySet()) {
-        assertEquals(
-            entry.getValue(),
-            requestFor(modelId, entry.getKey()).reasoning().effort(),
-            modelId.id() + " " + entry.getKey());
-      }
-    }
+  void theTableCoversEveryCataloguedModel() {
+    assertEquals(EnumSet.allOf(OpenAIModelId.class), EnumSet.copyOf(DOCUMENTED.keySet()));
+  }
+
+  @ParameterizedTest(name = "{0} {1}")
+  @MethodSource("acceptedCells")
+  void anAcceptedCellSendsExactlyItsDocumentedFields(OpenAIModelId model, Reasoning reasoning) {
+    var config = config(reasoning).build();
+    createModel(model, config).close();
+
+    var body = wire(model.id(), config);
+
+    assertEquals(reasoning(DOCUMENTED.get(model), reasoning), body.get("reasoning"));
+  }
+
+  @ParameterizedTest(name = "{0} {1}")
+  @MethodSource("rejectedCells")
+  void aRejectedCellThrowsAtConstructionNamingTheModelAndWhatItAccepts(
+      OpenAIModelId model, Reasoning reasoning) {
+    var config = config(reasoning).build();
+
+    var rejection =
+        assertThrows(IllegalArgumentException.class, () -> createModel(model, config)).getMessage();
+
+    assertTrue(rejection.contains("Model " + model.id() + " "), rejection);
+    assertTrue(rejection.contains(DOCUMENTED.get(model).accepts().description()), rejection);
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("everyModel")
+  void anAbsentReasoningSendsNoReasoningField(OpenAIModelId model) {
+    var body = wire(model.id(), config(null).build());
+
+    assertFalse(body.containsKey("reasoning"), body::toString);
+  }
+
+  static Stream<OpenAIModelId> everyModel() {
+    return Arrays.stream(OpenAIModelId.values());
+  }
+
+  @ParameterizedTest(name = "{0} {1} {2}")
+  @MethodSource("acceptedSamplingCells")
+  void anAcceptedSamplingParameterIsSentAsSet(
+      OpenAIModelId model, Reasoning reasoning, String parameter) {
+    var config = withSampling(config(reasoning), parameter, 0.4);
+    createModel(model, config).close();
+
+    assertEquals(0.4, wire(model.id(), config).get(parameter));
+  }
+
+  @ParameterizedTest(name = "{0} {1} {2}")
+  @MethodSource("rejectedSamplingCells")
+  void aRejectedSamplingParameterThrowsAtConstruction(
+      OpenAIModelId model, Reasoning reasoning, String parameter) {
+    var config = withSampling(config(reasoning), parameter, 0.4);
+
+    var rejection =
+        assertThrows(IllegalArgumentException.class, () -> createModel(model, config)).getMessage();
+
+    assertTrue(rejection.startsWith("Model " + model.id() + " does not accept "), rejection);
   }
 
   @Test
-  void samplingParametersRideAtEffortNone() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.NONE)
-            .withTemperature(0.2)
-            .withTopP(0.9)
-            .build();
-    var requests = requests(OpenAIModelId.GPT_6_LUNA, config);
-
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
-
-    assertEquals("none", request.reasoning().effort());
-    assertEquals(0.2, request.temperature());
-    assertEquals(0.9, request.topP());
-  }
-
-  @Test
-  void samplingParametersAreDroppedWhenNoneFallsBackToLow() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.NONE)
-            .withTemperature(0.2)
-            .withTopP(0.9)
-            .build();
-    var requests = requests(OpenAIModelId.GPT_6_ASTRA, config);
-
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
-
-    assertEquals("low", request.reasoning().effort());
-    assertNull(request.temperature());
-    assertNull(request.topP());
-  }
-
-  @Test
-  void reasoningRequestsNeverCarrySamplingParameters() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.MEDIUM)
-            .withTemperature(0.7)
-            .withTopP(0.9)
-            .build();
-    var requests = requests(OpenAIModelId.GPT_6_ASTRA, config);
-
-    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
-
-    assertNull(request.temperature());
-    assertNull(request.topP(), "top_p with a reasoning effort returns a 400 on the GPT-6 family");
-  }
-
-  @Test
-  void gpt54MiniXhighIsSentVerbatim() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.XHIGH)
-            .build();
-    var requests = requests(OpenAIModelId.GPT_5_4_MINI, config);
-
-    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
-
-    assertEquals("xhigh", request.reasoning().effort());
-  }
-
-  @Test
-  void noneOmitsReasoningOnModelsWithoutExplicitNone() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.NONE)
-            .build();
-    var requests = requests(OpenAIModelId.O4_MINI, config);
-
-    var request = requests.build(List.of(Message.user("Quick")), List.of(), null);
-
-    assertNull(request.reasoning());
-  }
-
-  @Test
-  void gpt55XhighMapsToXhighWireString() {
-    // Per OpenAI's deployment-checklist + gpt-5.5 model page, gpt-5.5 reasoning.effort accepts
-    // none/low/medium/high/xhigh. Helios's XHIGH must round-trip to the literal "xhigh", not
-    // clamp to "high".
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.XHIGH)
-            .build();
-    var requests = requests(OpenAIModelId.GPT_5_5, config);
-
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
+  void samplingIsRejectedNamingTheModelTheParameterAndTheRule() {
+    var astra = config(null).withTopP(0.5).build();
+    var sol = config(null).withTemperature(0.5).build();
+    var mini = config(new Reasoning.Effort(Level.LOW, Display.HIDDEN)).withTemperature(0.5).build();
 
     assertEquals(
-        "xhigh",
-        request.reasoning().effort(),
-        "gpt-5.5 must receive the literal 'xhigh' wire string");
+        "Model gpt-6-astra does not accept topP whenever it is set.",
+        assertThrows(
+                IllegalArgumentException.class, () -> createModel(OpenAIModelId.GPT_6_ASTRA, astra))
+            .getMessage());
+    assertEquals(
+        "Model gpt-6-sol does not accept temperature unless Reasoning.Off is set.",
+        assertThrows(
+                IllegalArgumentException.class, () -> createModel(OpenAIModelId.GPT_6_SOL, sol))
+            .getMessage());
+    assertEquals(
+        "Model gpt-5.4-mini does not accept temperature with Reasoning.Effort.",
+        assertThrows(
+                IllegalArgumentException.class, () -> createModel(OpenAIModelId.GPT_5_4_MINI, mini))
+            .getMessage());
   }
 
   @Test
-  void gpt54XhighMapsToXhighWireString() {
-    // gpt-5.4 model page documents the same five-tier set as gpt-5.5.
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.XHIGH)
-            .build();
-    var requests = requests(OpenAIModelId.GPT_5_4, config);
+  void offIsRejectedOnGpt6Astra() {
+    var off = config(new Reasoning.Off()).build();
 
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
-
-    assertEquals("xhigh", request.reasoning().effort());
+    assertThrows(IllegalArgumentException.class, () -> createModel(OpenAIModelId.GPT_6_ASTRA, off));
   }
 
-  @Test
-  void gpt55MaxClampsToXhighWireString() {
-    // OpenAI has no native "max" tier — Helios's MAX maps to OpenAI's highest available, which
-    // is xhigh on gpt-5.5. Distinct from "high" so callers get the strongest reasoning OpenAI
-    // exposes.
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.MAX)
-            .build();
-    var requests = requests(OpenAIModelId.GPT_5_5, config);
+  @ParameterizedTest
+  @ValueSource(strings = {"MINIMAL", "MAX"})
+  void anUncataloguedModelIsSentEveryLevelAndItsSampling(String level) {
+    var effort = new Reasoning.Effort(Level.valueOf(level), Display.SUMMARY);
+    var config = config(effort).withTemperature(0.4).withTopP(0.8).build();
 
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var body = wire("gpt-7", config);
 
     assertEquals(
-        "xhigh",
-        request.reasoning().effort(),
-        "MAX must clamp to OpenAI's highest tier (xhigh on gpt-5.5), not stop at 'high'");
+        Map.of("effort", level.toLowerCase(Locale.ROOT), "summary", "auto"), body.get("reasoning"));
+    assertEquals(0.4, body.get("temperature"));
+    assertEquals(0.8, body.get("top_p"));
+    assertEquals(
+        Map.of("effort", "none"),
+        wire("gpt-7", config(new Reasoning.Off()).build()).get("reasoning"));
   }
 
   @Test
-  void o3XhighClampsToHighWireString() {
-    // o-series reasoning models (o3, o4-mini) are not documented to accept "xhigh" — only
-    // low/medium/high are confirmed via OpenAI's docs. Helios clamps XHIGH/MAX to "high" here
-    // until OpenAI publishes wider support. Conservative dispatch keeps requests valid.
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.XHIGH)
-            .build();
-    var requests = requests(OpenAIModelId.O3, config);
+  void progressHasNoOpenAiSpellingEvenOnAnUncataloguedModel() {
+    var progress = config(new Reasoning.Effort(Level.LOW, Display.PROGRESS)).build();
 
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
-
-    assertEquals("high", request.reasoning().effort());
+    assertThrows(
+        IllegalArgumentException.class, () -> new OpenAIRequestBuilder("gpt-7", null, progress));
   }
 
-  @Test
-  void o4MiniMaxClampsToHighWireString() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.MAX)
-            .build();
-    var requests = requests(OpenAIModelId.O4_MINI, config);
-
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
-
-    assertEquals("high", request.reasoning().effort());
+  private static Map<String, Object> reasoning(Documented documented, Reasoning reasoning) {
+    return switch (reasoning) {
+      case Reasoning.Off _ -> documented.off().isEmpty() ? null : documented.off();
+      case Reasoning.Effort e when e.display() == Display.SUMMARY ->
+          Map.of("effort", e.level().name().toLowerCase(Locale.ROOT), "summary", "auto");
+      case Reasoning.Effort e -> Map.of("effort", e.level().name().toLowerCase(Locale.ROOT));
+    };
   }
 
-  @Test
-  void buildRequestReasoningNoneOmitsConfig() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.NONE)
-            .build();
-    var requests = requests(OpenAIModelId.O3, config);
-
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
-
-    assertNull(request.reasoning());
+  private static ModelConfig withSampling(ModelConfig.Builder builder, String name, double value) {
+    return ("temperature".equals(name) ? builder.withTemperature(value) : builder.withTopP(value))
+        .build();
   }
 
-  @Test
-  void buildRequestReasoningNullsTemperature() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withTemperature(0.7)
-            .withThinkingLevel(ThinkingLevel.HIGH)
-            .build();
-    var requests = requests(OpenAIModelId.O3, config);
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> wire(String modelId, ModelConfig config) {
+    var request = requestFor(modelId, config);
+    return JSON.readValue(OpenAIJson.LENIENT.writeValueAsString(request), Map.class);
+  }
 
-    var request = requests.build(List.of(Message.user("Think")), List.of(), null);
-
-    assertNull(request.temperature());
-    assertNotNull(request.reasoning());
+  private static ModelConfig.Builder config(Reasoning reasoning) {
+    return ModelConfig.newBuilder()
+        .withApiKey("test-key")
+        .withBaseUrl("http://127.0.0.1:1/v1/responses")
+        .withReasoning(reasoning);
   }
 }

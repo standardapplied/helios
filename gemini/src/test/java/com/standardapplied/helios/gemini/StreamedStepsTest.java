@@ -24,6 +24,7 @@ import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.StreamEvent;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Named;
@@ -170,6 +171,90 @@ class StreamedStepsTest {
     var done = (StreamEvent.Done) events.getLast();
     assertNotNull(done.response().thinking());
     assertTrue(done.response().thinking().contains("deeper"));
+  }
+
+  @Test
+  void thoughtSummaryDeltaTextStreamsAsThinking() {
+    var thoughtStart = stepStart(0, "{\"type\":\"thought\"}");
+    var summary =
+        stepDelta(
+            0,
+            "{\"type\":\"thought_summary\","
+                + "\"content\":{\"type\":\"text\",\"text\":\"Checking the arithmetic.\"}}");
+    var signature = stepDelta(0, "{\"type\":\"thought_signature\",\"signature\":\"sig\"}");
+
+    var events = drain(thoughtStart + summary + signature + stepStop(0) + TEXT_FLOW);
+
+    assertEquals(
+        "Checking the arithmetic.",
+        events.stream()
+            .filter(StreamEvent.ThinkingDelta.class::isInstance)
+            .map(StreamEvent.ThinkingDelta.class::cast)
+            .findFirst()
+            .orElseThrow()
+            .text());
+    var complete =
+        events.stream()
+            .filter(StreamEvent.ThinkingComplete.class::isInstance)
+            .map(StreamEvent.ThinkingComplete.class::cast)
+            .findFirst()
+            .orElseThrow();
+    assertEquals("Checking the arithmetic.", complete.fullThinking());
+    assertEquals("sig", complete.signature());
+    var done = (StreamEvent.Done) events.getLast();
+    assertEquals("Checking the arithmetic.", done.response().thinking());
+  }
+
+  @Test
+  void eachSummaryDeltaAddsAnItemAfterTheSummaryAThoughtStartsWith() {
+    var thoughtStart =
+        stepStart(
+            0, "{\"type\":\"thought\",\"summary\":[{\"type\":\"text\",\"text\":\"First.\"}]}");
+    var second =
+        stepDelta(
+            0,
+            "{\"type\":\"thought_summary\",\"content\":{\"type\":\"text\",\"text\":\"Second.\"}}");
+    var third =
+        stepDelta(
+            0,
+            "{\"type\":\"thought_summary\",\"content\":{\"type\":\"text\",\"text\":\"Third.\"}}");
+
+    var events = drain(thoughtStart + second + third + stepStop(0) + TEXT_FLOW);
+
+    assertEquals(
+        List.of("Second.", "Third."),
+        events.stream()
+            .filter(StreamEvent.ThinkingDelta.class::isInstance)
+            .map(event -> ((StreamEvent.ThinkingDelta) event).text())
+            .toList());
+    assertEquals(
+        "First.\nSecond.\nThird.", ((StreamEvent.Done) events.getLast()).response().thinking());
+  }
+
+  @ParameterizedTest
+  @MethodSource("summaryDeltasWithoutText")
+  void aThoughtSummaryDeltaWithoutTextIsIgnored(String delta) {
+    var events =
+        drain(
+            stepStart(0, "{\"type\":\"thought\"}") + stepDelta(0, delta) + stepStop(0) + TEXT_FLOW);
+
+    assertTrue(events.stream().noneMatch(StreamEvent.ThinkingDelta.class::isInstance));
+    assertTrue(events.stream().noneMatch(StreamEvent.Error.class::isInstance));
+    assertNull(((StreamEvent.Done) events.getLast()).response().thinking());
+  }
+
+  static Stream<Named<String>> summaryDeltasWithoutText() {
+    return Stream.of(
+        named("no content", "{\"type\":\"thought_summary\"}"),
+        named(
+            "non-text content",
+            "{\"type\":\"thought_summary\",\"content\":{\"type\":\"image\",\"data\":\"x\"}}"),
+        named(
+            "non-text content carrying text",
+            "{\"type\":\"thought_summary\",\"content\":{\"type\":\"image\",\"text\":\"alt\"}}"),
+        named(
+            "content without text",
+            "{\"type\":\"thought_summary\",\"content\":{\"type\":\"text\"}}"));
   }
 
   @Test

@@ -94,6 +94,7 @@ final class StreamedSteps {
         yield null;
       }
       case "thought_signature" -> signature(delta);
+      case "thought_summary" -> thinking(delta.content());
       case "text" -> delta.text() == null ? annotations(delta) : text(state, delta);
       case null, default -> annotations(delta);
     };
@@ -158,12 +159,20 @@ final class StreamedSteps {
 
   private StreamEvent text(StepState state, ContentItem delta) {
     if (state != null && "thought".equals(state.type)) {
-      output.thought(delta.text());
-      return new StreamEvent.ThinkingDelta(delta.text());
+      return thinking(delta);
     }
     var event = output.text(delta.text());
     annotations(delta);
     return event;
+  }
+
+  /** The text of a thought, or of a thought summary's content, as thinking. */
+  private StreamEvent thinking(ContentItem item) {
+    if (item == null || !item.hasTypeText() || item.text() == null) {
+      return null;
+    }
+    output.thought(item.text());
+    return new StreamEvent.ThinkingDelta(item.text());
   }
 
   private StreamEvent annotations(ContentItem delta) {

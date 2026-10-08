@@ -64,68 +64,7 @@
     } ],
     "top_p" : 0.9
   },
-  "gpt-4.1 MEDIUM tools" : {
-    "input" : [ {
-      "content" : [ {
-        "image_url" : "data:image/png;base64,iVBORw==",
-        "type" : "input_image"
-      }, {
-        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
-        "type" : "input_text"
-      } ],
-      "role" : "user",
-      "type" : "message"
-    }, {
-      "content" : [ {
-        "text" : "Let me check both cities.",
-        "type" : "output_text"
-      } ],
-      "role" : "assistant",
-      "type" : "message"
-    }, {
-      "arguments" : "{\"city\":\"Paris\"}",
-      "call_id" : "call_1",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "arguments" : "{\"city\":\"Rome\"}",
-      "call_id" : "call_2",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "call_id" : "call_1",
-      "output" : "18C and sunny",
-      "type" : "function_call_output"
-    }, {
-      "call_id" : "call_2",
-      "output" : "22C and cloudy",
-      "type" : "function_call_output"
-    } ],
-    "instructions" : "You are a precise assistant.",
-    "max_output_tokens" : 32000,
-    "model" : "gpt-4.1",
-    "reasoning" : {
-      "effort" : "medium",
-      "summary" : "auto"
-    },
-    "stream" : true,
-    "tools" : [ {
-      "description" : "Current weather for a city",
-      "name" : "weather",
-      "parameters" : {
-        "properties" : {
-          "city" : {
-            "description" : "The city name",
-            "type" : "string"
-          }
-        },
-        "required" : [ "city" ],
-        "type" : "object"
-      },
-      "type" : "function"
-    } ]
-  },
-  "gpt-4.1 NONE tools" : {
+  "gpt-4.1 absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -182,68 +121,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-4.1-mini MEDIUM tools" : {
-    "input" : [ {
-      "content" : [ {
-        "image_url" : "data:image/png;base64,iVBORw==",
-        "type" : "input_image"
-      }, {
-        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
-        "type" : "input_text"
-      } ],
-      "role" : "user",
-      "type" : "message"
-    }, {
-      "content" : [ {
-        "text" : "Let me check both cities.",
-        "type" : "output_text"
-      } ],
-      "role" : "assistant",
-      "type" : "message"
-    }, {
-      "arguments" : "{\"city\":\"Paris\"}",
-      "call_id" : "call_1",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "arguments" : "{\"city\":\"Rome\"}",
-      "call_id" : "call_2",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "call_id" : "call_1",
-      "output" : "18C and sunny",
-      "type" : "function_call_output"
-    }, {
-      "call_id" : "call_2",
-      "output" : "22C and cloudy",
-      "type" : "function_call_output"
-    } ],
-    "instructions" : "You are a precise assistant.",
-    "max_output_tokens" : 32000,
-    "model" : "gpt-4.1-mini",
-    "reasoning" : {
-      "effort" : "medium",
-      "summary" : "auto"
-    },
-    "stream" : true,
-    "tools" : [ {
-      "description" : "Current weather for a city",
-      "name" : "weather",
-      "parameters" : {
-        "properties" : {
-          "city" : {
-            "description" : "The city name",
-            "type" : "string"
-          }
-        },
-        "required" : [ "city" ],
-        "type" : "object"
-      },
-      "type" : "function"
-    } ]
-  },
-  "gpt-4.1-mini NONE tools" : {
+  "gpt-4.1-mini absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -300,68 +178,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-4.1-nano MEDIUM tools" : {
-    "input" : [ {
-      "content" : [ {
-        "image_url" : "data:image/png;base64,iVBORw==",
-        "type" : "input_image"
-      }, {
-        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
-        "type" : "input_text"
-      } ],
-      "role" : "user",
-      "type" : "message"
-    }, {
-      "content" : [ {
-        "text" : "Let me check both cities.",
-        "type" : "output_text"
-      } ],
-      "role" : "assistant",
-      "type" : "message"
-    }, {
-      "arguments" : "{\"city\":\"Paris\"}",
-      "call_id" : "call_1",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "arguments" : "{\"city\":\"Rome\"}",
-      "call_id" : "call_2",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "call_id" : "call_1",
-      "output" : "18C and sunny",
-      "type" : "function_call_output"
-    }, {
-      "call_id" : "call_2",
-      "output" : "22C and cloudy",
-      "type" : "function_call_output"
-    } ],
-    "instructions" : "You are a precise assistant.",
-    "max_output_tokens" : 16000,
-    "model" : "gpt-4.1-nano",
-    "reasoning" : {
-      "effort" : "medium",
-      "summary" : "auto"
-    },
-    "stream" : true,
-    "tools" : [ {
-      "description" : "Current weather for a city",
-      "name" : "weather",
-      "parameters" : {
-        "properties" : {
-          "city" : {
-            "description" : "The city name",
-            "type" : "string"
-          }
-        },
-        "required" : [ "city" ],
-        "type" : "object"
-      },
-      "type" : "function"
-    } ]
-  },
-  "gpt-4.1-nano NONE tools" : {
+  "gpt-4.1-nano absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -418,68 +235,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-4o MEDIUM tools" : {
-    "input" : [ {
-      "content" : [ {
-        "image_url" : "data:image/png;base64,iVBORw==",
-        "type" : "input_image"
-      }, {
-        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
-        "type" : "input_text"
-      } ],
-      "role" : "user",
-      "type" : "message"
-    }, {
-      "content" : [ {
-        "text" : "Let me check both cities.",
-        "type" : "output_text"
-      } ],
-      "role" : "assistant",
-      "type" : "message"
-    }, {
-      "arguments" : "{\"city\":\"Paris\"}",
-      "call_id" : "call_1",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "arguments" : "{\"city\":\"Rome\"}",
-      "call_id" : "call_2",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "call_id" : "call_1",
-      "output" : "18C and sunny",
-      "type" : "function_call_output"
-    }, {
-      "call_id" : "call_2",
-      "output" : "22C and cloudy",
-      "type" : "function_call_output"
-    } ],
-    "instructions" : "You are a precise assistant.",
-    "max_output_tokens" : 16384,
-    "model" : "gpt-4o",
-    "reasoning" : {
-      "effort" : "medium",
-      "summary" : "auto"
-    },
-    "stream" : true,
-    "tools" : [ {
-      "description" : "Current weather for a city",
-      "name" : "weather",
-      "parameters" : {
-        "properties" : {
-          "city" : {
-            "description" : "The city name",
-            "type" : "string"
-          }
-        },
-        "required" : [ "city" ],
-        "type" : "object"
-      },
-      "type" : "function"
-    } ]
-  },
-  "gpt-4o NONE tools" : {
+  "gpt-4o absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -536,68 +292,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-4o-mini MEDIUM tools" : {
-    "input" : [ {
-      "content" : [ {
-        "image_url" : "data:image/png;base64,iVBORw==",
-        "type" : "input_image"
-      }, {
-        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
-        "type" : "input_text"
-      } ],
-      "role" : "user",
-      "type" : "message"
-    }, {
-      "content" : [ {
-        "text" : "Let me check both cities.",
-        "type" : "output_text"
-      } ],
-      "role" : "assistant",
-      "type" : "message"
-    }, {
-      "arguments" : "{\"city\":\"Paris\"}",
-      "call_id" : "call_1",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "arguments" : "{\"city\":\"Rome\"}",
-      "call_id" : "call_2",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "call_id" : "call_1",
-      "output" : "18C and sunny",
-      "type" : "function_call_output"
-    }, {
-      "call_id" : "call_2",
-      "output" : "22C and cloudy",
-      "type" : "function_call_output"
-    } ],
-    "instructions" : "You are a precise assistant.",
-    "max_output_tokens" : 16384,
-    "model" : "gpt-4o-mini",
-    "reasoning" : {
-      "effort" : "medium",
-      "summary" : "auto"
-    },
-    "stream" : true,
-    "tools" : [ {
-      "description" : "Current weather for a city",
-      "name" : "weather",
-      "parameters" : {
-        "properties" : {
-          "city" : {
-            "description" : "The city name",
-            "type" : "string"
-          }
-        },
-        "required" : [ "city" ],
-        "type" : "object"
-      },
-      "type" : "function"
-    } ]
-  },
-  "gpt-4o-mini NONE tools" : {
+  "gpt-4o-mini absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -654,7 +349,64 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.4 MEDIUM tools" : {
+  "gpt-5.4 absent tools" : {
+    "input" : [ {
+      "content" : [ {
+        "image_url" : "data:image/png;base64,iVBORw==",
+        "type" : "input_image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "input_text"
+      } ],
+      "role" : "user",
+      "type" : "message"
+    }, {
+      "content" : [ {
+        "text" : "Let me check both cities.",
+        "type" : "output_text"
+      } ],
+      "role" : "assistant",
+      "type" : "message"
+    }, {
+      "arguments" : "{\"city\":\"Paris\"}",
+      "call_id" : "call_1",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "arguments" : "{\"city\":\"Rome\"}",
+      "call_id" : "call_2",
+      "name" : "weather",
+      "type" : "function_call"
+    }, {
+      "call_id" : "call_1",
+      "output" : "18C and sunny",
+      "type" : "function_call_output"
+    }, {
+      "call_id" : "call_2",
+      "output" : "22C and cloudy",
+      "type" : "function_call_output"
+    } ],
+    "instructions" : "You are a precise assistant.",
+    "max_output_tokens" : 128000,
+    "model" : "gpt-5.4",
+    "stream" : true,
+    "tools" : [ {
+      "description" : "Current weather for a city",
+      "name" : "weather",
+      "parameters" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "type" : "function"
+    } ]
+  },
+  "gpt-5.4 medium summary tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -715,7 +467,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.4 NONE tools" : {
+  "gpt-5.4-mini absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -754,11 +506,7 @@
     } ],
     "instructions" : "You are a precise assistant.",
     "max_output_tokens" : 128000,
-    "model" : "gpt-5.4",
-    "reasoning" : {
-      "effort" : "none",
-      "summary" : "auto"
-    },
+    "model" : "gpt-5.4-mini",
     "stream" : true,
     "tools" : [ {
       "description" : "Current weather for a city",
@@ -776,7 +524,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.4-mini MEDIUM tools" : {
+  "gpt-5.4-mini medium summary tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -837,7 +585,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.4-mini NONE tools" : {
+  "gpt-5.4-nano absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -876,11 +624,7 @@
     } ],
     "instructions" : "You are a precise assistant.",
     "max_output_tokens" : 128000,
-    "model" : "gpt-5.4-mini",
-    "reasoning" : {
-      "effort" : "none",
-      "summary" : "auto"
-    },
+    "model" : "gpt-5.4-nano",
     "stream" : true,
     "tools" : [ {
       "description" : "Current weather for a city",
@@ -898,7 +642,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.4-nano MEDIUM tools" : {
+  "gpt-5.4-nano medium summary tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -959,7 +703,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.4-nano NONE tools" : {
+  "gpt-5.5 absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -998,11 +742,7 @@
     } ],
     "instructions" : "You are a precise assistant.",
     "max_output_tokens" : 128000,
-    "model" : "gpt-5.4-nano",
-    "reasoning" : {
-      "effort" : "none",
-      "summary" : "auto"
-    },
+    "model" : "gpt-5.5",
     "stream" : true,
     "tools" : [ {
       "description" : "Current weather for a city",
@@ -1020,7 +760,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.5 MEDIUM tools" : {
+  "gpt-5.5 medium summary tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1081,7 +821,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.5 NONE tools" : {
+  "gpt-5.6 absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1120,11 +860,7 @@
     } ],
     "instructions" : "You are a precise assistant.",
     "max_output_tokens" : 128000,
-    "model" : "gpt-5.5",
-    "reasoning" : {
-      "effort" : "none",
-      "summary" : "auto"
-    },
+    "model" : "gpt-5.6",
     "stream" : true,
     "tools" : [ {
       "description" : "Current weather for a city",
@@ -1142,7 +878,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.6 MEDIUM tools" : {
+  "gpt-5.6 medium summary tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1203,7 +939,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.6 NONE tools" : {
+  "gpt-5.6-luna absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1242,11 +978,7 @@
     } ],
     "instructions" : "You are a precise assistant.",
     "max_output_tokens" : 128000,
-    "model" : "gpt-5.6",
-    "reasoning" : {
-      "effort" : "none",
-      "summary" : "auto"
-    },
+    "model" : "gpt-5.6-luna",
     "stream" : true,
     "tools" : [ {
       "description" : "Current weather for a city",
@@ -1264,7 +996,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.6-luna MEDIUM tools" : {
+  "gpt-5.6-luna medium summary tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1325,7 +1057,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.6-luna NONE tools" : {
+  "gpt-5.6-sol absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1364,11 +1096,7 @@
     } ],
     "instructions" : "You are a precise assistant.",
     "max_output_tokens" : 128000,
-    "model" : "gpt-5.6-luna",
-    "reasoning" : {
-      "effort" : "none",
-      "summary" : "auto"
-    },
+    "model" : "gpt-5.6-sol",
     "stream" : true,
     "tools" : [ {
       "description" : "Current weather for a city",
@@ -1386,7 +1114,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.6-sol MEDIUM tools" : {
+  "gpt-5.6-sol medium summary tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1447,7 +1175,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.6-sol NONE tools" : {
+  "gpt-5.6-terra absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1486,11 +1214,7 @@
     } ],
     "instructions" : "You are a precise assistant.",
     "max_output_tokens" : 128000,
-    "model" : "gpt-5.6-sol",
-    "reasoning" : {
-      "effort" : "none",
-      "summary" : "auto"
-    },
+    "model" : "gpt-5.6-terra",
     "stream" : true,
     "tools" : [ {
       "description" : "Current weather for a city",
@@ -1508,7 +1232,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.6-terra MEDIUM tools" : {
+  "gpt-5.6-terra medium summary tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1569,7 +1293,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-5.6-terra NONE tools" : {
+  "gpt-6-astra absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1608,11 +1332,7 @@
     } ],
     "instructions" : "You are a precise assistant.",
     "max_output_tokens" : 128000,
-    "model" : "gpt-5.6-terra",
-    "reasoning" : {
-      "effort" : "none",
-      "summary" : "auto"
-    },
+    "model" : "gpt-6-astra",
     "stream" : true,
     "tools" : [ {
       "description" : "Current weather for a city",
@@ -1630,7 +1350,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-6-astra MEDIUM tools" : {
+  "gpt-6-astra medium summary tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1691,7 +1411,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-6-astra NONE tools" : {
+  "gpt-6-luna absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1730,11 +1450,7 @@
     } ],
     "instructions" : "You are a precise assistant.",
     "max_output_tokens" : 128000,
-    "model" : "gpt-6-astra",
-    "reasoning" : {
-      "effort" : "low",
-      "summary" : "auto"
-    },
+    "model" : "gpt-6-luna",
     "stream" : true,
     "tools" : [ {
       "description" : "Current weather for a city",
@@ -1752,7 +1468,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-6-luna MEDIUM tools" : {
+  "gpt-6-luna medium summary tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1813,7 +1529,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-6-luna NONE tools" : {
+  "gpt-6-sol absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1852,11 +1568,7 @@
     } ],
     "instructions" : "You are a precise assistant.",
     "max_output_tokens" : 128000,
-    "model" : "gpt-6-luna",
-    "reasoning" : {
-      "effort" : "none",
-      "summary" : "auto"
-    },
+    "model" : "gpt-6-sol",
     "stream" : true,
     "tools" : [ {
       "description" : "Current weather for a city",
@@ -1874,7 +1586,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-6-sol MEDIUM tools" : {
+  "gpt-6-sol medium summary tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1935,7 +1647,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-6-sol NONE tools" : {
+  "gpt-6.1-sol absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -1974,11 +1686,7 @@
     } ],
     "instructions" : "You are a precise assistant.",
     "max_output_tokens" : 128000,
-    "model" : "gpt-6-sol",
-    "reasoning" : {
-      "effort" : "none",
-      "summary" : "auto"
-    },
+    "model" : "gpt-6.1-sol",
     "stream" : true,
     "tools" : [ {
       "description" : "Current weather for a city",
@@ -1996,7 +1704,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-6.1-sol MEDIUM tools" : {
+  "gpt-6.1-sol medium summary tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -2057,129 +1765,7 @@
       "type" : "function"
     } ]
   },
-  "gpt-6.1-sol NONE tools" : {
-    "input" : [ {
-      "content" : [ {
-        "image_url" : "data:image/png;base64,iVBORw==",
-        "type" : "input_image"
-      }, {
-        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
-        "type" : "input_text"
-      } ],
-      "role" : "user",
-      "type" : "message"
-    }, {
-      "content" : [ {
-        "text" : "Let me check both cities.",
-        "type" : "output_text"
-      } ],
-      "role" : "assistant",
-      "type" : "message"
-    }, {
-      "arguments" : "{\"city\":\"Paris\"}",
-      "call_id" : "call_1",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "arguments" : "{\"city\":\"Rome\"}",
-      "call_id" : "call_2",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "call_id" : "call_1",
-      "output" : "18C and sunny",
-      "type" : "function_call_output"
-    }, {
-      "call_id" : "call_2",
-      "output" : "22C and cloudy",
-      "type" : "function_call_output"
-    } ],
-    "instructions" : "You are a precise assistant.",
-    "max_output_tokens" : 128000,
-    "model" : "gpt-6.1-sol",
-    "reasoning" : {
-      "effort" : "low",
-      "summary" : "auto"
-    },
-    "stream" : true,
-    "tools" : [ {
-      "description" : "Current weather for a city",
-      "name" : "weather",
-      "parameters" : {
-        "properties" : {
-          "city" : {
-            "description" : "The city name",
-            "type" : "string"
-          }
-        },
-        "required" : [ "city" ],
-        "type" : "object"
-      },
-      "type" : "function"
-    } ]
-  },
-  "o3 MEDIUM tools" : {
-    "input" : [ {
-      "content" : [ {
-        "image_url" : "data:image/png;base64,iVBORw==",
-        "type" : "input_image"
-      }, {
-        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
-        "type" : "input_text"
-      } ],
-      "role" : "user",
-      "type" : "message"
-    }, {
-      "content" : [ {
-        "text" : "Let me check both cities.",
-        "type" : "output_text"
-      } ],
-      "role" : "assistant",
-      "type" : "message"
-    }, {
-      "arguments" : "{\"city\":\"Paris\"}",
-      "call_id" : "call_1",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "arguments" : "{\"city\":\"Rome\"}",
-      "call_id" : "call_2",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "call_id" : "call_1",
-      "output" : "18C and sunny",
-      "type" : "function_call_output"
-    }, {
-      "call_id" : "call_2",
-      "output" : "22C and cloudy",
-      "type" : "function_call_output"
-    } ],
-    "instructions" : "You are a precise assistant.",
-    "max_output_tokens" : 100000,
-    "model" : "o3",
-    "reasoning" : {
-      "effort" : "medium",
-      "summary" : "auto"
-    },
-    "stream" : true,
-    "tools" : [ {
-      "description" : "Current weather for a city",
-      "name" : "weather",
-      "parameters" : {
-        "properties" : {
-          "city" : {
-            "description" : "The city name",
-            "type" : "string"
-          }
-        },
-        "required" : [ "city" ],
-        "type" : "object"
-      },
-      "type" : "function"
-    } ]
-  },
-  "o3 NONE tools" : {
+  "o3 absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -2236,68 +1822,7 @@
       "type" : "function"
     } ]
   },
-  "o4-mini MEDIUM tools" : {
-    "input" : [ {
-      "content" : [ {
-        "image_url" : "data:image/png;base64,iVBORw==",
-        "type" : "input_image"
-      }, {
-        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
-        "type" : "input_text"
-      } ],
-      "role" : "user",
-      "type" : "message"
-    }, {
-      "content" : [ {
-        "text" : "Let me check both cities.",
-        "type" : "output_text"
-      } ],
-      "role" : "assistant",
-      "type" : "message"
-    }, {
-      "arguments" : "{\"city\":\"Paris\"}",
-      "call_id" : "call_1",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "arguments" : "{\"city\":\"Rome\"}",
-      "call_id" : "call_2",
-      "name" : "weather",
-      "type" : "function_call"
-    }, {
-      "call_id" : "call_1",
-      "output" : "18C and sunny",
-      "type" : "function_call_output"
-    }, {
-      "call_id" : "call_2",
-      "output" : "22C and cloudy",
-      "type" : "function_call_output"
-    } ],
-    "instructions" : "You are a precise assistant.",
-    "max_output_tokens" : 100000,
-    "model" : "o4-mini",
-    "reasoning" : {
-      "effort" : "medium",
-      "summary" : "auto"
-    },
-    "stream" : true,
-    "tools" : [ {
-      "description" : "Current weather for a city",
-      "name" : "weather",
-      "parameters" : {
-        "properties" : {
-          "city" : {
-            "description" : "The city name",
-            "type" : "string"
-          }
-        },
-        "required" : [ "city" ],
-        "type" : "object"
-      },
-      "type" : "function"
-    } ]
-  },
-  "o4-mini NONE tools" : {
+  "o4-mini absent tools" : {
     "input" : [ {
       "content" : [ {
         "image_url" : "data:image/png;base64,iVBORw==",
@@ -2395,7 +1920,7 @@
     "max_output_tokens" : 128000,
     "model" : "gpt-5.6",
     "reasoning" : {
-      "effort" : "low",
+      "effort" : "medium",
       "summary" : "auto"
     },
     "stream" : true,
@@ -2458,7 +1983,7 @@
     "max_output_tokens" : 128000,
     "model" : "gpt-5.6",
     "reasoning" : {
-      "effort" : "low",
+      "effort" : "medium",
       "summary" : "auto"
     },
     "stream" : true,

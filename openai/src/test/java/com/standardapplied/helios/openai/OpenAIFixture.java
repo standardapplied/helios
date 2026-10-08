@@ -5,7 +5,6 @@ package com.standardapplied.helios.openai;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
-import com.standardapplied.helios.core.model.ThinkingLevel;
 import com.standardapplied.helios.openai.api.ResponsesRequest;
 import java.util.List;
 
@@ -31,9 +30,9 @@ final class OpenAIFixture {
     return requests(OpenAIModelId.GPT_4O, ModelConfig.newBuilder().withApiKey("test-key").build());
   }
 
-  /** The request for a one-message conversation with {@code modelId} thinking at {@code level}. */
-  static ResponsesRequest requestFor(OpenAIModelId modelId, ThinkingLevel level) {
-    var config = ModelConfig.newBuilder().withApiKey("test-key").withThinkingLevel(level).build();
-    return requests(modelId, config).build(List.of(Message.user("Hi")), List.of(), null);
+  /** The request for a one-message conversation with {@code wireModelId} under {@code config}. */
+  static ResponsesRequest requestFor(String wireModelId, ModelConfig config) {
+    return new OpenAIRequestBuilder(wireModelId, OpenAIModelId.fromId(wireModelId), config)
+        .build(List.of(Message.user("Hi")), List.of(), null);
   }
 }

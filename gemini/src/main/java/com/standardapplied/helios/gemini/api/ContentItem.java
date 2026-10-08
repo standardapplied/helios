@@ -16,10 +16,11 @@ import tools.jackson.databind.annotation.JsonDeserialize;
  * <p>Goes inside {@code step.content[]} on {@code user_input} and {@code model_output} steps, and
  * inside {@code step.summary[]} on {@code thought} steps. Doubles as the carrier for {@code
  * step.delta} payloads on the streaming side, where the delta union includes inline media plus the
- * lightweight {@code thought_signature} delta that ships only a {@link #signature()} byte string.
+ * lightweight {@code thought_signature} delta that ships only a {@link #signature()} byte string
+ * and the {@code thought_summary} delta that nests its text in {@link #content()}.
  *
  * <p>Spec discriminator values: {@code text}, {@code image}, {@code audio}, {@code document},
- * {@code video}, and (delta-only) {@code thought_signature}.
+ * {@code video}, and (delta-only) {@code thought_signature} and {@code thought_summary}.
  *
  * @param type the content discriminator
  * @param text the text body (for {@code text})
@@ -40,6 +41,7 @@ import tools.jackson.databind.annotation.JsonDeserialize;
  *     materialised), accumulated into a buffer and parsed once the step completes; and a complete
  *     JSON <em>object</em> on a {@code google_search_call} delta, re-serialized to its compact JSON
  *     string form
+ * @param content the summary text item of a {@code thought_summary} streaming delta
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ContentItem(
@@ -50,18 +52,19 @@ public record ContentItem(
     String uri,
     String signature,
     List<OutputAnnotation> annotations,
-    @JsonDeserialize(using = RawArgumentsDeserializer.class) String arguments) {
+    @JsonDeserialize(using = RawArgumentsDeserializer.class) String arguments,
+    ContentItem content) {
 
   public static ContentItem text(String text) {
-    return new ContentItem("text", text, null, null, null, null, null, null);
+    return new ContentItem("text", text, null, null, null, null, null, null, null);
   }
 
   public static ContentItem inlineData(String type, String mimeType, String base64Data) {
-    return new ContentItem(type, null, mimeType, base64Data, null, null, null, null);
+    return new ContentItem(type, null, mimeType, base64Data, null, null, null, null, null);
   }
 
   public static ContentItem fileUri(String type, String mimeType, String uri) {
-    return new ContentItem(type, null, mimeType, null, uri, null, null, null);
+    return new ContentItem(type, null, mimeType, null, uri, null, null, null, null);
   }
 
   public boolean hasTypeText() {

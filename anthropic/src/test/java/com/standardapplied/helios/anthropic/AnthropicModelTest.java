@@ -22,7 +22,7 @@ class AnthropicModelTest extends BoundedErrorBodyContract {
 
   private static HttpRequest httpRequest(ModelConfig config) {
     try (var client = HttpClient.newHttpClient()) {
-      return new AnthropicStreams(config, client).httpRequest("{}");
+      return new AnthropicStreams(config, client, List.of()).httpRequest("{}");
     }
   }
 
