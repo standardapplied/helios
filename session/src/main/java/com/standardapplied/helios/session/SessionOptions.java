@@ -66,14 +66,12 @@ import java.util.Optional;
  *     schema rides every model turn via the provider's native structured-output channel — Gemini
  *     {@code response_format.schema}, OpenAI {@code text.format=json_schema}, Anthropic {@code
  *     system_instruction} text. The schema is dormant on tool-calling turns and activates on
- *     text-output turns, so the model produces conforming JSON exactly when it produces text.
- *     Sessions whose terminal answer is a tool-call payload (e.g. {@code CodeActPreset.withSubLm}
- *     with an in-sandbox {@code submit(...)} flow) leave this field empty and carry their schema on
- *     the tool itself. The post-hoc validator inside {@link AgentSession#runBlocking(UserMessage,
- *     OutputSchema)} takes its schema per-call and is independent of this field
+ *     text-output turns, so the model produces conforming JSON exactly when it produces text. The
+ *     post-hoc validator inside {@link AgentSession#runBlocking(UserMessage, OutputSchema)} takes
+ *     its schema per-call and is independent of this field
  * @param systemPrompt optional system-role message prepended to the conversation history before the
- *     first user message. Presets (CodeAct, RLM, custom) supply their strategy text here so the
- *     agent loop carries it to every model turn through the standard system-role channel
+ *     first user message. Presets supply their strategy text here so the agent loop carries it to
+ *     every model turn through the standard system-role channel
  * @param tokenCounter estimates running history's token footprint after each model turn. When usage
  *     crosses {@code 0.85} of {@link SessionLimits#maxContextTokens()}, the loop emits a {@link
  *     QueryEvent.ContextWarning ContextWarning}; the same counter is used to detect the 0.95
@@ -389,9 +387,8 @@ public record SessionOptions(
      * conversation history before the first user message, so every model turn sees the prompt
      * through the standard system-role channel.
      *
-     * <p>Presets ({@code CodeActPreset.typed}, {@code CodeActPreset.withSubLm}, custom presets)
-     * supply their strategy text here. Stacking presets that both set a system prompt is "later
-     * wins" — for layered behaviour, build the combined prompt externally and set it once.
+     * <p>Presets supply their strategy text here. Stacking presets that both set a system prompt is
+     * "later wins" — for layered behaviour, build the combined prompt externally and set it once.
      *
      * @param systemPrompt nullable / blank-tolerant prompt text
      * @return this builder

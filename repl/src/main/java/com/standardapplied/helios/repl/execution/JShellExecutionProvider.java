@@ -358,9 +358,8 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
 
     /**
      * A JShell snippet executed once on every new sandbox, immediately after {@link
-     * ReplSession#create} returns. Use this to install input bindings, custom prelude declarations,
-     * or any other per-session JShell state the agent should see before its first {@code
-     * execute_code} call.
+     * ReplSession#create} returns. Use this to install custom declarations or any other per-session
+     * JShell state the agent should see before its first {@code Execute} call.
      *
      * <p>If the snippet fails (non-zero exit or thrown exception) the session start is refused with
      * {@link SessionStartOutcome#refuse(String)}, the partially-spawned sandbox is closed, and the

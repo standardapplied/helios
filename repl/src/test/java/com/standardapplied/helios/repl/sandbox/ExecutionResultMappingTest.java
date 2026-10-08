@@ -26,7 +26,7 @@ class ExecutionResultMappingTest {
   @Test
   void executeRequestCarriesTheCodeTimeoutAndBindingLimits() throws Exception {
     try (var fake = new FakeSandboxProcess()) {
-      fake.answerNext(reply("", "", 0, null, Map.of()));
+      fake.answerNext(reply("", "", 0, Map.of()));
 
       fake.sandbox()
           .execute(
@@ -75,7 +75,7 @@ class ExecutionResultMappingTest {
     bindings.put("$1", "500");
     bindings.put("__truncated__", "(snapshot exceeded 16384 chars; remaining vars dropped)");
 
-    var result = execute(reply("500\n", "", 0, null, bindings));
+    var result = execute(reply("500\n", "", 0, bindings));
 
     assertEquals(
         new ExecutionResult(
@@ -83,7 +83,6 @@ class ExecutionResultMappingTest {
             "500\n",
             "",
             0,
-            null,
             Map.of(
                 "big", "xxxxxxxx... (len=500)",
                 "$1", "500",
@@ -96,35 +95,28 @@ class ExecutionResultMappingTest {
   void thrownException() throws Exception {
     var stderr = "java.lang.IllegalStateException: boom\n\tat .(#1:1)\n";
 
-    var result = execute(reply("", stderr, 1, null, Map.of()));
+    var result = execute(reply("", stderr, 1, Map.of()));
 
-    assertEquals(new ExecutionResult(CODE, "", stderr, 1, null, Map.of(), Duration.ZERO), result);
+    assertEquals(new ExecutionResult(CODE, "", stderr, 1, Map.of(), Duration.ZERO), result);
   }
 
   @Test
   void compileError() throws Exception {
     var stderr = "incompatible types: java.lang.String cannot be converted to int\n";
 
-    var result = execute(reply("", stderr, 1, null, Map.of("ok", "1")));
+    var result = execute(reply("", stderr, 1, Map.of("ok", "1")));
 
     assertEquals(
-        new ExecutionResult(CODE, "", stderr, 1, null, Map.of("ok", "1"), Duration.ZERO), result);
+        new ExecutionResult(CODE, "", stderr, 1, Map.of("ok", "1"), Duration.ZERO), result);
   }
 
   @Test
   void timeoutWithOutputBeforeIt() throws Exception {
-    var result =
-        execute(reply("started\n", "Execution timed out\n", 1, null, Map.of()), "captured line");
+    var result = execute(reply("started\n", "Execution timed out\n", 1, Map.of()), "captured line");
 
     assertEquals(
         new ExecutionResult(
-            CODE,
-            "captured line\nstarted\n",
-            "Execution timed out\n",
-            1,
-            null,
-            Map.of(),
-            Duration.ZERO),
+            CODE, "captured line\nstarted\n", "Execution timed out\n", 1, Map.of(), Duration.ZERO),
         result);
   }
 
@@ -134,29 +126,23 @@ class ExecutionResultMappingTest {
         "SandboxPolicyException: denied java/lang/ProcessBuilder.<init>"
             + " (rule=deniedClasses:java.lang.ProcessBuilder)\n";
 
-    var result = execute(reply("", stderr, 0, null, Map.of()));
+    var result = execute(reply("", stderr, 0, Map.of()));
 
-    assertEquals(new ExecutionResult(CODE, "", stderr, 0, null, Map.of(), Duration.ZERO), result);
+    assertEquals(new ExecutionResult(CODE, "", stderr, 0, Map.of(), Duration.ZERO), result);
   }
 
   @Test
-  void submittedValueAndBindingValuesThatAreNotStrings() throws Exception {
+  void bindingValuesThatAreNotStrings() throws Exception {
     var bindings = new LinkedHashMap<String, Object>();
     bindings.put("n", 5);
     bindings.put("nothing", null);
     bindings.put("list", List.of(1, 2));
 
-    var result = execute(reply("", "", 0, Map.of("answer", 42), bindings));
+    var result = execute(reply("", "", 0, bindings));
 
     assertEquals(
         new ExecutionResult(
-            CODE,
-            "",
-            "",
-            0,
-            Map.of("answer", 42),
-            Map.of("n", "5", "nothing", "null", "list", "[1, 2]"),
-            Duration.ZERO),
+            CODE, "", "", 0, Map.of("n", "5", "nothing", "null", "list", "[1, 2]"), Duration.ZERO),
         result);
   }
 
@@ -168,24 +154,22 @@ class ExecutionResultMappingTest {
 
     var result = ExecutionReplies.toExecutionResult(CODE, Map.of("bindings", bindings), "");
 
-    assertEquals(
-        new ExecutionResult(CODE, "", "", 0, null, Map.of("kept", "2"), Duration.ZERO), result);
+    assertEquals(new ExecutionResult(CODE, "", "", 0, Map.of("kept", "2"), Duration.ZERO), result);
   }
 
   @Test
   void replyWithoutTheBootstrapsFields() throws Exception {
     var result = execute(Map.of("unexpected", true));
 
-    assertEquals(new ExecutionResult(CODE, "", "", 0, null, Map.of(), Duration.ZERO), result);
+    assertEquals(new ExecutionResult(CODE, "", "", 0, Map.of(), Duration.ZERO), result);
   }
 
   @Test
   void replyThatIsNotAMap() throws Exception {
     assertEquals(
-        new ExecutionResult(CODE, "[1, 2]", "", 0, null, Map.of(), Duration.ZERO),
+        new ExecutionResult(CODE, "[1, 2]", "", 0, Map.of(), Duration.ZERO),
         execute(List.of(1, 2)));
-    assertEquals(
-        new ExecutionResult(CODE, "null", "", 0, null, Map.of(), Duration.ZERO), execute(null));
+    assertEquals(new ExecutionResult(CODE, "null", "", 0, Map.of(), Duration.ZERO), execute(null));
   }
 
   @Test
@@ -199,13 +183,7 @@ class ExecutionResultMappingTest {
 
       assertEquals(
           new ExecutionResult(
-              CODE,
-              "partial output",
-              "Remote error [-32603]: eval crashed",
-              1,
-              null,
-              Map.of(),
-              null),
+              CODE, "partial output", "Remote error [-32603]: eval crashed", 1, Map.of(), null),
           result);
     }
   }
@@ -218,12 +196,11 @@ class ExecutionResultMappingTest {
   }
 
   private static Map<String, Object> reply(
-      String stdout, String stderr, int exitCode, Object submitted, Map<String, ?> bindings) {
+      String stdout, String stderr, int exitCode, Map<String, ?> bindings) {
     var reply = new LinkedHashMap<String, Object>();
     reply.put("stdout", stdout);
     reply.put("stderr", stderr);
     reply.put("exitCode", exitCode);
-    reply.put("submitted", submitted);
     reply.put("bindings", bindings);
     return reply;
   }

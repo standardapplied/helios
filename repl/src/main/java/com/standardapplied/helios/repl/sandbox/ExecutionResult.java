@@ -20,7 +20,6 @@ import java.util.Map;
  * @param stdout captured standard output
  * @param stderr captured standard error
  * @param exitCode the exit code (0 = success)
- * @param submitted the value passed to {@code submit()}, or {@code null} if not called
  * @param bindings post-execute snapshot of every user-declared {@code var} in the sandbox, mapped
  *     to a length-capped {@code toString} repr. Excludes harness-internal {@code __}-prefixed
  *     names. Empty (not {@code null}) when no bindings were captured (sandbox not configured to
@@ -28,16 +27,13 @@ import java.util.Map;
  *     live observers can watch the agent's working memory across iterations. Kept in the given
  *     order, the sandbox's declaration order; a null name or repr is rejected
  * @param duration wall-clock time the sandbox spent on this execute, measured around {@link
- *     Sandbox#execute}. {@link Duration#ZERO} when not measured. Used by the {@code
- *     CodeExecutionTool} budget header to give the model {@code last_exec=...} visibility — the
- *     empirical lever Prime Intellect cites for letting the model self-regulate inefficient code
+ *     Sandbox#execute}. {@link Duration#ZERO} when not measured
  */
 public record ExecutionResult(
     String executedCode,
     String stdout,
     String stderr,
     int exitCode,
-    Object submitted,
     Map<String, String> bindings,
     Duration duration) {
 
@@ -63,8 +59,7 @@ public record ExecutionResult(
    * the value the sandbox returned.
    */
   public ExecutionResult withDuration(Duration duration) {
-    return new ExecutionResult(
-        executedCode, stdout, stderr, exitCode, submitted, bindings, duration);
+    return new ExecutionResult(executedCode, stdout, stderr, exitCode, bindings, duration);
   }
 
   /** Whether the execution completed successfully (exit code 0). */
@@ -72,19 +67,9 @@ public record ExecutionResult(
     return exitCode == 0;
   }
 
-  /** Whether a value was submitted via the submit() host function. */
-  public boolean hasSubmittedValue() {
-    return submitted != null;
-  }
-
   /** Create a successful result with stdout only. */
   public static ExecutionResult success(String stdout) {
     return newBuilder().withStdout(stdout).build();
-  }
-
-  /** Create a successful result with stdout and a submitted value. */
-  public static ExecutionResult success(String stdout, Object submitted) {
-    return newBuilder().withStdout(stdout).withSubmitted(submitted).build();
   }
 
   /** Create a failure result with stderr. */
@@ -106,7 +91,6 @@ public record ExecutionResult(
     private String stdout = "";
     private String stderr = "";
     private int exitCode;
-    private Object submitted;
     private Map<String, String> bindings = Map.of();
     private Duration duration = Duration.ZERO;
 
@@ -132,11 +116,6 @@ public record ExecutionResult(
       return this;
     }
 
-    public Builder withSubmitted(Object submitted) {
-      this.submitted = submitted;
-      return this;
-    }
-
     public Builder withBindings(Map<String, String> bindings) {
       this.bindings = bindings == null ? Map.of() : bindings;
       return this;
@@ -148,8 +127,7 @@ public record ExecutionResult(
     }
 
     public ExecutionResult build() {
-      return new ExecutionResult(
-          executedCode, stdout, stderr, exitCode, submitted, bindings, duration);
+      return new ExecutionResult(executedCode, stdout, stderr, exitCode, bindings, duration);
     }
   }
 }

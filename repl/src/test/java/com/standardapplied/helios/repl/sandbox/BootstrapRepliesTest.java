@@ -33,7 +33,7 @@ class BootstrapRepliesTest {
   }
 
   @Test
-  void executeIsAnsweredWithItsOutputExitCodeSubmissionAndBindings() {
+  void executeIsAnsweredWithItsOutputExitCodeAndBindings() {
     env.feedLine(
         "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"execute\",\"params\":{\"code\":\"var x = 6"
             + " * 7; System.out.println(x);\",\"timeoutMs\":"
@@ -43,7 +43,7 @@ class BootstrapRepliesTest {
     assertEquals(
         PREFIX
             + "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"stdout\":\"42\\n\",\"stderr\":\"\","
-            + "\"exitCode\":0,\"submitted\":null,\"bindings\":{\"x\":\"42\"}}}",
+            + "\"exitCode\":0,\"bindings\":{\"x\":\"42\"}}}",
         env.nextLine());
   }
 
@@ -59,7 +59,7 @@ class BootstrapRepliesTest {
         PREFIX
             + "{\"jsonrpc\":\"2.0\",\"id\":\"2\",\"result\":{\"stdout\":\"\",\"stderr\":"
             + "\"incompatible types: java.lang.String cannot be converted to int\\n\","
-            + "\"exitCode\":1,\"submitted\":null}}",
+            + "\"exitCode\":1}}",
         env.nextLine());
   }
 

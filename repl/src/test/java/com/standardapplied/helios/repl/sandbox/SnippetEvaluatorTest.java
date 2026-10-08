@@ -167,7 +167,7 @@ class SnippetEvaluatorTest {
                       .handleExecute(
                           Map.of(
                               "code",
-                              "predict(\"hold\", \"the eval thread\");",
+                              "__call(\"hold\", null);",
                               "timeoutMs",
                               BEYOND_HANG_GUARD_MS,
                               "captureBindings",

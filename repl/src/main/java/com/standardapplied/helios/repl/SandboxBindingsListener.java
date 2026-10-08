@@ -9,7 +9,7 @@ import com.standardapplied.helios.repl.sandbox.ExecutionResult;
 import java.util.Map;
 
 /**
- * Observer for the sandbox's working-memory state after each {@code execute_code} call.
+ * Observer for the sandbox's working-memory state after each {@code Execute} call.
  *
  * <p>Where {@code EventSink} (in helios-core) gives lifecycle events at the agent-loop level, this
  * listener gives REPL-specific structural state: every user-declared {@code var} in the sandbox at
@@ -21,8 +21,8 @@ import java.util.Map;
  *
  * <p>The bindings come from a {@link jdk.jshell.JShell#variables()} sweep on the sandbox side,
  * filtered to exclude harness-internal {@code __}-prefixed names and capped per-value (default 200
- * chars) and per-snapshot (default 16 KB) so a single 50KB {@code predict()} result doesn't blow
- * the protocol or your listener.
+ * chars) and per-snapshot (default 16 KB) so a single 50KB value doesn't blow the protocol or your
+ * listener.
  *
  * <p>Listener contract: must be cheap and non-blocking — fires synchronously after every execute.
  * Exceptions are caught and ignored so a misbehaving listener doesn't break the run.
@@ -33,13 +33,13 @@ import java.util.Map;
 public interface SandboxBindingsListener {
 
   /**
-   * Called after each {@code execute_code} completes, with the bindings snapshot pulled from the
+   * Called after each {@code Execute} completes, with the bindings snapshot pulled from the
    * sandbox.
    *
    * @param bindings post-execute snapshot of user-declared sandbox variables; never {@code null},
    *     may be empty when nothing has been bound yet
-   * @param result the full execution result (stdout, stderr, exit code, submitted value); useful
-   *     for correlating bindings with the code that produced them
+   * @param result the full execution result (stdout, stderr, exit code); useful for correlating
+   *     bindings with the code that produced them
    */
   void onBindings(Map<String, String> bindings, ExecutionResult result);
 }
