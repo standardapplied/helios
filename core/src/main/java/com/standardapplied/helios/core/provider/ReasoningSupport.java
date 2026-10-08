@@ -8,6 +8,7 @@ import com.standardapplied.helios.core.model.Reasoning.Level;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -31,6 +32,8 @@ public record ReasoningSupport(boolean off, Set<Level> levels, Set<Display> disp
    * @throws NullPointerException if {@code levels} or {@code displays} is null
    */
   public ReasoningSupport {
+    Objects.requireNonNull(levels, "levels must not be null");
+    Objects.requireNonNull(displays, "displays must not be null");
     levels = Collections.unmodifiableSet(copy(levels, Level.class));
     displays = Collections.unmodifiableSet(copy(displays, Display.class));
   }

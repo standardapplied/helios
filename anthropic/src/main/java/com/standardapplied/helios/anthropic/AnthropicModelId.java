@@ -69,14 +69,11 @@ public enum AnthropicModelId {
     /** Never: either one is rejected whenever it is set, with or without reasoning. */
     REJECTED,
 
-    /** Either one, never both together. */
-    ONE_OF,
-
     /**
      * Either one, never both together; alongside {@code Reasoning.Effort} {@code temperature} is
      * rejected and {@code top_p} must lie between 0.95 and 1 inclusive.
      */
-    ONE_OF_WITHOUT_EFFORT,
+    ONE_OF,
 
     /** Whatever is set is sent: the API judges a model the catalogue does not know. */
     UNCHECKED
@@ -108,7 +105,7 @@ public enum AnthropicModelId {
         Off.OMITTED,
         EnumSet.of(Level.LOW, Level.MEDIUM, Level.HIGH, Level.MAX),
         Display.SUMMARY,
-        Sampling.ONE_OF_WITHOUT_EFFORT),
+        Sampling.ONE_OF),
 
     /** Takes no effort (Haiku 4.5). */
     WITHOUT_EFFORT(Off.OMITTED, EnumSet.noneOf(Level.class), Display.SUMMARY, Sampling.ONE_OF),
