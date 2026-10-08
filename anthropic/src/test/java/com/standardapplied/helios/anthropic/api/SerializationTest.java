@@ -58,45 +58,22 @@ class SerializationTest {
   }
 
   @Test
-  void serializeLegacyThinkingShape() throws Exception {
-    // Opus 4.6 / Sonnet 4.6: thinking.type=enabled with budget_tokens. No output_config.
-    var request =
-        MessagesRequest.newBuilder()
-            .withModel("claude-opus-4-6")
-            .withMaxTokens(4096)
-            .withMessages(List.of(MessagesRequest.MessageEntry.user("Hello")))
-            .withThinking(ThinkingConfig.enabled(10000))
-            .build();
-    var json = objectMapper.writeValueAsString(request);
-    assertTrue(
-        json.contains("\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":10000}"),
-        "legacy shape, got:\n" + json);
-    assertFalse(json.contains("output_config"), "no output_config for legacy shape");
-  }
-
-  @Test
   void serializeAdaptiveThinkingShape() throws Exception {
-    // Opus 4.7+: thinking.type=adaptive WITHOUT budget_tokens, output_config.effort sibling.
-    // display=summarized is pinned by ThinkingConfig.adaptive() so callers continue to receive
-    // ThinkingDelta events — Anthropic's own default flipped to "omitted" on Opus 4.7.
     var request =
         MessagesRequest.newBuilder()
             .withModel("claude-opus-4-7")
             .withMaxTokens(4096)
             .withMessages(List.of(MessagesRequest.MessageEntry.user("Hello")))
-            .withThinking(ThinkingConfig.adaptive())
-            .withOutputConfig(OutputConfig.MEDIUM)
+            .withThinking(ThinkingConfig.adaptive("summarized"))
+            .withOutputConfig(new OutputConfig("medium"))
             .build();
     var json = objectMapper.writeValueAsString(request);
     assertTrue(
         json.contains("\"thinking\":{\"type\":\"adaptive\",\"display\":\"summarized\"}"),
-        "adaptive shape with explicit summarized display, got:\n" + json);
+        "adaptive shape with its display, got:\n" + json);
     assertTrue(
         json.contains("\"output_config\":{\"effort\":\"medium\"}"),
         "output_config sibling carries effort, got:\n" + json);
-    assertFalse(
-        json.contains("budget_tokens"),
-        "adaptive shape must NOT include budget_tokens — Opus 4.7 rejects it");
   }
 
   @Test
@@ -207,19 +184,10 @@ class SerializationTest {
   }
 
   @Test
-  void serializeThinkingEnabled() throws Exception {
-    var thinking = ThinkingConfig.enabled(10000);
-    var json = objectMapper.writeValueAsString(thinking);
-    assertTrue(json.contains("\"type\":\"enabled\""));
-    assertTrue(json.contains("\"budget_tokens\":10000"));
-  }
-
-  @Test
   void serializeThinkingDisabled() throws Exception {
     var thinking = ThinkingConfig.disabled();
     var json = objectMapper.writeValueAsString(thinking);
-    assertTrue(json.contains("\"type\":\"disabled\""));
-    assertFalse(json.contains("\"budget_tokens\""));
+    assertEquals("{\"type\":\"disabled\"}", json);
   }
 
   @Test
@@ -512,23 +480,6 @@ class SerializationTest {
 
     assertEquals("signature_delta", delta.type());
     assertEquals("EqoB123abc", delta.signature());
-  }
-
-  @Test
-  void serializeRequestWithThinking() throws Exception {
-    var request =
-        MessagesRequest.newBuilder()
-            .withModel("claude-sonnet-4-6-20250514")
-            .withMaxTokens(16000)
-            .withMessages(List.of(MessagesRequest.MessageEntry.user("Think hard")))
-            .withThinking(ThinkingConfig.enabled(10000))
-            .withStream(true)
-            .build();
-
-    var json = objectMapper.writeValueAsString(request);
-    assertTrue(json.contains("\"thinking\""));
-    assertTrue(json.contains("\"type\":\"enabled\""));
-    assertTrue(json.contains("\"budget_tokens\":10000"));
   }
 
   @Test

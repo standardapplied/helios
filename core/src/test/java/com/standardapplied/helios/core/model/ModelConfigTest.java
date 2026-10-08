@@ -15,6 +15,7 @@ import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class ModelConfigTest {
@@ -24,7 +25,7 @@ class ModelConfigTest {
     var config = ModelConfig.of("test-api-key");
 
     assertEquals("test-api-key", config.apiKey());
-    assertEquals(ThinkingLevel.NONE, config.thinkingLevel());
+    assertEquals(Optional.empty(), config.reasoning());
     assertEquals(Duration.ofSeconds(10), config.connectTimeout());
     assertEquals(Duration.ofSeconds(60), config.responseTimeout());
   }
@@ -34,13 +35,15 @@ class ModelConfigTest {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("my-api-key")
-            .withThinkingLevel(ThinkingLevel.HIGH)
+            .withReasoning(new Reasoning.Effort(Reasoning.Level.HIGH, Reasoning.Display.SUMMARY))
             .withConnectTimeout(Duration.ofSeconds(30))
             .withResponseTimeout(Duration.ofMinutes(2))
             .build();
 
     assertEquals("my-api-key", config.apiKey());
-    assertEquals(ThinkingLevel.HIGH, config.thinkingLevel());
+    assertEquals(
+        Optional.of(new Reasoning.Effort(Reasoning.Level.HIGH, Reasoning.Display.SUMMARY)),
+        config.reasoning());
     assertEquals(Duration.ofSeconds(30), config.connectTimeout());
     assertEquals(Duration.ofMinutes(2), config.responseTimeout());
   }
@@ -50,7 +53,7 @@ class ModelConfigTest {
     var config = ModelConfig.newBuilder().withApiKey("key").build();
 
     assertEquals("key", config.apiKey());
-    assertEquals(ThinkingLevel.NONE, config.thinkingLevel());
+    assertEquals(Optional.empty(), config.reasoning());
     assertEquals(Duration.ofSeconds(10), config.connectTimeout());
     assertEquals(Duration.ofSeconds(60), config.responseTimeout());
     assertTrue(config.providerContinuation());
@@ -85,11 +88,51 @@ class ModelConfigTest {
   @Test
   void builderPartialOverride() {
     var config =
-        ModelConfig.newBuilder().withApiKey("key").withThinkingLevel(ThinkingLevel.MEDIUM).build();
+        ModelConfig.newBuilder().withApiKey("key").withReasoning(new Reasoning.Off()).build();
 
-    assertEquals(ThinkingLevel.MEDIUM, config.thinkingLevel());
+    assertEquals(Optional.of(new Reasoning.Off()), config.reasoning());
     assertEquals(Duration.ofSeconds(10), config.connectTimeout());
     assertEquals(Duration.ofSeconds(60), config.responseTimeout());
+  }
+
+  @Test
+  void aNullReasoningClearsTheReasoningAndANullComponentIsEmpty() {
+    var cleared =
+        ModelConfig.newBuilder(ModelConfig.newBuilder().withReasoning(new Reasoning.Off()).build())
+            .withReasoning(null)
+            .build();
+    var canonical =
+        new ModelConfig(
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            false,
+            false,
+            null,
+            null,
+            null,
+            null,
+            true,
+            null,
+            RawOutputCapturePolicy.ENABLED);
+
+    assertEquals(Optional.empty(), cleared.reasoning());
+    assertEquals(Optional.empty(), canonical.reasoning());
+  }
+
+  @Test
+  void anEffortNeedsALevelAndADisplay() {
+    assertThrows(
+        NullPointerException.class, () -> new Reasoning.Effort(null, Reasoning.Display.HIDDEN));
+    assertThrows(NullPointerException.class, () -> new Reasoning.Effort(Reasoning.Level.LOW, null));
   }
 
   @Test
@@ -124,7 +167,7 @@ class ModelConfigTest {
     var original =
         ModelConfig.newBuilder()
             .withApiKey("key")
-            .withThinkingLevel(ThinkingLevel.HIGH)
+            .withReasoning(new Reasoning.Effort(Reasoning.Level.HIGH, Reasoning.Display.SUMMARY))
             .withTemperature(0.5)
             .withMaxOutputTokens(512)
             .build();
@@ -132,7 +175,9 @@ class ModelConfigTest {
     var copy = ModelConfig.newBuilder(original).withTemperature(0.9).build();
 
     assertEquals("key", copy.apiKey());
-    assertEquals(ThinkingLevel.HIGH, copy.thinkingLevel());
+    assertEquals(
+        Optional.of(new Reasoning.Effort(Reasoning.Level.HIGH, Reasoning.Display.SUMMARY)),
+        copy.reasoning());
     assertEquals(0.9, copy.temperature());
     assertEquals(512, copy.maxOutputTokens());
   }

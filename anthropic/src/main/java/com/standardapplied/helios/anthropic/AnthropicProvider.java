@@ -25,8 +25,9 @@ import com.standardapplied.helios.core.provider.StreamingModel;
  * <p>Curated {@link AnthropicModelId} values are recognised with full metadata. Beyond those, any
  * {@code modelId} starting with {@value AnthropicModelId#CLAUDE_ID_PREFIX} is accepted against the
  * default endpoint and passed verbatim as the {@code model} field, so a newly-released Claude can
- * be used before this provider's enum catches up; unrecognised ids fall back to adaptive thinking
- * and {@value AnthropicRequestBuilder#DEFAULT_MAX_OUTPUT_TOKENS} output tokens. When {@link
+ * be used before this provider's enum catches up; unrecognised ids accept every reasoning
+ * configuration, sent in the current adaptive shape, and {@value
+ * AnthropicRequestBuilder#DEFAULT_MAX_OUTPUT_TOKENS} output tokens. When {@link
  * ModelConfig#baseUrl()} is set — pointing at Bedrock, Vertex AI, or a compatible proxy — any
  * non-blank {@code modelId} is accepted regardless of prefix. Callers can always override output
  * tokens via {@link ModelConfig.Builder#withMaxOutputTokens(Integer)}.
@@ -91,7 +92,7 @@ public class AnthropicProvider implements ModelProvider {
     validate(wireModelId, config, cachePolicy);
     var requests = new AnthropicRequestBuilder(wireModelId, knownModel, config, cachePolicy);
     var httpClient = HttpClientFactory.create(config);
-    var streams = new AnthropicStreams(config, httpClient);
+    var streams = new AnthropicStreams(config, httpClient, requests.betas());
     var exchange =
         new ChatExchange<>(PROVIDER_NAME, "Anthropic API", streams::open, AnthropicException::new);
     return StreamingModel.<MessagesRequest>newBuilder()

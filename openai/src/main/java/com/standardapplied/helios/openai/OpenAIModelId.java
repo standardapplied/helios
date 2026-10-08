@@ -6,6 +6,11 @@
 package com.standardapplied.helios.openai;
 
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.Reasoning.Display;
+import com.standardapplied.helios.core.model.Reasoning.Level;
+import com.standardapplied.helios.core.provider.ReasoningSupport;
+import java.util.EnumSet;
+import java.util.Set;
 
 /**
  * Supported OpenAI model identifiers.
@@ -16,84 +21,155 @@ public enum OpenAIModelId {
   // maxOutputTokens reflects the documented per-model output ceiling at time of writing —
   // operators can override per-call via ModelConfig.Builder.withMaxOutputTokens. Reasoning models
   // (o3, o4-mini) carry higher caps because their output includes reasoning tokens.
-  //
-  // EffortSupport per model (model pages, 2026-10-01): gpt-6-astra and gpt-6.1-sol document
-  // low/medium/high/xhigh/max and reject none; gpt-6-sol, gpt-6-luna and the gpt-5.6 family (incl.
-  // sol/terra/luna) document none/low/medium/high/xhigh/max; gpt-5.5, gpt-5.4, gpt-5.4-mini and
-  // gpt-5.4-nano document none/low/medium/high/xhigh; o-series and non-reasoning GPT-4.x models are
-  // STANDARD (low..high, no explicit none), so higher tiers clamp.
-  GPT_6_ASTRA("gpt-6-astra", 1_050_000, 128_000, EffortSupport.FULL_WITHOUT_NONE),
-  GPT_6_1_SOL("gpt-6.1-sol", 1_050_000, 128_000, EffortSupport.FULL_WITHOUT_NONE),
-  GPT_6_SOL("gpt-6-sol", 1_050_000, 128_000, EffortSupport.FULL),
-  GPT_6_LUNA("gpt-6-luna", 1_050_000, 128_000, EffortSupport.FULL),
-  GPT_5_6("gpt-5.6", 1_050_000, 128_000, EffortSupport.FULL),
-  GPT_5_6_SOL("gpt-5.6-sol", 1_050_000, 128_000, EffortSupport.FULL),
-  GPT_5_6_TERRA("gpt-5.6-terra", 1_050_000, 128_000, EffortSupport.FULL),
-  GPT_5_6_LUNA("gpt-5.6-luna", 1_050_000, 128_000, EffortSupport.FULL),
-  GPT_5_5("gpt-5.5", 1_050_000, 128_000, EffortSupport.EXTENDED),
-  GPT_5_4("gpt-5.4", 1_050_000, 128_000, EffortSupport.EXTENDED),
-  GPT_5_4_MINI("gpt-5.4-mini", 400_000, 128_000, EffortSupport.EXTENDED),
-  GPT_5_4_NANO("gpt-5.4-nano", 400_000, 128_000, EffortSupport.EXTENDED),
-  GPT_4_1("gpt-4.1", 1_000_000, 32_000, EffortSupport.STANDARD),
-  GPT_4_1_MINI("gpt-4.1-mini", 1_000_000, 32_000, EffortSupport.STANDARD),
-  GPT_4_1_NANO("gpt-4.1-nano", 1_000_000, 16_000, EffortSupport.STANDARD),
-  GPT_4O("gpt-4o", 128_000, 16_384, EffortSupport.STANDARD),
-  GPT_4O_MINI("gpt-4o-mini", 128_000, 16_384, EffortSupport.STANDARD),
-  O3("o3", 200_000, 100_000, EffortSupport.STANDARD),
-  O4_MINI("o4-mini", 200_000, 100_000, EffortSupport.STANDARD);
+  // ReasoningRules per model (model pages and the reasoning, GPT-5.4 and GPT-6 guides, 2026-10-08):
+  // gpt-6-astra and gpt-6.1-sol take low..max and reject none; gpt-6-sol, gpt-6-luna and the
+  // gpt-5.6
+  // family take none..max; gpt-5.5 and the gpt-5.4 family take none..xhigh, gpt-5.4 defaulting to
+  // none; o-series take low..high; gpt-4.1 and gpt-4o do not reason. temperature / top_p ride only
+  // at effort none on the GPT-5.4+ reasoning models, never on o-series or gpt-6-astra/6.1-sol.
+  GPT_6_ASTRA("gpt-6-astra", 1_050_000, 128_000, ReasoningRules.ALWAYS_REASONS),
+  GPT_6_1_SOL("gpt-6.1-sol", 1_050_000, 128_000, ReasoningRules.ALWAYS_REASONS),
+  GPT_6_SOL("gpt-6-sol", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
+  GPT_6_LUNA("gpt-6-luna", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
+  GPT_5_6("gpt-5.6", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
+  GPT_5_6_SOL("gpt-5.6-sol", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
+  GPT_5_6_TERRA("gpt-5.6-terra", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
+  GPT_5_6_LUNA("gpt-5.6-luna", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
+  GPT_5_5("gpt-5.5", 1_050_000, 128_000, ReasoningRules.NONE_TO_XHIGH),
+  GPT_5_4("gpt-5.4", 1_050_000, 128_000, ReasoningRules.NONE_BY_DEFAULT_TO_XHIGH),
+  GPT_5_4_MINI("gpt-5.4-mini", 400_000, 128_000, ReasoningRules.NONE_BY_DEFAULT_TO_XHIGH),
+  GPT_5_4_NANO("gpt-5.4-nano", 400_000, 128_000, ReasoningRules.NONE_BY_DEFAULT_TO_XHIGH),
+  GPT_4_1("gpt-4.1", 1_000_000, 32_000, ReasoningRules.NOT_REASONING),
+  GPT_4_1_MINI("gpt-4.1-mini", 1_000_000, 32_000, ReasoningRules.NOT_REASONING),
+  GPT_4_1_NANO("gpt-4.1-nano", 1_000_000, 16_000, ReasoningRules.NOT_REASONING),
+  GPT_4O("gpt-4o", 128_000, 16_384, ReasoningRules.NOT_REASONING),
+  GPT_4O_MINI("gpt-4o-mini", 128_000, 16_384, ReasoningRules.NOT_REASONING),
+  O3("o3", 200_000, 100_000, ReasoningRules.LOW_TO_HIGH),
+  O4_MINI("o4-mini", 200_000, 100_000, ReasoningRules.LOW_TO_HIGH);
+
+  /** How a model is told to stop reasoning. */
+  public enum Off {
+    /** It cannot stop: {@code Reasoning.Off} is rejected. */
+    REJECTED,
+
+    /** The {@code reasoning} field is left out; the model does not reason. */
+    OMITTED,
+
+    /** {@code reasoning.effort=none}. */
+    NONE
+  }
+
+  /** When a model accepts {@code temperature} and {@code top_p}. */
+  public enum Sampling {
+    /** Always. */
+    ACCEPTED,
+
+    /** Only with {@code Reasoning.Off}, sent as effort {@code none}. */
+    WITH_OFF,
+
+    /** Unless {@code Reasoning.Effort} is set: the model's default effort is {@code none}. */
+    WITHOUT_EFFORT,
+
+    /** Never: either one is rejected whenever it is set. */
+    REJECTED,
+
+    /** Whatever is set is sent: the API judges a model the catalogue does not know. */
+    UNCHECKED
+  }
 
   /**
-   * The {@code reasoning.effort} value range a model accepts on the Responses API. {@link
-   * #STANDARD}, {@link #EXTENDED} and {@link #FULL} widen in that order; {@link #FULL_WITHOUT_NONE}
-   * is {@link #FULL} minus {@code none}.
+   * What a model accepts for reasoning and sampling, and how it is told to stop reasoning. An
+   * accepted {@code Reasoning.Effort} is sent as {@code reasoning.effort}, with {@code
+   * reasoning.summary=auto} when a summary is asked for.
    */
-  public enum EffortSupport {
-    /**
-     * {@code low} / {@code medium} / {@code high} only; higher Helios tiers clamp to high and
-     * {@code ThinkingLevel.NONE} omits the {@code reasoning} config.
-     */
-    STANDARD,
+  public enum ReasoningRules {
+    /** Always reasons (gpt-6-astra, gpt-6.1-sol). */
+    ALWAYS_REASONS(Off.REJECTED, Level.LOW, Level.MAX, Sampling.REJECTED),
+
+    /** {@code none} up to {@code max} (gpt-6-sol, gpt-6-luna, gpt-5.6 family). */
+    NONE_TO_MAX(Off.NONE, Level.LOW, Level.MAX, Sampling.WITH_OFF),
+
+    /** {@code none} up to {@code xhigh} (gpt-5.5). */
+    NONE_TO_XHIGH(Off.NONE, Level.LOW, Level.XHIGH, Sampling.WITH_OFF),
+
+    /** {@code none} up to {@code xhigh}, {@code none} by default (gpt-5.4 family). */
+    NONE_BY_DEFAULT_TO_XHIGH(Off.NONE, Level.LOW, Level.XHIGH, Sampling.WITHOUT_EFFORT),
+
+    /** {@code low} up to {@code high} (o-series). */
+    LOW_TO_HIGH(Off.REJECTED, Level.LOW, Level.HIGH, Sampling.REJECTED),
+
+    /** Does not reason (gpt-4.1, gpt-4o families). */
+    NOT_REASONING(Off.OMITTED, null, null, Sampling.ACCEPTED),
 
     /**
-     * {@code none} / {@code low} / {@code medium} / {@code high} / {@code xhigh} (gpt-5.4 and
-     * gpt-5.5 families); {@code ThinkingLevel.MAX} clamps to xhigh.
+     * A model the catalogue does not know: accepts every level and both displays the API can send,
+     * spelling off as {@code none}; the API judges what the model accepts.
      */
-    EXTENDED,
+    UNCATALOGUED(Off.NONE, Level.MINIMAL, Level.MAX, Sampling.UNCHECKED);
+
+    private final Off off;
+    private final ReasoningSupport support;
+    private final Sampling sampling;
+
+    ReasoningRules(Off off, Level lowest, Level highest, Sampling sampling) {
+      var reasons = lowest != null;
+      this.off = off;
+      this.support =
+          new ReasoningSupport(
+              off != Off.REJECTED,
+              reasons ? EnumSet.range(lowest, highest) : Set.of(),
+              reasons ? EnumSet.of(Display.HIDDEN, Display.SUMMARY) : Set.of());
+      this.sampling = sampling;
+    }
 
     /**
-     * Full range {@code none} / {@code low} / {@code medium} / {@code high} / {@code xhigh} /
-     * {@code max} (gpt-5.6 family, gpt-6-sol, gpt-6-luna).
+     * How the model is told to stop reasoning.
+     *
+     * @return the off spelling; {@link Off#REJECTED} when it cannot stop
      */
-    FULL,
+    public Off off() {
+      return off;
+    }
 
     /**
-     * {@code low} / {@code medium} / {@code high} / {@code xhigh} / {@code max}; {@code none}
-     * returns a 400 (gpt-6-astra, gpt-6.1-sol), so {@code ThinkingLevel.NONE} pins {@code low}, the
-     * lowest effort these models accept.
+     * The reasoning values the model accepts.
+     *
+     * @return the support
      */
-    FULL_WITHOUT_NONE
+    public ReasoningSupport support() {
+      return support;
+    }
+
+    /**
+     * When the model accepts {@code temperature} and {@code top_p}.
+     *
+     * @return the sampling rule
+     */
+    public Sampling sampling() {
+      return sampling;
+    }
   }
 
   private final String id;
   private final int contextWindow;
   private final int maxOutputTokens;
-  private final EffortSupport effortSupport;
+  private final ReasoningRules reasoning;
 
-  OpenAIModelId(String id, int contextWindow, int maxOutputTokens, EffortSupport effortSupport) {
+  OpenAIModelId(String id, int contextWindow, int maxOutputTokens, ReasoningRules reasoning) {
     this.id = id;
     this.contextWindow = contextWindow;
     this.maxOutputTokens = maxOutputTokens;
-    this.effortSupport = effortSupport;
+    this.reasoning = reasoning;
   }
 
   /**
-   * The {@code reasoning.effort} range this model accepts. Drives the {@code ThinkingLevel} → wire
-   * mapping: tiers above the model's ceiling clamp down so requests stay valid.
+   * What this model accepts for reasoning and sampling. Read only by the request builder, the one
+   * place that turns it into request fields.
    *
-   * @return the effort-support tier
+   * @return the rules; non-null
    */
-  public EffortSupport effortSupport() {
-    return effortSupport;
+  public ReasoningRules reasoning() {
+    return reasoning;
   }
 
   /**

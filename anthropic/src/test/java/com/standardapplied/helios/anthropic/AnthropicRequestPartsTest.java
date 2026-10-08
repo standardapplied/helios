@@ -3,17 +3,14 @@
 package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.anthropic.AnthropicModelId.ThinkingShape;
 import com.standardapplied.helios.anthropic.api.ContentBlock;
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.anthropic.api.SystemContent;
-import com.standardapplied.helios.anthropic.api.ThinkingConfig;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
@@ -29,20 +26,6 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class AnthropicRequestPartsTest {
-
-  @Test
-  void anUnsetThinkingLevelIsTheShapesLowestSetting() {
-    assertEquals(
-        ThinkingConfig.disabled(),
-        AnthropicThinking.of(ThinkingShape.ADAPTIVE_DEFAULT_ON, null, "m").thinking());
-  }
-
-  @Test
-  void onlyAThinkingConfigOtherThanDisabledThinks() {
-    assertFalse(new AnthropicThinking(null, null).thinks());
-    assertFalse(new AnthropicThinking(ThinkingConfig.disabled(), null).thinks());
-    assertTrue(new AnthropicThinking(ThinkingConfig.adaptive(), null).thinks());
-  }
 
   @Test
   void anAssistantTurnWithoutMetadataOrTextSendsItsToolCalls() {
@@ -253,7 +236,7 @@ class AnthropicRequestPartsTest {
 
   private static HttpRequest httpRequest(ModelConfig config) {
     try (var client = HttpClient.newHttpClient()) {
-      return new AnthropicStreams(config, client).httpRequest("{}");
+      return new AnthropicStreams(config, client, List.of()).httpRequest("{}");
     }
   }
 }

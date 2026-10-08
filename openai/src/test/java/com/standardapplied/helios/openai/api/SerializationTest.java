@@ -194,7 +194,7 @@ class SerializationTest {
         ResponsesRequest.newBuilder()
             .withModel("o3")
             .withInput(List.of(InputItem.userMessage("Think hard")))
-            .withReasoning(ResponsesRequest.ReasoningConfig.of("high"))
+            .withReasoning(new ResponsesRequest.ReasoningConfig("high", "auto"))
             .withStream(true)
             .build();
 
@@ -456,7 +456,7 @@ class SerializationTest {
 
   @Test
   void reasoningConfigSerialization() throws Exception {
-    var config = ResponsesRequest.ReasoningConfig.of("medium");
+    var config = new ResponsesRequest.ReasoningConfig("medium", "auto");
     var json = objectMapper.writeValueAsString(config);
     assertTrue(json.contains("\"effort\":\"medium\""));
     assertTrue(json.contains("\"summary\":\"auto\""));
@@ -464,7 +464,7 @@ class SerializationTest {
 
   @Test
   void reasoningSummaryIsJsonStringNotObject() throws Exception {
-    var config = ResponsesRequest.ReasoningConfig.of("high");
+    var config = new ResponsesRequest.ReasoningConfig("high", "auto");
     var json = objectMapper.writeValueAsString(config);
     assertFalse(
         json.contains("\"summary\":{"),
@@ -502,7 +502,7 @@ class SerializationTest {
             .withText(
                 new ResponsesRequest.TextConfig(
                     TextFormatConfig.jsonSchema("output", Map.of("type", "object"), true)))
-            .withReasoning(ResponsesRequest.ReasoningConfig.of("low"))
+            .withReasoning(new ResponsesRequest.ReasoningConfig("low", "auto"))
             .build();
 
     assertEquals("gpt-4o", request.model());

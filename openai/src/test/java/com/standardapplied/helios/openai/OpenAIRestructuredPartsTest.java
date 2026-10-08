@@ -13,10 +13,8 @@ import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.StreamEvent;
-import com.standardapplied.helios.core.model.ThinkingLevel;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.ConversationFixture;
-import com.standardapplied.helios.openai.OpenAIModelId.EffortSupport;
 import com.standardapplied.helios.openai.api.ApiUsage;
 import java.util.List;
 import java.util.Map;
@@ -81,7 +79,7 @@ class OpenAIRestructuredPartsTest {
   }
 
   @Test
-  void anUnrecognisedModelIsStandardWithoutKnownLimits() {
+  void anUnrecognisedModelHasNoKnownLimitsAndNoDefaultReasoning() {
     var config = ModelConfig.newBuilder().withApiKey("k").withBaseUrl("http://127.0.0.1:1").build();
     var model = new OpenAIProvider().create("gpt-next", config);
 
@@ -93,13 +91,6 @@ class OpenAIRestructuredPartsTest {
     assertEquals(0, request.maxOutputTokens());
     assertEquals(0, model.contextWindow());
     assertEquals(0, model.maxOutputTokens());
-  }
-
-  @Test
-  void anUnsetReasoningLevelIsTheModelsLowestEffort() {
-    assertEquals("none", OpenAIReasoning.of(EffortSupport.FULL, null).effort());
-    assertEquals("low", OpenAIReasoning.of(EffortSupport.FULL_WITHOUT_NONE, null).effort());
-    assertNull(OpenAIReasoning.of(EffortSupport.STANDARD, ThinkingLevel.NONE));
   }
 
   @Test
