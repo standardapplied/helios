@@ -75,15 +75,7 @@ final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
       AnthropicModelId knownModel,
       ModelConfig config,
       CachePolicy cachePolicy) {
-    if (knownModel != null
-        && !knownModel.acceptsForcedToolChoice()
-        && AnthropicTools.forces(config.toolChoice())) {
-      throw new IllegalArgumentException(
-          "Model "
-              + wireModelId
-              + " rejects forced tool use (tool_choice any/required); use ToolChoice.auto() and"
-              + " instruct the model in the prompt, or a structured OutputSchema.");
-    }
+    rejectForcedToolChoice(wireModelId, knownModel, config);
     var rules = knownModel != null ? knownModel.reasoning() : ReasoningRules.UNCATALOGUED;
     rules.support().require(wireModelId, config.reasoning());
     requireSampling(wireModelId, rules.sampling(), config);
@@ -93,10 +85,7 @@ final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
         knownModel != null ? knownModel.maxOutputTokens() : DEFAULT_MAX_OUTPUT_TOKENS;
     this.config = config;
     this.cachePolicy = cachePolicy;
-    this.thinking =
-        effort != null
-            ? ThinkingConfig.adaptive(DISPLAY.get(effort.display()))
-            : config.reasoning().map(_ -> OFF.get(rules.off())).orElse(null);
+    this.thinking = thinking(rules, config.reasoning().orElse(null));
     this.outputConfig =
         effort != null ? new OutputConfig(effort.level().name().toLowerCase(Locale.ROOT)) : null;
     this.betas =
@@ -139,6 +128,28 @@ final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
             .withOutputConfig(outputConfig);
     PromptCache.apply(cachePolicy, request, system, toolDefinitions, conversation.entries());
     return request.build();
+  }
+
+  private static void rejectForcedToolChoice(
+      String wireModelId, AnthropicModelId knownModel, ModelConfig config) {
+    if (knownModel != null
+        && !knownModel.acceptsForcedToolChoice()
+        && AnthropicTools.forces(config.toolChoice())) {
+      throw new IllegalArgumentException(
+          "Model "
+              + wireModelId
+              + " rejects forced tool use (tool_choice any/required); use ToolChoice.auto() and"
+              + " instruct the model in the prompt, or a structured OutputSchema.");
+    }
+  }
+
+  /** The {@code thinking} field for an accepted {@code reasoning}; null leaves it out. */
+  private static ThinkingConfig thinking(ReasoningRules rules, Reasoning reasoning) {
+    return switch (reasoning) {
+      case null -> null;
+      case Reasoning.Off _ -> OFF.get(rules.off());
+      case Reasoning.Effort e -> ThinkingConfig.adaptive(DISPLAY.get(e.display()));
+    };
   }
 
   /**
