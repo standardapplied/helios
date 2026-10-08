@@ -24,6 +24,7 @@ import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.StreamEvent;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Named;
@@ -204,6 +205,32 @@ class StreamedStepsTest {
     assertEquals("Checking the arithmetic.", done.response().thinking());
   }
 
+  @Test
+  void eachSummaryDeltaAddsAnItemAfterTheSummaryAThoughtStartsWith() {
+    var thoughtStart =
+        stepStart(
+            0, "{\"type\":\"thought\",\"summary\":[{\"type\":\"text\",\"text\":\"First.\"}]}");
+    var second =
+        stepDelta(
+            0,
+            "{\"type\":\"thought_summary\",\"content\":{\"type\":\"text\",\"text\":\"Second.\"}}");
+    var third =
+        stepDelta(
+            0,
+            "{\"type\":\"thought_summary\",\"content\":{\"type\":\"text\",\"text\":\"Third.\"}}");
+
+    var events = drain(thoughtStart + second + third + stepStop(0) + TEXT_FLOW);
+
+    assertEquals(
+        List.of("Second.", "Third."),
+        events.stream()
+            .filter(StreamEvent.ThinkingDelta.class::isInstance)
+            .map(event -> ((StreamEvent.ThinkingDelta) event).text())
+            .toList());
+    assertEquals(
+        "First.\nSecond.\nThird.", ((StreamEvent.Done) events.getLast()).response().thinking());
+  }
+
   @ParameterizedTest
   @MethodSource("summaryDeltasWithoutText")
   void aThoughtSummaryDeltaWithoutTextIsIgnored(String delta) {
@@ -212,6 +239,7 @@ class StreamedStepsTest {
             stepStart(0, "{\"type\":\"thought\"}") + stepDelta(0, delta) + stepStop(0) + TEXT_FLOW);
 
     assertTrue(events.stream().noneMatch(StreamEvent.ThinkingDelta.class::isInstance));
+    assertTrue(events.stream().noneMatch(StreamEvent.Error.class::isInstance));
     assertNull(((StreamEvent.Done) events.getLast()).response().thinking());
   }
 
@@ -221,6 +249,9 @@ class StreamedStepsTest {
         named(
             "non-text content",
             "{\"type\":\"thought_summary\",\"content\":{\"type\":\"image\",\"data\":\"x\"}}"),
+        named(
+            "non-text content carrying text",
+            "{\"type\":\"thought_summary\",\"content\":{\"type\":\"image\",\"text\":\"alt\"}}"),
         named(
             "content without text",
             "{\"type\":\"thought_summary\",\"content\":{\"type\":\"text\"}}"));
