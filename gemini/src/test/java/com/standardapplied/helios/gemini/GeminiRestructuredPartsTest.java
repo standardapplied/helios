@@ -208,6 +208,6 @@ class GeminiRestructuredPartsTest {
   }
 
   private static ContentItem item(String type, String text, String arguments) {
-    return new ContentItem(type, text, null, null, null, null, null, arguments);
+    return new ContentItem(type, text, null, null, null, null, null, arguments, null);
   }
 }

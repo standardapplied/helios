@@ -173,6 +173,60 @@ class StreamedStepsTest {
   }
 
   @Test
+  void thoughtSummaryDeltaTextStreamsAsThinking() {
+    var thoughtStart = stepStart(0, "{\"type\":\"thought\"}");
+    var summary =
+        stepDelta(
+            0,
+            "{\"type\":\"thought_summary\","
+                + "\"content\":{\"type\":\"text\",\"text\":\"Checking the arithmetic.\"}}");
+    var signature = stepDelta(0, "{\"type\":\"thought_signature\",\"signature\":\"sig\"}");
+
+    var events = drain(thoughtStart + summary + signature + stepStop(0) + TEXT_FLOW);
+
+    assertEquals(
+        "Checking the arithmetic.",
+        events.stream()
+            .filter(StreamEvent.ThinkingDelta.class::isInstance)
+            .map(StreamEvent.ThinkingDelta.class::cast)
+            .findFirst()
+            .orElseThrow()
+            .text());
+    var complete =
+        events.stream()
+            .filter(StreamEvent.ThinkingComplete.class::isInstance)
+            .map(StreamEvent.ThinkingComplete.class::cast)
+            .findFirst()
+            .orElseThrow();
+    assertEquals("Checking the arithmetic.", complete.fullThinking());
+    assertEquals("sig", complete.signature());
+    var done = (StreamEvent.Done) events.getLast();
+    assertEquals("Checking the arithmetic.", done.response().thinking());
+  }
+
+  @ParameterizedTest
+  @MethodSource("summaryDeltasWithoutText")
+  void aThoughtSummaryDeltaWithoutTextIsIgnored(String delta) {
+    var events =
+        drain(
+            stepStart(0, "{\"type\":\"thought\"}") + stepDelta(0, delta) + stepStop(0) + TEXT_FLOW);
+
+    assertTrue(events.stream().noneMatch(StreamEvent.ThinkingDelta.class::isInstance));
+    assertNull(((StreamEvent.Done) events.getLast()).response().thinking());
+  }
+
+  static Stream<Named<String>> summaryDeltasWithoutText() {
+    return Stream.of(
+        named("no content", "{\"type\":\"thought_summary\"}"),
+        named(
+            "non-text content",
+            "{\"type\":\"thought_summary\",\"content\":{\"type\":\"image\",\"data\":\"x\"}}"),
+        named(
+            "content without text",
+            "{\"type\":\"thought_summary\",\"content\":{\"type\":\"text\"}}"));
+  }
+
+  @Test
   void thoughtWithNoSignatureFieldStillCapturesSummary() {
     var thought = "{\"type\":\"thought\",\"summary\":[{\"type\":\"text\",\"text\":\"inner\"}]}";
     var sse =
