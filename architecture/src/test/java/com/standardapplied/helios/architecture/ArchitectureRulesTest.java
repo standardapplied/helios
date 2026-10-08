@@ -7,6 +7,7 @@ import static com.tngtech.archunit.core.domain.JavaAccess.Predicates.origin;
 import static com.tngtech.archunit.core.domain.JavaAccess.Predicates.target;
 import static com.tngtech.archunit.core.domain.JavaAccess.Predicates.targetOwner;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.assignableTo;
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.belongTo;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.simpleName;
@@ -90,6 +91,26 @@ class ArchitectureRulesTest {
 
   /** The one class that swaps the JVM-global standard streams: the sandbox's snippet evaluator. */
   private static final String STREAM_SWAPPER = HELIOS + ".repl.sandbox.SnippetEvaluator";
+
+  private static final String REASONING_SUPPORT = HELIOS + ".core.provider.ReasoningSupport";
+
+  /**
+   * Each provider's model catalogue, the core type it declares reasoning in, and its one reader.
+   */
+  private static final Set<String> REASONING_DECLARATIONS_AND_READERS =
+      Set.of(
+          HELIOS + ".anthropic.AnthropicModelId",
+          HELIOS + ".anthropic.AnthropicRequestBuilder",
+          HELIOS + ".openai.OpenAIModelId",
+          HELIOS + ".openai.OpenAIRequestBuilder",
+          HELIOS + ".gemini.GeminiModelId",
+          HELIOS + ".gemini.GeminiRequestBuilder",
+          REASONING_SUPPORT);
+
+  private static final DescribedPredicate<JavaClass> A_REASONING_DECLARATION_OR_ITS_READER =
+      describe(
+          "a model catalogue, ReasoningSupport or a request builder",
+          type -> REASONING_DECLARATIONS_AND_READERS.contains(type.getName()));
 
   private static final String TIME_SEAM =
       "a class that needs the time takes a java.time.InstantSource through withClock(...) and"
@@ -323,14 +344,17 @@ class ArchitectureRulesTest {
             .and(target(name("reasoning")))
             .or(
                 targetOwner(simpleName("ReasoningRules"))
-                    .and(target(name("off").or(name("support")).or(name("sampling")))));
+                    .and(target(name("off").or(name("support")).or(name("sampling")))))
+            .or(
+                targetOwner(name(REASONING_SUPPORT))
+                    .and(
+                        target(
+                            name("require")
+                                .or(name("off"))
+                                .or(name("levels"))
+                                .or(name("displays")))));
     noClasses()
-        .that()
-        .haveSimpleNameNotEndingWith("RequestBuilder")
-        .and()
-        .haveSimpleNameNotEndingWith("ModelId")
-        .and()
-        .doNotHaveSimpleName("ReasoningRules")
+        .that(not(belongTo(A_REASONING_DECLARATION_OR_ITS_READER)))
         .should()
         .accessTargetWhere(declaration)
         .because(
