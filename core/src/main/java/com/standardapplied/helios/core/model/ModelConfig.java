@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Configuration for model providers.
@@ -21,7 +22,8 @@ import java.util.Objects;
  * parameters.
  *
  * @param apiKey the API key for authentication
- * @param thinkingLevel level of reasoning trace to include in responses
+ * @param reasoning what the model is asked to do about reasoning; empty sends no reasoning field
+ *     and leaves the provider's defaults in force. Never null
  * @param connectTimeout maximum time to establish HTTP connection
  * @param responseTimeout maximum time to wait for HTTP response headers
  * @param temperature controls randomness (0.0 = deterministic, 2.0 = very random)
@@ -75,7 +77,7 @@ import java.util.Objects;
  */
 public record ModelConfig(
     String apiKey,
-    ThinkingLevel thinkingLevel,
+    Optional<Reasoning> reasoning,
     Duration connectTimeout,
     Duration responseTimeout,
     Double temperature,
@@ -96,8 +98,18 @@ public record ModelConfig(
     RawOutputCapturePolicy rawOutputCapturePolicy) {
 
   public ModelConfig {
+    reasoning = reasoning == null ? Optional.empty() : reasoning;
     headers = headers == null ? Map.of() : Map.copyOf(headers);
     Objects.requireNonNull(rawOutputCapturePolicy, "rawOutputCapturePolicy must not be null");
+    requireFinite("temperature", temperature);
+    requireFinite("topP", topP);
+  }
+
+  /** A NaN or infinite value would reach the wire as a string no provider accepts. */
+  private static void requireFinite(String parameter, Double value) {
+    if (value != null && !Double.isFinite(value)) {
+      throw new IllegalArgumentException(parameter + " must be a finite number, got " + value);
+    }
   }
 
   /**
@@ -112,7 +124,7 @@ public record ModelConfig(
   public String toString() {
     var sb = new StringBuilder("ModelConfig[");
     sb.append("apiKey=").append(apiKey == null ? "null" : "<redacted>");
-    sb.append(", thinkingLevel=").append(thinkingLevel);
+    sb.append(", reasoning=").append(reasoning);
     sb.append(", connectTimeout=").append(connectTimeout);
     sb.append(", responseTimeout=").append(responseTimeout);
     sb.append(", temperature=").append(temperature);
@@ -201,7 +213,7 @@ public record ModelConfig(
 
   public static class Builder {
     private String apiKey;
-    private ThinkingLevel thinkingLevel = ThinkingLevel.NONE;
+    private Reasoning reasoning;
     private Duration connectTimeout = DEFAULT_CONNECT_TIMEOUT;
     private Duration responseTimeout = DEFAULT_RESPONSE_TIMEOUT;
     private Double temperature;
@@ -225,7 +237,7 @@ public record ModelConfig(
 
     private Builder(ModelConfig config) {
       this.apiKey = config.apiKey;
-      this.thinkingLevel = config.thinkingLevel;
+      this.reasoning = config.reasoning.orElse(null);
       this.connectTimeout = config.connectTimeout;
       this.responseTimeout = config.responseTimeout;
       this.temperature = config.temperature;
@@ -251,8 +263,12 @@ public record ModelConfig(
       return this;
     }
 
-    public Builder withThinkingLevel(ThinkingLevel thinkingLevel) {
-      this.thinkingLevel = thinkingLevel;
+    /**
+     * Ask the model to reason as {@code reasoning} states; {@code null} (the default) sends no
+     * reasoning field. See {@link ModelConfig#reasoning()}.
+     */
+    public Builder withReasoning(Reasoning reasoning) {
+      this.reasoning = reasoning;
       return this;
     }
 
@@ -398,7 +414,7 @@ public record ModelConfig(
     public ModelConfig build() {
       return new ModelConfig(
           apiKey,
-          thinkingLevel,
+          Optional.ofNullable(reasoning),
           connectTimeout,
           responseTimeout,
           temperature,

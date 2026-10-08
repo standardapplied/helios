@@ -170,7 +170,91 @@
       "name" : "weather"
     } ]
   },
-  "claude-fable-5 MEDIUM tools" : {
+  "claude-fable-5 absent tools" : {
+    "max_tokens" : 128000,
+    "messages" : [ {
+      "content" : [ {
+        "source" : {
+          "data" : "iVBORw==",
+          "media_type" : "image/png",
+          "type" : "base64"
+        },
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "role" : "user"
+    }, {
+      "content" : [ {
+        "signature" : "sig-1",
+        "thinking" : "Two cities, two calls.",
+        "type" : "thinking"
+      }, {
+        "text" : "Let me check both cities.",
+        "type" : "text"
+      }, {
+        "id" : "call_1",
+        "input" : {
+          "city" : "Paris"
+        },
+        "name" : "weather",
+        "type" : "tool_use"
+      }, {
+        "cache_control" : {
+          "type" : "ephemeral"
+        },
+        "id" : "call_2",
+        "input" : {
+          "city" : "Rome"
+        },
+        "name" : "weather",
+        "type" : "tool_use"
+      } ],
+      "role" : "assistant"
+    }, {
+      "content" : [ {
+        "content" : "18C and sunny",
+        "tool_use_id" : "call_1",
+        "type" : "tool_result"
+      }, {
+        "cache_control" : {
+          "type" : "ephemeral"
+        },
+        "content" : "22C and cloudy",
+        "tool_use_id" : "call_2",
+        "type" : "tool_result"
+      } ],
+      "role" : "user"
+    } ],
+    "model" : "claude-fable-5",
+    "stream" : true,
+    "system" : [ {
+      "cache_control" : {
+        "type" : "ephemeral"
+      },
+      "text" : "You are a precise assistant.",
+      "type" : "text"
+    } ],
+    "tools" : [ {
+      "cache_control" : {
+        "type" : "ephemeral"
+      },
+      "description" : "Current weather for a city",
+      "input_schema" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "name" : "weather"
+    } ]
+  },
+  "claude-fable-5 medium summary tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -261,7 +345,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-fable-5 NONE tools" : {
+  "claude-fable-5-1 absent tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -318,7 +402,7 @@
       } ],
       "role" : "user"
     } ],
-    "model" : "claude-fable-5",
+    "model" : "claude-fable-5-1",
     "stream" : true,
     "system" : [ {
       "cache_control" : {
@@ -345,7 +429,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-fable-5-1 MEDIUM tools" : {
+  "claude-fable-5-1 medium summary tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -436,7 +520,91 @@
       "name" : "weather"
     } ]
   },
-  "claude-fable-5-1 NONE tools" : {
+  "claude-haiku-4-5 absent tools" : {
+    "max_tokens" : 64000,
+    "messages" : [ {
+      "content" : [ {
+        "source" : {
+          "data" : "iVBORw==",
+          "media_type" : "image/png",
+          "type" : "base64"
+        },
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "role" : "user"
+    }, {
+      "content" : [ {
+        "signature" : "sig-1",
+        "thinking" : "Two cities, two calls.",
+        "type" : "thinking"
+      }, {
+        "text" : "Let me check both cities.",
+        "type" : "text"
+      }, {
+        "id" : "call_1",
+        "input" : {
+          "city" : "Paris"
+        },
+        "name" : "weather",
+        "type" : "tool_use"
+      }, {
+        "cache_control" : {
+          "type" : "ephemeral"
+        },
+        "id" : "call_2",
+        "input" : {
+          "city" : "Rome"
+        },
+        "name" : "weather",
+        "type" : "tool_use"
+      } ],
+      "role" : "assistant"
+    }, {
+      "content" : [ {
+        "content" : "18C and sunny",
+        "tool_use_id" : "call_1",
+        "type" : "tool_result"
+      }, {
+        "cache_control" : {
+          "type" : "ephemeral"
+        },
+        "content" : "22C and cloudy",
+        "tool_use_id" : "call_2",
+        "type" : "tool_result"
+      } ],
+      "role" : "user"
+    } ],
+    "model" : "claude-haiku-4-5",
+    "stream" : true,
+    "system" : [ {
+      "cache_control" : {
+        "type" : "ephemeral"
+      },
+      "text" : "You are a precise assistant.",
+      "type" : "text"
+    } ],
+    "tools" : [ {
+      "cache_control" : {
+        "type" : "ephemeral"
+      },
+      "description" : "Current weather for a city",
+      "input_schema" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "name" : "weather"
+    } ]
+  },
+  "claude-mythos-5 absent tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -493,7 +661,7 @@
       } ],
       "role" : "user"
     } ],
-    "model" : "claude-fable-5-1",
+    "model" : "claude-mythos-5",
     "stream" : true,
     "system" : [ {
       "cache_control" : {
@@ -520,179 +688,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-haiku-4-5 MEDIUM tools" : {
-    "max_tokens" : 64000,
-    "messages" : [ {
-      "content" : [ {
-        "source" : {
-          "data" : "iVBORw==",
-          "media_type" : "image/png",
-          "type" : "base64"
-        },
-        "type" : "image"
-      }, {
-        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
-        "type" : "text"
-      } ],
-      "role" : "user"
-    }, {
-      "content" : [ {
-        "signature" : "sig-1",
-        "thinking" : "Two cities, two calls.",
-        "type" : "thinking"
-      }, {
-        "text" : "Let me check both cities.",
-        "type" : "text"
-      }, {
-        "id" : "call_1",
-        "input" : {
-          "city" : "Paris"
-        },
-        "name" : "weather",
-        "type" : "tool_use"
-      }, {
-        "cache_control" : {
-          "type" : "ephemeral"
-        },
-        "id" : "call_2",
-        "input" : {
-          "city" : "Rome"
-        },
-        "name" : "weather",
-        "type" : "tool_use"
-      } ],
-      "role" : "assistant"
-    }, {
-      "content" : [ {
-        "content" : "18C and sunny",
-        "tool_use_id" : "call_1",
-        "type" : "tool_result"
-      }, {
-        "cache_control" : {
-          "type" : "ephemeral"
-        },
-        "content" : "22C and cloudy",
-        "tool_use_id" : "call_2",
-        "type" : "tool_result"
-      } ],
-      "role" : "user"
-    } ],
-    "model" : "claude-haiku-4-5",
-    "stream" : true,
-    "system" : [ {
-      "cache_control" : {
-        "type" : "ephemeral"
-      },
-      "text" : "You are a precise assistant.",
-      "type" : "text"
-    } ],
-    "thinking" : {
-      "budget_tokens" : 10000,
-      "type" : "enabled"
-    },
-    "tools" : [ {
-      "cache_control" : {
-        "type" : "ephemeral"
-      },
-      "description" : "Current weather for a city",
-      "input_schema" : {
-        "properties" : {
-          "city" : {
-            "description" : "The city name",
-            "type" : "string"
-          }
-        },
-        "required" : [ "city" ],
-        "type" : "object"
-      },
-      "name" : "weather"
-    } ]
-  },
-  "claude-haiku-4-5 NONE tools" : {
-    "max_tokens" : 64000,
-    "messages" : [ {
-      "content" : [ {
-        "source" : {
-          "data" : "iVBORw==",
-          "media_type" : "image/png",
-          "type" : "base64"
-        },
-        "type" : "image"
-      }, {
-        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
-        "type" : "text"
-      } ],
-      "role" : "user"
-    }, {
-      "content" : [ {
-        "signature" : "sig-1",
-        "thinking" : "Two cities, two calls.",
-        "type" : "thinking"
-      }, {
-        "text" : "Let me check both cities.",
-        "type" : "text"
-      }, {
-        "id" : "call_1",
-        "input" : {
-          "city" : "Paris"
-        },
-        "name" : "weather",
-        "type" : "tool_use"
-      }, {
-        "cache_control" : {
-          "type" : "ephemeral"
-        },
-        "id" : "call_2",
-        "input" : {
-          "city" : "Rome"
-        },
-        "name" : "weather",
-        "type" : "tool_use"
-      } ],
-      "role" : "assistant"
-    }, {
-      "content" : [ {
-        "content" : "18C and sunny",
-        "tool_use_id" : "call_1",
-        "type" : "tool_result"
-      }, {
-        "cache_control" : {
-          "type" : "ephemeral"
-        },
-        "content" : "22C and cloudy",
-        "tool_use_id" : "call_2",
-        "type" : "tool_result"
-      } ],
-      "role" : "user"
-    } ],
-    "model" : "claude-haiku-4-5",
-    "stream" : true,
-    "system" : [ {
-      "cache_control" : {
-        "type" : "ephemeral"
-      },
-      "text" : "You are a precise assistant.",
-      "type" : "text"
-    } ],
-    "tools" : [ {
-      "cache_control" : {
-        "type" : "ephemeral"
-      },
-      "description" : "Current weather for a city",
-      "input_schema" : {
-        "properties" : {
-          "city" : {
-            "description" : "The city name",
-            "type" : "string"
-          }
-        },
-        "required" : [ "city" ],
-        "type" : "object"
-      },
-      "name" : "weather"
-    } ]
-  },
-  "claude-mythos-5 MEDIUM tools" : {
+  "claude-mythos-5 medium summary tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -783,7 +779,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-mythos-5 NONE tools" : {
+  "claude-mythos-5-1 absent tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -840,7 +836,7 @@
       } ],
       "role" : "user"
     } ],
-    "model" : "claude-mythos-5",
+    "model" : "claude-mythos-5-1",
     "stream" : true,
     "system" : [ {
       "cache_control" : {
@@ -867,7 +863,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-mythos-5-1 MEDIUM tools" : {
+  "claude-mythos-5-1 medium summary tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -958,7 +954,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-mythos-5-1 NONE tools" : {
+  "claude-opus-4-6 absent tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -1015,7 +1011,7 @@
       } ],
       "role" : "user"
     } ],
-    "model" : "claude-mythos-5-1",
+    "model" : "claude-opus-4-6",
     "stream" : true,
     "system" : [ {
       "cache_control" : {
@@ -1042,7 +1038,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-opus-4-6 MEDIUM tools" : {
+  "claude-opus-4-6 medium summary tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -1133,7 +1129,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-opus-4-6 NONE tools" : {
+  "claude-opus-4-7 absent tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -1190,7 +1186,7 @@
       } ],
       "role" : "user"
     } ],
-    "model" : "claude-opus-4-6",
+    "model" : "claude-opus-4-7",
     "stream" : true,
     "system" : [ {
       "cache_control" : {
@@ -1217,7 +1213,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-opus-4-7 MEDIUM tools" : {
+  "claude-opus-4-7 medium summary tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -1308,7 +1304,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-opus-4-7 NONE tools" : {
+  "claude-opus-4-8 absent tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -1365,7 +1361,7 @@
       } ],
       "role" : "user"
     } ],
-    "model" : "claude-opus-4-7",
+    "model" : "claude-opus-4-8",
     "stream" : true,
     "system" : [ {
       "cache_control" : {
@@ -1392,7 +1388,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-opus-4-8 MEDIUM tools" : {
+  "claude-opus-4-8 medium summary tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -1483,7 +1479,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-opus-4-8 NONE tools" : {
+  "claude-opus-5 absent tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -1540,7 +1536,7 @@
       } ],
       "role" : "user"
     } ],
-    "model" : "claude-opus-4-8",
+    "model" : "claude-opus-5",
     "stream" : true,
     "system" : [ {
       "cache_control" : {
@@ -1567,7 +1563,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-opus-5 MEDIUM tools" : {
+  "claude-opus-5 medium summary tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -1658,7 +1654,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-opus-5 NONE tools" : {
+  "claude-opus-5-5 absent tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -1715,7 +1711,7 @@
       } ],
       "role" : "user"
     } ],
-    "model" : "claude-opus-5",
+    "model" : "claude-opus-5-5",
     "stream" : true,
     "system" : [ {
       "cache_control" : {
@@ -1724,9 +1720,6 @@
       "text" : "You are a precise assistant.",
       "type" : "text"
     } ],
-    "thinking" : {
-      "type" : "disabled"
-    },
     "tools" : [ {
       "cache_control" : {
         "type" : "ephemeral"
@@ -1745,7 +1738,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-opus-5-5 MEDIUM tools" : {
+  "claude-opus-5-5 medium summary tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -1836,7 +1829,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-opus-5-5 NONE tools" : {
+  "claude-sonnet-4-6 absent tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -1893,7 +1886,7 @@
       } ],
       "role" : "user"
     } ],
-    "model" : "claude-opus-5-5",
+    "model" : "claude-sonnet-4-6",
     "stream" : true,
     "system" : [ {
       "cache_control" : {
@@ -1920,7 +1913,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-sonnet-4-6 MEDIUM tools" : {
+  "claude-sonnet-4-6 medium summary tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -2011,7 +2004,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-sonnet-4-6 NONE tools" : {
+  "claude-sonnet-5 absent tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -2068,7 +2061,7 @@
       } ],
       "role" : "user"
     } ],
-    "model" : "claude-sonnet-4-6",
+    "model" : "claude-sonnet-5",
     "stream" : true,
     "system" : [ {
       "cache_control" : {
@@ -2095,7 +2088,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-sonnet-5 MEDIUM tools" : {
+  "claude-sonnet-5 medium summary tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -2186,7 +2179,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-sonnet-5 NONE tools" : {
+  "claude-sonnet-5-5 absent tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -2243,7 +2236,7 @@
       } ],
       "role" : "user"
     } ],
-    "model" : "claude-sonnet-5",
+    "model" : "claude-sonnet-5-5",
     "stream" : true,
     "system" : [ {
       "cache_control" : {
@@ -2252,9 +2245,6 @@
       "text" : "You are a precise assistant.",
       "type" : "text"
     } ],
-    "thinking" : {
-      "type" : "disabled"
-    },
     "tools" : [ {
       "cache_control" : {
         "type" : "ephemeral"
@@ -2273,7 +2263,7 @@
       "name" : "weather"
     } ]
   },
-  "claude-sonnet-5-5 MEDIUM tools" : {
+  "claude-sonnet-5-5 medium summary tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
       "content" : [ {
@@ -2345,93 +2335,6 @@
     "thinking" : {
       "display" : "summarized",
       "type" : "adaptive"
-    },
-    "tools" : [ {
-      "cache_control" : {
-        "type" : "ephemeral"
-      },
-      "description" : "Current weather for a city",
-      "input_schema" : {
-        "properties" : {
-          "city" : {
-            "description" : "The city name",
-            "type" : "string"
-          }
-        },
-        "required" : [ "city" ],
-        "type" : "object"
-      },
-      "name" : "weather"
-    } ]
-  },
-  "claude-sonnet-5-5 NONE tools" : {
-    "max_tokens" : 128000,
-    "messages" : [ {
-      "content" : [ {
-        "source" : {
-          "data" : "iVBORw==",
-          "media_type" : "image/png",
-          "type" : "base64"
-        },
-        "type" : "image"
-      }, {
-        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
-        "type" : "text"
-      } ],
-      "role" : "user"
-    }, {
-      "content" : [ {
-        "signature" : "sig-1",
-        "thinking" : "Two cities, two calls.",
-        "type" : "thinking"
-      }, {
-        "text" : "Let me check both cities.",
-        "type" : "text"
-      }, {
-        "id" : "call_1",
-        "input" : {
-          "city" : "Paris"
-        },
-        "name" : "weather",
-        "type" : "tool_use"
-      }, {
-        "cache_control" : {
-          "type" : "ephemeral"
-        },
-        "id" : "call_2",
-        "input" : {
-          "city" : "Rome"
-        },
-        "name" : "weather",
-        "type" : "tool_use"
-      } ],
-      "role" : "assistant"
-    }, {
-      "content" : [ {
-        "content" : "18C and sunny",
-        "tool_use_id" : "call_1",
-        "type" : "tool_result"
-      }, {
-        "cache_control" : {
-          "type" : "ephemeral"
-        },
-        "content" : "22C and cloudy",
-        "tool_use_id" : "call_2",
-        "type" : "tool_result"
-      } ],
-      "role" : "user"
-    } ],
-    "model" : "claude-sonnet-5-5",
-    "stream" : true,
-    "system" : [ {
-      "cache_control" : {
-        "type" : "ephemeral"
-      },
-      "text" : "You are a precise assistant.",
-      "type" : "text"
-    } ],
-    "thinking" : {
-      "type" : "between_tools"
     },
     "tools" : [ {
       "cache_control" : {
@@ -2539,8 +2442,7 @@
         "type" : "object"
       },
       "name" : "weather"
-    } ],
-    "top_p" : 0.9
+    } ]
   },
   "schema" : {
     "max_tokens" : 128000,

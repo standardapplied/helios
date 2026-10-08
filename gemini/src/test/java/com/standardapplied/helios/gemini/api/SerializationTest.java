@@ -627,9 +627,9 @@ class SerializationTest {
 
   @Test
   void contentItemAnnotationHelperRejectsEmptyList() {
-    var item = new ContentItem("text", "x", null, null, null, null, null, null);
+    var item = new ContentItem("text", "x", null, null, null, null, null, null, null);
     assertFalse(item.hasAnnotations());
-    var withEmpty = new ContentItem("text", "x", null, null, null, null, List.of(), null);
+    var withEmpty = new ContentItem("text", "x", null, null, null, null, List.of(), null, null);
     assertFalse(withEmpty.hasAnnotations());
   }
 

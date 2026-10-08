@@ -4,6 +4,8 @@ package com.standardapplied.helios.gemini;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Reasoning;
+import com.standardapplied.helios.core.model.Reasoning.Display;
 import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.core.provider.RequestFactory;
 import com.standardapplied.helios.core.tool.Tool;
@@ -14,21 +16,38 @@ import com.standardapplied.helios.gemini.api.ToolChoiceConfig;
 import com.standardapplied.helios.gemini.api.ToolDefinition;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
  * Builds the Interactions API request for one turn of one model: the conversation, or only what
  * follows its continuation point when continuing server-side; the tools, with Google Search and URL
- * context when enabled; and the generation settings.
+ * context when enabled; and the generation settings. It is the one place that reads a model's
+ * reasoning support: what the configuration may ask for is checked when it is built, and an
+ * accepted {@link Reasoning} is looked up into its wire fields exactly, never clamped or
+ * substituted.
  */
 final class GeminiRequestBuilder implements RequestFactory<InteractionRequest> {
 
+  private static final Map<Display, String> THINKING_SUMMARIES =
+      Map.of(Display.HIDDEN, "none", Display.SUMMARY, "auto");
+
   private final GeminiModelId modelId;
   private final ModelConfig config;
+  private final Reasoning.Effort effort;
 
+  /**
+   * A builder for {@code modelId}, checking the configuration's reasoning against what the model
+   * accepts.
+   *
+   * @throws IllegalArgumentException if the configuration sets a reasoning the model does not
+   *     accept
+   */
   GeminiRequestBuilder(GeminiModelId modelId, ModelConfig config) {
+    modelId.reasoning().require(modelId.id(), config.reasoning());
     this.modelId = modelId;
     this.config = config;
+    this.effort = config.reasoning().orElse(null) instanceof Reasoning.Effort e ? e : null;
   }
 
   /**
@@ -93,7 +112,8 @@ final class GeminiRequestBuilder implements RequestFactory<InteractionRequest> {
             config.maxOutputTokens() != null ? config.maxOutputTokens() : modelId.maxOutputTokens())
         .withStopSequences(config.stopSequences())
         .withSeed(config.seed())
-        .withThinkingLevel(GeminiThinking.level(modelId, config.thinkingLevel()))
+        .withThinkingLevel(effort == null ? null : effort.level().name().toLowerCase(Locale.ROOT))
+        .withThinkingSummaries(effort == null ? null : THINKING_SUMMARIES.get(effort.display()))
         .withToolChoice(toolChoice(config.toolChoice()))
         .build();
   }

@@ -4,13 +4,14 @@ package com.standardapplied.helios.openai;
 
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
-import com.standardapplied.helios.core.model.ThinkingLevel;
+import com.standardapplied.helios.core.model.Reasoning;
 import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.core.test.ConversationFixture;
 import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.ModelHarness;
 import com.standardapplied.helios.core.tool.Tool;
 import java.net.URI;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,26 +38,28 @@ class OpenAIRequestSnapshotTest {
   private static final Map<String, String> REASONING =
       Map.of(OpenAIResponseAssembler.REASONING_KEY, "Two cities, two calls.");
 
+  private static final Reasoning MEDIUM =
+      new Reasoning.Effort(Reasoning.Level.MEDIUM, Reasoning.Display.SUMMARY);
+
   private final Map<String, Object> snapshots = new LinkedHashMap<>();
 
   @Test
   void everyRequestMatchesItsSnapshot() {
     for (var id : OpenAIModelId.values()) {
-      for (var level : List.of(ThinkingLevel.NONE, ThinkingLevel.MEDIUM)) {
-        snapshot(
-            id.id() + " " + level + " tools",
-            modelAt(id, config(builder -> builder, level)),
-            withTools());
-      }
+      snapshot(
+          id.id() + " absent tools", modelAt(id, config(builder -> builder, null)), withTools());
+    }
+    for (var id : EnumSet.range(OpenAIModelId.GPT_6_ASTRA, OpenAIModelId.GPT_5_4_NANO)) {
+      snapshot(
+          id.id() + " medium summary tools",
+          modelAt(id, config(builder -> builder, MEDIUM)),
+          withTools());
     }
     var model = OpenAIModelId.GPT_5_6;
-    snapshot(
-        "schema",
-        modelAt(model, config(builder -> builder, ThinkingLevel.LOW)),
-        withSchema(List.of()));
+    snapshot("schema", modelAt(model, config(builder -> builder, MEDIUM)), withSchema(List.of()));
     snapshot(
         "schema and tools",
-        modelAt(model, config(builder -> builder, ThinkingLevel.LOW)),
+        modelAt(model, config(builder -> builder, MEDIUM)),
         withSchema(ConversationFixture.tools()));
     snapshot(
         "generation settings",
@@ -71,7 +74,7 @@ class OpenAIRequestSnapshotTest {
                         .withMaxOutputTokens(2048)
                         .withPromptCacheKey("tenant-7")
                         .withToolChoice(ToolChoice.required("weather")),
-                ThinkingLevel.NONE)),
+                new Reasoning.Off())),
         withTools());
 
     Golden.assertMatches("openai/requests.json", JSON.writeValueAsString(snapshots));
@@ -96,14 +99,14 @@ class OpenAIRequestSnapshotTest {
   }
 
   private static Function<URI, ModelConfig> config(
-      Function<ModelConfig.Builder, ModelConfig.Builder> settings, ThinkingLevel level) {
+      Function<ModelConfig.Builder, ModelConfig.Builder> settings, Reasoning reasoning) {
     return uri ->
         settings
             .apply(
                 ModelConfig.newBuilder()
                     .withApiKey("test-key")
                     .withBaseUrl(uri + "/v1/responses")
-                    .withThinkingLevel(level))
+                    .withReasoning(reasoning))
             .build();
   }
 }

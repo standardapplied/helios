@@ -176,43 +176,11 @@ class OpenAIModelIdTest {
   }
 
   @Test
-  void gpt6EffortSupportSeparatesModelsThatRejectNone() {
-    assertEquals(
-        OpenAIModelId.EffortSupport.FULL_WITHOUT_NONE, OpenAIModelId.GPT_6_ASTRA.effortSupport());
-    assertEquals(
-        OpenAIModelId.EffortSupport.FULL_WITHOUT_NONE, OpenAIModelId.GPT_6_1_SOL.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.FULL, OpenAIModelId.GPT_6_SOL.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.FULL, OpenAIModelId.GPT_6_LUNA.effortSupport());
-  }
-
-  @Test
-  void effortSupportTiers() {
-    assertEquals(OpenAIModelId.EffortSupport.FULL, OpenAIModelId.GPT_5_6.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.FULL, OpenAIModelId.GPT_5_6_SOL.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.FULL, OpenAIModelId.GPT_5_6_TERRA.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.EXTENDED, OpenAIModelId.GPT_5_5.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.EXTENDED, OpenAIModelId.GPT_5_4.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.STANDARD, OpenAIModelId.O3.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.STANDARD, OpenAIModelId.GPT_4O.effortSupport());
-  }
-
-  @Test
   void allModelsHaveIds() {
     for (var model : OpenAIModelId.values()) {
       assertNotNull(model.id());
       assertFalse(model.id().isBlank());
       assertTrue(model.contextWindow() > 0);
     }
-  }
-
-  @Test
-  void effortSupportPerModel() {
-    assertEquals(OpenAIModelId.EffortSupport.FULL, OpenAIModelId.GPT_5_6.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.EXTENDED, OpenAIModelId.GPT_5_5.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.EXTENDED, OpenAIModelId.GPT_5_4.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.EXTENDED, OpenAIModelId.GPT_5_4_MINI.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.EXTENDED, OpenAIModelId.GPT_5_4_NANO.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.STANDARD, OpenAIModelId.O3.effortSupport());
-    assertEquals(OpenAIModelId.EffortSupport.STANDARD, OpenAIModelId.GPT_4_1.effortSupport());
   }
 }

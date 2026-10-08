@@ -17,8 +17,9 @@ import java.util.List;
  * @param maxOutputTokens maximum number of tokens to generate
  * @param stopSequences sequences that stop generation
  * @param seed random seed for reproducibility
- * @param thinkingLevel thinking/reasoning level ({@code none}, {@code low}, {@code medium}, {@code
- *     high})
+ * @param thinkingLevel thinking level ({@code minimal}, {@code low}, {@code medium}, {@code high})
+ * @param thinkingSummaries whether thought summaries are returned ({@code auto}) or not ({@code
+ *     none})
  * @param toolChoice tool-choice policy (bare string {@code auto}/{@code any}/{@code none}, or an
  *     allowed-tools restriction)
  */
@@ -28,6 +29,7 @@ public record InteractionGenerationConfig(
     @JsonProperty("stop_sequences") List<String> stopSequences,
     Long seed,
     @JsonProperty("thinking_level") String thinkingLevel,
+    @JsonProperty("thinking_summaries") String thinkingSummaries,
     @JsonProperty("tool_choice") ToolChoiceConfig toolChoice) {
 
   public static Builder newBuilder() {
@@ -39,6 +41,7 @@ public record InteractionGenerationConfig(
     private List<String> stopSequences;
     private Long seed;
     private String thinkingLevel;
+    private String thinkingSummaries;
     private ToolChoiceConfig toolChoice;
 
     private Builder() {}
@@ -63,6 +66,11 @@ public record InteractionGenerationConfig(
       return this;
     }
 
+    public Builder withThinkingSummaries(String thinkingSummaries) {
+      this.thinkingSummaries = thinkingSummaries;
+      return this;
+    }
+
     public Builder withToolChoice(ToolChoiceConfig toolChoice) {
       this.toolChoice = toolChoice;
       return this;
@@ -70,7 +78,7 @@ public record InteractionGenerationConfig(
 
     public InteractionGenerationConfig build() {
       return new InteractionGenerationConfig(
-          maxOutputTokens, stopSequences, seed, thinkingLevel, toolChoice);
+          maxOutputTokens, stopSequences, seed, thinkingLevel, thinkingSummaries, toolChoice);
     }
   }
 }

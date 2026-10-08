@@ -6,7 +6,6 @@ import static com.standardapplied.helios.anthropic.AnthropicFixture.model;
 import static com.standardapplied.helios.anthropic.AnthropicFixture.requests;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,8 +15,8 @@ import com.standardapplied.helios.core.model.FileReference;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Reasoning;
 import com.standardapplied.helios.core.model.Role;
-import com.standardapplied.helios.core.model.ThinkingLevel;
 import com.standardapplied.helios.core.model.ToolCall;
 import java.util.List;
 import java.util.Map;
@@ -237,7 +236,6 @@ class AnthropicRequestBuilderTest {
         ModelConfig.newBuilder()
             .withApiKey("test-key")
             .withTemperature(0.7)
-            .withTopP(0.9)
             .withStopSequences(List.of("END"))
             .build();
     var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
@@ -245,7 +243,6 @@ class AnthropicRequestBuilderTest {
     var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
 
     assertEquals(0.7, request.temperature());
-    assertEquals(0.9, request.topP());
     assertEquals(List.of("END"), request.stopSequences());
   }
 
@@ -270,58 +267,11 @@ class AnthropicRequestBuilderTest {
   }
 
   @Test
-  void the55ModelsNeverSendSamplingParams() {
-    for (var modelId :
-        List.of(AnthropicModelId.CLAUDE_OPUS_5_5, AnthropicModelId.CLAUDE_SONNET_5_5)) {
-      var config =
-          ModelConfig.newBuilder()
-              .withApiKey("test-key")
-              .withTemperature(0.3)
-              .withTopP(0.8)
-              .build();
-
-      var request = requests(modelId, config).build(List.of(Message.user("Hi")), List.of(), null);
-
-      assertNull(request.temperature(), modelId.name());
-      assertNull(request.topP(), modelId.name());
-    }
-  }
-
-  @Test
-  void adaptiveModelsNeverSendSamplingParamsEvenWithThinkingOff() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.NONE)
-            .withTemperature(0.7)
-            .withTopP(0.9)
-            .build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_8, config);
-
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
-
-    assertNull(request.temperature(), "Opus 4.7+ rejects temperature with a 400 — never send it");
-    assertNull(request.topP(), "Opus 4.7+ rejects top_p with a 400 — never send it");
-  }
-
-  @Test
-  void fable5NeverSendsSamplingParams() {
-    var config =
-        ModelConfig.newBuilder().withApiKey("test-key").withTemperature(0.3).withTopP(0.8).build();
-    var requests = requests(AnthropicModelId.CLAUDE_FABLE_5, config);
-
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
-
-    assertNull(request.temperature());
-    assertNull(request.topP());
-  }
-
-  @Test
   void datedLegacySnapshotResolvesToFamilyShape() {
     var config =
         ModelConfig.newBuilder()
             .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.NONE)
+            .withReasoning(new Reasoning.Off())
             .withTemperature(0.2)
             .build();
     var requests = requests("claude-sonnet-4-6-20251114", config);
@@ -332,22 +282,5 @@ class AnthropicRequestBuilderTest {
         0.2,
         request.temperature(),
         "dated snapshots resolve to the family shape, which still accepts sampling params");
-  }
-
-  @Test
-  void legacyModelKeepsSamplingParamsWhenThinkingOff() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withThinkingLevel(ThinkingLevel.NONE)
-            .withTemperature(0.7)
-            .withTopP(0.9)
-            .build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
-
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
-
-    assertEquals(0.7, request.temperature());
-    assertEquals(0.9, request.topP());
   }
 }

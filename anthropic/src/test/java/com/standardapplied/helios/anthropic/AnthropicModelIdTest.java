@@ -27,9 +27,7 @@ class AnthropicModelIdTest {
   }
 
   @Test
-  void opus48UsesAdaptiveThinking() {
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ADAPTIVE, AnthropicModelId.CLAUDE_OPUS_4_8.thinkingShape());
+  void opus48OutputCeiling() {
     assertEquals(128_000, AnthropicModelId.CLAUDE_OPUS_4_8.maxOutputTokens());
   }
 
@@ -41,13 +39,10 @@ class AnthropicModelIdTest {
   }
 
   @Test
-  void haiku45IsCataloguedWithLegacyThinkingShape() {
+  void haiku45IsCatalogued() {
     assertEquals("claude-haiku-4-5", AnthropicModelId.CLAUDE_HAIKU_4_5.id());
     assertEquals(200_000, AnthropicModelId.CLAUDE_HAIKU_4_5.contextWindow());
     assertEquals(64_000, AnthropicModelId.CLAUDE_HAIKU_4_5.maxOutputTokens());
-    assertEquals(
-        AnthropicModelId.ThinkingShape.LEGACY_BUDGET,
-        AnthropicModelId.CLAUDE_HAIKU_4_5.thinkingShape());
     assertTrue(AnthropicModelId.isSupported("claude-haiku-4-5"));
     assertEquals(
         AnthropicModelId.CLAUDE_HAIKU_4_5,
@@ -128,12 +123,11 @@ class AnthropicModelIdTest {
   }
 
   @Test
-  void fable51AndMythos51AreCataloguedAsAlwaysOnThinkingModels() {
+  void fable51AndMythos51AreCatalogued() {
     for (var model :
         List.of(AnthropicModelId.CLAUDE_FABLE_5_1, AnthropicModelId.CLAUDE_MYTHOS_5_1)) {
       assertEquals(1_000_000, model.contextWindow());
       assertEquals(128_000, model.maxOutputTokens());
-      assertEquals(AnthropicModelId.ThinkingShape.ALWAYS_ON, model.thinkingShape());
       assertFalse(model.acceptsForcedToolChoice());
     }
     assertEquals("claude-fable-5-1", AnthropicModelId.CLAUDE_FABLE_5_1.id());
@@ -175,11 +169,6 @@ class AnthropicModelIdTest {
       assertTrue(AnthropicModelId.isSupported(model.id()));
       assertEquals(model, AnthropicModelId.fromId(model.id()));
     }
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ALWAYS_ON, AnthropicModelId.CLAUDE_OPUS_5_5.thinkingShape());
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ADAPTIVE_BETWEEN_TOOLS,
-        AnthropicModelId.CLAUDE_SONNET_5_5.thinkingShape());
   }
 
   @Test
@@ -218,48 +207,6 @@ class AnthropicModelIdTest {
   void opus5AndMythos5MetadataMatchesCurrentModels() {
     assertEquals(128_000, AnthropicModelId.CLAUDE_OPUS_5.maxOutputTokens());
     assertEquals(128_000, AnthropicModelId.CLAUDE_MYTHOS_5.maxOutputTokens());
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON,
-        AnthropicModelId.CLAUDE_OPUS_5.thinkingShape());
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ALWAYS_ON, AnthropicModelId.CLAUDE_MYTHOS_5.thinkingShape());
-  }
-
-  @Test
-  void thinkingShapesPerModel() {
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ALWAYS_ON, AnthropicModelId.CLAUDE_FABLE_5.thinkingShape());
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ALWAYS_ON, AnthropicModelId.CLAUDE_MYTHOS_5.thinkingShape());
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON,
-        AnthropicModelId.CLAUDE_OPUS_5.thinkingShape());
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON,
-        AnthropicModelId.CLAUDE_SONNET_5.thinkingShape());
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ADAPTIVE, AnthropicModelId.CLAUDE_OPUS_4_8.thinkingShape());
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ADAPTIVE, AnthropicModelId.CLAUDE_OPUS_4_7.thinkingShape());
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ADAPTIVE_WITHOUT_XHIGH,
-        AnthropicModelId.CLAUDE_OPUS_4_6.thinkingShape());
-    assertEquals(
-        AnthropicModelId.ThinkingShape.ADAPTIVE_WITHOUT_XHIGH,
-        AnthropicModelId.CLAUDE_SONNET_4_6.thinkingShape());
-    assertEquals(
-        AnthropicModelId.ThinkingShape.LEGACY_BUDGET,
-        AnthropicModelId.CLAUDE_HAIKU_4_5.thinkingShape());
-  }
-
-  @Test
-  void samplingParametersAcceptedOnlyWhereDocumented() {
-    assertTrue(AnthropicModelId.ThinkingShape.LEGACY_BUDGET.acceptsSamplingParameters());
-    assertTrue(AnthropicModelId.ThinkingShape.ADAPTIVE_WITHOUT_XHIGH.acceptsSamplingParameters());
-    assertFalse(AnthropicModelId.ThinkingShape.ADAPTIVE.acceptsSamplingParameters());
-    assertFalse(AnthropicModelId.ThinkingShape.ADAPTIVE_DEFAULT_ON.acceptsSamplingParameters());
-    assertFalse(AnthropicModelId.ThinkingShape.ADAPTIVE_BETWEEN_TOOLS.acceptsSamplingParameters());
-    assertFalse(AnthropicModelId.ThinkingShape.ALWAYS_ON.acceptsSamplingParameters());
   }
 
   @Test

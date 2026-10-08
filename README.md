@@ -103,6 +103,28 @@ try (var model = new AnthropicProvider().create(
 
 All providers implement the same `Model` interface — swap providers without touching the rest of your code.
 
+#### Reasoning
+
+`ModelConfig.reasoning` says what a reasoning model should do; leave it unset and Helios sends no
+thinking, reasoning or effort field, so the provider's defaults apply. `Reasoning.Off` stops
+reasoning; `Reasoning.Effort(level, display)` reasons at `MINIMAL`..`MAX` and returns the reasoning
+`HIDDEN`, as a `SUMMARY`, or only as the `PROGRESS` notes the model writes between tool calls.
+
+```java
+var config = ModelConfig.newBuilder()
+    .withApiKey(System.getenv("ANTHROPIC_API_KEY"))
+    .withReasoning(new Reasoning.Effort(Reasoning.Level.MEDIUM, Reasoning.Display.PROGRESS))
+    .build();
+var model = new AnthropicProvider().create(AnthropicModelId.CLAUDE_OPUS_5_5.id(), config);
+```
+
+Each provider's model catalogue declares what a model accepts, and the request is exactly what
+was asked or `create` throws, naming the model, the rejected value and the accepted ones: `Off` on
+Opus 5.5 (which always thinks), `MAX` on gpt-5.5, `PROGRESS` on any model without progress notes,
+`temperature` on Claude 4.7 and later. Nothing is clamped or silently dropped. An Anthropic or
+OpenAI model id the catalogue does not know is sent whatever the provider can spell, and the API
+judges it.
+
 Gemini video understanding uses the Files API for large or reusable videos. Google currently
 accepts Files API video references through the beta Interactions endpoint; the stable endpoint can
 reject the same `video` content block. Select `v1beta` before constructing the model. Helios never
