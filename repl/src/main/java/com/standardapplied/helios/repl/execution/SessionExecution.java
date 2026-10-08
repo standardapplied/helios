@@ -27,12 +27,13 @@ final class SessionExecution {
       String sessionId,
       ReplSession session,
       ExecutionRequest request,
+      Duration timeout,
       CancellationToken cancellation,
       OutputRedaction redaction) {
     var future = new CompletableFuture<ExecutionResult>();
     Thread.ofVirtual()
         .name("helios-jshell-" + sessionId)
-        .start(() -> run(session, request, cancellation, redaction, future));
+        .start(() -> run(session, request, timeout, cancellation, redaction, future));
     return future;
   }
 
@@ -45,6 +46,7 @@ final class SessionExecution {
   private static void run(
       ReplSession session,
       ExecutionRequest request,
+      Duration timeout,
       CancellationToken cancellation,
       OutputRedaction redaction,
       CompletableFuture<ExecutionResult> future) {
@@ -58,7 +60,7 @@ final class SessionExecution {
             });
     var startNanos = System.nanoTime();
     try {
-      var raw = session.execute(request.script());
+      var raw = session.execute(request.script(), timeout);
       var elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
       complete(future, cancellation, () -> redaction.redact(raw, elapsed));
     } catch (ReplException e) {

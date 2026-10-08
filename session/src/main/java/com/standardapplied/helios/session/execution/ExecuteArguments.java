@@ -22,8 +22,6 @@ import java.util.Map;
  */
 final class ExecuteArguments {
 
-  private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
-
   private ExecuteArguments() {}
 
   /**
@@ -31,12 +29,14 @@ final class ExecuteArguments {
    *
    * @param provider the provider whose capabilities bound the runtime
    * @param args the tool's arguments
+   * @param defaultTimeout the budget when the model names none: the tool call's own deadline
    * @return the request, or the first validation failure
    */
-  static Result<ExecutionRequest> parse(ExecutionProvider provider, Map<String, Object> args) {
+  static Result<ExecutionRequest> parse(
+      ExecutionProvider provider, Map<String, Object> args, Duration defaultTimeout) {
     return switch (runtime(provider, args)) {
       case Result.Failure<Runtime> failure -> new Result.Failure<>(failure.error());
-      case Result.Success<Runtime> runtime -> request(runtime.value(), args);
+      case Result.Success<Runtime> runtime -> request(runtime.value(), args, defaultTimeout);
     };
   }
 
@@ -70,7 +70,8 @@ final class ExecuteArguments {
     return new Result.Success<>(runtime);
   }
 
-  private static Result<ExecutionRequest> request(Runtime runtime, Map<String, Object> args) {
+  private static Result<ExecutionRequest> request(
+      Runtime runtime, Map<String, Object> args, Duration defaultTimeout) {
     var script = ToolArgs.stringArg(args, "script");
     if (Strings.isBlank(script)) {
       return new Result.Failure<>("Execute: missing required 'script' argument");
@@ -80,7 +81,7 @@ final class ExecuteArguments {
       return new Result.Failure<>("Execute: 'args' must be an array of strings");
     }
     var workingDirectory = ToolArgs.stringArgOrNull(args, "workingDirectory");
-    var timeout = timeoutArg(args);
+    var timeout = timeoutArg(args, defaultTimeout);
     if (timeout == null) {
       return new Result.Failure<>("Execute: 'timeoutSeconds' must be a positive integer");
     }
@@ -105,9 +106,9 @@ final class ExecuteArguments {
     return new Result.Success<>(builder.build());
   }
 
-  private static Duration timeoutArg(Map<String, Object> args) {
+  private static Duration timeoutArg(Map<String, Object> args, Duration defaultTimeout) {
     if (args.get("timeoutSeconds") == null) {
-      return DEFAULT_TIMEOUT;
+      return defaultTimeout;
     }
     var seconds = ToolArgs.intArg(args, "timeoutSeconds", 0);
     return seconds <= 0 ? null : Duration.ofSeconds(seconds);

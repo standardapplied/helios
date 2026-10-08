@@ -214,8 +214,12 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
                   + session.sessionId()
                   + " — onSessionStart not called or already onSessionEnd'd"));
     }
+    var timeout =
+        request.timeout().compareTo(capabilities.maxTimeout()) > 0
+            ? capabilities.maxTimeout()
+            : request.timeout();
     return SessionExecution.start(
-        session.sessionId(), replSession, request, cancellation, redaction);
+        session.sessionId(), replSession, request, timeout, cancellation, redaction);
   }
 
   /**
