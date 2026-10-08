@@ -60,8 +60,8 @@ public record ResponsesRequest(
    * Reasoning configuration for thinking models. Both fields serialize as JSON strings — OpenAI's
    * Responses API rejects the request with HTTP 400 if {@code summary} is sent as an object.
    *
-   * @param effort reasoning effort: {@code "none"}, {@code "low"}, {@code "medium"}, {@code
-   *     "high"}, {@code "xhigh"} or {@code "max"}
+   * @param effort reasoning effort: {@code "none"}, {@code "minimal"}, {@code "low"}, {@code
+   *     "medium"}, {@code "high"}, {@code "xhigh"} or {@code "max"}
    * @param summary reasoning summary verbosity: {@code "auto"}, {@code "concise"} or {@code
    *     "detailed"}; {@code null} omits it and no summary is returned
    */
