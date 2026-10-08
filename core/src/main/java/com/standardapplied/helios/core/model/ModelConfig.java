@@ -101,6 +101,15 @@ public record ModelConfig(
     reasoning = reasoning == null ? Optional.empty() : reasoning;
     headers = headers == null ? Map.of() : Map.copyOf(headers);
     Objects.requireNonNull(rawOutputCapturePolicy, "rawOutputCapturePolicy must not be null");
+    requireFinite("temperature", temperature);
+    requireFinite("topP", topP);
+  }
+
+  /** A NaN or infinite value would reach the wire as a string no provider accepts. */
+  private static void requireFinite(String parameter, Double value) {
+    if (value != null && !Double.isFinite(value)) {
+      throw new IllegalArgumentException(parameter + " must be a finite number, got " + value);
+    }
   }
 
   /**

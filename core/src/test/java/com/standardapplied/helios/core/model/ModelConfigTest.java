@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class ModelConfigTest {
 
@@ -83,6 +85,21 @@ class ModelConfigTest {
     assertThrows(
         NullPointerException.class,
         () -> ModelConfig.newBuilder().withRawOutputCapture(null).build());
+  }
+
+  @ParameterizedTest
+  @ValueSource(doubles = {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY})
+  void aNonFiniteSamplingParameterIsRejected(double value) {
+    var temperature =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> ModelConfig.newBuilder().withTemperature(value).build());
+    var topP =
+        assertThrows(
+            IllegalArgumentException.class, () -> ModelConfig.newBuilder().withTopP(value).build());
+
+    assertEquals("temperature must be a finite number, got " + value, temperature.getMessage());
+    assertEquals("topP must be a finite number, got " + value, topP.getMessage());
   }
 
   @Test

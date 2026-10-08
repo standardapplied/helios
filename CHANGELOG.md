@@ -296,6 +296,7 @@ What each 2.x level sent, and the `Reasoning` that sends the same now. `E(L, D)`
 | 2.x sampling | 3.0 |
 |---|---|
 | `temperature` / `topP` on a model that rejects them were dropped from the request | thrown at construction: `IllegalArgumentException("Model <id> does not accept <parameter> <rule>.")`; remove the parameter, or set `Reasoning.Off` where the model accepts sampling only without reasoning |
+| a NaN or infinite `temperature` / `topP` was sent as the string `"NaN"` / `"Infinity"` | thrown by `ModelConfig`: `IllegalArgumentException("<parameter> must be a finite number, got <value>")` |
 
 ### Added
 
