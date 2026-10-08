@@ -13,6 +13,8 @@ import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Reasoning;
 import com.standardapplied.helios.core.model.Reasoning.Display;
 import com.standardapplied.helios.core.model.Reasoning.Level;
+import com.standardapplied.helios.core.test.ReasoningMatrix;
+import com.standardapplied.helios.core.test.ReasoningMatrix.Accepts;
 import com.standardapplied.helios.openai.api.OpenAIJson;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -110,12 +112,8 @@ class OpenAIReasoningTest {
   private record Documented(
       Map<String, Object> off, Set<Level> levels, Set<Display> displays, Sampling sampling) {
 
-    boolean accepts(Reasoning reasoning) {
-      return switch (reasoning) {
-        case null -> true;
-        case Reasoning.Off _ -> off != null;
-        case Reasoning.Effort e -> levels.contains(e.level()) && displays.contains(e.display());
-      };
+    Accepts accepts() {
+      return new Accepts(off != null, levels, displays);
     }
 
     boolean acceptsSampling(Reasoning reasoning) {
@@ -126,22 +124,6 @@ class OpenAIReasoningTest {
         case NEVER -> false;
       };
     }
-
-    String accepted() {
-      var effort =
-          levels.isEmpty() ? "no Effort" : "Effort " + levels + " with display " + displays;
-      return "it accepts " + (off == null ? "no Off" : "Off") + " and " + effort;
-    }
-  }
-
-  static Stream<Reasoning> everyReasoning() {
-    var efforts =
-        Arrays.stream(Level.values())
-            .flatMap(
-                level ->
-                    Arrays.stream(Display.values())
-                        .map(display -> (Reasoning) new Reasoning.Effort(level, display)));
-    return Stream.concat(Stream.of(new Reasoning.Off()), efforts);
   }
 
   static Stream<Arguments> acceptedCells() {
@@ -153,12 +135,7 @@ class OpenAIReasoningTest {
   }
 
   private static Stream<Arguments> cells(boolean accepted) {
-    return DOCUMENTED.entrySet().stream()
-        .flatMap(
-            row ->
-                everyReasoning()
-                    .filter(reasoning -> row.getValue().accepts(reasoning) == accepted)
-                    .map(reasoning -> Arguments.of(row.getKey(), reasoning)));
+    return ReasoningMatrix.cells(DOCUMENTED, Documented::accepts, accepted);
   }
 
   static Stream<Arguments> acceptedSamplingCells() {
@@ -177,9 +154,9 @@ class OpenAIReasoningTest {
     return DOCUMENTED.entrySet().stream()
         .flatMap(
             row ->
-                Stream.of(
+                Stream.<Reasoning>of(
                         null, new Reasoning.Off(), new Reasoning.Effort(Level.LOW, Display.SUMMARY))
-                    .filter(reasoning -> row.getValue().accepts(reasoning))
+                    .filter(reasoning -> row.getValue().accepts().test(reasoning))
                     .filter(reasoning -> row.getValue().acceptsSampling(reasoning) == accepted)
                     .flatMap(
                         reasoning ->
@@ -213,7 +190,7 @@ class OpenAIReasoningTest {
         assertThrows(IllegalArgumentException.class, () -> createModel(model, config)).getMessage();
 
     assertTrue(rejection.contains("Model " + model.id() + " "), rejection);
-    assertTrue(rejection.contains(DOCUMENTED.get(model).accepted()), rejection);
+    assertTrue(rejection.contains(DOCUMENTED.get(model).accepts().description()), rejection);
   }
 
   @ParameterizedTest(name = "{0}")

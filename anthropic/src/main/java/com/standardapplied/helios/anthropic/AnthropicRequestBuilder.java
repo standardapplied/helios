@@ -152,8 +152,8 @@ final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
     switch (sampling) {
       case UNCHECKED -> {}
       case REJECTED -> {
-        reject(model, "temperature", temperature != null, "is rejected whenever it is set");
-        reject(model, "topP", topP != null, "is rejected whenever it is set");
+        reject(model, "temperature", temperature != null, "whenever it is set");
+        reject(model, "topP", topP != null, "whenever it is set");
       }
       case ONE_OF, ONE_OF_WITHOUT_EFFORT -> {
         reject(model, "temperature", temperature != null && topP != null, "and topP together");
