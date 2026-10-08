@@ -282,12 +282,15 @@ What each 2.x level sent, and the `Reasoning` that sends the same now. `E(L, D)`
 | | `MINIMAL`, `LOW` .. `XHIGH` | as gpt-5.6 | as gpt-5.6 |
 | | `MAX` | clamped to `xhigh` | `E(XHIGH, SUMMARY)`; `MAX` throws |
 | o3, o4-mini | `NONE` | no `reasoning` | absent (`Off` throws) |
-| | `MINIMAL`, `LOW`, `MEDIUM`, `HIGH` | effort `low` / `low` / `medium` / `high`, `summary: auto` | `E(LOW, SUMMARY)` / `E(MEDIUM, SUMMARY)` / `E(HIGH, SUMMARY)` |
+| | `MINIMAL`, `LOW` | effort `low`, `summary: auto` | `E(LOW, SUMMARY)`; `MINIMAL` throws |
+| | `MEDIUM`, `HIGH` | the same effort, `summary: auto` | `E(<same>, SUMMARY)` |
 | | `XHIGH`, `MAX` | clamped to `high` | `E(HIGH, SUMMARY)`; `XHIGH` / `MAX` throw |
 | gpt-4.1, gpt-4o families | `NONE` | no `reasoning` | absent or `Off` |
 | | `MINIMAL`..`MAX` | a `reasoning` field these models do not take | no equivalent: every `Effort` throws |
 | an uncatalogued OpenAI id | `NONE` | no `reasoning` | absent |
-| | `MINIMAL`..`MAX` | `low`..`high`, `XHIGH` / `MAX` clamped to `high` | `E(<level>, SUMMARY)`, sent verbatim |
+| | `MINIMAL`, `LOW` | effort `low`, `summary: auto` | `E(LOW, SUMMARY)` (`MINIMAL` now sends `minimal`) |
+| | `MEDIUM`, `HIGH` | the same effort, `summary: auto` | `E(<same>, SUMMARY)` |
+| | `XHIGH`, `MAX` | clamped to `high` | `E(HIGH, SUMMARY)` (`XHIGH` / `MAX` are now sent as they are) |
 | Gemini 3 Flash Preview, 3.1 Flash-Lite, 3.5 Flash, 3.5 Flash-Lite, 3.6 Flash | `NONE`, `MINIMAL` | `thinking_level: minimal` | `E(MINIMAL, HIDDEN)` (`Off` throws) |
 | Gemini 3.1 Pro Preview, 3.7 Flash, 3.8 Flash | `NONE`, `MINIMAL` | `thinking_level: low` | `E(LOW, HIDDEN)`; `MINIMAL` throws |
 | every Gemini 3.x | `LOW`, `MEDIUM`, `HIGH` | the same level | `E(<same>, HIDDEN)` (`SUMMARY` adds `thinking_summaries: auto`) |
@@ -314,7 +317,8 @@ What each 2.x level sent, and the `Reasoning` that sends the same now. `E(L, D)`
   asserts its output is the same in each; `DeclarationOrderFixture` is a conversation whose
   schema, tool parameters and replayed arguments each have eight or more names in a declared
   order, and asserts a request body or prompt keeps it. `FailingInputStream` fails on read or
-  close, and `SseEvents` writes and drains server-sent events. Abstract contract tests run one set of cases against every implementation:
+  close, and `SseEvents` writes and drains server-sent events. `ReasoningMatrix` is the
+  model-by-`Reasoning` matrix each provider's reasoning test runs. Abstract contract tests run one set of cases against every implementation:
   `ModelIntegrationContract` (live provider parity), `BoundedErrorBodyContract`,
   `PromptRegistryContract` and `ToolCallJournalContract`. Depend on it with
   `<type>test-jar</type>` and `<scope>test</scope>`.
