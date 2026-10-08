@@ -375,6 +375,14 @@ What each 2.x level sent, and the `Reasoning` that sends the same now. `E(L, D)`
 
 ### Fixed
 
+- **`Execute` on the JShell runtime ignored its time budget; every snippet stopped at 30 seconds.**
+  `JShellExecutionProvider` ran each snippet under `ReplConfig.executionTimeout()` (30 s by
+  default), whatever `timeoutSeconds` the model passed, and `Execute` itself defaulted to 30 s
+  instead of the session's per-tool timeout. A CodeAct/RLM snippet that fanned out a few
+  `predict(...)` calls in a row was killed at 30 s even when the model asked for 120. The snippet
+  now runs under the requested budget, capped at the provider's `withMaxTimeout` (5 minutes by
+  default), and `Execute` without `timeoutSeconds` defaults to the session's
+  `SessionLimits.toolTimeoutDefault()`. New: `ReplSession.execute(String, Duration)`.
 - **`JShellExecutionProvider`: a session ended while it started could free its slot twice, and a
   closed provider could keep a live sandbox.** If `onSessionEnd` ran while the session's startup
   snippet was running and the snippet then failed, the end and the failed start each gave the
