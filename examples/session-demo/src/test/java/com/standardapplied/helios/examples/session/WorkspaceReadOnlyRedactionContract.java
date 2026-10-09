@@ -63,9 +63,9 @@ abstract class WorkspaceReadOnlyRedactionContract {
         call(
             GlobTool.binding(WorkspaceRoot.of(corpus)),
             "List every markdown file in the workspace using the Glob tool with pattern"
-                + " '**/*.md'.");
+                + " '**/*.md'.",
+            Map.of("pattern", "**/*.md"));
 
-    assumeArguments(result, Map.of("pattern", "**/*.md"));
     var output = result.result().output();
     assertTrue(output.contains("intro.md") && output.contains("guide.md"), output);
     assertFalse(output.contains("config.yaml"), output);
@@ -83,9 +83,9 @@ abstract class WorkspaceReadOnlyRedactionContract {
     var result =
         call(
             GrepTool.binding(WorkspaceRoot.of(corpus), new SecretRegistry().redactor()),
-            "Use Grep to find which file in the workspace mentions 'reactor'.");
+            "Use Grep to find which file in the workspace mentions 'reactor'.",
+            Map.of("pattern", "reactor"));
 
-    assumeArguments(result, Map.of("pattern", "reactor"));
     var output = result.result().output();
     assertTrue(output.contains("patterns.md"), output);
     assertFalse(output.contains("misc.md"), output);
@@ -105,9 +105,9 @@ abstract class WorkspaceReadOnlyRedactionContract {
         call(
             ReadTool.binding(
                 WorkspaceRoot.of(corpus), InMemoryFileTracker.create(), registry.redactor()),
-            "Use Read to read 'config.yaml' from the workspace.");
+            "Use Read to read 'config.yaml' from the workspace.",
+            Map.of("path", "config.yaml"));
 
-    assumeArguments(result, Map.of("path", "config.yaml"));
     var output = result.result().output();
     assertTrue(output.contains("<redacted:OPENAI_KEY>"), output);
     assertFalse(output.contains(secret), output);
@@ -115,24 +115,13 @@ abstract class WorkspaceReadOnlyRedactionContract {
   }
 
   /**
-   * Skips unless the model called the tool with exactly {@code arguments}, the ones the expected
-   * output follows from, then asserts the call succeeded.
-   */
-  private static void assumeArguments(QueryEvent.ToolResult result, Map<String, ?> arguments) {
-    var called = result.call().arguments();
-    assumeTrue(
-        arguments.equals(called),
-        () -> "the model called " + result.call().name() + " with " + called + "; " + COUNTERPART);
-    assertTrue(result.result().success(), result.result().output());
-  }
-
-  /**
    * Run {@code request} in a session whose only tool is {@code tool}, with the model forced to call
    * a tool. Asserts what holds whatever the model does: the session ends cleanly with no error and
-   * a tool was called. It skips unless the first call was {@code tool}, and returns that call's
-   * result.
+   * a tool was called. It skips unless the first call was {@code tool} with exactly {@code
+   * arguments}, the ones the expected output follows from, then asserts the call succeeded and
+   * returns its result.
    */
-  private QueryEvent.ToolResult call(ToolBinding tool, String request) {
+  private QueryEvent.ToolResult call(ToolBinding tool, String request, Map<String, ?> arguments) {
     try (var model = createModel(ToolChoice.any());
         var session =
             AgentSession.create(
@@ -153,17 +142,20 @@ abstract class WorkspaceReadOnlyRedactionContract {
       assertTrue(events.eventsOf(QueryEvent.Error.class).isEmpty());
       var results = events.eventsOf(QueryEvent.ToolResult.class);
       assertFalse(results.isEmpty());
+      var first = results.getFirst();
       assumeTrue(
-          results.getFirst().call().name().equals(tool.name()),
+          first.call().name().equals(tool.name()) && arguments.equals(first.call().arguments()),
           () ->
               model.id()
                   + " called "
                   + results.stream().map(QueryEvent.ToolResult::call).toList()
                   + " instead of "
                   + tool.name()
+                  + arguments
                   + "; "
                   + COUNTERPART);
-      return results.getFirst();
+      assertTrue(first.result().success(), first.result().output());
+      return first;
     }
   }
 }

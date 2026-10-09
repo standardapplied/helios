@@ -26,6 +26,7 @@ import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -86,7 +87,6 @@ final class Claude55AgentSessionIntegrationTest {
             .withReasoning(reasoning)
             .withMaxOutputTokens(16_000)
             .build();
-    var events = new CollectingSubscriber();
     try (var model =
             new AnthropicProvider().create(modelId.id(), config, CachePolicy.shortLived());
         var session =
@@ -98,6 +98,7 @@ final class Claude55AgentSessionIntegrationTest {
                     .withCostCalculator(AnthropicPricing.calculator(CachePolicy.shortLived()))
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(12).build())
                     .build())) {
+      var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
       session.events().subscribe(events);
 
       var terminal = session.runBlocking(UserMessage.text(VIEWER));

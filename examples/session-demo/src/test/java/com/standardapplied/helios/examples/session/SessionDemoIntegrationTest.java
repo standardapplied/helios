@@ -55,11 +55,11 @@ import org.junit.jupiter.api.io.TempDir;
  *
  * <p>Assertions describe what the framework guarantees whatever the model writes: forced to call a
  * tool, the loop dispatches it and the provider accepts the next turn; the attachment-bearing user
- * message is accepted; and a memory write without an allow rule is refused by the permission system
- * and never reaches disk. Which tool a forced call picks is the model's choice: a run whose calls
- * are not the ones under test skips, naming the offline test that covers them. Forcing applies to
- * every turn, so once the exploring session runs out of file steps it calls the demo's other tools;
- * only its first call is checked.
+ * message is accepted; and a memory write without an allow rule asks the user, who denies it, so
+ * the permission system blocks it before dispatch and it never reaches disk. Which tool a forced
+ * call picks is the model's choice: a run whose calls are not the ones under test skips, naming the
+ * offline test that covers them. Forcing applies to every turn, so once the exploring session runs
+ * out of file steps it calls the demo's other tools; only its first call is checked.
  */
 @EnabledIfEnvironmentVariable(named = "GEMINI_API_KEY", matches = ".+")
 final class SessionDemoIntegrationTest {
@@ -135,7 +135,9 @@ final class SessionDemoIntegrationTest {
         SessionOptions.newBuilder().withModel(model).withSessionId("session-demo-att-test").build();
 
     try (var session = AgentSession.create(options)) {
-      session.events().subscribe(new CollectingSubscriber());
+      session
+          .events()
+          .subscribe(new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny")));
       var msg =
           UserMessage.newBuilder()
               .withText("I'm sending a small generated image. Briefly describe what you see.")
@@ -157,8 +159,6 @@ final class SessionDemoIntegrationTest {
     seedFakeRepo(tmp);
     var ws = WorkspaceRoot.of(tmp);
     var memoryBackend = FileSystemMemoryBackend.of(ws);
-    // No MemoryWrite allow rule — under DEFAULT mode this falls to ASK, which (until an
-    // AskUserQuestion handler is wired into the permission system) blocks the call.
     var permission =
         new Permission(
             PermissionMode.DEFAULT,
@@ -176,9 +176,6 @@ final class SessionDemoIntegrationTest {
                     .withTools(new ToolRegistry(List.of(MemoryWriteTool.binding(memoryBackend))))
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
                     .build())) {
-      // Subscribe with an auto-denier — every QuestionAsked the permission system surfaces gets a
-      // synthetic "Deny" answer so the loop unblocks. Without this, runBlocking would deadlock
-      // waiting on session.answer.
       events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
       session.events().subscribe(events);
       session.runBlocking(
@@ -189,9 +186,6 @@ final class SessionDemoIntegrationTest {
       modelId = forced.id();
     }
 
-    // Permission blocks happen BEFORE dispatch — the loop emits ToolBlocked and a failed ToolResult
-    // without a ToolUse. The block proves the attempted write was refused, and nothing landed on
-    // disk.
     var calls = events.eventsOf(QueryEvent.ToolResult.class);
     assertFalse(calls.isEmpty());
     assumeTrue(
