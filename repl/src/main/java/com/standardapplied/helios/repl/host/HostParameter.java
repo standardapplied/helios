@@ -25,7 +25,7 @@ import com.standardapplied.helios.core.tool.ParameterType;
  *     synthesized JShell)
  * @param type JSON Schema-style type, mapped to a Java type in the synthesized signature
  * @param description short description of the parameter; surfaced in {@code
- *     SandboxPrelude.modelFacingSummary} so the LLM knows what the parameter means
+ *     SandboxPrelude.customWrapperSummary} so the LLM knows what the parameter means
  * @param required whether the caller must supply the parameter; optional parameters are still
  *     present in the synthesized signature (with their boxed nullable type) — the contract is "the
  *     model passes {@code null} when omitting"
