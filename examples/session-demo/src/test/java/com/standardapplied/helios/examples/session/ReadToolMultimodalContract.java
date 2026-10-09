@@ -40,9 +40,10 @@ import org.junit.jupiter.api.io.TempDir;
  * <p>The model is forced to call a tool on every turn, with Read the only one it is given beside
  * the built-in AskUserQuestion, so each session ends at its two-turn limit after the second
  * request, the one carrying the attachment. Which tool and path the model picks is its choice: a
- * run with no successful Read skips, and {@code RecordedSessionTest} replays a recorded session
- * that reads and attaches both files. The fixtures are a 1x1 PNG and a one-page "Hello, world!" PDF
- * from {@link SampleDocuments}. Each subclass supplies its model and carries its own API-key gate.
+ * run whose first turn attaches no file skips, since only a first-turn attachment reaches a
+ * request, and {@code RecordedSessionTest} replays a recorded session that reads and attaches both
+ * files. The fixtures are a 1x1 PNG and a one-page "Hello, world!" PDF from {@link
+ * SampleDocuments}. Each subclass supplies its model and carries its own API-key gate.
  */
 abstract class ReadToolMultimodalContract {
 
@@ -93,10 +94,13 @@ abstract class ReadToolMultimodalContract {
           results.stream()
               .anyMatch(
                   result ->
-                      result.call().name().equals(ReadTool.NAME) && result.result().success()),
+                      result.turnIndex() == 1
+                          && result.call().name().equals(ReadTool.NAME)
+                          && result.result().success()
+                          && result.result().hasAttachments()),
           () ->
               model.id()
-                  + " made no successful Read call, "
+                  + " attached no file on its first turn, "
                   + results.stream().map(QueryEvent.ToolResult::call).toList()
                   + "; RecordedSessionTest#fileToolsRedactTheirOutputAndAttachWhatTheyRead"
                   + " covers the attachment");
