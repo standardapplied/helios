@@ -58,13 +58,11 @@ final class SnippetEvaluator {
 
   Map<String, Object> handleExecute(Map<String, Object> params) {
     if (!executeLock.tryAcquire()) {
-      return Map.of(
-          "stdout",
-          "",
-          "stderr",
-          "Concurrent execution rejected — only one execute may run at a time",
-          "exitCode",
-          1);
+      var error = new LinkedHashMap<String, Object>();
+      error.put("stdout", "");
+      error.put("stderr", "Concurrent execution rejected — only one execute may run at a time");
+      error.put("exitCode", 1);
+      return error;
     }
     try {
       return doExecute(params);
