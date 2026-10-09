@@ -499,7 +499,7 @@ try (var executionProvider = JShellExecutionProvider.create(
 }
 ```
 
-The model calls `Execute` with `{"runtime": "JSHELL", "script": "println(marketQuote(\"AAPL\"))"}` and gets back the snippet's stdout, stderr and exit code. Credentials never enter the sandbox: a host function runs in the host process and returns only what it chooses to.
+The model calls `Execute` with `{"runtime": "JSHELL", "script": "println(marketQuote(\"AAPL\"))"}` and gets back the snippet's stdout, stderr and exit code. Tell the model what the sandbox offers in your system prompt: `SandboxPrelude.modelFacingSummary()` describes the built-in helpers, and `SandboxPrelude.formatSignature(quote)` renders a host function's signature as the model calls it. Credentials never enter the sandbox: a host function runs in the host process and returns only what it chooses to.
 
 ### Scripting prelude
 
