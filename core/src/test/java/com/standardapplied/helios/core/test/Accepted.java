@@ -48,12 +48,13 @@ public final class Accepted {
   }
 
   /**
-   * Asserts that {@code response}, the reply to a request that offers tools, either called a tool
-   * and ended for that reason or is a {@link #textReply text reply}, and returns it.
+   * Asserts that {@code response}, the reply to a request that offers tools, either ended to call a
+   * tool and carries that call or is a {@link #textReply text reply}, and returns it. A reply cut
+   * short by the token limit or a refusal may carry the tool calls emitted before it stopped.
    */
   public static <T> Response<T> toolTurn(Response<T> response) {
-    if (response.hasToolCalls()) {
-      assertEquals(FinishReason.TOOL_CALLS, response.finishReason());
+    if (response.finishReason() == FinishReason.TOOL_CALLS) {
+      assertTrue(response.hasToolCalls(), "TOOL_CALLS must carry a tool call");
       return response;
     }
     return textReply(response);
