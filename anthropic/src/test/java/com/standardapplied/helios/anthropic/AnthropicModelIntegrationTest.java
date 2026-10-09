@@ -96,16 +96,15 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
 
       assumeTrue(
           response.hasThinking(),
-          "claude-sonnet-4-6 wrote no thinking; AnthropicStreamTranscriptTest \"thinking\" covers"
-              + " the parsing");
+          AnthropicModelId.CLAUDE_SONNET_4_6.id()
+              + " wrote no thinking; AnthropicStreamTranscriptTest \"thinking\" covers the"
+              + " parsing");
       assertFalse(ThinkingBlock.decodeAll(response.metadata()).isEmpty());
       messages.add(response.toMessage());
       messages.add(Message.user("Now split it four ways evenly."));
       Accepted.textReply(thinkingModel.chat(messages));
     }
   }
-
-  // ── Opus 5.5 / Sonnet 5.5 / always-on models ──────────────────────────────
 
   private static final int MAX_TURNS = 8;
 
@@ -338,18 +337,27 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
         "Profile p7: operator turned angel, hardware supply chain background, based in Texas,"
             + " seeking early-stage climate deals. Related ids: p7, p12, p19.";
 
+    var summary = new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY);
+    var calledNoTool = new ArrayList<String>();
     for (var modelId : THE_55_MODELS) {
-      try (var candidate =
-          modelFor(modelId.id(), new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))) {
-        runToolLoop(candidate, opening, tools, profile, turn -> false, MAX_TURNS)
-            .forEach(Accepted::toolTurn);
+      try (var candidate = modelFor(modelId.id(), summary)) {
+        var turns = runToolLoop(candidate, opening, tools, profile, turn -> false, MAX_TURNS);
+        turns.forEach(Accepted::toolTurn);
+        if (!turns.getFirst().hasToolCalls()) {
+          calledNoTool.add(modelId.id() + " " + summary);
+        }
       }
     }
 
     var opusId = AnthropicModelId.CLAUDE_OPUS_5_5.id();
-    try (var opus = modelFor(opusId, new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS))) {
+    var progress = new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS);
+    try (var opus = modelFor(opusId, progress)) {
       var turns = runToolLoop(opus, opening, tools, profile, Response::hasThinking, MAX_TURNS);
       turns.forEach(Accepted::toolTurn);
+      if (!turns.getFirst().hasToolCalls()) {
+        calledNoTool.add(opusId + " " + progress);
+      }
+      assumeTrue(calledNoTool.isEmpty(), () -> noToolCall(String.join(", ", calledNoTool)));
 
       var noted = turns.stream().filter(Response::hasThinking).findFirst();
       assumeTrue(

@@ -72,8 +72,6 @@ class GeminiGroundedStructuredOutputIntegrationTest {
             Message.user(
                 "What is the capital of Australia? Search the web to confirm, then answer."));
 
-    // The deliverable: structured output parsed off a grounded turn. Before the fix the stream
-    // died on the google_search_call delta and this call threw GeminiException instead of parsing.
     Response<CapitalFact> response =
         model.chat(messages, List.of(), OutputSchema.of(CapitalFact.class));
 
@@ -94,8 +92,9 @@ class GeminiGroundedStructuredOutputIntegrationTest {
     Accepted.textReply(response);
     assumeTrue(
         response.hasCitations(),
-        "gemini-3.5-flash cited no source; GeminiStreamTranscriptTest \"grounded\" covers the"
-            + " citation harvest");
+        GeminiModelId.GEMINI_3_5_FLASH.id()
+            + " cited no source; GeminiStreamTranscriptTest \"grounded\" covers the citation"
+            + " harvest");
     response
         .citations()
         .forEach(
