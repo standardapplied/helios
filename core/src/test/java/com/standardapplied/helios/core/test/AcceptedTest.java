@@ -59,21 +59,39 @@ class AcceptedTest {
     assertThrows(AssertionError.class, () -> Accepted.textReply(response));
   }
 
+  private static Response<Void> called(FinishReason finishReason) {
+    var call = ToolCall.newBuilder().withId("c1").withName("t").withArguments(Map.of()).build();
+    return Response.newBuilder()
+        .withContent("")
+        .withToolCalls(List.of(call))
+        .withFinishReason(finishReason)
+        .withUsage(Response.Usage.of(3, 2))
+        .build();
+  }
+
   @Test
   void aToolTurnEitherCalledAToolOrIsATextReply() {
-    var call = ToolCall.newBuilder().withId("c1").withName("t").withArguments(Map.of()).build();
-    var called =
-        Response.newBuilder()
-            .withContent("")
-            .withToolCalls(List.of(call))
-            .withFinishReason(FinishReason.TOOL_CALLS)
-            .withUsage(Response.Usage.of(3, 2))
-            .build();
+    var called = called(FinishReason.TOOL_CALLS);
     var answered = reply("done", FinishReason.STOP);
 
     assertSame(called, Accepted.toolTurn(called));
     assertSame(answered, Accepted.toolTurn(answered));
     assertThrows(AssertionError.class, () -> Accepted.toolTurn(reply("", FinishReason.TOOL_CALLS)));
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = FinishReason.class,
+      names = {"LENGTH", "REFUSAL"})
+  void aToolTurnCutShortMayCarryTheToolCallsEmittedBeforeIt(FinishReason finishReason) {
+    var truncated = called(finishReason);
+
+    assertSame(truncated, Accepted.toolTurn(truncated));
+  }
+
+  @Test
+  void aToolTurnWithToolCallsMayNotEndInAnError() {
+    assertThrows(AssertionError.class, () -> Accepted.toolTurn(called(FinishReason.ERROR)));
   }
 
   @Test

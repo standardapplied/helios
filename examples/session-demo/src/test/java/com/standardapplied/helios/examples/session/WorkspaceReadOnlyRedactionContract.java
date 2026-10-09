@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -38,9 +39,9 @@ import org.junit.jupiter.api.io.TempDir;
  * reach the tool, and that the tool's output is what Helios produces for them, redaction included.
  *
  * <p>Each case forces the model to call its tool on every turn, so each session ends at its
- * two-turn limit. The arguments are the model's choice: a case whose call does not name what the
- * user asked for skips, and {@code RecordedSessionTest} replays a recorded session whose calls do.
- * Each subclass supplies its model and carries its own API-key gate.
+ * two-turn limit. The arguments are the model's choice: a case whose call does not carry exactly
+ * the arguments the user asked for skips, and {@code RecordedSessionTest} replays a recorded
+ * session whose calls do. Each subclass supplies its model and carries its own API-key gate.
  */
 abstract class WorkspaceReadOnlyRedactionContract {
 
@@ -64,10 +65,7 @@ abstract class WorkspaceReadOnlyRedactionContract {
             "List every markdown file in the workspace using the Glob tool with pattern"
                 + " '**/*.md'.");
 
-    var pattern = String.valueOf(result.call().arguments().get("pattern"));
-    assumeTrue(
-        pattern.endsWith("*.md") && result.result().success(),
-        () -> "the model globbed " + pattern + "; " + COUNTERPART);
+    assumeArguments(result, Map.of("pattern", "**/*.md"));
     var output = result.result().output();
     assertTrue(output.contains("intro.md") && output.contains("guide.md"), output);
     assertFalse(output.contains("config.yaml"), output);
@@ -89,10 +87,7 @@ abstract class WorkspaceReadOnlyRedactionContract {
             GrepTool.NAME,
             "Use Grep to find which file in the workspace mentions 'reactor'.");
 
-    var pattern = String.valueOf(result.call().arguments().get("pattern"));
-    assumeTrue(
-        "reactor".equals(pattern) && result.result().success(),
-        () -> "the model grepped for " + pattern + "; " + COUNTERPART);
+    assumeArguments(result, Map.of("pattern", "reactor"));
     var output = result.result().output();
     assertTrue(output.contains("patterns.md"), output);
     assertFalse(output.contains("misc.md"), output);
@@ -111,14 +106,23 @@ abstract class WorkspaceReadOnlyRedactionContract {
     var result =
         call(corpus, registry, ReadTool.NAME, "Use Read to read 'config.yaml' from the workspace.");
 
-    var path = String.valueOf(result.call().arguments().get("path"));
-    assumeTrue(
-        path.endsWith("config.yaml") && result.result().success(),
-        () -> "the model read " + path + "; " + COUNTERPART);
+    assumeArguments(result, Map.of("path", "config.yaml"));
     var output = result.result().output();
     assertTrue(output.contains("<redacted:OPENAI_KEY>"), output);
     assertFalse(output.contains(secret), output);
     assertFalse(output.contains("CONFIDENTIAL-do-not-leak"), output);
+  }
+
+  /**
+   * Skips unless the model called the tool with exactly {@code arguments}, the ones the expected
+   * output follows from, then asserts the call succeeded.
+   */
+  private static void assumeArguments(QueryEvent.ToolResult result, Map<String, ?> arguments) {
+    var called = result.call().arguments();
+    assumeTrue(
+        arguments.equals(called),
+        () -> "the model called " + result.call().name() + " with " + called + "; " + COUNTERPART);
+    assertTrue(result.result().success(), result.result().output());
   }
 
   /**
