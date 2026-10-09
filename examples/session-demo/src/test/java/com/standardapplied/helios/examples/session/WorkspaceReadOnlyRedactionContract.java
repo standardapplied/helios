@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.examples.session;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -21,6 +20,8 @@ import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.QuestionAnswers;
+import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -38,8 +39,9 @@ import org.junit.jupiter.api.io.TempDir;
  * provider, it verifies that the provider accepts each tool's schema, that the model's arguments
  * reach the tool, and that the tool's output is what Helios produces for them, redaction included.
  *
- * <p>Each case forces the model to call its tool on every turn, so each session ends at its
- * two-turn limit. The arguments are the model's choice: a case whose call does not carry exactly
+ * <p>Each case forces the model to call a tool on every turn, with its tool the only one it is
+ * given beside the built-in AskUserQuestion, so each session ends at its two-turn limit. The tool
+ * and its arguments are the model's choice: a case whose first call is not its tool with exactly
  * the arguments the user asked for skips, and {@code RecordedSessionTest} replays a recorded
  * session whose calls do. Each subclass supplies its model and carries its own API-key gate.
  */
@@ -59,9 +61,7 @@ abstract class WorkspaceReadOnlyRedactionContract {
 
     var result =
         call(
-            corpus,
-            new SecretRegistry(),
-            GlobTool.NAME,
+            GlobTool.binding(WorkspaceRoot.of(corpus)),
             "List every markdown file in the workspace using the Glob tool with pattern"
                 + " '**/*.md'.");
 
@@ -82,9 +82,7 @@ abstract class WorkspaceReadOnlyRedactionContract {
 
     var result =
         call(
-            corpus,
-            new SecretRegistry(),
-            GrepTool.NAME,
+            GrepTool.binding(WorkspaceRoot.of(corpus), new SecretRegistry().redactor()),
             "Use Grep to find which file in the workspace mentions 'reactor'.");
 
     assumeArguments(result, Map.of("pattern", "reactor"));
@@ -104,7 +102,10 @@ abstract class WorkspaceReadOnlyRedactionContract {
         StandardCharsets.UTF_8);
 
     var result =
-        call(corpus, registry, ReadTool.NAME, "Use Read to read 'config.yaml' from the workspace.");
+        call(
+            ReadTool.binding(
+                WorkspaceRoot.of(corpus), InMemoryFileTracker.create(), registry.redactor()),
+            "Use Read to read 'config.yaml' from the workspace.");
 
     assumeArguments(result, Map.of("path", "config.yaml"));
     var output = result.result().output();
@@ -126,31 +127,21 @@ abstract class WorkspaceReadOnlyRedactionContract {
   }
 
   /**
-   * Run {@code request} in a session bound to {@code corpus} with only the v2 file tools — Read and
-   * Grep wired through {@code registry}'s redactor; Glob takes no redactor by design (paths are
-   * structural, not secret material) — and the model forced to call {@code tool}. Asserts what
-   * holds whatever the model does: the session ends cleanly with no error and called {@code tool},
-   * and returns the first result of that call.
+   * Run {@code request} in a session whose only tool is {@code tool}, with the model forced to call
+   * a tool. Asserts what holds whatever the model does: the session ends cleanly with no error and
+   * a tool was called. It skips unless the first call was {@code tool}, and returns that call's
+   * result.
    */
-  private QueryEvent.ToolResult call(
-      Path corpus, SecretRegistry registry, String tool, String request) {
-    var workspace = WorkspaceRoot.of(corpus);
-    var tracker = InMemoryFileTracker.create();
-    var redactor = registry.redactor();
-    var bindings =
-        List.of(
-            ReadTool.binding(workspace, tracker, redactor),
-            GrepTool.binding(workspace, redactor),
-            GlobTool.binding(workspace));
-    var events = new CollectingSubscriber();
-    try (var model = createModel(ToolChoice.required(tool));
+  private QueryEvent.ToolResult call(ToolBinding tool, String request) {
+    try (var model = createModel(ToolChoice.any());
         var session =
             AgentSession.create(
                 SessionOptions.newBuilder()
                     .withModel(model)
-                    .withTools(new ToolRegistry(bindings))
+                    .withTools(new ToolRegistry(List.of(tool)))
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
                     .build())) {
+      var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
       session.events().subscribe(events);
       var terminal = session.runBlocking(UserMessage.text(request));
       events.awaitDone();
@@ -162,7 +153,16 @@ abstract class WorkspaceReadOnlyRedactionContract {
       assertTrue(events.eventsOf(QueryEvent.Error.class).isEmpty());
       var results = events.eventsOf(QueryEvent.ToolResult.class);
       assertFalse(results.isEmpty());
-      results.forEach(result -> assertEquals(tool, result.call().name()));
+      assumeTrue(
+          results.getFirst().call().name().equals(tool.name()),
+          () ->
+              model.id()
+                  + " called "
+                  + results.stream().map(QueryEvent.ToolResult::call).toList()
+                  + " instead of "
+                  + tool.name()
+                  + "; "
+                  + COUNTERPART);
       return results.getFirst();
     }
   }

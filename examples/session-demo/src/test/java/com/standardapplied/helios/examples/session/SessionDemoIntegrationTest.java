@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
@@ -31,6 +32,7 @@ import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.test.QuestionAnswers;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -52,9 +54,12 @@ import org.junit.jupiter.api.io.TempDir;
  * Skipped when {@code GEMINI_API_KEY} is unset so the suite stays runnable offline.
  *
  * <p>Assertions describe what the framework guarantees whatever the model writes: forced to call a
- * file-reading tool, the loop dispatches it and the provider accepts the next turn; the
- * attachment-bearing user message is accepted; and a forced memory write without an allow rule is
- * refused by the permission system and never reaches disk.
+ * tool, the loop dispatches it and the provider accepts the next turn; the attachment-bearing user
+ * message is accepted; and a memory write without an allow rule is refused by the permission system
+ * and never reaches disk. Which tool a forced call picks is the model's choice: a run whose calls
+ * are not the ones under test skips, naming the offline test that covers them. Forcing applies to
+ * every turn, so once the exploring session runs out of file steps it calls the demo's other tools;
+ * only its first call is checked.
  */
 @EnabledIfEnvironmentVariable(named = "GEMINI_API_KEY", matches = ".+")
 final class SessionDemoIntegrationTest {
@@ -86,16 +91,13 @@ final class SessionDemoIntegrationTest {
   @Test
   void agentExploresRepoWithItsFileTools(@TempDir Path tmp) throws Exception {
     seedFakeRepo(tmp);
-    var events = new CollectingSubscriber();
-    try (var forced =
-            gemini(
-                ModelConfig.newBuilder()
-                    .withToolChoice(ToolChoice.required(FILE_READ_TOOLS.toArray(String[]::new))));
+    try (var forced = gemini(ModelConfig.newBuilder().withToolChoice(ToolChoice.any()));
         var session =
             AgentSession.create(
                 SessionDemoMain.exploreAndRememberOptions(forced, tmp)
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(3).build())
                     .build())) {
+      var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
       session.events().subscribe(events);
       var prompt =
           "Do exactly two steps, then stop:\n"
@@ -107,14 +109,21 @@ final class SessionDemoIntegrationTest {
       assertTrue(
           result instanceof ResultMessage.Success || result instanceof ResultMessage.ErrorMaxTurns,
           () -> "session did not reach a clean terminal: " + result);
-      var toolNamesObserved =
-          events.eventsOf(QueryEvent.ToolResult.class).stream().map(e -> e.call().name()).toList();
-      assertFalse(toolNamesObserved.isEmpty());
-      assertTrue(FILE_READ_TOOLS.containsAll(toolNamesObserved), toolNamesObserved::toString);
       var failedToolEvents = events.eventsOf(QueryEvent.Error.class);
       assertTrue(
           failedToolEvents.isEmpty(),
           () -> "no provider-level errors expected, got " + failedToolEvents);
+      var toolNamesObserved =
+          events.eventsOf(QueryEvent.ToolResult.class).stream().map(e -> e.call().name()).toList();
+      assertFalse(toolNamesObserved.isEmpty());
+      assumeTrue(
+          FILE_READ_TOOLS.contains(toolNamesObserved.getFirst()),
+          () ->
+              forced.id()
+                  + " called "
+                  + toolNamesObserved
+                  + "; RecordedSessionTest#fileToolsRedactTheirOutputAndAttachWhatTheyRead covers"
+                  + " the file tools");
     }
   }
 
@@ -157,16 +166,14 @@ final class SessionDemoIntegrationTest {
             List.of(),
             List.of());
     CollectingSubscriber events;
-    try (var forced =
-            gemini(
-                ModelConfig.newBuilder()
-                    .withToolChoice(ToolChoice.required(MemoryWriteTool.NAME)));
+    String modelId;
+    try (var forced = gemini(ModelConfig.newBuilder().withToolChoice(ToolChoice.any()));
         var session =
             AgentSession.create(
                 SessionOptions.newBuilder()
                     .withModel(forced)
                     .withPermission(permission)
-                    .withMemoryBackend(memoryBackend)
+                    .withTools(new ToolRegistry(List.of(MemoryWriteTool.binding(memoryBackend))))
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
                     .build())) {
       // Subscribe with an auto-denier — every QuestionAsked the permission system surfaces gets a
@@ -179,14 +186,25 @@ final class SessionDemoIntegrationTest {
               "Use MemoryWrite with op=create to save a note at /memories/test.md with content"
                   + " 'hello world'."));
       events.awaitDone();
+      modelId = forced.id();
     }
 
-    // Permission blocks happen BEFORE dispatch — the loop emits ToolBlocked directly without a
-    // preceding ToolResult. The forced call proves a write was attempted; the block proves it was
-    // refused, and nothing landed on disk.
-    var blocked = events.eventsOf(QueryEvent.ToolBlocked.class);
-    assertFalse(blocked.isEmpty(), "the forced MemoryWrite must be blocked");
-    blocked.forEach(block -> assertEquals(MemoryWriteTool.NAME, block.call().name()));
+    // Permission blocks happen BEFORE dispatch — the loop emits ToolBlocked and a failed ToolResult
+    // without a ToolUse. The block proves the attempted write was refused, and nothing landed on
+    // disk.
+    var calls = events.eventsOf(QueryEvent.ToolResult.class);
+    assertFalse(calls.isEmpty());
+    assumeTrue(
+        calls.stream().anyMatch(result -> result.call().name().equals(MemoryWriteTool.NAME)),
+        () ->
+            modelId
+                + " called "
+                + calls.stream().map(QueryEvent.ToolResult::call).toList()
+                + "; Phase4AcceptanceTest#memoryWriteIsBlockedWhenUserDeniesAsk covers the block");
+    assertTrue(
+        events.eventsOf(QueryEvent.ToolBlocked.class).stream()
+            .anyMatch(block -> block.call().name().equals(MemoryWriteTool.NAME)),
+        "the MemoryWrite must be blocked");
     var successfulMemoryWrites =
         events.eventsOf(QueryEvent.ToolResult.class).stream()
             .filter(r -> r.call().name().equals(MemoryWriteTool.NAME))
