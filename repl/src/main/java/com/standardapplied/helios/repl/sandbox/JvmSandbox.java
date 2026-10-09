@@ -10,7 +10,6 @@ import com.standardapplied.helios.repl.host.HostFunctionRegistry;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import com.standardapplied.helios.repl.protocol.RpcChannel;
 import java.io.IOException;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -80,12 +79,12 @@ public final class JvmSandbox implements Sandbox {
   }
 
   /**
-   * Accessor for the per-session ephemeral working directory created by {@link #create}, or {@code
-   * null} when the caller pinned a working directory via {@link
-   * JvmSandboxConfig#workingDirectory()}. Exposed for tests that verify cwd containment.
+   * The directories {@link #create} made for this sandbox: its RPC socket directory and, unless the
+   * caller pinned one via {@link JvmSandboxConfig#workingDirectory()}, its ephemeral working
+   * directory. Exposed for tests that verify containment and cleanup.
    */
-  Path ephemeralWorkingDirForTests() {
-    return directories.ephemeralWorkingDirectory();
+  SandboxDirectories directoriesForTests() {
+    return directories;
   }
 
   /**
