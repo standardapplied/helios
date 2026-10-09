@@ -59,17 +59,16 @@ class ToolLoopReplayTest {
     for (var turn = 0; turn + 1 < requests.size(); turn++) {
       var before = blocks(requests.get(turn));
       var after = blocks(requests.get(turn + 1));
-      var breakpoints = 0;
+      assertTrue(
+          before.getLast().breakpoint(), "request " + turn + " left its last block uncached");
       for (var end = 0; end < before.size(); end++) {
         if (before.get(end).breakpoint()) {
-          breakpoints++;
           assertEquals(
               contents(before, end + 1),
               contents(after, end + 1),
               "request " + (turn + 1) + " changed the prefix request " + turn + " cached");
         }
       }
-      assertTrue(breakpoints > 0, "request " + turn + " marked no cache breakpoint");
     }
   }
 
