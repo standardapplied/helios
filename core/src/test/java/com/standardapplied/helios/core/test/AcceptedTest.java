@@ -59,14 +59,34 @@ class AcceptedTest {
     assertThrows(AssertionError.class, () -> Accepted.textReply(response));
   }
 
-  private static Response<Void> called(FinishReason finishReason) {
+  @Test
+  void aTextReplyCarriesContent() {
+    var response =
+        Response.newBuilder()
+            .withFinishReason(FinishReason.STOP)
+            .withUsage(Response.Usage.of(3, 2))
+            .build();
+
+    assertThrows(AssertionError.class, () -> Accepted.textReply(response));
+  }
+
+  private static Response.Builder<Void> calling(FinishReason finishReason) {
     var call = ToolCall.newBuilder().withId("c1").withName("t").withArguments(Map.of()).build();
-    return Response.newBuilder()
-        .withContent("")
-        .withToolCalls(List.of(call))
-        .withFinishReason(finishReason)
-        .withUsage(Response.Usage.of(3, 2))
-        .build();
+    return Response.newBuilder().withToolCalls(List.of(call)).withFinishReason(finishReason);
+  }
+
+  private static Response<Void> called(FinishReason finishReason) {
+    return calling(finishReason).withContent("").withUsage(Response.Usage.of(3, 2)).build();
+  }
+
+  @Test
+  void aToolTurnThatCalledAToolCarriesContentAndUsage() {
+    var withoutUsage = calling(FinishReason.TOOL_CALLS).withContent("").build();
+    var withoutContent =
+        calling(FinishReason.TOOL_CALLS).withUsage(Response.Usage.of(3, 2)).build();
+
+    assertThrows(AssertionError.class, () -> Accepted.toolTurn(withoutUsage));
+    assertThrows(AssertionError.class, () -> Accepted.toolTurn(withoutContent));
   }
 
   @Test
@@ -96,9 +116,25 @@ class AcceptedTest {
 
   @Test
   void aParsedReplyIsReturned() {
-    var response = reply("{}", FinishReason.STOP);
+    var response =
+        Response.newBuilder(String.class)
+            .withContent("{}")
+            .withParsed("value")
+            .withFinishReason(FinishReason.STOP)
+            .withUsage(Response.Usage.of(3, 2))
+            .build();
 
     assertSame(response, Accepted.parsedOrSkip("m", "SomeTest", () -> response));
+  }
+
+  @Test
+  void aBlankReplyThatParsesToNoValueAbortsTheTestNamingItsCounterpart() {
+    var aborted =
+        assertThrows(
+            TestAbortedException.class,
+            () -> Accepted.parsedOrSkip("m", "SomeTest", () -> reply("", FinishReason.REFUSAL)));
+
+    assertTrue(aborted.getMessage().contains("m wrote no JSON matching the schema; SomeTest"));
   }
 
   @Test
