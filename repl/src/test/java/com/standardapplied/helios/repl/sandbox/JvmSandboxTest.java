@@ -326,8 +326,7 @@ class JvmSandboxTest {
     // process.descendants().forEach(::destroyForcibly) the parent dies on sandbox.close() but its
     // grandchildren survive — an orphaned process leak. This test launches a real sandbox, runs
     // a snippet that forks a long-running child, reports the child PID to a host function, closes
-    // the
-    // sandbox, and asserts the descendant PID is no longer alive.
+    // the sandbox, and asserts the descendant PID is no longer alive.
     var descendantPidHolder = new AtomicReference<Long>();
     var registry = new HostFunctionRegistry();
     registry.register(
