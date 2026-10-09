@@ -668,7 +668,7 @@ class JvmSandboxTest {
 
   @Test
   void endToEndSubprocessReturnsBindingsSnapshot() {
-    // Variables bound during execute_code should come back in ExecutionResult.bindings(),
+    // Variables bound during an execute should come back in ExecutionResult.bindings(),
     // filtered to exclude __-prefixed harness internals and capped per-value.
     var registry = new HostFunctionRegistry();
     JvmSandbox sandbox = null;
