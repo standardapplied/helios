@@ -16,9 +16,7 @@ import com.standardapplied.helios.repl.protocol.RpcChannel;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Handler;
@@ -50,8 +48,8 @@ class SandboxCloseTest {
   @Test
   void closeLeavesNoProcessSocketDirectoryOrWorkingDirectory() {
     var sandbox = JvmSandbox.create(CONFIG, new HostFunctionRegistry());
-    var socketDir = socketDirectory(sandbox.process());
-    var workingDir = sandbox.ephemeralWorkingDirForTests();
+    var socketDir = sandbox.directoriesForTests().socketDirectory();
+    var workingDir = sandbox.directoriesForTests().ephemeralWorkingDirectory();
     assertTrue(Files.isDirectory(socketDir), socketDir.toString());
     assertTrue(Files.isDirectory(workingDir), workingDir.toString());
 
@@ -65,8 +63,8 @@ class SandboxCloseTest {
   @Test
   void shutdownHookLeavesNoProcessSocketDirectoryOrWorkingDirectory() {
     var sandbox = JvmSandbox.create(CONFIG, new HostFunctionRegistry());
-    var socketDir = socketDirectory(sandbox.process());
-    var workingDir = sandbox.ephemeralWorkingDirForTests();
+    var socketDir = sandbox.directoriesForTests().socketDirectory();
+    var workingDir = sandbox.directoriesForTests().ephemeralWorkingDirectory();
 
     sandbox.destroyOnJvmShutdown();
 
@@ -134,15 +132,6 @@ class SandboxCloseTest {
     assertFalse(channel.isActive());
     assertFalse(Files.exists(directories.socketDirectory()));
     assertFalse(Files.exists(directories.workingDirectory()));
-  }
-
-  private static Path socketDirectory(Process process) {
-    var socketArg =
-        Arrays.stream(process.info().arguments().orElseThrow())
-            .filter(arg -> arg.startsWith("--rpc-socket="))
-            .findFirst()
-            .orElseThrow();
-    return Path.of(socketArg.substring("--rpc-socket=".length())).getParent();
   }
 
   /**
