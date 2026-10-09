@@ -152,6 +152,48 @@ and for HTTP clients `StubHttpServer` and `RedirectTrap`.
   method completes its work before returning; a listener or future it already exposes; a
   package-private accessor.
 
+### Live tests
+
+A live test (gated by `@EnabledIfEnvironmentVariable` on a provider key) fails only when the
+provider rejects a request Helios built, or when Helios mis-reads what the provider sent; never on
+what the model chose to write. Helios behaviour that needs a model choice is proven by a recorded
+test that runs on every build; the live test that needs that choice skips when the model makes a
+different one.
+
+1. **What a live test asserts.** Only facts that hold for any output the model may produce: the
+   provider accepted every request (no exception, no `Error` event); Helios turned the response
+   into its own types (a finish reason the request allows, non-null content, parsed usage, a
+   computed cost); a replayed turn was accepted; the streamed deltas join to exactly the content
+   `Done` reports; a parsed value is present where the provider constrains the output (OpenAI
+   strict `json_schema`, Gemini `response_format`). `core.test.Accepted` holds these checks.
+2. **Force what can be forced.** Force tool use with `ModelConfig.Builder.withToolChoice`:
+   on Anthropic only for a model whose `AnthropicModelId.acceptsForcedToolChoice()` is true and
+   with no reasoning set; on OpenAI with `ToolChoice.required(name)`; on Gemini with
+   `ToolChoice.any()` or `required(...)`. A session's tool choice applies on every turn, so a
+   forced session ends in `ErrorMaxTurns`; a test that forces one accepts that terminal.
+3. **Skip what cannot be forced.** A tool call on a model that rejects forced tool use, a progress
+   note or thinking text, a citation or grounding, a web search, valid JSON where the provider
+   does not constrain it, and the arguments the model passes: check the step with
+   `Assumptions.assumeTrue(condition, message)`, whose message names the model, the step it
+   skipped and the recorded test that covers it. Every assertion before the assumption is a
+   rule-1 fact; assertions that need the step come after it.
+4. **Every skip has a recorded counterpart** that runs in `mvn verify` without keys. Provider
+   level: a fixture under `golden/<provider>/streams/` in that provider's `*StreamTranscriptTest`.
+   Session level: the real provider client against `StubHttpServer` through `AgentSession`, as
+   `RecordedSessionTest` does. A multi-turn fixture separates responses with
+   `ModelHarness.NEXT_RESPONSE`. Each fixture comes from one live call: keep its event types,
+   block order, block indices and field names as recorded; text may be shortened, ids and
+   signatures replaced with stable placeholders; never a key or an `Authorization` header. The
+   test's javadoc states each fixture's model id and recording date in one line.
+5. **No wording checks.** Never assert what the model said. Where a wording check stood in for a
+   request-shape guarantee, assert the request Helios sent offline, through the requests
+   `ModelHarness.exchange` returns (`ConversationRequestContract`).
+6. **The provider's cache is not asserted live.** `ToolLoopReplayTest` proves offline that every
+   request repeats the prefix the request before it marked for the cache.
+7. **No turn bound fails a live test.** A live tool loop stops after the turn it tests (for a replay
+   test, the first turn that sends the replayed block), and a session that hits `maxTurns` is an
+   accepted terminal unless the test is about that terminal.
+
 ### Running it
 
 ```bash
@@ -279,7 +321,7 @@ means changing `SCANNER_VERSION` and both checksums in `advisory_scan.py` togeth
 
 ```
 helios/
-├── core/                           # Zero deps - Model + Reasoning + tool + common + fault + process + provider + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream, FailingInputStream, StubHttpServer, RedirectTrap, SseEvents, ChildJvm, and for provider characterization ModelHarness, SseReplies, Transcript, Golden, ConversationFixture, DeclarationOrderFixture, ReasoningMatrix) and the abstract `*Contract` tests ship as its test-jar.
+├── core/                           # Zero deps - Model + Reasoning + tool + common + fault + process + provider + schema + trace + runtime + knowledge + prompt + embedding interfaces. CostEstimate + CostCalculator. Test fixtures (Await, LineSink, FeedableInputStream, FailingInputStream, StubHttpServer, RedirectTrap, SseEvents, ChildJvm, and for provider characterization ModelHarness, SseReplies, Transcript, Golden, ConversationFixture, DeclarationOrderFixture, ReasoningMatrix, and for live tests Accepted) and the abstract `*Contract` tests ship as its test-jar.
 ├── session/                        # v2 SDK - AgentSession, SessionPresets, hooks, permissions, file tools, memory backend, agent loop. Test fixtures (CollectingSubscriber, QuestionAnswers, HookInputs, SampleDocuments in `session.test`) ship as its test-jar.
 ├── runtime/                        # Helidon HTTP/SSE surface for session — POST /sessions, SSE /events, long-poll /result
 ├── gemini/                         # Gemini Interactions API + Jackson 3.x

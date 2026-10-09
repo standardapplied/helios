@@ -11,11 +11,15 @@ import org.junit.jupiter.params.provider.ValueSource;
 /**
  * Characterization: for each recorded stream under {@code golden/gemini/streams}, the exact events
  * {@code chatStream} yields and the response {@code chat} assembles.
+ *
+ * <p>{@code grounded} is a live gemini-3.5-flash Google Search turn with its url citations,
+ * recorded 2026-10-09. The other streams are hand-built.
  */
 class GeminiStreamTranscriptTest {
 
   @ParameterizedTest
-  @ValueSource(strings = {"text", "tool-calls", "thinking", "error", "citations", "malformed"})
+  @ValueSource(
+      strings = {"text", "tool-calls", "thinking", "error", "citations", "malformed", "grounded"})
   void transcriptMatchesItsGolden(String name) {
     var transcript =
         ModelHarness.transcript(
