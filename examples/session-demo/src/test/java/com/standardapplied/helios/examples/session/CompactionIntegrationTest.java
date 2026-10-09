@@ -32,6 +32,7 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PostCompactHook;
 import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -250,8 +251,8 @@ final class CompactionIntegrationTest {
             .withLimits(limits)
             .build();
 
-    var events = new CollectingSubscriber();
     try (var session = AgentSession.create(options)) {
+      var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
       session.events().subscribe(events);
       var result = session.runBlocking(UserMessage.text(NOTES_TASK));
       events.awaitDone();
