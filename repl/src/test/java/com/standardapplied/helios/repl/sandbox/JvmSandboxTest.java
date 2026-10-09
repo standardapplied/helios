@@ -12,7 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.tool.ParameterType;
+import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
+import com.standardapplied.helios.repl.host.HostParameter;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import com.standardapplied.helios.repl.protocol.RpcChannel;
 import java.io.BufferedReader;
@@ -322,17 +325,17 @@ class JvmSandboxTest {
     // Theme E regression test: snippets can call Runtime.exec(...) and spawn descendants. Without
     // process.descendants().forEach(::destroyForcibly) the parent dies on sandbox.close() but its
     // grandchildren survive — an orphaned process leak. This test launches a real sandbox, runs
-    // a snippet that forks a long-running child, captures the child PID via submit(), closes the
-    // sandbox, and asserts the descendant PID is no longer alive.
+    // a snippet that forks a long-running child, reports the child PID to a host function, closes
+    // the sandbox, and asserts the descendant PID is no longer alive.
     var descendantPidHolder = new AtomicReference<Long>();
     var registry = new HostFunctionRegistry();
     registry.register(
-        new com.standardapplied.helios.repl.host.HostFunction(
-            "submit",
+        new HostFunction(
+            "reportPid",
             "test capture for descendant PID",
+            List.of(HostParameter.required("pid", ParameterType.STRING, "the descendant's PID")),
             params -> {
-              var raw = params.get("output");
-              descendantPidHolder.set(Long.parseLong(raw.toString()));
+              descendantPidHolder.set(Long.parseLong(params.get("pid").toString()));
               return null;
             }));
     try (var sandbox = JvmSandbox.create(END_TO_END, registry)) {
@@ -340,7 +343,7 @@ class JvmSandboxTest {
           sandbox.execute(
               ExecutionRequest.java(
                   "var grandchild = new ProcessBuilder(\"sleep\", \"600\").start();\n"
-                      + "submit(String.valueOf(grandchild.pid()));"));
+                      + "reportPid(String.valueOf(grandchild.pid()));"));
       assertEquals(0, result.exitCode(), "snippet failed; stderr was:\n" + result.stderr());
       var descendant = ProcessHandle.of(descendantPidHolder.get()).orElseThrow();
       try {
@@ -509,16 +512,14 @@ class JvmSandboxTest {
   }
 
   @Test
-  void executeSuccessMapWithSubmitted() throws Exception {
+  void executeFailureMapCarriesStderrAndExitCode() throws Exception {
     try (var fake = new FakeSandboxProcess()) {
-      fake.answerNext(
-          Map.of("stdout", "", "stderr", "warning", "exitCode", 1, "submitted", "answer"));
+      fake.answerNext(Map.of("stdout", "", "stderr", "warning", "exitCode", 1));
 
       var result = fake.sandbox().execute(ExecutionRequest.java("code"));
 
       assertEquals(1, result.exitCode());
       assertEquals("warning", result.stderr());
-      assertEquals("answer", result.submitted());
     }
   }
 
@@ -572,18 +573,19 @@ class JvmSandboxTest {
   }
 
   @Test
-  void endToEndSubprocessCallsHostBridgeAndSubmits() {
-    // Real end-to-end: launch a sandbox subprocess, evaluate JShell code that calls
-    // HostBridge.submit, confirm the submitted value flows back. This is the regression test
+  void endToEndSubprocessCallsACustomHostFunction() {
+    // Real end-to-end: launch a sandbox subprocess, evaluate JShell code that calls a synthesized
+    // host-function wrapper, confirm the argument flows back. This is the regression test
     // for Kubera's F1/F2/F3 — if any of those bugs reappears, this test fails.
-    var submittedHolder = new AtomicReference<>();
+    var reportedHolder = new AtomicReference<>();
     var registry = new HostFunctionRegistry();
     registry.register(
-        new com.standardapplied.helios.repl.host.HostFunction(
-            "submit",
-            "stub submit for the JvmSandbox end-to-end test",
+        new HostFunction(
+            "report",
+            "stub capture for the JvmSandbox end-to-end test",
+            List.of(HostParameter.required("value", ParameterType.STRING, "the reported value")),
             params -> {
-              submittedHolder.set(params.get("output"));
+              reportedHolder.set(params.get("value"));
               return null;
             }));
     JvmSandbox sandbox = null;
@@ -592,11 +594,11 @@ class JvmSandboxTest {
       assertTrue(sandbox.isAlive(), "subprocess should be running after create");
 
       var request =
-          ExecutionRequest.newBuilder().withCode("submit(\"hello-from-sandbox\");").build();
+          ExecutionRequest.newBuilder().withCode("report(\"hello-from-sandbox\");").build();
       var result = sandbox.execute(request);
 
       assertEquals(0, result.exitCode(), "exitCode != 0; stderr was:\n" + result.stderr());
-      assertEquals("hello-from-sandbox", submittedHolder.get());
+      assertEquals("hello-from-sandbox", reportedHolder.get());
     } finally {
       if (sandbox != null) {
         var proc = sandbox.process();
@@ -615,7 +617,7 @@ class JvmSandboxTest {
     var capturedArgs = new AtomicReference<Map<String, Object>>();
     var registry = new HostFunctionRegistry();
     registry.register(
-        new com.standardapplied.helios.repl.host.HostFunction(
+        new HostFunction(
             "marketQuote",
             "Get a stock quote",
             List.of(
@@ -666,7 +668,7 @@ class JvmSandboxTest {
 
   @Test
   void endToEndSubprocessReturnsBindingsSnapshot() {
-    // Variables bound during execute_code should come back in ExecutionResult.bindings(),
+    // Variables bound during an execute should come back in ExecutionResult.bindings(),
     // filtered to exclude __-prefixed harness internals and capped per-value.
     var registry = new HostFunctionRegistry();
     JvmSandbox sandbox = null;
@@ -782,7 +784,7 @@ class JvmSandboxTest {
     // synthesis produces something a model can actually invoke from JShell.
     var registry = new HostFunctionRegistry();
     registry.register(
-        new com.standardapplied.helios.repl.host.HostFunction(
+        new HostFunction(
             "listSymbols", "All known tickers", params -> List.of("AAPL", "GOOG", "MSFT")));
     JvmSandbox sandbox = null;
     try {
@@ -918,7 +920,7 @@ class JvmSandboxTest {
     var invocations = new java.util.concurrent.atomic.AtomicInteger();
     var registry = new HostFunctionRegistry();
     registry.register(
-        new com.standardapplied.helios.repl.host.HostFunction(
+        new HostFunction(
             "auditCallback",
             "test capture for forged RPC invocations",
             params -> {
@@ -1067,7 +1069,7 @@ class JvmSandboxTest {
     var forgedCallArrived = new CountDownLatch(1);
     var registry = new HostFunctionRegistry();
     registry.register(
-        new com.standardapplied.helios.repl.host.HostFunction(
+        new HostFunction(
             "auditCallback",
             "test capture for forged RPC invocations",
             params -> {

@@ -25,8 +25,8 @@ public enum Runtime {
    */
   SQL,
   /**
-   * JShell — JDK 25 Java REPL. The Phase 6 {@code CodeActPreset} wires this through the existing
-   * {@code JvmSandbox} / {@code ReplSession} substrate; Phase 5 ships the enum value only.
+   * JShell — JDK 25 Java REPL, served by {@code helios-repl}'s {@code JShellExecutionProvider} over
+   * the {@code JvmSandbox} / {@code ReplSession} substrate.
    */
   JSHELL,
   /** R — for statistical / analytics workloads. No built-in handler in Phase 5. */

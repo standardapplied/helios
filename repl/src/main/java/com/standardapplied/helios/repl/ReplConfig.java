@@ -16,22 +16,15 @@ import java.util.List;
  * Configuration for REPL sessions. Immutable and reusable across sessions.
  *
  * <p>This is the substrate-only shape: sandbox factory, execution caps, host-function registry, and
- * bindings-snapshot bounds. RLM / CodeAct harness concepts (submit schema, predict budget, required
- * predict signatures, signature matchers) were removed in the v2 cut — predict and submit become
- * session-level Tools in v2, not sandbox host functions, and the iteration / completion surface
- * lives on {@code AgentSession} hooks.
+ * bindings-snapshot bounds.
  *
  * @param sandboxFactory creates the sandbox for each session
  * @param executionTimeout default timeout per code execution
  * @param maxConcurrentSessions maximum concurrent sessions (enforced via semaphore)
  * @param hostFunctions additional host functions registered for each session
- * @param maxOutputCharsToModel cap on the size of the {@code execute_code} tool result returned to
- *     the model. The full untruncated output stays in {@link ReplSession#history()} for operators.
- *     Variables persist fully across executions in the sandbox; the printed output the model sees
- *     on each turn is bounded. Defaults to 5000. Set to {@code 0} to disable truncation
  * @param sandboxBindingsListener optional observer of the sandbox's working memory after each
- *     {@code execute_code}. Fires synchronously inside {@link ReplSession#execute(String)} after
- *     the underlying sandbox returns. {@code null} disables the callback (default)
+ *     {@code Execute}. Fires synchronously inside {@link ReplSession#execute(String)} after the
+ *     underlying sandbox returns. {@code null} disables the callback (default)
  * @param maxBindingValueChars per-value cap on the sandbox-side {@code toString} repr emitted in
  *     {@link ExecutionResult#bindings()}. Defaults to {@value #DEFAULT_MAX_BINDING_VALUE_CHARS}.
  *     Set to {@code 0} to disable per-value truncation
@@ -48,7 +41,6 @@ public record ReplConfig(
     Duration executionTimeout,
     int maxConcurrentSessions,
     List<HostFunction> hostFunctions,
-    int maxOutputCharsToModel,
     SandboxBindingsListener sandboxBindingsListener,
     int maxBindingValueChars,
     int maxBindingSnapshotChars,
@@ -59,9 +51,6 @@ public record ReplConfig(
 
   /** Default max concurrent sessions. */
   public static final int DEFAULT_MAX_CONCURRENT_SESSIONS = 50;
-
-  /** Default {@code execute_code} output cap shown to the model: 5000 chars. */
-  public static final int DEFAULT_MAX_OUTPUT_CHARS_TO_MODEL = 5000;
 
   /** Default per-value cap on the {@code toString} repr in a bindings snapshot. */
   public static final int DEFAULT_MAX_BINDING_VALUE_CHARS = 200;
@@ -85,10 +74,6 @@ public record ReplConfig(
     }
     if (maxConcurrentSessions <= 0) {
       throw new IllegalArgumentException("Max concurrent sessions must be positive");
-    }
-    if (maxOutputCharsToModel < 0) {
-      throw new IllegalArgumentException(
-          "maxOutputCharsToModel must be >= 0 (0 disables truncation)");
     }
     if (maxBindingValueChars < 0) {
       throw new IllegalArgumentException(
@@ -116,7 +101,6 @@ public record ReplConfig(
     private Duration executionTimeout = DEFAULT_EXECUTION_TIMEOUT;
     private int maxConcurrentSessions = DEFAULT_MAX_CONCURRENT_SESSIONS;
     private final List<HostFunction> hostFunctions = new ArrayList<>();
-    private int maxOutputCharsToModel = DEFAULT_MAX_OUTPUT_CHARS_TO_MODEL;
     private SandboxBindingsListener sandboxBindingsListener;
     private int maxBindingValueChars = DEFAULT_MAX_BINDING_VALUE_CHARS;
     private int maxBindingSnapshotChars = DEFAULT_MAX_BINDING_SNAPSHOT_CHARS;
@@ -154,15 +138,9 @@ public record ReplConfig(
       return this;
     }
 
-    /** Cap on the printable {@code execute_code} output shown to the model. */
-    public Builder withMaxOutputCharsToModel(int maxOutputCharsToModel) {
-      this.maxOutputCharsToModel = maxOutputCharsToModel;
-      return this;
-    }
-
     /**
-     * Listener that observes the sandbox's working memory after each {@code execute_code}. {@code
-     * null} disables the callback (default).
+     * Listener that observes the sandbox's working memory after each {@code Execute}. {@code null}
+     * disables the callback (default).
      */
     public Builder withSandboxBindingsListener(SandboxBindingsListener listener) {
       this.sandboxBindingsListener = listener;
@@ -197,7 +175,6 @@ public record ReplConfig(
           executionTimeout,
           maxConcurrentSessions,
           hostFunctions,
-          maxOutputCharsToModel,
           sandboxBindingsListener,
           maxBindingValueChars,
           maxBindingSnapshotChars,

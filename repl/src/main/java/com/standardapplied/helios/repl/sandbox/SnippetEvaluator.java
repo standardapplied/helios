@@ -21,7 +21,7 @@ import jdk.jshell.SourceCodeAnalysis;
  * Evaluates the host's snippets in the sandbox's JShell. Each execute captures the snippet's stdout
  * and stderr by swapping {@code System.out} and {@code System.err}, runs it on a platform thread in
  * a thread group of its own so a timeout can find every thread the snippet started, and answers
- * with its output, exit code, submitted value and, on request, a snapshot of its bindings.
+ * with its output, exit code and, on request, a snapshot of its bindings.
  *
  * <p>Only one execute may run at a time: the standard streams are JVM-global, so concurrent
  * executes would corrupt each other's capture. A {@link Semaphore} rejects the second; the host
@@ -31,7 +31,6 @@ import jdk.jshell.SourceCodeAnalysis;
 final class SnippetEvaluator {
 
   private final JShell jshell;
-  private final HostBridgeState bridge;
   private final Semaphore executeLock = new Semaphore(1);
   private final ExecutionTimer timer;
   private final SnippetStopper stopper;
@@ -47,15 +46,12 @@ final class SnippetEvaluator {
 
   /**
    * @param jshell the sandbox's JShell
-   * @param bridge holds the value a snippet submits
    * @param timer waits for each execute's eval thread; {@link Thread#join(Duration)} outside tests
    * @param stopGrace how long a timed-out snippet has to end after {@link JShell#stop()} before the
    *     sandbox gives it up as unstoppable
    */
-  SnippetEvaluator(
-      JShell jshell, HostBridgeState bridge, ExecutionTimer timer, Duration stopGrace) {
+  SnippetEvaluator(JShell jshell, ExecutionTimer timer, Duration stopGrace) {
     this.jshell = jshell;
-    this.bridge = bridge;
     this.timer = timer;
     this.stopper = new SnippetStopper(jshell, stopGrace);
   }
@@ -66,7 +62,6 @@ final class SnippetEvaluator {
       error.put("stdout", "");
       error.put("stderr", "Concurrent execution rejected — only one execute may run at a time");
       error.put("exitCode", 1);
-      error.put("submitted", null);
       return error;
     }
     try {
@@ -133,8 +128,6 @@ final class SnippetEvaluator {
         params.get("maxBindingSnapshotChars") instanceof Number tn ? tn.intValue() : 16 * 1024;
     var captureBindings = params.get("captureBindings") instanceof Boolean cb ? cb : Boolean.TRUE;
 
-    bridge.setSubmittedValue(null);
-
     var stdoutCapture = new ByteArrayOutputStream();
     var stderrCapture = new ByteArrayOutputStream();
     var captureOut = new PrintStream(stdoutCapture, true, StandardCharsets.UTF_8);
@@ -189,7 +182,6 @@ final class SnippetEvaluator {
         stderrCapture.toString(StandardCharsets.UTF_8)
             + timeoutCapture.toString(StandardCharsets.UTF_8));
     result.put("exitCode", exitCode.get());
-    result.put("submitted", bridge.submittedValue());
     if (Boolean.TRUE.equals(captureBindings) && unstoppableExecution == null) {
       result.put("bindings", collectBindings(maxBindingValueChars, maxBindingSnapshotChars));
     }

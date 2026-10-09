@@ -13,7 +13,11 @@ import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
 import com.standardapplied.helios.repl.host.HostParameter;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 import jdk.jshell.JShell;
 import jdk.jshell.Snippet;
 import org.junit.jupiter.api.Test;
@@ -29,9 +33,7 @@ class SandboxPreludeSynthesisTest {
   @Test
   void synthesizeReturnsEmptyWhenRegistryHasOnlyReservedNames() {
     var registry = new HostFunctionRegistry();
-    registry.register(new HostFunction("predict", "x", p -> ""));
-    registry.register(new HostFunction("submit", "x", p -> ""));
-    registry.register(new HostFunction("__getInput", "x", p -> ""));
+    registry.register(new HostFunction("__call", "x", p -> ""));
     assertEquals("", SandboxPrelude.synthesizeCustomWrappers(registry));
   }
 
@@ -124,17 +126,15 @@ class SandboxPreludeSynthesisTest {
   @Test
   void synthesizeRegistrySkipsReservedNames() {
     var registry = new HostFunctionRegistry();
-    registry.register(new HostFunction("predict", "x", p -> ""));
     registry.register(
         new HostFunction(
             "marketQuote",
             "x",
             List.of(HostParameter.required("ticker", ParameterType.STRING, "x")),
             p -> ""));
-    registry.register(new HostFunction("__getInput", "x", p -> ""));
+    registry.register(new HostFunction("__call", "x", p -> ""));
     var snippet = SandboxPrelude.synthesizeCustomWrappers(registry);
-    assertFalse(snippet.contains("static Object predict("), "predict is reserved");
-    assertFalse(snippet.contains("static Object __getInput("), "__getInput is reserved");
+    assertFalse(snippet.contains("static Object __call("), "__call is reserved");
     assertTrue(snippet.contains("static Object marketQuote("));
   }
 
@@ -220,7 +220,7 @@ class SandboxPreludeSynthesisTest {
     assertEquals("", SandboxPrelude.customWrapperSummary(null));
 
     var only = new HostFunctionRegistry();
-    only.register(new HostFunction("predict", "x", p -> ""));
+    only.register(new HostFunction("__call", "x", p -> ""));
     assertEquals("", SandboxPrelude.customWrapperSummary(only));
   }
 
@@ -241,17 +241,26 @@ class SandboxPreludeSynthesisTest {
   }
 
   @Test
-  void reservedNamesSetIncludesAllHostBridgeMethods() {
-    // Belt-and-suspenders test: any HostBridge.* static method (predict, submit, fetch, query,
-    // getInput, __call) MUST be in RESERVED_NAMES so the synthesizer never shadows it. If
-    // HostBridge gains a new public static method we want this test to fail until RESERVED_NAMES
-    // is updated.
-    assertTrue(SandboxPrelude.RESERVED_NAMES.contains("predict"));
-    assertTrue(SandboxPrelude.RESERVED_NAMES.contains("submit"));
-    assertTrue(SandboxPrelude.RESERVED_NAMES.contains("fetch"));
-    assertTrue(SandboxPrelude.RESERVED_NAMES.contains("query"));
-    assertTrue(SandboxPrelude.RESERVED_NAMES.contains("getInput"));
-    assertTrue(SandboxPrelude.RESERVED_NAMES.contains("__getInput"));
-    assertTrue(SandboxPrelude.RESERVED_NAMES.contains("__call"));
+  void reservedNamesAreExactlyTheHostBridgeMethods() {
+    var bridgeMethods =
+        Arrays.stream(HostBridge.class.getDeclaredMethods())
+            .filter(m -> Modifier.isPublic(m.getModifiers()) && Modifier.isStatic(m.getModifiers()))
+            .map(Method::getName)
+            .collect(Collectors.toSet());
+    assertEquals(bridgeMethods, SandboxPrelude.RESERVED_NAMES);
+  }
+
+  @Test
+  void synthesizeWrapsNamesTheBridgeNoLongerOwns() {
+    var registry = new HostFunctionRegistry();
+    registry.register(
+        new HostFunction(
+            "predict",
+            "x",
+            List.of(HostParameter.required("input", ParameterType.STRING, "x")),
+            p -> ""));
+    assertTrue(
+        SandboxPrelude.synthesizeCustomWrappers(registry)
+            .contains("static Object predict(java.lang.String input)"));
   }
 }

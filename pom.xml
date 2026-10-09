@@ -67,8 +67,6 @@
         <module>repl</module>
         <module>testing</module>
         <module>architecture</module>
-        <module>examples/codeact-demo</module>
-        <module>examples/rlm-demo</module>
         <module>examples/session-demo</module>
     </modules>
 

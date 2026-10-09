@@ -18,7 +18,6 @@ import org.junit.jupiter.api.Test;
 class ReplConfigTest {
 
   private static final SandboxFactory DUMMY_FACTORY = registry -> null;
-  private static final int DEFAULT_CAP = ReplConfig.DEFAULT_MAX_OUTPUT_CHARS_TO_MODEL;
 
   // ── canonical constructor ───────────────────────────────────────────────
 
@@ -27,20 +26,11 @@ class ReplConfigTest {
     var fn = new HostFunction("test", "desc", params -> "ok");
     var config =
         new ReplConfig(
-            DUMMY_FACTORY,
-            Duration.ofSeconds(10),
-            5,
-            List.of(fn),
-            DEFAULT_CAP,
-            null,
-            200,
-            16384,
-            5000);
+            DUMMY_FACTORY, Duration.ofSeconds(10), 5, List.of(fn), null, 200, 16384, 5000);
     assertEquals(DUMMY_FACTORY, config.sandboxFactory());
     assertEquals(Duration.ofSeconds(10), config.executionTimeout());
     assertEquals(5, config.maxConcurrentSessions());
     assertEquals(1, config.hostFunctions().size());
-    assertEquals(DEFAULT_CAP, config.maxOutputCharsToModel());
     assertNull(config.sandboxBindingsListener());
     assertEquals(200, config.maxBindingValueChars());
     assertEquals(16384, config.maxBindingSnapshotChars());
@@ -51,26 +41,21 @@ class ReplConfigTest {
   void nullFactoryThrows() {
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ReplConfig(
-                null, Duration.ofSeconds(10), 5, List.of(), DEFAULT_CAP, null, 200, 16384, 5000));
+        () -> new ReplConfig(null, Duration.ofSeconds(10), 5, List.of(), null, 200, 16384, 5000));
   }
 
   @Test
   void nullTimeoutThrows() {
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ReplConfig(DUMMY_FACTORY, null, 5, List.of(), DEFAULT_CAP, null, 200, 16384, 5000));
+        () -> new ReplConfig(DUMMY_FACTORY, null, 5, List.of(), null, 200, 16384, 5000));
   }
 
   @Test
   void zeroTimeoutThrows() {
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ReplConfig(
-                DUMMY_FACTORY, Duration.ZERO, 5, List.of(), DEFAULT_CAP, null, 200, 16384, 5000));
+        () -> new ReplConfig(DUMMY_FACTORY, Duration.ZERO, 5, List.of(), null, 200, 16384, 5000));
   }
 
   @Test
@@ -79,15 +64,7 @@ class ReplConfigTest {
         IllegalArgumentException.class,
         () ->
             new ReplConfig(
-                DUMMY_FACTORY,
-                Duration.ofSeconds(-1),
-                5,
-                List.of(),
-                DEFAULT_CAP,
-                null,
-                200,
-                16384,
-                5000));
+                DUMMY_FACTORY, Duration.ofSeconds(-1), 5, List.of(), null, 200, 16384, 5000));
   }
 
   @Test
@@ -96,32 +73,7 @@ class ReplConfigTest {
         IllegalArgumentException.class,
         () ->
             new ReplConfig(
-                DUMMY_FACTORY,
-                Duration.ofSeconds(10),
-                0,
-                List.of(),
-                DEFAULT_CAP,
-                null,
-                200,
-                16384,
-                5000));
-  }
-
-  @Test
-  void negativeMaxOutputCharsToModelThrows() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ReplConfig(
-                DUMMY_FACTORY, Duration.ofSeconds(10), 5, List.of(), -1, null, 200, 16384, 5000));
-  }
-
-  @Test
-  void zeroMaxOutputCharsToModelAllowed() {
-    var config =
-        new ReplConfig(
-            DUMMY_FACTORY, Duration.ofSeconds(10), 5, List.of(), 0, null, 200, 16384, 5000);
-    assertEquals(0, config.maxOutputCharsToModel());
+                DUMMY_FACTORY, Duration.ofSeconds(10), 0, List.of(), null, 200, 16384, 5000));
   }
 
   @Test
@@ -130,15 +82,7 @@ class ReplConfigTest {
         IllegalArgumentException.class,
         () ->
             new ReplConfig(
-                DUMMY_FACTORY,
-                Duration.ofSeconds(10),
-                5,
-                List.of(),
-                DEFAULT_CAP,
-                null,
-                -1,
-                16384,
-                5000));
+                DUMMY_FACTORY, Duration.ofSeconds(10), 5, List.of(), null, -1, 16384, 5000));
   }
 
   @Test
@@ -147,15 +91,7 @@ class ReplConfigTest {
         IllegalArgumentException.class,
         () ->
             new ReplConfig(
-                DUMMY_FACTORY,
-                Duration.ofSeconds(10),
-                5,
-                List.of(),
-                DEFAULT_CAP,
-                null,
-                200,
-                -1,
-                5000));
+                DUMMY_FACTORY, Duration.ofSeconds(10), 5, List.of(), null, 200, -1, 5000));
   }
 
   @Test
@@ -164,15 +100,7 @@ class ReplConfigTest {
         IllegalArgumentException.class,
         () ->
             new ReplConfig(
-                DUMMY_FACTORY,
-                Duration.ofSeconds(10),
-                5,
-                List.of(),
-                DEFAULT_CAP,
-                null,
-                200,
-                16384,
-                -1));
+                DUMMY_FACTORY, Duration.ofSeconds(10), 5, List.of(), null, 200, 16384, -1));
   }
 
   @Test
@@ -180,8 +108,7 @@ class ReplConfigTest {
     var mutable = new java.util.ArrayList<HostFunction>();
     mutable.add(new HostFunction("a", "desc", params -> "a"));
     var config =
-        new ReplConfig(
-            DUMMY_FACTORY, Duration.ofSeconds(10), 5, mutable, DEFAULT_CAP, null, 200, 16384, 5000);
+        new ReplConfig(DUMMY_FACTORY, Duration.ofSeconds(10), 5, mutable, null, 200, 16384, 5000);
     mutable.clear();
     // Calculator still sees the original entry — proves the snapshot was taken.
     assertEquals(1, config.hostFunctions().size());
@@ -194,7 +121,6 @@ class ReplConfigTest {
     var config = ReplConfig.newBuilder().withSandboxFactory(DUMMY_FACTORY).build();
     assertEquals(ReplConfig.DEFAULT_EXECUTION_TIMEOUT, config.executionTimeout());
     assertEquals(ReplConfig.DEFAULT_MAX_CONCURRENT_SESSIONS, config.maxConcurrentSessions());
-    assertEquals(ReplConfig.DEFAULT_MAX_OUTPUT_CHARS_TO_MODEL, config.maxOutputCharsToModel());
     assertEquals(ReplConfig.DEFAULT_MAX_BINDING_VALUE_CHARS, config.maxBindingValueChars());
     assertEquals(ReplConfig.DEFAULT_MAX_BINDING_SNAPSHOT_CHARS, config.maxBindingSnapshotChars());
     assertEquals(ReplConfig.DEFAULT_MAX_EXECUTED_CODE_CHARS, config.maxExecutedCodeChars());
@@ -214,7 +140,6 @@ class ReplConfigTest {
             .withMaxConcurrentSessions(10)
             .withHostFunction(fn1)
             .withHostFunctions(List.of(fn2))
-            .withMaxOutputCharsToModel(2000)
             .withSandboxBindingsListener(listener)
             .withMaxBindingValueChars(300)
             .withMaxBindingSnapshotChars(20_000)
@@ -224,7 +149,6 @@ class ReplConfigTest {
     assertEquals(Duration.ofMinutes(1), config.executionTimeout());
     assertEquals(10, config.maxConcurrentSessions());
     assertEquals(2, config.hostFunctions().size());
-    assertEquals(2000, config.maxOutputCharsToModel());
     assertEquals(listener, config.sandboxBindingsListener());
     assertEquals(300, config.maxBindingValueChars());
     assertEquals(20_000, config.maxBindingSnapshotChars());

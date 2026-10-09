@@ -38,9 +38,9 @@ public interface MemoryBackend {
    *
    * <p>{@link
    * com.standardapplied.helios.session.SessionOptions.Builder#withMemoryBackend(MemoryBackend)}
-   * accepts {@code null} to mean "no backend configured" — for CodeAct and similar presets that
-   * want a permanent stance against memory, prefer the sentinel because it communicates intent and
-   * produces a descriptive failure if the model bypasses the permission policy.
+   * accepts {@code null} to mean "no backend configured" — for sessions that want a permanent
+   * stance against memory, prefer the sentinel because it communicates intent and produces a
+   * descriptive failure if the model bypasses the permission policy.
    *
    * @return a process-wide singleton sentinel
    */

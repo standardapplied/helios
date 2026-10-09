@@ -32,9 +32,9 @@ import java.util.function.Function;
  *     compaction kicks in. Receives the original tool-result content and returns a replacement
  *     string for older turns. Defaults to a constant {@code [result omitted]} — sufficient for
  *     stateless tools where the model does not need to remember what the older call produced. Tools
- *     whose results carry trajectory-relevant metadata (e.g. {@code execute_code}, where the model
- *     self-references prior outputs) should set a richer form preserving length and a prefix. Never
- *     {@code null} — the compact constructor coerces a null argument to the default
+ *     whose results carry trajectory-relevant metadata (for example a code-execution tool whose
+ *     earlier output the model refers back to) should set a richer form preserving length and a
+ *     prefix. Never {@code null} — the compact constructor coerces a null argument to the default
  */
 public record Tool(
     String name,
@@ -162,8 +162,8 @@ public record Tool(
      * Override the result compactor used when older turns are dropped during context compaction.
      * Defaults to {@link #DEFAULT_RESULT_COMPACTOR} ({@code [result omitted]}). Passing {@code
      * null} resets to the default. Use this for tools whose old results carry useful metadata the
-     * model may want to recall (e.g. {@code execute_code} preserves length and a prefix so the
-     * model can self-reference what it ran earlier).
+     * model may want to recall (for example, keeping a code-execution result's length and a prefix
+     * so the model can refer back to what it ran earlier).
      */
     public Builder withResultCompactor(Function<String, String> resultCompactor) {
       this.resultCompactor = resultCompactor == null ? DEFAULT_RESULT_COMPACTOR : resultCompactor;
