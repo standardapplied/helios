@@ -3,7 +3,6 @@
 package com.standardapplied.helios.core.test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -141,10 +140,9 @@ public abstract class ModelIntegrationContract {
 
     try (var forced =
         model(ModelConfig.newBuilder().withToolChoice(ToolChoice.required("get_weather")))) {
-      var response = forced.chat(messages, List.of(weatherTool));
+      var response = Accepted.toolTurn(forced.chat(messages, List.of(weatherTool)));
 
       assertEquals(FinishReason.TOOL_CALLS, response.finishReason());
-      assertFalse(response.toolCalls().isEmpty());
       for (var toolCall : response.toolCalls()) {
         assertEquals("get_weather", toolCall.name());
         assertNotNull(toolCall.arguments());
@@ -198,9 +196,8 @@ public abstract class ModelIntegrationContract {
     try (var forced =
             model(ModelConfig.newBuilder().withToolChoice(ToolChoice.required("search_people")));
         var toolless = model(ModelConfig.newBuilder().withToolChoice(ToolChoice.none()))) {
-      var response1 = forced.chat(messages, List.of(searchPeople));
+      var response1 = Accepted.toolTurn(forced.chat(messages, List.of(searchPeople)));
       assertEquals(FinishReason.TOOL_CALLS, response1.finishReason());
-      assertFalse(response1.toolCalls().isEmpty());
 
       var messages2 = new ArrayList<>(messages);
       messages2.add(response1.toMessage());

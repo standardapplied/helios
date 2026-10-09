@@ -169,8 +169,9 @@ different one.
 2. **Force what can be forced.** Force tool use with `ModelConfig.Builder.withToolChoice`:
    on Anthropic only for a model whose `AnthropicModelId.acceptsForcedToolChoice()` is true and
    with no reasoning set; on OpenAI with `ToolChoice.required(name)`; on Gemini with
-   `ToolChoice.any()` or `required(...)`. A session's tool choice applies on every turn, so a
-   forced session ends in `ErrorMaxTurns`; a test that forces one accepts that terminal.
+   `ToolChoice.any()` only, since Helios sends `required(...)` as `allowed_tools` mode `validated`,
+   which lets the model answer in text. A session's tool choice applies on every turn, so a forced
+   session ends in `ErrorMaxTurns`; a test that forces one accepts that terminal.
 3. **Skip what cannot be forced.** A tool call on a model that rejects forced tool use, a progress
    note or thinking text, a citation or grounding, a web search, valid JSON where the provider
    does not constrain it, and the arguments the model passes: check the step with
