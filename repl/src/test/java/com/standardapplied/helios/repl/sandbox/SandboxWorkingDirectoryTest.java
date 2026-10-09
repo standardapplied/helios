@@ -43,7 +43,7 @@ class SandboxWorkingDirectoryTest {
     var config = JvmSandboxConfig.newBuilder().withExecutionTimeout(Duration.ofSeconds(20)).build();
     var registry = new HostFunctionRegistry();
     try (var sandbox = JvmSandbox.create(config, registry)) {
-      var ephemeralCwd = sandbox.ephemeralWorkingDirForTests();
+      var ephemeralCwd = sandbox.directoriesForTests().ephemeralWorkingDirectory();
       assertNotNull(
           ephemeralCwd, "default config must create a per-session ephemeral working directory");
       assertTrue(Files.isDirectory(ephemeralCwd), "ephemeral cwd must exist on the filesystem");
@@ -89,7 +89,7 @@ class SandboxWorkingDirectoryTest {
     var registry = new HostFunctionRegistry();
     Path ephemeralCwd;
     try (var sandbox = JvmSandbox.create(config, registry)) {
-      ephemeralCwd = sandbox.ephemeralWorkingDirForTests();
+      ephemeralCwd = sandbox.directoriesForTests().ephemeralWorkingDirectory();
       assertTrue(Files.isDirectory(ephemeralCwd), "ephemeral cwd must exist while sandbox is open");
     }
     assertFalse(
@@ -106,7 +106,7 @@ class SandboxWorkingDirectoryTest {
     var registry = new HostFunctionRegistry();
     Path ephemeralCwd;
     try (var sandbox = JvmSandbox.create(config, registry)) {
-      ephemeralCwd = sandbox.ephemeralWorkingDirForTests();
+      ephemeralCwd = sandbox.directoriesForTests().ephemeralWorkingDirectory();
       // Snippet creates a nested file structure: subdir/leaf.txt
       var snippet =
           "var p = java.nio.file.Path.of(\"subdir\", \"leaf.txt\");"
@@ -142,7 +142,7 @@ class SandboxWorkingDirectoryTest {
     var registry = new HostFunctionRegistry();
     try (var sandbox = JvmSandbox.create(config, registry)) {
       assertNull(
-          sandbox.ephemeralWorkingDirForTests(),
+          sandbox.directoriesForTests().ephemeralWorkingDirectory(),
           "explicit working directory must NOT create an ephemeral one");
       var result =
           sandbox.execute(
