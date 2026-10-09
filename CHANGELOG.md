@@ -67,7 +67,6 @@ in main code.
 | `ModelConfig(...)` 17-argument constructor | `ModelConfig.newBuilder()`, or the canonical constructor with `providerContinuation`, `apiVersion` and `rawOutputCapturePolicy` |
 | `ModelConfig.googleSearch()`, `ModelConfig.Builder.withGoogleSearch(boolean)` | `webSearch()`, `withWebSearch(boolean)` |
 | `ModelConfig.urlContext()`, `ModelConfig.Builder.withUrlContext(boolean)` | `webFetch()`, `withWebFetch(boolean)` |
-| `Tool(name, description, parameters, executor, idempotent)` | `Tool.newBuilder()`, or the canonical constructor with a `resultCompactor` (`Tool.DEFAULT_RESULT_COMPACTOR` for the previous behaviour) |
 | `CostCalculator.Pricing.ANTHROPIC_CACHE_WRITE_MULTIPLIER` | `Pricing.ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER` |
 | `CostCalculator.Pricing.anthropicCaching(input, output)` | `Pricing.anthropicCaching5m(input, output)` |
 | `JsonlEventSink.open(Path)` | `JsonlEventSink.openFull(Path)` (same behaviour) or `openMetadataOnly(Path)` |
@@ -322,6 +321,7 @@ through `ReplConfig`. Sub-agents, planned for 3.1, replace in-sandbox sub-model 
 | `sandbox.ExecutionResult.submitted()`, `hasSubmittedValue()`, `success(String, Object)`, `Builder.withSubmitted(Object)`, and the canonical constructor's `submitted` component | removed: no snippet can submit. The execute reply no longer carries `submitted` |
 | `ReplConfig.maxOutputCharsToModel`, `DEFAULT_MAX_OUTPUT_CHARS_TO_MODEL`, `Builder.withMaxOutputCharsToModel(int)` and the canonical constructor's component | removed: only `CodeExecutionTool` read it |
 | `ReplSession.config()` | removed: only `CodeExecutionTool` read it |
+| `Tool.resultCompactor()`, `Tool.DEFAULT_RESULT_COMPACTOR`, `Tool.Builder.withResultCompactor(Function)` and the canonical constructor's `resultCompactor` component | removed: no Helios code read it, and context compaction summarises history without it. `Tool(name, description, parameters, executor, idempotent)` is the canonical constructor |
 | `examples/codeact-demo`, `examples/rlm-demo` | removed |
 
 ### Added
