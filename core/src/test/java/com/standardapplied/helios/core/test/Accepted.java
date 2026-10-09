@@ -24,8 +24,7 @@ import org.junit.jupiter.api.Assumptions;
  */
 public final class Accepted {
 
-  /** Every finish reason a request that offers no tool allows. */
-  public static final Set<FinishReason> TEXT_FINISHES =
+  private static final Set<FinishReason> TEXT_FINISHES =
       EnumSet.of(
           FinishReason.STOP,
           FinishReason.LENGTH,
@@ -39,8 +38,7 @@ public final class Accepted {
    * that request allows and carries content and usage, and returns it.
    */
   public static <T> Response<T> textReply(Response<T> response) {
-    assertNotNull(response.content(), "content");
-    assertNotNull(response.usage(), "usage");
+    carriesContentAndUsage(response);
     assertTrue(
         TEXT_FINISHES.contains(response.finishReason()),
         () -> "finish reason " + response.finishReason());
@@ -53,25 +51,35 @@ public final class Accepted {
    * short by the token limit or a refusal may carry the tool calls emitted before it stopped.
    */
   public static <T> Response<T> toolTurn(Response<T> response) {
-    if (response.finishReason() == FinishReason.TOOL_CALLS) {
-      assertTrue(response.hasToolCalls(), "TOOL_CALLS must carry a tool call");
-      return response;
+    if (response.finishReason() != FinishReason.TOOL_CALLS) {
+      return textReply(response);
     }
-    return textReply(response);
+    carriesContentAndUsage(response);
+    assertTrue(response.hasToolCalls(), "TOOL_CALLS must carry a tool call");
+    return response;
+  }
+
+  private static void carriesContentAndUsage(Response<?> response) {
+    assertNotNull(response.content(), "content");
+    assertNotNull(response.usage(), "usage");
   }
 
   /**
-   * The reply {@code call} returns, or an aborted test when the model wrote output that does not
-   * parse against the schema, for a provider that does not constrain its output to the schema: a
-   * parse is then the model's choice, and {@code counterpart}, a recorded test, proves the parsing.
+   * The parsed reply {@code call} returns, or an aborted test when the model wrote output that does
+   * not parse against the schema, for a provider that does not constrain its output to the schema:
+   * a parse is then the model's choice, and {@code counterpart}, a recorded test, proves the
+   * parsing. A blank reply parses to no value without an exception, so it aborts too.
    */
   public static <T> Response<T> parsedOrSkip(
       String modelId, String counterpart, Supplier<Response<T>> call) {
+    var unparsed =
+        modelId + " wrote no JSON matching the schema; " + counterpart + " covers the parsing";
     try {
-      return call.get();
-    } catch (StructuredOutputParseException unparsed) {
-      return Assumptions.abort(
-          modelId + " wrote no JSON matching the schema; " + counterpart + " covers the parsing");
+      var response = call.get();
+      Assumptions.assumeTrue(response.hasParsed(), unparsed);
+      return response;
+    } catch (StructuredOutputParseException mismatch) {
+      return Assumptions.abort(unparsed);
     }
   }
 
