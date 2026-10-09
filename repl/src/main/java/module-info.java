@@ -6,13 +6,13 @@
 /**
  * Helios - REPL Module.
  *
- * <p>Provides sandboxed code execution for Recursive Language Model (RLM) patterns:
+ * <p>Provides sandboxed JShell execution for the {@code Execute} tool:
  *
  * <ul>
  *   <li>Stateful REPL sessions with isolated JVM subprocess sandboxes
  *   <li>JSON-RPC 2.0 protocol for host-sandbox communication
- *   <li>Host functions callable from sandbox code (predict, submit, user-defined)
- *   <li>CodeExecutionTool factory for agent integration
+ *   <li>Custom host functions callable from sandbox code
+ *   <li>{@code JShellExecutionProvider}, which serves {@code Runtime.JSHELL}
  * </ul>
  */
 module com.standardapplied.helios.repl {
@@ -24,7 +24,6 @@ module com.standardapplied.helios.repl {
   requires tools.jackson.databind;
 
   exports com.standardapplied.helios.repl;
-  exports com.standardapplied.helios.repl.codeact;
   exports com.standardapplied.helios.repl.execution;
   exports com.standardapplied.helios.repl.sandbox;
   exports com.standardapplied.helios.repl.sandbox.policy;

@@ -82,10 +82,10 @@ public sealed interface HeliosEvent
   // ---------------------------------------------------------------------------
 
   /**
-   * Emitted when a primitive run begins (Agent, Team, RlmHarness, CodeActHarness, optimizer).
+   * Emitted when a primitive run begins (Agent, Team, optimizer).
    *
    * @param harnessKind label identifying which primitive started, e.g. {@code "agent"}, {@code
-   *     "team"}, {@code "rlm-harness"}. Used by UIs to render the right icon / lane.
+   *     "team"}. Used by UIs to render the right icon / lane.
    * @param attributes implementation-defined metadata (model id, max iterations, etc.).
    */
   record RunStarted(

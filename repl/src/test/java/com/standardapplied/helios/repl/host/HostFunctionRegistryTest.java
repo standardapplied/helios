@@ -102,11 +102,7 @@ class HostFunctionRegistryTest {
 
   @Test
   void reservedNamesIsExactCanonicalSet() {
-    // If this changes, every framework component that filters reserved names must be reviewed
-    // (SandboxPrelude synthesis, ReplSession trajectory tracking, RlmSystemPrompt rendering).
-    var expected =
-        java.util.Set.of("predict", "submit", "fetch", "query", "getInput", "__getInput", "__call");
-    assertEquals(expected, HostFunctionRegistry.RESERVED_NAMES);
+    assertEquals(java.util.Set.of("__call"), HostFunctionRegistry.RESERVED_NAMES);
   }
 
   @Test
@@ -117,15 +113,7 @@ class HostFunctionRegistryTest {
   }
 
   @Test
-  void registerAcceptsReservedNamesForFrameworkWiring() {
-    // The framework legitimately registers reserved names via the public register() path —
-    // CodeActPreset.applyRlm wires SubmitFunction (name = "submit") and InputFunction (name =
-    // "__getInput") this way. Earlier review wanted register() to reject reserved names; rejected
-    // because it would break the documented v2 CodeAct preset. Defense moved downstream: the
-    // prelude synthesizer skips reserved names so no typed wrapper is emitted, leaving
-    // HostBridge.submit(...) as the canonical caller path; the dispatch / trajectory layer
-    // excludes them from per-call metrics. See SandboxPreludeSynthesisTest for the
-    // synthesizer-side enforcement.
+  void registerAcceptsReservedNames() {
     var registry = new HostFunctionRegistry();
     for (var reserved : HostFunctionRegistry.RESERVED_NAMES) {
       registry.register(new HostFunction(reserved, "framework wiring", params -> null));

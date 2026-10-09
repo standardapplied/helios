@@ -43,11 +43,10 @@ import java.util.function.Predicate;
  *
  * <p>{@code submitValidator} is an optional whole-output semantic check that runs after structural
  * validation wherever a final structured output is accepted: {@link StructuredContentParser} (so
- * every provider, the {@code AgentSession} loop, and typed {@code runBlocking}) and the CodeAct
- * {@code Submit} tool. Use {@link #withSubmitValidator(SubmitValidator)} (or the {@link
- * #withSubmitValidator(Predicate, String)} convenience overload) to attach one. On failure the
- * model sees the correction message as its next user turn and retries within the session's turn
- * budget.
+ * every provider, the {@code AgentSession} loop, and typed {@code runBlocking}). Use {@link
+ * #withSubmitValidator(SubmitValidator)} (or the {@link #withSubmitValidator(Predicate, String)}
+ * convenience overload) to attach one. On failure the model sees the correction message as its next
+ * user turn and retries within the session's turn budget.
  *
  * @param <T> the type of the output
  * @param type the class
@@ -99,7 +98,7 @@ public record OutputSchema<T>(
    * reconstruction (when applicable), then this validator on the parsed typed output. A failure is
    * surfaced the same way structural failures are: {@link StructuredContentParser} throws {@link
    * SubmitValidationException} and the session loop injects the correction and retries, bounded by
-   * {@code SessionLimits.maxTurns()}; the CodeAct {@code Submit} tool returns it inline.
+   * {@code SessionLimits.maxTurns()}.
    *
    * <p>Operator-thrown exceptions inside the validator are caught and converted to a failure with
    * message {@code "submit validator threw: <message>"}, so a buggy predicate doesn't tombstone the

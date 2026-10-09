@@ -72,7 +72,7 @@ final class BootstrapEnvironment implements AutoCloseable {
     SnippetEvaluator.ExecutionTimer timer =
         timedOutByTheTest ? this::endsBeforeTheTestTimesItOut : Thread::join;
     bridge = new HostBridgeState(new PrintStream(toHost, true, StandardCharsets.UTF_8));
-    evaluator = new SnippetEvaluator(jshell, bridge, timer, stopGrace);
+    evaluator = new SnippetEvaluator(jshell, timer, stopGrace);
     rpc =
         new BootstrapRpc(
             new BufferedReader(new InputStreamReader(fromHost, StandardCharsets.UTF_8)),

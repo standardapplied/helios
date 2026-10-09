@@ -301,6 +301,29 @@ What each 2.x level sent, and the `Reasoning` that sends the same now. `E(L, D)`
 | `temperature` / `topP` on a model that rejects them were dropped from the request | thrown at construction: `IllegalArgumentException("Model <id> does not accept <parameter> <rule>.")`; remove the parameter, or set `Reasoning.Off` where the model accepts sampling only without reasoning |
 | a NaN or infinite `temperature` / `topP` was sent as the string `"NaN"` / `"Infinity"` | thrown by `ModelConfig`: `IllegalArgumentException("<parameter> must be a finite number, got <value>")` |
 
+**The CodeAct and RLM presets are removed; JShell runs through `Execute` only.** Neither preset
+had real use: in live runs the model spent turns discovering how its input was bound, passed only
+when it improvised a batched rewrite, and one run ended with an empty `Success` and no `submit`.
+`CodeExecutionTool`, an older second way to run JShell, goes with them. The sandbox itself stays
+(`repl.sandbox`, its policy verifier and module limits, `ReplSession`, `JShellExecutionProvider`)
+and is reached through `Execute` with `Runtime.JSHELL`, plus the custom host functions registered
+through `ReplConfig`. Sub-agents, planned for 3.1, replace in-sandbox sub-model fan-out.
+
+| 2.x | 3.0 |
+|---|---|
+| `repl.codeact.CodeActPreset.typed(...)` | `JShellExecutionProvider` as the session's `ExecutionProvider`, `ExecuteTool.binding(provider)` in its `ToolRegistry`, and the task's own system prompt; the final answer is the model's last message, through `runBlocking(message, OutputSchema)` for a typed one |
+| `repl.codeact.CodeActPreset.withSubLm(...)` (RLM: `predict(...)` / `submit(...)` in the sandbox) | no replacement in 3.0; sub-agents in 3.1 replace sub-model fan-out. A host-side call the snippet needs is a custom `HostFunction` registered through `ReplConfig.Builder.withHostFunction` |
+| the rest of `repl.codeact` (`CodeActStrategy`, `RlmStrategy`, `PromptRendering`, `PredictFunction`, `PredictTool`, `SubmitFunction`, `SubmitTool`, `SubmitValidation`, `SubmittedValueHolder`, `OnSubmitStopHook`, `RequireExecuteCodeHook`, `InputFunction`, `OwnedExecutionProvider`) and the package's JPMS export | removed with the presets |
+| `repl.CodeExecutionTool` | `Execute` with `runtime: JSHELL` through `JShellExecutionProvider` |
+| `repl.InputBindings` | removed; seed per-session state with `JShellExecutionProvider.Builder.withStartupSnippet` |
+| `repl.SandboxBudgetExceededException` | removed; nothing threw it |
+| the `predict`, `submit`, `getInput`, `fetch` and `query` statics of `HostBridge` | removed; `HostBridge.__call`, which every synthesized host-function wrapper calls, stays. A custom host function may now be named `predict`, `submit`, `fetch`, `query` or `getInput` and gets a typed wrapper |
+| `HostFunctionRegistry.RESERVED_NAMES` held seven names | holds `__call` only |
+| `sandbox.ExecutionResult.submitted()`, `hasSubmittedValue()`, `success(String, Object)`, `Builder.withSubmitted(Object)`, and the canonical constructor's `submitted` component | removed: no snippet can submit. The execute reply no longer carries `submitted` |
+| `ReplConfig.maxOutputCharsToModel`, `DEFAULT_MAX_OUTPUT_CHARS_TO_MODEL`, `Builder.withMaxOutputCharsToModel(int)` and the canonical constructor's component | removed: only `CodeExecutionTool` read it |
+| `ReplSession.config()` | removed: only `CodeExecutionTool` read it |
+| `examples/codeact-demo`, `examples/rlm-demo` | removed |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
@@ -366,7 +389,7 @@ What each 2.x level sent, and the `Reasoning` that sends the same now. `E(L, D)`
   `session.events().subscribe(new ConsoleEventPrinter(System.out))`. Assistant text is written as
   it streams and flushed at once; citations, tool use, tool results, blocked tools, turn ends, the
   loop end and a stream error are written one line each. It writes only to the `PrintStream` it is
-  given. The session, CodeAct and RLM demos use it in place of their own copies.
+  given. The session demo uses it in place of its own copy.
 - **`HttpClientFactory.createForDownloads()`**, the one factory client that follows redirects, for
   unauthenticated downloads such as Hugging Face files served from its CDN. It uses
   `Redirect.NORMAL`, which never follows `https` to `http`, and the 10-second connect timeout of
@@ -459,8 +482,8 @@ What each 2.x level sent, and the `Reasoning` that sends the same now. `E(L, D)`
   `Provenanced.provenanceByField()` and the REPL's bindings were frozen with `Map.copyOf`, and
   OpenAI's strict-schema transform
   rebuilt every map as a `HashMap`. Each now keeps declaration order (record components, builder
-  insertion, parameter lists, parsed JSON), so request bodies, CodeAct and RLM prompts and
-  messages to the model are byte-identical across JVMs. This fixes prompt-cache misses across
+  insertion, parameter lists, parsed JSON), so request bodies and messages to the
+  model are byte-identical across JVMs. This fixes prompt-cache misses across
   restarts and across instances, and structured output generated out of its declared field order.
   `ExecutionCapabilities.supportedRuntimes()`, which an `Execute` refusal names, iterates in
   `Runtime` declaration order, and `ReplSession.calledHostFunctions()` is sorted by name. The

@@ -14,16 +14,15 @@ import java.util.List;
  * <p>Every non-reserved {@code HostFunction} registered before sandbox boot gets a typed JShell
  * wrapper synthesized into the sandbox preamble: a {@code HostFunction} named {@code marketQuote}
  * with parameters {@code [ticker: STRING]} becomes callable as {@code marketQuote("AAPL")} from any
- * {@code execute_code} call. The wrapper packs arguments into a {@code Map<String, Object>} keyed
- * by parameter name and dispatches to this {@link #handler}.
+ * {@code Execute} call. The wrapper packs arguments into a {@code Map<String, Object>} keyed by
+ * parameter name and dispatches to this {@link #handler}.
  *
  * <p>Functions declared with an empty {@link #parameters()} list still get a synthesized wrapper —
  * a zero-arg one — and the handler receives an empty map. Almost always you want to declare the
  * parameters explicitly so the model sees a typed signature.
  *
- * <p>Reserved names ({@code predict}, {@code submit}, {@code fetch}, {@code query}, {@code
- * getInput}, {@code __getInput}, {@code __call}) are skipped by the synthesizer because hardcoded
- * static methods on {@code HostBridge} already provide them.
+ * <p>The reserved name {@code __call} is skipped by the synthesizer because {@code HostBridge} owns
+ * that static method.
  *
  * @param name function name; used as the JSON-RPC method and as the synthesized JShell method name.
  *     Must be a valid Java identifier

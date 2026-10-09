@@ -285,7 +285,7 @@ helios/
 ├── gemini/                         # Gemini Interactions API + Jackson 3.x
 ├── anthropic/                      # Claude Messages API + Jackson 3.x
 ├── openai/                         # OpenAI Responses API + Jackson 3.x
-├── repl/                           # Sandboxed JShell substrate (JvmSandbox, ReplSession, CodeExecutionTool, InputBindings, HostFunction infrastructure)
+├── repl/                           # Sandboxed JShell behind Execute(JSHELL) (JShellExecutionProvider, JvmSandbox, ReplSession, HostFunction infrastructure)
 ├── onnx/                           # Local embeddings via ONNX Runtime
 ├── persistence/                    # PostgreSQL persistence — PgTraceStore + PgAnnotationStore + PgDurability via Helidon DbClient
 ├── testing/                        # helios-testing — ScriptedModel test double (scripted text, tool-call, response and stream turns) + ModelStreams, for deterministic CI evals
@@ -293,15 +293,12 @@ helios/
 ├── config/quality/                 # PMD rule sets + PMD/CPD exclusion files shared by every module
 ├── config/security/                # Advisory scan (OSV-Scanner wrapper + tests), its canary inventory and the exception file
 └── examples/
-    ├── session-demo/               # Reference: full session run against Gemini with a real workspace
-    ├── codeact-demo/               # AgentSession + CodeActPreset — Java-as-action loop against Gemini
-    └── rlm-demo/                   # AgentSession + CodeActPreset — nested "leader+worker" pattern on v2 primitives
+    └── session-demo/               # Reference: full session run against Gemini with a real workspace
 ```
 
-The v1 surface (`core.agent.Agent`, `core.workflow`, `core.memory`, `core.eval`, the
-`RlmHarness` / `CodeActHarness` family) was deleted in the v2 cut per spec
-§3.5. The v2 paradigm is a long-lived `AgentSession` that runs an agent loop on a virtual
-thread; v1's one-shot `Agent.run(...)` shape no longer exists.
+The v1 surface (`core.agent.Agent`, `core.workflow`, `core.memory`, `core.eval` and the v1
+harness family) was deleted in the v2 cut per spec §3.5. The v2 paradigm is a long-lived
+`AgentSession` that runs an agent loop on a virtual thread; v1's one-shot `Agent.run(...)` shape no longer exists.
 
 ### JPMS Modules
 
@@ -375,13 +372,15 @@ When critically reviewing this codebase, do NOT flag the following — they have
 
 User-visible release-by-release breaking changes — including DDL deltas for `helios_agent_runs`, `helios_tool_calls`, `helios_messages`, `helios_sessions` — live in [`CHANGELOG.md`](CHANGELOG.md). Older migrations (pre-1.5) are recoverable from git history.
 
-## REPL Module (substrate only — v2)
+## REPL Module (the sandbox behind `Execute(JSHELL)`)
 
-Sandboxed JShell execution that the future CodeAct preset will assemble onto. The v1 RLM/CodeAct
-harnesses were removed in the v2 cut (spec §3.5). What survives is the substrate: `JvmSandbox`,
-`JvmSandboxBootstrap`, `ReplSession`, `ReplConfig`, `CodeExecutionTool`, `InputBindings`,
-`SandboxPrelude`, and the `HostFunction` infrastructure (no `predict` / `submit` / `fetch` /
-`query` built-in host functions — those are v2 session-level Tools).
+Sandboxed JShell execution, and the one way to run Java snippets: a session wires
+`JShellExecutionProvider` as its `ExecutionProvider` and binds `ExecuteTool`; a call with
+`runtime: JSHELL` runs in that session's own `ReplSession`, whose `JvmSandbox` subprocess keeps
+variables, imports and classes across calls. The pieces are `JShellExecutionProvider`, `JvmSandbox`,
+`JvmSandboxBootstrap`, `ReplSession`, `ReplConfig`, `SandboxPrelude`, the sandbox policy verifier and
+module limits, and the `HostFunction` infrastructure. The sandbox has no built-in host functions;
+every host call is a custom `HostFunction` registered through `ReplConfig.withHostFunction`.
 
 ### Key Design Decisions
 
@@ -389,21 +388,13 @@ harnesses were removed in the v2 cut (spec §3.5). What survives is the substrat
 
 **Single-execute semantics.** `SnippetEvaluator`, which `JvmSandboxBootstrap` runs behind its RPC read loop (`BootstrapRpc`), enforces single-execute with `Semaphore(1)` — `System.setOut` / `setErr` are JVM-global; concurrent evals would corrupt streams. `ReplSession` uses `Semaphore.tryAcquire()` for max-concurrent-sessions bounding. `HostFunctionRegistry.freeze()` prevents modifications after sandbox startup.
 
-**`CodeExecutionTool` output truncation.** Default 5000-char cap on the formatted text shown to the model, plus an explicit marker stating "Variables in the sandbox retain their full values." Load-bearing context-rot fix; full untruncated text stays in `ReplSession.history()`. `ReplConfig.withMaxOutputCharsToModel(int)` tunes it.
-
-**`InputBindings`.** Generates a JShell snippet that calls `HostBridge.getInput()` to retrieve the input fields as a `Map<String, Object>` and casts each top-level record field to its declared generic type rendered as Java source. **No Jackson reference appears in the snippet** — JSON conversion happens host-side, and JShell only sees `java.*` types plus `HostBridge`. This is what makes the binding work uniformly under both classpath and JPMS launches: under JPMS the parent's modulepath modules are invisible to JShell's internal javac, so any reference to `tools.jackson.*` would fail to compile.
-
 **`SandboxPrelude`.** Installs a curated JShell preamble at sandbox boot: standard imports (`java.util.*`, `java.util.stream.*`, `java.util.function.*`, `java.io.*`, `java.math.*`, `java.time.*`, `Collectors`), free `print` / `println` / `printf` (PRINTING-equivalent), and ten script-style helpers (`sum`, `sumInts`, `mean`, `max`, `min`, `join`, `filter`, `map`, `sorted`, `countBy`).
 
-**Custom host functions are typed and JShell-callable.** Every non-reserved `HostFunction` registered before sandbox boot gets a typed JShell static wrapper synthesized into the prelude. `HostFunction("marketQuote", [HostParameter.required("ticker", STRING, ...)], handler)` becomes callable as `marketQuote("AAPL")` from emitted Java code. The wrapper packs args into a `LinkedHashMap` keyed by parameter name and dispatches via `HostBridge.__call`. Reserved names (`getInput`, `__getInput`, `__call`) are skipped — `HostBridge` static methods own those signatures.
+**Custom host functions are typed and JShell-callable.** Every non-reserved `HostFunction` registered before sandbox boot gets a typed JShell static wrapper synthesized into the prelude. `HostFunction("marketQuote", [HostParameter.required("ticker", STRING, ...)], handler)` becomes callable as `marketQuote("AAPL")` from emitted Java code. The wrapper packs args into a `LinkedHashMap` keyed by parameter name and dispatches via `HostBridge.__call`. The one reserved name, `__call` (`HostFunctionRegistry.RESERVED_NAMES`), is skipped — `HostBridge` owns that static method.
 
-**`CodeActStrategy.buildSystemPrompt` / `RlmStrategy.buildSystemPrompt`** return the assembled system-prompt `String` directly. Earlier versions wrapped the result in a `Skill` record (carrying `name` + `instructions` + `envTips` + `tools`), but the wrapping was decorative — only `.instructions()` was ever read, the `merge()` composition story was unused outside tests, and the type collided with the [agentskills.io](https://agentskills.io) open-standard meaning of "Skill". Both retired on 2026-05-18. The `Skill` namespace under `com.standardapplied.helios.repl` is now reserved for a future agentskills.io-compatible primitive (on-disk SKILL.md folders + progressive disclosure); build when a customer asks.
-
-**`SandboxBindingsListener`.** `ReplConfig.Builder.withSandboxBindingsListener(...)` observes the sandbox's working memory after each `execute_code`. Listener receives `(Map<String,String>, ExecutionResult)` where the Map carries every user-declared `var` (excluding `__`-prefixed harness internals), each value's `toString` capped per-value (default 200 chars) and per-snapshot (default 16 KB). Default off — opt-in. Use case: live "user watches the agent think" UI; also useful for post-mortem debugging when truncated stdout isn't enough.
+**`SandboxBindingsListener`.** `ReplConfig.Builder.withSandboxBindingsListener(...)` observes the sandbox's working memory after each JShell `Execute`. Listener receives `(Map<String,String>, ExecutionResult)` where the Map carries every user-declared `var` (excluding `__`-prefixed harness internals), each value's `toString` capped per-value (default 200 chars) and per-snapshot (default 16 KB). Default off — opt-in. Use case: live "user watches the agent think" UI; also useful for post-mortem debugging when truncated stdout isn't enough.
 
 **`ExecutionResult.executedCode`.** Every result carries the source code that ran (captured parent-side from `ExecutionRequest.code()`; no protocol change). Per-call cap via `ReplConfig.withMaxExecutedCodeChars(int)` (default 5000); truncation appends `... (len=N)`. Combined with the `bindings` field, gives live observers the *what reasoning produced this state* alongside *what state exists*.
-
-**Rejected design — typed positional `submit` codegen.** Generating `static void submit(int x, String y)` from the output schema looked ergonomic but cut integration determinism from 10/10 to 7/10 in testing — Java's positional overloading lets the LLM put values in the wrong slots. Map-based `submit(Map.of("field", value, ...))` (when a preset re-introduces submit) stays. Rule: **LLM-facing API design — keys must be explicit, ambiguity is fatal.**
 
 **Sandbox policy seam (`com.standardapplied.helios.repl.sandbox.policy`).** Layer-2 enforcement point that wraps JShell's `LocalExecutionControl` via `GuardedExecutionControl` (subclass) + `GuardedExecutionControlProvider`. The bootstrap installs the provider via `JShell.builder().executionEngine(new GuardedExecutionControlProvider(policy), Map.of())` instead of the stock `"local"` engine. Every snippet class, JShell wrapper, and `var` declaration flows through `load(ClassBytecodes[])` as raw bytes before any classloader sees them — that's the chokepoint `BytecodeVerifier` scans against the active `SandboxPolicy`. `SandboxPolicy` (record + Builder, `permissive()` preset) carries `deniedClasses`, `deniedPackages`, `denyReflection`, `denyNativeAccess`, `denyDynamicClassDefinition`, and `onViolation`. Non-permissive policies travel host→subprocess via `--sandbox-policy=<base64>` argv (encoded by `SandboxPolicySerialization`); permissive is the bootstrap's own default and isn't propagated. SecurityManager is gone in JDK 25 (JEP 411/486 finalized), so the only honest in-JVM enforcement is bytecode-level — and even that is defense-in-depth, not the perimeter (OS-level isolation remains the only authoritative boundary).
 
@@ -418,9 +409,6 @@ harnesses were removed in the v2 cut (spec §3.5). What survives is the substrat
 ## Example modules
 
 - **`examples/session-demo`** — end-to-end `AgentSession` integration against Gemini with a real workspace. Validates the v2 session shape including `SessionPresets.workspace(...)`, the streaming `QueryEvent` flow, and the typed `runBlocking` path.
-- **`examples/codeact-demo`** — Java-as-action loop on `AgentSession` + `CodeActPreset`. The preset assembles the REPL substrate (JvmSandbox + ReplSession + CodeExecutionTool) onto a session and adds the CodeAct system prompt. Replaces the deleted v1 `CodeActHarness`.
-- **`examples/rlm-demo`** — leader-agent + worker-agent pattern rebuilt on v2 primitives (workers are Tools wrapping nested AgentSessions). Replaces the deleted v1 `RlmHarness`. Not "RLM" in the original RLM sense — kept the name for continuity, drop it when a better label sticks.
-
-The other v1 example modules (`autoresearch-prompt`, `autoresearch-code`, `gepa-prompt`, `rlm-demo-jpms`, `workload-fixtures`) were deleted with the v1 core surface and have no v2 replacement yet.
+The v1 example modules were deleted with the v1 core surface, and the preset demos with their presets in 3.0; none has a replacement yet.
 
 **Roadmap items tracked in `docs/specs/`** rather than in this file — keeps this README a description of what *is*, not a wish list.

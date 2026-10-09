@@ -8,7 +8,6 @@ package com.standardapplied.helios.repl.sandbox;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -21,31 +20,41 @@ class ExecutionResultTest {
 
   @Test
   void constructorSetsFields() {
-    var result =
-        new ExecutionResult(
-            "code", "out", "err", 1, "submitted", java.util.Map.of(), Duration.ZERO);
+    var result = new ExecutionResult("code", "out", "err", 1, java.util.Map.of(), Duration.ZERO);
     assertEquals("code", result.executedCode());
     assertEquals("out", result.stdout());
     assertEquals("err", result.stderr());
     assertEquals(1, result.exitCode());
-    assertEquals("submitted", result.submitted());
+  }
+
+  @Test
+  void nullExecutedCodeDefaultsToEmpty() {
+    var result = new ExecutionResult(null, "out", "err", 0, java.util.Map.of(), Duration.ZERO);
+    assertEquals("", result.executedCode());
+  }
+
+  @Test
+  void builderTreatsNullExecutedCodeAndBindingsAsEmpty() {
+    var result = ExecutionResult.newBuilder().withExecutedCode(null).withBindings(null).build();
+    assertEquals("", result.executedCode());
+    assertEquals(java.util.Map.of(), result.bindings());
   }
 
   @Test
   void nullStdoutDefaultsToEmpty() {
-    var result = new ExecutionResult("c", null, "err", 0, null, java.util.Map.of(), Duration.ZERO);
+    var result = new ExecutionResult("c", null, "err", 0, java.util.Map.of(), Duration.ZERO);
     assertEquals("", result.stdout());
   }
 
   @Test
   void nullStderrDefaultsToEmpty() {
-    var result = new ExecutionResult("c", "out", null, 0, null, java.util.Map.of(), Duration.ZERO);
+    var result = new ExecutionResult("c", "out", null, 0, java.util.Map.of(), Duration.ZERO);
     assertEquals("", result.stderr());
   }
 
   @Test
   void nullBindingsDefaultToEmpty() {
-    var result = new ExecutionResult("c", "out", "err", 0, null, null, Duration.ZERO);
+    var result = new ExecutionResult("c", "out", "err", 0, null, Duration.ZERO);
     assertEquals(java.util.Map.of(), result.bindings());
   }
 
@@ -60,29 +69,10 @@ class ExecutionResultTest {
   }
 
   @Test
-  void hasSubmittedValueTrue() {
-    assertTrue(ExecutionResult.success("ok", "answer").hasSubmittedValue());
-  }
-
-  @Test
-  void hasSubmittedValueFalse() {
-    assertFalse(ExecutionResult.success("ok").hasSubmittedValue());
-  }
-
-  @Test
   void successFactory() {
     var result = ExecutionResult.success("hello");
     assertEquals("hello", result.stdout());
     assertEquals("", result.stderr());
-    assertEquals(0, result.exitCode());
-    assertNull(result.submitted());
-  }
-
-  @Test
-  void successWithSubmittedFactory() {
-    var result = ExecutionResult.success("out", "answer");
-    assertEquals("out", result.stdout());
-    assertEquals("answer", result.submitted());
     assertEquals(0, result.exitCode());
   }
 
@@ -108,7 +98,6 @@ class ExecutionResultTest {
     assertEquals("", result.stdout());
     assertEquals("", result.stderr());
     assertEquals(0, result.exitCode());
-    assertNull(result.submitted());
   }
 
   @Test
@@ -118,24 +107,21 @@ class ExecutionResultTest {
             .withStdout("output")
             .withStderr("warning")
             .withExitCode(2)
-            .withSubmitted("final")
             .build();
     assertEquals("output", result.stdout());
     assertEquals("warning", result.stderr());
     assertEquals(2, result.exitCode());
-    assertEquals("final", result.submitted());
   }
 
   @Test
   void durationDefaultsToZeroWhenCanonicalReceivesNull() {
-    var result = new ExecutionResult("c", "o", "e", 0, null, java.util.Map.of(), null);
+    var result = new ExecutionResult("c", "o", "e", 0, java.util.Map.of(), null);
     assertEquals(Duration.ZERO, result.duration());
   }
 
   @Test
   void durationDefaultsToZeroWhenNegative() {
-    var result =
-        new ExecutionResult("c", "o", "e", 0, null, java.util.Map.of(), Duration.ofMillis(-5));
+    var result = new ExecutionResult("c", "o", "e", 0, java.util.Map.of(), Duration.ofMillis(-5));
     assertEquals(
         Duration.ZERO,
         result.duration(),
@@ -145,7 +131,7 @@ class ExecutionResultTest {
   @Test
   void durationPreservedWhenPositive() {
     var d = Duration.ofMillis(123);
-    var result = new ExecutionResult("c", "o", "e", 0, null, java.util.Map.of(), d);
+    var result = new ExecutionResult("c", "o", "e", 0, java.util.Map.of(), d);
     assertEquals(d, result.duration());
   }
 
@@ -166,7 +152,7 @@ class ExecutionResultTest {
   void withDurationReturnsNewInstancePreservingOtherFields() {
     var original =
         new ExecutionResult(
-            "code", "stdout", "stderr", 7, "submitted", java.util.Map.of("v", "1"), Duration.ZERO);
+            "code", "stdout", "stderr", 7, java.util.Map.of("v", "1"), Duration.ZERO);
     var copy = original.withDuration(Duration.ofMillis(50));
 
     assertNotSame(original, copy, "withDuration must return a new instance (record immutability)");
@@ -175,7 +161,6 @@ class ExecutionResultTest {
     assertEquals("stdout", copy.stdout());
     assertEquals("stderr", copy.stderr());
     assertEquals(7, copy.exitCode());
-    assertEquals("submitted", copy.submitted());
     assertEquals(java.util.Map.of("v", "1"), copy.bindings());
   }
 
@@ -200,7 +185,6 @@ class ExecutionResultTest {
   @Test
   void successFactoryHasZeroDuration() {
     assertSame(Duration.ZERO, ExecutionResult.success("ok").duration());
-    assertSame(Duration.ZERO, ExecutionResult.success("ok", "answer").duration());
   }
 
   @Test
