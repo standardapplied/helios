@@ -66,9 +66,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * declared but unhandled — customers register their own handlers via {@link
  * Builder#withRuntime(Runtime, RuntimeHandler)}.
  *
- * <p>{@code Runtime.JSHELL} is intentionally absent: Phase 6 wires the existing {@code JvmSandbox}
- * / {@code ReplSession} substrate behind it. {@code Runtime.SQL} is declared in the enum but needs
- * a separate JDBC-allowlist provider — a follow-up slice.
+ * <p>{@code Runtime.JSHELL} is intentionally absent: {@code helios-repl}'s {@code
+ * JShellExecutionProvider} serves it. {@code Runtime.SQL} is declared in the enum but needs a
+ * separate JDBC-allowlist provider — a follow-up slice.
  *
  * <h2>Lifecycle</h2>
  *
