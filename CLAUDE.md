@@ -168,9 +168,10 @@ different one.
    strict `json_schema`, Gemini `response_format`). `core.test.Accepted` holds these checks.
 2. **Force what can be forced.** Force tool use with `ModelConfig.Builder.withToolChoice`:
    on Anthropic only for a model whose `AnthropicModelId.acceptsForcedToolChoice()` is true and
-   with no reasoning set; on OpenAI with `ToolChoice.required(name)`; on Gemini with
-   `ToolChoice.any()` only, since Helios sends `required(...)` as `allowed_tools` mode `validated`,
-   which lets the model answer in text. A session's tool choice applies on every turn, so a forced
+   with no reasoning set; on OpenAI with `ToolChoice.required(name)`; on Gemini only with
+   `ToolChoice.any()`, since Helios sends `required(...)` as `allowed_tools` mode `validated`,
+   which still allows a text-only reply. If the API rejects `any()` with a test's thinking config,
+   the step cannot be forced (rule 3). A session's tool choice applies on every turn, so a forced
    session ends in `ErrorMaxTurns`; a test that forces one accepts that terminal.
 3. **Skip what cannot be forced.** A tool call on a model that rejects forced tool use, a progress
    note or thinking text, a citation or grounding, a web search, valid JSON where the provider
@@ -184,8 +185,10 @@ different one.
    `RecordedSessionTest` does. A multi-turn fixture separates responses with
    `ModelHarness.NEXT_RESPONSE`. Each fixture comes from one live call: keep its event types,
    block order, block indices and field names as recorded; text may be shortened, ids and
-   signatures replaced with stable placeholders; never a key or an `Authorization` header. The
-   test's javadoc states each fixture's model id and recording date in one line.
+   signatures replaced with stable placeholders; never a key or an `Authorization` header. A
+   provider with no key on the devbox gets a fixture built from its documented stream shape. The
+   test's javadoc states each fixture's model id and recording date in one line, and says when it
+   is hand-built.
 5. **No wording checks.** Never assert what the model said. Where a wording check stood in for a
    request-shape guarantee, assert the request Helios sent offline, through the requests
    `ModelHarness.exchange` returns (`ConversationRequestContract`).
