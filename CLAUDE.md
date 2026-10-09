@@ -297,8 +297,8 @@ helios/
 ```
 
 The v1 surface (`core.agent.Agent`, `core.workflow`, `core.memory`, `core.eval` and the v1
-harness family) was deleted in the v2 cut per spec §3.5. The v2 paradigm is a long-lived `AgentSession` that runs an agent loop on a virtual
-thread; v1's one-shot `Agent.run(...)` shape no longer exists.
+harness family) was deleted in the v2 cut per spec §3.5. The v2 paradigm is a long-lived
+`AgentSession` that runs an agent loop on a virtual thread; v1's one-shot `Agent.run(...)` shape no longer exists.
 
 ### JPMS Modules
 
