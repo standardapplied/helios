@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
@@ -30,7 +31,8 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
  * schema the original light-grid bug report described — outer record holding a list of inner
  * records with multiple required fields. Gemini constrains the reply to the schema, so the asserts
  * stop at "every required field is present": the framework's job is transmission, and what the
- * model writes in those fields is its choice.
+ * model writes in those fields is its choice. Tool calls are turned off, so the session's built-in
+ * AskUserQuestion cannot spend the two-turn limit before the typed reply arrives.
  *
  * <p>Guarded by {@code GEMINI_API_KEY} so the suite stays runnable offline.
  */
@@ -54,7 +56,8 @@ final class StructuredOutputThroughLoopIntegrationTest {
   @BeforeAll
   static void setUp() {
     var apiKey = System.getenv("GEMINI_API_KEY");
-    var config = ModelConfig.newBuilder().withApiKey(apiKey).build();
+    var config =
+        ModelConfig.newBuilder().withApiKey(apiKey).withToolChoice(ToolChoice.none()).build();
     model = new GeminiProvider().create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
   }
 
