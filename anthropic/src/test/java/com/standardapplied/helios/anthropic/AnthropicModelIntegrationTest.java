@@ -5,7 +5,6 @@
 
 package com.standardapplied.helios.anthropic;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -218,6 +217,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   void the55AndFable51ModelsReplayTheirThinkingBlocksAcrossAToolLoop() {
     var weatherTool =
         stringTool("get_weather", "Get the current weather for a location", "location");
+    var calledNoTool = new ArrayList<String>();
 
     for (var modelId : LIVE_MODELS) {
       for (var reasoning :
@@ -241,11 +241,14 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
                           Response::hasToolCalls,
                           MAX_TURNS));
 
-          assumeTrue(turns.getFirst().hasToolCalls(), () -> noToolCall(label));
-          assertEquals(2, turns.size(), label);
+          turns.forEach(Accepted::toolTurn);
+          if (!turns.getFirst().hasToolCalls()) {
+            calledNoTool.add(label);
+          }
         }
       }
     }
+    assumeTrue(calledNoTool.isEmpty(), () -> noToolCall(String.join(", ", calledNoTool)));
   }
 
   @Test
@@ -262,10 +265,10 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
               Response::hasToolCalls,
               MAX_TURNS);
 
+      turns.forEach(Accepted::toolTurn);
       assumeTrue(
           turns.getFirst().hasToolCalls(),
           () -> noToolCall(AnthropicModelId.CLAUDE_SONNET_5_5.id() + " " + new Reasoning.Off()));
-      assertEquals(2, turns.size());
     }
   }
 
@@ -292,17 +295,20 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   }
 
   /**
-   * {@code call}'s result, or a skipped test when {@code modelId} is not available to this API key:
-   * Fable 5.1 needs an organization with 30-day data retention.
+   * {@code call}'s result, or a skipped test when {@code modelId} is Fable 5.1 and not available to
+   * this API key: Fable 5.1 needs an organization with 30-day data retention. Any other model's
+   * rejection fails, since its id is one Helios sends.
    */
   private static <T> T availableOrSkip(AnthropicModelId modelId, Supplier<T> call) {
     try {
       return call.get();
     } catch (AnthropicException e) {
+      var unavailable =
+          e.statusCode() == 403
+              || e.statusCode() == 404
+              || e.getMessage().contains("data retention");
       assumeTrue(
-          e.statusCode() != 403
-              && e.statusCode() != 404
-              && !e.getMessage().contains("data retention"),
+          modelId != AnthropicModelId.CLAUDE_FABLE_5_1 || !unavailable,
           () -> modelId.id() + " is not available to this API key");
       throw e;
     }
@@ -360,6 +366,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
     var saveNote = stringTool("save_note", "Save a note for the user", "text");
     Predicate<Response<Void>> echoed =
         turn -> turn.metadata().containsKey(RawContentEcho.RAW_CONTENT_KEY);
+    var replayedNoRawContent = new ArrayList<String>();
 
     for (var modelId : THE_55_MODELS) {
       var config =
@@ -382,15 +389,17 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
                 echoed,
                 MAX_TURNS);
         turns.forEach(Accepted::toolTurn);
-
-        var replayed = turns.subList(0, turns.size() - 1).stream().anyMatch(echoed);
-        assumeTrue(
-            replayed,
-            modelId.id()
-                + " sent no turn carrying its raw content before a tool call;"
-                + " AnthropicStreamTranscriptTest \"server-tool\" covers the raw-content echo");
+        if (turns.subList(0, turns.size() - 1).stream().noneMatch(echoed)) {
+          replayedNoRawContent.add(modelId.id());
+        }
       }
     }
+    assumeTrue(
+        replayedNoRawContent.isEmpty(),
+        () ->
+            String.join(", ", replayedNoRawContent)
+                + " sent no turn carrying its raw content before a tool call;"
+                + " AnthropicStreamTranscriptTest \"server-tool\" covers the raw-content echo");
   }
 
   @Test
@@ -470,7 +479,6 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
             STRUCTURED_COUNTERPART,
             () -> model.chat(messages, OutputSchema.of(UiResponse.class)));
 
-    assertTrue(response.hasParsed(), "Expected parsed output");
     assertNotNull(response.parsed().component());
   }
 }

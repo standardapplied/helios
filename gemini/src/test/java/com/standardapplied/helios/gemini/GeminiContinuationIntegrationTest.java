@@ -6,7 +6,6 @@
 package com.standardapplied.helios.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import com.standardapplied.helios.core.model.FinishReason;
@@ -85,10 +84,9 @@ class GeminiContinuationIntegrationTest {
                     .withApiKey(System.getenv("GEMINI_API_KEY"))
                     .withToolChoice(ToolChoice.any())
                     .build())) {
-      var response1 = forced.chat(messages, tools);
+      var response1 = Accepted.toolTurn(forced.chat(messages, tools));
 
       assertEquals(FinishReason.TOOL_CALLS, response1.finishReason());
-      assertFalse(response1.toolCalls().isEmpty());
       assertNotNull(
           response1.metadata().get(ContinuationPoint.INTERACTION_ID_KEY),
           "response must carry interactionId for continuation");
