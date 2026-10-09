@@ -341,9 +341,14 @@ through `ReplConfig`. Sub-agents, planned for 3.1, replace in-sandbox sub-model 
   schema, tool parameters and replayed arguments each have eight or more names in a declared
   order, and asserts a request body or prompt keeps it. `FailingInputStream` fails on read or
   close, and `SseEvents` writes and drains server-sent events. `ReasoningMatrix` is the
-  model-by-`Reasoning` matrix each provider's reasoning test runs. Abstract contract tests run one set of cases against every implementation:
-  `ModelIntegrationContract` (live provider parity), `BoundedErrorBodyContract`,
-  `PromptRegistryContract` and `ToolCallJournalContract`. Depend on it with
+  model-by-`Reasoning` matrix each provider's reasoning test runs. `Accepted` holds the checks a
+  live test makes whatever the model writes: a reply the request allows, deltas that join to the
+  `Done` content, and a skip naming the recorded counterpart when an unconstrained structured reply
+  does not parse. Abstract contract tests run one set of cases against every implementation:
+  `ModelIntegrationContract` (live provider parity, asserting only what holds for any model
+  output), `ConversationRequestContract` (the system message and earlier turns a request carries,
+  offline), `BoundedErrorBodyContract`, `PromptRegistryContract` and `ToolCallJournalContract`.
+  Depend on it with
   `<type>test-jar</type>` and `<scope>test</scope>`.
 - **`core.common.OrderedMaps.copyOf(Map)`** is the one ordered copy of a map Helios sends to a
   model or reports to a user: unmodifiable, in the given iteration order, and rejecting a null map,

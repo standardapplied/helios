@@ -5,7 +5,6 @@
 
 package com.standardapplied.helios.gemini;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import com.standardapplied.helios.core.model.Message;
@@ -92,7 +91,6 @@ class GeminiVideoIntegrationTest {
       var response = model.chat(List.of(message), OutputSchema.of(VideoObservation.class));
 
       assertNotNull(response.parsed());
-      assertFalse(response.parsed().summary().isBlank());
     }
   }
 }

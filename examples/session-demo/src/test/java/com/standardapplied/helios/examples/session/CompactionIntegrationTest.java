@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
 import com.standardapplied.helios.session.AgentSession;
@@ -54,7 +55,10 @@ import org.junit.jupiter.api.io.TempDir;
  * <p>Strategy: drive a session past the {@code 0.95 × maxContextTokens} compaction watermark by
  * running a multi-turn tool-use loop with an artificially small {@code maxContextTokens} cap, then
  * assert that {@link QueryEvent.ContextEdited} fires AND the session reaches a clean terminal
- * (which is only possible if Gemini accepted the post-compaction request body).
+ * (which is only possible if Gemini accepted the post-compaction request body). The session's model
+ * is forced to call a tool on every turn, so the history grows by a tool round per turn whatever
+ * the model would have chosen, and the run always ends at the turn limit; the compactor summarises
+ * through an unforced model of the same id.
  */
 @EnabledIfEnvironmentVariable(named = "GEMINI_API_KEY", matches = ".+")
 final class CompactionIntegrationTest {
@@ -68,18 +72,27 @@ final class CompactionIntegrationTest {
           + "5. Reply with a one-line summary mentioning all three files.";
 
   private static Model model;
+  private static Model forced;
 
   @BeforeAll
   static void setUp() {
-    var apiKey = System.getenv("GEMINI_API_KEY");
-    var config = ModelConfig.newBuilder().withApiKey(apiKey).build();
-    model = new GeminiProvider().create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
+    model = gemini(ModelConfig.newBuilder());
+    forced = gemini(ModelConfig.newBuilder().withToolChoice(ToolChoice.any()));
+  }
+
+  private static Model gemini(ModelConfig.Builder config) {
+    return new GeminiProvider()
+        .create(
+            GeminiModelId.GEMINI_3_5_FLASH.id(),
+            config.withApiKey(System.getenv("GEMINI_API_KEY")).build());
   }
 
   @AfterAll
   static void tearDown() throws Exception {
-    if (model != null) {
-      model.close();
+    for (var open : new Model[] {model, forced}) {
+      if (open != null) {
+        open.close();
+      }
     }
   }
 
@@ -204,15 +217,15 @@ final class CompactionIntegrationTest {
             .withTailPreserved(1)
             .build();
 
-    // The char-based TokenCounter is conservative: short replies plus tool args/results land in
-    // the few-hundred-token range across 4–6 turns, so 300 trips the 0.95 watermark reliably
-    // without starving the first round-trip. 8 turns ends a misbehaving run in a clean
-    // ErrorMaxTurns.
+    // The char-based TokenCounter is conservative: tool args and results land in the
+    // few-hundred-token range across 4–6 turns, so 300 trips the 0.95 watermark reliably without
+    // starving the first round-trip. The forced model calls a tool every turn, so the run ends in
+    // ErrorMaxTurns at 8 turns.
     var limits = SessionLimits.newBuilder().withMaxContextTokens(300L).withMaxTurns(8).build();
 
     var options =
         SessionOptions.newBuilder()
-            .withModel(model)
+            .withModel(forced)
             .withTools(tools)
             .withContextCompactor(compactor)
             .withHooks(hooks)

@@ -1,13 +1,16 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.examples.session;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
@@ -17,57 +20,35 @@ import com.standardapplied.helios.session.files.GrepTool;
 import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Locale;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Live end-to-end contract for the v2 workspace file tools ({@link ReadTool}, {@link GrepTool},
  * {@link GlobTool}) pointed at a curated knowledge corpus through a real {@code AgentSession}, with
  * {@code Read} and {@code Grep} wired through a session-level {@link SecretRegistry}. Run once per
- * provider, it verifies tool-schema discovery, argument round-tripping and end-to-end secret
- * redaction, and catches cross-provider divergence in how tool calls are encoded on the wire.
+ * provider, it verifies that the provider accepts each tool's schema, that the model's arguments
+ * reach the tool, and that the tool's output is what Helios produces for them, redaction included.
  *
- * <ul>
- *   <li>{@link #agentDiscoversFilesViaGlob} — model uses {@code Glob} to list markdown files.
- *   <li>{@link #agentFindsPatternViaGrep} — model uses {@code Grep} to locate "reactor" in the
- *       corpus.
- *   <li>{@link #readRedactsRegisteredSecretsEndToEnd} — the load-bearing one: registered secret in
- *       a config file, model is asked to read it, assistant's final reply MUST NOT contain the raw
- *       secret bytes. Proves the {@code Redactor} overload survives the full tool-result-to-model
- *       round-trip.
- * </ul>
- *
- * <p>Each subclass supplies its model and carries its own API-key gate.
+ * <p>Each case forces the model to call its tool on every turn, so each session ends at its
+ * two-turn limit. The arguments are the model's choice: a case whose call does not name what the
+ * user asked for skips, and {@code RecordedSessionTest} replays a recorded session whose calls do.
+ * Each subclass supplies its model and carries its own API-key gate.
  */
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 abstract class WorkspaceReadOnlyRedactionContract {
 
-  private Model model;
+  private static final String COUNTERPART =
+      "RecordedSessionTest#fileToolsRedactTheirOutputAndAttachWhatTheyRead covers the output";
 
-  /** The live tool-calling model under test, closed after the class's tests. */
-  protected abstract Model createModel();
-
-  @BeforeAll
-  void openModel() {
-    model = createModel();
-  }
-
-  @AfterAll
-  void closeModel() throws Exception {
-    if (model != null) {
-      model.close();
-    }
-  }
+  /** The live tool-calling model under test, sending {@code toolChoice}; the caller closes it. */
+  protected abstract Model createModel(ToolChoice toolChoice);
 
   @Test
   void agentDiscoversFilesViaGlob(@TempDir Path corpus) throws IOException {
@@ -75,17 +56,21 @@ abstract class WorkspaceReadOnlyRedactionContract {
     Files.writeString(corpus.resolve("guide.md"), "# Guide\n", StandardCharsets.UTF_8);
     Files.writeString(corpus.resolve("config.yaml"), "key: value\n", StandardCharsets.UTF_8);
 
-    var text =
-        ask(
+    var result =
+        call(
             corpus,
             new SecretRegistry(),
+            GlobTool.NAME,
             "List every markdown file in the workspace using the Glob tool with pattern"
-                + " '**/*.md'. Return the bare list of names.");
-    assertTrue(
-        text.contains("intro.md") && text.contains("guide.md"),
-        () -> "assistant must name both markdown files via Glob: " + text);
-    assertFalse(
-        text.contains("config.yaml"), () -> "Glob with '**/*.md' must not surface yaml: " + text);
+                + " '**/*.md'.");
+
+    var pattern = String.valueOf(result.call().arguments().get("pattern"));
+    assumeTrue(
+        pattern.endsWith("*.md") && result.result().success(),
+        () -> "the model globbed " + pattern + "; " + COUNTERPART);
+    var output = result.result().output();
+    assertTrue(output.contains("intro.md") && output.contains("guide.md"), output);
+    assertFalse(output.contains("config.yaml"), output);
   }
 
   @Test
@@ -97,21 +82,24 @@ abstract class WorkspaceReadOnlyRedactionContract {
     Files.writeString(
         corpus.resolve("misc.md"), "# Misc\nNothing relevant here.\n", StandardCharsets.UTF_8);
 
-    var text =
-        ask(
+    var result =
+        call(
             corpus,
             new SecretRegistry(),
-            "Use Grep to find which file in the workspace mentions 'reactor'."
-                + " Tell me only the filename.");
-    assertTrue(
-        text.contains("patterns.md"),
-        () -> "assistant must identify the file containing the reactor term: " + text);
+            GrepTool.NAME,
+            "Use Grep to find which file in the workspace mentions 'reactor'.");
+
+    var pattern = String.valueOf(result.call().arguments().get("pattern"));
+    assumeTrue(
+        "reactor".equals(pattern) && result.result().success(),
+        () -> "the model grepped for " + pattern + "; " + COUNTERPART);
+    var output = result.result().output();
+    assertTrue(output.contains("patterns.md"), output);
+    assertFalse(output.contains("misc.md"), output);
   }
 
   @Test
   void readRedactsRegisteredSecretsEndToEnd(@TempDir Path corpus) throws IOException {
-    // Read's text-body output passes through the registry's Redactor before it becomes the tool
-    // result, so the model never sees the raw secret bytes and cannot echo them back.
     var secret = "sk-test-CONFIDENTIAL-do-not-leak-789012";
     var registry = new SecretRegistry();
     registry.register("OPENAI_KEY", secret);
@@ -120,35 +108,28 @@ abstract class WorkspaceReadOnlyRedactionContract {
         "service: backend\napi_key: " + secret + "\nregion: us-east-1\n",
         StandardCharsets.UTF_8);
 
-    var text =
-        ask(
-            corpus,
-            registry,
-            "Use Read to read 'config.yaml' from the workspace. Quote the entire"
-                + " api_key value back to me exactly as it appears in the file.");
-    assertFalse(
-        text.contains(secret),
-        () ->
-            "Registered secret bytes MUST NOT appear in the assistant's reply — Redactor wiring on"
-                + " ReadTool is the provider-agnostic contract. Got: "
-                + text);
-    assertFalse(
-        text.contains("CONFIDENTIAL-do-not-leak"),
-        () -> "Even a substring of the registered secret must be scrubbed: " + text);
-    assertTrue(
-        text.toLowerCase(Locale.ROOT).contains("redact") || text.contains("OPENAI_KEY"),
-        () ->
-            "Assistant should reference the redaction marker so a downstream auditor can"
-                + " see the secret was elided, not silently dropped. Got: "
-                + text);
+    var result =
+        call(corpus, registry, ReadTool.NAME, "Use Read to read 'config.yaml' from the workspace.");
+
+    var path = String.valueOf(result.call().arguments().get("path"));
+    assumeTrue(
+        path.endsWith("config.yaml") && result.result().success(),
+        () -> "the model read " + path + "; " + COUNTERPART);
+    var output = result.result().output();
+    assertTrue(output.contains("<redacted:OPENAI_KEY>"), output);
+    assertFalse(output.contains(secret), output);
+    assertFalse(output.contains("CONFIDENTIAL-do-not-leak"), output);
   }
 
   /**
    * Run {@code request} in a session bound to {@code corpus} with only the v2 file tools — Read and
    * Grep wired through {@code registry}'s redactor; Glob takes no redactor by design (paths are
-   * structural, not secret material) — and return the assistant's final reply.
+   * structural, not secret material) — and the model forced to call {@code tool}. Asserts what
+   * holds whatever the model does: the session ends cleanly with no error and called {@code tool},
+   * and returns the first result of that call.
    */
-  private String ask(Path corpus, SecretRegistry registry, String request) {
+  private QueryEvent.ToolResult call(
+      Path corpus, SecretRegistry registry, String tool, String request) {
     var workspace = WorkspaceRoot.of(corpus);
     var tracker = InMemoryFileTracker.create();
     var redactor = registry.redactor();
@@ -157,23 +138,28 @@ abstract class WorkspaceReadOnlyRedactionContract {
             ReadTool.binding(workspace, tracker, redactor),
             GrepTool.binding(workspace, redactor),
             GlobTool.binding(workspace));
-    var options =
-        SessionOptions.newBuilder()
-            .withModel(model)
-            .withTools(new ToolRegistry(bindings))
-            .withSystemPrompt(
-                "You are a precise knowledge-base assistant. Always call the Read / Grep / Glob"
-                    + " tools rather than answering from memory. Be terse — one sentence answers"
-                    + " when the user asks for a fact.")
-            .withLimits(SessionLimits.newBuilder().withMaxTurns(4).build())
-            .build();
-    try (var session = AgentSession.create(options)) {
+    var events = new CollectingSubscriber();
+    try (var model = createModel(ToolChoice.required(tool));
+        var session =
+            AgentSession.create(
+                SessionOptions.newBuilder()
+                    .withModel(model)
+                    .withTools(new ToolRegistry(bindings))
+                    .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
+                    .build())) {
+      session.events().subscribe(events);
       var terminal = session.runBlocking(UserMessage.text(request));
-      return assertInstanceOf(
-              ResultMessage.Success.class,
-              terminal,
-              () -> "expected Success terminal, got " + terminal)
-          .result();
+      events.awaitDone();
+
+      assertTrue(
+          terminal instanceof ResultMessage.Success
+              || terminal instanceof ResultMessage.ErrorMaxTurns,
+          () -> "ended as " + terminal);
+      assertTrue(events.eventsOf(QueryEvent.Error.class).isEmpty());
+      var results = events.eventsOf(QueryEvent.ToolResult.class);
+      assertFalse(results.isEmpty());
+      results.forEach(result -> assertEquals(tool, result.call().name()));
+      return results.getFirst();
     }
   }
 }

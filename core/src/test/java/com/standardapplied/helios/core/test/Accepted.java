@@ -1,0 +1,101 @@
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
+
+package com.standardapplied.helios.core.test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.standardapplied.helios.core.model.CloseableIterator;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.schema.StructuredOutputParseException;
+import java.util.EnumSet;
+import java.util.Set;
+import java.util.function.Supplier;
+import org.junit.jupiter.api.Assumptions;
+
+/**
+ * Assertions a live test makes on what a provider sent back, which hold for any output the model
+ * may produce: the provider accepted the request, and Helios turned its reply into Helios types.
+ */
+public final class Accepted {
+
+  /** Every finish reason a request that offers no tool allows. */
+  public static final Set<FinishReason> TEXT_FINISHES =
+      EnumSet.of(
+          FinishReason.STOP,
+          FinishReason.LENGTH,
+          FinishReason.REFUSAL,
+          FinishReason.CONTENT_FILTER);
+
+  private Accepted() {}
+
+  /**
+   * Asserts that {@code response}, the reply to a request that offers no tool, ended for a reason
+   * that request allows and carries content and usage, and returns it.
+   */
+  public static <T> Response<T> textReply(Response<T> response) {
+    assertNotNull(response.content(), "content");
+    assertNotNull(response.usage(), "usage");
+    assertTrue(
+        TEXT_FINISHES.contains(response.finishReason()),
+        () -> "finish reason " + response.finishReason());
+    return response;
+  }
+
+  /**
+   * Asserts that {@code response}, the reply to a request that offers tools, either called a tool
+   * and ended for that reason or is a {@link #textReply text reply}, and returns it.
+   */
+  public static <T> Response<T> toolTurn(Response<T> response) {
+    if (response.hasToolCalls()) {
+      assertEquals(FinishReason.TOOL_CALLS, response.finishReason());
+      return response;
+    }
+    return textReply(response);
+  }
+
+  /**
+   * The reply {@code call} returns, or an aborted test when the model wrote output that does not
+   * parse against the schema, for a provider that does not constrain its output to the schema: a
+   * parse is then the model's choice, and {@code counterpart}, a recorded test, proves the parsing.
+   */
+  public static <T> Response<T> parsedOrSkip(
+      String modelId, String counterpart, Supplier<Response<T>> call) {
+    try {
+      return call.get();
+    } catch (StructuredOutputParseException unparsed) {
+      return Assumptions.abort(
+          modelId + " wrote no JSON matching the schema; " + counterpart + " covers the parsing");
+    }
+  }
+
+  /**
+   * Drains and closes {@code events}, asserting that no event is an error, that the stream ends in
+   * one {@code Done}, and that its text deltas join to exactly the content {@code Done} reports;
+   * returns that {@code Done}'s response.
+   */
+  public static Response<?> stream(CloseableIterator<StreamEvent> events) {
+    var text = new StringBuilder();
+    StreamEvent.Done done = null;
+    try (events) {
+      while (events.hasNext()) {
+        var event = events.next();
+        assertFalse(event instanceof StreamEvent.Error, () -> "stream error: " + event);
+        assertNull(done, () -> "event after Done: " + event);
+        switch (event) {
+          case StreamEvent.TextDelta(var delta) -> text.append(delta);
+          case StreamEvent.Done ended -> done = ended;
+          default -> {}
+        }
+      }
+    }
+    assertNotNull(done, "the stream ended without Done");
+    assertEquals(done.response().content(), text.toString());
+    return done.response();
+  }
+}

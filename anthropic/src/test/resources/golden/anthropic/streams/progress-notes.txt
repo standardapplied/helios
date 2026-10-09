@@ -1,0 +1,27 @@
+== chatStream
+ThinkingDelta[text=All]
+ThinkingDelta[text= four searches returned the same three]
+ThinkingDelta[text= profiles (p7, p]
+ThinkingDelta[text=12, p19)]
+ThinkingDelta[text= — either the search isn't fil]
+ThinkingDelta[text=tering by query or Austin]
+ThinkingDelta[text= just has few members. I'll]
+ThinkingDelta[text= open]
+ThinkingDelta[text= all three to see who they are]
+ThinkingDelta[text=.]
+ThinkingDelta[text=
+
+]
+ThinkingComplete[fullThinking=All four searches returned the same three profiles (p7, p12, p19) — either the search isn't filtering by query or Austin just has few members. I'll open all three to see who they are.
+
+, signature=SIG-3]
+ToolCallComplete[toolCall=ToolCall[id=toolu_5, name=get_profile, arguments={id=p7}]]
+ToolCallComplete[toolCall=ToolCall[id=toolu_6, name=get_profile, arguments={id=p12}]]
+ToolCallComplete[toolCall=ToolCall[id=toolu_7, name=get_profile, arguments={id=p19}]]
+Done[response=Response[content=, parsed=null, toolCalls=[ToolCall[id=toolu_5, name=get_profile, arguments={id=p7}], ToolCall[id=toolu_6, name=get_profile, arguments={id=p12}], ToolCall[id=toolu_7, name=get_profile, arguments={id=p19}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=2, outputTokens=235, cacheCreationInputTokens=568, cacheReadInputTokens=904, totalTokens=1709], thinking=All four searches returned the same three profiles (p7, p12, p19) — either the search isn't filtering by query or Austin just has few members. I'll open all three to see who they are.
+
+, citations=[], metadata={anthropic.stopReason=tool_use, anthropic.thinkingBlocks=[{"signature":"SIG-2","text":""},{"signature":"SIG-3","text":"All four searches returned the same three profiles (p7, p12, p19) — either the search isn't filtering by query or Austin just has few members. I'll open all three to see who they are.\n\n"}]}]]
+== chat
+Response[content=, parsed=null, toolCalls=[ToolCall[id=toolu_5, name=get_profile, arguments={id=p7}], ToolCall[id=toolu_6, name=get_profile, arguments={id=p12}], ToolCall[id=toolu_7, name=get_profile, arguments={id=p19}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=2, outputTokens=235, cacheCreationInputTokens=568, cacheReadInputTokens=904, totalTokens=1709], thinking=All four searches returned the same three profiles (p7, p12, p19) — either the search isn't filtering by query or Austin just has few members. I'll open all three to see who they are.
+
+, citations=[], metadata={anthropic.stopReason=tool_use, anthropic.thinkingBlocks=[{"signature":"SIG-2","text":""},{"signature":"SIG-3","text":"All four searches returned the same three profiles (p7, p12, p19) — either the search isn't filtering by query or Austin just has few members. I'll open all three to see who they are.\n\n"}]}]
