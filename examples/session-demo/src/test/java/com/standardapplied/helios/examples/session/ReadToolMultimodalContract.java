@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.examples.session;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -15,12 +14,17 @@ import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.SessionPresets;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.ReadTool;
+import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.test.SampleDocuments;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -33,12 +37,12 @@ import org.junit.jupiter.api.io.TempDir;
  * the {@code InlineFile} into its image / document block → the live server accepting the binary
  * payload.
  *
- * <p>The model is forced to call Read on every turn, so each session ends at its two-turn limit
- * after the second request, the one carrying the attachment. Which path the model passes is its
- * choice: a run whose Read did not succeed skips, and {@code RecordedSessionTest} replays a
- * recorded session that reads and attaches both files. The fixtures are a 1x1 PNG and a one-page
- * "Hello, world!" PDF from {@link SampleDocuments}. Each subclass supplies its model and carries
- * its own API-key gate.
+ * <p>The model is forced to call a tool on every turn, with Read the only one it is given beside
+ * the built-in AskUserQuestion, so each session ends at its two-turn limit after the second
+ * request, the one carrying the attachment. Which tool and path the model picks is its choice: a
+ * run with no successful Read skips, and {@code RecordedSessionTest} replays a recorded session
+ * that reads and attaches both files. The fixtures are a 1x1 PNG and a one-page "Hello, world!" PDF
+ * from {@link SampleDocuments}. Each subclass supplies its model and carries its own API-key gate.
  */
 abstract class ReadToolMultimodalContract {
 
@@ -63,15 +67,17 @@ abstract class ReadToolMultimodalContract {
   }
 
   private void readAndAttach(Path workspace, String file) {
-    var events = new CollectingSubscriber();
-    try (var model = createModel(ToolChoice.required(ReadTool.NAME));
+    var read = ReadTool.binding(WorkspaceRoot.of(workspace), InMemoryFileTracker.create());
+    try (var model = createModel(ToolChoice.any());
         var session =
             AgentSession.create(
                 SessionOptions.newBuilder()
                     .withPreset(SessionPresets.readOnly(workspace))
+                    .withTools(new ToolRegistry(List.of(read)))
                     .withModel(model)
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
                     .build())) {
+      var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
       session.events().subscribe(events);
       var terminal = session.runBlocking(UserMessage.text("Read the file '" + file + "'."));
       events.awaitDone();
@@ -81,15 +87,17 @@ abstract class ReadToolMultimodalContract {
               || terminal instanceof ResultMessage.ErrorMaxTurns,
           () -> "ended as " + terminal);
       assertTrue(events.eventsOf(QueryEvent.Error.class).isEmpty());
-      var reads = events.eventsOf(QueryEvent.ToolResult.class);
-      assertFalse(reads.isEmpty());
-      reads.forEach(read -> assertEquals(ReadTool.NAME, read.call().name()));
+      var results = events.eventsOf(QueryEvent.ToolResult.class);
+      assertFalse(results.isEmpty());
       assumeTrue(
-          reads.getFirst().result().success(),
+          results.stream()
+              .anyMatch(
+                  result ->
+                      result.call().name().equals(ReadTool.NAME) && result.result().success()),
           () ->
               model.id()
-                  + " passed Read a path that failed, "
-                  + reads.getFirst().call().arguments()
+                  + " made no successful Read call, "
+                  + results.stream().map(QueryEvent.ToolResult::call).toList()
                   + "; RecordedSessionTest#fileToolsRedactTheirOutputAndAttachWhatTheyRead"
                   + " covers the attachment");
     }
