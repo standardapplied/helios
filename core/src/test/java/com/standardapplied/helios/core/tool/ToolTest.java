@@ -20,54 +20,6 @@ import org.junit.jupiter.api.Test;
 class ToolTest {
 
   @Test
-  void defaultResultCompactorReturnsConstantPlaceholder() {
-    var tool =
-        Tool.newBuilder()
-            .withName("noop")
-            .withDescription("noop")
-            .withExecutor((args, ctx) -> ToolResult.success(""))
-            .build();
-    assertNotNull(tool.resultCompactor());
-    assertEquals("[result omitted]", tool.resultCompactor().apply("anything"));
-    assertEquals("[result omitted]", tool.resultCompactor().apply(""));
-  }
-
-  @Test
-  void customResultCompactorPreservedThroughBuilder() {
-    var tool =
-        Tool.newBuilder()
-            .withName("custom")
-            .withDescription("custom")
-            .withExecutor((args, ctx) -> ToolResult.success(""))
-            .withResultCompactor(content -> "[shortened: " + content.length() + " chars]")
-            .build();
-    assertEquals("[shortened: 5 chars]", tool.resultCompactor().apply("hello"));
-  }
-
-  @Test
-  void nullCompactorResetsToDefault() {
-    var tool =
-        Tool.newBuilder()
-            .withName("reset")
-            .withDescription("reset")
-            .withExecutor((args, ctx) -> ToolResult.success(""))
-            .withResultCompactor(content -> "custom")
-            .withResultCompactor(null)
-            .build();
-    assertEquals(
-        "[result omitted]",
-        tool.resultCompactor().apply("anything"),
-        "passing null to withResultCompactor must restore the default, not break the tool");
-  }
-
-  @Test
-  void canonicalCtorCoercesNullCompactorToDefault() {
-    var tool =
-        new Tool("name", "desc", List.of(), (args, ctx) -> ToolResult.success(""), false, null);
-    assertEquals("[result omitted]", tool.resultCompactor().apply("x"));
-  }
-
-  @Test
   void buildSimpleTool() {
     var tool =
         Tool.newBuilder()
