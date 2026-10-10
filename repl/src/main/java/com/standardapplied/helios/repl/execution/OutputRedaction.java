@@ -29,7 +29,12 @@ final class OutputRedaction {
     var stdout = redactor.redact(raw.stdout());
     var stderr = redactor.redact(raw.stderr());
     return new ExecutionResult(
-        raw.exitCode(), stdout.text(), stderr.text(), elapsed, false, stdout.mergeCounts(stderr));
+        raw.exitCode(),
+        stdout.text(),
+        stderr.text(),
+        elapsed,
+        raw.timedOut(),
+        stdout.mergeCounts(stderr));
   }
 
   /**

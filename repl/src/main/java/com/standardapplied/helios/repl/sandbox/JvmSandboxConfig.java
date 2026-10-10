@@ -19,7 +19,8 @@ import java.time.Duration;
  *     3. Default {@link #DEFAULT_STOP_GRACE}; travels to the subprocess as a {@code
  *     --stop-grace=<ISO-8601 duration>} argv flag.
  * @param maxHeapMb maximum heap size for the subprocess in MB
- * @param callTimeout timeout for JSON-RPC calls (host function responses)
+ * @param callTimeout timeout for JSON-RPC calls (host function responses), and the margin an
+ *     execute's reply has to arrive once its snippet's timeout and stop grace are over
  * @param subprocessStartupTimeout maximum wait for the subprocess to connect back on the RPC socket
  *     after launch. Default {@value #DEFAULT_SUBPROCESS_STARTUP_TIMEOUT_SECONDS} s is comfortable
  *     for normal JDK cold-start; raise it when launching off slow storage (NAS, EBS-backed
@@ -76,6 +77,8 @@ public record JvmSandboxConfig(
 
   private static final int DEFAULT_SUBPROCESS_STARTUP_TIMEOUT_SECONDS = 10;
 
+  private static final Duration LONGEST_REPLY_WAIT = Duration.ofMillis(Long.MAX_VALUE);
+
   /** Default subprocess startup timeout: 10 seconds. */
   public static final Duration DEFAULT_SUBPROCESS_STARTUP_TIMEOUT =
       Duration.ofSeconds(DEFAULT_SUBPROCESS_STARTUP_TIMEOUT_SECONDS);
@@ -120,6 +123,21 @@ public record JvmSandboxConfig(
         SandboxPolicy.permissive(),
         SubprocessModules.unrestricted(),
         null);
+  }
+
+  /**
+   * How long the host waits for the reply to an execute whose snippet has {@code budget}: the
+   * budget, then the {@link #stopGrace()} the sandbox may spend stopping the snippet, then the
+   * {@link #callTimeout()} for the reply to arrive. A sum beyond {@link Long#MAX_VALUE}
+   * milliseconds waits that long.
+   */
+  Duration executeReplyWait(Duration budget) {
+    try {
+      var wait = budget.plus(stopGrace).plus(callTimeout);
+      return wait.compareTo(LONGEST_REPLY_WAIT) < 0 ? wait : LONGEST_REPLY_WAIT;
+    } catch (ArithmeticException overflow) {
+      return LONGEST_REPLY_WAIT;
+    }
   }
 
   public static Builder newBuilder() {

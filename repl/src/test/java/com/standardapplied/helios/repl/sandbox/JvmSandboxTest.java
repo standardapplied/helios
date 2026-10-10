@@ -304,6 +304,51 @@ class JvmSandboxTest {
     Await.termination("the process close() destroys", process);
   }
 
+  /**
+   * The peer is a child that only sleeps, so it never answers. The channel's own call timeout is
+   * beyond the hang guard: returning at all proves the sandbox waited only for the snippet's
+   * budget, the stop grace and the call timeout, a millisecond each.
+   */
+  @Test
+  void sandboxThatDoesNotAnswerAnExecuteWithinItsDefaultBudgetIsClosed() throws Exception {
+    var sandbox = unansweringSandbox(Duration.ofMillis(1));
+
+    var result = sandbox.execute(ExecutionRequest.java("1+1"));
+
+    assertEquals(
+        new ExecutionResult(
+            "1+1",
+            "",
+            "Sandbox did not answer the execute within PT0.003S; the sandbox is closed",
+            1,
+            true,
+            Map.of(),
+            Duration.ZERO),
+        result);
+    assertFalse(sandbox.isAlive());
+    Await.termination("the process of the sandbox that did not answer", sandbox.process());
+  }
+
+  /** The default budget is beyond the hang guard, so only the request's own budget can end it. */
+  @Test
+  void sandboxThatDoesNotAnswerAnExecuteWithinTheRequestsBudgetIsClosed() throws Exception {
+    var sandbox = unansweringSandbox(BEYOND_HANG_GUARD);
+
+    var result =
+        sandbox.execute(
+            ExecutionRequest.newBuilder()
+                .withCode("1+1")
+                .withTimeout(Duration.ofMillis(2))
+                .build());
+
+    assertEquals(
+        "Sandbox did not answer the execute within PT0.004S; the sandbox is closed",
+        result.stderr());
+    assertTrue(result.timedOut());
+    assertFalse(sandbox.isAlive());
+    Await.termination("the process of the sandbox that did not answer", sandbox.process());
+  }
+
   @Test
   void shutdownHookKillsLeakedProcess() throws Exception {
     var process = new ProcessBuilder("sleep", "600").start();
@@ -431,46 +476,6 @@ class JvmSandboxTest {
     assertEquals(process, sandbox.process());
     assertEquals(transport, sandbox.rpc().transport());
     assertEquals(channel, sandbox.rpc().channel());
-
-    sandbox.close();
-  }
-
-  @Test
-  void executeWithRequestTimeout() throws Exception {
-    var process = new ProcessBuilder("sleep", "600").start();
-    var transport = new ProcessTransport(process.getInputStream(), process.getOutputStream());
-    var registry = new HostFunctionRegistry();
-    var channel = new RpcChannel(transport, registry, Duration.ofMillis(100));
-    var config = JvmSandboxConfig.defaults();
-    var sandbox = new JvmSandbox(process, transport, channel, config);
-
-    var result =
-        sandbox.execute(
-            ExecutionRequest.newBuilder()
-                .withCode("1+1")
-                .withTimeout(Duration.ofMillis(100))
-                .build());
-
-    assertEquals(1, result.exitCode());
-    assertTrue(result.stderr().contains("timed out"), result.stderr());
-
-    sandbox.close();
-  }
-
-  @Test
-  void executeWithDefaultTimeout() throws Exception {
-    // When request has no timeout, the sandbox config timeout is used
-    var process = new ProcessBuilder("sleep", "600").start();
-    var transport = new ProcessTransport(process.getInputStream(), process.getOutputStream());
-    var registry = new HostFunctionRegistry();
-    var channel = new RpcChannel(transport, registry, Duration.ofMillis(100));
-    var config = JvmSandboxConfig.newBuilder().withExecutionTimeout(Duration.ofMillis(100)).build();
-    var sandbox = new JvmSandbox(process, transport, channel, config);
-
-    var result = sandbox.execute(ExecutionRequest.java("1+1"));
-
-    assertEquals(1, result.exitCode());
-    assertTrue(result.stderr().contains("timed out"), result.stderr());
 
     sandbox.close();
   }
@@ -844,6 +849,39 @@ class JvmSandboxTest {
   }
 
   /**
+   * The snippet's budget is longer than the call timeout, so a host that waited only the call
+   * timeout would give up while the snippet still runs. The snippet blocks on a latch nothing
+   * releases, so only the sandbox's own timeout ends it.
+   */
+  @Test
+  void snippetWithABudgetBeyondTheCallTimeoutGetsTheSandboxsOwnTimeout() {
+    var config =
+        JvmSandboxConfig.newBuilder()
+            .withSubprocessStartupTimeout(Await.HANG_GUARD)
+            .withCallTimeout(Duration.ofSeconds(1))
+            .withExecutionTimeout(BEYOND_HANG_GUARD)
+            .withStopGrace(Await.HANG_GUARD)
+            .build();
+    try (var sandbox = JvmSandbox.create(config, new HostFunctionRegistry())) {
+      var blocked =
+          ExecutionRequest.newBuilder()
+              .withCode("new java.util.concurrent.CountDownLatch(1).await();")
+              .withTimeout(Duration.ofSeconds(2))
+              .build();
+
+      var result = sandbox.execute(blocked);
+
+      assertTrue(result.timedOut(), result.stderr());
+      assertTrue(result.stderr().contains("Execution timed out"), result.stderr());
+      assertFalse(result.stderr().contains("Call timed out"), result.stderr());
+      assertTrue(sandbox.isAlive());
+      var next = sandbox.execute(ExecutionRequest.java("1+1"));
+      assertEquals(0, next.exitCode(), next.stderr());
+      assertTrue(next.stdout().contains("2"), next.stdout());
+    }
+  }
+
+  /**
    * A snippet blocked entering a monitor that a thread outside its thread group holds cannot be
    * stopped, so the sandbox answers the execute and then exits with code 3. The holder is a virtual
    * thread, never a member of the snippet's group, blocked on a latch nothing releases. The
@@ -1133,6 +1171,24 @@ class JvmSandboxTest {
         "collectBindings should not narrow to Exception — that's the regression we're guarding"
             + " against; current body:\n"
             + body);
+  }
+
+  /**
+   * A sandbox over a child that only sleeps, with a stop grace and call timeout of a millisecond
+   * and {@code executionTimeout} as the default budget; its channel's own timeout is beyond the
+   * hang guard.
+   */
+  private static JvmSandbox unansweringSandbox(Duration executionTimeout) throws IOException {
+    var process = new ProcessBuilder("sleep", "600").start();
+    var transport = new ProcessTransport(process.getInputStream(), process.getOutputStream());
+    var channel = new RpcChannel(transport, new HostFunctionRegistry(), BEYOND_HANG_GUARD);
+    var config =
+        JvmSandboxConfig.newBuilder()
+            .withExecutionTimeout(executionTimeout)
+            .withStopGrace(Duration.ofMillis(1))
+            .withCallTimeout(Duration.ofMillis(1))
+            .build();
+    return new JvmSandbox(process, transport, channel, config);
   }
 
   private static JvmSandboxConfig endToEnd(Duration stopGrace) {
