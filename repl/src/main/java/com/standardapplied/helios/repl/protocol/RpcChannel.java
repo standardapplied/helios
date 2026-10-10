@@ -106,9 +106,7 @@ public final class RpcChannel implements AutoCloseable {
    * @throws RpcException if the call fails or is interrupted
    */
   public Object call(String method, Object params, Duration timeout) {
-    if (timeout == null || timeout.isZero() || timeout.isNegative()) {
-      throw new IllegalArgumentException("Call timeout must be positive, was " + timeout);
-    }
+    requirePositive(timeout);
     if (closed.get()) {
       throw new RpcException("Channel is closed");
     }
@@ -134,6 +132,12 @@ public final class RpcChannel implements AutoCloseable {
         throw rpc;
       }
       throw new RpcException("Call failed", e.getCause());
+    }
+  }
+
+  private static void requirePositive(Duration timeout) {
+    if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+      throw new IllegalArgumentException("Call timeout must be positive, was " + timeout);
     }
   }
 
