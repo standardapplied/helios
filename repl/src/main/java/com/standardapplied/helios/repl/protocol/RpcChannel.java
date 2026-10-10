@@ -82,14 +82,31 @@ public final class RpcChannel implements AutoCloseable {
   }
 
   /**
-   * Send a request and wait for the response.
+   * Send a request and wait for the response for the channel's call timeout.
    *
    * @param method the method to call
    * @param params the parameters
    * @return the result from the remote side
-   * @throws RpcException if the call fails, times out, or is interrupted
+   * @throws RpcTimeoutException if no response arrives within the call timeout
+   * @throws RpcException if the call fails or is interrupted
    */
   public Object call(String method, Object params) {
+    return call(method, params, callTimeout);
+  }
+
+  /**
+   * Send a request and wait for the response for {@code timeout}.
+   *
+   * @param method the method to call
+   * @param params the parameters
+   * @param timeout how long to wait for the response; strictly positive
+   * @return the result from the remote side
+   * @throws IllegalArgumentException if {@code timeout} is null, zero or negative
+   * @throws RpcTimeoutException if no response arrives within {@code timeout}
+   * @throws RpcException if the call fails or is interrupted
+   */
+  public Object call(String method, Object params, Duration timeout) {
+    requirePositive(timeout);
     if (closed.get()) {
       throw new RpcException("Channel is closed");
     }
@@ -98,13 +115,13 @@ public final class RpcChannel implements AutoCloseable {
     pendingCalls.put(id, future);
     try {
       transport.send(new RpcMessage.Request(id, method, params));
-      return future.get(callTimeout.toMillis(), TimeUnit.MILLISECONDS);
+      return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
     } catch (IOException e) {
       pendingCalls.remove(id);
       throw new RpcException("Failed to send request", e);
     } catch (TimeoutException e) {
       pendingCalls.remove(id);
-      throw new RpcException("Call timed out after " + callTimeout, e);
+      throw new RpcTimeoutException("Call timed out after " + timeout, e);
     } catch (InterruptedException e) {
       pendingCalls.remove(id);
       Thread.currentThread().interrupt();
@@ -115,6 +132,12 @@ public final class RpcChannel implements AutoCloseable {
         throw rpc;
       }
       throw new RpcException("Call failed", e.getCause());
+    }
+  }
+
+  private static void requirePositive(Duration timeout) {
+    if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+      throw new IllegalArgumentException("Call timeout must be positive, was " + timeout);
     }
   }
 
@@ -283,12 +306,19 @@ public final class RpcChannel implements AutoCloseable {
   }
 
   /** Runtime exception for RPC channel errors. */
-  public static final class RpcException extends RuntimeException {
+  public static sealed class RpcException extends RuntimeException permits RpcTimeoutException {
     public RpcException(String message) {
       super(message);
     }
 
     public RpcException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
+
+  /** A call whose response did not arrive within its timeout. */
+  public static final class RpcTimeoutException extends RpcException {
+    public RpcTimeoutException(String message, Throwable cause) {
       super(message, cause);
     }
   }

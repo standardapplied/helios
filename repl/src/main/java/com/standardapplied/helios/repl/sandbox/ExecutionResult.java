@@ -20,6 +20,8 @@ import java.util.Map;
  * @param stdout captured standard output
  * @param stderr captured standard error
  * @param exitCode the exit code (0 = success)
+ * @param timedOut whether the snippet outlived its timeout and was stopped, or the sandbox did not
+ *     answer the execute within the snippet's timeout and its stop grace
  * @param bindings post-execute snapshot of every user-declared {@code var} in the sandbox, mapped
  *     to a length-capped {@code toString} repr. Excludes harness-internal {@code __}-prefixed
  *     names. Empty (not {@code null}) when no bindings were captured (sandbox not configured to
@@ -34,6 +36,7 @@ public record ExecutionResult(
     String stdout,
     String stderr,
     int exitCode,
+    boolean timedOut,
     Map<String, String> bindings,
     Duration duration) {
 
@@ -59,7 +62,8 @@ public record ExecutionResult(
    * the value the sandbox returned.
    */
   public ExecutionResult withDuration(Duration duration) {
-    return new ExecutionResult(executedCode, stdout, stderr, exitCode, bindings, duration);
+    return new ExecutionResult(
+        executedCode, stdout, stderr, exitCode, timedOut, bindings, duration);
   }
 
   /** Whether the execution completed successfully (exit code 0). */
@@ -91,6 +95,7 @@ public record ExecutionResult(
     private String stdout = "";
     private String stderr = "";
     private int exitCode;
+    private boolean timedOut;
     private Map<String, String> bindings = Map.of();
     private Duration duration = Duration.ZERO;
 
@@ -116,6 +121,11 @@ public record ExecutionResult(
       return this;
     }
 
+    public Builder withTimedOut(boolean timedOut) {
+      this.timedOut = timedOut;
+      return this;
+    }
+
     public Builder withBindings(Map<String, String> bindings) {
       this.bindings = bindings == null ? Map.of() : bindings;
       return this;
@@ -127,7 +137,8 @@ public record ExecutionResult(
     }
 
     public ExecutionResult build() {
-      return new ExecutionResult(executedCode, stdout, stderr, exitCode, bindings, duration);
+      return new ExecutionResult(
+          executedCode, stdout, stderr, exitCode, timedOut, bindings, duration);
     }
   }
 }

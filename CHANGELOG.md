@@ -330,6 +330,14 @@ throws `IllegalStateException("session ended with Success but produced no result
 <type>")` instead of returning `null`. The untyped `runBlocking(message)` still returns that
 `Success`, and `StructuredContentParser.parse` still returns `null` for blank input.
 
+**A sandbox execute reports its timeout, and an RPC timeout has its own type.**
+`repl.sandbox.ExecutionResult` gains a `boolean timedOut` component after `exitCode`, which
+changes the canonical constructor to `ExecutionResult(executedCode, stdout, stderr, exitCode,
+timedOut, bindings, duration)`; `ExecutionResult.Builder.withTimedOut(boolean)` sets it.
+`RpcChannel.RpcException` is now `sealed`, with `RpcChannel.RpcTimeoutException` as its only
+subclass: a call whose response does not arrive in time throws it, with the same message. New:
+`RpcChannel.call(method, params, timeout)`.
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
@@ -417,6 +425,16 @@ throws `IllegalStateException("session ended with Success but produced no result
   now runs under the requested budget, capped at the provider's `withMaxTimeout` (5 minutes by
   default), and `Execute` without `timeoutSeconds` defaults to the session's
   `SessionLimits.toolTimeoutDefault()`. New: `ReplSession.execute(String, Duration)`.
+- **A timed-out JShell snippet was reported as an ordinary failure, and one with a budget beyond
+  the call timeout looked like a broken sandbox.** The sandbox stopped a snippet that outlived its
+  budget, but its reply carried no timeout flag, so `Execute` reported `timedOut=false` and never
+  printed `TIMEOUT`, unlike the process runtimes. It now reports `timedOut=true` and keeps the
+  snippet's output up to the stop. The host also waited for an execute's reply only
+  `JvmSandboxConfig.callTimeout()` (60 s by default), so a snippet given a longer budget came back
+  as `Call timed out` while it still ran, and the next execute was refused as concurrent. The host
+  now waits for the snippet's budget, the stop grace and the call timeout. A sandbox that does not
+  answer even then is closed, and the execute returns `timedOut=true` with `Sandbox did not answer
+  the execute within <wait>; the sandbox is closed`.
 - **`JShellExecutionProvider`: a session ended while it started could free its slot twice, and a
   closed provider could keep a live sandbox.** If `onSessionEnd` ran while the session's startup
   snippet was running and the snippet then failed, the end and the failed start each gave the

@@ -182,6 +182,7 @@ final class SnippetEvaluator {
         stderrCapture.toString(StandardCharsets.UTF_8)
             + timeoutCapture.toString(StandardCharsets.UTF_8));
     result.put("exitCode", exitCode.get());
+    result.put("timedOut", timedOut.get());
     if (Boolean.TRUE.equals(captureBindings) && unstoppableExecution == null) {
       result.put("bindings", collectBindings(maxBindingValueChars, maxBindingSnapshotChars));
     }
