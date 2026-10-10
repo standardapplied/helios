@@ -56,6 +56,8 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 final class AgentSessionImplTest {
 
@@ -957,6 +959,30 @@ final class AgentSessionImplTest {
               IllegalStateException.class,
               () -> s.runBlocking(UserMessage.text("hi"), OutputSchema.of(TypedAnswer.class)));
       assertTrue(ex.getMessage().contains("Refusal"));
+    }
+  }
+
+  /** Output record whose simple name the blank-result message names. */
+  public record Person(String name) {}
+
+  @ParameterizedTest
+  @ValueSource(strings = {"", " \n\t "})
+  void typedRunBlockingThrowsWhenSuccessCarriesABlankResult(String blank) {
+    try (var s = buildSession(textOnceModel(blank, FinishReason.STOP))) {
+      var ex =
+          assertThrows(
+              IllegalStateException.class,
+              () -> s.runBlocking(UserMessage.text("hi"), OutputSchema.of(Person.class)));
+      assertEquals(
+          "session ended with Success but produced no result to parse as Person", ex.getMessage());
+    }
+  }
+
+  @Test
+  void untypedRunBlockingReturnsSuccessWithTheEmptyResult() {
+    try (var s = buildSession(textOnceModel("", FinishReason.STOP))) {
+      var terminal = s.runBlocking(UserMessage.text("hi"));
+      assertEquals("", assertInstanceOf(ResultMessage.Success.class, terminal).result());
     }
   }
 

@@ -324,6 +324,12 @@ through `ReplConfig`. Sub-agents, planned for 3.1, replace in-sandbox sub-model 
 | `Tool.resultCompactor()`, `Tool.DEFAULT_RESULT_COMPACTOR`, `Tool.Builder.withResultCompactor(Function)` and the canonical constructor's `resultCompactor` component | removed: no Helios code read it, and context compaction summarises history without it. `Tool(name, description, parameters, executor, idempotent)` is the canonical constructor |
 | `examples/codeact-demo`, `examples/rlm-demo` | removed |
 
+**A typed `runBlocking` never returns `null`.** `AgentSession.runBlocking(message, schema)` on a
+run that ends as `Success` with a blank result (a model that ends its last turn with no text) now
+throws `IllegalStateException("session ended with Success but produced no result to parse as
+<type>")` instead of returning `null`. The untyped `runBlocking(message)` still returns that
+`Success`, and `StructuredContentParser.parse` still returns `null` for blank input.
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
