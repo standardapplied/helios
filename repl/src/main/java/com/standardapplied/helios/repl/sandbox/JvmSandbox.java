@@ -192,17 +192,21 @@ public final class JvmSandbox implements Sandbox {
     if (!isAlive()) {
       return ExecutionReplies.notAlive(closed.get(), process);
     }
-    var timeout = request.timeout() != null ? request.timeout() : config.executionTimeout();
+    var budget = request.timeout() != null ? request.timeout() : config.executionTimeout();
     var params = new LinkedHashMap<String, Object>();
     params.put("code", request.code());
     params.put("language", request.language());
-    params.put("timeoutMs", timeout.toMillis());
+    params.put("timeoutMs", budget.toMillis());
     params.put("captureBindings", executeParams.captureBindings());
     params.put("maxBindingValueChars", executeParams.maxBindingValueChars());
     params.put("maxBindingSnapshotChars", executeParams.maxBindingSnapshotChars());
+    var wait = config.executeReplyWait(budget);
     try {
-      var reply = rpc.channel().call("execute", params);
+      var reply = rpc.channel().call("execute", params, wait);
       return ExecutionReplies.toExecutionResult(request.code(), reply, stdout.drain());
+    } catch (RpcChannel.RpcTimeoutException e) {
+      close();
+      return ExecutionReplies.unanswered(request.code(), stdout.drain(), wait);
     } catch (RpcChannel.RpcException e) {
       return ExecutionReplies.rpcFailure(request.code(), stdout.drain(), e.getMessage());
     }

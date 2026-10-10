@@ -361,4 +361,29 @@ class JvmSandboxConfigTest {
     var config = JvmSandboxConfig.newBuilder().withSubprocessModules(modules).build();
     assertSame(modules, config.subprocessModules());
   }
+
+  @Test
+  void executeReplyWaitIsTheBudgetThenTheStopGraceThenTheCallTimeout() {
+    var config =
+        JvmSandboxConfig.newBuilder()
+            .withStopGrace(Duration.ofSeconds(5))
+            .withCallTimeout(Duration.ofSeconds(60))
+            .build();
+
+    assertEquals(Duration.ofSeconds(95), config.executeReplyWait(Duration.ofSeconds(30)));
+  }
+
+  @Test
+  void executeReplyWaitWhoseSumOverflowsADurationIsTheLongestWait() {
+    var wait = JvmSandboxConfig.defaults().executeReplyWait(Duration.ofSeconds(Long.MAX_VALUE));
+
+    assertEquals(Duration.ofMillis(Long.MAX_VALUE), wait);
+  }
+
+  @Test
+  void executeReplyWaitBeyondLongMaxMillisecondsIsTheLongestWait() {
+    var wait = JvmSandboxConfig.defaults().executeReplyWait(Duration.ofMillis(Long.MAX_VALUE));
+
+    assertEquals(Duration.ofMillis(Long.MAX_VALUE), wait);
+  }
 }

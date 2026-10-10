@@ -110,13 +110,76 @@ class RpcChannelTest {
   }
 
   @Test
-  void callTimesOut() {
+  void callTimesOutAfterTheChannelsCallTimeout() {
     var channel =
         new RpcChannel(new FakeTransport(), new HostFunctionRegistry(), Duration.ofMillis(100));
 
-    var ex = assertThrows(RpcChannel.RpcException.class, () -> channel.call("slow", null));
+    var ex = assertThrows(RpcChannel.RpcTimeoutException.class, () -> channel.call("slow", null));
 
-    assertTrue(ex.getMessage().contains("timed out"), ex.getMessage());
+    assertEquals("Call timed out after PT0.1S", ex.getMessage());
+    channel.close();
+  }
+
+  @Test
+  void callWithItsOwnTimeoutTimesOutAfterIt() {
+    var channel =
+        new RpcChannel(new FakeTransport(), new HostFunctionRegistry(), BEYOND_HANG_GUARD);
+
+    var ex =
+        assertThrows(
+            RpcChannel.RpcTimeoutException.class,
+            () -> channel.call("slow", null, Duration.ofMillis(100)));
+
+    assertEquals("Call timed out after PT0.1S", ex.getMessage());
+    channel.close();
+  }
+
+  /**
+   * The channel's own timeout is a nanosecond, so a call that waited for it would have given up
+   * before it parked; the answer is released only once the caller is parked waiting for the timeout
+   * it passed.
+   */
+  @Test
+  void callWithItsOwnTimeoutWaitsBeyondTheChannelsCallTimeout() {
+    var transport = new FakeTransport();
+    var channel = new RpcChannel(transport, new HostFunctionRegistry(), Duration.ofNanos(1));
+    var release = new CountDownLatch(1);
+    transport.onSend(
+        msg ->
+            Thread.startVirtualThread(
+                () -> {
+                  Await.latch("the test releasing the answer", release);
+                  var request = (RpcMessage.Request) msg;
+                  transport.enqueueIncoming(new RpcMessage.Response(request.id(), PONG));
+                }));
+    var caller = new AtomicReference<Thread>();
+    var answer =
+        CompletableFuture.supplyAsync(
+            () -> {
+              caller.set(Thread.currentThread());
+              return channel.call(PING, null, BEYOND_HANG_GUARD);
+            },
+            Thread.ofVirtual()::start);
+
+    Await.until(
+        "the caller parked waiting for its answer",
+        () -> caller.get() != null && caller.get().getState() == Thread.State.TIMED_WAITING);
+    release.countDown();
+
+    assertEquals(PONG, Await.value("the answer", answer));
+    channel.close();
+  }
+
+  @Test
+  void callWithATimeoutThatIsNotPositiveIsRejected() {
+    var channel =
+        new RpcChannel(new FakeTransport(), new HostFunctionRegistry(), BEYOND_HANG_GUARD);
+
+    for (var timeout : new Duration[] {null, Duration.ZERO, Duration.ofMillis(-1)}) {
+      var ex =
+          assertThrows(IllegalArgumentException.class, () -> channel.call(PING, null, timeout));
+      assertEquals("Call timeout must be positive, was " + timeout, ex.getMessage());
+    }
     channel.close();
   }
 

@@ -8,9 +8,9 @@ import java.util.Map;
 
 /**
  * The {@link ExecutionResult} the host reports for each way an execute can end: the bootstrap's
- * reply, which is a map of its output, exit code and bindings or else a bare value; an RPC failure;
- * or a sandbox that is no longer alive. What the subprocess printed outside the reply comes first
- * in the result's stdout.
+ * reply, which is a map of its output, exit code, timeout flag and bindings or else a bare value;
+ * an RPC failure; a sandbox that did not answer in time; or a sandbox that is no longer alive. What
+ * the subprocess printed outside the reply comes first in the result's stdout.
  */
 final class ExecutionReplies {
 
@@ -35,6 +35,17 @@ final class ExecutionReplies {
         .build();
   }
 
+  /** The result of an execute the sandbox did not answer within {@code wait}, closing it. */
+  static ExecutionResult unanswered(String executedCode, String capturedStdout, Duration wait) {
+    return ExecutionResult.newBuilder()
+        .withExecutedCode(executedCode)
+        .withStdout(capturedStdout)
+        .withStderr("Sandbox did not answer the execute within " + wait + "; the sandbox is closed")
+        .withExitCode(1)
+        .withTimedOut(true)
+        .build();
+  }
+
   /** The result of an execute sent to a sandbox that is closed or whose subprocess has exited. */
   static ExecutionResult notAlive(boolean closed, Process process) {
     if (closed) {
@@ -53,11 +64,13 @@ final class ExecutionReplies {
     var stdout = reply.get("stdout") instanceof String s ? s : "";
     var stderr = reply.get("stderr") instanceof String s ? s : "";
     var exitCode = reply.get("exitCode") instanceof Number n ? n.intValue() : 0;
+    var timedOut = reply.get("timedOut") instanceof Boolean b && b;
     return new ExecutionResult(
         executedCode,
         precededBy(capturedStdout, stdout),
         stderr,
         exitCode,
+        timedOut,
         bindings(reply.get("bindings")),
         Duration.ZERO);
   }
@@ -65,7 +78,7 @@ final class ExecutionReplies {
   private static ExecutionResult fromValue(
       String executedCode, Object value, String capturedStdout) {
     var stdout = capturedStdout.isEmpty() ? String.valueOf(value) : capturedStdout;
-    return new ExecutionResult(executedCode, stdout, "", 0, Map.of(), Duration.ZERO);
+    return new ExecutionResult(executedCode, stdout, "", 0, false, Map.of(), Duration.ZERO);
   }
 
   private static Map<String, String> bindings(Object raw) {

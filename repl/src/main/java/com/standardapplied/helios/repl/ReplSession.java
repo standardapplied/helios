@@ -184,7 +184,13 @@ public final class ReplSession implements AutoCloseable {
     }
     var truncated = code.substring(0, cap) + "... (len=" + code.length() + ")";
     return new ExecutionResult(
-        truncated, raw.stdout(), raw.stderr(), raw.exitCode(), raw.bindings(), raw.duration());
+        truncated,
+        raw.stdout(),
+        raw.stderr(),
+        raw.exitCode(),
+        raw.timedOut(),
+        raw.bindings(),
+        raw.duration());
   }
 
   /**
