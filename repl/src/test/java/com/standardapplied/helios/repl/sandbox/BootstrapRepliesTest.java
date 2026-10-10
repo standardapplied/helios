@@ -43,7 +43,7 @@ class BootstrapRepliesTest {
     assertEquals(
         PREFIX
             + "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"stdout\":\"42\\n\",\"stderr\":\"\","
-            + "\"exitCode\":0,\"bindings\":{\"x\":\"42\"}}}",
+            + "\"exitCode\":0,\"timedOut\":false,\"bindings\":{\"x\":\"42\"}}}",
         env.nextLine());
   }
 
@@ -59,7 +59,7 @@ class BootstrapRepliesTest {
         PREFIX
             + "{\"jsonrpc\":\"2.0\",\"id\":\"2\",\"result\":{\"stdout\":\"\",\"stderr\":"
             + "\"incompatible types: java.lang.String cannot be converted to int\\n\","
-            + "\"exitCode\":1}}",
+            + "\"exitCode\":1,\"timedOut\":false}}",
         env.nextLine());
   }
 
