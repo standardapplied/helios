@@ -4,8 +4,13 @@ package com.standardapplied.helios.examples.session;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.ToolChoice;
+import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
 import com.standardapplied.helios.session.AgentSession;
@@ -27,6 +32,7 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PostCompactHook;
 import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -52,9 +58,12 @@ import org.junit.jupiter.api.io.TempDir;
  * invariants that surface only in a live request.
  *
  * <p>Strategy: drive a session past the {@code 0.95 × maxContextTokens} compaction watermark by
- * running a multi-turn tool-use loop with an artificially small {@code maxContextTokens} cap, then
- * assert that {@link QueryEvent.ContextEdited} fires AND the session reaches a clean terminal
- * (which is only possible if Gemini accepted the post-compaction request body).
+ * running a multi-turn tool-use loop, then assert that {@link QueryEvent.ContextEdited} fires AND
+ * the session reaches a clean terminal (which is only possible if Gemini accepted the
+ * post-compaction request body). The session's model is forced to call a tool on every turn, so the
+ * history grows by a tool round per turn whatever the model would have chosen, and the run always
+ * ends at the turn limit. The token count is a fixed cost per message and the summary is a fixed
+ * text, so when compaction fires does not depend on the model's tool arguments or summary wording.
  */
 @EnabledIfEnvironmentVariable(named = "GEMINI_API_KEY", matches = ".+")
 final class CompactionIntegrationTest {
@@ -67,19 +76,46 @@ final class CompactionIntegrationTest {
           + "4. Call Read on note3.txt and tell me its first line.\n"
           + "5. Reply with a one-line summary mentioning all three files.";
 
-  private static Model model;
+  private static final Model SUMMARY_MODEL =
+      new Model() {
+        @Override
+        public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+          return Response.newBuilder()
+              .withContent("Earlier file-tool calls completed.")
+              .withFinishReason(FinishReason.STOP)
+              .withUsage(Response.Usage.of(0, 0))
+              .build();
+        }
+
+        @Override
+        public String id() {
+          return "fixed-summary";
+        }
+
+        @Override
+        public String provider() {
+          return "testing";
+        }
+      };
+
+  private static Model forced;
 
   @BeforeAll
   static void setUp() {
-    var apiKey = System.getenv("GEMINI_API_KEY");
-    var config = ModelConfig.newBuilder().withApiKey(apiKey).build();
-    model = new GeminiProvider().create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
+    forced =
+        new GeminiProvider()
+            .create(
+                GeminiModelId.GEMINI_3_5_FLASH.id(),
+                ModelConfig.newBuilder()
+                    .withApiKey(System.getenv("GEMINI_API_KEY"))
+                    .withToolChoice(ToolChoice.any())
+                    .build());
   }
 
   @AfterAll
   static void tearDown() throws Exception {
-    if (model != null) {
-      model.close();
+    if (forced != null) {
+      forced.close();
     }
   }
 
@@ -91,9 +127,8 @@ final class CompactionIntegrationTest {
     assertFalse(
         events.eventsOf(QueryEvent.ContextEdited.class).isEmpty(),
         () ->
-            "expected ContextEdited to fire at least once with such a small maxContextTokens"
-                + " — none observed. Either the watermark math is broken or maxContextTokens is"
-                + " too lax for this task. Events: "
+            "expected ContextEdited once the history crossed the watermark — none observed."
+                + " Events: "
                 + summariseEventKinds(events.events()));
 
     assertFalse(
@@ -179,10 +214,8 @@ final class CompactionIntegrationTest {
   private record Run(ResultMessage result, CollectingSubscriber events) {}
 
   /**
-   * Run {@link #NOTES_TASK} over a seeded workspace with {@code hooks} installed, a compactor, and
-   * a context cap small enough that the history is compacted mid-run. Tool calls and their results
-   * grow the history by several messages per turn, so the cumulative token count crosses the
-   * watermark cleanly.
+   * Run {@link #NOTES_TASK} over a seeded workspace with {@code hooks} installed and a compactor
+   * that fires mid-run: each tool round adds two messages, and five messages cross the watermark.
    */
   private static Run runNotesTask(Path tmp, List<Hook> hooks) throws IOException {
     seedFiles(tmp);
@@ -199,28 +232,27 @@ final class CompactionIntegrationTest {
     // Default head/tail 3/20 needs > 23 messages before any middle exists to summarise, a lot of
     // live round-trips for one test; with 1/1 a 3+ message history already has a non-empty middle.
     var compactor =
-        DropMiddleToolResultsCompactor.newBuilder(model)
+        DropMiddleToolResultsCompactor.newBuilder(SUMMARY_MODEL)
             .withHeadPreserved(1)
             .withTailPreserved(1)
             .build();
 
-    // The char-based TokenCounter is conservative: short replies plus tool args/results land in
-    // the few-hundred-token range across 4–6 turns, so 300 trips the 0.95 watermark reliably
-    // without starving the first round-trip. 8 turns ends a misbehaving run in a clean
-    // ErrorMaxTurns.
+    // At 100 tokens a message the 285-token watermark trips from three messages on, but head and
+    // tail of one leave no middle until the second tool round makes five.
     var limits = SessionLimits.newBuilder().withMaxContextTokens(300L).withMaxTurns(8).build();
 
     var options =
         SessionOptions.newBuilder()
-            .withModel(model)
+            .withModel(forced)
             .withTools(tools)
+            .withTokenCounter(history -> 100L * history.size())
             .withContextCompactor(compactor)
             .withHooks(hooks)
             .withLimits(limits)
             .build();
 
-    var events = new CollectingSubscriber();
     try (var session = AgentSession.create(options)) {
+      var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
       session.events().subscribe(events);
       var result = session.runBlocking(UserMessage.text(NOTES_TASK));
       events.awaitDone();

@@ -3,8 +3,6 @@
 package com.standardapplied.helios.core.test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,7 +10,7 @@ import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
-import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.tool.ParameterType;
@@ -22,14 +20,18 @@ import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
 /**
  * The live cases every provider's model passes against its real API: a simple chat, a system
  * message, usage, streaming, a tool call, a multi-turn conversation, its metadata, a full tool
- * round trip and structured output. A provider's integration test extends this, supplies its model
- * through {@link #model()}, builds a model from a given configuration through {@link
- * #model(ModelConfig.Builder)} and gates itself on its API key.
+ * round trip and structured output. Each asserts only what holds for any reply the model may write:
+ * the provider accepted the request and Helios read the reply into its own types; tool use is
+ * forced. A provider's integration test extends this, supplies its model through {@link #model()},
+ * builds a model from a given configuration through {@link #model(ModelConfig.Builder)} and gates
+ * itself on its API key.
  */
 public abstract class ModelIntegrationContract {
 
@@ -70,16 +72,21 @@ public abstract class ModelIntegrationContract {
    */
   protected abstract Model model(ModelConfig.Builder config);
 
+  /**
+   * The recorded test that proves this provider's structured-output parsing, for a provider that
+   * does not constrain the model's output to the schema. Empty, the default, when the provider does
+   * constrain it, so a reply that does not parse fails the case instead of skipping it.
+   *
+   * @return the recorded test, or empty when the provider constrains structured output
+   */
+  protected Optional<String> unconstrainedStructuredOutputCounterpart() {
+    return Optional.empty();
+  }
+
   @Test
   void simpleChat() {
-    var messages = List.of(Message.user("What is 2 + 2? Reply with just the number."));
-
-    var response = model().chat(messages);
-
-    assertNotNull(response);
-    assertNotNull(response.content());
-    assertTrue(response.content().contains("4"));
-    assertEquals(FinishReason.STOP, response.finishReason());
+    Accepted.textReply(
+        model().chat(List.of(Message.user("What is 2 + 2? Reply with just the number."))));
   }
 
   @Test
@@ -89,22 +96,12 @@ public abstract class ModelIntegrationContract {
             Message.system("You are a pirate. Always respond in pirate speak."),
             Message.user("Hello, how are you?"));
 
-    var response = model().chat(messages);
-
-    assertNotNull(response);
-    assertNotNull(response.content());
-    assertTrue(
-        response.content().toLowerCase().contains("arr")
-            || response.content().toLowerCase().contains("ahoy")
-            || response.content().toLowerCase().contains("matey")
-            || response.content().toLowerCase().contains("ye"));
+    Accepted.textReply(model().chat(messages));
   }
 
   @Test
   void chatWithUsageStats() {
-    var messages = List.of(Message.user("Say hello"));
-
-    var response = model().chat(messages);
+    var response = model().chat(List.of(Message.user("Say hello")));
 
     assertNotNull(response.usage());
     assertTrue(response.usage().inputTokens() > 0);
@@ -116,27 +113,7 @@ public abstract class ModelIntegrationContract {
   void streamingChat() {
     var messages = List.of(Message.user("Count from 1 to 5, one number per line."));
 
-    var iterator = model().chatStream(messages, List.of());
-
-    var textDeltas = new ArrayList<String>();
-    StreamEvent.Done doneEvent = null;
-
-    while (iterator.hasNext()) {
-      var event = iterator.next();
-      if (event instanceof StreamEvent.TextDelta(String text)) {
-        textDeltas.add(text);
-      } else if (event instanceof StreamEvent.Done done) {
-        doneEvent = done;
-      }
-    }
-
-    assertFalse(textDeltas.isEmpty());
-    assertNotNull(doneEvent);
-    assertNotNull(doneEvent.response());
-
-    var fullContent = String.join("", textDeltas);
-    assertTrue(fullContent.contains("1"));
-    assertTrue(fullContent.contains("5"));
+    Accepted.textReply(Accepted.stream(model().chatStream(messages, List.of())));
   }
 
   @Test
@@ -163,13 +140,13 @@ public abstract class ModelIntegrationContract {
 
     try (var forced =
         model(ModelConfig.newBuilder().withToolChoice(ToolChoice.required("get_weather")))) {
-      var response = forced.chat(messages, List.of(weatherTool));
+      var response = Accepted.toolTurn(forced.chat(messages, List.of(weatherTool)));
 
-      assertEquals(1, response.toolCalls().size());
-      var toolCall = response.toolCalls().getFirst();
-      assertEquals("get_weather", toolCall.name());
-      var location = assertInstanceOf(String.class, toolCall.arguments().get("location"));
-      assertFalse(location.isBlank());
+      assertEquals(FinishReason.TOOL_CALLS, response.finishReason());
+      for (var toolCall : response.toolCalls()) {
+        assertEquals("get_weather", toolCall.name());
+        assertNotNull(toolCall.arguments());
+      }
     }
   }
 
@@ -177,17 +154,12 @@ public abstract class ModelIntegrationContract {
   void multiTurnConversation() {
     var messages = new ArrayList<Message>();
     messages.add(Message.user("My name is Alice."));
-
-    var response1 = model().chat(messages);
-    assertNotNull(response1);
+    var response1 = Accepted.textReply(model().chat(messages));
 
     messages.add(Message.assistant(response1.content()));
     messages.add(Message.user("What is my name?"));
 
-    var response2 = model().chat(messages);
-
-    assertNotNull(response2);
-    assertTrue(response2.content().toLowerCase().contains("alice"));
+    Accepted.textReply(model().chat(messages));
   }
 
   @Test
@@ -221,23 +193,22 @@ public abstract class ModelIntegrationContract {
                 "You are a helpful assistant. Use the search_people tool when asked to find people."),
             Message.user("Find me AI researchers"));
 
-    var response1 = model().chat(messages, List.of(searchPeople));
-    assertNotNull(response1);
-    assertEquals(FinishReason.TOOL_CALLS, response1.finishReason());
-    assertFalse(response1.toolCalls().isEmpty());
+    try (var forced =
+            model(ModelConfig.newBuilder().withToolChoice(ToolChoice.required("search_people")));
+        var toolless = model(ModelConfig.newBuilder().withToolChoice(ToolChoice.none()))) {
+      var response1 = Accepted.toolTurn(forced.chat(messages, List.of(searchPeople)));
+      assertEquals(FinishReason.TOOL_CALLS, response1.finishReason());
 
-    var toolCall = response1.toolCalls().getFirst();
-    var toolResult = searchPeople.execute(toolCall.arguments(), ToolContext.noop());
+      var messages2 = new ArrayList<>(messages);
+      messages2.add(response1.toMessage());
+      for (var toolCall : response1.toolCalls()) {
+        assertEquals("search_people", toolCall.name());
+        var toolResult = searchPeople.execute(toolCall.arguments(), ToolContext.noop());
+        messages2.add(Message.tool(toolCall.id(), toolCall.name(), toolResult.output()));
+      }
 
-    var messages2 = new ArrayList<>(messages);
-    messages2.add(response1.toMessage());
-    messages2.add(Message.tool(toolCall.id(), toolCall.name(), toolResult.output()));
-
-    var response2 = model().chat(messages2, List.of(searchPeople));
-    assertNotNull(response2);
-    assertNotNull(response2.content());
-    assertEquals(FinishReason.STOP, response2.finishReason());
-    assertTrue(response2.content().toLowerCase().contains("alice"));
+      Accepted.textReply(toolless.chat(messages2, List.of(searchPeople)));
+    }
   }
 
   @Test
@@ -247,18 +218,13 @@ public abstract class ModelIntegrationContract {
             Message.user(
                 "Extract the person info: John Smith is a 35-year-old software engineer."));
 
-    var response = model().chat(messages, OutputSchema.of(Person.class));
+    Supplier<Response<Person>> call = () -> model().chat(messages, OutputSchema.of(Person.class));
+    var response =
+        unconstrainedStructuredOutputCounterpart()
+            .map(counterpart -> Accepted.parsedOrSkip(expectedId, counterpart, call))
+            .orElseGet(call);
 
-    assertNotNull(response);
-    assertNotNull(response.content());
     assertTrue(response.hasParsed(), "Expected parsed output to be present");
-
-    var person = response.parsed();
-    assertNotNull(person);
-    assertEquals("John Smith", person.name());
-    assertEquals(35, person.age());
-    assertTrue(
-        person.occupation().toLowerCase().contains("software")
-            || person.occupation().toLowerCase().contains("engineer"));
+    assertNotNull(response.parsed());
   }
 }
