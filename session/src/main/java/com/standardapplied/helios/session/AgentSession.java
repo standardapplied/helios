@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session;
 
+import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.schema.StructuredContentParser;
@@ -178,7 +179,8 @@ public interface AgentSession extends AutoCloseable {
    * @throws NullPointerException if {@code message} or {@code schema} is null
    * @throws IllegalStateException if the session terminated without a {@link ResultMessage.Success}
    *     — the caller cannot recover a typed value from {@link ResultMessage.Cancelled} / {@link
-   *     ResultMessage.ErrorDuringExecution} / etc.
+   *     ResultMessage.ErrorDuringExecution} / etc., or terminated as a {@link
+   *     ResultMessage.Success} whose result is blank, leaving nothing to parse
    * @throws com.standardapplied.helios.core.schema.StructuredOutputParseException if the final
    *     assistant text does not parse against the schema (carries a per-field diff) or, as {@link
    *     com.standardapplied.helios.core.schema.SubmitValidationException}, fails the schema's
@@ -193,6 +195,11 @@ public interface AgentSession extends AutoCloseable {
           "session terminated as "
               + terminal.getClass().getSimpleName()
               + "; cannot parse a typed result from a non-Success terminal");
+    }
+    if (Strings.isBlank(success.result())) {
+      throw new IllegalStateException(
+          "session ended with Success but produced no result to parse as "
+              + schema.type().getSimpleName());
     }
     return StructuredContentParser.parse(
         success.result(), schema, SessionJson.STRUCTURED, rawOutputCapturePolicy());
