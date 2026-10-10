@@ -2,12 +2,15 @@
 package com.standardapplied.helios.examples.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
 import com.standardapplied.helios.session.AgentSession;
@@ -29,6 +32,7 @@ import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.test.QuestionAnswers;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -49,10 +53,13 @@ import org.junit.jupiter.api.io.TempDir;
  * <p>Tests the same shape as {@link SessionDemoMain} but with assertions instead of console output.
  * Skipped when {@code GEMINI_API_KEY} is unset so the suite stays runnable offline.
  *
- * <p>Assertions describe what the framework guarantees given a cooperating model — the model fires
- * at least one file-reading tool, the loop terminates with a non-null result, and the
- * attachment-bearing user message reaches the provider without crashing the encoder. Specific
- * tool-call ordering is non-deterministic and not asserted.
+ * <p>Assertions describe what the framework guarantees whatever the model writes: forced to call a
+ * tool, the loop dispatches it and the provider accepts the next turn; the attachment-bearing user
+ * message is accepted; and a memory write without an allow rule asks the user, who denies it, so
+ * the permission system blocks it before dispatch and it never reaches disk. Which tool a forced
+ * call picks is the model's choice: a run whose calls are not the ones under test skips, naming the
+ * offline test that covers them. Forcing applies to every turn, so once the exploring session runs
+ * out of file steps it calls the demo's other tools; only its first call is checked.
  */
 @EnabledIfEnvironmentVariable(named = "GEMINI_API_KEY", matches = ".+")
 final class SessionDemoIntegrationTest {
@@ -64,9 +71,14 @@ final class SessionDemoIntegrationTest {
 
   @BeforeAll
   static void setUp() {
-    var apiKey = System.getenv("GEMINI_API_KEY");
-    var config = ModelConfig.newBuilder().withApiKey(apiKey).build();
-    model = new GeminiProvider().create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
+    model = gemini(ModelConfig.newBuilder());
+  }
+
+  private static Model gemini(ModelConfig.Builder config) {
+    return new GeminiProvider()
+        .create(
+            GeminiModelId.GEMINI_3_5_FLASH.id(),
+            config.withApiKey(System.getenv("GEMINI_API_KEY")).build());
   }
 
   @AfterAll
@@ -77,50 +89,41 @@ final class SessionDemoIntegrationTest {
   }
 
   @Test
-  void agentExploresRepoAndWritesToMemory(@TempDir Path tmp) throws Exception {
+  void agentExploresRepoWithItsFileTools(@TempDir Path tmp) throws Exception {
     seedFakeRepo(tmp);
-    var options =
-        SessionDemoMain.exploreAndRememberOptions(model, tmp)
-            .withLimits(SessionLimits.newBuilder().withMaxTurns(12).build())
-            .build();
-
-    var events = new CollectingSubscriber();
-    try (var session = AgentSession.create(options)) {
+    try (var forced = gemini(ModelConfig.newBuilder().withToolChoice(ToolChoice.any()));
+        var session =
+            AgentSession.create(
+                SessionDemoMain.exploreAndRememberOptions(forced, tmp)
+                    .withLimits(SessionLimits.newBuilder().withMaxTurns(3).build())
+                    .build())) {
+      var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
       session.events().subscribe(events);
-      // Directive prompt: each tool used at most once. An open-ended "look at the repo" prompt
-      // gives Gemini Flash too much rope and it loops re-running LS forever. maxTurns=12 above is
-      // the belt-and-braces ceiling so a misbehaving model still terminates the test in seconds.
       var prompt =
-          "Do exactly three steps, then stop:\n"
+          "Do exactly two steps, then stop:\n"
               + "1. Call LS on the workspace root to list its contents.\n"
-              + "2. Call Read on README.md.\n"
-              + "3. Call MemoryWrite with op=create, path=/memories/project/summary.md, and a"
-              + " one-line content summary based on what you just read.\n"
-              + "After step 3, reply with a short confirmation. Do NOT explore further.";
+              + "2. Call Read on README.md.";
       var result = session.runBlocking(UserMessage.text(prompt));
       events.awaitDone();
 
-      // The framework guarantees we care about here:
-      //   - The agent loop reaches a defined terminal state (no hang, no provider crash). Both
-      //     Success and ErrorMaxTurns are well-defined terminals — which one we hit depends on
-      //     how directive the model decides to be, and is not what this test pins down.
-      //   - At least one file-read tool fired (workspace tool registration + dispatch works).
-      //   - No provider-level Error event fired (the multi-turn wire round-trip is clean).
-      // The model picking its own exploration depth is not a framework concern.
       assertTrue(
           result instanceof ResultMessage.Success || result instanceof ResultMessage.ErrorMaxTurns,
           () -> "session did not reach a clean terminal: " + result);
-
-      var toolNamesObserved =
-          events.eventsOf(QueryEvent.ToolUse.class).stream().map(e -> e.call().name()).toList();
-      assertTrue(
-          toolNamesObserved.stream().anyMatch(FILE_READ_TOOLS::contains),
-          () -> "expected at least one file-read tool call, got " + toolNamesObserved);
-
       var failedToolEvents = events.eventsOf(QueryEvent.Error.class);
       assertTrue(
           failedToolEvents.isEmpty(),
           () -> "no provider-level errors expected, got " + failedToolEvents);
+      var toolNamesObserved =
+          events.eventsOf(QueryEvent.ToolResult.class).stream().map(e -> e.call().name()).toList();
+      assertFalse(toolNamesObserved.isEmpty());
+      assumeTrue(
+          FILE_READ_TOOLS.contains(toolNamesObserved.getFirst()),
+          () ->
+              forced.id()
+                  + " called "
+                  + toolNamesObserved
+                  + "; RecordedSessionTest#fileToolsRedactTheirOutputAndAttachWhatTheyRead covers"
+                  + " the file tools");
     }
   }
 
@@ -132,7 +135,9 @@ final class SessionDemoIntegrationTest {
         SessionOptions.newBuilder().withModel(model).withSessionId("session-demo-att-test").build();
 
     try (var session = AgentSession.create(options)) {
-      session.events().subscribe(new CollectingSubscriber());
+      session
+          .events()
+          .subscribe(new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny")));
       var msg =
           UserMessage.newBuilder()
               .withText("I'm sending a small generated image. Briefly describe what you see.")
@@ -146,7 +151,6 @@ final class SessionDemoIntegrationTest {
               result,
               () -> "attachment session did not finish Success: " + result);
       assertNotNull(success.result());
-      assertTrue(!success.result().isBlank(), "expected the model to produce some text");
     }
   }
 
@@ -155,47 +159,52 @@ final class SessionDemoIntegrationTest {
     seedFakeRepo(tmp);
     var ws = WorkspaceRoot.of(tmp);
     var memoryBackend = FileSystemMemoryBackend.of(ws);
-    // No MemoryWrite allow rule — under DEFAULT mode this falls to ASK, which (until an
-    // AskUserQuestion handler is wired into the permission system) blocks the call.
     var permission =
         new Permission(
             PermissionMode.DEFAULT,
             List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryRead", "/memories/**")),
             List.of(),
             List.of());
-    var options =
-        SessionOptions.newBuilder()
-            .withModel(model)
-            .withPermission(permission)
-            .withMemoryBackend(memoryBackend)
-            .build();
-
     CollectingSubscriber events;
-    try (var session = AgentSession.create(options)) {
-      // Subscribe with an auto-denier — every QuestionAsked the permission system surfaces gets a
-      // synthetic "Deny" answer so the loop unblocks. Without this, runBlocking would deadlock
-      // waiting on session.answer.
+    String modelId;
+    try (var forced = gemini(ModelConfig.newBuilder().withToolChoice(ToolChoice.any()));
+        var session =
+            AgentSession.create(
+                SessionOptions.newBuilder()
+                    .withModel(forced)
+                    .withPermission(permission)
+                    .withTools(new ToolRegistry(List.of(MemoryWriteTool.binding(memoryBackend))))
+                    .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
+                    .build())) {
       events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
       session.events().subscribe(events);
-      var prompt =
-          "Please use MemoryWrite with op=create to save a note at /memories/test.md with content"
-              + " 'hello world'. Just attempt it once.";
-      session.runBlocking(UserMessage.text(prompt));
+      session.runBlocking(
+          UserMessage.text(
+              "Use MemoryWrite with op=create to save a note at /memories/test.md with content"
+                  + " 'hello world'."));
       events.awaitDone();
+      modelId = forced.id();
     }
 
-    // Permission blocks happen BEFORE dispatch — the loop emits ToolBlocked directly without a
-    // preceding ToolUse. So the right check is: no successful MemoryWrite ToolResult fired, and
-    // nothing landed on disk.
+    var calls = events.eventsOf(QueryEvent.ToolResult.class);
+    assertFalse(calls.isEmpty());
+    assumeTrue(
+        calls.stream().anyMatch(result -> result.call().name().equals(MemoryWriteTool.NAME)),
+        () ->
+            modelId
+                + " called "
+                + calls.stream().map(QueryEvent.ToolResult::call).toList()
+                + "; Phase4AcceptanceTest#memoryWriteIsBlockedWhenUserDeniesAsk covers the block");
+    assertTrue(
+        events.eventsOf(QueryEvent.ToolBlocked.class).stream()
+            .anyMatch(block -> block.call().name().equals(MemoryWriteTool.NAME)),
+        "the MemoryWrite must be blocked");
     var successfulMemoryWrites =
         events.eventsOf(QueryEvent.ToolResult.class).stream()
             .filter(r -> r.call().name().equals(MemoryWriteTool.NAME))
             .filter(r -> r.result().success())
             .count();
-    assertEquals(
-        0L,
-        successfulMemoryWrites,
-        () -> "no MemoryWrite should have succeeded, got " + successfulMemoryWrites);
+    assertEquals(0L, successfulMemoryWrites);
     assertTrue(
         memoryBackend.list("/memories/").isEmpty(), "no memory entries should have been written");
   }

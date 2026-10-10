@@ -5,6 +5,7 @@ import com.standardapplied.helios.anthropic.AnthropicModelId;
 import com.standardapplied.helios.anthropic.AnthropicProvider;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.ToolChoice;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 /**
@@ -16,8 +17,12 @@ final class WorkspaceReadOnlyRedactionAgentSessionAnthropicIntegrationTest
     extends WorkspaceReadOnlyRedactionContract {
 
   @Override
-  protected Model createModel() {
-    var config = ModelConfig.newBuilder().withApiKey(System.getenv("ANTHROPIC_API_KEY")).build();
+  protected Model createModel(ToolChoice toolChoice) {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey(System.getenv("ANTHROPIC_API_KEY"))
+            .withToolChoice(toolChoice)
+            .build();
     return new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
   }
 }

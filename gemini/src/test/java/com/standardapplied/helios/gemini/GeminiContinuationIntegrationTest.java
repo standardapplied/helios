@@ -6,15 +6,14 @@
 package com.standardapplied.helios.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
-import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.ToolChoice;
+import com.standardapplied.helios.core.test.Accepted;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
@@ -27,12 +26,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 /**
- * Integration test verifying system instruction persistence across multi-turn tool-calling
- * interactions against the real Gemini Interactions API.
- *
- * <p>Reproduces the bug fixed in 2.6.1: the continuation path (requests using {@code
- * previous_interaction_id}) was not re-sending {@code system_instruction}, causing the model to
- * lose its persona and behavioral constraints after the first tool call.
+ * A multi-turn tool-calling exchange against the real Gemini Interactions API: the first turn,
+ * forced to call the tool, returns the interaction id, and the continuation request that names it
+ * is accepted. That the continuation carries {@code system_instruction}, the bug fixed in 2.6.1, is
+ * asserted on the request itself by {@code GeminiConversationRequestTest}.
  */
 @EnabledIfEnvironmentVariable(named = "GEMINI_API_KEY", matches = ".+")
 class GeminiContinuationIntegrationTest {
@@ -54,12 +51,10 @@ class GeminiContinuationIntegrationTest {
   }
 
   @Test
-  void systemInstructionSurvivesContinuation() {
-    var codeWord = "PINEAPPLE";
+  void aContinuationAfterAForcedToolCallIsAccepted() {
     var systemPrompt =
-        "You are a helpful assistant. CRITICAL RULE: you must always include the exact word \""
-            + codeWord
-            + "\" somewhere in every response you produce, no exceptions.";
+        "You are a helpful assistant. Always include the exact word \"PINEAPPLE\" somewhere in"
+            + " every response you produce.";
 
     var tool =
         Tool.newBuilder()
@@ -77,41 +72,32 @@ class GeminiContinuationIntegrationTest {
 
     var tools = List.of(tool);
 
-    // Turn 1: user asks a question that requires tool use
     var messages = new ArrayList<Message>();
     messages.add(Message.system(systemPrompt));
     messages.add(Message.user("What is the temperature in Paris?"));
 
-    Response<Void> response1 = model.chat(messages, tools);
+    try (var forced =
+        new GeminiProvider()
+            .create(
+                GeminiModelId.GEMINI_3_5_FLASH.id(),
+                ModelConfig.newBuilder()
+                    .withApiKey(System.getenv("GEMINI_API_KEY"))
+                    .withToolChoice(ToolChoice.any())
+                    .build())) {
+      var response1 = Accepted.toolTurn(forced.chat(messages, tools));
 
-    // Model should call the tool
-    assertEquals(FinishReason.TOOL_CALLS, response1.finishReason());
-    assertFalse(response1.toolCalls().isEmpty());
-    var tc = response1.toolCalls().getFirst();
-    assertEquals("get_temperature", tc.name());
+      assertEquals(FinishReason.TOOL_CALLS, response1.finishReason());
+      assertNotNull(
+          response1.metadata().get(ContinuationPoint.INTERACTION_ID_KEY),
+          "response must carry interactionId for continuation");
 
-    // Verify interactionId was captured (needed for continuation)
-    assertNotNull(
-        response1.metadata().get(ContinuationPoint.INTERACTION_ID_KEY),
-        "response must carry interactionId for continuation");
+      messages.add(response1.toMessage());
+      for (var call : response1.toolCalls()) {
+        assertEquals("get_temperature", call.name());
+        messages.add(Message.tool(call.id(), call.name(), "22°C and sunny in Paris"));
+      }
+    }
 
-    // Turn 2: send tool results back — this exercises the continuation path
-    messages.add(Message.assistant(null, response1.toolCalls(), response1.metadata()));
-    messages.add(Message.tool(tc.id(), tc.name(), "22°C and sunny in Paris"));
-
-    Response<Void> response2 = model.chat(messages, tools);
-
-    assertEquals(FinishReason.STOP, response2.finishReason());
-    assertFalse(response2.content().isBlank(), "model must produce a text response");
-
-    // The critical assertion: the model's response on the continuation turn must contain the
-    // code word from the system instruction. If system_instruction was dropped on the
-    // continuation request, the model wouldn't know about this rule.
-    assertTrue(
-        response2.content().toUpperCase().contains(codeWord),
-        "system instruction must survive continuation — expected \""
-            + codeWord
-            + "\" in response but got: "
-            + response2.content());
+    Accepted.toolTurn(model.chat(messages, tools));
   }
 }
