@@ -173,6 +173,19 @@ class RpcChannelTest {
   }
 
   @Test
+  void callWithATimeoutBeyondLongMaxNanosecondsWaitsForTheAnswer() {
+    var transport = new FakeTransport();
+    var channel = new RpcChannel(transport, new HostFunctionRegistry(), BEYOND_HANG_GUARD);
+    transport.onSend(
+        msg ->
+            transport.enqueueIncoming(
+                new RpcMessage.Response(((RpcMessage.Request) msg).id(), PONG)));
+
+    assertEquals(PONG, channel.call(PING, null, Duration.ofSeconds(Long.MAX_VALUE)));
+    channel.close();
+  }
+
+  @Test
   void callWithATimeoutThatIsNotPositiveIsRejected() {
     var channel =
         new RpcChannel(new FakeTransport(), new HostFunctionRegistry(), BEYOND_HANG_GUARD);
