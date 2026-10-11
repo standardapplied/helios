@@ -20,8 +20,8 @@ import java.util.Map;
  * @param stdout captured standard output
  * @param stderr captured standard error
  * @param exitCode the exit code (0 = success)
- * @param timedOut whether the snippet outlived its timeout and was stopped, or the sandbox did not
- *     answer the execute within the snippet's timeout and its stop grace
+ * @param timedOut whether the snippet outlived its timeout, or the sandbox did not answer the
+ *     execute within the snippet's timeout, its stop grace and the call timeout, and was closed
  * @param bindings post-execute snapshot of every user-declared {@code var} in the sandbox, mapped
  *     to a length-capped {@code toString} repr. Excludes harness-internal {@code __}-prefixed
  *     names. Empty (not {@code null}) when no bindings were captured (sandbox not configured to

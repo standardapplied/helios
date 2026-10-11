@@ -19,8 +19,9 @@ import java.time.Duration;
  *     3. Default {@link #DEFAULT_STOP_GRACE}; travels to the subprocess as a {@code
  *     --stop-grace=<ISO-8601 duration>} argv flag.
  * @param maxHeapMb maximum heap size for the subprocess in MB
- * @param callTimeout timeout for JSON-RPC calls (host function responses), and the margin an
- *     execute's reply has to arrive once its snippet's timeout and stop grace are over
+ * @param callTimeout how long the host waits for the subprocess to answer a call such as installing
+ *     the host-function wrappers, and the margin an execute's reply has to arrive once its
+ *     snippet's timeout and stop grace are over
  * @param subprocessStartupTimeout maximum wait for the subprocess to connect back on the RPC socket
  *     after launch. Default {@value #DEFAULT_SUBPROCESS_STARTUP_TIMEOUT_SECONDS} s is comfortable
  *     for normal JDK cold-start; raise it when launching off slow storage (NAS, EBS-backed
