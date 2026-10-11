@@ -35,7 +35,7 @@ final class ExecutionReplies {
         .build();
   }
 
-  /** The result of an execute the sandbox did not answer within {@code wait}, closing it. */
+  /** The result of an execute the sandbox did not answer within {@code wait}, once it is closed. */
   static ExecutionResult unanswered(String executedCode, String capturedStdout, Duration wait) {
     return ExecutionResult.newBuilder()
         .withExecutedCode(executedCode)
