@@ -352,6 +352,50 @@ class ReplSessionTest {
     session.close();
   }
 
+  @Test
+  void executedCodeCapKeepsTheRestOfTheResult() {
+    var code = "x".repeat(30);
+    var timedOut =
+        new ExecutionResult(
+            code, "partial", "Execution timed out", 1, true, Map.of("v", "1"), Duration.ZERO);
+    var config =
+        ReplConfig.newBuilder()
+            .withSandboxFactory(registry -> new FixedSandbox(timedOut))
+            .withMaxExecutedCodeChars(20)
+            .build();
+    var session = ReplSession.create(config, new Semaphore(1));
+
+    var result = session.execute(code);
+
+    assertEquals(
+        new ExecutionResult(
+            "x".repeat(20) + "... (len=30)",
+            "partial",
+            "Execution timed out",
+            1,
+            true,
+            Map.of("v", "1"),
+            result.duration()),
+        result);
+    session.close();
+  }
+
+  /** Sandbox that answers every execute with the same result. */
+  private record FixedSandbox(ExecutionResult result) implements Sandbox {
+    @Override
+    public ExecutionResult execute(ExecutionRequest request) {
+      return result;
+    }
+
+    @Override
+    public boolean isAlive() {
+      return true;
+    }
+
+    @Override
+    public void close() {}
+  }
+
   /** Sandbox that echoes the request's code into the result's executedCode field. */
   private static class EchoSandbox implements Sandbox {
     @Override
