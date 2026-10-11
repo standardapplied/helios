@@ -115,7 +115,7 @@ public final class RpcChannel implements AutoCloseable {
     pendingCalls.put(id, future);
     try {
       transport.send(new RpcMessage.Request(id, method, params));
-      return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+      return future.get(TimeUnit.NANOSECONDS.convert(timeout), TimeUnit.NANOSECONDS);
     } catch (IOException e) {
       pendingCalls.remove(id);
       throw new RpcException("Failed to send request", e);
