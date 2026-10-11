@@ -303,9 +303,9 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     }
 
     /**
-     * Capability advertised through {@link ExecutionCapabilities#maxTimeout()}. Informational — the
-     * actual per-snippet timeout comes from {@link ReplConfig#executionTimeout()}. Defaults to 5
-     * minutes.
+     * The longest budget an execute may ask for, advertised through {@link
+     * ExecutionCapabilities#maxTimeout()}. A request asking for more runs with this budget, and the
+     * sandbox stops the snippet when its budget is spent. Defaults to 5 minutes.
      *
      * @param maxTimeout strictly positive duration
      * @return this builder

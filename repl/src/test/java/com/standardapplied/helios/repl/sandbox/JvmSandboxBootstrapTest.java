@@ -139,6 +139,7 @@ class JvmSandboxBootstrapTest {
         evaluator.handleExecute(Map.of("code", "1 + 1", "timeoutMs", BEYOND_HANG_GUARD_MS));
 
     assertEquals(0, result.get("exitCode"));
+    assertEquals(false, result.get("timedOut"));
     assertTrue(((String) result.get("stdout")).contains("2"));
     assertEquals("", result.get("stderr"));
   }
@@ -183,6 +184,7 @@ class JvmSandboxBootstrapTest {
                 BEYOND_HANG_GUARD_MS));
 
     assertEquals(1, result.get("exitCode"));
+    assertEquals(false, result.get("timedOut"));
     assertTrue(((String) result.get("stderr")).contains("boom"));
   }
 
@@ -807,6 +809,7 @@ class JvmSandboxBootstrapTest {
 
   private static void assertTimedOut(Map<String, Object> result) {
     assertEquals(1, result.get("exitCode"));
+    assertEquals(true, result.get("timedOut"));
     assertTrue(
         ((String) result.get("stderr")).contains("Execution timed out"),
         "stderr was: " + result.get("stderr"));

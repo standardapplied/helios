@@ -20,7 +20,8 @@ class ExecutionResultTest {
 
   @Test
   void constructorSetsFields() {
-    var result = new ExecutionResult("code", "out", "err", 1, java.util.Map.of(), Duration.ZERO);
+    var result =
+        new ExecutionResult("code", "out", "err", 1, false, java.util.Map.of(), Duration.ZERO);
     assertEquals("code", result.executedCode());
     assertEquals("out", result.stdout());
     assertEquals("err", result.stderr());
@@ -29,7 +30,8 @@ class ExecutionResultTest {
 
   @Test
   void nullExecutedCodeDefaultsToEmpty() {
-    var result = new ExecutionResult(null, "out", "err", 0, java.util.Map.of(), Duration.ZERO);
+    var result =
+        new ExecutionResult(null, "out", "err", 0, false, java.util.Map.of(), Duration.ZERO);
     assertEquals("", result.executedCode());
   }
 
@@ -42,19 +44,19 @@ class ExecutionResultTest {
 
   @Test
   void nullStdoutDefaultsToEmpty() {
-    var result = new ExecutionResult("c", null, "err", 0, java.util.Map.of(), Duration.ZERO);
+    var result = new ExecutionResult("c", null, "err", 0, false, java.util.Map.of(), Duration.ZERO);
     assertEquals("", result.stdout());
   }
 
   @Test
   void nullStderrDefaultsToEmpty() {
-    var result = new ExecutionResult("c", "out", null, 0, java.util.Map.of(), Duration.ZERO);
+    var result = new ExecutionResult("c", "out", null, 0, false, java.util.Map.of(), Duration.ZERO);
     assertEquals("", result.stderr());
   }
 
   @Test
   void nullBindingsDefaultToEmpty() {
-    var result = new ExecutionResult("c", "out", "err", 0, null, Duration.ZERO);
+    var result = new ExecutionResult("c", "out", "err", 0, false, null, Duration.ZERO);
     assertEquals(java.util.Map.of(), result.bindings());
   }
 
@@ -98,6 +100,7 @@ class ExecutionResultTest {
     assertEquals("", result.stdout());
     assertEquals("", result.stderr());
     assertEquals(0, result.exitCode());
+    assertFalse(result.timedOut());
   }
 
   @Test
@@ -107,21 +110,24 @@ class ExecutionResultTest {
             .withStdout("output")
             .withStderr("warning")
             .withExitCode(2)
+            .withTimedOut(true)
             .build();
     assertEquals("output", result.stdout());
     assertEquals("warning", result.stderr());
     assertEquals(2, result.exitCode());
+    assertTrue(result.timedOut());
   }
 
   @Test
   void durationDefaultsToZeroWhenCanonicalReceivesNull() {
-    var result = new ExecutionResult("c", "o", "e", 0, java.util.Map.of(), null);
+    var result = new ExecutionResult("c", "o", "e", 0, false, java.util.Map.of(), null);
     assertEquals(Duration.ZERO, result.duration());
   }
 
   @Test
   void durationDefaultsToZeroWhenNegative() {
-    var result = new ExecutionResult("c", "o", "e", 0, java.util.Map.of(), Duration.ofMillis(-5));
+    var result =
+        new ExecutionResult("c", "o", "e", 0, false, java.util.Map.of(), Duration.ofMillis(-5));
     assertEquals(
         Duration.ZERO,
         result.duration(),
@@ -131,7 +137,7 @@ class ExecutionResultTest {
   @Test
   void durationPreservedWhenPositive() {
     var d = Duration.ofMillis(123);
-    var result = new ExecutionResult("c", "o", "e", 0, java.util.Map.of(), d);
+    var result = new ExecutionResult("c", "o", "e", 0, false, java.util.Map.of(), d);
     assertEquals(d, result.duration());
   }
 
@@ -152,7 +158,7 @@ class ExecutionResultTest {
   void withDurationReturnsNewInstancePreservingOtherFields() {
     var original =
         new ExecutionResult(
-            "code", "stdout", "stderr", 7, java.util.Map.of("v", "1"), Duration.ZERO);
+            "code", "stdout", "stderr", 7, true, java.util.Map.of("v", "1"), Duration.ZERO);
     var copy = original.withDuration(Duration.ofMillis(50));
 
     assertNotSame(original, copy, "withDuration must return a new instance (record immutability)");
@@ -161,6 +167,7 @@ class ExecutionResultTest {
     assertEquals("stdout", copy.stdout());
     assertEquals("stderr", copy.stderr());
     assertEquals(7, copy.exitCode());
+    assertTrue(copy.timedOut());
     assertEquals(java.util.Map.of("v", "1"), copy.bindings());
   }
 

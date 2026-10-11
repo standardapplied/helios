@@ -2,6 +2,8 @@
 package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
@@ -83,6 +85,7 @@ class ExecutionResultMappingTest {
             "500\n",
             "",
             0,
+            false,
             Map.of(
                 "big", "xxxxxxxx... (len=500)",
                 "$1", "500",
@@ -97,7 +100,7 @@ class ExecutionResultMappingTest {
 
     var result = execute(reply("", stderr, 1, Map.of()));
 
-    assertEquals(new ExecutionResult(CODE, "", stderr, 1, Map.of(), Duration.ZERO), result);
+    assertEquals(new ExecutionResult(CODE, "", stderr, 1, false, Map.of(), Duration.ZERO), result);
   }
 
   @Test
@@ -107,16 +110,49 @@ class ExecutionResultMappingTest {
     var result = execute(reply("", stderr, 1, Map.of("ok", "1")));
 
     assertEquals(
-        new ExecutionResult(CODE, "", stderr, 1, Map.of("ok", "1"), Duration.ZERO), result);
+        new ExecutionResult(CODE, "", stderr, 1, false, Map.of("ok", "1"), Duration.ZERO), result);
   }
 
   @Test
   void timeoutWithOutputBeforeIt() throws Exception {
-    var result = execute(reply("started\n", "Execution timed out\n", 1, Map.of()), "captured line");
+    var timedOut = reply("started\n", "Execution timed out\n", 1, Map.of());
+    timedOut.put("timedOut", true);
+
+    var result = execute(timedOut, "captured line");
 
     assertEquals(
         new ExecutionResult(
-            CODE, "captured line\nstarted\n", "Execution timed out\n", 1, Map.of(), Duration.ZERO),
+            CODE,
+            "captured line\nstarted\n",
+            "Execution timed out\n",
+            1,
+            true,
+            Map.of(),
+            Duration.ZERO),
+        result);
+  }
+
+  @Test
+  void timedOutIsTrueOnlyWhenTheReplySaysTrue() {
+    assertTrue(timedOutOf(Map.of("timedOut", true)));
+    assertFalse(timedOutOf(Map.of("timedOut", false)));
+    assertFalse(timedOutOf(Map.of()));
+    assertFalse(timedOutOf(Map.of("timedOut", "true")));
+  }
+
+  @Test
+  void unansweredExecuteIsATimeoutWithTheCapturedOutput() {
+    var result = ExecutionReplies.unanswered(CODE, "partial output", Duration.ofMillis(3));
+
+    assertEquals(
+        new ExecutionResult(
+            CODE,
+            "partial output",
+            "Sandbox did not answer the execute within PT0.003S; the sandbox is closed",
+            1,
+            true,
+            Map.of(),
+            Duration.ZERO),
         result);
   }
 
@@ -128,7 +164,7 @@ class ExecutionResultMappingTest {
 
     var result = execute(reply("", stderr, 0, Map.of()));
 
-    assertEquals(new ExecutionResult(CODE, "", stderr, 0, Map.of(), Duration.ZERO), result);
+    assertEquals(new ExecutionResult(CODE, "", stderr, 0, false, Map.of(), Duration.ZERO), result);
   }
 
   @Test
@@ -142,7 +178,13 @@ class ExecutionResultMappingTest {
 
     assertEquals(
         new ExecutionResult(
-            CODE, "", "", 0, Map.of("n", "5", "nothing", "null", "list", "[1, 2]"), Duration.ZERO),
+            CODE,
+            "",
+            "",
+            0,
+            false,
+            Map.of("n", "5", "nothing", "null", "list", "[1, 2]"),
+            Duration.ZERO),
         result);
   }
 
@@ -154,22 +196,24 @@ class ExecutionResultMappingTest {
 
     var result = ExecutionReplies.toExecutionResult(CODE, Map.of("bindings", bindings), "");
 
-    assertEquals(new ExecutionResult(CODE, "", "", 0, Map.of("kept", "2"), Duration.ZERO), result);
+    assertEquals(
+        new ExecutionResult(CODE, "", "", 0, false, Map.of("kept", "2"), Duration.ZERO), result);
   }
 
   @Test
   void replyWithoutTheBootstrapsFields() throws Exception {
     var result = execute(Map.of("unexpected", true));
 
-    assertEquals(new ExecutionResult(CODE, "", "", 0, Map.of(), Duration.ZERO), result);
+    assertEquals(new ExecutionResult(CODE, "", "", 0, false, Map.of(), Duration.ZERO), result);
   }
 
   @Test
   void replyThatIsNotAMap() throws Exception {
     assertEquals(
-        new ExecutionResult(CODE, "[1, 2]", "", 0, Map.of(), Duration.ZERO),
+        new ExecutionResult(CODE, "[1, 2]", "", 0, false, Map.of(), Duration.ZERO),
         execute(List.of(1, 2)));
-    assertEquals(new ExecutionResult(CODE, "null", "", 0, Map.of(), Duration.ZERO), execute(null));
+    assertEquals(
+        new ExecutionResult(CODE, "null", "", 0, false, Map.of(), Duration.ZERO), execute(null));
   }
 
   @Test
@@ -183,9 +227,19 @@ class ExecutionResultMappingTest {
 
       assertEquals(
           new ExecutionResult(
-              CODE, "partial output", "Remote error [-32603]: eval crashed", 1, Map.of(), null),
+              CODE,
+              "partial output",
+              "Remote error [-32603]: eval crashed",
+              1,
+              false,
+              Map.of(),
+              null),
           result);
     }
+  }
+
+  private static boolean timedOutOf(Map<String, Object> reply) {
+    return ExecutionReplies.toExecutionResult(CODE, reply, "").timedOut();
   }
 
   private static ExecutionResult execute(Object reply, String... plainOutput) throws Exception {
