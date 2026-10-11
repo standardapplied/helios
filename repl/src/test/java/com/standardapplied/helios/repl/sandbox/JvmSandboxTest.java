@@ -925,6 +925,7 @@ class JvmSandboxTest {
               ExecuteParams.DISABLED);
 
       assertEquals(1, result.exitCode());
+      assertTrue(result.timedOut(), result.stderr());
       assertTrue(result.stderr().contains("Execution timed out"), result.stderr());
       assertTrue(result.stderr().contains("could not be stopped"), result.stderr());
       Await.termination("the sandbox exiting", sandbox.process());

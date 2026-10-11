@@ -162,8 +162,10 @@ class RpcChannelTest {
             Thread.ofVirtual()::start);
 
     Await.until(
-        "the caller parked waiting for its answer",
-        () -> caller.get() != null && caller.get().getState() == Thread.State.TIMED_WAITING);
+        "the caller parked waiting for its answer, or its call ended",
+        () ->
+            answer.isDone()
+                || caller.get() != null && caller.get().getState() == Thread.State.TIMED_WAITING);
     release.countDown();
 
     assertEquals(PONG, Await.value("the answer", answer));
