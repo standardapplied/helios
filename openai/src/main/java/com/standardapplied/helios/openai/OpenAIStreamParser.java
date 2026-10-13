@@ -11,6 +11,9 @@ import com.standardapplied.helios.openai.api.ApiStreamEvent;
 import com.standardapplied.helios.openai.api.ApiUsage;
 import com.standardapplied.helios.openai.api.OpenAIJson;
 import com.standardapplied.helios.openai.api.ResponsesResponse;
+import java.util.Objects;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Parses one Responses API stream, one event at a time, into {@link StreamEvent}s: text, reasoning
@@ -32,7 +35,7 @@ final class OpenAIStreamParser implements SseReader.Parser {
   @Override
   public StreamEvent parse(String payload) {
     try {
-      return on(OpenAIJson.LENIENT.readValue(payload, ApiStreamEvent.class), payload);
+      return on(OpenAIJson.LENIENT.readValue(payload, ApiStreamEvent.class));
     } catch (ProviderException e) {
       return failed(e.getMessage(), e);
     } catch (RuntimeException e) {
@@ -45,7 +48,7 @@ final class OpenAIStreamParser implements SseReader.Parser {
     return response(FinishReason.ERROR);
   }
 
-  private StreamEvent on(ApiStreamEvent event, String payload) {
+  private StreamEvent on(ApiStreamEvent event) {
     return switch (event.type()) {
       case "response.output_text.delta" -> message.text(event.delta());
       case "response.refusal.delta" -> message.refusalDelta(event.delta());
@@ -61,8 +64,15 @@ final class OpenAIStreamParser implements SseReader.Parser {
           reasoning.done(event.itemId(), event.summaryIndex(), event.text());
       case "response.completed" -> completed(event.response());
       case "response.incomplete" -> incomplete(event.response());
-      case "response.failed" -> responseFailed(event.response());
-      case "error" -> failed("API stream error: " + payload, null);
+      case "response.failed" -> {
+        record(event.response());
+        yield apiError(
+            "API response failed", event.response() == null ? null : event.response().error());
+      }
+      case "error" ->
+          apiError(
+              "API stream error",
+              new ResponsesResponse.ResponseError(event.code(), event.message()));
       case null, default -> null;
     };
   }
@@ -90,12 +100,13 @@ final class OpenAIStreamParser implements SseReader.Parser {
     return terminal(OpenAIResponseAssembler.incompleteReason(incompleteReason));
   }
 
-  private StreamEvent responseFailed(ResponsesResponse response) {
-    record(response);
-    var error = response == null ? null : response.error();
-    return error == null
-        ? failed("API response failed", null)
-        : failed("API response failed: " + error.code() + ": " + error.message(), null);
+  private StreamEvent apiError(String summary, ResponsesResponse.ResponseError error) {
+    var details = error == null ? Stream.<String>empty() : Stream.of(error.code(), error.message());
+    return failed(
+        Stream.concat(Stream.of(summary), details)
+            .filter(Objects::nonNull)
+            .collect(Collectors.joining(": ")),
+        null);
   }
 
   private StreamEvent terminal(FinishReason finishReason) {
