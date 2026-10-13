@@ -12,9 +12,14 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -32,6 +37,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 final class AgentHttpServiceIntegrationTest {
@@ -111,6 +117,79 @@ final class AgentHttpServiceIntegrationTest {
           collected.stream().filter(e -> e.event.equals("LoopEnded")).findFirst().orElseThrow();
       assertTrue(loopEnded.data.contains("hello back"));
     }
+  }
+
+  @Test
+  void aToolOutcomeStreamsAsAnObjectThroughADeployerSuppliedMapper() throws Exception {
+    var slow =
+        Tool.newBuilder()
+            .withName("slow")
+            .withExecutor((args, ctx) -> ToolResult.timedOut("slow", Duration.ofMinutes(1)))
+            .build();
+    var server =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withObjectMapper(new ObjectMapper())
+            .withOptionsFactory(
+                sessionId ->
+                    SessionOptions.newBuilder()
+                        .withModel(callingOnce(new ToolCall("c1", "slow", Map.of())))
+                        .withTools(
+                            new ToolRegistry(
+                                List.of(
+                                    ToolBinding.newBuilder(slow)
+                                        .withCategory(ToolCategory.READ)
+                                        .build())))
+                        .withSessionId(sessionId)
+                        .build())
+            .withPort(0)
+            .withHost("127.0.0.1")
+            .build();
+    try (server) {
+      var base = baseUrl(server);
+      var sessionId = createSession(http, base);
+      var events = startEventReader(http, base, sessionId);
+      sendMessage(http, base, sessionId, "go");
+
+      var toolResult =
+          events.awaitTerminal().stream()
+              .filter(e -> e.event.equals("ToolResult"))
+              .findFirst()
+              .orElseThrow();
+      assertTrue(
+          toolResult.data.contains(
+              "\"result\":{\"outcome\":{\"kind\":\"TimedOut\",\"limit\":\"PT1M\"},"
+                  + "\"output\":\"tool 'slow' timed out after PT1M\""),
+          toolResult.data);
+    }
+  }
+
+  /** A model that makes {@code call} on its first turn and answers "done" on every later one. */
+  private static Model callingOnce(ToolCall call) {
+    var turns = new AtomicInteger();
+    return new Model() {
+      @Override
+      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+        var builder = Response.newBuilder().withUsage(Usage.of(1, 1));
+        if (turns.getAndIncrement() == 0) {
+          return builder
+              .withToolCalls(List.of(call))
+              .withFinishReason(FinishReason.TOOL_CALLS)
+              .build();
+        }
+        return builder.withContent("done").withFinishReason(FinishReason.STOP).build();
+      }
+
+      @Override
+      public String id() {
+        return "test";
+      }
+
+      @Override
+      public String provider() {
+        return "test";
+      }
+    };
   }
 
   @Test

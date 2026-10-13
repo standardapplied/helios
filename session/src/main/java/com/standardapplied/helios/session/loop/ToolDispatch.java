@@ -33,7 +33,7 @@ import java.util.concurrent.TimeoutException;
  * category acquires from the general {@code toolCallPermits} pool. Sizes come from {@link
  * ConcurrencyLimits}.
  *
- * <p>Unknown tool names return a synthetic {@link ToolResult#failure(String) failure}; the agent
+ * <p>Unknown tool names return a {@link ToolResult#notFound(String) not-found} result; the agent
  * loop feeds that result back to the model so it can self-correct rather than crash.
  *
  * <h2>Thread-safety</h2>
@@ -135,7 +135,7 @@ public final class ToolDispatch {
   /**
    * Dispatch one tool call. Blocks the calling thread until the appropriate semaphore is available,
    * then runs the tool on a fresh virtual thread bounded by {@code timeout}. Returns the tool's
-   * result, a synthetic failure for unknown tools, or a synthetic failure when the timeout fires.
+   * result, a not-found result for unknown tools, or a timed-out result when the timeout fires.
    * Cancellation is observed before acquire and re-thrown if signalled during the acquire wait;
    * after dispatch, cancellation flows through the {@link ToolContext} so tool implementations can
    * poll {@code ctx.cancellation()} at safe points.
@@ -146,8 +146,8 @@ public final class ToolDispatch {
    *
    * @param call the call; non-null
    * @param cancellation cooperative cancellation token; non-null
-   * @param timeout per-call wall-clock budget; non-null, non-negative
-   * @return the tool's result, or a synthetic failure on unknown tool / timeout / thrown exception
+   * @param timeout per-call wall-clock budget; non-null, positive
+   * @return the tool's result, or a framework result on unknown tool / timeout / thrown error
    * @throws NullPointerException if any argument is null
    * @throws CancellationException if cancellation fires before or during the permit wait
    */
@@ -155,14 +155,14 @@ public final class ToolDispatch {
     Objects.requireNonNull(call, "call must not be null");
     Objects.requireNonNull(cancellation, "cancellation must not be null");
     Objects.requireNonNull(timeout, "timeout must not be null");
-    if (timeout.isNegative()) {
-      throw new IllegalArgumentException("timeout must not be negative, got " + timeout);
+    if (timeout.isNegative() || timeout.isZero()) {
+      throw new IllegalArgumentException("timeout must be positive, got " + timeout);
     }
     cancellation.throwIfCancelled();
 
     var bindingOpt = registry.get(call.name());
     if (bindingOpt.isEmpty()) {
-      return ToolResult.failure("tool not found: " + call.name());
+      return ToolResult.notFound(call.name());
     }
     var binding = bindingOpt.orElseThrow();
     var permits = permitsFor(binding.category());
@@ -190,18 +190,13 @@ public final class ToolDispatch {
         return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
       } catch (TimeoutException e) {
         worker.interrupt();
-        return ToolResult.failure("tool '" + call.name() + "' timed out after " + timeout);
+        return ToolResult.timedOut(call.name(), timeout);
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
         worker.interrupt();
         throw new CancellationException("interrupted waiting for tool " + call.name());
       } catch (ExecutionException e) {
-        var cause = e.getCause();
-        var msg =
-            cause == null || cause.getMessage() == null
-                ? (cause == null ? "no cause" : cause.getClass().getSimpleName())
-                : cause.getMessage();
-        return ToolResult.failure("tool '" + call.name() + "' threw: " + msg);
+        return ToolResult.threw(call.name(), e.getCause());
       }
     } finally {
       permits.release();

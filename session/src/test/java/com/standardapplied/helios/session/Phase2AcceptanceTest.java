@@ -146,7 +146,7 @@ final class Phase2AcceptanceTest {
       // Verify Grep ran successfully and the result names the seeded files.
       var grepResult = findToolResult(sub.events(), GrepTool.NAME);
       assertNotNull(grepResult);
-      assertTrue(grepResult.result().success());
+      assertTrue(grepResult.result().succeeded());
       var grepOut = grepResult.result().output();
       assertTrue(grepOut.contains("README.md"), grepOut);
       assertTrue(grepOut.contains("Hello.java"), grepOut);
@@ -154,7 +154,7 @@ final class Phase2AcceptanceTest {
       // Verify the allowed Read ran successfully and surfaced the file's content.
       var allowedResult = findToolResult(sub.events(), ReadTool.NAME);
       assertNotNull(allowedResult);
-      assertTrue(allowedResult.result().success());
+      assertTrue(allowedResult.result().succeeded());
       assertTrue(allowedResult.result().output().contains("Hello"));
 
       // Verify the denied Read was BLOCKED by the permission system.
@@ -173,7 +173,7 @@ final class Phase2AcceptanceTest {
       // Verify the AskUserQuestion tool returned the user's selection.
       var askResult = findToolResult(sub.events(), AskUserQuestionTool.NAME);
       assertNotNull(askResult);
-      assertTrue(askResult.result().success());
+      assertTrue(askResult.result().succeeded());
       assertTrue(askResult.result().output().contains("- Yes"));
 
       // Verify memory listing works via the auto-registered MemoryRead tool.

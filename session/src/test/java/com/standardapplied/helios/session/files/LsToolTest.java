@@ -35,7 +35,7 @@ final class LsToolTest {
             .tool()
             .execute(Map.of("path", "."), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     var out = result.output();
     assertTrue(out.contains("alpha/"), out);
     assertTrue(out.contains("zeta/"), out);
@@ -58,7 +58,7 @@ final class LsToolTest {
   void defaultPathListsRoot(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("readme"), "", StandardCharsets.UTF_8);
     var result = LsTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of(), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertTrue(result.output().contains("readme"));
   }
 
@@ -69,7 +69,7 @@ final class LsToolTest {
         LsTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", ""), ToolContext.noop());
-    assertTrue(result.success());
+    assertTrue(result.succeeded());
     assertTrue(result.output().contains("readme"));
   }
 
@@ -80,7 +80,7 @@ final class LsToolTest {
         LsTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", 42), ToolContext.noop());
-    assertTrue(result.success());
+    assertTrue(result.succeeded());
     assertTrue(result.output().contains("readme"));
   }
 
@@ -91,7 +91,7 @@ final class LsToolTest {
         LsTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "file.txt"), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("not a directory"), result.output());
   }
 
@@ -101,7 +101,7 @@ final class LsToolTest {
         LsTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "../etc"), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().startsWith("LS:"), result.output());
   }
 
@@ -123,7 +123,7 @@ final class LsToolTest {
         LsTool.binding(new WorkspaceRoot(tmp, false))
             .tool()
             .execute(Map.of("path", "."), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertTrue(result.output().contains("link.txt@"), result.output());
     assertTrue(result.output().contains("target.txt"), result.output());
   }

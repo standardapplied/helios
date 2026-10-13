@@ -21,7 +21,7 @@ final class TextPageTest {
     var result =
         TextPage.read(workspace, workspace.resolveSafe("absent.txt"), 1, 10, new SecretRegistry());
 
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().startsWith("Read: I/O error reading file: "), result.output());
   }
 }

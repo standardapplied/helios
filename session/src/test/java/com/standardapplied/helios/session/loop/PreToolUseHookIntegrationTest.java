@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.tool.ToolOutcome;
+import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.UserMessage;
@@ -14,6 +16,7 @@ import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.testing.ScriptedModel;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -44,9 +47,15 @@ final class PreToolUseHookIntegrationTest {
     var result = callEchoThenAnswer(Map.of("v", "x"), "after-block", blocker);
     var success = assertInstanceOf(ResultMessage.Success.class, result);
     assertEquals("after-block", success.result());
-    assertEquals("not allowed", loop.first(QueryEvent.ToolBlocked.class).reason());
+    var blocked = loop.first(QueryEvent.ToolBlocked.class);
+    assertEquals("not allowed", blocked.reason());
     var toolResult = loop.first(QueryEvent.ToolResult.class);
-    assertTrue(toolResult.result().output().contains("blocked by hook"));
+    assertEquals(
+        new ToolResult(
+            new ToolOutcome.Rejected(blocked.hookName(), "not allowed"),
+            "blocked by " + blocked.hookName() + ": not allowed",
+            List.of()),
+        toolResult.result());
   }
 
   @Test

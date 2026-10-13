@@ -110,7 +110,7 @@ final class MimeTypesTest {
             .tool()
             .execute(Map.of("path", "blob.bin"), ToolContext.noop());
 
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertEquals(
         "Read: refusing to decode binary file as text (detected MIME unknown). Images and PDFs are"
             + " returned as attachments; for other binary formats use a dedicated tool or extract"
@@ -128,7 +128,7 @@ final class MimeTypesTest {
             .tool()
             .execute(Map.of("path", "odd.json"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertFalse(result.hasAttachments());
   }
 }

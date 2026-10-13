@@ -196,7 +196,7 @@ final class RecordedSessionTest {
             .filter(result -> result.call().arguments().containsValue(argument))
             .toList();
     assertEquals(1, results.size(), tool + " " + argument);
-    assertTrue(results.getFirst().result().success(), tool + " " + argument);
+    assertTrue(results.getFirst().result().succeeded(), tool + " " + argument);
     return results.getFirst().result().output();
   }
 

@@ -9,6 +9,7 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Runs the tool calls of one model turn serially: fires {@code PreToolUse}, dispatches through
@@ -22,10 +23,11 @@ import java.util.List;
  * <ul>
  *   <li><b>PreToolUse</b>: {@code Continue} dispatches; {@code MutateArgs} emits {@link
  *       QueryEvent.ToolMutated} and dispatches with the replacement args; {@code Block} emits
- *       {@link QueryEvent.ToolBlocked} and substitutes a synthetic failure {@link ToolResult};
- *       {@code Inject} queues a synthetic user message and substitutes a synthetic failure {@code
- *       ToolResult}; {@code Stop} terminates.
- *   <li><b>PostToolUse</b>: {@code MutateResult} rewrites the tool result content; {@code Inject}
+ *       {@link QueryEvent.ToolBlocked} and substitutes a {@link ToolResult#rejected rejected}
+ *       result; {@code Inject} queues a synthetic user message and substitutes a rejected result;
+ *       {@code Stop} terminates.
+ *   <li><b>PostToolUse</b>: {@code MutateResult} rewrites the tool result's output and keeps its
+ *       outcome, since a hook changes what the model reads, not what happened; {@code Inject}
  *       queues a synthetic user message; {@code Stop} appends the result and terminates.
  * </ul>
  */
@@ -63,7 +65,7 @@ final class ToolRound {
 
   private boolean runOne(SessionState state, ToolCall call, SessionLimits limits) {
     var decision = collaborators.hooks().firePreToolUse(call, collaborators.hookContext(state));
-    var hookName = HookEffects.firingHookName(decision);
+    var hookName = Objects.requireNonNullElse(HookEffects.firingHookName(decision), PRE_TOOL_USE);
     if (decision.outcome() instanceof HookOutcome.Stop stop) {
       effects.stop(state, hookName, PRE_TOOL_USE, stop);
       return true;
@@ -75,7 +77,7 @@ final class ToolRound {
           case HookOutcome.Inject inject -> {
             effects.inject(state, hookName, PRE_TOOL_USE, inject);
             yield new PlannedCall(
-                call, ToolResult.failure("tool skipped: hook injected user message"));
+                call, ToolResult.rejected(hookName, "hook injected a user message"));
           }
           default -> new PlannedCall(emitToolUse(state, call), null);
         };
@@ -90,7 +92,7 @@ final class ToolRound {
   private ToolResult emitRedacted(SessionState state, ToolCall call, ToolResult raw) {
     var redaction = collaborators.secrets().redactor().redact(raw.output());
     var output = redaction.counts().isEmpty() ? raw.output() : redaction.text();
-    var result = new ToolResult(raw.success(), output, raw.attachments());
+    var result = raw.withOutput(output);
     emitter.emit(
         state,
         new QueryEvent.ToolResult(
@@ -121,7 +123,7 @@ final class ToolRound {
             state.currentTurnIndex(),
             collaborators.clock().instant(),
             call,
-            hookName == null ? PRE_TOOL_USE : hookName,
+            hookName,
             call.arguments(),
             mutate.args()));
     return new PlannedCall(
@@ -138,9 +140,9 @@ final class ToolRound {
             state.currentTurnIndex(),
             collaborators.clock().instant(),
             call,
-            hookName == null ? PRE_TOOL_USE : hookName,
+            hookName,
             block.reason()));
-    return new PlannedCall(call, ToolResult.failure("blocked by hook: " + block.reason()));
+    return new PlannedCall(call, ToolResult.rejected(hookName, block.reason()));
   }
 
   private ToolResult dispatch(SessionState state, ToolCall call, SessionLimits limits) {
@@ -149,8 +151,7 @@ final class ToolRound {
           .toolDispatch()
           .dispatch(call, state.cancellation(), limits.toolTimeoutDefault());
     } catch (Throwable t) {
-      var msg = t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
-      return ToolResult.failure("tool dispatch failed: " + msg);
+      return ToolResult.threw(call.name(), t);
     }
   }
 
@@ -160,7 +161,8 @@ final class ToolRound {
     var hookName = HookEffects.firingHookName(decision);
     var kept = result;
     switch (decision.outcome()) {
-      case HookOutcome.MutateResult mutate -> kept = mutateResult(state, call, hookName, mutate);
+      case HookOutcome.MutateResult mutate ->
+          kept = mutateResult(state, call, result, hookName, mutate);
       case HookOutcome.Inject inject -> effects.inject(state, hookName, POST_TOOL_USE, inject);
       case HookOutcome.Stop stop -> {
         emitter.emitHookFired(state, hookName, POST_TOOL_USE, "Stop");
@@ -175,9 +177,13 @@ final class ToolRound {
   }
 
   private ToolResult mutateResult(
-      SessionState state, ToolCall call, String hookName, HookOutcome.MutateResult mutate) {
+      SessionState state,
+      ToolCall call,
+      ToolResult result,
+      String hookName,
+      HookOutcome.MutateResult mutate) {
     emitter.emitHookFired(state, hookName, POST_TOOL_USE, "MutateResult");
-    return emitRedacted(state, call, ToolResult.success(mutate.output()));
+    return emitRedacted(state, call, result.withOutput(mutate.output()));
   }
 
   /**

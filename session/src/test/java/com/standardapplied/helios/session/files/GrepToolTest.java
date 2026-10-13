@@ -38,7 +38,7 @@ final class GrepToolTest {
             .tool()
             .execute(Map.of("pattern", "hello"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     var out = result.output();
     assertTrue(out.contains("a.txt:1:hello world"), out);
     assertTrue(out.contains("a.txt:3:hello again"), out);
@@ -60,7 +60,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "ZZZ"), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertEquals("", result.output());
   }
 
@@ -74,7 +74,7 @@ final class GrepToolTest {
             .tool()
             .execute(Map.of("pattern", "TARGET", "include", "*.java"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertTrue(result.output().contains("good.java"), result.output());
     assertFalse(result.output().contains("skip.md"));
   }
@@ -90,7 +90,7 @@ final class GrepToolTest {
             .tool()
             .execute(Map.of("pattern", "HEADER"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertTrue(result.output().contains("visible.txt"), result.output());
     assertFalse(result.output().contains("HEAD\n") && result.output().contains(".git"));
   }
@@ -105,7 +105,7 @@ final class GrepToolTest {
             .tool()
             .execute(Map.of("pattern", "TARGET"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertTrue(result.output().contains("text.txt"), result.output());
     assertFalse(result.output().contains("data.bin"));
   }
@@ -120,7 +120,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "AAA"), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertTrue(result.output().contains("small.txt"), result.output());
     assertFalse(result.output().contains("big.txt"));
   }
@@ -129,7 +129,7 @@ final class GrepToolTest {
   void missingPatternFails(@TempDir Path tmp) {
     var result =
         GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of(), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("missing required 'pattern'"), result.output());
   }
 
@@ -139,7 +139,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "[unclosed"), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("Grep: invalid regex"), result.output());
   }
 
@@ -150,7 +150,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "x", "path", "file.txt"), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("not a directory"), result.output());
   }
 
@@ -160,7 +160,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "x", "path", "absent"), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().startsWith("Grep: I/O error scanning absent: "), result.output());
   }
 
@@ -170,7 +170,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "x", "path", "../etc"), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().startsWith("Grep:"), result.output());
   }
 
@@ -190,7 +190,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "TAR"), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertTrue(result.output().contains("good.txt"), result.output());
     assertFalse(result.output().contains("bad.txt"));
   }
@@ -206,7 +206,7 @@ final class GrepToolTest {
             .tool()
             .execute(Map.of("pattern", "needle", "include", "**/*.md"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     var out = result.output();
     assertTrue(out.contains("intro.md:1:needle"), "root .md must match include='**/*.md': " + out);
     assertFalse(out.contains("config.yaml"), "yaml must be filtered out: " + out);
@@ -235,7 +235,7 @@ final class GrepToolTest {
             .tool()
             .execute(Map.of("pattern", "SENTINEL"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertEquals("inside.txt:1:SENTINEL inside\n", result.output());
   }
 
@@ -250,7 +250,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "AAA"), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertEquals("", result.output());
   }
 
@@ -263,7 +263,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "hello"), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertEquals("a.txt:1:hello\n", result.output());
   }
 
@@ -279,7 +279,7 @@ final class GrepToolTest {
         GrepTool.binding(ws)
             .tool()
             .execute(Map.of("pattern", "hello", "path", "alias"), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertEquals("real/a.txt:1:hello\n", result.output());
   }
 
@@ -291,7 +291,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "hit"), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertTrue(
         result.output().endsWith("big.txt:1000:hit\n[truncated at 1000 matches]\n"),
         result.output());
@@ -306,7 +306,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "hit"), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     var lines = result.output().split("\n");
     assertEquals(1001, lines.length);
     assertEquals("[truncated at 1000 matches]", lines[1000]);
@@ -321,7 +321,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "hit"), ToolContext.of(session, Duration.ofMinutes(1)));
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertEquals("", result.output());
   }
 
@@ -331,7 +331,7 @@ final class GrepToolTest {
         GrepTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "x", "include", "["), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().startsWith("Grep: invalid include pattern '[': "), result.output());
   }
 
@@ -347,7 +347,7 @@ final class GrepToolTest {
           GrepTool.binding(WorkspaceRoot.of(tmp))
               .tool()
               .execute(Map.of("pattern", "hit"), ToolContext.noop());
-      assertTrue(result.success(), result.output());
+      assertTrue(result.succeeded(), result.output());
       assertEquals("a.txt:1:hit\n", result.output());
     } finally {
       Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rw-------"));

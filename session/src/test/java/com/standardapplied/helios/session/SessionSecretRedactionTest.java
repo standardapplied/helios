@@ -20,6 +20,7 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.CommandGrant;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolExecutor;
+import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.execution.ExecutionCapabilities;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
@@ -195,12 +196,15 @@ final class SessionSecretRedactionTest {
     var run = run(options, calling(List.of(List.of(call("c1", "throws"), call("c2", "errors")))));
 
     assertEquals(
-        List.of("Tool execution failed: bad " + MARKER, "tool 'errors' threw: bad " + MARKER),
+        List.of("tool 'throws' threw: bad " + MARKER, "tool 'errors' threw: bad " + MARKER),
         run.toolResults().stream().map(e -> e.result().output()).toList());
     assertEquals(
         run.toolResults().stream().map(e -> e.result().output()).toList(), run.toolMessages(1));
     assertEquals(
-        List.of(false, false), run.toolResults().stream().map(e -> e.result().success()).toList());
+        List.of(
+            new ToolOutcome.Threw("java.lang.IllegalStateException"),
+            new ToolOutcome.Threw("java.lang.AssertionError")),
+        run.toolResults().stream().map(e -> e.result().outcome()).toList());
   }
 
   @Test

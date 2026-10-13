@@ -133,7 +133,7 @@ final class ExecuteToolTest {
     var provider = new RecordingProvider(ok(""));
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("script", "echo hi"), ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("missing required 'runtime'"));
   }
 
@@ -142,7 +142,7 @@ final class ExecuteToolTest {
     var provider = new RecordingProvider(ok(""));
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "DELPHI", "script", "x"), ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("unknown runtime"));
   }
 
@@ -152,7 +152,7 @@ final class ExecuteToolTest {
     provider.supportedRuntimes = EnumSet.of(Runtime.BASH); // PYTHON not supported
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "PYTHON", "script", "print('x')"), ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("not supported by this provider"));
     org.junit.jupiter.api.Assertions.assertNull(
         provider.lastRequest, "provider should not have been called");
@@ -164,7 +164,7 @@ final class ExecuteToolTest {
     provider.supportedRuntimes = EnumSet.of(Runtime.BASH);
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), ctx());
-    assertTrue(result.success());
+    assertTrue(result.succeeded());
     assertEquals(Runtime.BASH, provider.lastRequest.runtime());
   }
 
@@ -180,7 +180,7 @@ final class ExecuteToolTest {
       provider.supportedRuntimes = EnumSet.allOf(Runtime.class);
       var binding = ExecuteTool.binding(provider);
       var result = binding.tool().execute(Map.of("runtime", "python", "script", "x"), ctx());
-      assertTrue(result.success(), "lowercase python should resolve under tr locale");
+      assertTrue(result.succeeded(), "lowercase python should resolve under tr locale");
       assertEquals(Runtime.PYTHON, provider.lastRequest.runtime());
     } finally {
       java.util.Locale.setDefault(defaultLocale);
@@ -192,7 +192,7 @@ final class ExecuteToolTest {
     var provider = new RecordingProvider(ok(""));
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "BASH"), ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("missing required 'script'"));
   }
 
@@ -204,7 +204,7 @@ final class ExecuteToolTest {
         binding
             .tool()
             .execute(Map.of("runtime", "BASH", "script", "echo", "args", List.of(1, 2, 3)), ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("array of strings"));
   }
 
@@ -216,7 +216,7 @@ final class ExecuteToolTest {
         binding
             .tool()
             .execute(Map.of("runtime", "BASH", "script", "echo", "args", "not-array"), ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("array of strings"));
   }
 
@@ -228,7 +228,7 @@ final class ExecuteToolTest {
         binding
             .tool()
             .execute(Map.of("runtime", "BASH", "script", "echo", "timeoutSeconds", 0), ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("positive integer"));
   }
 
@@ -242,7 +242,7 @@ final class ExecuteToolTest {
             .execute(
                 Map.of("runtime", "BASH", "script", "echo", "environment", Map.of("FOO", 123)),
                 ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("string→string"));
   }
 
@@ -255,7 +255,7 @@ final class ExecuteToolTest {
             .tool()
             .execute(
                 Map.of("runtime", "BASH", "script", "echo", "environment", "not-a-map"), ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("string→string"));
   }
 
@@ -285,7 +285,7 @@ final class ExecuteToolTest {
                     "stdin",
                     "in"),
                 ctx());
-    assertTrue(result.success());
+    assertTrue(result.succeeded());
     assertTrue(result.output().contains("runtime BASH"));
     assertTrue(result.output().contains("exit 0"));
     assertTrue(result.output().contains("hello"));
@@ -307,7 +307,7 @@ final class ExecuteToolTest {
         binding
             .tool()
             .execute(Map.of("runtime", "BASH", "script", "sleep 5", "timeoutSeconds", 1), ctx());
-    assertTrue(result.success(), "tool dispatch should succeed even when execution timed out");
+    assertTrue(result.succeeded(), "tool dispatch should succeed even when execution timed out");
     assertTrue(result.output().startsWith("[runtime BASH exit -1 TIMEOUT"), result.output());
   }
 
@@ -329,7 +329,7 @@ final class ExecuteToolTest {
     provider.throwOnExecute = true;
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("provider failed"));
     assertTrue(result.output().contains("boom"));
   }
@@ -342,7 +342,7 @@ final class ExecuteToolTest {
         binding
             .tool()
             .execute(Map.of("runtime", "BASH", "script", "x", "workingDirectory", ""), ctx());
-    assertTrue(result.success());
+    assertTrue(result.succeeded());
     // The request must NOT carry an explicit Path — empty string is treated as "no working dir".
     org.junit.jupiter.api.Assertions.assertNull(provider.lastRequest.workingDirectory());
   }
@@ -362,7 +362,7 @@ final class ExecuteToolTest {
         };
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("Execute: cancelled"));
   }
 
@@ -382,7 +382,7 @@ final class ExecuteToolTest {
         };
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("RuntimeException"));
   }
 
@@ -412,7 +412,7 @@ final class ExecuteToolTest {
             new SessionContext("cancel-test", token, Clock.systemUTC(), new SecretRegistry()),
             Duration.ofSeconds(1));
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), toolCtx);
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("test"));
   }
 
@@ -453,7 +453,7 @@ final class ExecuteToolTest {
       Map<String, Object> args, String message) {
     var provider = new RecordingProvider(ok(""));
     var result = ExecuteTool.binding(provider).tool().execute(args, ctx());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertEquals(message, result.output());
     assertEquals(null, provider.lastRequest);
   }
@@ -484,7 +484,7 @@ final class ExecuteToolTest {
                     "environment", Map.of("K", "V"),
                     "stdin", "in"),
                 ctx());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     var request = provider.lastRequest;
     assertEquals(Runtime.PYTHON, request.runtime());
     assertEquals("print(1)", request.script());
