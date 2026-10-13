@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
 
@@ -76,6 +77,34 @@ class SseReaderTest {
     public void close() throws IOException {
       closed = true;
       throw new IOException("close failed");
+    }
+  }
+
+  /** A body whose read blocks through interrupts and fails only once the body is closed. */
+  private static final class ClosedOnlyByClose extends InputStream {
+    private final CountDownLatch reading = new CountDownLatch(1);
+    private final CountDownLatch closed = new CountDownLatch(1);
+
+    @Override
+    public int read() throws IOException {
+      reading.countDown();
+      var interrupted = false;
+      while (closed.getCount() > 0) {
+        try {
+          closed.await();
+        } catch (InterruptedException e) {
+          interrupted = true;
+        }
+      }
+      if (interrupted) {
+        Thread.currentThread().interrupt();
+      }
+      throw new IOException("body closed");
+    }
+
+    @Override
+    public void close() {
+      closed.countDown();
     }
   }
 
@@ -142,7 +171,7 @@ class SseReaderTest {
     var parser = new EchoParser();
     var reader =
         new SseReader(
-            stream("data:{\"a\":\ndata\ndata:  1}\n\ndata: stop\n\n"),
+            stream("data:{\"a\":\ndataset: no\ndata\ndata:  1}\n\ndata: stop\n\n"),
             NEVER_IDLE,
             parser,
             ProviderException::new);
@@ -153,18 +182,19 @@ class SseReaderTest {
   }
 
   @Test
-  void endsLinesAtCarriageReturnLineFeedOrEither() {
+  void endsLinesAtCarriageReturnLineFeedOrEitherWhereverTheReadsSplitThem() {
     var parser = new EchoParser();
     var reader =
         new SseReader(
-            stream("data: one\r\n\r\ndata: two\r\rdata: three\n\ndata: stop\r\n\r\n"),
+            byteByByte(
+                "data: one\r\ndata: more\r\n\r\ndata: two\r\rdata: three\n\ndata: stop\r\n\r\n"),
             NEVER_IDLE,
             parser,
             ProviderException::new);
 
     drain(reader);
 
-    assertEquals(List.of("one", "two", "three", "stop"), parser.payloads);
+    assertEquals(List.of("one\nmore", "two", "three", "stop"), parser.payloads);
   }
 
   @Test
@@ -243,10 +273,33 @@ class SseReaderTest {
   }
 
   @Test
-  void aLineLongerThanTheFrameBoundEndsInTheProvidersException() {
-    var line = "data: " + "x".repeat(SseFrames.MAX_FRAME_CHARS);
+  void aLineAndAnEventOfExactlyTheFrameBoundAreRead() {
+    var line = "data:" + "x".repeat(SseFrames.MAX_FRAME_CHARS - 5);
+    var halves =
+        "data:"
+            + "x".repeat(SseFrames.MAX_FRAME_CHARS / 2)
+            + "\ndata:"
+            + "x".repeat(SseFrames.MAX_FRAME_CHARS / 2 - 1);
+    var parser = new EchoParser();
+    var reader =
+        new SseReader(
+            stream(line + "\n\n" + halves + "\n\ndata: stop\n\n"),
+            NEVER_IDLE,
+            parser,
+            ProviderException::new);
+
+    assertInstanceOf(StreamEvent.Done.class, drain(reader).getLast());
+    assertEquals(
+        List.of(SseFrames.MAX_FRAME_CHARS - 5, SseFrames.MAX_FRAME_CHARS, 4),
+        parser.payloads.stream().map(String::length).toList());
+  }
+
+  @Test
+  void aLineOneCharacterOverTheFrameBoundEndsInTheProvidersException() {
+    var line = "data:" + "x".repeat(SseFrames.MAX_FRAME_CHARS - 4);
     var body = new Closing(stream(line + "\n\n"));
-    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+    var parser = new EchoParser();
+    var reader = new SseReader(body, NEVER_IDLE, parser, ProviderException::new);
 
     var error = assertInstanceOf(StreamEvent.Error.class, reader.next());
 
@@ -254,20 +307,43 @@ class SseReaderTest {
     assertTrue(body.closed);
     assertEquals(
         error.message(), assertInstanceOf(ProviderException.class, error.cause()).getMessage());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
+    assertEquals(List.of(), parser.payloads);
     assertFalse(reader.hasNext());
   }
 
   @Test
-  void anEventLargerThanTheFrameBoundEndsInTheProvidersException() {
+  void aLineThatNeverEndsFailsAtTheFrameBoundInsteadOfBufferingTheBody() {
+    var reader =
+        new SseReader(
+            endless("data: ".getBytes(StandardCharsets.UTF_8), (byte) 'x'),
+            NEVER_IDLE,
+            new EchoParser(),
+            ProviderException::new);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, reader.next());
+
+    assertEquals("Stream line exceeds 16777216 characters", error.message());
+  }
+
+  @Test
+  void anEventOneCharacterOverTheFrameBoundEndsInTheProvidersExceptionWithThePartial() {
     var half = "data: " + "x".repeat(SseFrames.MAX_FRAME_CHARS / 2) + "\n";
     var parser = new EchoParser();
     var reader =
-        new SseReader(stream(half + half + "\n"), NEVER_IDLE, parser, ProviderException::new);
+        new SseReader(
+            stream("data: one\n\n" + half + half + "\n"),
+            NEVER_IDLE,
+            parser,
+            ProviderException::new);
+    reader.next();
 
     var error = assertInstanceOf(StreamEvent.Error.class, reader.next());
 
     assertEquals("Stream event exceeds 16777216 characters", error.message());
-    assertEquals(List.of(), parser.payloads);
+    assertInstanceOf(ProviderException.class, error.cause());
+    assertEquals("one", error.partial().content());
+    assertEquals(List.of("one"), parser.payloads);
   }
 
   @Test
@@ -343,6 +419,25 @@ class SseReaderTest {
       assertInstanceOf(IOException.class, error.cause());
       assertTrue(body.closed);
       assertFalse(reader.hasNext());
+    }
+  }
+
+  @Test
+  void closeReleasesAReadThatIgnoresInterruptsByClosingTheBodyFirst() {
+    var body = new ClosedOnlyByClose();
+    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+    var threads = Executors.newVirtualThreadPerTaskExecutor();
+    try {
+      var blocked = threads.submit(reader::next);
+      Await.latch("a read to block on the body", body.reading);
+
+      Await.value("the close", threads.submit(reader::close));
+
+      var error =
+          assertInstanceOf(StreamEvent.Error.class, Await.value("the blocked next", blocked));
+      assertEquals("body closed", error.cause().getMessage());
+    } finally {
+      threads.shutdownNow();
     }
   }
 
@@ -449,6 +544,32 @@ class SseReaderTest {
 
   private static InputStream stream(String text) {
     return new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8));
+  }
+
+  private static InputStream byteByByte(String text) {
+    var bytes = stream(text);
+    return new InputStream() {
+      @Override
+      public int read() throws IOException {
+        return bytes.read();
+      }
+
+      @Override
+      public int read(byte[] target, int offset, int length) throws IOException {
+        return length == 0 ? 0 : bytes.read(target, offset, 1);
+      }
+    };
+  }
+
+  private static InputStream endless(byte[] prefix, byte repeated) {
+    return new InputStream() {
+      private int position;
+
+      @Override
+      public int read() {
+        return position < prefix.length ? prefix[position++] : repeated;
+      }
+    };
   }
 
   private static InputStream failing(Exception failure) {
