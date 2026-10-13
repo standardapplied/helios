@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * The function calls of a streamed response, keyed by output item: each announced when its item is
@@ -67,9 +68,14 @@ final class FunctionCalls {
     return new StreamEvent.ToolCallComplete(toolCall);
   }
 
-  /** The name of a function call whose arguments are still open, or {@code null} when none is. */
+  /**
+   * The name of a function call whose arguments are still open, {@code <unnamed>} when it has none,
+   * or {@code null} when no call is open.
+   */
   String open() {
-    return pending.isEmpty() ? null : pending.values().iterator().next().name();
+    return pending.isEmpty()
+        ? null
+        : Objects.requireNonNullElse(pending.values().iterator().next().name(), "<unnamed>");
   }
 
   /** The tool calls, in the order their arguments completed. */

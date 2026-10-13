@@ -1,6 +1,6 @@
 == chatStream
 ThinkingDelta[text=The user greets me. ]
 ThinkingDelta[text=I greet back.]
-Error[message=Stream ended before its terminal event, cause=EOFException(the response body ended before the provider's terminal event), partial=Response[content=, parsed=null, toolCalls=[], finishReason=ERROR, usage=Usage[inputTokens=25, outputTokens=0, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=37], thinking=The user greets me. I greet back., citations=[], metadata={}]]
+Error[message=Stream ended before its terminal event, cause=EOFException(the response body ended before the provider's terminal event), partial=Response[content=, parsed=null, toolCalls=[], finishReason=ERROR, usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38], thinking=The user greets me. I greet back., citations=[], metadata={}]]
 == chat
 threw TransientStreamException(Stream ended before its terminal event) provider=anthropic caused by EOFException(the response body ended before the provider's terminal event)

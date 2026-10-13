@@ -67,8 +67,9 @@ final class AnthropicStreamParser implements SseReader.Parser {
   }
 
   /**
-   * Input and cache token counts, reported on {@code message_start}; {@code message_delta} later
-   * carries the running output count, and cache counts do not change after the start.
+   * Input, cache and initial output token counts, reported on {@code message_start}; {@code
+   * message_delta} later carries the running output count, and cache counts do not change after the
+   * start.
    */
   private StreamEvent messageStart(MessagesResponse message) {
     if (message == null || message.usage() == null) {
@@ -77,6 +78,9 @@ final class AnthropicStreamParser implements SseReader.Parser {
     var usage = message.usage();
     if (usage.inputTokens() != null) {
       inputTokens = usage.inputTokens();
+    }
+    if (usage.outputTokens() != null) {
+      outputTokens = usage.outputTokens();
     }
     if (usage.cacheCreationInputTokens() != null) {
       cacheCreationInputTokens = usage.cacheCreationInputTokens();
