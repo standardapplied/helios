@@ -19,6 +19,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Semaphore;
@@ -347,7 +348,7 @@ public final class CommandGrant {
      * it, and the tool refuses to run in a session with a different registry.
      */
     public Builder withSecretRegistry(SecretRegistry registry) {
-      this.secretRegistry = registry;
+      this.secretRegistry = Objects.requireNonNull(registry, "registry");
       return this;
     }
 
