@@ -17,6 +17,7 @@ final class ResponseDrain implements Flow.Subscriber<StreamEvent> {
   private final StreamFailure failures;
   private final CountDownLatch done = new CountDownLatch(1);
   private volatile Flow.Subscription subscription;
+  private volatile boolean abandoned;
   private Response<Void> response;
   private Throwable failure;
 
@@ -34,6 +35,10 @@ final class ResponseDrain implements Flow.Subscriber<StreamEvent> {
   @Override
   public void onSubscribe(Flow.Subscription subscription) {
     this.subscription = subscription;
+    if (abandoned) {
+      subscription.cancel();
+      return;
+    }
     subscription.request(Long.MAX_VALUE);
   }
 
@@ -70,8 +75,12 @@ final class ResponseDrain implements Flow.Subscriber<StreamEvent> {
     try {
       done.await();
     } catch (InterruptedException interrupted) {
+      abandoned = true;
+      var open = subscription;
       try {
-        subscription.cancel();
+        if (open != null) {
+          open.cancel();
+        }
       } finally {
         Thread.currentThread().interrupt();
       }

@@ -22,6 +22,7 @@ final class ChunkDrain implements Flow.Subscriber<ModelChunk> {
   private final List<ToolCall> toolCalls = new ArrayList<>();
   private ModelChunk.MessageStop stop;
   private volatile Flow.Subscription subscription;
+  private volatile boolean abandoned;
   private Throwable failure;
 
   private ChunkDrain() {}
@@ -41,6 +42,10 @@ final class ChunkDrain implements Flow.Subscriber<ModelChunk> {
   @Override
   public void onSubscribe(Flow.Subscription subscription) {
     this.subscription = subscription;
+    if (abandoned) {
+      subscription.cancel();
+      return;
+    }
     subscription.request(Long.MAX_VALUE);
   }
 
@@ -84,6 +89,7 @@ final class ChunkDrain implements Flow.Subscriber<ModelChunk> {
     try {
       done.await();
     } catch (InterruptedException interrupted) {
+      abandoned = true;
       var open = subscription;
       try {
         if (open != null) {
