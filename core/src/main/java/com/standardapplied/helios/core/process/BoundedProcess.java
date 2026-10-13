@@ -18,9 +18,9 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * One child process started from an explicit argv and environment, never through a shell, with its
- * stdout and stderr captured into bounded buffers that never end in part of a registered secret, a
- * timeout that kills the process and its descendants, and a per-call working directory removed on
- * {@link #close()}.
+ * stdout and stderr captured into bounded buffers, a timeout that kills the process and its
+ * descendants, and a per-call working directory removed on {@link #close()}. A buffer cut at its
+ * cap keeps no part of a registered secret the cut went through.
  *
  * <p>The child inherits nothing from the JVM's environment; it sees exactly the variables the
  * builder was given. Its stdin is left open for the caller, who closes it or feeds it through
@@ -214,8 +214,8 @@ public final class BoundedProcess implements AutoCloseable {
     }
 
     /**
-     * The registry whose secrets a stream cut at the cap must not end in part of. Defaults to an
-     * empty registry, which trims nothing.
+     * The registry a stream cut at the cap is trimmed against, so that it keeps no part of a secret
+     * the cut went through. Defaults to an empty registry, which trims nothing.
      */
     public Builder withSecretRegistry(SecretRegistry secrets) {
       this.secrets = Objects.requireNonNull(secrets, "secrets");
