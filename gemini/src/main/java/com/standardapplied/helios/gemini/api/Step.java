@@ -9,7 +9,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Map;
-import tools.jackson.databind.annotation.JsonDeserialize;
+import tools.jackson.databind.JsonNode;
 
 /**
  * A typed step in the stable Interactions API timeline.
@@ -36,7 +36,8 @@ import tools.jackson.databind.annotation.JsonDeserialize;
  * @param signature thought / tool-call signature for round-tripping
  * @param id call identifier (for {@code function_call}, {@code google_search_call})
  * @param name function name (for {@code function_call}, optional on {@code function_result})
- * @param arguments call arguments (for {@code function_call}, {@code google_search_call})
+ * @param arguments call arguments as the wire carries them (for {@code function_call}, {@code
+ *     google_search_call}), a JSON object when well formed
  * @param callId reference to the originating call (for {@code function_result}, {@code
  *     google_search_result})
  * @param result tool result payload (for {@code function_result}, {@code google_search_result});
@@ -57,7 +58,7 @@ public record Step(
     String signature,
     String id,
     String name,
-    @JsonDeserialize(using = ArgumentsDeserializer.class) Map<String, Object> arguments,
+    JsonNode arguments,
     @JsonProperty("call_id") String callId,
     Object result,
     @JsonProperty("is_error") Boolean errorFlag,
@@ -91,7 +92,7 @@ public record Step(
         null,
         id,
         name,
-        arguments == null ? Map.of() : arguments,
+        GeminiJson.LENIENT.valueToTree(arguments == null ? Map.of() : arguments),
         null,
         null,
         null,

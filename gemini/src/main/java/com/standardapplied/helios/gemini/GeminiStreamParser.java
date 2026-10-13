@@ -7,13 +7,11 @@ import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.SseReader;
-import com.standardapplied.helios.core.provider.ToolArguments;
 import com.standardapplied.helios.gemini.api.GeminiJson;
 import com.standardapplied.helios.gemini.api.InteractionResponse;
 import com.standardapplied.helios.gemini.api.InteractionUsage;
 import com.standardapplied.helios.gemini.api.StreamingEvent;
 import java.util.Map;
-import tools.jackson.databind.JsonNode;
 
 /**
  * Parses one Interactions API stream, one event at a time, into {@link StreamEvent}s: the step
@@ -44,9 +42,7 @@ final class GeminiStreamParser implements SseReader.Parser {
   @Override
   public StreamEvent parse(String payload) {
     try {
-      var event = GeminiJson.LENIENT.readTree(payload);
-      checkStartArguments(event);
-      return on(GeminiJson.LENIENT.treeToValue(event, StreamingEvent.class));
+      return on(GeminiJson.LENIENT.readValue(payload, StreamingEvent.class));
     } catch (ProviderException e) {
       return failed(e.getMessage(), e);
     } catch (RuntimeException e) {
@@ -57,22 +53,6 @@ final class GeminiStreamParser implements SseReader.Parser {
   @Override
   public Response<Void> partial() {
     return response(FinishReason.ERROR);
-  }
-
-  /**
-   * Reads the arguments a function call starts with as {@link ToolArguments} reads streamed ones,
-   * before deserialization reads anything but a JSON object as no arguments.
-   */
-  private static void checkStartArguments(JsonNode event) {
-    var step = event.path("step");
-    var arguments = step.get("arguments");
-    if (arguments != null && "function_call".equals(step.path("type").asString())) {
-      ToolArguments.read(
-          step.path("name").asString(),
-          arguments.isString() ? arguments.asString() : arguments.toString(),
-          GeminiJson.STRUCTURED.reader(),
-          GeminiException::new);
-    }
   }
 
   private StreamEvent on(StreamingEvent event) {
