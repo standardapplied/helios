@@ -356,7 +356,7 @@ REPL's bindings listener is gone.
 | `session.execution.ExecutionResult.secretRedactionCounts()`, `totalRedactions()`, `Builder.withSecretRedactionCounts`; `CommandGrant.InvocationResult.redactionCounts()`, `totalRedactions()`; `RedactionResult.mergeCounts` | removed; `QueryEvent.ToolResult` gains `Map<String, Integer> redactions`, the per-secret counts of the session's pass over that result. `ExecutionResult(exitCode, stdout, stderr, duration, timedOut)` |
 | `QueryEvent.ToolResult(sessionId, turnIndex, timestamp, call, result)` | `QueryEvent.ToolResult(sessionId, turnIndex, timestamp, call, result, redactions)` |
 | `CommandGrant.Builder.withSecretRegistry` optional (a private registry by default) | required: `build()` without it throws `IllegalStateException`. The tool refuses to run, starting no process, in a session whose registry is a different instance |
-| `CommandGrant.invoke(List)` and `CommandGrant.InvocationResult` public, output redacted | package-private, output raw |
+| `CommandGrant.invoke(List)`, `CommandGrant.InvocationResult` and `CommandGrant.RejectedException` public, output redacted | package-private, output raw; `InvocationResult.duration` is removed |
 | `ProcessOutcome(exitCode, stdout, stderr, timedOut, truncated, elapsed)` | `ProcessOutcome(exitCode, stdout, stderr, timedOut, stdoutTruncated, stderrTruncated, elapsed)`; `truncated()` is derived. `BoundedProcess.Builder.withSecretRegistry` names the secrets whose trailing start a cut stream drops, through the new `Redactor.trimPartialSecret` |
 | `repl.SandboxBindingsListener`, `ReplConfig.sandboxBindingsListener`, `maxBindingValueChars`, `maxBindingSnapshotChars`, `DEFAULT_MAX_BINDING_VALUE_CHARS`, `DEFAULT_MAX_BINDING_SNAPSHOT_CHARS` and their builder methods; `sandbox.ExecuteParams`; `Sandbox.execute(request, ExecuteParams)`; `sandbox.ExecutionResult.bindings()` and `Builder.withBindings`; the `captureBindings`, `maxBindingValueChars` and `maxBindingSnapshotChars` execute parameters and the reply's `bindings` | removed: the listener received unredacted output, served every session and carried no session id, and nothing registered one |
 | `sandbox.ExecutionResult.executedCode()`, `Builder.withExecutedCode`; `ReplConfig.maxExecutedCodeChars`, `DEFAULT_MAX_EXECUTED_CODE_CHARS`, `Builder.withMaxExecutedCodeChars`; `ReplSession.history()` | removed: only the listener's observers used them. `sandbox.ExecutionResult(stdout, stderr, exitCode, timedOut, duration)`; `ReplConfig(sandboxFactory, executionTimeout, maxConcurrentSessions, hostFunctions)` |
@@ -565,8 +565,9 @@ REPL's bindings listener is gone.
   every custom tool, `MemoryRead` and a `PostToolUse` `MutateResult`; the text of tool failures
   built from exception messages (`threw:`, `tool dispatch failed:`, `Tool execution failed:`);
   the messages in `TurnRetried` and terminal `SerializedError` cause chains and the reason of
-  `ErrorProviderUnavailable` (which carried the JShell startup snippet's raw output);
-  `ToolResult.data`, which the runtime's SSE stream serialised unredacted; the prefix of a secret
+  `ErrorProviderUnavailable` (which carried the JShell startup snippet's raw output); the error
+  message a model stream failed with after completing a tool call, which became the turn's
+  assistant message and so reached the next request; `ToolResult.data`, which the runtime's SSE stream serialised unredacted; the prefix of a secret
   that straddled an output cap, since output was capped before it was redacted; and the stdout,
   stderr and code a `SandboxBindingsListener` received. The session now redacts every tool result
   and every error it reports against its one registry, a cut stream drops a trailing partial

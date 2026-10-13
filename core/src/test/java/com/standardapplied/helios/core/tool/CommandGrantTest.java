@@ -7,7 +7,6 @@ package com.standardapplied.helios.core.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -447,14 +446,6 @@ class CommandGrantTest {
   void envVarNamesExposed() {
     var grant = bash().withEnv("A", "valuevalue1").withEnv("B", "valuevalue2").build();
     assertEquals(java.util.Set.of("A", "B"), grant.envVarNames());
-  }
-
-  @Test
-  void invocationResultRecordContainsDuration() throws Exception {
-    var grant = bash().build();
-    var result = grant.invoke(List.of("-c", "true"));
-    assertNotNull(result.duration());
-    assertTrue(result.duration().toNanos() > 0);
   }
 
   @Test

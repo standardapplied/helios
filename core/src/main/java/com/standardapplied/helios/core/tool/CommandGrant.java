@@ -213,8 +213,7 @@ public final class CommandGrant {
         new String(outcome.stdout(), StandardCharsets.UTF_8),
         new String(outcome.stderr(), StandardCharsets.UTF_8),
         outcome.timedOut(),
-        outcome.truncated(),
-        outcome.elapsed());
+        outcome.truncated());
   }
 
   /**
@@ -225,21 +224,15 @@ public final class CommandGrant {
    * @param stderr stderr text (UTF-8 decoded)
    * @param timedOut true if the process was killed because it exceeded the configured timeout
    * @param truncated true if stdout or stderr exceeded {@code maxOutputBytes} and was clipped
-   * @param duration wall-clock time the process spent running, including reaping
    */
   record InvocationResult(
-      int exitCode,
-      String stdout,
-      String stderr,
-      boolean timedOut,
-      boolean truncated,
-      Duration duration) {}
+      int exitCode, String stdout, String stderr, boolean timedOut, boolean truncated) {}
 
   /** Thrown when a call is rejected before subprocess start (validation or quota). */
-  public static final class RejectedException extends RuntimeException {
+  static final class RejectedException extends RuntimeException {
     private static final long serialVersionUID = 1L;
 
-    public RejectedException(String message) {
+    RejectedException(String message) {
       super(message);
     }
   }
