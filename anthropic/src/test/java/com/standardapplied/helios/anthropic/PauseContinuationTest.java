@@ -164,7 +164,6 @@ class PauseContinuationTest {
 
     assertEquals(refused.getMessage(), error.message());
     assertSame(refused, error.cause());
-    assertEquals(paused(FinishReason.ERROR), error.partial());
   }
 
   @Test
@@ -231,7 +230,9 @@ class PauseContinuationTest {
     var events =
         continuation(r -> opened[0]++ == 0 ? stream(pausedWithContent()) : resume.open(r)).stream(
             request);
-    return assertInstanceOf(StreamEvent.Error.class, events.next());
+    var error = assertInstanceOf(StreamEvent.Error.class, events.next());
+    assertEquals(paused(FinishReason.ERROR), error.partial());
+    return error;
   }
 
   static PauseContinuation continuation(ChatExchange.StreamOpener<MessagesRequest> segments) {

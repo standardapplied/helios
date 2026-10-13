@@ -29,6 +29,7 @@ class AnthropicStreamParserTest {
     assertNull(parser.parse("{\"type\":\"message_delta\"}"));
     assertNull(parser.parse("{\"type\":\"message_delta\",\"delta\":{},\"usage\":{}}"));
     assertNull(parser.parse("{\"type\":\"ping\"}"));
+    assertNull(parser.parse("{\"type\":\"future_event\",\"stop_reason\":\"end_turn\"}"));
     assertNull(parser.parse("{}"));
 
     var partial = parser.partial();
@@ -224,6 +225,9 @@ class AnthropicStreamParserTest {
   @Test
   void aServerToolInputThatIsNotAJsonObjectEndsTheStreamNamingTheTool() {
     parser.parse(
+        "{\"type\":\"content_block_delta\",\"index\":1,"
+            + "\"delta\":{\"type\":\"text_delta\",\"text\":\"I will search.\"}}");
+    parser.parse(
         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":"
             + "{\"type\":\"server_tool_use\",\"id\":\"s1\",\"name\":\"web_search\"}}");
     parser.parse(
@@ -236,6 +240,8 @@ class AnthropicStreamParserTest {
 
     assertEquals(
         "Arguments of tool call 'web_search' are not a JSON object: null", error.message());
+    assertEquals("I will search.", error.partial().content());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
   }
 
   @Test
