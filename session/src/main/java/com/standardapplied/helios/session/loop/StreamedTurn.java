@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.session.loop;
 
+import com.standardapplied.helios.core.common.Redactor;
 import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response.Usage;
@@ -36,14 +37,22 @@ record StreamedTurn(
    * The turn outcome with an explicit {@code streamAttempts} count, which surfaces on {@link
    * com.standardapplied.helios.session.ResultMessage.ErrorTransientStream} when the retry budget is
    * exhausted. The recorded throwable is carried through unchanged so downstream consumers can walk
-   * the full cause chain instead of seeing only the wrapper's message.
+   * the full cause chain instead of seeing only the wrapper's message. When the stream failed, the
+   * outcome's assistant content is the error's message redacted by {@code redactor}: it reaches the
+   * history, and so the model, when the failed stream had already completed a tool call.
    *
    * @param streamAttempts the attempt count to record; must be {@code >= 1}
+   * @param redactor the session's secret redactor, applied to the error's message
    */
-  TurnOutcome toOutcome(int streamAttempts) {
+  TurnOutcome toOutcome(int streamAttempts, Redactor redactor) {
     var assistantContent =
         error != null
-            ? (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage())
+            ? redactor
+                .redact(
+                    error.getMessage() == null
+                        ? error.getClass().getSimpleName()
+                        : error.getMessage())
+                .text()
             : content;
     return new TurnOutcome(finishReason, assistantContent, usage, metadata, error, streamAttempts);
   }

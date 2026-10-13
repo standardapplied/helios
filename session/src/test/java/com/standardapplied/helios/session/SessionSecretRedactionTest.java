@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
@@ -320,6 +321,29 @@ final class SessionSecretRedactionTest {
     var terminal = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, run.result());
     assertEquals(
         List.of("stream broke on " + MARKER, "cause " + MARKER), messages(terminal.error()));
+  }
+
+  @Test
+  void aStreamErrorAfterAToolCallReachesTheModelRedacted() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                ModelStreams.failing(
+                    new IllegalStateException("stream broke on " + SECRET),
+                    new ModelChunk.ToolUseStop(call("c1", "clean"))))
+            .withTextTurn("done")
+            .build();
+    var options =
+        withTools(registryWithSecret(), tool("clean", (args, ctx) -> ToolResult.success("clean")));
+
+    var run = run(options, model);
+
+    var assistant =
+        run.model().calls().get(1).stream()
+            .filter(m -> m.role() == Role.ASSISTANT)
+            .map(Message::content)
+            .toList();
+    assertEquals(List.of("stream broke on " + MARKER), assistant);
   }
 
   @Test
