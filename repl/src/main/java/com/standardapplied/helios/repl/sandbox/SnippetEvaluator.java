@@ -21,7 +21,7 @@ import jdk.jshell.SourceCodeAnalysis;
  * Evaluates the host's snippets in the sandbox's JShell. Each execute captures the snippet's stdout
  * and stderr by swapping {@code System.out} and {@code System.err}, runs it on a platform thread in
  * a thread group of its own so a timeout can find every thread the snippet started, and answers
- * with its output, exit code and, on request, a snapshot of its bindings.
+ * with its output, exit code and timeout flag.
  *
  * <p>Only one execute may run at a time: the standard streams are JVM-global, so concurrent
  * executes would corrupt each other's capture. A {@link Semaphore} rejects the second; the host
@@ -122,11 +122,6 @@ final class SnippetEvaluator {
   private Map<String, Object> doExecute(Map<String, Object> params) {
     var code = params.get("code") instanceof String s ? s : "";
     var timeoutMs = params.get("timeoutMs") instanceof Number n ? n.longValue() : 30000L;
-    var maxBindingValueChars =
-        params.get("maxBindingValueChars") instanceof Number bn ? bn.intValue() : 200;
-    var maxBindingSnapshotChars =
-        params.get("maxBindingSnapshotChars") instanceof Number tn ? tn.intValue() : 16 * 1024;
-    var captureBindings = params.get("captureBindings") instanceof Boolean cb ? cb : Boolean.TRUE;
 
     var stdoutCapture = new ByteArrayOutputStream();
     var stderrCapture = new ByteArrayOutputStream();
@@ -183,9 +178,6 @@ final class SnippetEvaluator {
             + timeoutCapture.toString(StandardCharsets.UTF_8));
     result.put("exitCode", exitCode.get());
     result.put("timedOut", timedOut.get());
-    if (Boolean.TRUE.equals(captureBindings) && unstoppableExecution == null) {
-      result.put("bindings", collectBindings(maxBindingValueChars, maxBindingSnapshotChars));
-    }
     return result;
   }
 
@@ -208,51 +200,6 @@ final class SnippetEvaluator {
       err.println("The timed-out snippet could not be stopped; the sandbox is shutting down");
       unstoppableExecution = Thread.currentThread();
     }
-  }
-
-  /**
-   * Snapshot every user-declared {@code var} in JShell, filtered to exclude harness-internal {@code
-   * __}-prefixed names, with each value's {@code toString} repr capped per-value and the total
-   * snapshot capped to a budget. The repr is whatever JShell's {@code varValue} returns (which is
-   * itself the runtime {@code toString}); a custom {@code toString} that throws gets its message
-   * folded into the value as {@code "<error: ...>"} rather than aborting the snapshot.
-   */
-  Map<String, String> collectBindings(int maxValueChars, int maxSnapshotChars) {
-    var snapshot = new LinkedHashMap<String, String>();
-    var totalChars = 0;
-    var snippets = jshell.variables().toList();
-    for (var snippet : snippets) {
-      var name = snippet.name();
-      if (name.startsWith("__")) {
-        continue;
-      }
-      String repr;
-      try {
-        repr = jshell.varValue(snippet);
-      } catch (Throwable e) {
-        // Catch Throwable here (not just Exception): a malicious toString() can throw
-        // StackOverflowError, OutOfMemoryError, or AssertionError. Aborting the snapshot would
-        // kill the response with no bindings map, and propagate out of doExecute into the virtual
-        // thread's uncaught handler. The "<error: …>" stub is a recoverable substitute regardless
-        // of the failure mode.
-        repr = "<error: " + e.getClass().getSimpleName() + ": " + e.getMessage() + ">";
-      }
-      if (repr == null) {
-        repr = "null";
-      }
-      if (maxValueChars > 0 && repr.length() > maxValueChars) {
-        repr = repr.substring(0, maxValueChars) + "... (len=" + repr.length() + ")";
-      }
-      if (maxSnapshotChars > 0 && totalChars + name.length() + repr.length() > maxSnapshotChars) {
-        snapshot.put(
-            "__truncated__",
-            "(snapshot exceeded " + maxSnapshotChars + " chars; remaining vars dropped)");
-        break;
-      }
-      totalChars += name.length() + repr.length();
-      snapshot.put(name, repr);
-    }
-    return snapshot;
   }
 
   private boolean evalCode(String code, AtomicBoolean timedOut, PrintStream out, PrintStream err) {

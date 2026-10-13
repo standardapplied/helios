@@ -5,13 +5,13 @@
 
 package com.standardapplied.helios.core.tool;
 
-import com.standardapplied.helios.core.common.Redactor;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.process.BinaryResolver;
 import com.standardapplied.helios.core.process.BoundedProcess;
 import com.standardapplied.helios.core.process.ProcessOutcome;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -27,9 +27,10 @@ import java.util.function.Function;
 /**
  * Host-side grant that lets an agent invoke a single CLI binary under tightly controlled
  * conditions. The grant pins the binary at build time, owns the environment (so secrets never leak
- * into the JVM-inherited environment of the child), filters argv, jails the working directory, caps
- * output and runtime, and pipes everything through a {@link Redactor} so registered secret values
- * cannot reach the model-visible string.
+ * into the JVM-inherited environment of the child), filters argv, jails the working directory, and
+ * caps output and runtime. Its env values are registered in the {@link SecretRegistry} of the
+ * sessions that run it, and the session redacts the tool's output against that registry before
+ * anything sees it.
  *
  * <h2>Security guarantees</h2>
  *
@@ -44,8 +45,10 @@ import java.util.function.Function;
  *       environment. Only secrets/PATH the operator explicitly granted are visible.
  *   <li><b>Argv pre-scan refuses secrets in argv.</b> A registered secret value appearing in any
  *       argv slot fails the call before the process starts; secrets must arrive via env-only.
- *   <li><b>Output redaction is mandatory.</b> Both stdout and stderr are scrubbed against the
- *       {@link SecretRegistry} before they leave the host process.
+ *   <li><b>Output is redacted by the session.</b> The grant must be built with the registry passed
+ *       to {@code SessionOptions.withSecretRegistry}; run in a session with any other registry, the
+ *       tool refuses without starting a process. A stream cut at the output cap loses the start of
+ *       a secret the cut went through, so the session's redaction cannot miss it.
  *   <li><b>Stdin is empty.</b> The child's stdin is closed immediately after fork.
  *   <li><b>Per-call jail by default.</b> If no working directory is set, a fresh temporary
  *       directory is created per call and removed on exit.
@@ -67,7 +70,11 @@ import java.util.function.Function;
  *         : Optional.of("'gh auth' is not allowed via this grant"))
  *     .build();
  *
- * agent.tools().add(gh.toTool());
+ * var options = SessionOptions.newBuilder()
+ *     .withModel(model)
+ *     .withSecretRegistry(registry)
+ *     .withTools(new ToolRegistry(List.of(ToolBinding.newBuilder(gh.toTool()).build())))
+ *     .build();
  * }</pre>
  */
 public final class CommandGrant {
@@ -133,7 +140,7 @@ public final class CommandGrant {
     return binaryPath;
   }
 
-  /** The {@link SecretRegistry} this grant redacts against. Shared if the operator passed one. */
+  /** The {@link SecretRegistry} the grant registered its env values in. */
   public SecretRegistry secretRegistry() {
     return secretRegistry;
   }
@@ -147,13 +154,13 @@ public final class CommandGrant {
   }
 
   /**
-   * Invoke the bound binary with {@code userArgs}. Output is redacted before being returned.
+   * Invoke the bound binary with {@code userArgs}. The output is raw; the session redacts it.
    *
    * @throws RejectedException if argv validation fails or argv contains a registered secret
    * @throws InterruptedException if the calling thread is interrupted while waiting
    * @throws IOException if the subprocess cannot be started
    */
-  public InvocationResult invoke(List<String> userArgs) throws InterruptedException, IOException {
+  InvocationResult invoke(List<String> userArgs) throws InterruptedException, IOException {
     var argsList = List.copyOf(userArgs);
     checkArgs(argsList);
     if (!concurrency.tryAcquire()) {
@@ -195,53 +202,37 @@ public final class CommandGrant {
             .withTempDirectoryPrefix("helios-grant-")
             .withTimeout(timeout)
             .withMaxOutputBytes(maxOutputBytes)
+            .withSecretRegistry(secretRegistry)
             .start()) {
       process.stdin().close();
       outcome = process.await();
     }
-    var redactor = secretRegistry.redactor();
-    var stdoutResult = redactor.redact(outcome.stdout());
-    var stderrResult = redactor.redact(outcome.stderr());
     return new InvocationResult(
         outcome.exitCode(),
-        stdoutResult.text(),
-        stderrResult.text(),
+        new String(outcome.stdout(), StandardCharsets.UTF_8),
+        new String(outcome.stderr(), StandardCharsets.UTF_8),
         outcome.timedOut(),
         outcome.truncated(),
-        outcome.elapsed(),
-        stdoutResult.mergeCounts(stderrResult));
+        outcome.elapsed());
   }
 
   /**
-   * Outcome of a single subprocess invocation. Strings have already been redacted against the
-   * {@link SecretRegistry}.
+   * Outcome of a single subprocess invocation. The text is raw; the session redacts it.
    *
    * @param exitCode the process exit code, or {@code -1} on timeout
-   * @param stdout redacted stdout text (UTF-8 decoded)
-   * @param stderr redacted stderr text (UTF-8 decoded)
+   * @param stdout stdout text (UTF-8 decoded)
+   * @param stderr stderr text (UTF-8 decoded)
    * @param timedOut true if the process was killed because it exceeded the configured timeout
    * @param truncated true if stdout or stderr exceeded {@code maxOutputBytes} and was clipped
    * @param duration wall-clock time the process spent running, including reaping
-   * @param redactionCounts per-secret-name redaction counts across both streams
    */
-  public record InvocationResult(
+  record InvocationResult(
       int exitCode,
       String stdout,
       String stderr,
       boolean timedOut,
       boolean truncated,
-      Duration duration,
-      Map<String, Integer> redactionCounts) {
-
-    /** Total redactions across stdout and stderr. */
-    public int totalRedactions() {
-      var total = 0;
-      for (var c : redactionCounts.values()) {
-        total += c;
-      }
-      return total;
-    }
-  }
+      Duration duration) {}
 
   /** Thrown when a call is rejected before subprocess start (validation or quota). */
   public static final class RejectedException extends RuntimeException {
@@ -285,8 +276,7 @@ public final class CommandGrant {
 
     /**
      * Add an environment variable for the child process. The value is also registered in the {@link
-     * SecretRegistry} under the same name, so it will be redacted from any model-visible output
-     * produced by this grant or any other tool sharing the same registry.
+     * SecretRegistry} under the same name, so the session redacts it from every tool's output.
      */
     public Builder withEnv(String name, String value) {
       if (Strings.isBlank(name)) {
@@ -352,8 +342,9 @@ public final class CommandGrant {
     }
 
     /**
-     * Use the supplied {@link SecretRegistry} so this grant participates in cross-tool redaction.
-     * If not called, the grant gets a private registry that other tools will not see.
+     * The {@link SecretRegistry} of the sessions that will run this grant, the one passed to {@code
+     * SessionOptions.withSecretRegistry}. Required: {@link #build()} registers the env values in
+     * it, and the tool refuses to run in a session with a different registry.
      */
     public Builder withSecretRegistry(SecretRegistry registry) {
       this.secretRegistry = registry;
@@ -369,13 +360,24 @@ public final class CommandGrant {
       return this;
     }
 
+    /**
+     * Resolve the binary, register the env values in the registry and build the grant.
+     *
+     * @throws IllegalStateException if {@link #withSecretRegistry(SecretRegistry)} was not called
+     */
     public CommandGrant build() {
-      var resolved = BinaryResolver.resolve(spec, System.getenv("PATH"));
-      var registry = secretRegistry != null ? secretRegistry : new SecretRegistry();
-      for (var entry : env.entrySet()) {
-        registry.register(entry.getKey(), entry.getValue());
+      if (secretRegistry == null) {
+        throw new IllegalStateException(
+            "CommandGrant "
+                + spec
+                + " needs withSecretRegistry(registry): pass the SecretRegistry of the sessions"
+                + " that will run it");
       }
-      return new CommandGrant(this, resolved, registry);
+      var resolved = BinaryResolver.resolve(spec, System.getenv("PATH"));
+      for (var entry : env.entrySet()) {
+        secretRegistry.register(entry.getKey(), entry.getValue());
+      }
+      return new CommandGrant(this, resolved, secretRegistry);
     }
   }
 

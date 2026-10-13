@@ -12,12 +12,11 @@ import java.util.Objects;
 /**
  * Result of a tool execution.
  *
- * <p>A tool can return text ({@link #output}), optional structured data ({@link #data}, free-form
- * for the deployer), and optional multimodal attachments ({@link #attachments}) when the tool
- * surfaced a file the model should consume natively rather than as text. Use the attachments
- * channel for image / PDF / audio outputs — for example a Read tool that returned a PNG should pack
- * the bytes into an {@link InlineFile} so the provider's vision channel sees the image rather than
- * the Base64 string.
+ * <p>A tool returns text ({@link #output}) and optional multimodal attachments ({@link
+ * #attachments}) when it surfaced a file the model should consume natively rather than as text. Use
+ * the attachments channel for image / PDF / audio outputs — for example a Read tool that returned a
+ * PNG should pack the bytes into an {@link InlineFile} so the provider's vision channel sees the
+ * image rather than the Base64 string.
  *
  * <p>The agent loop splices any returned {@link #attachments} into a synthetic follow-up user
  * message after the tool-result text reaches the model. That keeps wire encoding uniform across
@@ -26,12 +25,10 @@ import java.util.Objects;
  *
  * @param success whether the execution succeeded
  * @param output the output (result text or error message); non-null, may be empty
- * @param data optional structured data from the tool; free-form, may be null
  * @param attachments multimodal files to surface to the model alongside {@link #output}; non-null
  *     (use empty list when none), defensively copied
  */
-public record ToolResult(
-    boolean success, String output, Object data, List<InlineFile> attachments) {
+public record ToolResult(boolean success, String output, List<InlineFile> attachments) {
 
   /**
    * Canonical constructor. Normalises {@code attachments} to an immutable copy and rejects null —
@@ -45,12 +42,7 @@ public record ToolResult(
 
   /** Successful result with text only. */
   public static ToolResult success(String output) {
-    return new ToolResult(true, output, null, List.of());
-  }
-
-  /** Successful result with text plus deployer-supplied structured data. */
-  public static ToolResult success(String output, Object data) {
-    return new ToolResult(true, output, data, List.of());
+    return new ToolResult(true, output, List.of());
   }
 
   /**
@@ -63,12 +55,12 @@ public record ToolResult(
    * @return a successful {@link ToolResult} carrying both
    */
   public static ToolResult successWithAttachments(String output, List<InlineFile> attachments) {
-    return new ToolResult(true, output, null, attachments);
+    return new ToolResult(true, output, attachments);
   }
 
   /** Failed result with text error. */
   public static ToolResult failure(String error) {
-    return new ToolResult(false, error, null, List.of());
+    return new ToolResult(false, error, List.of());
   }
 
   /** Failed result with cause; appends {@code cause.getMessage()} when present. */
@@ -77,7 +69,7 @@ public record ToolResult(
     if (cause != null && cause.getMessage() != null) {
       message = error + ": " + cause.getMessage();
     }
-    return new ToolResult(false, message, null, List.of());
+    return new ToolResult(false, message, List.of());
   }
 
   /**

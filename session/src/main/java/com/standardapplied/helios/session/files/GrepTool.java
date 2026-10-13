@@ -4,7 +4,6 @@
  */
 package com.standardapplied.helios.session.files;
 
-import com.standardapplied.helios.core.common.Redactor;
 import com.standardapplied.helios.core.common.Result;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.tool.ParameterType;
@@ -68,35 +67,14 @@ public final class GrepTool {
   private GrepTool() {}
 
   /**
-   * Build a tool binding bound to the given workspace, with no secret redaction. Equivalent to
-   * {@link #binding(WorkspaceRoot, Redactor) binding(workspace, null)}.
+   * Build a tool binding bound to the given workspace. The session redacts the matched lines the
+   * tool returns against its secret registry.
    *
    * @param workspace the path-jail workspace; non-null
    * @return a ready-to-register binding
    * @throws NullPointerException if {@code workspace} is null
    */
   public static ToolBinding binding(WorkspaceRoot workspace) {
-    return binding(workspace, null);
-  }
-
-  /**
-   * Build a tool binding bound to the given workspace, piping the matched line content through the
-   * supplied {@link Redactor} before returning it to the model. Use this overload when the searched
-   * tree may contain registered secrets (the "curated knowledge corpus" pattern) — pass {@code
-   * registry.redactor()} where {@code registry} is the same {@link
-   * com.standardapplied.helios.core.common.SecretRegistry} you handed to other tools, so a token
-   * written by one tool is scrubbed when grep returns a line containing it.
-   *
-   * <p>Redaction is applied to the {@code content} portion of each {@code path:line:content} match
-   * only. Path prefixes are not redacted — they are structural information the model needs to
-   * navigate, not secret material.
-   *
-   * @param workspace the path-jail workspace; non-null
-   * @param redactor applied to each match's content; null = no redaction
-   * @return a ready-to-register binding
-   * @throws NullPointerException if {@code workspace} is null
-   */
-  public static ToolBinding binding(WorkspaceRoot workspace, Redactor redactor) {
     Objects.requireNonNull(workspace, "workspace must not be null");
     var tool =
         Tool.newBuilder()
@@ -129,7 +107,7 @@ public final class GrepTool {
                         .withRequired(false)
                         .build()))
             .withIdempotent(true)
-            .withExecutor((args, ctx) -> execute(ctx, workspace, redactor, args))
+            .withExecutor((args, ctx) -> execute(ctx, workspace, args))
             .build();
     return ToolBinding.newBuilder(tool)
         .withCategory(ToolCategory.SEARCH)
@@ -138,15 +116,14 @@ public final class GrepTool {
   }
 
   private static ToolResult execute(
-      ToolContext ctx, WorkspaceRoot workspace, Redactor redactor, Map<String, Object> args) {
+      ToolContext ctx, WorkspaceRoot workspace, Map<String, Object> args) {
     return switch (GrepRequest.parse(args)) {
       case Result.Failure<GrepRequest> failure -> ToolResult.failure(failure.error());
-      case Result.Success<GrepRequest> request -> grep(ctx, workspace, redactor, request.value());
+      case Result.Success<GrepRequest> request -> grep(ctx, workspace, request.value());
     };
   }
 
-  private static ToolResult grep(
-      ToolContext ctx, WorkspaceRoot workspace, Redactor redactor, GrepRequest request) {
+  private static ToolResult grep(ToolContext ctx, WorkspaceRoot workspace, GrepRequest request) {
     try {
       var root = workspace.resolveSafe(request.path());
       if (!workspace.attributes(root).isDirectory()) {
@@ -165,7 +142,7 @@ public final class GrepTool {
                   include.matches(file.getFileName())
                       ? searchFile(workspace, file, request.regex(), remaining, hits)
                       : 0);
-      return ToolResult.success(format(hits, count >= MAX_MATCHES, redactor));
+      return ToolResult.success(format(hits, count >= MAX_MATCHES));
     } catch (WorkspaceRoot.WorkspaceEscapeException e) {
       return ToolResult.failure("Grep: " + e.getMessage());
     } catch (IllegalArgumentException e) {
@@ -209,11 +186,10 @@ public final class GrepTool {
     return found;
   }
 
-  private static String format(List<Hit> hits, boolean truncated, Redactor redactor) {
+  private static String format(List<Hit> hits, boolean truncated) {
     var out = new StringBuilder();
     for (var hit : hits) {
-      var line = redactor == null ? hit.line() : redactor.redact(hit.line()).text();
-      out.append(hit.path()).append(':').append(hit.lineNumber()).append(':').append(line);
+      out.append(hit.path()).append(':').append(hit.lineNumber()).append(':').append(hit.line());
       out.append('\n');
     }
     if (truncated) {

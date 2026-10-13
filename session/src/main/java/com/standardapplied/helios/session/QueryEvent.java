@@ -396,26 +396,31 @@ public sealed interface QueryEvent
    * A tool call completed. Carries the originating {@link ToolCall} so subscribers can correlate
    * dispatch and result without joining across events, plus the {@link
    * com.standardapplied.helios.core.tool.ToolResult ToolResult} the tool produced (success or
-   * failure).
+   * failure), its output already redacted against the session's secret registry.
    *
    * @param sessionId the session id
    * @param turnIndex the turn index in which the call ran
    * @param timestamp the event timestamp
    * @param call the originating call; non-null
-   * @param result the tool result; non-null
+   * @param result the tool result, its output redacted; non-null
+   * @param redactions per secret name, how many occurrences the session's redaction of this result
+   *     replaced, in encounter order; empty when none. Non-null, with no null key or value; copied
    */
   record ToolResult(
       String sessionId,
       long turnIndex,
       Instant timestamp,
       ToolCall call,
-      com.standardapplied.helios.core.tool.ToolResult result)
+      com.standardapplied.helios.core.tool.ToolResult result,
+      Map<String, Integer> redactions)
       implements QueryEvent {
 
     public ToolResult {
       validateCommon(sessionId, turnIndex, timestamp);
       Objects.requireNonNull(call, "call must not be null");
       Objects.requireNonNull(result, "result must not be null");
+      Objects.requireNonNull(redactions, "redactions must not be null");
+      redactions = OrderedMaps.copyOf(redactions);
     }
   }
 

@@ -122,11 +122,11 @@ public final class AgentLoop {
     }
   }
 
-  private static ResultMessage crashTerminate(SessionState state, Exception e) {
+  private ResultMessage crashTerminate(SessionState state, Exception e) {
     var failure =
         new ResultMessage.ErrorDuringExecution(
             state.sessionId(),
-            SerializedError.of(e),
+            SerializedError.of(e).redactedBy(collaborators.secrets().redactor()),
             state.totals().usage(),
             state.totals().cost(),
             state.elapsed());

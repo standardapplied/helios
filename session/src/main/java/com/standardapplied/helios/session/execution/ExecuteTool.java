@@ -202,7 +202,7 @@ public final class ExecuteTool {
     } catch (CancellationException e) {
       return ToolResult.failure("Execute: cancelled");
     }
-    return ToolResult.success(format(request.runtime(), result), result);
+    return ToolResult.success(format(request.runtime(), result));
   }
 
   private static String format(Runtime runtime, ExecutionResult result) {

@@ -14,6 +14,11 @@ import java.util.List;
  * Runs the tool calls of one model turn serially: fires {@code PreToolUse}, dispatches through
  * {@link ToolDispatch}, fires {@code PostToolUse}, and appends each result to the history.
  *
+ * <p>Each result's output, whether a tool produced it or the round substituted it, is redacted once
+ * against the session's secret registry before its {@link QueryEvent.ToolResult} is emitted, so the
+ * event, {@code PostToolUse} hooks and the history all see the redacted text. A {@code
+ * MutateResult} output is new text and is redacted the same way.
+ *
  * <ul>
  *   <li><b>PreToolUse</b>: {@code Continue} dispatches; {@code MutateArgs} emits {@link
  *       QueryEvent.ToolMutated} and dispatches with the replacement args; {@code Block} emits
@@ -78,15 +83,24 @@ final class ToolRound {
         planned.substitute() == null
             ? dispatch(state, planned.call(), limits)
             : planned.substitute();
+    return afterTool(state, planned.call(), emitRedacted(state, planned.call(), result));
+  }
+
+  /** Redact {@code raw}'s output, emit its {@link QueryEvent.ToolResult}, return it redacted. */
+  private ToolResult emitRedacted(SessionState state, ToolCall call, ToolResult raw) {
+    var redaction = collaborators.secrets().redactor().redact(raw.output());
+    var output = redaction.counts().isEmpty() ? raw.output() : redaction.text();
+    var result = new ToolResult(raw.success(), output, raw.attachments());
     emitter.emit(
         state,
         new QueryEvent.ToolResult(
             state.sessionId(),
             state.currentTurnIndex(),
             collaborators.clock().instant(),
-            planned.call(),
-            result));
-    return afterTool(state, planned.call(), result);
+            call,
+            result,
+            redaction.counts()));
+    return result;
   }
 
   private ToolCall emitToolUse(SessionState state, ToolCall call) {
@@ -163,16 +177,7 @@ final class ToolRound {
   private ToolResult mutateResult(
       SessionState state, ToolCall call, String hookName, HookOutcome.MutateResult mutate) {
     emitter.emitHookFired(state, hookName, POST_TOOL_USE, "MutateResult");
-    var mutated = ToolResult.success(mutate.output());
-    emitter.emit(
-        state,
-        new QueryEvent.ToolResult(
-            state.sessionId(),
-            state.currentTurnIndex(),
-            collaborators.clock().instant(),
-            call,
-            mutated));
-    return mutated;
+    return emitRedacted(state, call, ToolResult.success(mutate.output()));
   }
 
   /**

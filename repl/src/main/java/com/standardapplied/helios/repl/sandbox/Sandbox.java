@@ -12,25 +12,12 @@ package com.standardapplied.helios.repl.sandbox;
 public interface Sandbox extends AutoCloseable {
 
   /**
-   * Execute code in the sandbox using {@link ExecuteParams#DEFAULT default} per-call params.
+   * Execute code in the sandbox.
    *
    * @param request the execution request
    * @return the execution result
    */
   ExecutionResult execute(ExecutionRequest request);
-
-  /**
-   * Execute code with per-call param overrides. Default implementation ignores {@code params} and
-   * delegates to {@link #execute(ExecutionRequest)}; sandboxes that support binding snapshots or
-   * other per-call telemetry override this.
-   *
-   * @param request the execution request
-   * @param params per-call overrides (binding-snapshot caps, etc.)
-   * @return the execution result
-   */
-  default ExecutionResult execute(ExecutionRequest request, ExecuteParams params) {
-    return execute(request);
-  }
 
   /**
    * Whether the sandbox process is still alive and ready to accept requests.
