@@ -8,11 +8,12 @@ import java.io.Reader;
 
 /**
  * The server-sent-events wire format of one response body: its lines, each ending with CR, LF or
- * CRLF, and the data of each event they frame. A line {@code data:value} or {@code data: value}
- * appends {@code value} to the event's data, several {@code data} lines joining with a newline; a
- * blank line ends the event; comment lines and every other field are ignored; an event the body
- * cuts off before its blank line is dropped. A line and an event's data are each bounded by {@link
- * #MAX_FRAME_CHARS}; past the bound reading fails with the provider's exception.
+ * CRLF, and the data of each event they frame. One byte order mark at the start of the body is
+ * dropped. A line {@code data:value} or {@code data: value} appends {@code value} to the event's
+ * data, several {@code data} lines joining with a newline; a blank line ends the event; comment
+ * lines and every other field are ignored; an event the body cuts off before its blank line is
+ * dropped. A line and an event's data are each bounded by {@link #MAX_FRAME_CHARS}; past the bound
+ * reading fails with the provider's exception.
  */
 final class SseFrames {
 
@@ -30,6 +31,7 @@ final class SseFrames {
   private static final String DATA_FIELD = "data";
   private static final String DONE_MARKER = "[DONE]";
   private static final int BUFFER_CHARS = 8192;
+  private static final char BYTE_ORDER_MARK = '\uFEFF';
 
   private final Reader reader;
   private final ProviderFailure failure;
@@ -37,6 +39,7 @@ final class SseFrames {
   private int position;
   private int limit;
   private boolean skipLineFeed;
+  private boolean atBodyStart = true;
 
   /** Frames the text {@code reader} decodes; an oversized frame fails with {@code failure}. */
   SseFrames(Reader reader, ProviderFailure failure) {
@@ -73,6 +76,10 @@ final class SseFrames {
    * @throws ProviderException if the line exceeds {@link #MAX_FRAME_CHARS}
    */
   String line() throws IOException {
+    if (atBodyStart) {
+      atBodyStart = false;
+      skipByteOrderMark();
+    }
     var line = new StringBuilder();
     while (true) {
       if (position == limit && !fill()) {
@@ -117,6 +124,12 @@ final class SseFrames {
     }
     var value = line.substring(DATA_FIELD.length() + 1);
     return value.startsWith(" ") ? value.substring(1) : value;
+  }
+
+  private void skipByteOrderMark() throws IOException {
+    if (fill() && buffer[0] == BYTE_ORDER_MARK) {
+      position = 1;
+    }
   }
 
   private boolean fill() throws IOException {
