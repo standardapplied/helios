@@ -179,6 +179,32 @@ class GeminiStreamParserTest {
     assertNull(error.cause());
   }
 
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(
+      strings = {
+        "{\"event_type\":\"interaction.status_update\",\"interaction_id\":\"int_xyz\","
+            + "\"status\":\"in_progress\",\"usage\":{\"total_input_tokens\":2000000000,"
+            + "\"total_output_tokens\":2000000000}}",
+        "{\"event_type\":\"interaction.completed\",\"interaction\":{\"id\":\"int_xyz\","
+            + "\"status\":\"completed\",\"usage\":{\"total_input_tokens\":2000000000,"
+            + "\"total_output_tokens\":2000000000}}}"
+      })
+  void usageOverflowingAnIntEndsTheStreamKeepingTheUsageReportedBeforeIt(String overflowing) {
+    var checkpoint =
+        "data: {\"event_type\":\"interaction.status_update\",\"interaction_id\":\"int_xyz\","
+            + "\"status\":\"in_progress\",\"usage\":{\"total_input_tokens\":7,"
+            + "\"total_output_tokens\":3}}\n\n";
+    var events =
+        drain(checkpoint + MODEL_OUTPUT_START + HELLO_DELTA + "data: " + overflowing + "\n\n");
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals("Failed to parse stream event", error.message());
+    assertInstanceOf(ArithmeticException.class, error.cause());
+    assertEquals("Hello", error.partial().content());
+    assertEquals(7, error.partial().usage().inputTokens());
+    assertEquals(3, error.partial().usage().outputTokens());
+  }
+
   @Test
   void usageWithNullTokenFieldsCoercesToZero() {
     var envelope =

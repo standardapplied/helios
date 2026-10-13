@@ -27,7 +27,7 @@ final class GeminiStreamParser implements SseReader.Parser {
   private final boolean propagateInteractionId;
   private final String apiVersion;
   private final StreamedSteps steps = new StreamedSteps();
-  private InteractionUsage usage;
+  private Response.Usage usage;
   private String interactionId;
 
   /**
@@ -120,7 +120,7 @@ final class GeminiStreamParser implements SseReader.Parser {
       interactionId = id;
     }
     if (reported != null) {
-      usage = reported;
+      usage = GeminiResponseAssembler.usage(reported);
     }
     return null;
   }
