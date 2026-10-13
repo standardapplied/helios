@@ -177,7 +177,7 @@ class AcceptedTest {
   void aStreamWithAnErrorEventFails() {
     var stream =
         events(
-            new StreamEvent.Error("overloaded", null),
+            new StreamEvent.Error("overloaded", null, reply("", FinishReason.ERROR)),
             new StreamEvent.Done(reply("", FinishReason.STOP)));
 
     assertThrows(AssertionError.class, () -> Accepted.stream(stream));

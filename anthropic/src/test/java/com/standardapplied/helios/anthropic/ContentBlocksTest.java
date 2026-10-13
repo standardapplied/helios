@@ -4,8 +4,8 @@ package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.anthropic.api.ContentBlock;
@@ -69,7 +69,7 @@ class ContentBlocksTest {
   }
 
   @Test
-  void toolInputThatIsNotAJsonObjectReachesTheModelRaw() {
+  void toolInputThatIsNotAJsonObjectFailsNamingTheTool() {
     blocks.start(
         0,
         new ContentBlock(
@@ -77,9 +77,11 @@ class ContentBlocksTest {
         "{}");
     blocks.delta(0, delta("input_json_delta", null, "{not json", null, null, null));
 
-    var call = assertInstanceOf(StreamEvent.ToolCallComplete.class, blocks.stop(0)).toolCall();
+    var thrown = assertThrows(AnthropicException.class, () -> blocks.stop(0));
 
-    assertEquals(Map.of("_raw", "{not json"), call.arguments());
+    assertTrue(
+        thrown.getMessage().startsWith("Arguments of tool call 'search' are not a JSON object: "));
+    assertTrue(blocks.toolUses().calls().isEmpty());
   }
 
   @Test
@@ -126,10 +128,10 @@ class ContentBlocksTest {
   }
 
   @Test
-  void aWholeBlockThatCannotBeReadIsLeftOutOfTheEcho() {
-    blocks.start(0, block("web_fetch_tool_result"), "{not json");
+  void aWholeBlockThatCannotBeReadFailsInsteadOfLeavingAGapInTheEcho() {
+    assertThrows(
+        RuntimeException.class, () -> blocks.start(0, block("web_fetch_tool_result"), "{not json"));
 
-    assertTrue(blocks.verbatim().seen());
     assertTrue(blocks.verbatim().indices().isEmpty());
   }
 

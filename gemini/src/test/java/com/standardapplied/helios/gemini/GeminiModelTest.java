@@ -242,7 +242,7 @@ class GeminiModelTest extends BoundedErrorBodyContract {
     assertEquals("function_call", converted.steps().get(1).type());
     assertEquals("c1", converted.steps().get(1).id());
     assertEquals("search", converted.steps().get(1).name());
-    assertEquals(Map.of("q", "test"), converted.steps().get(1).arguments());
+    assertEquals("{\"q\":\"test\"}", converted.steps().get(1).arguments().toString());
     assertEquals("function_result", converted.steps().get(2).type());
     assertEquals("c1", converted.steps().get(2).callId());
     assertEquals("result1", converted.steps().get(2).result());

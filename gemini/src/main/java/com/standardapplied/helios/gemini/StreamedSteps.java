@@ -4,11 +4,13 @@ package com.standardapplied.helios.gemini;
 
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.provider.ToolArguments;
 import com.standardapplied.helios.gemini.api.ContentItem;
 import com.standardapplied.helios.gemini.api.GeminiJson;
 import com.standardapplied.helios.gemini.api.Step;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * The steps of a streamed interaction, by index, from {@code step.start} through {@code step.delta}
@@ -30,31 +32,35 @@ final class StreamedSteps {
     }
 
     /**
-     * The streamed arguments, or the arguments the step started with when none streamed or they are
-     * not a JSON object.
+     * The streamed arguments, or the arguments the step started with when none streamed.
+     *
+     * @throws GeminiException if the streamed arguments are not a JSON object
      */
-    @SuppressWarnings("unchecked")
     Map<String, Object> arguments() {
       if (!streamedArguments.isEmpty()) {
-        try {
-          var parsed =
-              (Map<String, Object>)
-                  GeminiJson.LENIENT.readValue(streamedArguments.toString(), Map.class);
-          if (parsed != null) {
-            return parsed;
-          }
-        } catch (RuntimeException notAnObject) {
-          // Fall back to the arguments the step started with.
-        }
+        return read(streamedArguments.toString());
       }
       return startArguments != null ? startArguments : Map.of();
+    }
+
+    /**
+     * {@code json} as the arguments of this call.
+     *
+     * @throws GeminiException if {@code json} is not a JSON object
+     */
+    Map<String, Object> read(String json) {
+      return ToolArguments.read(name, json, GeminiJson.STRUCTURED.reader(), GeminiException::new);
     }
   }
 
   private final Map<Integer, StepState> steps = new LinkedHashMap<>();
   private final StepOutput output = new StepOutput();
 
-  /** A {@code step.start}. */
+  /**
+   * A {@code step.start}.
+   *
+   * @throws GeminiException if a function call starts with arguments that are not a JSON object
+   */
   StreamEvent start(Integer index, Step step) {
     if (index == null || step == null) {
       return null;
@@ -63,12 +69,13 @@ final class StreamedSteps {
     state.type = step.type();
     state.name = step.name();
     state.id = step.id();
-    state.startArguments = step.arguments();
+    state.startArguments =
+        state.isCall() && step.arguments() != null ? state.read(step.arguments().toString()) : null;
     if (step.hasTypeThought()) {
       thought(step);
       return null;
     }
-    return step.hasTypeModelOutput() && step.hasContent() ? initialOutput(step) : null;
+    return step.hasTypeModelOutput() && step.hasContent() ? output.initialText(step) : null;
   }
 
   /** A {@code step.delta} carrying {@code argumentsDelta} or {@code delta}. */
@@ -102,7 +109,7 @@ final class StreamedSteps {
 
   /** A {@code step.stop}: the tool call of a function call, or a completed thought. */
   StreamEvent stop(Integer index) {
-    var state = index == null ? null : steps.get(index);
+    var state = index == null ? null : steps.remove(index);
     if (state == null) {
       return null;
     }
@@ -117,25 +124,20 @@ final class StreamedSteps {
     return "thought".equals(state.type) ? output.thinkingComplete() : null;
   }
 
-  StepOutput.Result result() {
-    return output.result();
+  /**
+   * The name of a function call whose step is still open, {@code <unnamed>} when it has none, or
+   * {@code null} when none is open.
+   */
+  String openCall() {
+    return steps.values().stream()
+        .filter(StepState::isCall)
+        .map(state -> Objects.requireNonNullElse(state.name, "<unnamed>"))
+        .findFirst()
+        .orElse(null);
   }
 
-  /**
-   * The text a {@code model_output} step starts with, as one delta, its annotations harvested along
-   * the way.
-   */
-  private StreamEvent initialOutput(Step step) {
-    var initialText = new StringBuilder();
-    for (var item : step.content()) {
-      if (item.hasTypeText() && item.text() != null && !item.text().isEmpty()) {
-        initialText.append(item.text());
-      }
-      if (item.hasAnnotations()) {
-        output.cite(item);
-      }
-    }
-    return initialText.isEmpty() ? null : output.text(initialText.toString());
+  StepOutput.Result result() {
+    return output.result();
   }
 
   private void thought(Step step) {

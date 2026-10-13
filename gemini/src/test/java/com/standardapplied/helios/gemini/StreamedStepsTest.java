@@ -32,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The steps of a Gemini stream, from {@code step.start} through {@code step.delta} to {@code
@@ -346,28 +347,82 @@ class StreamedStepsTest {
     assertEquals(FinishReason.STOP, done.response().finishReason());
   }
 
-  static Stream<Named<String>> argumentsDeltasAfterAStartWithArguments() {
-    return Stream.of(
-        named("functionCallWithEmbeddedArgumentsOnStartFallsBack", ""),
-        named(
-            "functionCallWithMalformedArgsDeltaFallsBackToStartArgs",
-            stepArgumentsDelta(1, "{not json")),
-        named(
-            "argumentsDeltaParsingNullPayloadFallsBackToStartArgs", stepArgumentsDelta(1, "null")));
-  }
-
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("argumentsDeltasAfterAStartWithArguments")
-  void functionCallFallsBackToTheArgumentsOnItsStart(String argumentsDeltas) {
+  @Test
+  void aFunctionCallWithoutStreamedArgumentsTakesTheArgumentsOnItsStart() {
     var events =
-        drain(
-            stepStart(1, GET_WEATHER_WITH_ARGUMENTS)
-                + argumentsDeltas
-                + stepStop(1)
-                + INTERACTION_COMPLETED);
+        drain(stepStart(1, GET_WEATHER_WITH_ARGUMENTS) + stepStop(1) + INTERACTION_COMPLETED);
 
     var tc = ((StreamEvent.ToolCallComplete) events.get(0)).toolCall();
     assertEquals(Map.of("city", "NYC"), tc.arguments());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "[]",
+        "42",
+        "true",
+        "null",
+        "\"[1]\"",
+        "\"{not json\"",
+        "\"{\\\"city\\\":\\\"NYC\\\"}\""
+      })
+  void startArgumentsThatAreNotAJsonObjectEndTheStreamNamingTheTool(String arguments) {
+    var events =
+        drain(
+            stepStart(
+                    1,
+                    "{\"type\":\"function_call\",\"id\":\"call_1\",\"name\":\"delete\","
+                        + "\"arguments\":"
+                        + arguments
+                        + "}")
+                + stepStop(1)
+                + INTERACTION_COMPLETED);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertTrue(
+        error.message().startsWith("Arguments of tool call 'delete' are not a JSON object: "),
+        error.message());
+    assertInstanceOf(GeminiException.class, error.cause());
+    assertEquals(List.of(), error.partial().toolCalls());
+    assertEquals(1, events.size());
+  }
+
+  @Test
+  void theArgumentsOfAStepThatIsNotAFunctionCallAreNotReadAsToolArguments() {
+    var events =
+        drain(
+            stepStart(0, "{\"type\":\"google_search_call\",\"id\":\"g1\",\"arguments\":[\"q\"]}")
+                + stepStop(0)
+                + INTERACTION_COMPLETED);
+
+    assertEquals(1, events.size());
+    assertInstanceOf(StreamEvent.Done.class, events.getFirst());
+  }
+
+  static Stream<Named<String>> streamedArgumentsThatAreNotAnObject() {
+    return Stream.of(
+        named("malformed", stepArgumentsDelta(1, "{not json")),
+        named("jsonNull", stepArgumentsDelta(1, "null")));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("streamedArgumentsThatAreNotAnObject")
+  void streamedArgumentsThatAreNotAJsonObjectEndTheStreamNamingTheTool(String argumentsDelta) {
+    var events =
+        drain(
+            stepStart(1, GET_WEATHER_WITH_ARGUMENTS)
+                + argumentsDelta
+                + stepStop(1)
+                + INTERACTION_COMPLETED);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertTrue(
+        error.message().startsWith("Arguments of tool call 'get_weather' are not a JSON object: "),
+        error.message());
+    assertInstanceOf(GeminiException.class, error.cause());
+    assertEquals(List.of(), error.partial().toolCalls());
+    assertEquals(1, events.size());
   }
 
   static Stream<Named<String>> thoughtsWithAnEmptySignature() {

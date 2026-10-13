@@ -7,6 +7,7 @@ import com.standardapplied.helios.anthropic.api.ContentBlock;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -41,18 +42,14 @@ final class VerbatimBlocks implements RawContentEcho.Source {
   /**
    * A whole block at {@code index}, taken from the raw event {@code payload}: the typed {@link
    * ContentBlock} drops fields it does not model, such as {@code encrypted_content} and a redacted
-   * block's {@code data}. An unreadable block is left out, so a later echo fails loudly at the API
-   * instead of sending corrupted content.
+   * block's {@code data}. The payload has already been read as a {@code content_block_start}, so it
+   * holds the block as a JSON object.
    */
   @SuppressWarnings("unchecked")
   void capture(int index, String payload) {
     seen = true;
-    try {
-      var event = (Map<String, Object>) AnthropicJson.LENIENT.readValue(payload, Map.class);
-      blocks.put(index, (Map<String, Object>) event.get("content_block"));
-    } catch (RuntimeException unreadable) {
-      return;
-    }
+    var event = (Map<String, Object>) AnthropicJson.LENIENT.readValue(payload, Map.class);
+    blocks.put(index, (Map<String, Object>) event.get("content_block"));
   }
 
   /** Input JSON for the server tool use at {@code index}; whether there is one to take it. */
@@ -71,8 +68,21 @@ final class VerbatimBlocks implements RawContentEcho.Source {
     if (input == null) {
       return false;
     }
-    blocks.get(index).put("input", ToolUseBlocks.arguments(input.toString()));
+    var block = blocks.get(index);
+    block.put("input", ToolUseBlocks.arguments((String) block.get("name"), input.toString()));
     return true;
+  }
+
+  /**
+   * The name of a server tool use still open, {@code <unnamed>} when it has none, or {@code null}
+   * when none is open.
+   */
+  String open() {
+    return serverToolInputs.isEmpty()
+        ? null
+        : Objects.requireNonNullElse(
+            (String) blocks.get(serverToolInputs.keySet().iterator().next()).get("name"),
+            "<unnamed>");
   }
 
   /** Whether the turn held a verbatim block. */

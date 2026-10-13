@@ -380,6 +380,34 @@ drift.
 | JSONL `ToolCallCompleted`: `success` | `success` plus `"outcome":"<kind>"` |
 | `ConsoleEventPrinter`: `[result] <tool> FAILED: <output>` | `[result] <tool> <kind>: <output>` |
 
+**A provider stream succeeds only at its provider's terminal event.** A stream that ended without
+one used to complete with finish reason `STOP`: a dropped connection after some text was a
+finished answer. Now every stream ends in exactly one `Done` or `Error`. `Done` comes only from
+Anthropic's `message_stop` (with a `stop_reason` Helios knows), OpenAI's `response.completed`
+(status `completed`) or `response.incomplete` (status `incomplete`), and Gemini's `interaction.completed` (status
+`completed`, `requires_action` or `incomplete`). Anything else ends in an `Error`, which carries what
+the stream produced before it failed.
+
+| 2.x | 3.0 |
+|---|---|
+| `StreamEvent.Error(message, cause)`, `Error(message)` | `Error(message, cause, partial)`: `partial` is the `Response` so far (text, completed tool calls, usage, thinking, citations, metadata), finish reason `ERROR` |
+| A body that ended without the terminal event completed with `STOP` | `Error` "Stream ended before its terminal event", cause `EOFException`; the blocking `chat` throws a retryable `TransientStreamException` |
+| A malformed event or a provider `error` event yielded an `Error`, and the stream read on to a `Done` | the `Error` ends the stream |
+| Tool arguments that were not a JSON object reached the tool as `{"_raw": "..."}` (Gemini: the step's start arguments, or `{}`; a Gemini step that started with a JSON string holding an object took that object) | the stream ends in an `Error` naming the tool and the parse failure; the call is never dispatched. A Gemini step's start arguments follow the same rule, so a JSON string is an `Error` too |
+| A terminal event that arrived while a tool call was still open completed without that call | `Error` naming the open call |
+| An unknown Anthropic `stop_reason` or a missing one finished `STOP` | `Error` |
+| Anthropic usage took input and cache tokens from `message_start` only, so a server-tool turn reported the input of its first sampling step | each count `message_delta` carries replaces the last; its counts are cumulative, so the turn reports the input of every server-tool step |
+| OpenAI `response.incomplete` was ignored, so the turn finished `STOP` with no usage | `Done` with `LENGTH` (`CONTENT_FILTER` for `content_filter`), the usage, and `openai.incompleteReason` metadata; `response.completed` with any status but `completed`, and `response.incomplete` with any but `incomplete`, is an `Error` |
+| OpenAI reasoning summary deltas were read from `text`, so the thinking was `null` | read from `delta`; each summary part completes as one `ThinkingComplete` with its `text`, and the parts join with a blank line |
+| An OpenAI refusal was dropped and the turn finished `STOP` | `REFUSAL`, its text as `Response.REFUSAL_EXPLANATION_KEY` |
+| A provider's in-stream error message held the raw event (OpenAI's `response.failed`: the request's `instructions` and `tools` included; Anthropic's `error` event); Gemini dropped a string `code` | one shape for every provider, built by `core.provider.StreamErrorMessage`: `<summary>: <code>: <message>`, a missing part left out (`API stream error: overloaded_error: Overloaded`, `API response failed: server_error: ...`, `API error: UNAVAILABLE: ...`); the usage `response.failed` reports stays on the partial |
+| OpenAI's in-stream `server_error` and `rate_limit_exceeded` (an `error` event or `response.failed`) ended in a non-retryable `OpenAIException` | a retryable `TransientStreamException`, as Anthropic's `overloaded_error` already was; every other code stays non-retryable |
+| Gemini `interaction.completed` was ignored; status `failed` or `budget_exceeded` finished `ERROR` inside a `Done` | `interaction.completed` ends the stream, judged by the status its own interaction carries, never one from an earlier status update; `failed`, `cancelled`, a missing status and any other is an `Error` |
+| An Anthropic server-tool input that was not a JSON object was echoed back as `{"_raw": "..."}` | the stream ends in an `Error` naming the tool and the parse failure |
+| SSE framing took each `data: ` line (exactly one space) as one event | events end at a blank line; `data` with or without the space, several `data` lines joined by a newline, CR, LF or CRLF, comments ignored, one byte order mark at the start of the body dropped; an event cut off before its blank line is dropped; a line or an event over 16 MiB ends the stream in an `Error` |
+| `SseReader.Parser.finished()` and `complete()` | removed; a `Done` or `Error` from `parse` ends the stream, and `partial()` gives what a cut-off stream produced |
+| `ToolCall.Builder.withArguments` rejected a `null` value | a JSON `null` argument stays a `null` value (`OrderedMaps.copyOfKeepingNullValues`); `HookOutcome.MutateArgs`, both `QueryEvent.ToolMutated` inputs and `HeliosEvent.ToolCallStarted.args` keep it too |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`

@@ -6,6 +6,7 @@ import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.gemini.api.ContentItem;
+import com.standardapplied.helios.gemini.api.Step;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -40,6 +41,23 @@ final class StepOutput {
   StreamEvent text(String text) {
     content.append(text);
     return new StreamEvent.TextDelta(text);
+  }
+
+  /**
+   * The text a {@code model_output} step starts with, as one delta, its annotations harvested along
+   * the way.
+   */
+  StreamEvent initialText(Step step) {
+    var initialText = new StringBuilder();
+    for (var item : step.content()) {
+      if (item.hasTypeText() && item.text() != null && !item.text().isEmpty()) {
+        initialText.append(item.text());
+      }
+      if (item.hasAnnotations()) {
+        cite(item);
+      }
+    }
+    return initialText.isEmpty() ? null : text(initialText.toString());
   }
 
   /** {@code text} added to the thinking on a line of its own. */

@@ -1,4 +1,4 @@
-data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Partial"}
+data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"Partial","sequence_number":0}
 
-data: {"type":"error","code":"server_error","message":"something went wrong"}
+data: {"type":"error","code":"server_error","message":"something went wrong","param":null,"sequence_number":1}
 

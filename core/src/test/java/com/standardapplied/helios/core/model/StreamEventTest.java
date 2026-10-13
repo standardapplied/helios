@@ -8,6 +8,7 @@ package com.standardapplied.helios.core.model;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -65,22 +66,41 @@ class StreamEventTest {
   }
 
   @Test
-  void errorWithCause() {
+  void errorCarriesItsMessageCauseAndPartialResponse() {
     var cause = new RuntimeException("Network error");
-    var event = new StreamEvent.Error("Connection failed", cause);
+    var partial =
+        Response.newBuilder().withContent("Hel").withFinishReason(FinishReason.ERROR).build();
+    var event = new StreamEvent.Error("Connection failed", cause, partial);
 
-    assertInstanceOf(StreamEvent.class, event);
     assertEquals("Connection failed", event.message());
     assertEquals(cause, event.cause());
+    assertEquals(partial, event.partial());
   }
 
   @Test
-  void errorWithoutCause() {
-    var event = new StreamEvent.Error("Timeout occurred");
+  void errorRejectsAPartialResponseThatDoesNotFinishWithError() {
+    var stopped =
+        Response.newBuilder().withContent("Hel").withFinishReason(FinishReason.STOP).build();
 
-    assertInstanceOf(StreamEvent.class, event);
-    assertEquals("Timeout occurred", event.message());
-    assertNull(event.cause());
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class, () -> new StreamEvent.Error("cut", null, stopped));
+
+    assertEquals("partial must finish with ERROR, not STOP", thrown.getMessage());
+  }
+
+  @Test
+  void errorRequiresAMessageAndAPartialResponse() {
+    var partial = Response.newBuilder().withFinishReason(FinishReason.ERROR).build();
+
+    assertEquals(
+        "message must not be null",
+        assertThrows(NullPointerException.class, () -> new StreamEvent.Error(null, null, partial))
+            .getMessage());
+    assertEquals(
+        "partial must not be null",
+        assertThrows(NullPointerException.class, () -> new StreamEvent.Error("cut", null, null))
+            .getMessage());
   }
 
   @Test
@@ -112,7 +132,9 @@ class StreamEventTest {
   @Test
   void patternMatchingOnEvents() {
     StreamEvent textEvent = new StreamEvent.TextDelta("text");
-    StreamEvent errorEvent = new StreamEvent.Error("error");
+    StreamEvent errorEvent =
+        new StreamEvent.Error(
+            "error", null, Response.newBuilder().withFinishReason(FinishReason.ERROR).build());
     StreamEvent thinkingEvent = new StreamEvent.ThinkingDelta("thinking");
 
     var textResult = classify(textEvent);
@@ -133,7 +155,7 @@ class StreamEventTest {
       case StreamEvent.ToolCallDelta(var id, var delta) -> "delta";
       case StreamEvent.ToolCallComplete(var tc) -> "complete";
       case StreamEvent.Done(var r) -> "done";
-      case StreamEvent.Error(var msg, var cause) -> "error: " + msg;
+      case StreamEvent.Error(var msg, var cause, var partial) -> "error: " + msg;
     };
   }
 }

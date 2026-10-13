@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * The thinking blocks of a streamed turn, in arrival order. Each keeps its own signature: the API
@@ -44,11 +45,6 @@ final class ThinkingBlocks implements RawContentEcho.Source {
     at(index).signature().append(signature);
   }
 
-  /** Whether a thinking block is at {@code index}. */
-  boolean holds(int index) {
-    return blocks.containsKey(index);
-  }
-
   /** The closing of the block at {@code index}: its whole text and signature, unless blank. */
   StreamEvent complete(int index) {
     var thinking = blocks.get(index);
@@ -58,6 +54,19 @@ final class ThinkingBlocks implements RawContentEcho.Source {
     }
     var signature = thinking.signature().isEmpty() ? null : thinking.signature().toString();
     return new StreamEvent.ThinkingComplete(text, signature);
+  }
+
+  /**
+   * The text of every block, in order and separated by a blank line, or {@code null} when none has
+   * any; a block keeps its text whether or not its signature arrived.
+   */
+  String text() {
+    var text =
+        blocks.values().stream()
+            .map(thinking -> thinking.text().toString())
+            .filter(value -> !value.isEmpty())
+            .collect(Collectors.joining("\n\n"));
+    return text.isEmpty() ? null : text;
   }
 
   /** The signed blocks, in order: a block without a signature cannot go back to the API. */

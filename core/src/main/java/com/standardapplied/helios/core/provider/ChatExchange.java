@@ -3,6 +3,7 @@
 package com.standardapplied.helios.core.provider;
 
 import com.standardapplied.helios.core.model.CloseableIterator;
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
@@ -80,12 +81,12 @@ public final class ChatExchange<R> implements Exchange<R> {
     try {
       return opener.open(request);
     } catch (ProviderException e) {
-      return failed(new StreamEvent.Error(e.getMessage(), e));
+      return failed(e.getMessage(), e);
     } catch (IOException e) {
-      return failed(new StreamEvent.Error("Failed to connect", e));
+      return failed("Failed to connect", e);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return failed(new StreamEvent.Error("Request interrupted", e));
+      return failed("Request interrupted", e);
     }
   }
 
@@ -96,7 +97,7 @@ public final class ChatExchange<R> implements Exchange<R> {
       if (event instanceof StreamEvent.Done(var response)) {
         return (Response<Void>) response;
       }
-      if (event instanceof StreamEvent.Error(var message, var cause)) {
+      if (event instanceof StreamEvent.Error(var message, var cause, _)) {
         throw failureOf(message, cause);
       }
     }
@@ -112,7 +113,10 @@ public final class ChatExchange<R> implements Exchange<R> {
     };
   }
 
-  private static CloseableIterator<StreamEvent> failed(StreamEvent.Error error) {
-    return CloseableIterator.of(List.<StreamEvent>of(error).iterator());
+  private static CloseableIterator<StreamEvent> failed(String message, Exception cause) {
+    var nothing =
+        Response.newBuilder().withContent("").withFinishReason(FinishReason.ERROR).build();
+    return CloseableIterator.of(
+        List.<StreamEvent>of(new StreamEvent.Error(message, cause, nothing)).iterator());
   }
 }

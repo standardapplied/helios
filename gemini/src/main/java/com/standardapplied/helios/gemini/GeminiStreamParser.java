@@ -2,29 +2,35 @@
 
 package com.standardapplied.helios.gemini;
 
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.ProviderException;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.SseReader;
+import com.standardapplied.helios.core.provider.StreamErrorMessage;
 import com.standardapplied.helios.gemini.api.GeminiJson;
 import com.standardapplied.helios.gemini.api.InteractionResponse;
 import com.standardapplied.helios.gemini.api.InteractionUsage;
 import com.standardapplied.helios.gemini.api.StreamingEvent;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Parses one Interactions API stream, one event at a time, into {@link StreamEvent}s: the step
- * events through {@link StreamedSteps}, the interaction's id, status and usage from its envelope
- * and status updates, and the assembled response at the end of the body. An {@code error} event
- * ends the stream with a {@link GeminiException} carrying the reported code.
+ * events through {@link StreamedSteps}, the interaction's id and usage from its envelope and status
+ * updates, and the assembled response at {@code interaction.completed}. The stream succeeds only
+ * there, when that event's own interaction status is one the assembler counts as an ending and no
+ * function call is still open; any other status, an unreadable event and function arguments that
+ * are not a JSON object end it in an error, and an {@code error} event in one whose {@link
+ * GeminiException} carries the reported code.
  */
 final class GeminiStreamParser implements SseReader.Parser {
 
   private final boolean propagateInteractionId;
   private final String apiVersion;
   private final StreamedSteps steps = new StreamedSteps();
-  private InteractionUsage usage;
+  private Response.Usage usage;
   private String interactionId;
-  private String status;
-  private boolean finished;
 
   /**
    * A parser for a stream of the interactions API {@code apiVersion}, whose response records its
@@ -39,28 +45,25 @@ final class GeminiStreamParser implements SseReader.Parser {
   public StreamEvent parse(String payload) {
     try {
       return on(GeminiJson.LENIENT.readValue(payload, StreamingEvent.class));
+    } catch (ProviderException e) {
+      return failed(e.getMessage(), e);
     } catch (RuntimeException e) {
-      return new StreamEvent.Error("Failed to parse stream event", e);
+      return failed("Failed to parse stream event", e);
     }
   }
 
   @Override
-  public boolean finished() {
-    return finished;
-  }
-
-  @Override
-  public StreamEvent complete() {
-    return GeminiResponseAssembler.done(
-        steps.result(), usage, status, propagateInteractionId ? interactionId : null, apiVersion);
+  public Response<Void> partial() {
+    return response(FinishReason.ERROR);
   }
 
   private StreamEvent on(StreamingEvent event) {
     return switch (event.eventType()) {
       case "error" -> error(event.error());
-      case "interaction.created", "interaction.completed" -> envelope(event.interaction());
+      case "interaction.created" -> envelope(event.interaction());
+      case "interaction.completed" -> completed(event.interaction());
       case "interaction.status_update", "interaction.in_progress", "interaction.requires_action" ->
-          statusUpdate(event.interactionId(), event.status());
+          checkpoint(event.interactionId(), event.usage());
       case "step.start" -> steps.start(event.index(), event.step());
       case "step.delta" -> steps.delta(event.index(), event.argumentsDelta(), event.delta());
       case "step.stop" -> steps.stop(event.index());
@@ -69,36 +72,55 @@ final class GeminiStreamParser implements SseReader.Parser {
   }
 
   private StreamEvent error(Map<String, Object> error) {
-    var message = "API error";
-    var statusCode = 0;
-    if (error != null) {
-      if (error.get("message") != null) {
-        message = "API error: " + error.get("message");
-      }
-      if (error.get("code") instanceof Number code && code.intValue() > 0) {
-        statusCode = code.intValue();
-      }
+    var fields = error == null ? Map.<String, Object>of() : error;
+    var code = fields.get("code");
+    var message =
+        StreamErrorMessage.of(
+            "API error",
+            Objects.toString(code, null),
+            Objects.toString(fields.get("message"), null));
+    var statusCode = code instanceof Number number && number.intValue() > 0 ? number.intValue() : 0;
+    return failed(message, new GeminiException(message, statusCode));
+  }
+
+  private StreamEvent completed(InteractionResponse interaction) {
+    envelope(interaction);
+    var open = steps.openCall();
+    if (open != null) {
+      return failed("Interaction completed while function call '" + open + "' is still open", null);
     }
-    finished = true;
-    return new StreamEvent.Error(message, new GeminiException(message, statusCode));
+    var status = interaction == null ? null : interaction.status();
+    var finishReason =
+        GeminiResponseAssembler.finishReason(status, !steps.result().calls().isEmpty());
+    if (finishReason == null) {
+      return failed("Interaction completed with status " + status, null);
+    }
+    return new StreamEvent.Done(response(finishReason));
+  }
+
+  private StreamEvent failed(String message, Exception cause) {
+    return new StreamEvent.Error(message, cause, partial());
+  }
+
+  private Response<Void> response(FinishReason finishReason) {
+    return GeminiResponseAssembler.response(
+        steps.result(),
+        usage,
+        propagateInteractionId ? interactionId : null,
+        apiVersion,
+        finishReason);
   }
 
   private StreamEvent envelope(InteractionResponse interaction) {
-    if (interaction != null) {
-      statusUpdate(interaction.id(), interaction.status());
-      if (interaction.usage() != null) {
-        usage = interaction.usage();
-      }
-    }
-    return null;
+    return interaction == null ? null : checkpoint(interaction.id(), interaction.usage());
   }
 
-  private StreamEvent statusUpdate(String id, String newStatus) {
+  private StreamEvent checkpoint(String id, InteractionUsage reported) {
     if (id != null) {
       interactionId = id;
     }
-    if (newStatus != null) {
-      status = newStatus;
+    if (reported != null) {
+      usage = GeminiResponseAssembler.usage(reported);
     }
     return null;
   }

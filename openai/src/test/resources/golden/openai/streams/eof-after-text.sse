@@ -1,0 +1,6 @@
+data: {"type":"response.created","response":{"id":"resp_1","object":"response","status":"in_progress","output":[],"model":"gpt-5.6","usage":null},"sequence_number":0}
+
+data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"Hello","sequence_number":1}
+
+data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":", wor","sequence_number":2}
+

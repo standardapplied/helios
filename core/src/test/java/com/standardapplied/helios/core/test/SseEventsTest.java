@@ -8,7 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.CloseableIterator;
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.SseReader;
 import java.io.IOException;
@@ -28,13 +30,8 @@ class SseEventsTest {
         }
 
         @Override
-        public boolean finished() {
-          return false;
-        }
-
-        @Override
-        public StreamEvent complete() {
-          return new StreamEvent.TextDelta("end");
+        public Response<Void> partial() {
+          return Response.newBuilder().withFinishReason(FinishReason.ERROR).build();
         }
       };
 
@@ -90,11 +87,8 @@ class SseEventsTest {
     var body = SseEvents.body(SseEvents.data("one") + SseEvents.named("x", "two"));
 
     assertEquals(
-        List.of(
-            new StreamEvent.TextDelta("one"),
-            new StreamEvent.TextDelta("two"),
-            new StreamEvent.TextDelta("end")),
-        SseEvents.drain(echo(body)));
+        List.of(new StreamEvent.TextDelta("one"), new StreamEvent.TextDelta("two")),
+        SseEvents.drain(echo(body)).subList(0, 2));
   }
 
   @Test
