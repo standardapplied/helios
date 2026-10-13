@@ -173,6 +173,35 @@ class AnthropicStreamParserTest {
   }
 
   @Test
+  void theCumulativeUsageOfMessageDeltaReplacesTheCountsOfMessageStart() {
+    parser.parse(
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":2679,"
+            + "\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,"
+            + "\"output_tokens\":3}}}");
+    parser.parse(
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
+            + "\"usage\":{\"input_tokens\":10682,\"cache_creation_input_tokens\":4,"
+            + "\"cache_read_input_tokens\":5,\"output_tokens\":510,"
+            + "\"server_tool_use\":{\"web_search_requests\":1}}}");
+
+    var done =
+        assertInstanceOf(StreamEvent.Done.class, parser.parse("{\"type\":\"message_stop\"}"));
+
+    assertEquals(Response.Usage.of(10682, 510, 4, 5), done.response().usage());
+  }
+
+  @Test
+  void aMessageDeltaWithOnlyOutputTokensKeepsTheInputCountsOfMessageStart() {
+    parser.parse(
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":25,"
+            + "\"cache_creation_input_tokens\":5,\"cache_read_input_tokens\":7,"
+            + "\"output_tokens\":1}}}");
+    parser.parse("{\"type\":\"message_delta\",\"usage\":{\"output_tokens\":15}}");
+
+    assertEquals(Response.Usage.of(25, 15, 5, 7), parser.partial().usage());
+  }
+
+  @Test
   void toolInputThatIsNotAJsonObjectEndsTheStreamNamingTheTool() {
     parser.parse(
         "{\"type\":\"content_block_start\",\"index\":0,"

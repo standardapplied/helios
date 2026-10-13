@@ -66,16 +66,31 @@ final class AnthropicStreamParser implements SseReader.Parser {
     };
   }
 
-  /**
-   * Input, cache and initial output token counts, reported on {@code message_start}; {@code
-   * message_delta} later carries the running output count, and cache counts do not change after the
-   * start.
-   */
   private StreamEvent messageStart(MessagesResponse message) {
-    if (message == null || message.usage() == null) {
-      return null;
+    if (message != null) {
+      absorb(message.usage());
     }
-    var usage = message.usage();
+    return null;
+  }
+
+  private StreamEvent messageDelta(ContentDelta delta, ApiUsage usage) {
+    if (delta != null && delta.stopReason() != null) {
+      stopReason = delta.stopReason();
+      stopDetails = delta.stopDetails();
+    }
+    absorb(usage);
+    return null;
+  }
+
+  /**
+   * The token counts {@code usage} reports. {@code message_start} reports the input, cache and
+   * initial output counts; each {@code message_delta} reports cumulative counts, which grow past
+   * the start's input count when server tools run, so every count it carries replaces the last.
+   */
+  private void absorb(ApiUsage usage) {
+    if (usage == null) {
+      return;
+    }
     if (usage.inputTokens() != null) {
       inputTokens = usage.inputTokens();
     }
@@ -88,18 +103,6 @@ final class AnthropicStreamParser implements SseReader.Parser {
     if (usage.cacheReadInputTokens() != null) {
       cacheReadInputTokens = usage.cacheReadInputTokens();
     }
-    return null;
-  }
-
-  private StreamEvent messageDelta(ContentDelta delta, ApiUsage usage) {
-    if (delta != null && delta.stopReason() != null) {
-      stopReason = delta.stopReason();
-      stopDetails = delta.stopDetails();
-    }
-    if (usage != null && usage.outputTokens() != null) {
-      outputTokens = usage.outputTokens();
-    }
-    return null;
   }
 
   private StreamEvent messageStop() {
