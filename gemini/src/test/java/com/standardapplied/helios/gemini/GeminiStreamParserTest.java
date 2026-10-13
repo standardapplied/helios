@@ -167,6 +167,19 @@ class GeminiStreamParserTest {
   }
 
   @Test
+  void interactionCompletedWhileANamelessFunctionCallIsOpenNamesItUnnamed() {
+    var events =
+        drain(
+            stepStart(1, "{\"type\":\"function_call\",\"id\":\"c1\"}")
+                + interactionEnded("requires_action"));
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals(
+        "Interaction completed while function call '<unnamed>' is still open", error.message());
+    assertNull(error.cause());
+  }
+
+  @Test
   void usageWithNullTokenFieldsCoercesToZero() {
     var envelope =
         "data: {\"event_type\":\"interaction.completed\","
