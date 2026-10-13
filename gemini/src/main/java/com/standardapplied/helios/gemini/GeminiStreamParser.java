@@ -7,6 +7,7 @@ import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.SseReader;
+import com.standardapplied.helios.core.provider.StreamErrorMessage;
 import com.standardapplied.helios.gemini.api.GeminiJson;
 import com.standardapplied.helios.gemini.api.InteractionResponse;
 import com.standardapplied.helios.gemini.api.InteractionUsage;
@@ -70,16 +71,14 @@ final class GeminiStreamParser implements SseReader.Parser {
   }
 
   private StreamEvent error(Map<String, Object> error) {
-    var message = "API error";
-    var statusCode = 0;
-    if (error != null) {
-      if (error.get("message") != null) {
-        message = "API error: " + error.get("message");
-      }
-      if (error.get("code") instanceof Number code && code.intValue() > 0) {
-        statusCode = code.intValue();
-      }
-    }
+    var fields = error == null ? Map.<String, Object>of() : error;
+    var code = fields.get("code");
+    var message =
+        StreamErrorMessage.of(
+            "API error",
+            code == null ? null : code.toString(),
+            fields.get("message") == null ? null : fields.get("message").toString());
+    var statusCode = code instanceof Number number && number.intValue() > 0 ? number.intValue() : 0;
     return failed(message, new GeminiException(message, statusCode));
   }
 

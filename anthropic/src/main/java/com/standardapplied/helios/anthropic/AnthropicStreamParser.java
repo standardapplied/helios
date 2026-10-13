@@ -13,6 +13,7 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.SseReader;
+import com.standardapplied.helios.core.provider.StreamErrorMessage;
 import java.util.Objects;
 
 /**
@@ -59,7 +60,7 @@ final class AnthropicStreamParser implements SseReader.Parser {
       case "content_block_stop" -> blocks.stop(event.index());
       case "message_delta" -> messageDelta(event.delta(), event.usage());
       case "message_stop" -> messageStop();
-      case "error" -> error(event.error(), payload);
+      case "error" -> error(event.error());
       case null, default -> null;
     };
   }
@@ -113,8 +114,11 @@ final class AnthropicStreamParser implements SseReader.Parser {
     return AnthropicResponseAssembler.done(blocks, usage(), stopReason, stopDetails);
   }
 
-  private StreamEvent error(ApiStreamEvent.ApiError error, String payload) {
-    var message = "API stream error: " + payload;
+  private StreamEvent error(ApiStreamEvent.ApiError error) {
+    var message =
+        error == null
+            ? StreamErrorMessage.of("API stream error", null, null)
+            : StreamErrorMessage.of("API stream error", error.type(), error.message());
     var cause =
         error != null && error.isTransient()
             ? new TransientStreamException(message, null, AnthropicProvider.PROVIDER_NAME)

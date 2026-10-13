@@ -6,13 +6,13 @@ import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.SseReader;
+import com.standardapplied.helios.core.provider.StreamErrorMessage;
 import com.standardapplied.helios.openai.api.ApiStreamEvent;
 import com.standardapplied.helios.openai.api.OpenAIJson;
 import com.standardapplied.helios.openai.api.ResponsesResponse;
-import java.util.Objects;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import java.util.Set;
 
 /**
  * Parses one Responses API stream, one event at a time, into {@link StreamEvent}s: text, reasoning
@@ -24,6 +24,12 @@ import java.util.stream.Stream;
  * terminal reached while a function call is still open end the stream in an error.
  */
 final class OpenAIStreamParser implements SseReader.Parser {
+
+  /**
+   * The documented error codes re-issuing the request can recover from: the server failed, or the
+   * caller was rate limited.
+   */
+  private static final Set<String> TRANSIENT_CODES = Set.of("server_error", "rate_limit_exceeded");
 
   private final OutputMessage message = new OutputMessage();
   private final ReasoningSummary reasoning = new ReasoningSummary();
@@ -100,12 +106,15 @@ final class OpenAIStreamParser implements SseReader.Parser {
   }
 
   private StreamEvent apiError(String summary, ResponsesResponse.ResponseError error) {
-    var details = error == null ? Stream.<String>empty() : Stream.of(error.code(), error.message());
+    if (error == null) {
+      return failed(StreamErrorMessage.of(summary, null, null), null);
+    }
+    var message = StreamErrorMessage.of(summary, error.code(), error.message());
     return failed(
-        Stream.concat(Stream.of(summary), details)
-            .filter(Objects::nonNull)
-            .collect(Collectors.joining(": ")),
-        null);
+        message,
+        error.code() != null && TRANSIENT_CODES.contains(error.code())
+            ? new TransientStreamException(message, null, OpenAIProvider.PROVIDER_NAME)
+            : null);
   }
 
   private StreamEvent terminal(FinishReason finishReason) {

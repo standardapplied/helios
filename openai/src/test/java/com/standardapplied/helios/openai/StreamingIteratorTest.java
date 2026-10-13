@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.test.FailingInputStream;
 import com.standardapplied.helios.core.test.FeedableInputStream;
@@ -426,6 +427,9 @@ class StreamingIteratorTest {
     assertEquals("Hello", error.partial().content());
     assertEquals(FinishReason.ERROR, error.partial().finishReason());
     assertEquals(7, error.partial().usage().outputTokens());
+    var cause = assertInstanceOf(TransientStreamException.class, error.cause());
+    assertEquals(error.message(), cause.getMessage());
+    assertEquals("openai", cause.providerName());
   }
 
   @Test
@@ -443,19 +447,29 @@ class StreamingIteratorTest {
       value = {
         "{\"type\":\"error\",\"code\":\"server_error\",\"message\":\"something went wrong\","
             + "\"param\":null,\"sequence_number\":1}"
-            + "|API stream error: server_error: something went wrong",
+            + "|API stream error: server_error: something went wrong|true",
+        "{\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"slow down\"}"
+            + "|API stream error: rate_limit_exceeded: slow down|true",
+        "{\"type\":\"error\",\"code\":\"invalid_prompt\",\"message\":\"rejected\"}"
+            + "|API stream error: invalid_prompt: rejected|false",
         "{\"type\":\"error\",\"code\":null,\"message\":\"something went wrong\"}"
-            + "|API stream error: something went wrong",
-        "{\"type\":\"error\"}|API stream error"
+            + "|API stream error: something went wrong|false",
+        "{\"type\":\"error\"}|API stream error|false"
       })
-  void anErrorEventEndsTheStreamWithItsCodeAndMessageNeverItsPayload(
-      String payload, String message) {
+  void anErrorEventEndsTheStreamWithItsCodeAndMessageRetryableOnlyForATransientCode(
+      String payload, String message, boolean retryable) {
     var events = drain("data: " + payload + "\n\n" + TEXT_DELTA + RESPONSE_COMPLETED);
 
     assertEquals(1, events.size());
     var error = assertInstanceOf(StreamEvent.Error.class, events.getFirst());
     assertEquals(message, error.message());
-    assertNull(error.cause());
+    if (retryable) {
+      var cause = assertInstanceOf(TransientStreamException.class, error.cause());
+      assertEquals(message, cause.getMessage());
+      assertEquals("openai", cause.providerName());
+    } else {
+      assertNull(error.cause());
+    }
     assertEquals(FinishReason.ERROR, error.partial().finishReason());
   }
 
