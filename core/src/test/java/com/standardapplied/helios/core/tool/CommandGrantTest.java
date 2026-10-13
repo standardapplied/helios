@@ -173,6 +173,25 @@ class CommandGrantTest {
   }
 
   @Test
+  void toolRunInTheGrantsOwnRegistryStartsTheProcess(@TempDir Path tmp) {
+    var grant = bash().withCwd(tmp).build();
+
+    var result =
+        grant.toTool().execute(Map.of("args", List.of("-c", ": > marker")), sessionOf(grant));
+
+    assertTrue(result.success(), result.output());
+    assertTrue(Files.exists(tmp.resolve("marker")));
+  }
+
+  @Test
+  void nullRegistryRefusedWhereItIsPassed() {
+    var builder = CommandGrant.builder("bash");
+
+    var ex = assertThrows(NullPointerException.class, () -> builder.withSecretRegistry(null));
+    assertEquals("registry", ex.getMessage());
+  }
+
+  @Test
   void outputCutInsideASecretKeepsNoPartOfIt() throws Exception {
     var registry = new SecretRegistry();
     registry.register("API_KEY", SECRET);
