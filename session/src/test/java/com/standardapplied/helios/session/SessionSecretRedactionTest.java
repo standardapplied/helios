@@ -155,6 +155,28 @@ final class SessionSecretRedactionTest {
   }
 
   @Test
+  void redactionsCountEachSecretInTheOrderTheOutputNamesThem() {
+    var secrets = registryWithSecret();
+    secrets.register("DB_PASSWORD", "hunter2-hunter2");
+    var options =
+        withTools(
+            secrets,
+            tool(
+                "leak",
+                (args, ctx) ->
+                    ToolResult.success("hunter2-hunter2 " + SECRET + " hunter2-hunter2")));
+
+    var run = run(options, calling(List.of(List.of(call("c1", "leak")))));
+
+    var event = run.toolResults().getFirst();
+    assertEquals(
+        "<redacted:DB_PASSWORD> " + MARKER + " <redacted:DB_PASSWORD>", event.result().output());
+    assertEquals(
+        List.of(Map.entry("DB_PASSWORD", 2), Map.entry("API_KEY", 1)),
+        List.copyOf(event.redactions().entrySet()));
+  }
+
+  @Test
   void failureTextIsRedacted() {
     var options =
         withTools(
@@ -177,6 +199,8 @@ final class SessionSecretRedactionTest {
         run.toolResults().stream().map(e -> e.result().output()).toList());
     assertEquals(
         run.toolResults().stream().map(e -> e.result().output()).toList(), run.toolMessages(1));
+    assertEquals(
+        List.of(false, false), run.toolResults().stream().map(e -> e.result().success()).toList());
   }
 
   @Test
@@ -259,6 +283,18 @@ final class SessionSecretRedactionTest {
     var event = run.toolResults().getFirst();
     assertEquals("token=" + SECRET, event.result().output());
     assertEquals(Map.of(), event.redactions());
+  }
+
+  @Test
+  void outputNoSecretMatchedReachesTheModelUnchangedEvenWhereUtf8CannotCarryIt() {
+    var unpaired = "half a pair \uD800 here";
+    var options =
+        withTools(registryWithSecret(), tool("odd", (args, ctx) -> ToolResult.success(unpaired)));
+
+    var run = run(options, calling(List.of(List.of(call("c1", "odd")))));
+
+    assertEquals(unpaired, run.toolResults().getFirst().result().output());
+    assertEquals(List.of(unpaired), run.toolMessages(1));
   }
 
   @Test
