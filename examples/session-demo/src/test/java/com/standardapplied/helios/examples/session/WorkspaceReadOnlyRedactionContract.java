@@ -34,10 +34,11 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Live end-to-end contract for the v2 workspace file tools ({@link ReadTool}, {@link GrepTool},
- * {@link GlobTool}) pointed at a curated knowledge corpus through a real {@code AgentSession}, whose
- * {@link SecretRegistry} is set through {@code SessionOptions.withSecretRegistry}. Run once per
- * provider, it verifies that the provider accepts each tool's schema, that the model's arguments
- * reach the tool, and that the tool's output is what Helios produces for them, redaction included.
+ * {@link GlobTool}) pointed at a curated knowledge corpus through a real {@code AgentSession},
+ * whose {@link SecretRegistry} is set through {@code SessionOptions.withSecretRegistry}. Run once
+ * per provider, it verifies that the provider accepts each tool's schema, that the model's
+ * arguments reach the tool, and that the tool's output is what Helios produces for them, redaction
+ * included.
  *
  * <p>Each case forces the model to call a tool on every turn, with its tool the only one it is
  * given beside the built-in AskUserQuestion, so each session ends at its two-turn limit. The tool
@@ -118,11 +119,10 @@ abstract class WorkspaceReadOnlyRedactionContract {
 
   /**
    * Run {@code request} in a session whose only tool is {@code tool} and whose secret registry is
-   * {@code secrets}, with the model forced to call
-   * a tool. Asserts what holds whatever the model does: the session ends cleanly with no error and
-   * a tool was called. It skips unless the first call was {@code tool} with exactly {@code
-   * arguments}, the ones the expected output follows from, then asserts the call succeeded and
-   * returns its result.
+   * {@code secrets}, with the model forced to call a tool. Asserts what holds whatever the model
+   * does: the session ends cleanly with no error and a tool was called. It skips unless the first
+   * call was {@code tool} with exactly {@code arguments}, the ones the expected output follows
+   * from, then asserts the call succeeded and returns its result.
    */
   private QueryEvent.ToolResult call(
       ToolBinding tool, SecretRegistry secrets, String request, Map<String, ?> arguments) {

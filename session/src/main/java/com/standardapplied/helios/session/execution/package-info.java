@@ -17,9 +17,9 @@
  * every runtime so a misconfigured session cannot silently shell out) and {@code
  * LocalProcessExecutionProvider} (each runtime run through {@link
  * com.standardapplied.helios.core.process.BoundedProcess} with argv-only invocation, a cleared
- * environment, capped output and descendant kill on timeout; the session redacts its output). Library users can plug their own — e.g.
- * an Incus-backed provider for library-mode use where execution must happen inside a sandbox rather
- * than the host process.
+ * environment, capped output and descendant kill on timeout; the session redacts its output).
+ * Library users can plug their own — e.g. an Incus-backed provider for library-mode use where
+ * execution must happen inside a sandbox rather than the host process.
  *
  * <p>The {@code Execute} tool itself is a single tool that dispatches every runtime through the
  * configured provider, classified under {@link

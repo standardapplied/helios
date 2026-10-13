@@ -26,8 +26,8 @@ import java.util.regex.Pattern;
  * @param redactor optional {@link Redactor} applied by {@link PgTraceStore} and {@link
  *     PgToolCallJournal} to trace/journal text fields before persisting. {@code null} (default)
  *     preserves verbatim capture, suitable for evals and debugging. The session's own redaction
- *     pass does not reach persistence, since the session does not feed these stores; to redact
- *     what is persisted, pass {@code registry.redactor()} from the {@link
+ *     pass does not reach persistence, since the session does not feed these stores; to redact what
+ *     is persisted, pass {@code registry.redactor()} from the {@link
  *     com.standardapplied.helios.core.common.SecretRegistry} given to {@code
  *     SessionOptions.withSecretRegistry}
  */

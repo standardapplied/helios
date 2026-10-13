@@ -58,6 +58,32 @@ class RedactorTest {
   }
 
   @Test
+  void trimPartialSecretLeavesACompleteSecretEndingInItsOwnPrefix() {
+    var redactor = build("TOKEN", "abcd1234a");
+
+    assertEquals("value=abcd1234a", redactor.trimPartialSecret("value=abcd1234a"));
+    assertEquals(
+        "value=abcd1234a",
+        new String(
+            redactor.trimPartialSecret("value=abcd1234a".getBytes(StandardCharsets.UTF_8)),
+            StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void trimPartialSecretLeavesACompleteSecretEndingInAnotherSecretsPrefix() {
+    var redactor = build("A", "abcdefgh12", "B", "h12345678");
+
+    assertEquals("xx abcdefgh12", redactor.trimPartialSecret("xx abcdefgh12"));
+  }
+
+  @Test
+  void trimPartialSecretDropsAPartialSecretReachingBeforeACompleteOne() {
+    var redactor = build("A", "defgh123", "B", "abcdefgh123456");
+
+    assertEquals("xx ", redactor.trimPartialSecret("xx abcdefgh123"));
+  }
+
+  @Test
   void trimPartialSecretDropsTheLongestOfOverlappingPrefixes() {
     var redactor = build("A", "abcdefgh12", "B", "fgh12345678");
 
