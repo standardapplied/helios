@@ -6,16 +6,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.IteratorPublisher;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
@@ -27,8 +31,11 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.RunnableScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -94,6 +101,45 @@ final class TurnSubscriberTest {
     assertInstanceOf(CancellationException.class, turn.error());
     assertEquals(1, subscription.cancels);
     assertEquals(0, token.activeCallbackCountForTests());
+  }
+
+  @Test
+  void aCancelWhoseSourceFailsToCloseStillReleasesTheWaiter() {
+    var blocked = new CountDownLatch(1);
+    var source =
+        new CloseableIterator<ModelChunk>() {
+          @Override
+          public boolean hasNext() {
+            blocked.countDown();
+            try {
+              new CountDownLatch(1).await();
+            } catch (InterruptedException e) {
+              throw new IllegalStateException("interrupted", e);
+            }
+            return false;
+          }
+
+          @Override
+          public ModelChunk next() {
+            throw new NoSuchElementException();
+          }
+
+          @Override
+          public void close() {
+            throw new IllegalStateException("close failed");
+          }
+        };
+    new IteratorPublisher<>(() -> source, new CancellationToken()).subscribe(subscriber);
+    Await.latch("the pull blocked", blocked);
+
+    var failure = assertThrows(IllegalStateException.class, scheduler::fireLatest);
+    var turn =
+        Await.value(
+            "the turn released",
+            CompletableFuture.supplyAsync(() -> subscriber.awaitDone(new CancellationToken())));
+
+    assertEquals("close failed", failure.getMessage());
+    assertInstanceOf(TimeoutException.class, turn.error());
   }
 
   @Test
