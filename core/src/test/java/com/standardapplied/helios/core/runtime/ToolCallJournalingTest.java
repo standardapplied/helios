@@ -11,11 +11,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.tool.ToolResult;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 class ToolCallJournalingTest {
 
@@ -68,15 +71,25 @@ class ToolCallJournalingTest {
     assertEquals(0, journal.failCount());
   }
 
-  @Test
-  void completeRoutesAFailedResultToFail() {
+  @ParameterizedTest
+  @MethodSource("unsuccessfulResults")
+  void completeRoutesEveryOtherOutcomeToFail(ToolResult result) {
     var journal = new RecordingToolCallJournal();
     var journaling = new ToolCallJournaling(durabilityWith(journal));
 
-    journaling.complete(UUID.randomUUID(), "tcid", ToolResult.failure("boom"));
+    journaling.complete(UUID.randomUUID(), "tcid", result);
 
     assertEquals(0, journal.completeCount());
     assertEquals(1, journal.failCount());
+  }
+
+  static List<ToolResult> unsuccessfulResults() {
+    return List.of(
+        ToolResult.failure("boom"),
+        ToolResult.threw("tool", new IllegalStateException("boom")),
+        ToolResult.timedOut("tool", Duration.ofSeconds(1)),
+        ToolResult.rejected("Hook", "no"),
+        ToolResult.notFound("tool"));
   }
 
   @Test

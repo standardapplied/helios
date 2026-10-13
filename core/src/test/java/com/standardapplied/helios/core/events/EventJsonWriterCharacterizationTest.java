@@ -185,13 +185,18 @@ class EventJsonWriterCharacterizationTest {
         Arguments.of(
             new HeliosEvent.ToolCallCompleted(
                 AT, RUN, NO_SPAN, "c-1", ToolResult.success("out"), Duration.ofNanos(1500)),
-            "{\"at\":\"2026-05-13T10:00:00Z\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"spanId\":null,\"type\":\"ToolCallCompleted\",\"toolCallId\":\"c-1\",\"success\":true,\"tookNanos\":1500}",
-            "{\"at\":\"2026-05-13T10:00:00Z\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"spanId\":null,\"type\":\"ToolCallCompleted\",\"toolCallId\":\"c-1\",\"success\":true,\"tookNanos\":1500}"),
+            "{\"at\":\"2026-05-13T10:00:00Z\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"spanId\":null,\"type\":\"ToolCallCompleted\",\"toolCallId\":\"c-1\",\"success\":true,\"outcome\":\"Succeeded\",\"tookNanos\":1500}",
+            "{\"at\":\"2026-05-13T10:00:00Z\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"spanId\":null,\"type\":\"ToolCallCompleted\",\"toolCallId\":\"c-1\",\"success\":true,\"outcome\":\"Succeeded\",\"tookNanos\":1500}"),
         Arguments.of(
             new HeliosEvent.ToolCallCompleted(
-                AT, RUN, NO_SPAN, "c-1", ToolResult.failure("bad"), Duration.ZERO),
-            "{\"at\":\"2026-05-13T10:00:00Z\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"spanId\":null,\"type\":\"ToolCallCompleted\",\"toolCallId\":\"c-1\",\"success\":false,\"tookNanos\":0}",
-            "{\"at\":\"2026-05-13T10:00:00Z\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"spanId\":null,\"type\":\"ToolCallCompleted\",\"toolCallId\":\"c-1\",\"success\":false,\"tookNanos\":0}"),
+                AT,
+                RUN,
+                NO_SPAN,
+                "c-1",
+                ToolResult.timedOut("grep", Duration.ofMinutes(1)),
+                Duration.ZERO),
+            "{\"at\":\"2026-05-13T10:00:00Z\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"spanId\":null,\"type\":\"ToolCallCompleted\",\"toolCallId\":\"c-1\",\"success\":false,\"outcome\":\"TimedOut\",\"tookNanos\":0}",
+            "{\"at\":\"2026-05-13T10:00:00Z\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"spanId\":null,\"type\":\"ToolCallCompleted\",\"toolCallId\":\"c-1\",\"success\":false,\"outcome\":\"TimedOut\",\"tookNanos\":0}"),
         Arguments.of(
             new HeliosEvent.ToolCallFailed(AT, RUN, NO_SPAN, "c-1", "exploded"),
             "{\"at\":\"2026-05-13T10:00:00Z\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"spanId\":null,\"type\":\"ToolCallFailed\",\"toolCallId\":\"c-1\",\"error\":\"exploded\"}",

@@ -134,7 +134,7 @@ final class Phase4AcceptanceTest {
     var toolResults = sub.eventsOf(QueryEvent.ToolResult.class);
     assertEquals(3, toolResults.size());
     for (var r : toolResults) {
-      assertTrue(r.result().success(), r.call().name() + " failed: " + r.result().output());
+      assertTrue(r.result().succeeded(), r.call().name() + " failed: " + r.result().output());
     }
     assertEquals(MemoryReadTool.NAME, toolResults.get(0).call().name());
     assertEquals(MemoryWriteTool.NAME, toolResults.get(1).call().name());

@@ -74,7 +74,8 @@ public final class AgentHttpService implements HttpService {
    * @param registry registry of live sessions; non-null
    * @param optionsFactory function that maps a generated session id to a fully-configured {@link
    *     SessionOptions}; non-null
-   * @param objectMapper mapper for request/response bodies; non-null
+   * @param objectMapper mapper for request/response bodies; non-null. The service uses a copy that
+   *     also writes {@link com.standardapplied.helios.core.tool.ToolOutcome}
    * @param eventsPathPrefix prefix used to build the {@code eventsUrl} returned by {@code POST
    *     /sessions} (e.g. {@code "/v1"}); non-null
    * @throws NullPointerException if any argument is null
@@ -86,7 +87,9 @@ public final class AgentHttpService implements HttpService {
       String eventsPathPrefix) {
     this.registry = Objects.requireNonNull(registry, "registry must not be null");
     this.optionsFactory = Objects.requireNonNull(optionsFactory, "optionsFactory must not be null");
-    this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+    this.objectMapper =
+        ToolOutcomeSerializer.addTo(
+            Objects.requireNonNull(objectMapper, "objectMapper must not be null"));
     this.eventsPathPrefix =
         Objects.requireNonNull(eventsPathPrefix, "eventsPathPrefix must not be null");
   }

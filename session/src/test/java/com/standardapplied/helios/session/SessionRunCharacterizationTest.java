@@ -177,12 +177,12 @@ class SessionRunCharacterizationTest {
           "HookFired turn=2 SessionRunCharacterizationTest$Run PreToolUseHook MutateArgs",
           "ToolMutated turn=2 c1 SessionRunCharacterizationTest$Run {v=one}->{v=mutated}",
           "ToolUse turn=2 c1 {v=mutated}",
-          "ToolResult turn=2 c1 echoed: mutated",
+          "ToolResult turn=2 c1 Succeeded echoed: mutated",
           "HookFired turn=2 SessionRunCharacterizationTest$Run PostToolUseHook MutateResult",
-          "ToolResult turn=2 c1 post-mutated: echoed: mutated",
+          "ToolResult turn=2 c1 Succeeded post-mutated: echoed: mutated",
           "HookFired turn=2 SessionRunCharacterizationTest$Run PreToolUseHook Block",
           "ToolBlocked turn=2 c2 SessionRunCharacterizationTest$Run not allowed",
-          "ToolResult turn=2 c2 blocked by hook: not allowed",
+          "ToolResult turn=2 c2 Rejected blocked by SessionRunCharacterizationTest$Run: not allowed",
           "TurnEnded turn=2 TOOL_USE",
           "ContextWarning turn=2 0.96",
           "HookFired turn=2 SessionRunCharacterizationTest$Run PreCompactHook MutateHistory",
@@ -375,7 +375,12 @@ class SessionRunCharacterizationTest {
                   + e.inputAfter();
           case QueryEvent.ToolBlocked e ->
               e.call().id() + " " + hook(e.hookName()) + " " + e.reason();
-          case QueryEvent.ToolResult e -> e.call().id() + " " + e.result().output();
+          case QueryEvent.ToolResult e ->
+              e.call().id()
+                  + " "
+                  + e.result().outcome().getClass().getSimpleName()
+                  + " "
+                  + hook(e.result().output());
           case QueryEvent.AssistantText e -> e.text();
           case QueryEvent.ContextWarning e -> String.valueOf(e.usagePct());
           case QueryEvent.ContextEdited e ->
@@ -387,7 +392,7 @@ class SessionRunCharacterizationTest {
   }
 
   private static String hook(String name) {
-    return name.replaceAll("\\$\\$Lambda.*", "");
+    return name.replaceAll("\\$\\$Lambda[^:]*", "");
   }
 
   private static String oneLine(String text) {

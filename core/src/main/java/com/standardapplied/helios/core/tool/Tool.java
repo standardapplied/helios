@@ -44,7 +44,7 @@ public record Tool(
    *
    * @param arguments the arguments from the model; non-null
    * @param context per-call cancellation + deadline; non-null
-   * @return the result of the execution
+   * @return the executor's result, or a {@link ToolOutcome.Threw} result when it throws
    */
   public ToolResult execute(Map<String, Object> arguments, ToolContext context) {
     try {
@@ -53,7 +53,7 @@ public record Tool(
       if (hasInterruptedCause(e)) {
         Thread.currentThread().interrupt();
       }
-      return ToolResult.failure("Tool execution failed", e);
+      return ToolResult.threw(name, e);
     }
   }
 

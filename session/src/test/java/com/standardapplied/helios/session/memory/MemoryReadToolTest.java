@@ -38,7 +38,7 @@ final class MemoryReadToolTest {
         MemoryReadTool.binding(backend)
             .tool()
             .execute(Map.of("path", "/memories/notes.md"), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertEquals("memory contents", result.output());
   }
 
@@ -62,7 +62,7 @@ final class MemoryReadToolTest {
         MemoryReadTool.binding(backend)
             .tool()
             .execute(Map.of("path", "/memories/", "list", true), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     var lines = List.of(result.output().split("\n"));
     assertTrue(lines.contains("/memories/INDEX.md"));
     assertTrue(lines.contains("/memories/user/a.md"));
@@ -75,7 +75,7 @@ final class MemoryReadToolTest {
         MemoryReadTool.binding(backend)
             .tool()
             .execute(Map.of("path", "/memories/", "list", true), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertEquals("(empty)\n", result.output());
   }
 
@@ -83,7 +83,7 @@ final class MemoryReadToolTest {
   void missingPathFails(@TempDir Path tmp) {
     var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
     var result = MemoryReadTool.binding(backend).tool().execute(Map.of(), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("missing required 'path'"), result.output());
   }
 
@@ -94,7 +94,7 @@ final class MemoryReadToolTest {
         MemoryReadTool.binding(backend)
             .tool()
             .execute(Map.of("path", "/memories/nope.md"), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("no such memory entry"), result.output());
   }
 
@@ -105,7 +105,7 @@ final class MemoryReadToolTest {
         MemoryReadTool.binding(backend)
             .tool()
             .execute(Map.of("path", "/etc/passwd"), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("MemoryRead:"), result.output());
   }
 

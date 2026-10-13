@@ -202,7 +202,7 @@ final class SessionDemoIntegrationTest {
     var successfulMemoryWrites =
         events.eventsOf(QueryEvent.ToolResult.class).stream()
             .filter(r -> r.call().name().equals(MemoryWriteTool.NAME))
-            .filter(r -> r.result().success())
+            .filter(r -> r.result().succeeded())
             .count();
     assertEquals(0L, successfulMemoryWrites);
     assertTrue(

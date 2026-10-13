@@ -159,7 +159,7 @@ abstract class WorkspaceReadOnlyRedactionContract {
                   + arguments
                   + "; "
                   + COUNTERPART);
-      assertTrue(first.result().success(), first.result().output());
+      assertTrue(first.result().succeeded(), first.result().output());
       return first;
     }
   }
