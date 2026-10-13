@@ -403,7 +403,7 @@ the stream produced before it failed.
 | An unreadable Anthropic server-tool result was left out of the echo | the stream ends in an `Error` |
 | SSE framing took each `data: ` line (exactly one space) as one event | events end at a blank line; `data` with or without the space, several `data` lines joined by a newline, CR, LF or CRLF, comments ignored, one byte order mark at the start of the body dropped; an event cut off before its blank line is dropped; a line or an event over 16 MiB ends the stream in an `Error` |
 | `SseReader.Parser.finished()` and `complete()` | removed; a `Done` or `Error` from `parse` ends the stream, and `partial()` gives what a cut-off stream produced |
-| `ToolCall.Builder.withArguments` rejected a `null` value | a JSON `null` argument stays a `null` value (`OrderedMaps.copyOfKeepingNullValues`); `QueryEvent.ToolMutated.inputBefore` keeps it too |
+| `ToolCall.Builder.withArguments` rejected a `null` value | a JSON `null` argument stays a `null` value (`OrderedMaps.copyOfKeepingNullValues`); `HookOutcome.MutateArgs` and both `QueryEvent.ToolMutated` inputs keep it too |
 
 ### Added
 

@@ -143,13 +143,14 @@ public sealed interface HookOutcome
   /**
    * Replace tool arguments at {@link PreToolUseHook}.
    *
-   * @param args the replacement arguments; non-null, defensively copied in the given order
+   * @param args the replacement arguments; non-null, defensively copied in the given order, keeping
+   *     {@code null} values
    */
   record MutateArgs(Map<String, Object> args) implements HookOutcome {
 
     public MutateArgs {
       Objects.requireNonNull(args, "args must not be null");
-      args = OrderedMaps.copyOf(args);
+      args = OrderedMaps.copyOfKeepingNullValues(args);
     }
   }
 
