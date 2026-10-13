@@ -79,8 +79,11 @@ final class ChunkStream implements Flow.Publisher<ModelChunk> {
         chunk = chunkOf(event);
       } catch (RuntimeException failure) {
         ended = true;
-        upstream.cancel();
-        downstream.onError(failure);
+        try {
+          upstream.cancel();
+        } finally {
+          downstream.onError(failure);
+        }
         return;
       }
       if (chunk == null) {

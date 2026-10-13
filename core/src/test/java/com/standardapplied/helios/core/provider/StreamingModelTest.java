@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.IteratorPublisher;
 import com.standardapplied.helios.core.model.Message;
@@ -36,6 +37,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class StreamingModelTest {
@@ -233,6 +235,43 @@ class StreamingModelTest {
     assertSame(reset, thrown.getCause());
     assertEquals(List.of(new ModelChunk.TextDelta("Hel")), subscriber.items());
     Await.latch("the stream closed", opened.closed);
+    assertEquals(0, subscriber.violations());
+  }
+
+  @Test
+  void chatStreamEndsAFailedTurnWithItsExceptionEvenWhenClosingTheStreamThrows() {
+    var reset = new IOException("reset");
+    var closes = new AtomicInteger();
+    publisher =
+        new IteratorPublisher<>(
+            () ->
+                new CloseableIterator<StreamEvent>() {
+                  private boolean read;
+
+                  @Override
+                  public boolean hasNext() {
+                    return !read;
+                  }
+
+                  @Override
+                  public StreamEvent next() {
+                    read = true;
+                    return error("Stream read error", reset);
+                  }
+
+                  @Override
+                  public void close() {
+                    closes.incrementAndGet();
+                    throw new IllegalStateException("close failed");
+                  }
+                },
+            new CancellationToken());
+
+    var subscriber = streamed(model(config()));
+
+    var thrown = assertInstanceOf(TransientStreamException.class, subscriber.awaitFailure());
+    assertSame(reset, thrown.getCause());
+    Await.until("the stream closed", () -> closes.get() > 0);
     assertEquals(0, subscriber.violations());
   }
 

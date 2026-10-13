@@ -303,6 +303,39 @@ class PauseContinuationTest {
   }
 
   @Test
+  void aNonPositiveRequestDuringTheHandoffFailsTheContinuationBeforeItOpens() {
+    var opened = new AtomicInteger();
+    var segments =
+        new ChatExchange<MessagesRequest>(
+            "Anthropic API",
+            r -> {
+              opened.incrementAndGet();
+              return opened.get() == 1 ? stream(pausedWithContent()) : stream(finished());
+            });
+    var handoff = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var streams = new AtomicInteger();
+    var subscriber = new RecordingSubscriber<StreamEvent>();
+
+    new PauseContinuation(
+            (r, token) -> {
+              if (streams.getAndIncrement() == 1) {
+                handoff.countDown();
+                Await.latch("the handoff released", release);
+              }
+              return segments.stream(r, token);
+            })
+        .stream(request, new CancellationToken()).subscribe(subscriber);
+    Await.latch("the continuation handoff", handoff);
+    subscriber.subscription().request(0);
+    release.countDown();
+
+    assertInstanceOf(IllegalArgumentException.class, subscriber.awaitFailure());
+    assertEquals(1, opened.get());
+    assertEquals(0, subscriber.violations());
+  }
+
+  @Test
   void aSecondSubscriberIsRefused() {
     var publisher = continuation(r -> stream(finished())).stream(request, new CancellationToken());
     var first = new RecordingSubscriber<StreamEvent>();
