@@ -3,15 +3,18 @@
 package com.standardapplied.helios.openai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.ChatExchange;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.test.SseEvents;
 import com.standardapplied.helios.openai.api.ResponsesRequest;
+import java.io.EOFException;
 import org.junit.jupiter.api.Test;
 
 class OpenAIStreamParserTest {
@@ -61,11 +64,10 @@ class OpenAIStreamParserTest {
   }
 
   @Test
-  void drainToResponseEmptyStreamReturnsDone() {
-    var response = drain("");
+  void drainingAnEmptyStreamFailsAsARetryableTruncation() {
+    var thrown = assertThrows(TransientStreamException.class, () -> drain(""));
 
-    assertNotNull(response);
-    assertEquals("", response.content());
-    assertEquals(FinishReason.STOP, response.finishReason());
+    assertEquals("Stream ended before its terminal event", thrown.getMessage());
+    assertInstanceOf(EOFException.class, thrown.getCause());
   }
 }

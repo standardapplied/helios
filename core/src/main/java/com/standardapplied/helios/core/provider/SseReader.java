@@ -5,12 +5,14 @@ package com.standardapplied.helios.core.provider;
 import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.ProviderException;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
-import java.io.BufferedReader;
 import java.io.Closeable;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.Reader;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -25,37 +27,42 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * The events of one server-sent-event response. Owns the response body: reads it a line at a time,
- * failing a line that does not arrive within the idle timeout, hands each {@code data:} payload to
- * the provider's {@link Parser}, and closes the body and its reader thread once the stream ends,
- * fails or is closed. A failure to read becomes a terminal {@link StreamEvent.Error}: an idle
- * timeout carries the provider's own exception, any other read failure its {@link IOException}.
+ * failing a line that does not arrive within the idle timeout, hands the data of each event the
+ * lines frame to the provider's {@link Parser}, and closes the body and its reader thread once the
+ * stream ends, fails or is closed.
+ *
+ * <p>A stream ends with exactly one terminal event: the {@link StreamEvent.Done} or {@link
+ * StreamEvent.Error} the parser yields, or an error this reader raises. A body that ends before the
+ * parser's terminal is never a completion: it ends in an error whose cause is an {@link
+ * EOFException}. A failure to read ends in an error carrying its {@link IOException}, an idle
+ * timeout or an oversized line or event one carrying the provider's own exception. Each error
+ * carries the parser's {@link Parser#partial()}. {@link SseFrames} frames the lines into events.
  */
 public final class SseReader implements CloseableIterator<StreamEvent> {
 
-  /** A provider's interpretation of the payloads of one stream. */
+  /** A provider's interpretation of the events of one stream. */
   public interface Parser {
 
     /**
-     * Absorbs one {@code data:} payload. Never throws: a payload it cannot read becomes a {@link
-     * StreamEvent.Error}.
+     * Absorbs one event's data. Never throws: data it cannot read becomes a {@link
+     * StreamEvent.Error}. A {@link StreamEvent.Done} or {@link StreamEvent.Error} ends the stream.
      *
-     * @param payload the payload, trimmed; never empty or {@code [DONE]}
+     * @param payload the event's data, trimmed; never empty or {@code [DONE]}
      * @return the event the payload yields, or {@code null} when it yields none
      */
     StreamEvent parse(String payload);
 
-    /** Whether the payload last parsed ended the stream. */
-    boolean finished();
-
-    /** The event that completes a stream whose body ended without a terminal payload. */
-    StreamEvent complete();
+    /**
+     * What the stream has produced so far, finishing with {@link
+     * com.standardapplied.helios.core.model.FinishReason#ERROR}: the content of a stream that ends
+     * without its terminal event.
+     */
+    Response<Void> partial();
   }
 
-  private static final String DATA_PREFIX = "data: ";
-  private static final String DONE_MARKER = "[DONE]";
-
   private final InputStream body;
-  private final BufferedReader reader;
+  private final Reader reader;
+  private final SseFrames frames;
   private final Duration idleTimeout;
   private final Parser parser;
   private final ProviderFailure failure;
@@ -73,7 +80,8 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
    */
   public SseReader(InputStream body, Duration idleTimeout, Parser parser, ProviderFailure failure) {
     this.body = body;
-    this.reader = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8));
+    this.reader = new InputStreamReader(body, StandardCharsets.UTF_8);
+    this.frames = new SseFrames(reader, failure);
     this.idleTimeout = idleTimeout;
     this.parser = parser;
     this.failure = failure;
@@ -141,9 +149,11 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
 
   private StreamEvent readNextEvent() {
     try {
-      for (var payload = nextPayload(); payload != null; payload = nextPayload()) {
+      for (var payload = frames.payload(this::readLine);
+          payload != null;
+          payload = frames.payload(this::readLine)) {
         var event = parser.parse(payload);
-        if (parser.finished()) {
+        if (event instanceof StreamEvent.Done || event instanceof StreamEvent.Error) {
           close();
           return event;
         }
@@ -151,27 +161,19 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
           return event;
         }
       }
-      close();
-      return parser.complete();
+      return failed(
+          "Stream ended before its terminal event",
+          new EOFException("the response body ended before the provider's terminal event"));
     } catch (ProviderException e) {
-      close();
-      return new StreamEvent.Error(e.getMessage(), e);
+      return failed(e.getMessage(), e);
     } catch (IOException e) {
-      close();
-      return new StreamEvent.Error("Stream read error", e);
+      return failed("Stream read error", e);
     }
   }
 
-  private String nextPayload() throws IOException {
-    for (var line = readLine(); line != null; line = readLine()) {
-      if (line.startsWith(DATA_PREFIX)) {
-        var payload = line.substring(DATA_PREFIX.length()).trim();
-        if (!payload.isEmpty() && !DONE_MARKER.equals(payload)) {
-          return payload;
-        }
-      }
-    }
-    return null;
+  private StreamEvent failed(String message, Exception cause) {
+    close();
+    return new StreamEvent.Error(message, cause, parser.partial());
   }
 
   private static void closeQuietly(Closeable closeable) {
@@ -183,7 +185,7 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
   }
 
   private String readLine() throws IOException {
-    var line = readExecutor.submit((Callable<String>) reader::readLine);
+    var line = readExecutor.submit((Callable<String>) frames::line);
     try {
       return line.get(idleTimeout.toMillis(), TimeUnit.MILLISECONDS);
     } catch (TimeoutException e) {
@@ -193,6 +195,9 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
     } catch (ExecutionException e) {
       if (e.getCause() instanceof IOException ioe) {
         throw ioe;
+      }
+      if (e.getCause() instanceof ProviderException tooLarge) {
+        throw tooLarge;
       }
       throw new IOException("Stream read failed", e.getCause());
     } catch (InterruptedException e) {

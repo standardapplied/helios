@@ -5,6 +5,7 @@ package com.standardapplied.helios.anthropic;
 import com.standardapplied.helios.anthropic.api.AnthropicJson;
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.core.model.CloseableIterator;
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.ChatExchange;
@@ -66,12 +67,26 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
 
   /**
    * The events of the whole turn answering {@code request}: the paused segment's completion is
-   * swallowed, the continuation streams on, and the one completion carries the merged response. A
-   * failure to open the first segment is the exchange's one error event, passed through.
+   * swallowed, the continuation streams on, and the one terminal carries the merged turn — the
+   * completion its response, an error after a pause its partial response. A failure to open the
+   * first segment is the exchange's one error event, passed through.
    */
   @Override
   public CloseableIterator<StreamEvent> stream(MessagesRequest request) {
     return new ContinuingStream(request, exchange.stream(request));
+  }
+
+  /** {@code merged}, the turn so far, as the partial response of a turn that failed. */
+  private static Response<Void> failed(Response<Void> merged) {
+    return Response.newBuilder()
+        .withContent(merged.content())
+        .withToolCalls(merged.toolCalls())
+        .withFinishReason(FinishReason.ERROR)
+        .withUsage(merged.usage())
+        .withThinking(merged.thinking())
+        .withCitations(merged.citations())
+        .withMetadata(merged.metadata())
+        .build();
   }
 
   private static boolean paused(Response<Void> response) {
@@ -124,6 +139,10 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
         }
         event = current.next();
       }
+      if (event instanceof StreamEvent.Error(var message, var cause, var partial)
+          && mergedSoFar != null) {
+        return new StreamEvent.Error(message, cause, SegmentMerge.merge(mergedSoFar, partial));
+      }
       return event;
     }
 
@@ -146,7 +165,8 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
       if (continuations >= MAX_PAUSE_CONTINUATIONS) {
         return new StreamEvent.Error(
             "pause_turn continuation limit exceeded after " + MAX_PAUSE_CONTINUATIONS + " resumes",
-            null);
+            null,
+            failed(merged));
       }
       mergedSoFar = merged;
       continuations++;
@@ -159,12 +179,12 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
         current = segments.open(continuation(request, merged));
         return null;
       } catch (AnthropicException e) {
-        return new StreamEvent.Error(e.getMessage(), e);
+        return new StreamEvent.Error(e.getMessage(), e, failed(merged));
       } catch (IOException e) {
-        return new StreamEvent.Error("Failed to reopen paused stream", e);
+        return new StreamEvent.Error("Failed to reopen paused stream", e, failed(merged));
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
-        return new StreamEvent.Error("Request interrupted", e);
+        return new StreamEvent.Error("Request interrupted", e, failed(merged));
       }
     }
   }

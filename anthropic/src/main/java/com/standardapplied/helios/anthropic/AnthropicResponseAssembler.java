@@ -11,9 +11,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Assembles the response at the end of a streamed turn: its text, tool calls, finish reason, usage,
- * thinking and citations, and the metadata a later turn needs to echo it — each signed thinking
- * block, the raw stop reason and refusal details, and the verbatim content when the turn needs it.
+ * Assembles the response of a streamed turn, at its end or as far as it got: its text, tool calls,
+ * finish reason, usage, thinking and citations, and the metadata a later turn needs to echo it —
+ * each signed thinking block, the raw stop reason and refusal details, and the verbatim content
+ * when the turn needs it.
  */
 final class AnthropicResponseAssembler {
 
@@ -22,41 +23,53 @@ final class AnthropicResponseAssembler {
 
   private AnthropicResponseAssembler() {}
 
-  /** The completion event of the turn in {@code blocks}. */
+  /**
+   * The completion event of the turn in {@code blocks}, whose {@code stopReason} {@link
+   * #finishReason} knows. A turn that called tools and stopped finishes with {@code TOOL_CALLS}.
+   */
   static StreamEvent.Done done(
       ContentBlocks blocks,
       Response.Usage usage,
       String stopReason,
       ContentDelta.StopDetails stopDetails) {
-    var calls = blocks.toolUses().calls();
-    var finishReason = mapStopReason(stopReason);
-    if (!calls.isEmpty() && finishReason == FinishReason.STOP) {
+    var finishReason = finishReason(stopReason);
+    if (!blocks.toolUses().calls().isEmpty() && finishReason == FinishReason.STOP) {
       finishReason = FinishReason.TOOL_CALLS;
     }
-    var thinkingBlocks = blocks.thinking().signed();
-    var response =
-        Response.newBuilder()
-            .withContent(blocks.text().content())
-            .withToolCalls(calls)
-            .withFinishReason(finishReason)
-            .withUsage(usage)
-            .withThinking(joined(thinkingBlocks))
-            .withCitations(blocks.text().citations())
-            .withMetadata(metadata(blocks, thinkingBlocks, stopReason, stopDetails))
-            .build();
-    return new StreamEvent.Done(response);
+    return new StreamEvent.Done(response(blocks, usage, stopReason, stopDetails, finishReason));
   }
 
-  /** The finish reason of the API's {@code stop_reason}. */
-  static FinishReason mapStopReason(String stopReason) {
-    if (stopReason == null) {
-      return FinishReason.STOP;
-    }
+  /** The response of the turn in {@code blocks} so far, finishing with {@code finishReason}. */
+  static Response<Void> response(
+      ContentBlocks blocks,
+      Response.Usage usage,
+      String stopReason,
+      ContentDelta.StopDetails stopDetails,
+      FinishReason finishReason) {
+    var thinkingBlocks = blocks.thinking().signed();
+    return Response.newBuilder()
+        .withContent(blocks.text().content())
+        .withToolCalls(blocks.toolUses().calls())
+        .withFinishReason(finishReason)
+        .withUsage(usage)
+        .withThinking(joined(thinkingBlocks))
+        .withCitations(blocks.text().citations())
+        .withMetadata(metadata(blocks, thinkingBlocks, stopReason, stopDetails))
+        .build();
+  }
+
+  /**
+   * The finish reason of the API's {@code stop_reason}, or {@code null} for none or one this client
+   * does not know, which ends no turn successfully. {@code pause_turn} stops a segment the turn
+   * continues from.
+   */
+  static FinishReason finishReason(String stopReason) {
     return switch (stopReason) {
+      case "end_turn", "stop_sequence", "pause_turn" -> FinishReason.STOP;
       case "tool_use" -> FinishReason.TOOL_CALLS;
       case "max_tokens", "model_context_window_exceeded" -> FinishReason.LENGTH;
       case "refusal" -> FinishReason.REFUSAL;
-      default -> FinishReason.STOP;
+      case null, default -> null;
     };
   }
 

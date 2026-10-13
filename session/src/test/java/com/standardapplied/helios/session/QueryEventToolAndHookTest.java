@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -196,6 +197,17 @@ final class QueryEventToolAndHookTest {
 
     assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(e.inputBefore()));
     assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(e.inputAfter()));
+  }
+
+  @Test
+  void toolMutatedKeepsAJsonNullArgumentTheModelSent() {
+    var before = new LinkedHashMap<String, Object>();
+    before.put("unit", null);
+
+    var e = new QueryEvent.ToolMutated(SID, TURN, TS, CALL, "h", before, Map.of("unit", "C"));
+
+    assertTrue(e.inputBefore().containsKey("unit"));
+    assertNull(e.inputBefore().get("unit"));
   }
 
   @Test

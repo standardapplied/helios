@@ -36,6 +36,9 @@ class ChatExchangeTest {
           .withFinishReason(FinishReason.STOP)
           .build();
 
+  private static final Response<Void> NOTHING =
+      Response.newBuilder().withFinishReason(FinishReason.ERROR).build();
+
   private final List<String> opened = new ArrayList<>();
 
   @Test
@@ -51,7 +54,8 @@ class ChatExchangeTest {
   void chatRethrowsTheProvidersOwnExceptionFromAnErrorEvent() {
     var own = new AcmeException("boom", 503, null);
 
-    var thrown = assertThrows(AcmeException.class, () -> chatOn(new StreamEvent.Error("x", own)));
+    var thrown =
+        assertThrows(AcmeException.class, () -> chatOn(new StreamEvent.Error("x", own, NOTHING)));
 
     assertSame(own, thrown);
   }
@@ -63,7 +67,7 @@ class ChatExchangeTest {
     var thrown =
         assertThrows(
             TransientStreamException.class,
-            () -> chatOn(new StreamEvent.Error("x", transientFailure)));
+            () -> chatOn(new StreamEvent.Error("x", transientFailure, NOTHING)));
 
     assertSame(transientFailure, thrown);
   }
@@ -75,7 +79,7 @@ class ChatExchangeTest {
     var thrown =
         assertThrows(
             TransientStreamException.class,
-            () -> chatOn(new StreamEvent.Error("Stream read error", reset)));
+            () -> chatOn(new StreamEvent.Error("Stream read error", reset, NOTHING)));
 
     assertEquals("Stream read error", thrown.getMessage());
     assertSame(reset, thrown.getCause());
@@ -88,9 +92,11 @@ class ChatExchangeTest {
 
     var wrapped =
         assertThrows(
-            AcmeException.class, () -> chatOn(new StreamEvent.Error("Failed to parse", parse)));
+            AcmeException.class,
+            () -> chatOn(new StreamEvent.Error("Failed to parse", parse, NOTHING)));
     var bare =
-        assertThrows(AcmeException.class, () -> chatOn(new StreamEvent.Error("API error", null)));
+        assertThrows(
+            AcmeException.class, () -> chatOn(new StreamEvent.Error("API error", null, NOTHING)));
 
     assertEquals("Failed to parse", wrapped.getMessage());
     assertSame(parse, wrapped.getCause());
@@ -180,6 +186,9 @@ class ChatExchangeTest {
 
     assertEquals("Failed to connect", error.message());
     assertSame(refused, error.cause());
+    assertEquals(
+        Response.newBuilder().withContent("").withFinishReason(FinishReason.ERROR).build(),
+        error.partial());
   }
 
   @Test

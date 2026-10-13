@@ -1,0 +1,8 @@
+data: {"event_type":"interaction.created","interaction":{"id":"int_xyz","status":"in_progress"}}
+
+data: {"event_type":"step.start","index":0,"step":{"type":"model_output"}}
+
+data: {"event_type":"step.delta","index":0,"delta":{"type":"text","text":"Hello"}}
+
+data: {"event_type":"step.delta","index":0,"delta":{"type":"text","text":", wor"}}
+

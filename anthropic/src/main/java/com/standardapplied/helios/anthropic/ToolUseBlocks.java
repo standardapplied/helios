@@ -5,6 +5,7 @@ package com.standardapplied.helios.anthropic;
 import com.standardapplied.helios.anthropic.api.AnthropicJson;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.provider.ToolArguments;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -23,19 +24,14 @@ final class ToolUseBlocks implements RawContentEcho.Source {
   private final List<ToolCall> calls = new ArrayList<>();
 
   /**
-   * The JSON object {@code json} as a map: empty for no input, and {@code {"_raw": json}} for input
-   * that is not a JSON object, so the model sees what it sent.
+   * The input of tool use {@code name}, streamed as {@code json}: a JSON object, empty when none
+   * streamed.
+   *
+   * @throws AnthropicException if {@code json} is not a JSON object
    */
-  @SuppressWarnings("unchecked")
-  static Map<String, Object> arguments(String json) {
-    if (json.isEmpty()) {
-      return Map.of();
-    }
-    try {
-      return AnthropicJson.LENIENT.readValue(json, Map.class);
-    } catch (RuntimeException e) {
-      return Map.of("_raw", json);
-    }
+  static Map<String, Object> arguments(String name, String json) {
+    return ToolArguments.read(
+        name, json, AnthropicJson.STRUCTURED.reader(), AnthropicException::new);
   }
 
   /** A tool-use block opening at {@code index}. */
@@ -61,11 +57,16 @@ final class ToolUseBlocks implements RawContentEcho.Source {
         ToolCall.newBuilder()
             .withId(block.id())
             .withName(block.name())
-            .withArguments(arguments(block.input().toString()))
+            .withArguments(arguments(block.name(), block.input().toString()))
             .build();
     calls.add(call);
     completed.put(index, call);
     return new StreamEvent.ToolCallComplete(call);
+  }
+
+  /** The name of a tool-use block still open, or {@code null} when none is. */
+  String open() {
+    return pending.isEmpty() ? null : pending.values().iterator().next().name();
   }
 
   /** The tool calls, in the order they closed. */

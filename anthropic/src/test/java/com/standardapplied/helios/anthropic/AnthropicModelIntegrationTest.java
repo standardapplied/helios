@@ -5,6 +5,7 @@
 
 package com.standardapplied.helios.anthropic;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -415,6 +416,17 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
     try (var haiku = modelFor("claude-haiku-4-5-20251001", new Reasoning.Off())) {
       Accepted.textReply(haiku.chat(List.of(Message.user("What is 17 * 23? Think it through."))));
     }
+  }
+
+  @Test
+  void aStreamCompletesOnlyAtMessageStopWithTheFinishReasonOfItsStopReason() {
+    var response =
+        Accepted.stream(
+            model.chatStream(List.of(Message.user("Reply with the single word: ok")), List.of()));
+
+    var stopReason = response.metadata().get(AnthropicResponseAssembler.STOP_REASON_KEY);
+    assertNotNull(stopReason, "message_delta carried no stop_reason");
+    assertEquals(AnthropicResponseAssembler.finishReason(stopReason), response.finishReason());
   }
 
   @Test

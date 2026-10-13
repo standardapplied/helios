@@ -1,0 +1,5 @@
+== chatStream
+TextDelta[text=Hello, wor]
+Done[response=Response[content=Hello, wor, parsed=null, toolCalls=[], finishReason=LENGTH, usage=Usage[inputTokens=25, outputTokens=4, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=41], thinking=null, citations=[], metadata={anthropic.stopReason=max_tokens}]]
+== chat
+Response[content=Hello, wor, parsed=null, toolCalls=[], finishReason=LENGTH, usage=Usage[inputTokens=25, outputTokens=4, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=41], thinking=null, citations=[], metadata={anthropic.stopReason=max_tokens}]

@@ -1,0 +1,5 @@
+== chatStream
+TextDelta[text=Hello]
+Error[message=Stream ended before its terminal event, cause=EOFException(the response body ended before the provider's terminal event), partial=Response[content=Hello, parsed=null, toolCalls=[], finishReason=ERROR, usage=Usage[inputTokens=25, outputTokens=15, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=52], thinking=null, citations=[], metadata={anthropic.stopReason=end_turn}]]
+== chat
+threw TransientStreamException(Stream ended before its terminal event) provider=anthropic caused by EOFException(the response body ended before the provider's terminal event)

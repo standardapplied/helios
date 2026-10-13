@@ -3,16 +3,15 @@
 package com.standardapplied.helios.openai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Role;
-import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.ConversationFixture;
 import com.standardapplied.helios.openai.api.ApiUsage;
@@ -129,10 +128,9 @@ class OpenAIRestructuredPartsTest {
   }
 
   private static Response.Usage usage(ApiUsage usage) {
-    var done =
-        assertInstanceOf(
-            StreamEvent.Done.class,
-            OpenAIResponseAssembler.done("", List.of(), "", usage, "completed"));
-    return done.response().usage();
+    return OpenAIResponseAssembler.response(
+            new OpenAIResponseAssembler.Turn("", List.of(), null, "", null, usage),
+            FinishReason.STOP)
+        .usage();
   }
 }

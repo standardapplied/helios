@@ -13,7 +13,8 @@ import java.util.Map;
  *
  * @param id unique identifier for this call (used to match results)
  * @param name the name of the tool to call
- * @param arguments the arguments to pass to the tool
+ * @param arguments the arguments to pass to the tool; a JSON {@code null} argument is a {@code
+ *     null} value
  */
 public record ToolCall(String id, String name, Map<String, Object> arguments) {
 
@@ -39,7 +40,8 @@ public record ToolCall(String id, String name, Map<String, Object> arguments) {
     }
 
     public Builder withArguments(Map<String, Object> arguments) {
-      this.arguments = arguments != null ? OrderedMaps.copyOf(arguments) : Map.of();
+      this.arguments =
+          arguments != null ? OrderedMaps.copyOfKeepingNullValues(arguments) : Map.of();
       return this;
     }
 

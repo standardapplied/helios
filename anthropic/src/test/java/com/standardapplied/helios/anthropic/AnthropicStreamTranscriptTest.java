@@ -29,7 +29,9 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p>{@code progress-notes} is the second turn of a live claude-opus-5-5 tool loop under {@code
  * Display.PROGRESS}, recorded 2026-10-09. {@code structured} is a live claude-sonnet-4-6 reply to a
- * structured-output request, recorded 2026-10-09. The other streams are hand-built.
+ * structured-output request, recorded 2026-10-09. The other streams are hand-built from the
+ * documented event shapes; the {@code eof-*} and {@code empty} streams are bodies cut short, which
+ * end in an error carrying what they produced, never in a completion.
  */
 class AnthropicStreamTranscriptTest {
 
@@ -49,7 +51,15 @@ class AnthropicStreamTranscriptTest {
         "redacted-thinking",
         "refusal",
         "pause-turn",
-        "progress-notes"
+        "progress-notes",
+        "empty",
+        "eof-after-text",
+        "eof-after-usage",
+        "eof-in-tool-arguments",
+        "eof-mid-event",
+        "max-tokens",
+        "bad-tool-arguments",
+        "null-argument"
       })
   void transcriptMatchesItsGolden(String name) {
     var transcript =

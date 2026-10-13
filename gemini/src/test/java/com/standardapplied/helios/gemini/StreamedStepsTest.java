@@ -346,28 +346,38 @@ class StreamedStepsTest {
     assertEquals(FinishReason.STOP, done.response().finishReason());
   }
 
-  static Stream<Named<String>> argumentsDeltasAfterAStartWithArguments() {
-    return Stream.of(
-        named("functionCallWithEmbeddedArgumentsOnStartFallsBack", ""),
-        named(
-            "functionCallWithMalformedArgsDeltaFallsBackToStartArgs",
-            stepArgumentsDelta(1, "{not json")),
-        named(
-            "argumentsDeltaParsingNullPayloadFallsBackToStartArgs", stepArgumentsDelta(1, "null")));
-  }
-
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("argumentsDeltasAfterAStartWithArguments")
-  void functionCallFallsBackToTheArgumentsOnItsStart(String argumentsDeltas) {
+  @Test
+  void aFunctionCallWithoutStreamedArgumentsTakesTheArgumentsOnItsStart() {
     var events =
-        drain(
-            stepStart(1, GET_WEATHER_WITH_ARGUMENTS)
-                + argumentsDeltas
-                + stepStop(1)
-                + INTERACTION_COMPLETED);
+        drain(stepStart(1, GET_WEATHER_WITH_ARGUMENTS) + stepStop(1) + INTERACTION_COMPLETED);
 
     var tc = ((StreamEvent.ToolCallComplete) events.get(0)).toolCall();
     assertEquals(Map.of("city", "NYC"), tc.arguments());
+  }
+
+  static Stream<Named<String>> streamedArgumentsThatAreNotAnObject() {
+    return Stream.of(
+        named("malformed", stepArgumentsDelta(1, "{not json")),
+        named("jsonNull", stepArgumentsDelta(1, "null")));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("streamedArgumentsThatAreNotAnObject")
+  void streamedArgumentsThatAreNotAJsonObjectEndTheStreamNamingTheTool(String argumentsDelta) {
+    var events =
+        drain(
+            stepStart(1, GET_WEATHER_WITH_ARGUMENTS)
+                + argumentsDelta
+                + stepStop(1)
+                + INTERACTION_COMPLETED);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertTrue(
+        error.message().startsWith("Arguments of tool call 'get_weather' are not a JSON object: "),
+        error.message());
+    assertInstanceOf(GeminiException.class, error.cause());
+    assertEquals(List.of(), error.partial().toolCalls());
+    assertEquals(1, events.size());
   }
 
   static Stream<Named<String>> thoughtsWithAnEmptySignature() {

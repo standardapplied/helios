@@ -1,0 +1,14 @@
+data: {"event_type":"interaction.created","interaction":{"id":"int_xyz","status":"in_progress"}}
+
+data: {"event_type":"step.start","index":0,"step":{"type":"function_call","id":"call_1","name":"weather"}}
+
+data: {"event_type":"step.delta","index":0,"delta":{"type":"arguments_delta","arguments":"{\"city\":\"Paris\","}}
+
+data: {"event_type":"step.delta","index":0,"delta":{"type":"arguments_delta","arguments":"\"unit\":null}"}}
+
+data: {"event_type":"step.stop","index":0,"status":"done"}
+
+data: {"event_type":"interaction.completed","interaction":{"id":"int_xyz","status":"requires_action","usage":{"total_input_tokens":2006,"total_output_tokens":150,"total_tokens":2156,"total_cached_tokens":1920}}}
+
+data: [DONE]
+
