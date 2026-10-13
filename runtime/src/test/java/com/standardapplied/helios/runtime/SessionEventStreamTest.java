@@ -13,6 +13,7 @@ import com.standardapplied.helios.session.QueryEvent;
 import io.helidon.http.sse.SseEvent;
 import io.helidon.webserver.CloseConnectionException;
 import io.helidon.webserver.sse.SseSink;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /** Unit tests for {@link SessionEventStream} as a subscriber, against a recording sink. */
 final class SessionEventStreamTest {
@@ -70,7 +72,8 @@ final class SessionEventStreamTest {
   @Test
   void aToolResultIsEmittedWithItsRedactionsAndNoData() {
     var sink = new RecordingSink(null);
-    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
+    var stream =
+        new SessionEventStream("sess-1", sink, ToolOutcomeSerializer.addTo(new ObjectMapper()));
 
     stream.onNext(
         new QueryEvent.ToolResult(
@@ -86,10 +89,36 @@ final class SessionEventStreamTest {
             "ToolResult:{\"sessionId\":\"sess-1\",\"turnIndex\":0,"
                 + "\"timestamp\":\"1970-01-01T00:00:00Z\","
                 + "\"call\":{\"id\":\"c1\",\"name\":\"leak\",\"arguments\":{}},"
-                + "\"result\":{\"success\":true,\"output\":\"token=<redacted:API_KEY>\","
+                + "\"result\":{\"outcome\":{\"kind\":\"Succeeded\"},"
+                + "\"output\":\"token=<redacted:API_KEY>\","
                 + "\"attachments\":[]},"
                 + "\"redactions\":{\"API_KEY\":1}}"),
         sink.emitted);
+  }
+
+  @Test
+  void aTimedOutCallStreamsTheSameThroughEitherMapperTheRuntimeIsGiven() {
+    var event =
+        new QueryEvent.ToolResult(
+            "sess-1",
+            0L,
+            Instant.EPOCH,
+            new ToolCall("c1", "slow", Map.of()),
+            ToolResult.timedOut("slow", Duration.ofMinutes(1)),
+            Map.of());
+    var expected =
+        "ToolResult:{\"sessionId\":\"sess-1\",\"turnIndex\":0,"
+            + "\"timestamp\":\"1970-01-01T00:00:00Z\","
+            + "\"call\":{\"id\":\"c1\",\"name\":\"slow\",\"arguments\":{}},"
+            + "\"result\":{\"outcome\":{\"kind\":\"TimedOut\",\"limit\":\"PT1M\"},"
+            + "\"output\":\"tool 'slow' timed out after PT1M\",\"attachments\":[]},"
+            + "\"redactions\":{}}";
+
+    for (var mapper : List.of(new ObjectMapper(), JsonMapper.builder().build())) {
+      var sink = new RecordingSink(null);
+      new SessionEventStream("sess-1", sink, ToolOutcomeSerializer.addTo(mapper)).onNext(event);
+      assertEquals(List.of(expected), sink.emitted);
+    }
   }
 
   @Test

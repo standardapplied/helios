@@ -96,7 +96,7 @@ abstract class ReadToolMultimodalContract {
                   result ->
                       result.turnIndex() == 1
                           && result.call().name().equals(ReadTool.NAME)
-                          && result.result().success()
+                          && result.result().succeeded()
                           && result.result().hasAttachments()),
           () ->
               model.id()

@@ -62,7 +62,11 @@ public final class ConsoleEventPrinter implements Flow.Subscriber<QueryEvent> {
               "[result] "
                   + result.call().name()
                   + " "
-                  + (result.result().success() ? "ok" : "FAILED: " + result.result().output()));
+                  + (result.result().succeeded()
+                      ? "ok"
+                      : result.result().outcome().getClass().getSimpleName()
+                          + ": "
+                          + result.result().output()));
       case QueryEvent.ToolBlocked blocked ->
           out.println("[blocked] " + blocked.call().name() + ": " + blocked.reason());
       case QueryEvent.TurnEnded ended -> out.println("\n[turn-ended] " + ended.reason());

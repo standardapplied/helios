@@ -361,6 +361,25 @@ REPL's bindings listener is gone.
 | `repl.SandboxBindingsListener`, `ReplConfig.sandboxBindingsListener`, `maxBindingValueChars`, `maxBindingSnapshotChars`, `DEFAULT_MAX_BINDING_VALUE_CHARS`, `DEFAULT_MAX_BINDING_SNAPSHOT_CHARS` and their builder methods; `sandbox.ExecuteParams`; `Sandbox.execute(request, ExecuteParams)`; `sandbox.ExecutionResult.bindings()` and `Builder.withBindings`; the `captureBindings`, `maxBindingValueChars` and `maxBindingSnapshotChars` execute parameters and the reply's `bindings` | removed: the listener received unredacted output, served every session and carried no session id, and nothing registered one |
 | `sandbox.ExecutionResult.executedCode()`, `Builder.withExecutedCode`; `ReplConfig.maxExecutedCodeChars`, `DEFAULT_MAX_EXECUTED_CODE_CHARS`, `Builder.withMaxExecutedCodeChars`; `ReplSession.history()` | removed: only the listener's observers used them. `sandbox.ExecutionResult(stdout, stderr, exitCode, timedOut, duration)`; `ReplConfig(sandboxFactory, executionTimeout, maxConcurrentSessions, hostFunctions)` |
 
+**A tool call's outcome is a typed component of `ToolResult`.** `core.tool.ToolOutcome` is a
+sealed interface with six records: `Succeeded`, `Failed`, `Threw(exceptionType)`,
+`TimedOut(limit)`, `Rejected(by, reason)` and `NotFound`. Count or route on it, never on the result
+text. Each `ToolResult` factory sets the outcome and writes the model-facing text, so the two cannot
+drift.
+
+| 2.x | 3.0 |
+|---|---|
+| `ToolResult(boolean success, output, attachments)`, `success()` | `ToolResult(ToolOutcome outcome, output, attachments)`, `succeeded()`. New framework factories `threw(toolName, cause)`, `timedOut(toolName, limit)`, `notFound(toolName)`, `rejected(by, reason)`, and `withOutput(text)` |
+| `ToolResult.failure(String, Exception)` | removed: return `failure(text)`, or throw and Helios reports `Threw` |
+| A tool's thrown exception: `Tool execution failed: <msg>`; a throwable from dispatch, including a call cancelled before it ran: `tool dispatch failed: <msg>` | both `Threw`, text `tool '<name>' threw: <msg>` (the simple class name when the message is null) |
+| A `PreToolUse` `Block`: `blocked by hook: <reason>` | `Rejected(by, reason)`, text `blocked by <by>: <reason>`, where `by` is the name `ToolBlocked` carries. A permission denial is a `Block` from `DefaultPermissionEvaluator`, so it is `Rejected` too |
+| A `PreToolUse` `Inject`: `tool skipped: hook injected user message` | `Rejected(by, "hook injected a user message")`, text `blocked by <by>: hook injected a user message` |
+| A `PostToolUse` `MutateResult` became a successful result with no attachments | the result keeps its outcome and attachments and replaces only its output: a hook changes what the model reads, not what happened |
+| `ToolDispatch.dispatch` accepted a zero timeout | the timeout must be positive, like `SessionLimits.toolTimeoutDefault` |
+| SSE `ToolResult` event: `"result":{"success":true,...}` | `"result":{"outcome":{"kind":"Succeeded"},...}`; the outcome object carries `kind` (the record's simple name) and the record's components, e.g. `{"kind":"TimedOut","limit":"PT1M"}`. The runtime adds the serializer to whatever `ObjectMapper` it is given |
+| JSONL `ToolCallCompleted`: `success` | `success` plus `"outcome":"<kind>"` |
+| `ConsoleEventPrinter`: `[result] <tool> FAILED: <output>` | `[result] <tool> <kind>: <output>` |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
