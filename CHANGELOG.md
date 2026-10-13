@@ -128,6 +128,25 @@ remove the per-call working directory before they release the concurrency permit
 | `SessionOptions.Builder.apply(preset)` | `withPreset(preset)` |
 | `DurabilityCoordinator.journalStart(...)`, `journalTerminal(...)`, `journalTerminalFailure(...)`, `inflightFor(runId)`, `markInflightFailed(...)` | `new ToolCallJournaling(durability)` with `start(...)`, `complete(...)`, `fail(...)`, `inflight(runId)`, `markInflightFailed(...)`; `DurabilityCoordinator` keeps the run lifecycle, and journal warnings log under `com.standardapplied.helios.core.runtime.ToolCallJournaling` |
 
+**A model streams one way: a lazy, cancellable `Flow.Publisher<ModelChunk>`.** `Model`'s default
+`Flow` form used to call the blocking `chat` before anyone subscribed and replay a chunk sequence
+made up from the finished response, so a session saw no text until the turn was over and could not
+cancel a call already in flight. Now `chatStream(messages, tools, [schema,] cancellation)` is the
+one entry point: every provider publishes each delta as its stream delivers it, nothing is sent
+before the subscriber's first request, and cancelling the subscription or the token aborts that
+request (awaiting headers or mid-body) and closes its connection without touching the shared model.
+`chat` drains the same stream. A session's `TurnSubscriber` owns the subscription and cancels it on
+the idle timeout, cancellation or an interrupt; one terminal transition ignores every late signal.
+
+| 2.x | 3.0 |
+|---|---|
+| `CloseableIterator<StreamEvent> chatStream(messages, tools)`, `chatStream(messages)` | `Flow.Publisher<ModelChunk> chatStream(messages, tools, cancellation)`, the one streaming form; `Model.chat(messages, tools)` drains it by default |
+| A `Model` implementing only the blocking `chat`; the `Flow` default ran it eagerly and synthesised chunks | implement `core.model.BlockingModel`: its `chat` runs as work the subscription owns, started on the first request and interrupted on cancellation; `BlockingModel.publisherOf(call, cancellation)` does the same for one call |
+| `Model.chat(messages)`, `Model.chat(messages, schema)` | `chat(messages, List.of())`, `chat(messages, List.of(), schema)` |
+| `Exchange.chat(request)`, `CloseableIterator<StreamEvent> Exchange.stream(request)` | `Flow.Publisher<StreamEvent> Exchange.stream(request, cancellation)`; `StreamingModel` drains it for `chat` |
+| `new ChatExchange<>(providerName, apiName, opener, failure)` | `new ChatExchange<>(apiName, opener)` plus `StreamingModel.Builder.withFailure(failure)`, which maps a failed turn's exception |
+| `new PauseContinuation(exchange, opener)` (Anthropic, package-private) | `new PauseContinuation(exchange)`, splicing each continuation segment's publisher into one stream |
+
 **The provider model classes are removed; every provider returns a `Model`.** `AnthropicModel`,
 `OpenAIModel` and `GeminiModel` were one forwarding surface written three times. Each provider now
 assembles a `core.provider.StreamingModel` from its own request builder, stream parser and JSON
@@ -463,11 +482,14 @@ the stream produced before it failed.
 - **`core.provider`: what every streaming provider shares**, for the built-in providers and for a
   provider written outside Helios. `StreamingModel` is the `Model` a provider assembles through
   `StreamingModel.newBuilder()` from its identity, `ModelConfig`, HTTP client, `RequestFactory`
-  (one turn's request), `Exchange` (how a turn runs) and a JSON adapter; it implements chat,
-  structured chat (parsed unless the turn called tools), streaming and close once. `ChatExchange`
-  is the standard `Exchange`: it opens a stream, drains it or hands it back, and maps failures
-  one way (the provider's exception and `TransientStreamException` pass through, an `IOException`
-  becomes a retryable `TransientStreamException`, an interrupt is restored). `SseReader` reads
+  (one turn's request), `Exchange` (how a turn's event stream is published), a `ProviderFailure`
+  and a JSON adapter; it implements streaming (each event as its `ModelChunk`, structured turns
+  checked once complete unless they called tools), chat (the stream drained), structured chat and
+  close once, and maps a failed turn's exception one way (the provider's exception and
+  `TransientStreamException` pass through, an `IOException` becomes a retryable
+  `TransientStreamException`). `ChatExchange` is the standard `Exchange`: a lazy
+  `core.model.IteratorPublisher` over the provider's response stream, with a failure to open it
+  as the stream's one error event. `SseReader` reads
   server-sent events with a per-line idle timeout, `JsonPost` builds the JSON `POST` with default
   and configured headers, `ProviderFailure` creates a provider's exception, and `JsonBinding`
   adapts a JSON library to structured output from two functions. Architecture rules keep provider
