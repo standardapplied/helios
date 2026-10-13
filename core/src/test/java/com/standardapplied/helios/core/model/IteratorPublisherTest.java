@@ -40,6 +40,7 @@ class IteratorPublisherTest {
     assertEquals("a", subscriber.next());
     assertEquals(List.of("a"), subscriber.awaitCompletion());
     assertEquals(1, opened.get());
+    Await.until("the owned thread finished", () -> token.activeCallbackCountForTests() == 0);
   }
 
   @Test
@@ -329,6 +330,7 @@ class IteratorPublisherTest {
 
     assertEquals(0, opened.get());
     assertFalse(subscriber.ended());
+    assertEquals(0, token.activeCallbackCountForTests());
   }
 
   @Test
@@ -355,6 +357,32 @@ class IteratorPublisherTest {
 
     assertEquals("too late", subscriber.awaitFailure().getMessage());
     assertEquals(0, opened.get());
+  }
+
+  @Test
+  void aTokenCancelledBeforeSubscribingFailsASubscriberThatNeverRequests() {
+    token.cancel("too late");
+    var subscriber = new RecordingSubscriber<String>(0);
+
+    publisherOf(new Source(List.of("a"))).subscribe(subscriber);
+
+    var failure = assertInstanceOf(CancellationException.class, subscriber.awaitFailure());
+    assertEquals("too late", failure.getMessage());
+    assertEquals(0, opened.get());
+  }
+
+  @Test
+  void aTokenCancelledAfterSubscribingFailsASubscriberThatNeverRequests() {
+    var subscriber = new RecordingSubscriber<String>(0);
+
+    publisherOf(new Source(List.of("a"))).subscribe(subscriber);
+    subscriber.subscription();
+    token.cancel("user stopped");
+
+    var failure = assertInstanceOf(CancellationException.class, subscriber.awaitFailure());
+    assertEquals("user stopped", failure.getMessage());
+    assertEquals(0, opened.get());
+    assertEquals(0, token.activeCallbackCountForTests());
   }
 
   @Test
