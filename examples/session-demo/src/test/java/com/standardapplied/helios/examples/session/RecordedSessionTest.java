@@ -49,6 +49,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -107,9 +108,14 @@ final class RecordedSessionTest {
     assertTrue(replay.events().eventsOf(QueryEvent.Error.class).isEmpty());
     assertEquals(8, replay.events().eventsOf(QueryEvent.ToolUse.class).size());
     assertEquals(8, replay.events().eventsOf(QueryEvent.ToolResult.class).size());
-    var notes = replay.events().eventsOf(QueryEvent.AssistantThinking.class);
-    assertEquals(2, notes.size());
-    notes.forEach(note -> assertFalse(note.text().isBlank()));
+    var notesByTurn =
+        replay.events().eventsOf(QueryEvent.AssistantThinking.class).stream()
+            .collect(
+                Collectors.groupingBy(
+                    QueryEvent.AssistantThinking::turnIndex,
+                    Collectors.mapping(QueryEvent.AssistantThinking::text, Collectors.joining())));
+    assertEquals(2, notesByTurn.size());
+    notesByTurn.values().forEach(notes -> assertFalse(notes.isBlank()));
   }
 
   @Test

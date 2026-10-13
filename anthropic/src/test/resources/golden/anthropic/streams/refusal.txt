@@ -1,5 +1,6 @@
 == chatStream
 TextDelta[text=I cannot]
-Done[response=Response[content=I cannot, parsed=null, toolCalls=[], finishReason=REFUSAL, usage=Usage[inputTokens=25, outputTokens=3, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=40], thinking=null, citations=[], metadata={anthropic.stopReason=refusal, refusal.category=cyber, refusal.explanation=This request was declined because it could enable cyber harm.}]]
+MessageStop[stopReason=REFUSAL, usage=Usage[inputTokens=25, outputTokens=3, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=40], metadata={anthropic.stopReason=refusal, refusal.category=cyber, refusal.explanation=This request was declined because it could enable cyber harm.}, citations=[]]
+onComplete
 == chat
 Response[content=I cannot, parsed=null, toolCalls=[], finishReason=REFUSAL, usage=Usage[inputTokens=25, outputTokens=3, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=40], thinking=null, citations=[], metadata={anthropic.stopReason=refusal, refusal.category=cyber, refusal.explanation=This request was declined because it could enable cyber harm.}]

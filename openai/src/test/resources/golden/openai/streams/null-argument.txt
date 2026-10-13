@@ -1,6 +1,7 @@
 == chatStream
-ToolCallStart[callId=call_1, toolName=weather]
-ToolCallComplete[toolCall=ToolCall[id=call_1, name=weather, arguments={city=Paris, unit=null}]]
-Done[response=Response[content=, parsed=null, toolCalls=[ToolCall[id=call_1, name=weather, arguments={city=Paris, unit=null}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={}]]
+ToolUseStart[callId=call_1, toolName=weather]
+ToolUseStop[toolCall=ToolCall[id=call_1, name=weather, arguments={city=Paris, unit=null}]]
+MessageStop[stopReason=TOOL_CALLS, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], metadata={}, citations=[]]
+onComplete
 == chat
 Response[content=, parsed=null, toolCalls=[ToolCall[id=call_1, name=weather, arguments={city=Paris, unit=null}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={}]

@@ -1,7 +1,7 @@
 == chatStream
 TextDelta[text=Before]
-Error[message=Failed to parse stream event, cause=UnexpectedEndOfInputException(Unexpected end-of-input within/between Object entries
- at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN]), partial=Response[content=Before, parsed=null, toolCalls=[], finishReason=ERROR, usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38], thinking=null, citations=[], metadata={}]]
+onError AnthropicException(Failed to parse stream event) status=0 caused by UnexpectedEndOfInputException(Unexpected end-of-input within/between Object entries
+ at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN])
 == chat
 threw AnthropicException(Failed to parse stream event) status=0 caused by UnexpectedEndOfInputException(Unexpected end-of-input within/between Object entries
  at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN])

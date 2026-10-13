@@ -14,7 +14,6 @@ import com.standardapplied.helios.core.model.FileReference;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;

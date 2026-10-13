@@ -230,7 +230,7 @@ class StreamReadErrorCausePreservationReproTest {
                 new AnthropicStreamParser(),
                 AnthropicException::new);
     return org.junit.jupiter.api.Assertions.assertThrows(
-        RuntimeException.class, () -> PauseContinuationTest.continuation(segments).chat(request, List.of()));
+        RuntimeException.class, () -> PauseContinuationTest.turn(segments, request));
   }
 
   @org.junit.jupiter.api.Test

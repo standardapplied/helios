@@ -1,5 +1,5 @@
 == chatStream
-ToolCallStart[callId=call_1, toolName=weather]
-Error[message=Stream ended before its terminal event, cause=EOFException(the response body ended before the provider's terminal event), partial=Response[content=, parsed=null, toolCalls=[], finishReason=ERROR, usage=null, thinking=null, citations=[], metadata={}]]
+ToolUseStart[callId=call_1, toolName=weather]
+onError TransientStreamException(Stream ended before its terminal event) provider=openai caused by EOFException(the response body ended before the provider's terminal event)
 == chat
 threw TransientStreamException(Stream ended before its terminal event) provider=openai caused by EOFException(the response body ended before the provider's terminal event)

@@ -92,8 +92,8 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
 
   /**
    * One subscriber's turn: the subscription it holds, spanning every segment. Segments run one
-   * after another, so their signals never overlap; the lock guards what the subscriber's own
-   * thread shares with them, its demand and the segment in flight.
+   * after another, so their signals never overlap; the lock guards what the subscriber's own thread
+   * shares with them, its demand and the segment in flight.
    */
   private final class Turn implements Flow.Subscription {
 
@@ -177,7 +177,8 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
         switch (event) {
           case StreamEvent.Done done -> complete(done);
           case StreamEvent.Error(var message, var cause, var partial) when mergedSoFar != null ->
-              deliver(new StreamEvent.Error(message, cause, SegmentMerge.merge(mergedSoFar, partial)));
+              deliver(
+                  new StreamEvent.Error(message, cause, SegmentMerge.merge(mergedSoFar, partial)));
           default -> deliver(event);
         }
       }

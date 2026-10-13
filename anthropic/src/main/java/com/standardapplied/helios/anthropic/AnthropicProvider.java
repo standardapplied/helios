@@ -93,8 +93,7 @@ public class AnthropicProvider implements ModelProvider {
     var requests = new AnthropicRequestBuilder(wireModelId, knownModel, config, cachePolicy);
     var httpClient = HttpClientFactory.create(config);
     var streams = new AnthropicStreams(config, httpClient, requests.betas());
-    var exchange =
-        new ChatExchange<>("Anthropic API", streams::open);
+    var exchange = new ChatExchange<>("Anthropic API", streams::open);
     return StreamingModel.<MessagesRequest>newBuilder()
         .withId(wireModelId)
         .withProvider(PROVIDER_NAME)

@@ -6,7 +6,6 @@
 package com.standardapplied.helios.testing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -18,11 +17,11 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
-import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
+import com.standardapplied.helios.core.test.RecordingSubscriber;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -89,7 +88,8 @@ class ScriptedModelTest {
     var model =
         ScriptedModel.newBuilder().withTextTurn("{\"answer\": \"yes\", \"score\": 4}").build();
 
-    var response = model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class));
+    var response =
+        model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class));
 
     assertEquals(new Verdict("yes", 4), response.parsed());
   }
@@ -100,7 +100,8 @@ class ScriptedModelTest {
 
     assertThrows(
         StructuredOutputParseException.class,
-        () -> model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class)));
+        () ->
+            model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class)));
   }
 
   @Test
@@ -132,7 +133,8 @@ class ScriptedModelTest {
     model.chat(List.of(Message.user("one")), List.of());
 
     var ex =
-        assertThrows(IllegalStateException.class, () -> model.chat(List.of(Message.user("two")), List.of()));
+        assertThrows(
+            IllegalStateException.class, () -> model.chat(List.of(Message.user("two")), List.of()));
     assertTrue(ex.getMessage().contains("1 turn(s) scripted"));
   }
 
@@ -157,14 +159,15 @@ class ScriptedModelTest {
   }
 
   @Test
-  void worksThroughDefaultStreamingPath() {
+  void aResponseTurnStreamsAsItsChunksOnceRequested() {
     var model = ScriptedModel.newBuilder().withTextTurn("streamed").build();
+    var subscriber = new RecordingSubscriber<ModelChunk>();
 
-    try (var stream = model.chatStream(List.of(Message.user("hi")))) {
-      var event = stream.next();
-      var done = assertInstanceOf(StreamEvent.Done.class, event);
-      assertEquals("streamed", done.response().content());
-    }
+    model
+        .chatStream(List.of(Message.user("hi")), List.of(), new CancellationToken())
+        .subscribe(subscriber);
+
+    assertEquals(new ModelChunk.TextDelta("streamed"), subscriber.awaitCompletion().getFirst());
   }
 
   @Test
@@ -195,7 +198,8 @@ class ScriptedModelTest {
                     .build())
             .build();
 
-    var response = model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class));
+    var response =
+        model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class));
 
     assertEquals(new Verdict("yes", 4), response.parsed());
     assertEquals("sure", response.thinking());
@@ -215,7 +219,8 @@ class ScriptedModelTest {
             .build();
     var model = ScriptedModel.newBuilder().withResponseTurn(scripted).build();
 
-    var response = model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class));
+    var response =
+        model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class));
 
     assertEquals(scripted, response);
   }
@@ -270,7 +275,8 @@ class ScriptedModelTest {
     var model = ScriptedModel.newBuilder().withStreamTurn(ModelStreams.of()).build();
 
     var ex =
-        assertThrows(IllegalStateException.class, () -> model.chat(List.of(Message.user("hi")), List.of()));
+        assertThrows(
+            IllegalStateException.class, () -> model.chat(List.of(Message.user("hi")), List.of()));
     assertEquals(
         "Scripted turn 1 is a stream turn: only chatStream with a CancellationToken answers it",
         ex.getMessage());
@@ -300,7 +306,7 @@ class ScriptedModelTest {
             .build();
 
     model.chat(List.of(Message.user("1")), List.of());
-    model.chat(List.of(Message.user("2")), schema);
+    model.chat(List.of(Message.user("2")), List.of(), schema);
     model.chatStream(List.of(Message.user("3")), List.of(), schema, new CancellationToken());
 
     assertEquals(

@@ -1,5 +1,6 @@
 == chatStream
 TextDelta[text=###]
-Done[response=Response[content=###, parsed=null, toolCalls=[], finishReason=LENGTH, usage=Usage[inputTokens=11, outputTokens=1, cacheCreationInputTokens=0, cacheReadInputTokens=0, totalTokens=12], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=v1_ChdHaGpPYXFDS0o3T3h4TjhQd3BtZzBBcxIXR2hqT2FxQ0tKN094eE44UHdwbWcwQXM, gemini.thoughtSignatures=EmkKZwFpFH0T77G9CqZmYrybCfQ6ZDEFqk9vJhHCH2TTF9KHsGLLlfGLcvjtX/BR55PkhaAHTkU16Ae0d+x0hwi+wvE1ADr0g/qOHqc0Ja2M9DaSi8t959FbpUAYnHhn9tI28NBDbLsrsNc=}]]
+MessageStop[stopReason=LENGTH, usage=Usage[inputTokens=11, outputTokens=1, cacheCreationInputTokens=0, cacheReadInputTokens=0, totalTokens=12], metadata={gemini.apiVersion=v1beta, gemini.interactionId=v1_ChdHaGpPYXFDS0o3T3h4TjhQd3BtZzBBcxIXR2hqT2FxQ0tKN094eE44UHdwbWcwQXM, gemini.thoughtSignatures=EmkKZwFpFH0T77G9CqZmYrybCfQ6ZDEFqk9vJhHCH2TTF9KHsGLLlfGLcvjtX/BR55PkhaAHTkU16Ae0d+x0hwi+wvE1ADr0g/qOHqc0Ja2M9DaSi8t959FbpUAYnHhn9tI28NBDbLsrsNc=}, citations=[]]
+onComplete
 == chat
 Response[content=###, parsed=null, toolCalls=[], finishReason=LENGTH, usage=Usage[inputTokens=11, outputTokens=1, cacheCreationInputTokens=0, cacheReadInputTokens=0, totalTokens=12], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=v1_ChdHaGpPYXFDS0o3T3h4TjhQd3BtZzBBcxIXR2hqT2FxQ0tKN094eE44UHdwbWcwQXM, gemini.thoughtSignatures=EmkKZwFpFH0T77G9CqZmYrybCfQ6ZDEFqk9vJhHCH2TTF9KHsGLLlfGLcvjtX/BR55PkhaAHTkU16Ae0d+x0hwi+wvE1ADr0g/qOHqc0Ja2M9DaSi8t959FbpUAYnHhn9tI28NBDbLsrsNc=}]

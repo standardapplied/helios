@@ -150,6 +150,11 @@ public final class HeldSseServer implements AutoCloseable {
             + serverSocket.getLocalPort());
   }
 
+  /** How many requests have arrived. */
+  public int requests() {
+    return next.get();
+  }
+
   @Override
   public void close() throws IOException {
     serverSocket.close();

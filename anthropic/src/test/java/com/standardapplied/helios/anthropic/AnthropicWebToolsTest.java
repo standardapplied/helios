@@ -294,12 +294,12 @@ class AnthropicWebToolsTest {
     var segments = new ArrayList<>(List.of(PAUSED_SEGMENT_SSE, FINAL_SEGMENT_SSE));
 
     var response =
-        PauseContinuationTest.continuation(
-                request -> {
-                  openedRequests.add(request);
-                  return iterator(segments.removeFirst());
-                })
-            .chat(initial, List.of());
+        PauseContinuationTest.turn(
+            request -> {
+              openedRequests.add(request);
+              return iterator(segments.removeFirst());
+            },
+            initial);
 
     assertEquals(2, openedRequests.size(), "paused turn must re-open exactly one continuation");
     assertEquals("Done.", response.content());
@@ -394,8 +394,7 @@ class AnthropicWebToolsTest {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
     var initial = requests(config).build(List.of(Message.user("research this")), List.of(), null);
     var segments = new ArrayList<>(List.of(pausedSegment, finalSegment));
-    return PauseContinuationTest.continuation(request -> iterator(segments.removeFirst()))
-        .chat(initial, List.of());
+    return PauseContinuationTest.turn(request -> iterator(segments.removeFirst()), initial);
   }
 
   @Test
@@ -468,9 +467,7 @@ class AnthropicWebToolsTest {
     var initial = requests(config).build(List.of(Message.user("research this")), List.of(), null);
     var segments = new ArrayList<>(List.of(PAUSED_SEGMENT_SSE, interleavedFinal));
 
-    var response =
-        PauseContinuationTest.continuation(request -> iterator(segments.removeFirst()))
-            .chat(initial, List.of());
+    var response = PauseContinuationTest.turn(request -> iterator(segments.removeFirst()), initial);
 
     @SuppressWarnings("unchecked")
     var merged =
@@ -511,9 +508,7 @@ class AnthropicWebToolsTest {
     var initial = requests(config).build(List.of(Message.user("go")), List.of(), null);
     var segments = new ArrayList<>(List.of(pausedTextOnly, FINAL_SEGMENT_SSE));
 
-    var response =
-        PauseContinuationTest.continuation(request -> iterator(segments.removeFirst()))
-            .chat(initial, List.of());
+    var response = PauseContinuationTest.turn(request -> iterator(segments.removeFirst()), initial);
 
     assertEquals("Starting.Done.", response.content());
     assertEquals("end_turn", response.metadata().get(AnthropicResponseAssembler.STOP_REASON_KEY));
@@ -532,12 +527,12 @@ class AnthropicWebToolsTest {
 
     var openedRequests = new ArrayList<MessagesRequest>();
     var segments = new ArrayList<>(List.of(PAUSED_SEGMENT_SSE, FINAL_SEGMENT_SSE));
-    PauseContinuationTest.continuation(
-            request -> {
-              openedRequests.add(request);
-              return iterator(segments.removeFirst());
-            })
-        .chat(initial, List.of());
+    PauseContinuationTest.turn(
+        request -> {
+          openedRequests.add(request);
+          return iterator(segments.removeFirst());
+        },
+        initial);
 
     assertNull(
         openedRequests.get(1).toolChoice(),
@@ -613,9 +608,7 @@ class AnthropicWebToolsTest {
     var ex =
         assertThrows(
             AnthropicException.class,
-            () ->
-                PauseContinuationTest.continuation(request -> iterator(PAUSED_SEGMENT_SSE))
-                    .chat(initial, List.of()));
+            () -> PauseContinuationTest.turn(request -> iterator(PAUSED_SEGMENT_SSE), initial));
     assertTrue(ex.getMessage().contains("pause_turn"));
   }
 

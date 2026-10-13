@@ -1,4 +1,5 @@
 == chatStream
-Done[response=Response[content=, parsed=null, toolCalls=[], finishReason=REFUSAL, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={refusal.explanation=I can't help with that.}]]
+MessageStop[stopReason=REFUSAL, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], metadata={refusal.explanation=I can't help with that.}, citations=[]]
+onComplete
 == chat
 Response[content=, parsed=null, toolCalls=[], finishReason=REFUSAL, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={refusal.explanation=I can't help with that.}]
