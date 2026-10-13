@@ -112,6 +112,26 @@ class RedactorTest {
   }
 
   @Test
+  void trimPartialSecretLeavesAnInputThatIsOneCompleteSecret() {
+    assertEquals("abcd1234a", build("TOKEN", "abcd1234a").trimPartialSecret("abcd1234a"));
+  }
+
+  @Test
+  void trimPartialSecretLeavesACompleteSecretThatStartsALongerOne() {
+    var redactor = build("SHORT", "abcd1234", "LONG", "abcd1234wxyz");
+
+    assertEquals("key abcd1234", redactor.trimPartialSecret("key abcd1234"));
+  }
+
+  @Test
+  void trimPartialSecretKeepsACompleteSecretBeforeTheCutOne() {
+    var redactor = build("API_KEY", SECRET, "OTHER", "zz-other-token");
+
+    assertEquals("key " + SECRET, redactor.trimPartialSecret("key " + SECRET + "zz-oth"));
+    assertEquals("key " + SECRET, redactor.trimPartialSecret("key " + SECRET + "sk-te"));
+  }
+
+  @Test
   void trimPartialSecretDropsACompleteSecretAtTheEndThatRedactionWouldNotReplace() {
     var redactor = build("A", "xyz-1234", "S", "1234-key", "T", "key-9999");
 
