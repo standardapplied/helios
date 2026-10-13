@@ -52,6 +52,7 @@ class AnthropicStreamTranscriptTest {
         "redacted-thinking",
         "refusal",
         "pause-turn",
+        "pause-turn-then-eof",
         "progress-notes",
         "empty",
         "eof-after-text",

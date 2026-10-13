@@ -11,12 +11,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
+import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.provider.ChatExchange;
 import java.io.EOFException;
 import java.io.IOException;
@@ -129,6 +131,28 @@ class PauseContinuationTest {
   }
 
   @Test
+  void everySegmentIsClosedWhenItsTurnEnds() {
+    var paused = stream(pausedWithContent());
+    var cut =
+        new Events(
+            List.of(
+                new StreamEvent.Error(
+                    "cut",
+                    null,
+                    Response.newBuilder().withFinishReason(FinishReason.ERROR).build())));
+    var opened = new int[1];
+    var events = continuation(r -> opened[0]++ == 0 ? paused : cut).stream(request);
+
+    assertInstanceOf(StreamEvent.Error.class, events.next());
+    assertTrue(paused.closed);
+    assertFalse(cut.closed);
+
+    events.close();
+
+    assertTrue(cut.closed);
+  }
+
+  @Test
   void aContinuationTheApiRefusesEndsTheStreamWithItsError() throws Exception {
     var refused = new AnthropicException("API error (status 400): bad", 400);
 
@@ -140,10 +164,7 @@ class PauseContinuationTest {
 
     assertEquals(refused.getMessage(), error.message());
     assertSame(refused, error.cause());
-    assertEquals("Searching. ", error.partial().content());
-    assertEquals(FinishReason.ERROR, error.partial().finishReason());
-    assertEquals(
-        "pause_turn", error.partial().metadata().get(AnthropicResponseAssembler.STOP_REASON_KEY));
+    assertEquals(paused(FinishReason.ERROR), error.partial());
   }
 
   @Test
@@ -221,10 +242,17 @@ class PauseContinuationTest {
   }
 
   private static Response<Void> pausedWithContent() {
+    return paused(FinishReason.STOP);
+  }
+
+  private static Response<Void> paused(FinishReason finishReason) {
     return Response.newBuilder()
         .withContent("Searching. ")
-        .withFinishReason(FinishReason.STOP)
+        .withToolCalls(List.of(ToolCall.newBuilder().withId("t1").withName("lookup").build()))
+        .withFinishReason(finishReason)
         .withUsage(Response.Usage.of(10, 2))
+        .withThinking("Planning.")
+        .withCitations(List.of(Citation.of("https://example.com", "snippet")))
         .withMetadata(
             Map.of(
                 AnthropicResponseAssembler.STOP_REASON_KEY,
@@ -242,13 +270,14 @@ class PauseContinuationTest {
         .build();
   }
 
-  private static CloseableIterator<StreamEvent> stream(Response<Void> response) {
+  private static Events stream(Response<Void> response) {
     return new Events(List.of(new StreamEvent.Done(response)));
   }
 
   private static final class Events implements CloseableIterator<StreamEvent> {
     private final List<StreamEvent> events;
     private int next;
+    private boolean closed;
 
     Events(List<StreamEvent> events) {
       this.events = events;
@@ -265,6 +294,8 @@ class PauseContinuationTest {
     }
 
     @Override
-    public void close() {}
+    public void close() {
+      closed = true;
+    }
   }
 }
