@@ -31,6 +31,8 @@ import tools.jackson.databind.json.JsonMapper;
  * empty} streams are bodies cut short, which end in an error carrying what they produced. The
  * reference documents a usage only on the terminal events; its {@code response.created} and {@code
  * response.in_progress} examples carry {@code "usage": null}, so no stream is cut after usage.
+ * {@code thinking-done-only} is {@code thinking} with a summary part whose text arrives only in its
+ * {@code done} event, so its golden streams the same thinking.
  */
 class OpenAIStreamTranscriptTest {
 
@@ -40,6 +42,7 @@ class OpenAIStreamTranscriptTest {
         "text",
         "tool-calls",
         "thinking",
+        "thinking-done-only",
         "error",
         "failed",
         "malformed",

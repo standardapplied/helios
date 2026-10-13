@@ -25,14 +25,23 @@ final class ReasoningSummary {
     return new StreamEvent.ThinkingDelta(delta);
   }
 
-  /** The completion of a part as {@code text}: its thinking, unless the part is empty. */
+  /**
+   * The completion of a part as {@code text}: its thinking, unless the part is empty. A part that
+   * streamed no delta completes as one delta of its whole text, so a chunk stream still sees it.
+   */
   StreamEvent done(String itemId, Integer summaryIndex, String text) {
     var part = part(itemId, summaryIndex);
+    var streamed = !part.isEmpty();
     if (text != null) {
       part.setLength(0);
       part.append(text);
     }
-    return part.isEmpty() ? null : new StreamEvent.ThinkingComplete(part.toString(), null);
+    if (part.isEmpty()) {
+      return null;
+    }
+    return streamed
+        ? new StreamEvent.ThinkingComplete(part.toString(), null)
+        : new StreamEvent.ThinkingDelta(part.toString());
   }
 
   /** The parts that hold text, in arrival order, a blank line apart; {@code null} without one. */

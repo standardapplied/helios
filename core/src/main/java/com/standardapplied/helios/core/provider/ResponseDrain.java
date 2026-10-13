@@ -70,8 +70,11 @@ final class ResponseDrain implements Flow.Subscriber<StreamEvent> {
     try {
       done.await();
     } catch (InterruptedException interrupted) {
-      subscription.cancel();
-      Thread.currentThread().interrupt();
+      try {
+        subscription.cancel();
+      } finally {
+        Thread.currentThread().interrupt();
+      }
       throw failures.failure().create("Request interrupted", 0, interrupted);
     }
     if (failure == null) {

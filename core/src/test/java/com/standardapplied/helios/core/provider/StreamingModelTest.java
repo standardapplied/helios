@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -173,6 +174,43 @@ class StreamingModelTest {
     var thrown = assertInstanceOf(AcmeException.class, Await.failure("the chat", chat));
     assertEquals("Request interrupted", thrown.getMessage());
     Await.latch("the stream closed", opened.closed);
+    assertTrue(interruptRestored[0]);
+  }
+
+  @Test
+  void anInterruptWhoseCancelFailsStillRestoresTheInterrupt() {
+    var subscribed = new CountDownLatch(1);
+    publisher =
+        subscriber ->
+            subscriber.onSubscribe(
+                new Flow.Subscription() {
+                  @Override
+                  public void request(long n) {
+                    subscribed.countDown();
+                  }
+
+                  @Override
+                  public void cancel() {
+                    throw new IllegalStateException("close failed");
+                  }
+                });
+    var model = model(config());
+    var interruptRestored = new boolean[1];
+    var chat =
+        new FutureTask<>(
+            () -> {
+              try {
+                return model.chat(MESSAGES, List.of());
+              } finally {
+                interruptRestored[0] = Thread.currentThread().isInterrupted();
+              }
+            });
+    var caller = Thread.ofPlatform().start(chat);
+    Await.latch("the chat subscribed", subscribed);
+    caller.interrupt();
+
+    var thrown = assertInstanceOf(IllegalStateException.class, Await.failure("the chat", chat));
+    assertEquals("close failed", thrown.getMessage());
     assertTrue(interruptRestored[0]);
   }
 
