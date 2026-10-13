@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
-import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
@@ -201,7 +200,7 @@ final class SessionPresetsTest {
 
   @Test
   void openEndedWiresExecuteToolAndProvider(@TempDir Path tmp) {
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var opts = build(SessionPresets.openEnded(tmp, provider));
     assertTrue(toolNames(opts).contains(ExecuteTool.NAME));
     assertSame(provider, opts.executionProvider());
@@ -210,7 +209,7 @@ final class SessionPresetsTest {
 
   @Test
   void openEndedPathOverloadDelegatesToWorkspaceOverload(@TempDir Path tmp) {
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var ws = WorkspaceRoot.of(tmp);
     var fromPath = build(SessionPresets.openEnded(tmp, provider));
     var fromWorkspace = build(SessionPresets.openEnded(ws, provider));
@@ -219,7 +218,7 @@ final class SessionPresetsTest {
 
   @Test
   void openEndedRejectsNullArguments(@TempDir Path tmp) {
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     assertEquals(
         "workspaceRoot must not be null",
         assertThrows(

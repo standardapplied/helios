@@ -7,7 +7,6 @@ package com.standardapplied.helios.session.execution;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -20,6 +19,7 @@ import com.standardapplied.helios.core.test.Await;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +38,8 @@ final class LocalProcessExecutionProviderTest {
 
   /** Cannot end on its own within the hang guard, so a result proves the timeout killed it. */
   private static final String HANG = "exec sleep 600";
+
+  private static final String SECRET = "sk-test-0123456789abcdef";
 
   // ── Builder validation ────────────────────────────────────────────────────
 
@@ -70,13 +72,6 @@ final class LocalProcessExecutionProviderTest {
     var b = LocalProcessExecutionProvider.newBuilder();
     var ex = assertThrows(NullPointerException.class, () -> b.withRuntime(Runtime.BASH, null));
     assertEquals("handler must not be null", ex.getMessage());
-  }
-
-  @Test
-  void builderRejectsNullSecretRegistry() {
-    var b = LocalProcessExecutionProvider.newBuilder();
-    var ex = assertThrows(NullPointerException.class, () -> b.withSecretRegistry(null));
-    assertEquals("secretRegistry must not be null", ex.getMessage());
   }
 
   @Test
@@ -124,10 +119,8 @@ final class LocalProcessExecutionProviderTest {
   @Test
   void builderWithAllOptions() {
     assumeBashAvailable();
-    var registry = new SecretRegistry();
     var provider =
         LocalProcessExecutionProvider.newBuilder()
-            .withSecretRegistry(registry)
             .withPath("/usr/bin:/bin")
             .withMaxOutputBytes(8192)
             .withMaxConcurrent(2)
@@ -136,7 +129,6 @@ final class LocalProcessExecutionProviderTest {
             .withFilesystemWriteAllowed(false)
             .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
             .build();
-    assertSame(registry, provider.secretRegistry());
     assertFalse(provider.capabilities().networkAllowed());
     assertFalse(provider.capabilities().filesystemWriteAllowed());
     assertEquals(Duration.ofSeconds(30), provider.capabilities().maxTimeout());
@@ -146,18 +138,10 @@ final class LocalProcessExecutionProviderTest {
   // ── defaultPosix factory ─────────────────────────────────────────────────
 
   @Test
-  void defaultPosixRequiresSecretRegistry() {
-    var ex =
-        assertThrows(
-            NullPointerException.class, () -> LocalProcessExecutionProvider.defaultPosix(null));
-    assertEquals("secretRegistry must not be null", ex.getMessage());
-  }
-
-  @Test
   void defaultPosixAdvertisesBashAndPython() {
     assumeBashAvailable();
     assumePythonAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     assertTrue(provider.capabilities().supports(Runtime.BASH));
     assertTrue(provider.capabilities().supports(Runtime.PYTHON));
     assertFalse(provider.capabilities().supports(Runtime.JSHELL));
@@ -213,7 +197,7 @@ final class LocalProcessExecutionProviderTest {
   @Test
   void executeCapturesStdout() {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
@@ -230,7 +214,7 @@ final class LocalProcessExecutionProviderTest {
   @Test
   void executeCapturesStderrAndExitCode() {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
@@ -245,7 +229,7 @@ final class LocalProcessExecutionProviderTest {
   @Test
   void executeRespectsTimeout() {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
@@ -276,26 +260,55 @@ final class LocalProcessExecutionProviderTest {
   }
 
   @Test
-  void executeRedactsSecretsInStdout() {
+  void executeReturnsOutputRawForTheSessionToRedact() {
     assumeBashAvailable();
-    var registry = new SecretRegistry();
-    registry.register("TOKEN", "supersecret123");
-    var provider = LocalProcessExecutionProvider.defaultPosix(registry);
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
-            .withScript("printf supersecret123")
+            .withScript("printf " + SECRET)
             .withTimeout(BEYOND_HANG_GUARD)
             .build();
     var result = run(provider, req);
-    assertEquals("<redacted:TOKEN>", result.stdout());
-    assertEquals(Integer.valueOf(1), result.secretRedactionCounts().get("TOKEN"));
+    assertEquals(SECRET, result.stdout());
+  }
+
+  @Test
+  void outputCutInsideASecretKeepsNoPartOfIt() throws Exception {
+    assumeBashAvailable();
+    var registry = new SecretRegistry();
+    registry.register("API_KEY", SECRET);
+    var session =
+        new SessionContext("cut-test", new CancellationToken(), Clock.systemUTC(), registry);
+    var provider =
+        LocalProcessExecutionProvider.newBuilder()
+            .withMaxOutputBytes(1024)
+            .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
+            .withShutdownHook(false)
+            .build();
+    var req =
+        ExecutionRequest.newBuilder()
+            .withRuntime(Runtime.BASH)
+            .withScript(
+                "head -c 1014 /dev/zero | tr '\\0' 'x'; printf "
+                    + SECRET
+                    + "; printf 'tail sk-test-' >&2")
+            .withTimeout(BEYOND_HANG_GUARD)
+            .build();
+
+    var result =
+        Await.value(
+            "the cut execution",
+            provider.execute(session, req, new CancellationToken()).toCompletableFuture());
+
+    assertEquals("x".repeat(1014) + "\n[truncated: output exceeded cap]", result.stdout());
+    assertEquals("tail sk-test-", result.stderr());
   }
 
   @Test
   void executeInjectsEnvironment() {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
@@ -311,7 +324,7 @@ final class LocalProcessExecutionProviderTest {
   @Test
   void executeFeedsStdin() {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
@@ -327,7 +340,7 @@ final class LocalProcessExecutionProviderTest {
   void executeUsesProvidedWorkingDirectory(@TempDir Path tmp) throws Exception {
     assumeBashAvailable();
     Files.writeString(tmp.resolve("hello.txt"), "world");
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
@@ -342,7 +355,7 @@ final class LocalProcessExecutionProviderTest {
   @Test
   void executeUsesTempCwdWhenWorkingDirectoryOmitted() {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
@@ -359,7 +372,7 @@ final class LocalProcessExecutionProviderTest {
   @Test
   void executeRejectsNullRequest() {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var ex =
         assertThrows(
             NullPointerException.class, () -> provider.execute(CTX, null, new CancellationToken()));
@@ -369,7 +382,7 @@ final class LocalProcessExecutionProviderTest {
   @Test
   void executeRejectsNullCancellation() {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var req = ExecutionRequest.newBuilder().withRuntime(Runtime.BASH).withScript("true").build();
     var ex = assertThrows(NullPointerException.class, () -> provider.execute(CTX, req, null));
     assertEquals("cancellation must not be null", ex.getMessage());
@@ -378,7 +391,7 @@ final class LocalProcessExecutionProviderTest {
   @Test
   void executeFailsWhenCancellationAlreadyFiredBeforeAcquire() {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var token = new CancellationToken();
     token.cancel("pre-acquired");
     var req =
@@ -412,7 +425,6 @@ final class LocalProcessExecutionProviderTest {
         };
     var provider =
         LocalProcessExecutionProvider.newBuilder()
-            .withSecretRegistry(new SecretRegistry())
             .withMaxTimeout(BEYOND_HANG_GUARD)
             .withRuntime(Runtime.BASH, handover)
             .build();
@@ -447,7 +459,6 @@ final class LocalProcessExecutionProviderTest {
     assumeBashAvailable();
     var provider =
         LocalProcessExecutionProvider.newBuilder()
-            .withSecretRegistry(new SecretRegistry())
             .withMaxOutputBytes(1024)
             .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
             .build();
@@ -465,7 +476,7 @@ final class LocalProcessExecutionProviderTest {
   @Test
   void executeRunsWithEmptyEnvironmentSoJvmSecretsDoNotLeak() {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
@@ -479,7 +490,7 @@ final class LocalProcessExecutionProviderTest {
   @Test
   void multipleRequestsRunUnderTheSameProvider() {
     assumeBashAvailable();
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var args = Map.of(1, "first", 2, "second", 3, "third");
     for (var e : args.entrySet()) {
       var req =

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -92,7 +93,8 @@ final class LoopStagesTest {
             (modelId, usage) -> CostEstimate.ofMicroUsd(modelId.equals("summary") ? 7 : 1),
             null,
             scheduler);
-    return new AgentLoop(collaborators, runner, new StopClassifier(), counter, compactor);
+    return new AgentLoop(
+        collaborators, runner, new StopClassifier(new SecretRegistry()), counter, compactor);
   }
 
   private AgentLoop loop(Model model, Hook... hooks) {
