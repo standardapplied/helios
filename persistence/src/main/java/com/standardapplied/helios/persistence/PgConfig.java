@@ -130,10 +130,8 @@ public record PgConfig(DbClient dbClient, String schema, String agentId, Redacto
 
     /**
      * Set the {@link Redactor} applied to trace and journal text fields before persisting. Pass
-     * {@code null} to clear a previously-set redactor (default: unset / no-op). Source-level
-     * redaction at tool boundaries is the recommended primary mitigation; this hook is ergonomic
-     * sugar for deployers who want defense-in-depth at the persistence boundary without wrapping
-     * the journal themselves.
+     * {@code null} to clear a previously-set redactor (default: unset / no-op). This is the only
+     * redaction persistence applies: the session's redaction pass does not reach these stores.
      */
     public Builder withRedactor(Redactor redactor) {
       this.redactor = redactor;
