@@ -104,12 +104,13 @@ public final class Redactor {
 
   /**
    * Drop the start of a secret that a size cap cut off. Returns {@code text} without its longest
-   * suffix that is a non-empty proper prefix of a registered secret, repeated until what is left
-   * ends in no such prefix (where secrets overlap, dropping one can expose the start of another),
-   * or {@code text} unchanged when it has none. Call it on the part of a cut output that is kept,
-   * before a truncation marker is appended: the cut secret no longer matches in full, so {@link
+   * suffix that is a non-empty proper prefix of a registered secret, or {@code text} unchanged when
+   * it has none. Where secrets overlap, that shorter end can cut through a complete secret; it is
+   * then dropped from its start too. Call it on the part of a cut output that is kept, before a
+   * truncation marker is appended: the cut secret no longer matches in full, so {@link
    * #redact(String)} would leave its prefix. A complete secret at the end is not touched, even when
-   * it ends in its own or another secret's prefix; {@link #redact(String)} replaces it.
+   * it ends in its own or another secret's prefix, so {@link #redact(String)} replaces it; unless
+   * another secret overlaps its start, which redaction would replace instead.
    *
    * @param text the kept part of a cut output; non-null
    * @return {@code text}, possibly shortened

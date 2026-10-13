@@ -98,6 +98,30 @@ class RedactorTest {
   }
 
   @Test
+  void trimPartialSecretKeepsTextBeforeTheCutSecretThatOnlyLooksLikeItsStart() {
+    var redactor = build("API_KEY", SECRET);
+
+    assertEquals("tasks: sk-", redactor.trimPartialSecret("tasks: sk-" + SECRET.substring(0, 10)));
+  }
+
+  @Test
+  void trimPartialSecretDropsOnlyTheCutSecretFromARepeatingRun() {
+    var redactor = build("TOKEN", "aaaaaaaa1");
+
+    assertEquals("a".repeat(992), redactor.trimPartialSecret("a".repeat(1000)));
+  }
+
+  @Test
+  void trimPartialSecretDropsACompleteSecretAtTheEndThatRedactionWouldNotReplace() {
+    var redactor = build("A", "xyz-1234", "S", "1234-key", "T", "key-9999");
+
+    var kept = redactor.trimPartialSecret("id xyz-1234-key");
+
+    assertEquals("id ", kept);
+    assertEquals("id <redacted:A>-key", redactor.redact("id xyz-1234-key").text());
+  }
+
+  @Test
   void trimPartialSecretOnBytesReturnsAFreshArray() {
     var input = ("cut at " + SECRET.substring(0, 10)).getBytes(StandardCharsets.UTF_8);
     var copy = input.clone();
