@@ -23,6 +23,8 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -69,7 +71,7 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
   private final ProviderFailure failure;
   private final ExecutorService readExecutor = Executors.newVirtualThreadPerTaskExecutor();
   private StreamEvent nextEvent;
-  private boolean done;
+  private volatile boolean done;
 
   /**
    * Reads {@code body}, which this reader now owns.
@@ -184,7 +186,12 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
   }
 
   private String readLine() throws IOException {
-    var line = readExecutor.submit((Callable<String>) frames::line);
+    Future<String> line;
+    try {
+      line = readExecutor.submit((Callable<String>) frames::line);
+    } catch (RejectedExecutionException closed) {
+      throw new IOException("Stream closed", closed);
+    }
     try {
       return line.get(idleTimeout.toMillis(), TimeUnit.MILLISECONDS);
     } catch (TimeoutException e) {
