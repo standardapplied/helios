@@ -20,9 +20,10 @@ import java.util.concurrent.Flow;
  * appended unchanged. The segments' events are spliced into one stream: a paused segment's
  * completion is swallowed, the continuation is opened once that segment's stream has completed, and
  * the one terminal carries the merged turn — the completion its response, an error after a pause
- * its partial response. A caller never sees the pause. Demand the caller has not yet been served
- * carries over to the next segment, and cancelling cancels the segment in flight. At most {@link
- * #MAX_PAUSE_CONTINUATIONS} resumes, which turns a pause loop into a loud failure.
+ * its partial response. A caller never sees the pause. Demand the caller has not yet been served,
+ * or a non-positive request, carries over to the next segment, and cancelling cancels the segment
+ * in flight. At most {@link #MAX_PAUSE_CONTINUATIONS} resumes, which turns a pause loop into a loud
+ * failure.
  */
 final class PauseContinuation implements Exchange<MessagesRequest> {
 
@@ -104,6 +105,7 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
     private Flow.Subscription current;
     private long demand;
     private boolean cancelled;
+    private Long invalidRequest;
     private Response<Void> mergedSoFar;
     private int continuations;
 
@@ -120,8 +122,13 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
     public void request(long n) {
       Flow.Subscription segment;
       synchronized (lock) {
+        if (cancelled || invalidRequest != null) {
+          return;
+        }
         if (n > 0) {
           demand = demand + n < 0 ? Long.MAX_VALUE : demand + n;
+        } else {
+          invalidRequest = n;
         }
         segment = current;
       }
@@ -156,17 +163,21 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
       public void onSubscribe(Flow.Subscription subscription) {
         boolean first;
         long carried;
+        Long invalid;
         boolean stop;
         synchronized (lock) {
           first = current == null;
           current = subscription;
           carried = demand;
+          invalid = invalidRequest;
           stop = cancelled;
         }
         if (first) {
           downstream.onSubscribe(Turn.this);
         } else if (stop) {
           subscription.cancel();
+        } else if (invalid != null) {
+          subscription.request(invalid);
         } else if (carried > 0) {
           subscription.request(carried);
         }
