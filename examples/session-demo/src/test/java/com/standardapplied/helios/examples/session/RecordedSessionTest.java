@@ -144,7 +144,11 @@ final class RecordedSessionTest {
         replay(
             provider + "/sessions/file-tools.sse",
             modelAt,
-            model -> SessionOptions.newBuilder().withModel(model).withTools(fileTools(corpus)));
+            model ->
+                SessionOptions.newBuilder()
+                    .withModel(model)
+                    .withSecretRegistry(secrets())
+                    .withTools(fileTools(corpus)));
 
     assertInstanceOf(ResultMessage.Success.class, replay.terminal());
     assertTrue(replay.events().eventsOf(QueryEvent.Error.class).isEmpty());
@@ -227,14 +231,18 @@ final class RecordedSessionTest {
     return ToolBinding.newBuilder(built).withCategory(ToolCategory.SEARCH).build();
   }
 
-  private static ToolRegistry fileTools(Path corpus) {
+  private static SecretRegistry secrets() {
     var registry = new SecretRegistry();
     registry.register("OPENAI_KEY", SECRET);
+    return registry;
+  }
+
+  private static ToolRegistry fileTools(Path corpus) {
     var workspace = WorkspaceRoot.of(corpus);
     return new ToolRegistry(
         List.of(
-            ReadTool.binding(workspace, InMemoryFileTracker.create(), registry.redactor()),
-            GrepTool.binding(workspace, registry.redactor()),
+            ReadTool.binding(workspace, InMemoryFileTracker.create()),
+            GrepTool.binding(workspace),
             GlobTool.binding(workspace)));
   }
 

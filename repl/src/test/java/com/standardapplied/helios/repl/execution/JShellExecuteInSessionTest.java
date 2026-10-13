@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
@@ -23,7 +24,6 @@ import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.execution.ExecuteTool;
-import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -39,12 +39,14 @@ import org.junit.jupiter.api.Test;
  * A session's {@code Execute(JSHELL)} call runs in a real sandbox subprocess through {@link
  * JShellExecutionProvider}: the snippet calls a host function registered through {@link
  * ReplConfig.Builder#withHostFunction}, and the tool result carries the snippet's stdout, exit code
- * and whether it outlived its budget. Every limit but the budget a test exercises is beyond the
- * hang guard; a snippet meant to time out blocks on a latch nothing releases.
+ * and whether it outlived its budget, with every secret of the session's registry redacted. Every
+ * limit but the budget a test exercises is beyond the hang guard; a snippet meant to time out
+ * blocks on a latch nothing releases.
  */
 class JShellExecuteInSessionTest {
 
   private static final Duration BEYOND_HANG_GUARD = Await.HANG_GUARD.multipliedBy(5);
+  private static final String SECRET = "sk-test-0123456789abcdef";
 
   @Test
   void executeRunsASnippetThatCallsACustomHostFunction() {
@@ -64,9 +66,9 @@ class JShellExecuteInSessionTest {
             replConfig().withHostFunction(quote),
             Map.of("script", "println(\"AAPL \" + marketQuote(\"AAPL\"));"));
 
-    var result = executionResult(toolResults.getFirst());
-    assertEquals(0, result.exitCode(), result.stderr());
-    assertEquals("AAPL 187.5\n", result.stdout());
+    var toolResult = toolResults.getFirst();
+    assertEquals("[runtime JSHELL exit 0 duration Nms]", header(toolResult), toolResult.output());
+    assertEquals("AAPL 187.5\n", body(toolResult));
     assertEquals(List.of("AAPL"), tickers);
   }
 
@@ -82,10 +84,9 @@ class JShellExecuteInSessionTest {
                 1));
 
     var toolResult = toolResults.getFirst();
-    var result = executionResult(toolResult);
-    assertTrue(result.timedOut(), result.stderr());
-    assertTrue(result.stderr().contains("Execution timed out"), result.stderr());
-    assertTrue(toolResult.output().startsWith("[runtime JSHELL exit 1 TIMEOUT duration "));
+    assertEquals(
+        "[runtime JSHELL exit 1 TIMEOUT duration Nms]", header(toolResult), toolResult.output());
+    assertTrue(body(toolResult).contains("Execution timed out"), toolResult.output());
   }
 
   @Test
@@ -96,14 +97,30 @@ class JShellExecuteInSessionTest {
             Map.of("script", "println(1 + 1);"),
             Map.of("script", "throw new IllegalStateException(\"boom\");"));
 
-    var completed = executionResult(toolResults.get(0));
-    var thrown = executionResult(toolResults.get(1));
-    assertEquals(0, completed.exitCode(), completed.stderr());
-    assertFalse(completed.timedOut());
-    assertEquals(1, thrown.exitCode());
-    assertTrue(thrown.stderr().contains("boom"), thrown.stderr());
-    assertFalse(thrown.timedOut());
+    var completed = toolResults.get(0);
+    var thrown = toolResults.get(1);
+    assertEquals("[runtime JSHELL exit 0 duration Nms]", header(completed), completed.output());
+    assertEquals("[runtime JSHELL exit 1 duration Nms]", header(thrown), thrown.output());
+    assertTrue(body(thrown).contains("boom"), thrown.output());
     toolResults.forEach(toolResult -> assertFalse(toolResult.output().contains("TIMEOUT")));
+  }
+
+  @Test
+  void secretASnippetPrintsReachesTheToolResultRedacted() {
+    var secrets = new SecretRegistry();
+    secrets.register("API_KEY", SECRET);
+
+    var event =
+        toolResultEvents(
+                replConfig(),
+                secrets,
+                Map.of("script", "System.out.println(\"sk-test-\" + \"0123456789abcdef\");"))
+            .getFirst();
+
+    var output = event.result().output();
+    assertTrue(output.contains("<redacted:API_KEY>"), output);
+    assertFalse(output.contains(SECRET), output);
+    assertEquals(Map.of("API_KEY", 1), event.redactions());
   }
 
   private static ReplConfig.Builder replConfig() {
@@ -117,13 +134,22 @@ class JShellExecuteInSessionTest {
     return ReplConfig.newBuilder().withSandboxFactory(sandboxes);
   }
 
-  /**
-   * Runs one session whose model calls {@code Execute} with each of {@code calls} in turn, the
-   * runtime set to {@code JSHELL}, and returns the tool results in call order.
-   */
   @SafeVarargs
   private static List<ToolResult> executeInSession(
       ReplConfig.Builder replConfig, Map<String, Object>... calls) {
+    return toolResultEvents(replConfig, new SecretRegistry(), calls).stream()
+        .map(QueryEvent.ToolResult::result)
+        .toList();
+  }
+
+  /**
+   * Runs one session holding {@code secrets} whose model calls {@code Execute} with each of {@code
+   * calls} in turn, the runtime set to {@code JSHELL}, and returns the tool result events in call
+   * order.
+   */
+  @SafeVarargs
+  private static List<QueryEvent.ToolResult> toolResultEvents(
+      ReplConfig.Builder replConfig, SecretRegistry secrets, Map<String, Object>... calls) {
     var script = ScriptedModel.newBuilder();
     for (var i = 0; i < calls.length; i++) {
       var args = new HashMap<String, Object>(calls[i]);
@@ -144,6 +170,7 @@ class JShellExecuteInSessionTest {
               .withTools(new ToolRegistry(List.of(ExecuteTool.binding(provider))))
               .withExecutionProvider(provider)
               .withPermission(Permission.lockedDown())
+              .withSecretRegistry(secrets)
               .withLimits(
                   SessionLimits.newBuilder().withToolTimeoutDefault(BEYOND_HANG_GUARD).build())
               .build();
@@ -155,15 +182,24 @@ class JShellExecuteInSessionTest {
       }
     }
 
-    var toolResults =
-        events.eventsOf(QueryEvent.ToolResult.class).stream()
-            .map(QueryEvent.ToolResult::result)
-            .toList();
+    var toolResults = events.eventsOf(QueryEvent.ToolResult.class);
     assertEquals(calls.length, toolResults.size());
     return toolResults;
   }
 
-  private static ExecutionResult executionResult(ToolResult toolResult) {
-    return assertInstanceOf(ExecutionResult.class, toolResult.data());
+  /** The output's header line, its duration replaced by {@code N}. */
+  private static String header(ToolResult toolResult) {
+    return toolResult
+        .output()
+        .lines()
+        .findFirst()
+        .orElseThrow()
+        .replaceFirst(" duration \\d+ms]$", " duration Nms]");
+  }
+
+  /** The output after its header line. */
+  private static String body(ToolResult toolResult) {
+    var output = toolResult.output();
+    return output.substring(output.indexOf('\n') + 1);
   }
 }

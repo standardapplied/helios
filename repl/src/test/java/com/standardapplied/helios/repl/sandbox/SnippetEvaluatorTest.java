@@ -16,9 +16,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * What an execute and a prelude install answer when the snippet or its parameters leave the usual
- * path: a prelude that is blank, incomplete or throws, binding limits that are not numbers,
- * harness-internal and unreadable variables, an engine that fails outside the snippet, and an
- * execute interrupted while it waits for its snippet.
+ * path: a prelude that is blank, incomplete or throws, an engine that fails outside the snippet,
+ * and an execute interrupted while it waits for its snippet.
  */
 class SnippetEvaluatorTest {
 
@@ -60,84 +59,6 @@ class SnippetEvaluatorTest {
   }
 
   @Test
-  void valueLimitThatIsNotANumberCapsEachValueAtTwoHundredChars() {
-    var result =
-        env.evaluator()
-            .handleExecute(
-                Map.of(
-                    "code",
-                    "var big = \"x\".repeat(500);",
-                    "timeoutMs",
-                    BEYOND_HANG_GUARD_MS,
-                    "maxBindingValueChars",
-                    "unset"));
-
-    assertEquals(Map.of("big", "\"" + "x".repeat(199) + "... (len=502)"), result.get("bindings"));
-  }
-
-  @Test
-  void snapshotLimitThatIsNotANumberCapsTheSnapshotAtSixteenKibibytes() {
-    var result =
-        env.evaluator()
-            .handleExecute(
-                Map.of(
-                    "code",
-                    "var huge = \"y\".repeat(20000);",
-                    "timeoutMs",
-                    BEYOND_HANG_GUARD_MS,
-                    "maxBindingValueChars",
-                    0,
-                    "maxBindingSnapshotChars",
-                    "unset"));
-
-    assertEquals(
-        Map.of("__truncated__", "(snapshot exceeded 16384 chars; remaining vars dropped)"),
-        result.get("bindings"));
-  }
-
-  @Test
-  void snapshotLimitOfZeroKeepsEveryVariable() {
-    var result =
-        env.evaluator()
-            .handleExecute(
-                Map.of(
-                    "code",
-                    "var huge = \"y\".repeat(20000);",
-                    "timeoutMs",
-                    BEYOND_HANG_GUARD_MS,
-                    "maxBindingValueChars",
-                    0,
-                    "maxBindingSnapshotChars",
-                    0));
-
-    assertEquals(Map.of("huge", "\"" + "y".repeat(20000) + "\""), result.get("bindings"));
-  }
-
-  @Test
-  void harnessInternalVariablesAreLeftOutOfTheBindings() {
-    var result =
-        env.evaluator()
-            .handleExecute(
-                Map.of(
-                    "code", "var __hidden = 1; var shown = 2;", "timeoutMs", BEYOND_HANG_GUARD_MS));
-
-    assertEquals(Map.of("shown", "2"), result.get("bindings"));
-  }
-
-  @Test
-  void bindingWhoseValueCannotBeReadIsReportedInItsPlace() {
-    env.close();
-    env = BootstrapEnvironment.failingVarValue("the engine is gone");
-
-    var result =
-        env.evaluator()
-            .handleExecute(Map.of("code", "int x = 1;", "timeoutMs", BEYOND_HANG_GUARD_MS));
-
-    assertEquals(
-        Map.of("x", "<error: IllegalStateException: the engine is gone>"), result.get("bindings"));
-  }
-
-  @Test
   void engineThatFailsOutsideTheSnippetFailsTheExecute() {
     env.close();
 
@@ -169,9 +90,7 @@ class SnippetEvaluatorTest {
                               "code",
                               "__call(\"hold\", null);",
                               "timeoutMs",
-                              BEYOND_HANG_GUARD_MS,
-                              "captureBindings",
-                              false));
+                              BEYOND_HANG_GUARD_MS));
               return Map.entry(result.get("exitCode"), Thread.currentThread().isInterrupted());
             });
 

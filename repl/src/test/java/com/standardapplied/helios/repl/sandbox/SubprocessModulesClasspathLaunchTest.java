@@ -194,9 +194,6 @@ class SubprocessModulesClasspathLaunchTest {
             params.put("code", snippet);
             params.put("language", "java");
             params.put("timeoutMs", Await.HANG_GUARD.multipliedBy(5).toMillis());
-            params.put("captureBindings", false);
-            params.put("maxBindingValueChars", 0);
-            params.put("maxBindingSnapshotChars", 0);
             var result = channel.call("execute", params);
             channel.close();
 

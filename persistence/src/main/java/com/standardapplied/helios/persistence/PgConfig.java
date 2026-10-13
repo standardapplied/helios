@@ -25,13 +25,11 @@ import java.util.regex.Pattern;
  * @param agentId the agent identifier for scoping data, or null when not needed
  * @param redactor optional {@link Redactor} applied by {@link PgTraceStore} and {@link
  *     PgToolCallJournal} to trace/journal text fields before persisting. {@code null} (default)
- *     preserves verbatim capture — the library's standard behaviour, suitable for evals and
- *     debugging. Deployers who want trace-side redaction without wrapping the journal themselves
- *     can pass {@code registry.redactor()} from their session-level {@link
- *     com.standardapplied.helios.core.common.SecretRegistry}. Source-level redaction (via {@code
- *     CommandGrant}, {@code ReadTool} / {@code GrepTool} wired with a {@code Redactor}, {@code
- *     JShellExecutionProvider}) remains the recommended primary mitigation; this hook is ergonomic
- *     sugar for deployers who need defense-in-depth at the persistence boundary
+ *     preserves verbatim capture, suitable for evals and debugging. The session's own redaction
+ *     pass does not reach persistence, since the session does not feed these stores; to redact
+ *     what is persisted, pass {@code registry.redactor()} from the {@link
+ *     com.standardapplied.helios.core.common.SecretRegistry} given to {@code
+ *     SessionOptions.withSecretRegistry}
  */
 public record PgConfig(DbClient dbClient, String schema, String agentId, Redactor redactor) {
 

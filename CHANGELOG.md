@@ -338,6 +338,28 @@ timedOut, bindings, duration)`; `ExecutionResult.Builder.withTimedOut(boolean)` 
 subclass: a call whose response does not arrive in time throws it, with the same message. New:
 `RpcChannel.call(method, params, timeout)`.
 
+**One secret registry per session, applied once where tool output enters the session.** A session
+redacts every tool result's output once, against its own `SecretRegistry`, before the
+`QueryEvent.ToolResult`, `PostToolUse` hooks and the history see it, and redacts the messages of
+every error it reports. No tool or execution provider redacts its own output any more, and the
+REPL's bindings listener is gone.
+
+| 2.x | 3.0 |
+|---|---|
+| Each component held its own `SecretRegistry`; sessions had none | `SessionOptions` gains a `secretRegistry` component and `Builder.withSecretRegistry(SecretRegistry)` (default: a new empty registry). `SessionContext` gains a `secrets` component, `SessionContext(sessionId, cancellation, clock, secrets)`; `SessionContext.forTesting` uses a new empty registry. Tools reach it as `ToolContext.sessionContext().secrets()` |
+| `StopClassifier()` | `StopClassifier(SecretRegistry)`: the session's registry, which its error terminals are redacted against |
+| `ReadTool.binding(workspace, tracker, Redactor)`, `GrepTool.binding(workspace, Redactor)` | removed; `ReadTool.binding(workspace, tracker)` and `GrepTool.binding(workspace)`, whose output the session redacts |
+| `LocalProcessExecutionProvider.defaultPosix(SecretRegistry)`, `Builder.withSecretRegistry`, `secretRegistry()` | `defaultPosix()`; the other two removed. Stdout and stderr are returned raw |
+| `JShellExecutionProvider.Builder.withSecretRegistry`, `secretRegistry()` | removed. Stdout and stderr are returned raw |
+| `ToolResult(success, output, data, attachments)`, `ToolResult.data()`, `ToolResult.success(String, Object)` | `ToolResult(success, output, attachments)`; `data` is gone, since an object cannot be redacted. `ExecuteTool` and the `CommandGrant` tool return their text only, which already names exit code, timeout and truncation |
+| `session.execution.ExecutionResult.secretRedactionCounts()`, `totalRedactions()`, `Builder.withSecretRedactionCounts`; `CommandGrant.InvocationResult.redactionCounts()`, `totalRedactions()`; `RedactionResult.mergeCounts` | removed; `QueryEvent.ToolResult` gains `Map<String, Integer> redactions`, the per-secret counts of the session's pass over that result. `ExecutionResult(exitCode, stdout, stderr, duration, timedOut)` |
+| `QueryEvent.ToolResult(sessionId, turnIndex, timestamp, call, result)` | `QueryEvent.ToolResult(sessionId, turnIndex, timestamp, call, result, redactions)` |
+| `CommandGrant.Builder.withSecretRegistry` optional (a private registry by default) | required: `build()` without it throws `IllegalStateException`. The tool refuses to run, starting no process, in a session whose registry is a different instance |
+| `CommandGrant.invoke(List)` and `CommandGrant.InvocationResult` public, output redacted | package-private, output raw |
+| `ProcessOutcome(exitCode, stdout, stderr, timedOut, truncated, elapsed)` | `ProcessOutcome(exitCode, stdout, stderr, timedOut, stdoutTruncated, stderrTruncated, elapsed)`; `truncated()` is derived. `BoundedProcess.Builder.withSecretRegistry` names the secrets whose trailing start a cut stream drops, through the new `Redactor.trimPartialSecret` |
+| `repl.SandboxBindingsListener`, `ReplConfig.sandboxBindingsListener`, `maxBindingValueChars`, `maxBindingSnapshotChars`, `DEFAULT_MAX_BINDING_VALUE_CHARS`, `DEFAULT_MAX_BINDING_SNAPSHOT_CHARS` and their builder methods; `sandbox.ExecuteParams`; `Sandbox.execute(request, ExecuteParams)`; `sandbox.ExecutionResult.bindings()` and `Builder.withBindings`; the `captureBindings`, `maxBindingValueChars` and `maxBindingSnapshotChars` execute parameters and the reply's `bindings` | removed: the listener received unredacted output, served every session and carried no session id, and nothing registered one |
+| `sandbox.ExecutionResult.executedCode()`, `Builder.withExecutedCode`; `ReplConfig.maxExecutedCodeChars`, `DEFAULT_MAX_EXECUTED_CODE_CHARS`, `Builder.withMaxExecutedCodeChars`; `ReplSession.history()` | removed: only the listener's observers used them. `sandbox.ExecutionResult(stdout, stderr, exitCode, timedOut, duration)`; `ReplConfig(sandboxFactory, executionTimeout, maxConcurrentSessions, hostFunctions)` |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
