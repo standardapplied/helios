@@ -61,10 +61,7 @@ final class OpenAIStreamParser implements SseReader.Parser {
           reasoning.done(event.itemId(), event.summaryIndex(), event.text());
       case "response.completed" -> completed(event.response());
       case "response.incomplete" -> incomplete(event.response());
-      case "response.failed" -> {
-        record(event.response());
-        yield failed("API response failed: " + payload, null);
-      }
+      case "response.failed" -> responseFailed(event.response());
       case "error" -> failed("API stream error: " + payload, null);
       case null, default -> null;
     };
@@ -91,6 +88,14 @@ final class OpenAIStreamParser implements SseReader.Parser {
       incompleteReason = response.incompleteDetails().reason();
     }
     return terminal(OpenAIResponseAssembler.incompleteReason(incompleteReason));
+  }
+
+  private StreamEvent responseFailed(ResponsesResponse response) {
+    record(response);
+    var error = response == null ? null : response.error();
+    return error == null
+        ? failed("API response failed", null)
+        : failed("API response failed: " + error.code() + ": " + error.message(), null);
   }
 
   private StreamEvent terminal(FinishReason finishReason) {
