@@ -108,8 +108,8 @@ public final class Redactor {
    * ends in no such prefix (where secrets overlap, dropping one can expose the start of another),
    * or {@code text} unchanged when it has none. Call it on the part of a cut output that is kept,
    * before a truncation marker is appended: the cut secret no longer matches in full, so {@link
-   * #redact(String)} would leave its prefix. A complete secret at the end is not touched; {@link
-   * #redact(String)} replaces it.
+   * #redact(String)} would leave its prefix. A complete secret at the end is not touched, even when
+   * it ends in its own or another secret's prefix; {@link #redact(String)} replaces it.
    *
    * @param text the kept part of a cut output; non-null
    * @return {@code text}, possibly shortened

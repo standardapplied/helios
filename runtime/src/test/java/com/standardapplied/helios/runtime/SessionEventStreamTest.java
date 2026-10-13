@@ -6,16 +6,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import io.helidon.http.sse.SseEvent;
 import io.helidon.webserver.CloseConnectionException;
 import io.helidon.webserver.sse.SseSink;
 import java.time.Instant;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Flow;

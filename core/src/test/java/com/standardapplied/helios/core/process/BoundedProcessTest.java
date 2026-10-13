@@ -157,6 +157,18 @@ class BoundedProcessTest {
   }
 
   @Test
+  void aCutStreamKeepsACompleteSecretEndingInItsOwnPrefixForRedaction() throws Exception {
+    var secrets = new SecretRegistry();
+    secrets.register("TOKEN", "abcd1234a");
+    var outcome =
+        run(bash("printf 'value=abcd1234a!'").withMaxOutputBytes(15).withSecretRegistry(secrets));
+
+    var redacted = secrets.redactor().redact(text(outcome.stdout()));
+    assertEquals("value=<redacted:TOKEN>\n[truncated: output exceeded cap]", redacted.text());
+    assertEquals(Map.of("TOKEN", 1), redacted.counts());
+  }
+
+  @Test
   void timeoutKillsTheProcess() throws Exception {
     var outcome = run(bash("exec sleep 600").withTimeout(SHORT));
 
