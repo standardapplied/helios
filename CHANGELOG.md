@@ -401,7 +401,7 @@ the stream produced before it failed.
 | OpenAI reasoning summary deltas were read from `text`, so the thinking was `null` | read from `delta`; each summary part completes as one `ThinkingComplete` with its `text`, and the parts join with a blank line |
 | An OpenAI refusal was dropped and the turn finished `STOP` | `REFUSAL`, its text as `Response.REFUSAL_EXPLANATION_KEY` |
 | Gemini `interaction.completed` was ignored; status `failed` or `budget_exceeded` finished `ERROR` inside a `Done` | `interaction.completed` ends the stream, judged by the status its own interaction carries, never one from an earlier status update; `failed`, `cancelled`, a missing status and any other is an `Error` |
-| An unreadable Anthropic server-tool result was left out of the echo | the stream ends in an `Error` |
+| An Anthropic server-tool input that was not a JSON object was echoed back as `{"_raw": "..."}` | the stream ends in an `Error` naming the tool and the parse failure |
 | SSE framing took each `data: ` line (exactly one space) as one event | events end at a blank line; `data` with or without the space, several `data` lines joined by a newline, CR, LF or CRLF, comments ignored, one byte order mark at the start of the body dropped; an event cut off before its blank line is dropped; a line or an event over 16 MiB ends the stream in an `Error` |
 | `SseReader.Parser.finished()` and `complete()` | removed; a `Done` or `Error` from `parse` ends the stream, and `partial()` gives what a cut-off stream produced |
 | `ToolCall.Builder.withArguments` rejected a `null` value | a JSON `null` argument stays a `null` value (`OrderedMaps.copyOfKeepingNullValues`); `HookOutcome.MutateArgs` and both `QueryEvent.ToolMutated` inputs keep it too |
