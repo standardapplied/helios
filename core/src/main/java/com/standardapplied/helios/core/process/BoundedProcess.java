@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.core.process;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
@@ -17,8 +18,9 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * One child process started from an explicit argv and environment, never through a shell, with its
- * stdout and stderr captured into bounded buffers, a timeout that kills the process and its
- * descendants, and a per-call working directory removed on {@link #close()}.
+ * stdout and stderr captured into bounded buffers that never end in part of a registered secret, a
+ * timeout that kills the process and its descendants, and a per-call working directory removed on
+ * {@link #close()}.
  *
  * <p>The child inherits nothing from the JVM's environment; it sees exactly the variables the
  * builder was given. Its stdin is left open for the caller, who closes it or feeds it through
@@ -40,6 +42,7 @@ public final class BoundedProcess implements AutoCloseable {
   private final Process process;
   private final Path ownedDirectory;
   private final Duration timeout;
+  private final SecretRegistry secrets;
   private final long startNanos;
   private final BoundedSink stdoutSink;
   private final BoundedSink stderrSink;
@@ -50,6 +53,7 @@ public final class BoundedProcess implements AutoCloseable {
     this.process = process;
     this.ownedDirectory = ownedDirectory;
     this.timeout = builder.timeout;
+    this.secrets = builder.secrets;
     this.startNanos = startNanos;
     this.stdoutSink = new BoundedSink(builder.maxOutputBytes);
     this.stderrSink = new BoundedSink(builder.maxOutputBytes);
@@ -86,7 +90,8 @@ public final class BoundedProcess implements AutoCloseable {
 
   /**
    * Wait for the child to exit, killing it and its descendants once the timeout elapses, then wait
-   * for both output streams to be fully captured.
+   * for both output streams to be fully captured. A stream cut at the cap loses its trailing part
+   * of a secret registered in the builder's registry before its truncation marker.
    *
    * @return the exit code, captured output and timing
    * @throws InterruptedException if the calling thread is interrupted while waiting; the child
@@ -100,12 +105,14 @@ public final class BoundedProcess implements AutoCloseable {
     }
     stdoutDrain.join();
     stderrDrain.join();
+    var redactor = secrets.redactor();
     return new ProcessOutcome(
         timedOut ? -1 : process.exitValue(),
-        stdoutSink.bytes(),
-        stderrSink.bytes(),
+        stdoutSink.bytes(redactor),
+        stderrSink.bytes(redactor),
         timedOut,
-        stdoutSink.truncated() || stderrSink.truncated(),
+        stdoutSink.truncated(),
+        stderrSink.truncated(),
         Duration.ofNanos(System.nanoTime() - startNanos));
   }
 
@@ -155,6 +162,7 @@ public final class BoundedProcess implements AutoCloseable {
     private String tempDirectoryPrefix = DEFAULT_TEMP_DIRECTORY_PREFIX;
     private Duration timeout = DEFAULT_TIMEOUT;
     private int maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES;
+    private SecretRegistry secrets = new SecretRegistry();
 
     private Builder(List<String> argv) {
       this.argv = List.copyOf(argv);
@@ -202,6 +210,15 @@ public final class BoundedProcess implements AutoCloseable {
         throw new IllegalArgumentException("maxOutputBytes must be positive");
       }
       this.maxOutputBytes = bytes;
+      return this;
+    }
+
+    /**
+     * The registry whose secrets a stream cut at the cap must not end in part of. Defaults to an
+     * empty registry, which trims nothing.
+     */
+    public Builder withSecretRegistry(SecretRegistry secrets) {
+      this.secrets = Objects.requireNonNull(secrets, "secrets");
       return this;
     }
 

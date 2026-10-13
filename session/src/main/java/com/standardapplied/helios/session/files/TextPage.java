@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session.files;
 
 import com.standardapplied.helios.core.common.Redactor;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -17,10 +18,11 @@ import java.nio.file.Path;
  * lines starting at line {@code offset} are emitted, each capped at {@link ReadTool#MAX_LINE_BYTES}
  * and all of them together at {@link ReadTool#MAX_OUTPUT_BYTES}. Either cap appends a truncation
  * marker that teaches the model the next move, and the rest of the file is never read once a cap
- * fires.
+ * fires. A line cut at its cap loses the start of a registered secret the cut went through.
  */
 final class TextPage {
 
+  private final Redactor redactor;
   private final StringBuilder out = new StringBuilder();
   private int linesEmitted;
   private long currentLine;
@@ -28,7 +30,9 @@ final class TextPage {
   private boolean truncatedByBytes;
   private boolean truncatedAnyLine;
 
-  private TextPage() {}
+  private TextPage(Redactor redactor) {
+    this.redactor = redactor;
+  }
 
   /**
    * Read one page of a text file.
@@ -37,12 +41,12 @@ final class TextPage {
    * @param file a resolved regular file
    * @param offset 1-based first line
    * @param limit maximum lines emitted
-   * @param redactor applied to the page before it is returned; null = no redaction
+   * @param secrets the session's registry, whose secrets a cut line must not end in part of
    * @return the page, or a failure naming the I/O error
    */
   static ToolResult read(
-      WorkspaceRoot workspace, Path file, int offset, int limit, Redactor redactor) {
-    var page = new TextPage();
+      WorkspaceRoot workspace, Path file, int offset, int limit, SecretRegistry secrets) {
+    var page = new TextPage(secrets.redactor());
     try (var reader =
         new BufferedReader(
             new InputStreamReader(
@@ -52,8 +56,7 @@ final class TextPage {
     } catch (IOException e) {
       return ToolResult.failure("Read: I/O error reading file: " + e.getMessage());
     }
-    var text = page.withMarker();
-    return ToolResult.success(redactor == null ? text : redactor.redact(text).text());
+    return ToolResult.success(page.withMarker());
   }
 
   private void fill(BufferedReader reader, int offset, int limit) throws IOException {
@@ -82,7 +85,7 @@ final class TextPage {
       return line;
     }
     truncatedAnyLine = true;
-    return line.substring(0, ReadTool.MAX_LINE_BYTES)
+    return redactor.trimPartialSecret(line.substring(0, ReadTool.MAX_LINE_BYTES))
         + " [line truncated to "
         + ReadTool.MAX_LINE_BYTES
         + " bytes]";

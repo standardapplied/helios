@@ -13,10 +13,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +39,7 @@ class CommandGrantTest {
   private static final Path BASH = Path.of("/bin/bash");
   private static final Path PRINTENV;
   private static final Duration NEVER_REACHED = Duration.ofMinutes(10);
+  private static final String SECRET = "sk-test-0123456789abcdef";
 
   /**
    * A command that cannot finish on its own: it marks its working directory once it runs, then
@@ -68,6 +72,18 @@ class CommandGrantTest {
 
   private static CommandGrant.Builder bash() {
     return CommandGrant.builder(BASH.toString()).withSecretRegistry(new SecretRegistry());
+  }
+
+  /** A tool context for a session whose registry is {@code secrets}. */
+  private static ToolContext sessionWith(SecretRegistry secrets) {
+    return ToolContext.of(
+        new SessionContext("grant-session", new CancellationToken(), Clock.systemUTC(), secrets),
+        NEVER_REACHED);
+  }
+
+  /** A tool context for a session that uses the grant's own registry. */
+  private static ToolContext sessionOf(CommandGrant grant) {
+    return sessionWith(grant.secretRegistry());
   }
 
   private static void awaitStarted(Path cwd) {
@@ -117,12 +133,63 @@ class CommandGrantTest {
 
   @Test
   void blankSpecRejected() {
-    assertThrows(IllegalArgumentException.class, () -> CommandGrant.builder("").build());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CommandGrant.builder("").withSecretRegistry(new SecretRegistry()).build());
   }
 
   @Test
   void specWithSeparatorButRelativeRejected() {
-    assertThrows(IllegalArgumentException.class, () -> CommandGrant.builder("dir/binary").build());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CommandGrant.builder("dir/binary").withSecretRegistry(new SecretRegistry()).build());
+  }
+
+  @Test
+  void buildWithoutRegistryNamesWhatToPass() {
+    var ex = assertThrows(IllegalStateException.class, () -> CommandGrant.builder("bash").build());
+    assertEquals(
+        "CommandGrant bash needs withSecretRegistry(registry): pass the SecretRegistry of the"
+            + " sessions that will run it",
+        ex.getMessage());
+  }
+
+  @Test
+  void toolRefusesASessionWithAnotherRegistryWithoutStartingAProcess(@TempDir Path tmp) {
+    var grant = bash().withCwd(tmp).build();
+
+    var result =
+        grant
+            .toTool()
+            .execute(
+                Map.of("args", List.of("-c", ": > marker")), sessionWith(new SecretRegistry()));
+
+    assertFalse(result.success());
+    assertEquals(
+        "CommandGrant bash was built with a different SecretRegistry than session grant-session;"
+            + " build it with the registry passed to SessionOptions.withSecretRegistry",
+        result.output());
+    assertFalse(Files.exists(tmp.resolve("marker")));
+  }
+
+  @Test
+  void outputCutInsideASecretKeepsNoPartOfIt() throws Exception {
+    var registry = new SecretRegistry();
+    registry.register("API_KEY", SECRET);
+    var grant = bash().withSecretRegistry(registry).withMaxOutputBytes(1024).build();
+
+    var result =
+        grant.invoke(
+            List.of(
+                "-c",
+                "head -c 1014 /dev/zero | tr '\\0' 'x'; printf %s%s \"$1\" \"$2\";"
+                    + " printf %s \"tail $1\" >&2",
+                "BIN",
+                SECRET.substring(0, 8),
+                SECRET.substring(8)));
+
+    assertEquals("x".repeat(1014) + "\n[truncated: output exceeded cap]", result.stdout());
+    assertEquals("tail sk-test-", result.stderr());
   }
 
   @Test
@@ -157,8 +224,7 @@ class CommandGrantTest {
     var grant = bash().withEnv("GREETING", "hello1234").build();
     var result = grant.invoke(List.of("-c", "echo $GREETING"));
     assertEquals(0, result.exitCode());
-    assertTrue(result.stdout().contains("<redacted:GREETING>"));
-    assertFalse(result.stdout().contains("hello1234"));
+    assertEquals("hello1234\n", result.stdout());
   }
 
   @Test
@@ -214,45 +280,11 @@ class CommandGrantTest {
   }
 
   @Test
-  void secretInStdoutRedactedViaEnvAuto() throws Exception {
-    var grant = bash().withEnv("MY_TOKEN", "abcdefgh1234").build();
-    var result = grant.invoke(List.of("-c", "echo $MY_TOKEN"));
-    assertFalse(result.stdout().contains("abcdefgh1234"));
-    assertTrue(result.stdout().contains("<redacted:MY_TOKEN>"));
-    assertEquals(1, (int) result.redactionCounts().get("MY_TOKEN"));
-    assertEquals(1, result.totalRedactions());
-  }
-
-  @Test
-  void secretInStderrRedacted() throws Exception {
-    var grant = bash().withEnv("MY_TOKEN", "abcdefgh1234").build();
-    var result = grant.invoke(List.of("-c", "echo $MY_TOKEN 1>&2"));
-    assertFalse(result.stderr().contains("abcdefgh1234"));
-    assertTrue(result.stderr().contains("<redacted:MY_TOKEN>"));
-  }
-
-  @Test
-  void sharedRegistryRedactsAcrossGrants() throws Exception {
-    var registry = new SecretRegistry();
-    var producer =
-        CommandGrant.builder(BASH.toString())
-            .withSecretRegistry(registry)
-            .withEnv("SHARED_TOKEN", "sharedvalue123")
-            .build();
-    var consumer = CommandGrant.builder(BASH.toString()).withSecretRegistry(registry).build();
-    var result =
-        consumer.invoke(List.of("-c", "A=share; B=value123; echo prefix-${A}d${B}-suffix"));
-    assertFalse(result.stdout().contains("sharedvalue123"));
-    assertTrue(result.stdout().contains("<redacted:SHARED_TOKEN>"));
-    assertNotNull(producer);
-  }
-
-  @Test
   void stderrHiddenFromModelByDefault() throws Exception {
     var grant = bash().build();
     var tool = grant.toTool();
     var result =
-        tool.execute(Map.of("args", List.of("-c", "echo err 1>&2; echo out")), ToolContext.noop());
+        tool.execute(Map.of("args", List.of("-c", "echo err 1>&2; echo out")), sessionOf(grant));
     assertTrue(result.success());
     assertTrue(result.output().contains("out"));
     assertFalse(result.output().contains("err"));
@@ -263,7 +295,7 @@ class CommandGrantTest {
     var grant = bash().withStderrToModel(true).build();
     var tool = grant.toTool();
     var result =
-        tool.execute(Map.of("args", List.of("-c", "echo err 1>&2; echo out")), ToolContext.noop());
+        tool.execute(Map.of("args", List.of("-c", "echo err 1>&2; echo out")), sessionOf(grant));
     assertTrue(result.output().contains("out"));
     assertTrue(result.output().contains("err"));
     assertTrue(result.output().contains("[stderr]"));
@@ -273,7 +305,7 @@ class CommandGrantTest {
   void toolMissingArgsParameter() {
     var grant = bash().build();
     var tool = grant.toTool();
-    var result = tool.execute(Map.of(), ToolContext.noop());
+    var result = tool.execute(Map.of(), sessionOf(grant));
     assertFalse(result.success());
     assertTrue(result.output().contains("array of strings"));
   }
@@ -282,7 +314,7 @@ class CommandGrantTest {
   void toolNonStringEntryRejected() {
     var grant = bash().build();
     var tool = grant.toTool();
-    var result = tool.execute(Map.of("args", List.of(1, 2)), ToolContext.noop());
+    var result = tool.execute(Map.of("args", List.of(1, 2)), sessionOf(grant));
     assertFalse(result.success());
     assertTrue(result.output().contains("must be a string"));
   }
@@ -291,7 +323,7 @@ class CommandGrantTest {
   void toolReportsTimeoutInOutput() {
     var grant = bash().withTimeout(Duration.ofMillis(200)).build();
     var tool = grant.toTool();
-    var result = tool.execute(Map.of("args", List.of("-c", "sleep 30")), ToolContext.noop());
+    var result = tool.execute(Map.of("args", List.of("-c", "sleep 30")), sessionOf(grant));
     assertTrue(result.output().contains("TIMEOUT"));
     assertTrue(result.success());
   }
@@ -303,7 +335,7 @@ class CommandGrantTest {
     var result =
         tool.execute(
             Map.of("args", List.of("-c", "head -c 50000 /dev/zero | tr '\\0' 'x'")),
-            ToolContext.noop());
+            sessionOf(grant));
     assertTrue(result.output().contains("TRUNCATED"));
   }
 
@@ -311,7 +343,7 @@ class CommandGrantTest {
   void toolWrapsRejectedAsFailure() {
     var grant = bash().withArgValidator(args -> Optional.of("nope")).build();
     var tool = grant.toTool();
-    var result = tool.execute(Map.of("args", List.of("-c", "echo hi")), ToolContext.noop());
+    var result = tool.execute(Map.of("args", List.of("-c", "echo hi")), sessionOf(grant));
     assertFalse(result.success());
     assertTrue(result.output().contains("nope"));
   }
@@ -362,13 +394,6 @@ class CommandGrantTest {
   }
 
   @Test
-  void privateRegistryCreatedWhenNotProvided() {
-    var grant = CommandGrant.builder(BASH.toString()).withEnv("X", "valuevalue1").build();
-    assertNotNull(grant.secretRegistry());
-    assertTrue(grant.secretRegistry().leaks("valuevalue1"));
-  }
-
-  @Test
   void blankEnvNameRefused() {
     assertThrows(IllegalArgumentException.class, () -> bash().withEnv("  ", "validvalue1234"));
   }
@@ -414,21 +439,6 @@ class CommandGrantTest {
   }
 
   @Test
-  void redactionCountsImmutable() throws Exception {
-    var grant = bash().withEnv("TOKEN", "abcdefgh1234").build();
-    var result = grant.invoke(List.of("-c", "echo $TOKEN"));
-    assertThrows(UnsupportedOperationException.class, () -> result.redactionCounts().put("X", 1));
-  }
-
-  @Test
-  void totalRedactionsZeroWhenNothingRedacted() throws Exception {
-    var grant = bash().build();
-    var result = grant.invoke(List.of("-c", "echo nothing"));
-    assertEquals(0, result.totalRedactions());
-    assertTrue(result.redactionCounts().isEmpty());
-  }
-
-  @Test
   void customPathRespected() throws Exception {
     var grant = bash().withPath("/usr/bin:/bin").build();
     var result = grant.invoke(List.of("-c", "echo $PATH"));
@@ -461,7 +471,7 @@ class CommandGrantTest {
   }
 
   @Test
-  void secretRegistryConflictAcrossEnvOverwritesValue() throws Exception {
+  void secretRegistryConflictAcrossEnvOverwritesValue() {
     var registry = new SecretRegistry();
     registry.register("TOKEN", "originalvalue");
     var grant =
@@ -469,25 +479,15 @@ class CommandGrantTest {
             .withSecretRegistry(registry)
             .withEnv("TOKEN", "newervalue1")
             .build();
-    var result = grant.invoke(List.of("-c", "echo originalvalue"));
-    assertFalse(result.stdout().contains("<redacted"));
-    assertNotNull(grant);
-  }
-
-  @Test
-  void redactionAcrossLargeOutput() throws Exception {
-    var grant = bash().withEnv("TOKEN", "needleneedle").build();
-    var result = grant.invoke(List.of("-c", "for i in 1 2 3; do echo padding-$TOKEN-$i; done"));
-    assertFalse(result.stdout().contains("needleneedle"));
-    assertEquals(3, (int) result.redactionCounts().get("TOKEN"));
+    assertTrue(grant.secretRegistry().leaks("newervalue1"));
+    assertFalse(grant.secretRegistry().leaks("originalvalue"));
   }
 
   @Test
   void stderrToModelButStderrEmpty() throws Exception {
     var grant = bash().withStderrToModel(true).build();
     var tool = grant.toTool();
-    var result =
-        tool.execute(Map.of("args", List.of("-c", "echo only-stdout")), ToolContext.noop());
+    var result = tool.execute(Map.of("args", List.of("-c", "echo only-stdout")), sessionOf(grant));
     assertTrue(result.success());
     assertTrue(result.output().contains("only-stdout"));
     assertFalse(result.output().contains("[stderr]"));
@@ -534,7 +534,7 @@ class CommandGrantTest {
             () ->
                 result.complete(
                     tool.execute(
-                        Map.of("args", List.of("-c", RUN_UNTIL_RELEASED)), ToolContext.noop())));
+                        Map.of("args", List.of("-c", RUN_UNTIL_RELEASED)), sessionOf(grant))));
     awaitStarted(tmp);
 
     invoker.interrupt();
@@ -554,7 +554,7 @@ class CommandGrantTest {
         CommandGrant.builder(fakeBin.toString()).withSecretRegistry(new SecretRegistry()).build();
     Files.delete(fakeBin);
     var tool = grant.toTool();
-    var result = tool.execute(Map.of("args", List.of()), ToolContext.noop());
+    var result = tool.execute(Map.of("args", List.of()), sessionOf(grant));
     assertFalse(result.success());
     assertTrue(result.output().contains("I/O error"));
   }

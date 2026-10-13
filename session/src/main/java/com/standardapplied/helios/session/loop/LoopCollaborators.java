@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.session.loop;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.hooks.HookContext;
@@ -54,6 +55,11 @@ public record LoopCollaborators(
    */
   public static Builder newBuilder() {
     return new Builder();
+  }
+
+  /** The session's secret registry, the one its tool dispatch hands every tool. */
+  SecretRegistry secrets() {
+    return toolDispatch.sessionContext().secrets();
   }
 
   HookContext hookContext(SessionState state) {

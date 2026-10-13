@@ -87,7 +87,8 @@ public final class AgentSessionImpl implements AgentSession {
     var cancellation = new CancellationToken();
     this.state = new SessionState(sessionId, cancellation, clock);
     options.systemPrompt().ifPresent(prompt -> this.state.history().append(Message.system(prompt)));
-    var sessionContext = new SessionContext(sessionId, cancellation, clock);
+    var sessionContext =
+        new SessionContext(sessionId, cancellation, clock, options.secretRegistry());
     this.steeringQueue = new SteeringQueue(concurrency.maxQueuedUserMessages());
     this.events = new SessionEventPublisher(sessionId);
     this.pendingQuestions = new PendingQuestions(state, events, clock);
@@ -130,7 +131,7 @@ public final class AgentSessionImpl implements AgentSession {
         new AgentLoop(
             collaborators,
             turnRunner,
-            new StopClassifier(),
+            new StopClassifier(options.secretRegistry()),
             options.tokenCounter(),
             options.contextCompactor());
   }

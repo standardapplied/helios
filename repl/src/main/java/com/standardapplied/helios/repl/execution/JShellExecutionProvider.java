@@ -4,7 +4,6 @@
  */
 package com.standardapplied.helios.repl.execution;
 
-import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.repl.ReplConfig;
@@ -57,12 +56,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <h2>Output redaction</h2>
  *
- * Matches {@link com.standardapplied.helios.session.execution.LocalProcessExecutionProvider}:
- * stdout and stderr captured from the sandbox are scrubbed against the configured {@link
- * SecretRegistry} before the result is returned. Per-secret hit counts are surfaced via {@link
- * ExecutionResult#secretRedactionCounts()} so callers can audit how often a sandbox snippet brushed
- * against a registered secret. The default registry is empty, so a deployer who has not registered
- * any secrets pays a no-op pass.
+ * Stdout and stderr captured from the sandbox are returned raw; the session redacts the {@code
+ * Execute} tool's output against its secret registry before anything sees it.
  *
  * <h2>Lifecycle</h2>
  *
@@ -83,20 +78,12 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
 
   private final SandboxPool pool;
   private final ExecutionCapabilities capabilities;
-  private final SecretRegistry secretRegistry;
-  private final OutputRedaction redaction;
   private final AtomicBoolean closed = new AtomicBoolean();
   private final Thread shutdownHook;
   private final boolean shutdownHookRegistered;
 
   private JShellExecutionProvider(Builder b) {
-    this.secretRegistry = b.secretRegistry != null ? b.secretRegistry : new SecretRegistry();
-    this.redaction = new OutputRedaction(secretRegistry);
-    this.pool =
-        new SandboxPool(
-            redaction.withRedactingBindingsListener(b.replConfig),
-            b.startupSnippet,
-            b.maxConcurrentSessions);
+    this.pool = new SandboxPool(b.replConfig, b.startupSnippet, b.maxConcurrentSessions);
     this.capabilities =
         ExecutionCapabilities.newBuilder()
             .withSupportedRuntimes(Set.of(Runtime.JSHELL))
@@ -109,18 +96,6 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     if (shutdownHookRegistered) {
       JVM.addShutdownHook(shutdownHook);
     }
-  }
-
-  /**
-   * The secret registry this provider redacts stdout / stderr against. Mirrors {@link
-   * com.standardapplied.helios.session.execution.LocalProcessExecutionProvider#secretRegistry()} so
-   * a deployer can wire one shared registry across both providers.
-   *
-   * @return the configured registry (never null — defaults to an empty registry when {@link
-   *     Builder#withSecretRegistry(SecretRegistry)} is not called)
-   */
-  public SecretRegistry secretRegistry() {
-    return secretRegistry;
   }
 
   /**
@@ -218,8 +193,7 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
         request.timeout().compareTo(capabilities.maxTimeout()) > 0
             ? capabilities.maxTimeout()
             : request.timeout();
-    return SessionExecution.start(
-        session.sessionId(), replSession, request, timeout, cancellation, redaction);
+    return SessionExecution.start(session.sessionId(), replSession, request, timeout, cancellation);
   }
 
   /**
@@ -252,26 +226,8 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     private boolean filesystemWriteAllowed = false;
     private boolean registerShutdownHook = true;
     private String startupSnippet;
-    private SecretRegistry secretRegistry;
 
     private Builder() {}
-
-    /**
-     * Set the shared {@link SecretRegistry} the provider redacts stdout / stderr against. Mirrors
-     * the {@link
-     * com.standardapplied.helios.session.execution.LocalProcessExecutionProvider.Builder#withSecretRegistry
-     * LocalProcessExecutionProvider} setter so a deployer can wire one shared registry across both
-     * providers. Defaults to a fresh empty registry — usable but invisible to other tools.
-     *
-     * @param secretRegistry the registry; non-null
-     * @return this builder
-     * @throws NullPointerException if {@code secretRegistry} is null
-     */
-    public Builder withSecretRegistry(SecretRegistry secretRegistry) {
-      this.secretRegistry =
-          Objects.requireNonNull(secretRegistry, "secretRegistry must not be null");
-      return this;
-    }
 
     /**
      * Set the {@link ReplConfig} used to spawn each per-session sandbox. Required.

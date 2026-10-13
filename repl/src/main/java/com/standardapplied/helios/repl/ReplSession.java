@@ -7,25 +7,22 @@ package com.standardapplied.helios.repl;
 
 import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
-import com.standardapplied.helios.repl.sandbox.ExecuteParams;
 import com.standardapplied.helios.repl.sandbox.ExecutionRequest;
 import com.standardapplied.helios.repl.sandbox.ExecutionResult;
 import com.standardapplied.helios.repl.sandbox.Sandbox;
 import java.time.Duration;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * A stateful REPL session backed by a sandbox. Each session has its own sandbox instance, host
- * function registry, and execution history.
+ * A stateful REPL session backed by a sandbox. Each session has its own sandbox instance and host
+ * function registry.
  *
  * <p>Sessions are bound to a single agent run and must be closed when done to release sandbox
  * resources and the concurrency semaphore permit. {@link
@@ -38,7 +35,6 @@ public final class ReplSession implements AutoCloseable {
   private final Sandbox sandbox;
   private final HostFunctionRegistry registry;
   private final Map<String, AtomicInteger> hostFnCounts;
-  private final List<ExecutionResult> history = new CopyOnWriteArrayList<>();
   private final Semaphore semaphore;
   private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -150,47 +146,9 @@ public final class ReplSession implements AutoCloseable {
       throw new ReplException("Sandbox is no longer alive");
     }
     var request = ExecutionRequest.newBuilder().withCode(code).withTimeout(timeout).build();
-    var executeParams =
-        new ExecuteParams(
-            config.sandboxBindingsListener() != null,
-            config.maxBindingValueChars(),
-            config.maxBindingSnapshotChars());
     var startNanos = System.nanoTime();
-    var rawResult = sandbox.execute(request, executeParams);
-    var elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
-    var result =
-        applyExecutedCodeCap(rawResult, config.maxExecutedCodeChars()).withDuration(elapsed);
-    history.add(result);
-    var listener = config.sandboxBindingsListener();
-    if (listener != null) {
-      try {
-        listener.onBindings(result.bindings(), result);
-      } catch (Throwable t) {
-        // Listener contract: must not throw. Swallow so a misbehaving listener can't tank the run.
-      }
-    }
-    return result;
-  }
-
-  /**
-   * Apply the configured per-call cap to the {@code executedCode} field. Truncated values get a
-   * {@code ... (len=N)} marker so consumers know the original length. Cap of {@code 0} returns the
-   * result unchanged.
-   */
-  private static ExecutionResult applyExecutedCodeCap(ExecutionResult raw, int cap) {
-    var code = raw.executedCode();
-    if (cap <= 0 || code == null || code.length() <= cap) {
-      return raw;
-    }
-    var truncated = code.substring(0, cap) + "... (len=" + code.length() + ")";
-    return new ExecutionResult(
-        truncated,
-        raw.stdout(),
-        raw.stderr(),
-        raw.exitCode(),
-        raw.timedOut(),
-        raw.bindings(),
-        raw.duration());
+    var result = sandbox.execute(request);
+    return result.withDuration(Duration.ofNanos(System.nanoTime() - startNanos));
   }
 
   /**
@@ -207,15 +165,6 @@ public final class ReplSession implements AutoCloseable {
       snapshot.put(entry.getKey(), entry.getValue().get());
     }
     return Collections.unmodifiableMap(snapshot);
-  }
-
-  /**
-   * The execution history for this session.
-   *
-   * @return unmodifiable list of execution results
-   */
-  public List<ExecutionResult> history() {
-    return Collections.unmodifiableList(history);
   }
 
   /** The host function registry for this session. */
