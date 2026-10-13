@@ -15,7 +15,8 @@ import org.junit.jupiter.params.provider.ValueSource;
  * <p>{@code grounded} is a live gemini-3.5-flash Google Search turn with its url citations,
  * recorded 2026-10-09; {@code requires-action} (a function-call turn under tool choice {@code any})
  * and {@code incomplete} (a five-token output ceiling) are live gemini-3.8-flash turns recorded
- * 2026-10-13. The other streams are hand-built from the documented event shapes (Interactions API
+ * 2026-10-13, and {@code eof-in-thinking} is the live thought-summary turn of that day cut after
+ * its thought. The other streams are hand-built from the documented event shapes (Interactions API
  * reference, checked 2026-10-13); the {@code eof-*} and {@code empty} streams are bodies cut short,
  * which end in an error carrying what they produced, {@code eof-after-usage} after a status update
  * reporting the usage so far. The API documents no refusal terminal.
@@ -37,6 +38,7 @@ class GeminiStreamTranscriptTest {
         "eof-in-tool-arguments",
         "eof-mid-event",
         "eof-after-usage",
+        "eof-in-thinking",
         "incomplete",
         "requires-action",
         "failed",
