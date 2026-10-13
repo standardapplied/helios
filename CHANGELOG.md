@@ -331,9 +331,10 @@ throws `IllegalStateException("session ended with Success but produced no result
 `Success`, and `StructuredContentParser.parse` still returns `null` for blank input.
 
 **A sandbox execute reports its timeout, and an RPC timeout has its own type.**
-`repl.sandbox.ExecutionResult` gains a `boolean timedOut` component after `exitCode`, which
-changes the canonical constructor to `ExecutionResult(executedCode, stdout, stderr, exitCode,
-timedOut, bindings, duration)`; `ExecutionResult.Builder.withTimedOut(boolean)` sets it.
+`repl.sandbox.ExecutionResult` gains a `boolean timedOut` component after `exitCode` (the
+3.0 canonical constructor, after the removals under the secret registry entry below, is
+`ExecutionResult(stdout, stderr, exitCode, timedOut, duration)`);
+`ExecutionResult.Builder.withTimedOut(boolean)` sets it.
 `RpcChannel.RpcException` is now `sealed`, with `RpcChannel.RpcTimeoutException` as its only
 subclass: a call whose response does not arrive in time throws it, with the same message. New:
 `RpcChannel.call(method, params, timeout)`.
@@ -557,6 +558,19 @@ REPL's bindings listener is gone.
   `deniedPackages:java.lang.reflect`.
 
 ### Security
+
+- **A registered secret no longer reaches the model or the session's events through paths 2.x
+  left unredacted.** In 2.x each component redacted only when handed its own registry, so a
+  registered value leaked through: `Read` and `Grep` built by `SessionPresets` (no redactor);
+  every custom tool, `MemoryRead` and a `PostToolUse` `MutateResult`; the text of tool failures
+  built from exception messages (`threw:`, `tool dispatch failed:`, `Tool execution failed:`);
+  the messages in `TurnRetried` and terminal `SerializedError` cause chains and the reason of
+  `ErrorProviderUnavailable` (which carried the JShell startup snippet's raw output);
+  `ToolResult.data`, which the runtime's SSE stream serialised unredacted; the prefix of a secret
+  that straddled an output cap, since output was capped before it was redacted; and the stdout,
+  stderr and code a `SandboxBindingsListener` received. The session now redacts every tool result
+  and every error it reports against its one registry, a cut stream drops a trailing partial
+  secret first, and `data` and the listener are gone (see Breaking).
 
 - **`helios-persistence` resolves the PostgreSQL JDBC driver `org.postgresql:postgresql` 42.7.12
   (was 42.7.7).** 42.7.7 is inside the affected range of two pgJDBC advisories:

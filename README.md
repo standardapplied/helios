@@ -338,7 +338,7 @@ var weatherTool = Tool.newBuilder()
     .build();
 ```
 
-Mark read-only tools as idempotent at build time — `Tool.newBuilder().withIdempotent(true)` — so durable resume (`Durability`, `UnsafeResumePolicy`) knows a call in flight at a crash is safe to repeat. The session loop never retries a tool: `ToolDispatch` acquires the call's per-category permit, runs the tool once on a virtual thread bounded by the per-call timeout, and turns an unknown tool, a timeout or a thrown exception into a failed result the model sees.
+`Tool.newBuilder().withIdempotent(true)` records that a tool is safe to repeat; the session loop does not read it, because it never retries a tool: `ToolDispatch` acquires the call's per-category permit, runs the tool once on a virtual thread bounded by the per-call timeout, and turns an unknown tool, a timeout or a thrown exception into a failed result the model sees.
 
 ### CommandGrant — give the agent a CLI without giving it the secrets
 
@@ -583,7 +583,7 @@ Helios is designed for production but has known limitations — see [Production 
 
 `core.common.SecretRegistry` is a thread-safe registry of secret values; `Redactor` (built via `registry.redactor()`) is an immutable Aho-Corasick byte-level scrubber that replaces every contiguous occurrence of a registered secret with `<redacted:NAME>`. It operates on raw bytes before UTF-8 decode so encoding mangling cannot bypass it. Overlap policy: leftmost-longest.
 
-A secret is registered under a non-blank name (re-registering a name replaces its value) and its value must be at least 8 characters of JSON-safe printable ASCII: every character in `0x20`–`0x7E` except `"` and `\`. Control characters, non-ASCII characters, `"` and `\` are refused, because Jackson would escape them and the escaped bytes would no longer match.
+A secret is registered under a non-blank name (re-registering a name replaces its value) and its value must be at least 8 characters of JSON-safe printable ASCII: every character in `0x20`–`0x7E` except `"` and `\`. `register` throws `IllegalArgumentException` otherwise: on a null value, a value shorter than 8 characters, a control character (`0x00`–`0x1F`, `0x7F`), `"` or `\` (Jackson escapes these, so the serialised bytes would no longer match), or any non-ASCII character (the redactor matches ASCII bytes).
 
 ```java
 var registry = new SecretRegistry();
