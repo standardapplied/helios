@@ -341,7 +341,7 @@ public sealed interface HeliosEvent
       if (Strings.isBlank(toolName)) {
         throw new IllegalArgumentException("toolName must not be blank");
       }
-      args = args == null ? Map.of() : OrderedMaps.copyOf(args);
+      args = args == null ? Map.of() : OrderedMaps.copyOfKeepingNullValues(args);
     }
   }
 
