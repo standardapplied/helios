@@ -18,6 +18,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.NoSuchElementException;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -120,10 +121,7 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
 
   @Override
   public boolean hasNext() {
-    if (done) {
-      return false;
-    }
-    if (nextEvent == null) {
+    if (nextEvent == null && !done) {
       nextEvent = readNextEvent();
     }
     return nextEvent != null;
@@ -131,8 +129,8 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
 
   @Override
   public StreamEvent next() {
-    if (nextEvent == null) {
-      nextEvent = readNextEvent();
+    if (!hasNext()) {
+      throw new NoSuchElementException("The stream has ended");
     }
     var event = nextEvent;
     nextEvent = null;
@@ -142,6 +140,7 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
   @Override
   public void close() {
     done = true;
+    nextEvent = null;
     readExecutor.shutdownNow();
     closeQuietly(body);
     closeQuietly(reader);
