@@ -249,11 +249,13 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void malformedJsonEmitsErrorEvent() {
+  void malformedJsonEndsTheStreamInAnError() {
     var events = drain("data: {not valid json}\n\n" + HELLO_TURN);
 
-    assertTrue(events.size() >= 2);
-    assertInstanceOf(StreamEvent.Error.class, events.get(0));
+    assertEquals(1, events.size());
+    assertEquals(
+        "Failed to parse stream event",
+        assertInstanceOf(StreamEvent.Error.class, events.get(0)).message());
   }
 
   @Test

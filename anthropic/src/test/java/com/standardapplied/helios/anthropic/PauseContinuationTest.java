@@ -18,6 +18,7 @@ import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.ChatExchange;
+import java.io.EOFException;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -92,6 +93,39 @@ class PauseContinuationTest {
     assertEquals("pause_turn continuation limit exceeded after 8 resumes", error.message());
     assertNull(error.cause());
     assertEquals(PauseContinuation.MAX_PAUSE_CONTINUATIONS + 1, opened[0]);
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
+    assertEquals("Searching. ".repeat(9), error.partial().content());
+    assertEquals(Response.Usage.of(90, 18), error.partial().usage());
+  }
+
+  @Test
+  void anErrorInAContinuedSegmentCarriesTheWholeTurnSoFar() throws Exception {
+    var cut =
+        Response.newBuilder()
+            .withContent("Fou")
+            .withFinishReason(FinishReason.ERROR)
+            .withUsage(Response.Usage.of(5, 1))
+            .build();
+    var eof = new EOFException("cut");
+    var opened = new int[1];
+    var events =
+        continuation(
+            r ->
+                opened[0]++ == 0
+                    ? stream(pausedWithContent())
+                    : new Events(
+                        List.of(
+                            new StreamEvent.TextDelta("Fou"),
+                            new StreamEvent.Error("cut", eof, cut))))
+            .stream(request);
+
+    assertEquals(new StreamEvent.TextDelta("Fou"), events.next());
+    var error = assertInstanceOf(StreamEvent.Error.class, events.next());
+
+    assertSame(eof, error.cause());
+    assertEquals("Searching. Fou", error.partial().content());
+    assertEquals(Response.Usage.of(15, 3), error.partial().usage());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
   }
 
   @Test
@@ -106,6 +140,10 @@ class PauseContinuationTest {
 
     assertEquals(refused.getMessage(), error.message());
     assertSame(refused, error.cause());
+    assertEquals("Searching. ", error.partial().content());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
+    assertEquals(
+        "pause_turn", error.partial().metadata().get(AnthropicResponseAssembler.STOP_REASON_KEY));
   }
 
   @Test
@@ -183,12 +221,17 @@ class PauseContinuationTest {
   }
 
   private static Response<Void> pausedWithContent() {
-    return paused(
-        Map.of(
-            AnthropicResponseAssembler.STOP_REASON_KEY,
-            "pause_turn",
-            RawContentEcho.RAW_CONTENT_KEY,
-            PAUSED_CONTENT));
+    return Response.newBuilder()
+        .withContent("Searching. ")
+        .withFinishReason(FinishReason.STOP)
+        .withUsage(Response.Usage.of(10, 2))
+        .withMetadata(
+            Map.of(
+                AnthropicResponseAssembler.STOP_REASON_KEY,
+                "pause_turn",
+                RawContentEcho.RAW_CONTENT_KEY,
+                PAUSED_CONTENT))
+        .build();
   }
 
   private static Response<Void> paused(Map<String, String> metadata) {

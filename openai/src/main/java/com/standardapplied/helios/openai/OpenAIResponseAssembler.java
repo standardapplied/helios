@@ -4,51 +4,80 @@ package com.standardapplied.helios.openai;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.openai.api.ApiUsage;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Assembles the response at the end of a streamed turn: its text, tool calls, finish reason, usage
- * and reasoning summary, which also rides as {@link #REASONING_KEY} metadata.
+ * Assembles the response of a streamed turn, at its end or as far as it got: its text, tool calls,
+ * finish reason, usage and reasoning summary, which also rides as {@link #REASONING_KEY} metadata,
+ * with a refusal's text as {@link Response#REFUSAL_EXPLANATION_KEY} and the reason an incomplete
+ * response stopped as {@link #INCOMPLETE_REASON_KEY}.
  */
 final class OpenAIResponseAssembler {
 
   static final String REASONING_KEY = "openai.reasoning";
 
-  private OpenAIResponseAssembler() {}
+  /** Metadata key carrying {@code incomplete_details.reason} of an incomplete response. */
+  static final String INCOMPLETE_REASON_KEY = "openai.incompleteReason";
 
   /**
-   * The completion event of a turn. A turn that called tools finishes with {@code TOOL_CALLS}
-   * whatever the response status.
+   * What a turn streamed.
+   *
+   * @param content the output text
+   * @param calls the completed function calls
+   * @param thinking the reasoning summary, or {@code null}
+   * @param refusal the refusal text, empty without one
+   * @param incompleteReason why an incomplete response stopped, or {@code null}
+   * @param usage the reported usage, or {@code null}
    */
-  static StreamEvent.Done done(
-      String content, List<ToolCall> calls, String reasoning, ApiUsage usage, String status) {
-    var thinking = reasoning.isEmpty() ? null : reasoning;
-    var response =
-        Response.newBuilder()
-            .withContent(content)
-            .withToolCalls(calls)
-            .withFinishReason(calls.isEmpty() ? mapStatus(status) : FinishReason.TOOL_CALLS)
-            .withUsage(usage(usage))
-            .withThinking(thinking)
-            .withMetadata(thinking == null ? Map.of() : Map.of(REASONING_KEY, thinking))
-            .build();
-    return new StreamEvent.Done(response);
+  record Turn(
+      String content,
+      List<ToolCall> calls,
+      String thinking,
+      String refusal,
+      String incompleteReason,
+      ApiUsage usage) {}
+
+  private OpenAIResponseAssembler() {}
+
+  /** The response of {@code turn}, finishing with {@code finishReason}. */
+  static Response<Void> response(Turn turn, FinishReason finishReason) {
+    var metadata = new HashMap<String, String>();
+    if (turn.thinking() != null) {
+      metadata.put(REASONING_KEY, turn.thinking());
+    }
+    if (!turn.refusal().isEmpty()) {
+      metadata.put(Response.REFUSAL_EXPLANATION_KEY, turn.refusal());
+    }
+    if (turn.incompleteReason() != null) {
+      metadata.put(INCOMPLETE_REASON_KEY, turn.incompleteReason());
+    }
+    return Response.newBuilder()
+        .withContent(turn.content())
+        .withToolCalls(turn.calls())
+        .withFinishReason(finishReason)
+        .withUsage(usage(turn.usage()))
+        .withThinking(turn.thinking())
+        .withMetadata(metadata)
+        .build();
   }
 
-  /** The finish reason of a response status. */
-  static FinishReason mapStatus(String status) {
-    if (status == null) {
-      return FinishReason.STOP;
+  /** The finish reason of a completed response: refused, calling tools or stopped. */
+  static FinishReason completedReason(boolean refused, boolean calledTools) {
+    if (refused) {
+      return FinishReason.REFUSAL;
     }
-    return switch (status) {
-      case "incomplete" -> FinishReason.LENGTH;
-      case "failed" -> FinishReason.ERROR;
-      default -> FinishReason.STOP;
-    };
+    return calledTools ? FinishReason.TOOL_CALLS : FinishReason.STOP;
+  }
+
+  /**
+   * The finish reason of an incomplete response: filtered for {@code content_filter}, truncated for
+   * any other reason, known or not.
+   */
+  static FinishReason incompleteReason(String reason) {
+    return "content_filter".equals(reason) ? FinishReason.CONTENT_FILTER : FinishReason.LENGTH;
   }
 
   /**

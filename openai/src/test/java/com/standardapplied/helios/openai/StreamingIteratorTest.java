@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.test.FailingInputStream;
@@ -116,38 +117,50 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void reasoningSummaryCapture() {
-    var reasoningDelta1 =
-        "data: {\"type\":\"response.reasoning_summary_text.delta\","
-            + "\"output_index\":0,\"text\":\"Let me think\"}\n\n";
-
-    var reasoningDelta2 =
-        "data: {\"type\":\"response.reasoning_summary_text.delta\","
-            + "\"output_index\":0,\"text\":\" about this.\"}\n\n";
-
-    var sse = reasoningDelta1 + reasoningDelta2 + TEXT_DELTA + RESPONSE_COMPLETED;
+  void reasoningSummaryDeltasStreamAsThinkingAndPartsJoinWithABlankLine() {
+    var sse =
+        reasoningDelta(0, "Let me think")
+            + reasoningDelta(0, " about this.")
+            + reasoningDone(0, "Let me think about this.")
+            + reasoningDelta(1, "Then answer.")
+            + reasoningDone(1, "Then answer.")
+            + TEXT_DELTA
+            + RESPONSE_COMPLETED;
 
     var events = drain(sse);
 
+    assertEquals(
+        List.of(
+            new StreamEvent.ThinkingDelta("Let me think"),
+            new StreamEvent.ThinkingDelta(" about this."),
+            new StreamEvent.ThinkingComplete("Let me think about this.", null),
+            new StreamEvent.ThinkingDelta("Then answer."),
+            new StreamEvent.ThinkingComplete("Then answer.", null),
+            new StreamEvent.TextDelta("Hello")),
+        events.subList(0, 6));
     var done = (StreamEvent.Done) events.getLast();
-    assertNotNull(done.response().thinking());
-    assertEquals("Let me think about this.", done.response().thinking());
-    assertTrue(done.response().metadata().containsKey(OpenAIResponseAssembler.REASONING_KEY));
-
-    // Streaming surface: each reasoning delta arrives as ThinkingDelta.
-    var thinkingDeltas =
-        events.stream().filter(StreamEvent.ThinkingDelta.class::isInstance).count();
-    assertEquals(2, thinkingDeltas);
+    assertEquals("Let me think about this.\n\nThen answer.", done.response().thinking());
+    assertEquals(
+        "Let me think about this.\n\nThen answer.",
+        done.response().metadata().get(OpenAIResponseAssembler.REASONING_KEY));
   }
 
   @Test
-  void reasoningSummaryEmitsThinkingComplete() {
-    var reasoningDelta =
-        "data: {\"type\":\"response.reasoning_summary_text.delta\","
-            + "\"output_index\":0,\"text\":\"Done thinking.\"}\n\n";
+  void anEmptyReasoningSummaryPartYieldsNoThinking() {
+    var events = drain(reasoningDone(0, "") + TEXT_DELTA + RESPONSE_COMPLETED);
+
+    assertEquals(2, events.size());
+    var done = (StreamEvent.Done) events.getLast();
+    assertNull(done.response().thinking());
+    assertNull(done.response().metadata().get(OpenAIResponseAssembler.REASONING_KEY));
+  }
+
+  @Test
+  void reasoningSummaryDoneWithoutTextCompletesWhatStreamed() {
     var reasoningDone =
-        "data: {\"type\":\"response.reasoning_summary_text.done\"," + "\"output_index\":0}\n\n";
-    var sse = reasoningDelta + reasoningDone + TEXT_DELTA + RESPONSE_COMPLETED;
+        "data: {\"type\":\"response.reasoning_summary_text.done\","
+            + "\"item_id\":\"rs_1\",\"summary_index\":0}\n\n";
+    var sse = reasoningDelta(0, "Done thinking.") + reasoningDone + TEXT_DELTA + RESPONSE_COMPLETED;
 
     var events = drain(sse);
     var complete =
@@ -185,11 +198,13 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void malformedJsonEmitsErrorEvent() {
+  void malformedJsonEndsTheStreamInAnError() {
     var sse = "data: {not valid json}\n\n" + TEXT_DELTA + RESPONSE_COMPLETED;
     var events = drain(sse);
-    assertTrue(events.size() >= 2);
-    assertInstanceOf(StreamEvent.Error.class, events.get(0));
+    assertEquals(1, events.size());
+    assertEquals(
+        "Failed to parse stream event",
+        assertInstanceOf(StreamEvent.Error.class, events.get(0)).message());
   }
 
   @Test
@@ -453,14 +468,15 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void responseCompletedNullResponseUsesDefaults() {
+  void responseCompletedWithoutAResponseIsAnError() {
     var noResponse = "data: {\"type\":\"response.completed\"}\n\n";
-    var sse = TEXT_DELTA + noResponse;
-    var events = drain(sse);
+    var events = drain(TEXT_DELTA + noResponse);
+
     assertEquals(2, events.size());
-    var done = (StreamEvent.Done) events.getLast();
-    assertNull(done.response().usage());
-    assertEquals(FinishReason.STOP, done.response().finishReason());
+    var error = (StreamEvent.Error) events.getLast();
+    assertEquals("response.completed with status null", error.message());
+    assertEquals("Hello", error.partial().content());
+    assertNull(error.partial().usage());
   }
 
   @Test
@@ -498,7 +514,7 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void malformedToolCallArgsUseFallback() {
+  void toolCallArgumentsThatAreNotAJsonObjectEndTheStreamNamingTheTool() {
     var toolItemAdded =
         "data: {\"type\":\"response.output_item.added\",\"output_index\":0,"
             + "\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\","
@@ -517,14 +533,15 @@ class StreamingIteratorTest {
     var sse = toolItemAdded + argsDelta + argsDone + RESPONSE_COMPLETED;
 
     var events = drain(sse);
-    var tcComplete =
-        events.stream()
-            .filter(e -> e instanceof StreamEvent.ToolCallComplete)
-            .map(e -> (StreamEvent.ToolCallComplete) e)
-            .findFirst()
-            .orElseThrow();
-    assertTrue(tcComplete.toolCall().arguments().containsKey("_raw"));
-    assertEquals("not valid json", tcComplete.toolCall().arguments().get("_raw"));
+
+    assertEquals(new StreamEvent.ToolCallStart("call_1", "test_fn"), events.getFirst());
+    var error = assertInstanceOf(StreamEvent.Error.class, events.get(1));
+    assertTrue(
+        error.message().startsWith("Arguments of tool call 'test_fn' are not a JSON object: "),
+        error.message());
+    assertInstanceOf(OpenAIException.class, error.cause());
+    assertEquals(List.of(), error.partial().toolCalls());
+    assertEquals(2, events.size());
   }
 
   @Test
@@ -601,18 +618,150 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void incompleteStatusMapsToLength() {
-    var incompleteResponse =
+  void aCompletedEventWithAnotherStatusIsAnError() {
+    var incompleteStatus =
         "data: {\"type\":\"response.completed\",\"response\":{"
-            + "\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"incomplete\","
-            + "\"output\":[],\"model\":\"gpt-4o\","
-            + "\"usage\":{\"input_tokens\":25,\"output_tokens\":4096,\"total_tokens\":4121}}}\n\n";
+            + "\"id\":\"resp_1\",\"status\":\"incomplete\","
+            + "\"usage\":{\"input_tokens\":25,\"output_tokens\":4096}}}\n\n";
 
-    var sse = TEXT_DELTA + incompleteResponse;
+    var error = (StreamEvent.Error) drain(TEXT_DELTA + incompleteStatus).getLast();
+
+    assertEquals("response.completed with status incomplete", error.message());
+    assertEquals(4096, error.partial().usage().outputTokens());
+  }
+
+  @Test
+  void anIncompleteResponseIsTruncatedWithItsUsageAndReason() {
+    var done = (StreamEvent.Done) drain(TEXT_DELTA + incomplete("max_output_tokens")).getLast();
+
+    assertEquals(FinishReason.LENGTH, done.response().finishReason());
+    assertEquals("Hello", done.response().content());
+    assertEquals(4096, done.response().usage().outputTokens());
+    assertEquals(
+        "max_output_tokens",
+        done.response().metadata().get(OpenAIResponseAssembler.INCOMPLETE_REASON_KEY));
+  }
+
+  @Test
+  void anIncompleteResponseStoppedByTheContentFilterIsFiltered() {
+    var done = (StreamEvent.Done) drain(TEXT_DELTA + incomplete("content_filter")).getLast();
+
+    assertEquals(FinishReason.CONTENT_FILTER, done.response().finishReason());
+  }
+
+  @Test
+  void anIncompleteResponseWithoutDetailsIsTruncated() {
+    var noDetails =
+        "data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\"}}\n\n";
+    var done = (StreamEvent.Done) drain(TEXT_DELTA + noDetails).getLast();
+
+    assertEquals(FinishReason.LENGTH, done.response().finishReason());
+    assertNull(done.response().metadata().get(OpenAIResponseAssembler.INCOMPLETE_REASON_KEY));
+  }
+
+  @Test
+  void anIncompleteEventWithoutAResponseIsTruncated() {
+    var done =
+        (StreamEvent.Done)
+            drain(TEXT_DELTA + "data: {\"type\":\"response.incomplete\"}\n\n").getLast();
+
+    assertEquals(FinishReason.LENGTH, done.response().finishReason());
+    assertNull(done.response().usage());
+  }
+
+  @Test
+  void aRefusalFinishesRefusedWithItsTextAsTheExplanation() {
+    var sse =
+        "data: {\"type\":\"response.refusal.delta\",\"item_id\":\"msg_1\",\"delta\":\"I can't\"}\n\n"
+            + "data: {\"type\":\"response.refusal.delta\",\"item_id\":\"msg_1\"}\n\n"
+            + "data: {\"type\":\"response.refusal.done\",\"item_id\":\"msg_1\","
+            + "\"refusal\":\"I can't help with that.\"}\n\n"
+            + RESPONSE_COMPLETED;
 
     var events = drain(sse);
-    var done = (StreamEvent.Done) events.getLast();
-    assertEquals(FinishReason.LENGTH, done.response().finishReason());
+
+    assertEquals(1, events.size());
+    var done = (StreamEvent.Done) events.getFirst();
+    assertEquals(FinishReason.REFUSAL, done.response().finishReason());
+    assertEquals("", done.response().content());
+    assertEquals(
+        "I can't help with that.",
+        done.response().metadata().get(Response.REFUSAL_EXPLANATION_KEY));
+  }
+
+  @Test
+  void aRefusalDoneWithoutTextKeepsTheStreamedRefusal() {
+    var sse =
+        "data: {\"type\":\"response.refusal.delta\",\"item_id\":\"msg_1\",\"delta\":\"No.\"}\n\n"
+            + "data: {\"type\":\"response.refusal.done\",\"item_id\":\"msg_1\"}\n\n"
+            + RESPONSE_COMPLETED;
+
+    var done = (StreamEvent.Done) drain(sse).getFirst();
+
+    assertEquals(FinishReason.REFUSAL, done.response().finishReason());
+  }
+
+  @Test
+  void aTerminalWhileAFunctionCallIsOpenIsAnErrorWithoutThatCall() {
+    var added =
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,"
+            + "\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\","
+            + "\"call_id\":\"call_1\",\"name\":\"weather\",\"arguments\":\"\"}}\n\n";
+
+    var events = drain(added + incomplete("max_output_tokens"));
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals("Response ended while function call 'weather' is still open", error.message());
+    assertEquals(List.of(), error.partial().toolCalls());
+    assertEquals(4096, error.partial().usage().outputTokens());
+  }
+
+  @Test
+  void theFinalArgumentsOfTheDoneEventWinOverWhatStreamedAndKeepAJsonNull() {
+    var sse =
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,"
+            + "\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\","
+            + "\"call_id\":\"call_1\",\"name\":\"weather\",\"arguments\":\"\"}}\n\n"
+            + "data: {\"type\":\"response.function_call_arguments.delta\","
+            + "\"item_id\":\"fc_1\",\"delta\":\"{\\\"city\\\":\"}\n\n"
+            + "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_1\","
+            + "\"arguments\":\"{\\\"city\\\":\\\"Paris\\\",\\\"unit\\\":null}\"}\n\n"
+            + RESPONSE_COMPLETED;
+
+    var done = (StreamEvent.Done) drain(sse).getLast();
+
+    var arguments = done.response().toolCalls().getFirst().arguments();
+    assertEquals("Paris", arguments.get("city"));
+    assertTrue(arguments.containsKey("unit"));
+    assertNull(arguments.get("unit"));
+    assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
+  }
+
+  private static String reasoningDelta(int summaryIndex, String delta) {
+    return "data: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"rs_1\","
+        + "\"summary_index\":"
+        + summaryIndex
+        + ",\"delta\":\""
+        + delta
+        + "\"}\n\n";
+  }
+
+  private static String reasoningDone(int summaryIndex, String text) {
+    return "data: {\"type\":\"response.reasoning_summary_text.done\",\"item_id\":\"rs_1\","
+        + "\"summary_index\":"
+        + summaryIndex
+        + ",\"text\":\""
+        + text
+        + "\"}\n\n";
+  }
+
+  private static String incomplete(String reason) {
+    return "data: {\"type\":\"response.incomplete\",\"response\":{"
+        + "\"id\":\"resp_1\",\"status\":\"incomplete\","
+        + "\"incomplete_details\":{\"reason\":\""
+        + reason
+        + "\"},"
+        + "\"usage\":{\"input_tokens\":25,\"output_tokens\":4096}}}\n\n";
   }
 
   private static SseReader reader(InputStream body) {

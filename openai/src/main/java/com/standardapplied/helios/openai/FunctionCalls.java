@@ -4,10 +4,11 @@ package com.standardapplied.helios.openai;
 
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.provider.ToolArguments;
 import com.standardapplied.helios.openai.api.OpenAIJson;
 import com.standardapplied.helios.openai.api.OutputItem;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -19,7 +20,7 @@ final class FunctionCalls {
 
   private record Pending(String callId, String name, StringBuilder arguments) {}
 
-  private final Map<String, Pending> pending = new HashMap<>();
+  private final Map<String, Pending> pending = new LinkedHashMap<>();
   private final List<ToolCall> calls = new ArrayList<>();
 
   /** An added output item: the start of a call when it is a function call. */
@@ -42,40 +43,37 @@ final class FunctionCalls {
     return null;
   }
 
-  /** The end of the arguments of item {@code itemId}: its tool call, if it was open. */
-  StreamEvent argumentsDone(String itemId) {
+  /**
+   * The end of the arguments of item {@code itemId}, finalized as {@code arguments} or, when the
+   * event carries none, as streamed: its tool call, if it was open.
+   *
+   * @throws OpenAIException if the arguments are not a JSON object
+   */
+  StreamEvent argumentsDone(String itemId, String arguments) {
     var call = itemId == null ? null : pending.remove(itemId);
     if (call == null) {
       return null;
     }
+    var json = arguments != null ? arguments : call.arguments().toString();
     var toolCall =
         ToolCall.newBuilder()
             .withId(call.callId())
             .withName(call.name())
-            .withArguments(arguments(call.arguments().toString()))
+            .withArguments(
+                ToolArguments.read(
+                    call.name(), json, OpenAIJson.STRUCTURED.reader(), OpenAIException::new))
             .build();
     calls.add(toolCall);
     return new StreamEvent.ToolCallComplete(toolCall);
   }
 
+  /** The name of a function call whose arguments are still open, or {@code null} when none is. */
+  String open() {
+    return pending.isEmpty() ? null : pending.values().iterator().next().name();
+  }
+
   /** The tool calls, in the order their arguments completed. */
   List<ToolCall> calls() {
     return List.copyOf(calls);
-  }
-
-  /**
-   * The JSON object {@code json} as a map: empty for no arguments, and {@code {"_raw": json}} for
-   * arguments that are not a JSON object, so the model sees what it sent.
-   */
-  @SuppressWarnings("unchecked")
-  private static Map<String, Object> arguments(String json) {
-    if (json.isEmpty()) {
-      return Map.of();
-    }
-    try {
-      return OpenAIJson.LENIENT.readValue(json, Map.class);
-    } catch (RuntimeException e) {
-      return Map.of("_raw", json);
-    }
   }
 }

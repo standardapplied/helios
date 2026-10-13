@@ -5,6 +5,8 @@
 
 package com.standardapplied.helios.core.model;
 
+import java.util.Objects;
+
 /** Events emitted during streaming response from a model. */
 public sealed interface StreamEvent {
 
@@ -73,19 +75,29 @@ public sealed interface StreamEvent {
   record Done(Response<?> response) implements StreamEvent {}
 
   /**
-   * An error occurred.
+   * The stream failed: the provider reported an error, an event could not be read, or the body
+   * ended before the provider's terminal event. Like {@link Done}, it ends the stream.
    *
    * @param message human-readable error description
    * @param cause originating exception, when known; may be {@code null}
+   * @param partial what the stream produced before it failed, with finish reason {@link
+   *     FinishReason#ERROR}: its text, usage, thinking, citations, metadata and the tool calls that
+   *     completed; a call still open when the stream failed is not among them
    */
-  record Error(String message, Exception cause) implements StreamEvent {
+  record Error(String message, Exception cause, Response<Void> partial) implements StreamEvent {
+
     /**
-     * Convenience constructor when no underlying exception is available.
-     *
-     * @param message human-readable error description
+     * @throws NullPointerException if {@code message} or {@code partial} is null
+     * @throws IllegalArgumentException if {@code partial} does not finish with {@link
+     *     FinishReason#ERROR}
      */
-    public Error(String message) {
-      this(message, null);
+    public Error {
+      Objects.requireNonNull(message, "message must not be null");
+      Objects.requireNonNull(partial, "partial must not be null");
+      if (partial.finishReason() != FinishReason.ERROR) {
+        throw new IllegalArgumentException(
+            "partial must finish with ERROR, not " + partial.finishReason());
+      }
     }
   }
 }

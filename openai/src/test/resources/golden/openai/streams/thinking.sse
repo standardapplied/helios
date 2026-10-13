@@ -1,10 +1,24 @@
-data: {"type":"response.reasoning_summary_text.delta","output_index":0,"text":"Let me think"}
+data: {"type":"response.created","response":{"id":"resp_1","object":"response","status":"in_progress","output":[],"model":"gpt-5.6","usage":null}}
 
-data: {"type":"response.reasoning_summary_text.delta","output_index":0,"text":" about this."}
+data: {"type":"response.reasoning_summary_part.added","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}
 
-data: {"type":"response.reasoning_summary_text.done","output_index":0}
+data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"**Planning**\n\nLet me think"}
 
-data: {"type":"response.output_text.delta","output_index":1,"content_index":0,"delta":"Hello!"}
+data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":" about this."}
+
+data: {"type":"response.reasoning_summary_text.done","item_id":"rs_1","output_index":0,"summary_index":0,"text":"**Planning**\n\nLet me think about this."}
+
+data: {"type":"response.reasoning_summary_part.done","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"**Planning**\n\nLet me think about this."}}
+
+data: {"type":"response.reasoning_summary_part.added","item_id":"rs_1","output_index":0,"summary_index":1,"part":{"type":"summary_text","text":""}}
+
+data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":1,"delta":"Then answer."}
+
+data: {"type":"response.reasoning_summary_text.done","item_id":"rs_1","output_index":0,"summary_index":1,"text":"Then answer."}
+
+data: {"type":"response.reasoning_summary_part.done","item_id":"rs_1","output_index":0,"summary_index":1,"part":{"type":"summary_text","text":"Then answer."}}
+
+data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"Hello!"}
 
 data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[],"model":"gpt-5.6","usage":{"input_tokens":2006,"output_tokens":150,"total_tokens":2156,"input_tokens_details":{"cached_tokens":1920,"cache_write_tokens":40}}}}
 

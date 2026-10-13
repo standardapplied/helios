@@ -26,12 +26,31 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p>{@code open-map-structured} is built by hand from the documented Responses API stream shape
  * for a gpt-4o reply to a non-strict {@code json_schema} request, 2026-10-09: no OpenAI key was
- * available to record it live. The other streams are hand-built.
+ * available to record it live. The other streams are hand-built from the documented event shapes
+ * (Responses API streaming events reference, checked 2026-10-13); the {@code eof-*} and {@code
+ * empty} streams are bodies cut short, which end in an error carrying what they produced. The
+ * Responses API reports usage only on its terminal event, so no stream is cut after usage.
  */
 class OpenAIStreamTranscriptTest {
 
   @ParameterizedTest
-  @ValueSource(strings = {"text", "tool-calls", "thinking", "error", "failed", "malformed"})
+  @ValueSource(
+      strings = {
+        "text",
+        "tool-calls",
+        "thinking",
+        "error",
+        "failed",
+        "malformed",
+        "empty",
+        "eof-after-text",
+        "eof-in-tool-arguments",
+        "eof-mid-event",
+        "incomplete",
+        "refusal",
+        "bad-tool-arguments",
+        "null-argument"
+      })
   void transcriptMatchesItsGolden(String name) {
     var transcript =
         ModelHarness.transcript(

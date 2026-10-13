@@ -1,0 +1,5 @@
+== chatStream
+ToolCallComplete[toolCall=ToolCall[id=call_1, name=weather, arguments={city=Paris, unit=null}]]
+Done[response=Response[content=, parsed=null, toolCalls=[ToolCall[id=call_1, name=weather, arguments={city=Paris, unit=null}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]]
+== chat
+Response[content=, parsed=null, toolCalls=[ToolCall[id=call_1, name=weather, arguments={city=Paris, unit=null}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]

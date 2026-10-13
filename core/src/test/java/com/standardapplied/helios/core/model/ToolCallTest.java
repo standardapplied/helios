@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -73,18 +74,24 @@ class ToolCallTest {
   }
 
   @Test
-  void withArgumentsRejectsANullNameOrValue() {
-    var nullValue = new LinkedHashMap<String, Object>();
-    nullValue.put("city", null);
+  void withArgumentsKeepsANullValueAsTheJsonNullItWas() {
+    var arguments = new LinkedHashMap<String, Object>();
+    arguments.put("city", null);
+    arguments.put("unit", "C");
+
+    var call = ToolCall.newBuilder().withArguments(arguments).build();
+
+    assertEquals(arguments, call.arguments());
+    assertEquals(List.of("city", "unit"), List.copyOf(call.arguments().keySet()));
+  }
+
+  @Test
+  void withArgumentsRejectsANullName() {
     var nullName = new LinkedHashMap<String, Object>();
     nullName.put(null, "Paris");
 
     var builder = ToolCall.newBuilder();
 
-    assertEquals(
-        "value of key city must not be null",
-        assertThrows(NullPointerException.class, () -> builder.withArguments(nullValue))
-            .getMessage());
     assertEquals(
         "key must not be null",
         assertThrows(NullPointerException.class, () -> builder.withArguments(nullName))

@@ -4,6 +4,7 @@ package com.standardapplied.helios.gemini;
 
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.provider.ToolArguments;
 import com.standardapplied.helios.gemini.api.ContentItem;
 import com.standardapplied.helios.gemini.api.GeminiJson;
 import com.standardapplied.helios.gemini.api.Step;
@@ -30,22 +31,17 @@ final class StreamedSteps {
     }
 
     /**
-     * The streamed arguments, or the arguments the step started with when none streamed or they are
-     * not a JSON object.
+     * The streamed arguments, or the arguments the step started with when none streamed.
+     *
+     * @throws GeminiException if the streamed arguments are not a JSON object
      */
-    @SuppressWarnings("unchecked")
     Map<String, Object> arguments() {
       if (!streamedArguments.isEmpty()) {
-        try {
-          var parsed =
-              (Map<String, Object>)
-                  GeminiJson.LENIENT.readValue(streamedArguments.toString(), Map.class);
-          if (parsed != null) {
-            return parsed;
-          }
-        } catch (RuntimeException notAnObject) {
-          // Fall back to the arguments the step started with.
-        }
+        return ToolArguments.read(
+            name,
+            streamedArguments.toString(),
+            GeminiJson.STRUCTURED.reader(),
+            GeminiException::new);
       }
       return startArguments != null ? startArguments : Map.of();
     }
@@ -68,7 +64,7 @@ final class StreamedSteps {
       thought(step);
       return null;
     }
-    return step.hasTypeModelOutput() && step.hasContent() ? initialOutput(step) : null;
+    return step.hasTypeModelOutput() && step.hasContent() ? output.initialText(step) : null;
   }
 
   /** A {@code step.delta} carrying {@code argumentsDelta} or {@code delta}. */
@@ -102,7 +98,7 @@ final class StreamedSteps {
 
   /** A {@code step.stop}: the tool call of a function call, or a completed thought. */
   StreamEvent stop(Integer index) {
-    var state = index == null ? null : steps.get(index);
+    var state = index == null ? null : steps.remove(index);
     if (state == null) {
       return null;
     }
@@ -117,25 +113,17 @@ final class StreamedSteps {
     return "thought".equals(state.type) ? output.thinkingComplete() : null;
   }
 
-  StepOutput.Result result() {
-    return output.result();
+  /** The name of a function call whose step is still open, or {@code null} when none is. */
+  String openCall() {
+    return steps.values().stream()
+        .filter(StepState::isCall)
+        .map(state -> state.name)
+        .findFirst()
+        .orElse(null);
   }
 
-  /**
-   * The text a {@code model_output} step starts with, as one delta, its annotations harvested along
-   * the way.
-   */
-  private StreamEvent initialOutput(Step step) {
-    var initialText = new StringBuilder();
-    for (var item : step.content()) {
-      if (item.hasTypeText() && item.text() != null && !item.text().isEmpty()) {
-        initialText.append(item.text());
-      }
-      if (item.hasAnnotations()) {
-        output.cite(item);
-      }
-    }
-    return initialText.isEmpty() ? null : output.text(initialText.toString());
+  StepOutput.Result result() {
+    return output.result();
   }
 
   private void thought(Step step) {

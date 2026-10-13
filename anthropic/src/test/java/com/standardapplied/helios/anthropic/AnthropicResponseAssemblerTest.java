@@ -3,6 +3,7 @@
 package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import org.junit.jupiter.api.Test;
@@ -10,44 +11,49 @@ import org.junit.jupiter.api.Test;
 class AnthropicResponseAssemblerTest {
 
   @Test
-  void mapStopReasonEndTurn() {
-    assertEquals(FinishReason.STOP, AnthropicResponseAssembler.mapStopReason("end_turn"));
+  void finishReasonOfEndTurn() {
+    assertEquals(FinishReason.STOP, AnthropicResponseAssembler.finishReason("end_turn"));
   }
 
   @Test
-  void mapStopReasonStopSequence() {
-    assertEquals(FinishReason.STOP, AnthropicResponseAssembler.mapStopReason("stop_sequence"));
+  void finishReasonOfStopSequence() {
+    assertEquals(FinishReason.STOP, AnthropicResponseAssembler.finishReason("stop_sequence"));
   }
 
   @Test
-  void mapStopReasonToolUse() {
-    assertEquals(FinishReason.TOOL_CALLS, AnthropicResponseAssembler.mapStopReason("tool_use"));
+  void finishReasonOfToolUse() {
+    assertEquals(FinishReason.TOOL_CALLS, AnthropicResponseAssembler.finishReason("tool_use"));
   }
 
   @Test
-  void mapStopReasonMaxTokens() {
-    assertEquals(FinishReason.LENGTH, AnthropicResponseAssembler.mapStopReason("max_tokens"));
+  void finishReasonOfMaxTokens() {
+    assertEquals(FinishReason.LENGTH, AnthropicResponseAssembler.finishReason("max_tokens"));
   }
 
   @Test
-  void mapStopReasonNull() {
-    assertEquals(FinishReason.STOP, AnthropicResponseAssembler.mapStopReason(null));
+  void finishReasonOfNull() {
+    assertNull(AnthropicResponseAssembler.finishReason(null));
   }
 
   @Test
-  void mapStopReasonUnknown() {
-    assertEquals(FinishReason.STOP, AnthropicResponseAssembler.mapStopReason("unknown"));
+  void finishReasonOfUnknown() {
+    assertNull(AnthropicResponseAssembler.finishReason("unknown"));
   }
 
   @Test
-  void mapStopReasonRefusal() {
-    assertEquals(FinishReason.REFUSAL, AnthropicResponseAssembler.mapStopReason("refusal"));
+  void finishReasonOfRefusal() {
+    assertEquals(FinishReason.REFUSAL, AnthropicResponseAssembler.finishReason("refusal"));
   }
 
   @Test
-  void mapStopReasonContextWindowExceeded() {
+  void finishReasonOfContextWindowExceeded() {
     assertEquals(
         FinishReason.LENGTH,
-        AnthropicResponseAssembler.mapStopReason("model_context_window_exceeded"));
+        AnthropicResponseAssembler.finishReason("model_context_window_exceeded"));
+  }
+
+  @Test
+  void finishReasonOfPauseTurn() {
+    assertEquals(FinishReason.STOP, AnthropicResponseAssembler.finishReason("pause_turn"));
   }
 }

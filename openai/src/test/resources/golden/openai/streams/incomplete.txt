@@ -1,0 +1,5 @@
+== chatStream
+TextDelta[text=Hello, wor]
+Done[response=Response[content=Hello, wor, parsed=null, toolCalls=[], finishReason=LENGTH, usage=Usage[inputTokens=86, outputTokens=16, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2022], thinking=null, citations=[], metadata={openai.incompleteReason=max_output_tokens}]]
+== chat
+Response[content=Hello, wor, parsed=null, toolCalls=[], finishReason=LENGTH, usage=Usage[inputTokens=86, outputTokens=16, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2022], thinking=null, citations=[], metadata={openai.incompleteReason=max_output_tokens}]
