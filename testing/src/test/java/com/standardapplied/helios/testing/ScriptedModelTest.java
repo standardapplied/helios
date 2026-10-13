@@ -239,19 +239,19 @@ class ScriptedModelTest {
                     .build())
             .build();
 
-    var recorder =
-        ChunkRecorder.drain(
-            model.chatStream(List.of(Message.user("go")), List.of(), new CancellationToken()));
+    var chunks = new RecordingSubscriber<ModelChunk>();
+    model
+        .chatStream(List.of(Message.user("go")), List.of(), new CancellationToken())
+        .subscribe(chunks);
 
     assertEquals(
         List.of(
-            "subscribed",
-            new ModelChunk.TextDelta("calling").toString(),
-            new ModelChunk.ToolUseStart("c1", "search").toString(),
-            new ModelChunk.ToolUseStop(call).toString(),
-            new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of()).toString(),
-            "complete"),
-        recorder.signals);
+            new ModelChunk.TextDelta("calling"),
+            new ModelChunk.ToolUseStart("c1", "search"),
+            new ModelChunk.ToolUseStop(call),
+            new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of())),
+        chunks.awaitCompletion());
+    assertEquals(0, chunks.violations());
   }
 
   @Test

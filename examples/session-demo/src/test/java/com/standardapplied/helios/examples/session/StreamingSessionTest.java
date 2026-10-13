@@ -106,8 +106,7 @@ final class StreamingSessionTest {
       reply.release();
 
       assertEquals(new ModelChunk.ToolUseDelta(start.callId(), "{\"city\""), delta);
-      assertEquals(
-          new ModelChunk.ToolUseDelta(start.callId(), ":\"Paris\"}"), chunks.next());
+      assertEquals(new ModelChunk.ToolUseDelta(start.callId(), ":\"Paris\"}"), chunks.next());
       assertInstanceOf(ModelChunk.ToolUseStop.class, chunks.next());
       assertInstanceOf(ModelChunk.MessageStop.class, chunks.awaitCompletion().getLast());
     }
