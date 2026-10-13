@@ -139,6 +139,44 @@ class ModelTest {
   }
 
   @Test
+  void anInterruptWhoseCancelFailsStillRestoresTheInterrupt() {
+    var subscribed = new CountDownLatch(1);
+    Model model =
+        model(
+            (cancellation) ->
+                subscriber ->
+                    subscriber.onSubscribe(
+                        new Flow.Subscription() {
+                          @Override
+                          public void request(long n) {
+                            subscribed.countDown();
+                          }
+
+                          @Override
+                          public void cancel() {
+                            throw new IllegalStateException("close failed");
+                          }
+                        }));
+    var interruptRestored = new boolean[1];
+    var chat =
+        new FutureTask<>(
+            () -> {
+              try {
+                return model.chat(List.of(), List.of());
+              } finally {
+                interruptRestored[0] = Thread.currentThread().isInterrupted();
+              }
+            });
+    var caller = Thread.ofPlatform().start(chat);
+    Await.latch("the chat subscribed", subscribed);
+    caller.interrupt();
+
+    var thrown = assertInstanceOf(IllegalStateException.class, Await.failure("the chat", chat));
+    assertEquals("close failed", thrown.getMessage());
+    assertTrue(interruptRestored[0]);
+  }
+
+  @Test
   void structuredOutputIsUnsupportedByDefault() {
     var model = streaming();
     var schema = OutputSchema.of(Answer.class);

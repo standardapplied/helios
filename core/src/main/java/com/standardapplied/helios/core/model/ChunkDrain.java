@@ -85,10 +85,13 @@ final class ChunkDrain implements Flow.Subscriber<ModelChunk> {
       done.await();
     } catch (InterruptedException interrupted) {
       var open = subscription;
-      if (open != null) {
-        open.cancel();
+      try {
+        if (open != null) {
+          open.cancel();
+        }
+      } finally {
+        Thread.currentThread().interrupt();
       }
-      Thread.currentThread().interrupt();
       throw new CancellationException("interrupted while waiting for the model's response");
     }
     if (failure != null) {

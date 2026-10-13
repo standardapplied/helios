@@ -156,10 +156,10 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void aSummaryPartThatStreamedNoDeltaCompletesWithTheTextOfItsDoneEvent() {
+  void aSummaryPartThatStreamedNoDeltaStreamsTheTextOfItsDoneEvent() {
     var events = drain(reasoningDone("rs_1", 0, "Whole.") + TEXT_DELTA + RESPONSE_COMPLETED);
 
-    assertEquals(new StreamEvent.ThinkingComplete("Whole.", null), events.getFirst());
+    assertEquals(new StreamEvent.ThinkingDelta("Whole."), events.getFirst());
     assertEquals("Whole.", ((StreamEvent.Done) events.getLast()).response().thinking());
   }
 
