@@ -280,7 +280,7 @@ class AnthropicStreamParserTest {
   void anErrorEventWithoutDetailsIsNotRetryable() {
     var error = assertInstanceOf(StreamEvent.Error.class, parser.parse("{\"type\":\"error\"}"));
 
-    assertEquals("API stream error: {\"type\":\"error\"}", error.message());
+    assertEquals("API stream error", error.message());
     assertNull(error.cause());
     assertEquals(FinishReason.ERROR, error.partial().finishReason());
   }

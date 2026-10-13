@@ -1,5 +1,5 @@
 == chatStream
 TextDelta[text=Partial]
-Error[message=API stream error: server_error: something went wrong, cause=null, partial=Response[content=Partial, parsed=null, toolCalls=[], finishReason=ERROR, usage=null, thinking=null, citations=[], metadata={}]]
+Error[message=API stream error: server_error: something went wrong, cause=TransientStreamException(API stream error: server_error: something went wrong) provider=openai, partial=Response[content=Partial, parsed=null, toolCalls=[], finishReason=ERROR, usage=null, thinking=null, citations=[], metadata={}]]
 == chat
-threw OpenAIException(API stream error: server_error: something went wrong) status=0
+threw TransientStreamException(API stream error: server_error: something went wrong) provider=openai

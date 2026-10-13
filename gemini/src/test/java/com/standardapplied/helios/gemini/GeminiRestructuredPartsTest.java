@@ -100,7 +100,7 @@ class GeminiRestructuredPartsTest {
   }
 
   @Test
-  void anErrorEventWithoutAMessageOrNumericCodeIsAPlainApiError() {
+  void anErrorEventNamesAStringCodeWithoutTakingItForAStatus() {
     var parser = new GeminiStreamParser(true, "v1");
 
     var error =
@@ -108,7 +108,7 @@ class GeminiRestructuredPartsTest {
             StreamEvent.Error.class,
             parser.parse("{\"event_type\":\"error\",\"error\":{\"code\":\"UNAVAILABLE\"}}"));
 
-    assertEquals("API error", error.message());
+    assertEquals("API error: UNAVAILABLE", error.message());
     assertEquals(0, ((GeminiException) error.cause()).statusCode());
   }
 
@@ -123,7 +123,7 @@ class GeminiRestructuredPartsTest {
                 "{\"event_type\":\"error\",\"error\":{\"code\":-1,\"message\":\"boom\"}}"));
 
     var cause = (GeminiException) error.cause();
-    assertEquals("API error: boom", error.message());
+    assertEquals("API error: -1: boom", error.message());
     assertEquals(0, cause.statusCode());
     assertTrue(cause.isRetryable());
   }

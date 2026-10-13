@@ -1,5 +1,5 @@
 == chatStream
 TextDelta[text=Partial]
-Error[message=API response failed: server_error: The model failed to generate a response., cause=null, partial=Response[content=Partial, parsed=null, toolCalls=[], finishReason=ERROR, usage=null, thinking=null, citations=[], metadata={}]]
+Error[message=API response failed: server_error: The model failed to generate a response., cause=TransientStreamException(API response failed: server_error: The model failed to generate a response.) provider=openai, partial=Response[content=Partial, parsed=null, toolCalls=[], finishReason=ERROR, usage=null, thinking=null, citations=[], metadata={}]]
 == chat
-threw OpenAIException(API response failed: server_error: The model failed to generate a response.) status=0
+threw TransientStreamException(API response failed: server_error: The model failed to generate a response.) provider=openai
