@@ -100,7 +100,7 @@ class GeminiRestructuredPartsTest {
   }
 
   @Test
-  void anErrorEventWithoutAMessageOrNumericCodeIsAPlainApiError() {
+  void anErrorEventNamesAStringCodeWithoutTakingItForAStatus() {
     var parser = new GeminiStreamParser(true, "v1");
 
     var error =
@@ -108,7 +108,7 @@ class GeminiRestructuredPartsTest {
             StreamEvent.Error.class,
             parser.parse("{\"event_type\":\"error\",\"error\":{\"code\":\"UNAVAILABLE\"}}"));
 
-    assertEquals("API error", error.message());
+    assertEquals("API error: UNAVAILABLE", error.message());
     assertEquals(0, ((GeminiException) error.cause()).statusCode());
   }
 
@@ -123,7 +123,7 @@ class GeminiRestructuredPartsTest {
                 "{\"event_type\":\"error\",\"error\":{\"code\":-1,\"message\":\"boom\"}}"));
 
     var cause = (GeminiException) error.cause();
-    assertEquals("API error: boom", error.message());
+    assertEquals("API error: -1: boom", error.message());
     assertEquals(0, cause.statusCode());
     assertTrue(cause.isRetryable());
   }
@@ -175,25 +175,10 @@ class GeminiRestructuredPartsTest {
   }
 
   @Test
-  void functionArgumentsArriveAsAnObjectOrAJsonStringOrNotAtAll() {
-    assertEquals(Map.of("a", 1), stepArguments("{\"a\":1}"));
-    assertEquals(Map.of("a", 1), stepArguments("\"{\\\"a\\\":1}\""));
-    assertEquals(Map.of(), stepArguments("\" \""));
-    assertNull(stepArguments("null"));
-    assertNull(stepArguments("42"));
-  }
-
-  @Test
   void rawArgumentsKeepAStringAndWriteAnObjectAsJson() {
     assertEquals("{\"a\"", itemArguments("\"{\\\"a\\\"\""));
     assertEquals("{\"a\":1}", itemArguments("{\"a\":1}"));
     assertNull(itemArguments("null"));
-  }
-
-  private static Map<String, Object> stepArguments(String json) {
-    return GeminiJson.LENIENT
-        .readValue("{\"type\":\"function_call\",\"arguments\":" + json + "}", Step.class)
-        .arguments();
   }
 
   private static String itemArguments(String json) {

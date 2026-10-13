@@ -442,7 +442,7 @@ class SerializationTest {
     assertEquals("function_call", call.type());
     assertEquals("fc_1", call.id());
     assertEquals("get_weather", call.name());
-    assertEquals("Boston, MA", call.arguments().get("location"));
+    assertEquals("Boston, MA", call.arguments().get("location").asString());
   }
 
   @Test
@@ -871,7 +871,7 @@ class SerializationTest {
             Step.class);
     assertEquals("google_search_call", step.type());
     assertEquals("web_search", step.searchType());
-    assertEquals(List.of("x"), step.arguments().get("queries"));
+    assertEquals("[\"x\"]", step.arguments().get("queries").toString());
   }
 
   @Test

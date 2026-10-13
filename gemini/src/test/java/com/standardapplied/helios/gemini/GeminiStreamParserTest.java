@@ -13,6 +13,7 @@ import static com.standardapplied.helios.gemini.GeminiSse.TEXT_FLOW;
 import static com.standardapplied.helios.gemini.GeminiSse.drain;
 import static com.standardapplied.helios.gemini.GeminiSse.interactionEnded;
 import static com.standardapplied.helios.gemini.GeminiSse.reader;
+import static com.standardapplied.helios.gemini.GeminiSse.stepStart;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -24,9 +25,11 @@ import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.test.SseEvents;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The interaction envelope of a Gemini stream: its id, status, usage and errors, and the
@@ -88,21 +91,118 @@ class GeminiStreamParserTest {
   }
 
   @Test
-  void interactionCompletedWithoutInteractionFieldIsTolerated() {
+  void interactionCompletedWithoutAnInteractionIsAnError() {
     var emptyEnvelope = "data: {\"event_type\":\"interaction.completed\"}\n\n";
     var events = drain(emptyEnvelope);
-    var done = (StreamEvent.Done) events.getFirst();
-    assertEquals(FinishReason.STOP, done.response().finishReason());
-    assertNull(done.response().usage());
-    assertFalse(done.response().metadata().containsKey(ContinuationPoint.INTERACTION_ID_KEY));
+
+    var error = (StreamEvent.Error) events.getFirst();
+    assertEquals("Interaction completed with status null", error.message());
+    assertNull(error.partial().usage());
+    assertFalse(error.partial().metadata().containsKey(ContinuationPoint.INTERACTION_ID_KEY));
   }
 
   @Test
-  void interactionCompletedWithoutIdOrStatusDoesNotPopulateMetadata() {
+  void interactionCompletedWithoutIdOrStatusIsAnErrorWithoutAnId() {
     var envelope = "data: {\"event_type\":\"interaction.completed\",\"interaction\":{}}\n\n";
     var events = drain(envelope);
-    var done = (StreamEvent.Done) events.getFirst();
-    assertFalse(done.response().metadata().containsKey(ContinuationPoint.INTERACTION_ID_KEY));
+
+    var error = (StreamEvent.Error) events.getFirst();
+    assertEquals("Interaction completed with status null", error.message());
+    assertFalse(error.partial().metadata().containsKey(ContinuationPoint.INTERACTION_ID_KEY));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"event_type\":\"interaction.completed\"}",
+        "{\"event_type\":\"interaction.completed\",\"interaction\":"
+            + "{\"id\":\"int_xyz\",\"usage\":{\"total_input_tokens\":10,\"total_output_tokens\":5}}}"
+      })
+  void interactionCompletedWithoutItsOwnStatusIsAnErrorAfterARequiresActionUpdate(String terminal) {
+    var requiresAction =
+        "data: {\"event_type\":\"interaction.status_update\",\"interaction_id\":\"int_xyz\","
+            + "\"status\":\"requires_action\"}\n\n";
+    var events = drain(INTERACTION_CREATED + requiresAction + "data: " + terminal + "\n\n");
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals("Interaction completed with status null", error.message());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
+  }
+
+  @Test
+  void interactionCompletedWithoutItsOwnStatusKeepsTheUsageItReported() {
+    var terminal =
+        "data: {\"event_type\":\"interaction.completed\",\"interaction\":"
+            + "{\"usage\":{\"total_input_tokens\":10,\"total_output_tokens\":5}}}\n\n";
+    var events = drain(INTERACTION_CREATED + terminal);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals(10, error.partial().usage().inputTokens());
+    assertEquals(5, error.partial().usage().outputTokens());
+  }
+
+  @Test
+  void aStreamEndingWithoutInteractionCompletedIsAnErrorCarryingItsOutput() {
+    var events = drain(INTERACTION_CREATED + MODEL_OUTPUT_START + HELLO_DELTA);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals("Stream ended before its terminal event", error.message());
+    assertEquals("Hello", error.partial().content());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
+    assertEquals("int_xyz", error.partial().metadata().get(ContinuationPoint.INTERACTION_ID_KEY));
+  }
+
+  @Test
+  void interactionCompletedWhileAFunctionCallIsOpenIsAnErrorWithoutThatCall() {
+    var events =
+        drain(
+            stepStart(1, "{\"type\":\"function_call\",\"id\":\"c1\",\"name\":\"weather\"}")
+                + interactionEnded("requires_action"));
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals(
+        "Interaction completed while function call 'weather' is still open", error.message());
+    assertEquals(List.of(), error.partial().toolCalls());
+    assertEquals(5, error.partial().usage().outputTokens());
+  }
+
+  @Test
+  void interactionCompletedWhileANamelessFunctionCallIsOpenNamesItUnnamed() {
+    var events =
+        drain(
+            stepStart(1, "{\"type\":\"function_call\",\"id\":\"c1\"}")
+                + interactionEnded("requires_action"));
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals(
+        "Interaction completed while function call '<unnamed>' is still open", error.message());
+    assertNull(error.cause());
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(
+      strings = {
+        "{\"event_type\":\"interaction.status_update\",\"interaction_id\":\"int_xyz\","
+            + "\"status\":\"in_progress\",\"usage\":{\"total_input_tokens\":2000000000,"
+            + "\"total_output_tokens\":2000000000}}",
+        "{\"event_type\":\"interaction.completed\",\"interaction\":{\"id\":\"int_xyz\","
+            + "\"status\":\"completed\",\"usage\":{\"total_input_tokens\":2000000000,"
+            + "\"total_output_tokens\":2000000000}}}"
+      })
+  void usageOverflowingAnIntEndsTheStreamKeepingTheUsageReportedBeforeIt(String overflowing) {
+    var checkpoint =
+        "data: {\"event_type\":\"interaction.status_update\",\"interaction_id\":\"int_xyz\","
+            + "\"status\":\"in_progress\",\"usage\":{\"total_input_tokens\":7,"
+            + "\"total_output_tokens\":3}}\n\n";
+    var events =
+        drain(checkpoint + MODEL_OUTPUT_START + HELLO_DELTA + "data: " + overflowing + "\n\n");
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals("Failed to parse stream event", error.message());
+    assertInstanceOf(ArithmeticException.class, error.cause());
+    assertEquals("Hello", error.partial().content());
+    assertEquals(7, error.partial().usage().inputTokens());
+    assertEquals(3, error.partial().usage().outputTokens());
   }
 
   @Test
@@ -284,7 +384,11 @@ class GeminiStreamParserTest {
     var statusUpdate =
         "data: {\"event_type\":\"interaction.status_update\","
             + "\"interaction_id\":\"int_status\",\"status\":\"requires_action\"}\n\n";
-    var sse = INTERACTION_CREATED + statusUpdate;
+    var sse =
+        INTERACTION_CREATED
+            + statusUpdate
+            + "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"status\":\"requires_action\"}}\n\n";
     var events = drain(sse);
     var done = (StreamEvent.Done) events.getFirst();
     assertEquals(
@@ -294,20 +398,23 @@ class GeminiStreamParserTest {
   }
 
   @Test
-  void statusUpdateFailedSetsErrorFinishReason() {
+  void aStatusUpdateAloneNeverCompletesTheStream() {
     var statusUpdate =
         "data: {\"event_type\":\"interaction.status_update\","
-            + "\"interaction_id\":\"int_f\",\"status\":\"failed\"}\n\n";
+            + "\"interaction_id\":\"int_f\",\"status\":\"completed\"}\n\n";
     var events = drain(statusUpdate);
-    var done = (StreamEvent.Done) events.getFirst();
-    assertEquals(FinishReason.ERROR, done.response().finishReason());
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getFirst());
+    assertEquals("int_f", error.partial().metadata().get(ContinuationPoint.INTERACTION_ID_KEY));
   }
 
   @Test
   void statelessIteratorDoesNotPropagateInteractionIdAndReportsApiVersion() {
     var sse =
         "data: {\"event_type\":\"interaction.status_update\","
-            + "\"interaction_id\":\"interaction-secret\",\"status\":\"completed\"}\n\n";
+            + "\"interaction_id\":\"interaction-secret\",\"status\":\"completed\"}\n\n"
+            + "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"status\":\"completed\"}}\n\n";
     var events =
         SseEvents.drain(
             new SseReader(
@@ -321,12 +428,26 @@ class GeminiStreamParserTest {
     assertFalse(done.response().metadata().containsValue("interaction-secret"));
   }
 
-  @ParameterizedTest(name = "{0} interaction sets {1}")
-  @CsvSource({"failed, ERROR", "incomplete, LENGTH", "budget_exceeded, ERROR"})
+  @ParameterizedTest(name = "{0} interaction finishes {1}")
+  @CsvSource({"completed, STOP", "requires_action, STOP", "incomplete, LENGTH"})
   void finishReasonFollowsTheInteractionStatus(String status, FinishReason finishReason) {
-    var events = drain(interactionEnded(status));
+    var events = drain(MODEL_OUTPUT_START + HELLO_DELTA + interactionEnded(status));
 
-    assertEquals(1, events.size());
-    assertEquals(finishReason, ((StreamEvent.Done) events.getFirst()).response().finishReason());
+    var done = assertInstanceOf(StreamEvent.Done.class, events.getLast());
+    assertEquals(finishReason, done.response().finishReason());
+    assertEquals("Hello", done.response().content());
+    assertEquals(5, done.response().usage().outputTokens());
+  }
+
+  @ParameterizedTest(name = "{0} interaction is an error")
+  @ValueSource(strings = {"failed", "cancelled", "in_progress", "budget_exceeded"})
+  void anInteractionCompletedWithAnyOtherStatusIsAnErrorCarryingItsOutput(String status) {
+    var events = drain(MODEL_OUTPUT_START + HELLO_DELTA + interactionEnded(status));
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals("Interaction completed with status " + status, error.message());
+    assertEquals("Hello", error.partial().content());
+    assertEquals(5, error.partial().usage().outputTokens());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
   }
 }

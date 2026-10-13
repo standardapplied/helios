@@ -24,8 +24,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * @param callId function call ID (for function_call_arguments events)
  * @param name function name (for function_call_arguments events)
  * @param arguments function call arguments (for function_call_arguments.done)
- * @param response the full response object (for response.completed/failed)
- * @param text reasoning summary text delta
+ * @param response the full response object (for response.completed/incomplete/failed)
+ * @param text the full text of a completed reasoning summary part
+ * @param summaryIndex the index of a reasoning summary part within its reasoning item
+ * @param refusal the full text of a completed refusal
+ * @param code the error code (for error)
+ * @param message the error message (for error)
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ApiStreamEvent(
@@ -40,4 +44,8 @@ public record ApiStreamEvent(
     String name,
     String arguments,
     ResponsesResponse response,
-    String text) {}
+    String text,
+    @JsonProperty("summary_index") Integer summaryIndex,
+    String refusal,
+    String code,
+    String message) {}

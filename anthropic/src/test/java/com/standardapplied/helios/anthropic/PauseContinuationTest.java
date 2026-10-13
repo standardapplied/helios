@@ -11,13 +11,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
+import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.provider.ChatExchange;
+import java.io.EOFException;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -92,6 +95,61 @@ class PauseContinuationTest {
     assertEquals("pause_turn continuation limit exceeded after 8 resumes", error.message());
     assertNull(error.cause());
     assertEquals(PauseContinuation.MAX_PAUSE_CONTINUATIONS + 1, opened[0]);
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
+    assertEquals("Searching. ".repeat(9), error.partial().content());
+    assertEquals(Response.Usage.of(90, 18), error.partial().usage());
+  }
+
+  @Test
+  void anErrorInAContinuedSegmentCarriesTheWholeTurnSoFar() throws Exception {
+    var cut =
+        Response.newBuilder()
+            .withContent("Fou")
+            .withFinishReason(FinishReason.ERROR)
+            .withUsage(Response.Usage.of(5, 1))
+            .build();
+    var eof = new EOFException("cut");
+    var opened = new int[1];
+    var events =
+        continuation(
+            r ->
+                opened[0]++ == 0
+                    ? stream(pausedWithContent())
+                    : new Events(
+                        List.of(
+                            new StreamEvent.TextDelta("Fou"),
+                            new StreamEvent.Error("cut", eof, cut))))
+            .stream(request);
+
+    assertEquals(new StreamEvent.TextDelta("Fou"), events.next());
+    var error = assertInstanceOf(StreamEvent.Error.class, events.next());
+
+    assertSame(eof, error.cause());
+    assertEquals("Searching. Fou", error.partial().content());
+    assertEquals(Response.Usage.of(15, 3), error.partial().usage());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
+  }
+
+  @Test
+  void everySegmentIsClosedWhenItsTurnEnds() {
+    var paused = stream(pausedWithContent());
+    var cut =
+        new Events(
+            List.of(
+                new StreamEvent.Error(
+                    "cut",
+                    null,
+                    Response.newBuilder().withFinishReason(FinishReason.ERROR).build())));
+    var opened = new int[1];
+    var events = continuation(r -> opened[0]++ == 0 ? paused : cut).stream(request);
+
+    assertInstanceOf(StreamEvent.Error.class, events.next());
+    assertTrue(paused.closed);
+    assertFalse(cut.closed);
+
+    events.close();
+
+    assertTrue(cut.closed);
   }
 
   @Test
@@ -172,7 +230,9 @@ class PauseContinuationTest {
     var events =
         continuation(r -> opened[0]++ == 0 ? stream(pausedWithContent()) : resume.open(r)).stream(
             request);
-    return assertInstanceOf(StreamEvent.Error.class, events.next());
+    var error = assertInstanceOf(StreamEvent.Error.class, events.next());
+    assertEquals(paused(FinishReason.ERROR), error.partial());
+    return error;
   }
 
   static PauseContinuation continuation(ChatExchange.StreamOpener<MessagesRequest> segments) {
@@ -183,12 +243,24 @@ class PauseContinuationTest {
   }
 
   private static Response<Void> pausedWithContent() {
-    return paused(
-        Map.of(
-            AnthropicResponseAssembler.STOP_REASON_KEY,
-            "pause_turn",
-            RawContentEcho.RAW_CONTENT_KEY,
-            PAUSED_CONTENT));
+    return paused(FinishReason.STOP);
+  }
+
+  private static Response<Void> paused(FinishReason finishReason) {
+    return Response.newBuilder()
+        .withContent("Searching. ")
+        .withToolCalls(List.of(ToolCall.newBuilder().withId("t1").withName("lookup").build()))
+        .withFinishReason(finishReason)
+        .withUsage(Response.Usage.of(10, 2))
+        .withThinking("Planning.")
+        .withCitations(List.of(Citation.of("https://example.com", "snippet")))
+        .withMetadata(
+            Map.of(
+                AnthropicResponseAssembler.STOP_REASON_KEY,
+                "pause_turn",
+                RawContentEcho.RAW_CONTENT_KEY,
+                PAUSED_CONTENT))
+        .build();
   }
 
   private static Response<Void> paused(Map<String, String> metadata) {
@@ -199,13 +271,14 @@ class PauseContinuationTest {
         .build();
   }
 
-  private static CloseableIterator<StreamEvent> stream(Response<Void> response) {
+  private static Events stream(Response<Void> response) {
     return new Events(List.of(new StreamEvent.Done(response)));
   }
 
   private static final class Events implements CloseableIterator<StreamEvent> {
     private final List<StreamEvent> events;
     private int next;
+    private boolean closed;
 
     Events(List<StreamEvent> events) {
       this.events = events;
@@ -222,6 +295,8 @@ class PauseContinuationTest {
     }
 
     @Override
-    public void close() {}
+    public void close() {
+      closed = true;
+    }
   }
 }

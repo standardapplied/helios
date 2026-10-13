@@ -21,8 +21,11 @@ import java.util.function.UnaryOperator;
  */
 public final class ModelHarness {
 
-  /** The line that separates two responses in a recorded fixture. */
-  public static final String NEXT_RESPONSE = "\n=== next response ===\n";
+  /**
+   * The line that separates two responses in a recorded fixture. Splitting on it leaves each
+   * response its own line endings, so the blank line that ends a response's last event stays.
+   */
+  public static final String NEXT_RESPONSE = "=== next response ===\n";
 
   private static final List<Message> PROMPT = List.of(Message.user("Hi"));
 

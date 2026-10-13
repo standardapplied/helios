@@ -20,6 +20,8 @@ import java.util.Map;
  *   <caption>Streaming event types</caption>
  *   <tr><th>Event type</th><th>Payload</th></tr>
  *   <tr><td>{@code interaction.created}</td><td>{@link #interaction()}</td></tr>
+ *   <tr><td>{@code interaction.status_update}</td>
+ *       <td>{@link #interactionId()}, {@link #status()}, {@link #usage()}</td></tr>
  *   <tr><td>{@code interaction.in_progress}</td><td>{@link #interactionId()}</td></tr>
  *   <tr><td>{@code interaction.requires_action}</td><td>{@link #interactionId()}</td></tr>
  *   <tr><td>{@code interaction.completed}</td><td>{@link #interaction()}</td></tr>
@@ -38,7 +40,9 @@ import java.util.Map;
  * @param interaction the full interaction object on {@code interaction.created} / {@code
  *     interaction.completed}
  * @param interactionId the interaction id on status-update events
- * @param status step status on {@code step.stop} (e.g. {@code done})
+ * @param status the interaction status on {@code interaction.status_update}, the step status on
+ *     {@code step.stop} (e.g. {@code done})
+ * @param usage the usage up to this checkpoint on {@code interaction.status_update}
  * @param error error payload on {@code error} events ({@code code} + {@code message})
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -51,4 +55,5 @@ public record StreamingEvent(
     InteractionResponse interaction,
     @JsonProperty("interaction_id") String interactionId,
     String status,
+    InteractionUsage usage,
     Map<String, Object> error) {}

@@ -58,12 +58,13 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void malformedJsonEmitsErrorEvent() {
+  void malformedJsonEndsTheStreamInAnError() {
     var sse = "data: {not valid json}\n\n" + INTERACTION_COMPLETED;
     var events = drain(sse);
-    assertEquals(2, events.size());
-    assertInstanceOf(StreamEvent.Error.class, events.get(0));
-    assertInstanceOf(StreamEvent.Done.class, events.get(1));
+    assertEquals(1, events.size());
+    assertEquals(
+        "Failed to parse stream event",
+        assertInstanceOf(StreamEvent.Error.class, events.get(0)).message());
   }
 
   @Test

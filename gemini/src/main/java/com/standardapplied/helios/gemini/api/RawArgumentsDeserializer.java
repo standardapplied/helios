@@ -20,11 +20,10 @@ import tools.jackson.databind.ValueDeserializer;
  *       union, landing the object in this slot.
  * </ul>
  *
- * <p>Unlike {@link ArgumentsDeserializer} (which normalizes to a {@code Map}), this deserializer
- * yields a raw {@code String} so the partial-fragment accumulation path is preserved: a string token
- * is returned verbatim, and an object or array token is re-serialized to its compact JSON string
- * form. {@code null} stays {@code null}. Parsing each partial fragment as a {@code Map} would throw
- * and break streamed tool calls, which is why the two cases cannot share a deserializer.
+ * <p>It yields a raw {@code String} so the partial-fragment accumulation path is preserved: a string
+ * token is returned verbatim, and an object or array token is re-serialized to its compact JSON
+ * string form. {@code null} stays {@code null}. Parsing each partial fragment as a {@code Map} would
+ * throw and break streamed tool calls.
  */
 public final class RawArgumentsDeserializer extends ValueDeserializer<String> {
 
@@ -37,6 +36,6 @@ public final class RawArgumentsDeserializer extends ValueDeserializer<String> {
     if (node.isString()) {
       return node.asString();
     }
-    return GeminiJson.DEFAULT.writeValueAsString(node);
+    return GeminiJson.LENIENT.writeValueAsString(node);
   }
 }

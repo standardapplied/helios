@@ -22,3 +22,7 @@ data: {"event_type":"step.stop","index":3,"status":"done"}
 
 data: {"event_type":"interaction.status_update","interaction_id":"int_xyz","status":"requires_action"}
 
+data: {"event_type":"interaction.completed","interaction":{"id":"int_xyz","status":"requires_action","usage":{"total_input_tokens":120,"total_output_tokens":30,"total_tokens":150,"total_cached_tokens":0}}}
+
+data: [DONE]
+

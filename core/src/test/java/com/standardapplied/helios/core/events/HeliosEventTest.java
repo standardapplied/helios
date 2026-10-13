@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.core.trace.Trace;
@@ -341,6 +342,20 @@ class HeliosEventTest {
     assertEquals(
         DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(started.attributes()));
     assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(custom.data()));
+  }
+
+  @Test
+  void toolCallStartedKeepsAJsonNullArgumentOfTheCall() {
+    var arguments = new LinkedHashMap<String, Object>();
+    arguments.put("city", "Paris");
+    arguments.put("cursor", null);
+    var call = ToolCall.newBuilder().withId("call_1").withName("search").withArguments(arguments);
+
+    var event =
+        new HeliosEvent.ToolCallStarted(
+            NOW, Ids.newId(), Optional.empty(), "call_1", "search", call.build().arguments());
+
+    assertEquals(arguments, event.args());
   }
 
   @Test

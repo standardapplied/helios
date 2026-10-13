@@ -1,0 +1,10 @@
+== chatStream
+ToolCallStart[callId=call_1, toolName=weather]
+Error[message=Arguments of tool call 'weather' are not a JSON object: Unexpected end-of-input within/between Object entries
+ at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN], cause=OpenAIException(Arguments of tool call 'weather' are not a JSON object: Unexpected end-of-input within/between Object entries
+ at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN]) status=0 caused by UnexpectedEndOfInputException(Unexpected end-of-input within/between Object entries
+ at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN]), partial=Response[content=, parsed=null, toolCalls=[], finishReason=ERROR, usage=null, thinking=null, citations=[], metadata={}]]
+== chat
+threw OpenAIException(Arguments of tool call 'weather' are not a JSON object: Unexpected end-of-input within/between Object entries
+ at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN]) status=0 caused by UnexpectedEndOfInputException(Unexpected end-of-input within/between Object entries
+ at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN])
