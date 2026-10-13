@@ -9,6 +9,7 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Runs the tool calls of one model turn serially: fires {@code PreToolUse}, dispatches through
@@ -64,7 +65,7 @@ final class ToolRound {
 
   private boolean runOne(SessionState state, ToolCall call, SessionLimits limits) {
     var decision = collaborators.hooks().firePreToolUse(call, collaborators.hookContext(state));
-    var hookName = HookEffects.firingHookName(decision);
+    var hookName = Objects.requireNonNullElse(HookEffects.firingHookName(decision), PRE_TOOL_USE);
     if (decision.outcome() instanceof HookOutcome.Stop stop) {
       effects.stop(state, hookName, PRE_TOOL_USE, stop);
       return true;
@@ -76,7 +77,7 @@ final class ToolRound {
           case HookOutcome.Inject inject -> {
             effects.inject(state, hookName, PRE_TOOL_USE, inject);
             yield new PlannedCall(
-                call, ToolResult.rejected(firingHook(hookName), "hook injected a user message"));
+                call, ToolResult.rejected(hookName, "hook injected a user message"));
           }
           default -> new PlannedCall(emitToolUse(state, call), null);
         };
@@ -122,7 +123,7 @@ final class ToolRound {
             state.currentTurnIndex(),
             collaborators.clock().instant(),
             call,
-            firingHook(hookName),
+            hookName,
             call.arguments(),
             mutate.args()));
     return new PlannedCall(
@@ -139,13 +140,9 @@ final class ToolRound {
             state.currentTurnIndex(),
             collaborators.clock().instant(),
             call,
-            firingHook(hookName),
+            hookName,
             block.reason()));
-    return new PlannedCall(call, ToolResult.rejected(firingHook(hookName), block.reason()));
-  }
-
-  private static String firingHook(String hookName) {
-    return hookName == null ? PRE_TOOL_USE : hookName;
+    return new PlannedCall(call, ToolResult.rejected(hookName, block.reason()));
   }
 
   private ToolResult dispatch(SessionState state, ToolCall call, SessionLimits limits) {
