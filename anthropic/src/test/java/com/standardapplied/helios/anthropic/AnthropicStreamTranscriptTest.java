@@ -85,7 +85,9 @@ class AnthropicStreamTranscriptTest {
             parsed.add(
                 model
                     .chat(
-                        List.of(Message.user("Extract the person")), List.of(), OutputSchema.of(Person.class))
+                        List.of(Message.user("Extract the person")),
+                        List.of(),
+                        OutputSchema.of(Person.class))
                     .parsed()));
 
     assertEquals(List.of(new Person("John Smith", 35, "software engineer")), parsed);

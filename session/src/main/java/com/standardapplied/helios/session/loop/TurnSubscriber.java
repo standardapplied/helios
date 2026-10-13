@@ -26,9 +26,10 @@ import java.util.concurrent.ScheduledExecutorService;
  *
  * <p>Created once per model turn by {@link TurnRunner}. It owns the turn's {@link
  * Flow.Subscription}: it requests every chunk on subscribe, and cancels the stream when the {@link
- * IdleWatchdog} finds it stalled, when the session's {@link CancellationToken} is cancelled, or when
- * the waiting thread is interrupted. The runner blocks in {@link #awaitDone(CancellationToken)}
- * until the stream ends one of those ways or with {@code onComplete} / {@code onError}.
+ * IdleWatchdog} finds it stalled, when the session's {@link CancellationToken} is cancelled, or
+ * when the waiting thread is interrupted. The runner blocks in {@link
+ * #awaitDone(CancellationToken)} until the stream ends one of those ways or with {@code onComplete}
+ * / {@code onError}.
  *
  * <h2>One terminal transition</h2>
  *
@@ -147,8 +148,8 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   /**
    * Block until the stream ends, then return what it produced. The session's {@link
    * CancellationToken} and an interrupt of the calling thread each end the stream and cancel it;
-   * without them a provider stream that never delivers {@code onComplete} / {@code onError}
-   * (silent socket, hung proxy) would pin this thread indefinitely — defeating {@link
+   * without them a provider stream that never delivers {@code onComplete} / {@code onError} (silent
+   * socket, hung proxy) would pin this thread indefinitely — defeating {@link
    * com.standardapplied.helios.session.SessionLimits#maxWallClock()} which is only re-checked at
    * turn boundaries.
    *

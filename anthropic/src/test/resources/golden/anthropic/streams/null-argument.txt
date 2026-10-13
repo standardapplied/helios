@@ -1,5 +1,6 @@
 == chatStream
-ToolCallComplete[toolCall=ToolCall[id=toolu_1, name=weather, arguments={city=Paris, unit=null}]]
-Done[response=Response[content=, parsed=null, toolCalls=[ToolCall[id=toolu_1, name=weather, arguments={city=Paris, unit=null}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=9, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=46], thinking=null, citations=[], metadata={anthropic.stopReason=tool_use}]]
+ToolUseStop[toolCall=ToolCall[id=toolu_1, name=weather, arguments={city=Paris, unit=null}]]
+MessageStop[stopReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=9, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=46], metadata={anthropic.stopReason=tool_use}, citations=[]]
+onComplete
 == chat
 Response[content=, parsed=null, toolCalls=[ToolCall[id=toolu_1, name=weather, arguments={city=Paris, unit=null}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=9, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=46], thinking=null, citations=[], metadata={anthropic.stopReason=tool_use}]

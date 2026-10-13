@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.core.model.Citation;
@@ -20,10 +19,17 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.provider.ChatExchange;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.ExchangeTurns;
+import com.standardapplied.helios.core.test.RecordingSubscriber;
 import java.io.EOFException;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class PauseContinuationTest {
@@ -42,13 +48,12 @@ class PauseContinuationTest {
   void aPauseWithoutVerbatimContentCannotResume() {
     var paused = paused(Map.of(AnthropicResponseAssembler.STOP_REASON_KEY, "pause_turn"));
 
-    var failure =
-        assertThrows(
-            AnthropicException.class, () -> continuation(r -> stream(paused)).chat(request, List.of()));
+    var error = lastError(r -> stream(paused));
 
+    assertInstanceOf(AnthropicException.class, error.cause());
     assertEquals(
-        "pause_turn received without capturable assistant content; cannot resume",
-        failure.getMessage());
+        "pause_turn received without capturable assistant content; cannot resume", error.message());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
   }
 
   @Test
@@ -61,7 +66,7 @@ class PauseContinuationTest {
                 RawContentEcho.RAW_CONTENT_KEY,
                 ""));
 
-    assertThrows(AnthropicException.class, () -> continuation(r -> stream(paused)).chat(request, List.of()));
+    assertInstanceOf(AnthropicException.class, lastError(r -> stream(paused)).cause());
   }
 
   @Test
@@ -72,36 +77,36 @@ class PauseContinuationTest {
                 AnthropicResponseAssembler.STOP_REASON_KEY, "pause_turn",
                 RawContentEcho.RAW_CONTENT_KEY, "{not json"));
 
-    var failure =
-        assertThrows(
-            AnthropicException.class, () -> continuation(r -> stream(paused)).chat(request, List.of()));
+    var error = lastError(r -> stream(paused));
 
-    assertEquals("Failed to decode paused assistant content for resume", failure.getMessage());
+    assertEquals("Failed to decode paused assistant content for resume", error.message());
+    assertThrows(AnthropicException.class, () -> turn(r -> stream(paused), request));
   }
 
   @Test
-  void aStreamThatKeepsPausingEndsWithAnErrorAfterTheLimit() throws Exception {
-    var opened = new int[1];
-    var events =
-        continuation(
+  void aStreamThatKeepsPausingEndsWithAnErrorAfterTheLimit() {
+    var opened = new AtomicInteger();
+
+    var error =
+        lastError(
             r -> {
-              opened[0]++;
+              opened.incrementAndGet();
               return stream(pausedWithContent());
-            })
-            .stream(request);
+            });
 
-    var error = assertInstanceOf(StreamEvent.Error.class, events.next());
-
-    assertEquals("pause_turn continuation limit exceeded after 8 resumes", error.message());
+    assertEquals(
+        "pause_turn continuation limit exceeded after 8 resumes; the server-tool loop did not"
+            + " converge",
+        error.message());
     assertNull(error.cause());
-    assertEquals(PauseContinuation.MAX_PAUSE_CONTINUATIONS + 1, opened[0]);
+    assertEquals(PauseContinuation.MAX_PAUSE_CONTINUATIONS + 1, opened.get());
     assertEquals(FinishReason.ERROR, error.partial().finishReason());
     assertEquals("Searching. ".repeat(9), error.partial().content());
     assertEquals(Response.Usage.of(90, 18), error.partial().usage());
   }
 
   @Test
-  void anErrorInAContinuedSegmentCarriesTheWholeTurnSoFar() throws Exception {
+  void anErrorInAContinuedSegmentCarriesTheWholeTurnSoFar() {
     var cut =
         Response.newBuilder()
             .withContent("Fou")
@@ -109,21 +114,20 @@ class PauseContinuationTest {
             .withUsage(Response.Usage.of(5, 1))
             .build();
     var eof = new EOFException("cut");
-    var opened = new int[1];
+    var opened = new AtomicInteger();
+
     var events =
-        continuation(
+        events(
             r ->
-                opened[0]++ == 0
+                opened.getAndIncrement() == 0
                     ? stream(pausedWithContent())
                     : new Events(
                         List.of(
                             new StreamEvent.TextDelta("Fou"),
-                            new StreamEvent.Error("cut", eof, cut))))
-            .stream(request);
+                            new StreamEvent.Error("cut", eof, cut))));
 
-    assertEquals(new StreamEvent.TextDelta("Fou"), events.next());
-    var error = assertInstanceOf(StreamEvent.Error.class, events.next());
-
+    assertEquals(new StreamEvent.TextDelta("Fou"), events.getFirst());
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
     assertSame(eof, error.cause());
     assertEquals("Searching. Fou", error.partial().content());
     assertEquals(Response.Usage.of(15, 3), error.partial().usage());
@@ -131,29 +135,21 @@ class PauseContinuationTest {
   }
 
   @Test
-  void everySegmentIsClosedWhenItsTurnEnds() {
+  void everySegmentIsClosedOnceTheTurnEnds() {
     var paused = stream(pausedWithContent());
-    var cut =
-        new Events(
-            List.of(
-                new StreamEvent.Error(
-                    "cut",
-                    null,
-                    Response.newBuilder().withFinishReason(FinishReason.ERROR).build())));
-    var opened = new int[1];
-    var events = continuation(r -> opened[0]++ == 0 ? paused : cut).stream(request);
+    var finished = stream(finished());
+    var opened = new AtomicInteger();
 
-    assertInstanceOf(StreamEvent.Error.class, events.next());
-    assertTrue(paused.closed);
-    assertFalse(cut.closed);
+    var events = events(r -> opened.getAndIncrement() == 0 ? paused : finished);
 
-    events.close();
-
-    assertTrue(cut.closed);
+    var done = assertInstanceOf(StreamEvent.Done.class, events.getLast());
+    assertEquals("Searching. Found.", done.response().content());
+    Await.latch("the paused segment closed", paused.closed);
+    Await.latch("the last segment closed", finished.closed);
   }
 
   @Test
-  void aContinuationTheApiRefusesEndsTheStreamWithItsError() throws Exception {
+  void aContinuationTheApiRefusesEndsTheStreamWithItsError() {
     var refused = new AnthropicException("API error (status 400): bad", 400);
 
     var error =
@@ -167,7 +163,7 @@ class PauseContinuationTest {
   }
 
   @Test
-  void aContinuationThatCannotConnectEndsTheStream() throws Exception {
+  void aContinuationThatCannotConnectEndsTheStream() {
     var reset = new IOException("reset");
 
     var error =
@@ -176,23 +172,8 @@ class PauseContinuationTest {
               throw reset;
             });
 
-    assertEquals("Failed to reopen paused stream", error.message());
+    assertEquals("Failed to communicate with Anthropic API", error.message());
     assertSame(reset, error.cause());
-  }
-
-  @Test
-  void aContinuationInterruptedWhileOpeningEndsTheStreamAndKeepsTheInterrupt() throws Exception {
-    var interrupt = new InterruptedException();
-
-    var error =
-        resumeFailingWith(
-            r -> {
-              throw interrupt;
-            });
-
-    assertTrue(Thread.interrupted());
-    assertEquals("Request interrupted", error.message());
-    assertSame(interrupt, error.cause());
   }
 
   @Test
@@ -200,46 +181,182 @@ class PauseContinuationTest {
     var refused = new AnthropicException("API error (status 400): bad", 400);
 
     var events =
-        continuation(
+        events(
             r -> {
               throw refused;
-            })
-            .stream(request);
+            });
 
-    var error = assertInstanceOf(StreamEvent.Error.class, events.next());
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getFirst());
+    assertEquals(1, events.size());
     assertEquals(refused.getMessage(), error.message());
     assertSame(refused, error.cause());
-    assertFalse(events.hasNext());
   }
 
   @Test
-  void eventsBeforeThePauseStreamThrough() throws Exception {
+  void eventsBeforeThePauseStreamThrough() {
     var text = new StreamEvent.TextDelta("searching");
     var done = new StreamEvent.Done(paused(Map.of()));
-    var events = continuation(r -> new Events(List.of(text, done))).stream(request);
 
-    assertTrue(events.hasNext());
-    assertSame(text, events.next());
-    assertInstanceOf(StreamEvent.Done.class, events.next());
-    assertFalse(events.hasNext());
+    var events = events(r -> new Events(List.of(text, done)));
+
+    assertEquals(List.of(text, done), events);
   }
 
-  private StreamEvent.Error resumeFailingWith(ChatExchange.StreamOpener<MessagesRequest> resume)
-      throws Exception {
-    var opened = new int[1];
-    var events =
-        continuation(r -> opened[0]++ == 0 ? stream(pausedWithContent()) : resume.open(r)).stream(
-            request);
-    var error = assertInstanceOf(StreamEvent.Error.class, events.next());
-    assertEquals(paused(FinishReason.ERROR), error.partial());
+  @Test
+  void demandNotYetServedCarriesOverToTheNextSegment() {
+    var opened = new AtomicInteger();
+    var subscriber = new RecordingSubscriber<StreamEvent>(1);
+
+    continuation(
+            r ->
+                opened.getAndIncrement() == 0
+                    ? new Events(
+                        List.of(
+                            new StreamEvent.TextDelta("Searching. "),
+                            new StreamEvent.Done(pausedWithContent())))
+                    : new Events(
+                        List.of(
+                            new StreamEvent.TextDelta("Found."), new StreamEvent.Done(finished()))))
+        .stream(request, new CancellationToken())
+        .subscribe(subscriber);
+    assertEquals(new StreamEvent.TextDelta("Searching. "), subscriber.next());
+    subscriber.request(1);
+    assertEquals(new StreamEvent.TextDelta("Found."), subscriber.next());
+    subscriber.request(1);
+
+    var events = subscriber.awaitCompletion();
+    assertEquals("Searching. Found.", ((StreamEvent.Done) events.getLast()).response().content());
+    assertEquals(0, subscriber.violations());
+  }
+
+  @Test
+  void cancellingCancelsTheSegmentInFlight() {
+    var opened = new AtomicInteger();
+    var stalled = new Events(List.of(new StreamEvent.TextDelta("Fou")));
+    stalled.stalls = true;
+    var subscriber = new RecordingSubscriber<StreamEvent>();
+
+    continuation(r -> opened.getAndIncrement() == 0 ? stream(pausedWithContent()) : stalled).stream(
+            request, new CancellationToken())
+        .subscribe(subscriber);
+    assertEquals(new StreamEvent.TextDelta("Fou"), subscriber.next());
+    subscriber.cancel();
+
+    Await.latch("the segment in flight closed", stalled.closed);
+    assertEquals(2, opened.get());
+  }
+
+  @Test
+  void cancellingBeforeAPausedSegmentCompletesOpensNoContinuation() {
+    var token = new CancellationToken();
+    var opened = new AtomicInteger();
+    var paused =
+        new Events(
+            List.of(new StreamEvent.TextDelta("x"), new StreamEvent.Done(pausedWithContent())));
+    paused.stalls = true;
+    var subscriber = new RecordingSubscriber<StreamEvent>();
+
+    continuation(
+            r -> {
+              opened.incrementAndGet();
+              return paused;
+            })
+        .stream(request, token)
+        .subscribe(subscriber);
+    subscriber.next();
+    Await.latch("the paused segment stalled", paused.stalled);
+    subscriber.cancel();
+    Await.latch("the paused segment closed", paused.closed);
+    Await.until("the segment's thread finished", () -> token.activeCallbackCountForTests() == 0);
+
+    assertEquals(1, opened.get());
+    assertFalse(subscriber.ended());
+  }
+
+  @Test
+  void cancellingTheTokenDuringAContinuationEndsTheTurn() {
+    var token = new CancellationToken();
+    var opened = new AtomicInteger();
+    var stalled = new Events(List.of());
+    stalled.stalls = true;
+    var subscriber = new RecordingSubscriber<StreamEvent>();
+
+    continuation(r -> opened.getAndIncrement() == 0 ? stream(pausedWithContent()) : stalled).stream(
+            request, token)
+        .subscribe(subscriber);
+    Await.latch("the continuation stalled", stalled.stalled);
+    token.cancel("session closed");
+
+    assertInstanceOf(CancellationException.class, subscriber.awaitFailure());
+    Await.latch("the continuation closed", stalled.closed);
+  }
+
+  @Test
+  void aNonPositiveRequestFailsTheTurn() {
+    var subscriber = new RecordingSubscriber<StreamEvent>(0);
+
+    continuation(r -> stream(finished())).stream(request, new CancellationToken())
+        .subscribe(subscriber);
+    subscriber.subscription().request(0);
+
+    assertInstanceOf(IllegalArgumentException.class, subscriber.awaitFailure());
+  }
+
+  @Test
+  void aSecondSubscriberIsRefused() {
+    var publisher = continuation(r -> stream(finished())).stream(request, new CancellationToken());
+    var first = new RecordingSubscriber<StreamEvent>();
+    var second = new RecordingSubscriber<StreamEvent>();
+
+    publisher.subscribe(first);
+    publisher.subscribe(second);
+
+    assertInstanceOf(IllegalStateException.class, second.awaitFailure());
+    assertInstanceOf(StreamEvent.Done.class, first.awaitCompletion().getLast());
+    assertThrows(NullPointerException.class, () -> publisher.subscribe(null));
+  }
+
+  private StreamEvent.Error resumeFailingWith(ChatExchange.StreamOpener<MessagesRequest> resume) {
+    var opened = new AtomicInteger();
+    var error =
+        lastError(
+            r -> opened.getAndIncrement() == 0 ? stream(pausedWithContent()) : resume.open(r));
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
+    assertEquals("Searching. ", error.partial().content());
     return error;
   }
 
+  private StreamEvent.Error lastError(ChatExchange.StreamOpener<MessagesRequest> segments) {
+    return assertInstanceOf(StreamEvent.Error.class, events(segments).getLast());
+  }
+
+  private List<StreamEvent> events(ChatExchange.StreamOpener<MessagesRequest> segments) {
+    var subscriber = new RecordingSubscriber<StreamEvent>();
+    continuation(segments).stream(request, new CancellationToken()).subscribe(subscriber);
+    return subscriber.awaitCompletion();
+  }
+
   static PauseContinuation continuation(ChatExchange.StreamOpener<MessagesRequest> segments) {
-    var exchange =
-        new ChatExchange<>(
-            AnthropicProvider.PROVIDER_NAME, "Anthropic API", segments, AnthropicException::new);
-    return new PauseContinuation(exchange, segments);
+    return new PauseContinuation(new ChatExchange<>("Anthropic API", segments));
+  }
+
+  /**
+   * The response of the whole turn {@code segments} answer {@code request} with, drained the way
+   * the provider's model drains it; a failed turn throws the exception the model would.
+   */
+  static Response<Void> turn(
+      ChatExchange.StreamOpener<MessagesRequest> segments, MessagesRequest request) {
+    return ExchangeTurns.chat(
+        continuation(segments), request, AnthropicProvider.PROVIDER_NAME, AnthropicException::new);
+  }
+
+  private static Response<Void> finished() {
+    return Response.newBuilder()
+        .withContent("Found.")
+        .withFinishReason(FinishReason.STOP)
+        .withUsage(Response.Usage.of(5, 1))
+        .withMetadata(Map.of(AnthropicResponseAssembler.STOP_REASON_KEY, "end_turn"))
+        .build();
   }
 
   private static Response<Void> pausedWithContent() {
@@ -275,10 +392,13 @@ class PauseContinuationTest {
     return new Events(List.of(new StreamEvent.Done(response)));
   }
 
+  /** Recorded events; one that stalls blocks after its last event until closed. */
   private static final class Events implements CloseableIterator<StreamEvent> {
     private final List<StreamEvent> events;
+    private final CountDownLatch closed = new CountDownLatch(1);
+    private final CountDownLatch stalled = new CountDownLatch(1);
     private int next;
-    private boolean closed;
+    private boolean stalls;
 
     Events(List<StreamEvent> events) {
       this.events = events;
@@ -286,6 +406,15 @@ class PauseContinuationTest {
 
     @Override
     public boolean hasNext() {
+      if (stalls && next == events.size()) {
+        stalled.countDown();
+        try {
+          closed.await();
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+        }
+        return false;
+      }
       return next < events.size();
     }
 
@@ -296,7 +425,7 @@ class PauseContinuationTest {
 
     @Override
     public void close() {
-      closed = true;
+      closed.countDown();
     }
   }
 }

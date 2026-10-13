@@ -1,10 +1,8 @@
 == chatStream
 ThinkingDelta[text=Then greet.]
-ThinkingComplete[fullThinking=Plan the answer.
-Then greet., signature=wireSig]
 TextDelta[text=Hello!]
-Done[response=Response[content=Hello!, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=Plan the answer.
-Then greet., citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz, gemini.thoughtSignatures=wireSig}]]
+MessageStop[stopReason=STOP, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz, gemini.thoughtSignatures=wireSig}, citations=[]]
+onComplete
 == chat
 Response[content=Hello!, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=Plan the answer.
 Then greet., citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz, gemini.thoughtSignatures=wireSig}]

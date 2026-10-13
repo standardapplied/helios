@@ -1,0 +1,271 @@
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
+
+package com.standardapplied.helios.session.loop;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.standardapplied.helios.core.model.BlockingModel;
+import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.hooks.DefaultHookContext;
+import com.standardapplied.helios.session.hooks.HookRegistry;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Flow;
+import java.util.concurrent.RunnableScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeoutException;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
+/**
+ * The turn's one terminal transition: whichever ending comes first — completion, the stream's
+ * error, the idle deadline, the session's cancellation, an interrupt or a protocol violation —
+ * snapshots the stream, cancels the subscription when the turn ended it, and makes every later
+ * signal a no-op that emits nothing.
+ */
+final class TurnSubscriberTest {
+
+  private static final Clock CLOCK = Clock.fixed(Instant.EPOCH, ZoneOffset.UTC);
+  private static final Response.Usage USAGE = Response.Usage.of(7, 3);
+
+  private final ManualScheduler scheduler = new ManualScheduler();
+  private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
+  private final TurnSubscriber subscriber = newSubscriber();
+  private final CountingSubscription subscription = new CountingSubscription();
+
+  @AfterEach
+  void stopScheduler() {
+    scheduler.shutdownNow();
+  }
+
+  @Test
+  void theIdleDeadlineCancelsTheSubscriptionOnceAndLateSignalsChangeNothing() {
+    var call = ToolCall.newBuilder().withId("c1").withName("lookup").build();
+    subscriber.onSubscribe(subscription);
+    subscriber.onNext(new ModelChunk.TextDelta("Hel"));
+
+    scheduler.fireLatest();
+    scheduler.fireLatest();
+    subscriber.onNext(new ModelChunk.TextDelta("lo"));
+    subscriber.onNext(new ModelChunk.ToolUseStop(call));
+    subscriber.onNext(new ModelChunk.MessageStop("STOP", USAGE, Map.of()));
+    subscriber.onComplete();
+    subscriber.onError(new IllegalStateException("late"));
+    var turn = subscriber.awaitDone(new CancellationToken());
+
+    assertEquals(1, subscription.cancels);
+    assertEquals(List.of(Long.MAX_VALUE), subscription.requests);
+    assertInstanceOf(TimeoutException.class, turn.error());
+    assertEquals(FinishReason.ERROR, turn.finishReason());
+    assertEquals("Hel", turn.content());
+    assertEquals(List.of(), turn.toolCalls());
+    assertEquals(Response.Usage.of(0, 0), turn.usage());
+    assertEquals(List.of("Hel"), assistantTexts());
+  }
+
+  @Test
+  void theSessionsCancellationCancelsTheSubscriptionOnce() {
+    var token = new CancellationToken();
+    subscriber.onSubscribe(subscription);
+    token.cancel("session closed");
+
+    var turn = subscriber.awaitDone(token);
+    subscriber.onComplete();
+
+    assertInstanceOf(CancellationException.class, turn.error());
+    assertEquals(1, subscription.cancels);
+    assertEquals(0, token.activeCallbackCountForTests());
+  }
+
+  @Test
+  void anInterruptWhileWaitingCancelsTheSubscriptionAndStaysSet() {
+    subscriber.onSubscribe(subscription);
+    Thread.currentThread().interrupt();
+
+    var turn = subscriber.awaitDone(new CancellationToken());
+
+    assertTrue(Thread.interrupted());
+    assertInstanceOf(InterruptedException.class, turn.error());
+    assertEquals(1, subscription.cancels);
+  }
+
+  @Test
+  void aSecondOnSubscribeIsCancelledAndTheFirstKept() {
+    var second = new CountingSubscription();
+    subscriber.onSubscribe(subscription);
+
+    subscriber.onSubscribe(second);
+    scheduler.fireLatest();
+
+    assertEquals(1, second.cancels);
+    assertEquals(List.of(), second.requests);
+    assertEquals(1, subscription.cancels);
+  }
+
+  @Test
+  void aChunkBeforeOnSubscribeEndsTheTurnWithAnIllegalState() {
+    subscriber.onNext(new ModelChunk.TextDelta("early"));
+
+    var turn = subscriber.awaitDone(new CancellationToken());
+
+    assertInstanceOf(IllegalStateException.class, turn.error());
+    assertEquals("", turn.content());
+    assertEquals(List.of(), events);
+  }
+
+  @Test
+  void aSubscriptionArrivingAfterTheTurnEndedIsCancelledUnrequested() {
+    var token = new CancellationToken();
+    token.cancel("closed before the stream subscribed");
+    subscriber.awaitDone(token);
+
+    subscriber.onSubscribe(subscription);
+
+    assertEquals(1, subscription.cancels);
+    assertEquals(List.of(), subscription.requests);
+  }
+
+  @Test
+  void aCompletedStreamIsSnapshottedWithEveryEventEmittedAndNothingCancelled() {
+    var call = ToolCall.newBuilder().withId("c1").withName("lookup").build();
+    var cite = Citation.of("https://example.com", "snippet");
+    subscriber.onSubscribe(subscription);
+
+    subscriber.onNext(new ModelChunk.ThinkingDelta("Hm."));
+    subscriber.onNext(new ModelChunk.TextDelta("Checking."));
+    subscriber.onNext(new ModelChunk.ToolUseStart("c1", "lookup"));
+    subscriber.onNext(new ModelChunk.ToolUseDelta("c1", "{}"));
+    subscriber.onNext(new ModelChunk.ToolUseStop(call));
+    subscriber.onNext(new ModelChunk.UsageDelta(USAGE));
+    subscriber.onNext(
+        new ModelChunk.MessageStop("TOOL_CALLS", USAGE, Map.of("k", "v"), List.of(cite)));
+    subscriber.onComplete();
+    var turn = subscriber.awaitDone(new CancellationToken());
+
+    assertNull(turn.error());
+    assertEquals("Checking.", turn.content());
+    assertEquals(List.of(call), turn.toolCalls());
+    assertEquals(FinishReason.TOOL_CALLS, turn.finishReason());
+    assertEquals(USAGE, turn.usage());
+    assertEquals(Map.of("k", "v"), turn.metadata());
+    assertEquals(List.of(cite), turn.citations());
+    assertEquals(
+        List.of(
+            QueryEvent.AssistantThinking.class,
+            QueryEvent.AssistantText.class,
+            QueryEvent.AssistantCitations.class),
+        events.stream().map(Object::getClass).toList());
+    assertEquals(0, subscription.cancels);
+  }
+
+  @Test
+  void theStreamsOwnErrorEndsTheTurnWithoutCancellingIt() {
+    var refused = new IllegalStateException("refused");
+    subscriber.onSubscribe(subscription);
+    subscriber.onNext(new ModelChunk.MessageStop("STOP", USAGE, Map.of()));
+
+    subscriber.onError(refused);
+    var turn = subscriber.awaitDone(new CancellationToken());
+
+    assertSame(refused, turn.error());
+    assertEquals(FinishReason.ERROR, turn.finishReason());
+    assertEquals(USAGE, turn.usage());
+    assertEquals(0, subscription.cancels);
+  }
+
+  private List<String> assistantTexts() {
+    return events.stream()
+        .filter(QueryEvent.AssistantText.class::isInstance)
+        .map(event -> ((QueryEvent.AssistantText) event).text())
+        .toList();
+  }
+
+  private TurnSubscriber newSubscriber() {
+    var state = new SessionState("sess", new CancellationToken(), CLOCK);
+    var model =
+        new BlockingModel() {
+          @Override
+          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+            throw new AssertionError("not called");
+          }
+
+          @Override
+          public String id() {
+            return "stub";
+          }
+
+          @Override
+          public String provider() {
+            return "stub";
+          }
+        };
+    var emitter =
+        new EventEmitter(
+            events::add,
+            HookRegistry.empty(),
+            s ->
+                new DefaultHookContext(
+                    s.sessionId(), s.currentTurnIndex(), s.cancellation(), model),
+            CLOCK);
+    return new TurnSubscriber(state, emitter, CLOCK, scheduler, Duration.ofHours(1));
+  }
+
+  /** A subscription that counts every request and cancel it receives. */
+  private static final class CountingSubscription implements Flow.Subscription {
+    private final List<Long> requests = new ArrayList<>();
+    private int cancels;
+
+    @Override
+    public synchronized void request(long n) {
+      requests.add(n);
+    }
+
+    @Override
+    public synchronized void cancel() {
+      cancels++;
+    }
+  }
+
+  /**
+   * A scheduler whose deadlines never come due on their own: the test runs the latest one on its
+   * own thread, as if its delay had passed.
+   */
+  private static final class ManualScheduler extends ScheduledThreadPoolExecutor {
+
+    private final List<Runnable> scheduled = new CopyOnWriteArrayList<>();
+
+    ManualScheduler() {
+      super(1);
+    }
+
+    @Override
+    protected <V> RunnableScheduledFuture<V> decorateTask(
+        Runnable runnable, RunnableScheduledFuture<V> task) {
+      scheduled.add(runnable);
+      return task;
+    }
+
+    void fireLatest() {
+      scheduled.getLast().run();
+    }
+  }
+}

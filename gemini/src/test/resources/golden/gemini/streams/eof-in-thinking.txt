@@ -5,11 +5,6 @@ I'm now focusing on defining prime numbers to establish a solid foundation. Spec
 
 
 ]
-Error[message=Stream ended before its terminal event, cause=EOFException(the response body ended before the provider's terminal event), partial=Response[content=, parsed=null, toolCalls=[], finishReason=ERROR, usage=null, thinking=**Defining Prime Numbers**
-
-I'm now focusing on defining prime numbers to establish a solid foundation. Specifically, I've listed the prime numbers below 30 to help facilitate the prime-number-count process. The target is to figure out the number of prime numbers under 30.
-
-
-, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=v1_ChRBUmpPYXRwanZKRzkwZy1HaUlCSRIUQVJqT2F0cGp2Skc5MGctR2lJQkk, gemini.thoughtSignatures=EuUHCuIHAWkUfRPEZhKgt2hWttUbrUXjzAta/kHdnvaPeP6w4fTJjHCEwb81xMOj5jojBRWstR0qeLWzRvvKhaDfaaXc8Nok0T363OKGwRPCEB+FCkuoubWTFgCqc9kwylaJbROV6kIxI7a2MzRovhbvn2bbYlX4i376Jnr7sZniFOM7FJAe8/RgshVBnShCwZZ3FcFXkfZWydo6M78ZYD9GMIP+juQgAfr3bzTaJdT0IF9/euf00MsmcxOrI8NytiKUfXozX+pUd9n+EwN7l5JjGzjEB3CwF0JaimTaN7MwVGigcsZvk7EZC5ogEne3JzDbjx6NVWoXpQsyIMFK4/s3qn3G47+SRK92nTUYtfF0NGVGO4XwoC8pGwWiZC/M2ue8DA2b56R3SfGczufLwdd7jiibDKYZHG4NeKsVIfr9c4X31JKDoW5IWASiIzGRFNT3k9jzVRKP4K5Z2sT/35HhmsURgMwcWN1oxqOiy/RM3f3HDIzLMbjjHFdLfUbdzqF0CWfn7AC9Fz+zRpfwQytyA0iZ1abwudmtTMlChntVUZ35FQTYDMiyiPo4i7U6ZQWmF7rJOh7Yhk+hx8wZGZ1O+hEk5G21i760rGPKPo19nscXqV3TgEzTj1S9gYDCnwIrHw28Kko89uyfnP9wxmg08emzQFJ3ExQL1Cw3JCuez2bmNeGnMsgTOV/pyRUvJvpUDvajE4AzRvZM6ijXRx5jv4y7naFzwz7PAB1GZ+BUXMurQ1iG5r3LfyNirAeUQJ51TN95dlSjPFMI8HGsnshn+9ni/bbBIQgv2vJeW96bwKekV0lCBUpBfNax8AQIWmYSxUh4rY5TbnNbAJBTEOS66kLz46iP4hqM43K1R9kWXcWYMWMRX28axYUKe8PcG9QaR3gh9Mo5pj91M4EKt/opMSJdzHRGHCEdFY3AYemm0NbXDuwRUcHOmu/ZymFos/V0VAfmNkitvPIQdbEFkT1D81JWNOD8oERhFbjyGP3p8wxDA6C9qEXODlpKKIswwBLVBZPPr+7i9cpFvoEJPez+MA8WkD8x7wdHSVRcJyxks01dsAzsfCxZixMcN3lMHnYl0LbUIG5Wj9jG46xCBlENSvLoRBER91wfh998UGl4K4TTcjftfirpUhJifAUb2kLtGx0HgmoEB0FMSkJmgmujFnhUgoiTjob2mvkKdq41XDdhgtUZke34UJL4y2U/B5WdGo7K38whl5PXHXF/IL2GONUQfRo/IqBELdT18ujrb4QzDaYrByYptWcTHOs6U7kyC6ecFKoECaRvc/Su3HXdoydMCb0AjdM3ctyy0HF/UTKZkqLfuA==}]]
+onError TransientStreamException(Stream ended before its terminal event) provider=gemini caused by EOFException(the response body ended before the provider's terminal event)
 == chat
 threw TransientStreamException(Stream ended before its terminal event) provider=gemini caused by EOFException(the response body ended before the provider's terminal event)
