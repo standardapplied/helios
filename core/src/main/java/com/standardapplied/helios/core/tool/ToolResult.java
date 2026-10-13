@@ -77,6 +77,8 @@ public record ToolResult(ToolOutcome outcome, String output, List<InlineFile> at
    *     simple class name when the message is null
    */
   public static ToolResult threw(String toolName, Throwable cause) {
+    Objects.requireNonNull(toolName, "toolName must not be null");
+    Objects.requireNonNull(cause, "cause must not be null");
     var message =
         cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
     return new ToolResult(
@@ -93,6 +95,7 @@ public record ToolResult(ToolOutcome outcome, String output, List<InlineFile> at
    * @return a {@link ToolOutcome.TimedOut} result
    */
   public static ToolResult timedOut(String toolName, Duration limit) {
+    Objects.requireNonNull(toolName, "toolName must not be null");
     return new ToolResult(
         new ToolOutcome.TimedOut(limit),
         "tool '" + toolName + "' timed out after " + limit,
@@ -106,6 +109,7 @@ public record ToolResult(ToolOutcome outcome, String output, List<InlineFile> at
    * @return a {@link ToolOutcome.NotFound} result
    */
   public static ToolResult notFound(String toolName) {
+    Objects.requireNonNull(toolName, "toolName must not be null");
     return new ToolResult(new ToolOutcome.NotFound(), "tool not found: " + toolName, List.of());
   }
 

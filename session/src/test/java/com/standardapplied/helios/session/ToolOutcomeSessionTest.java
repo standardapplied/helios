@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
@@ -39,6 +40,9 @@ import org.junit.jupiter.api.Test;
 final class ToolOutcomeSessionTest {
 
   private static final String SECRET = "sk-test-0123456789abcdef";
+
+  private static final List<InlineFile> PNG =
+      List.of(InlineFile.of(new byte[] {(byte) 0x89, 'P', 'N', 'G'}, "image/png"));
 
   /** A named {@code PreToolUse} hook, so the rejecting hook's name is stable. */
   private record Gate(HookOutcome outcome) implements PreToolUseHook {
@@ -200,9 +204,12 @@ final class ToolOutcomeSessionTest {
   }
 
   @Test
-  void aMutatedResultKeepsItsOutcome() {
+  void aMutatedResultKeepsItsOutcomeAndAttachments() {
     var options =
-        withTools(tool("t", (args, ctx) -> ToolResult.failure("raw failure")))
+        withTools(
+                tool(
+                    "t",
+                    (args, ctx) -> new ToolResult(new ToolOutcome.Failed(), "raw failure", PNG)))
             .withHook(
                 (PostToolUseHook) (toolCall, result, ctx) -> HookOutcome.mutateResult("rewritten"));
 
@@ -210,8 +217,8 @@ final class ToolOutcomeSessionTest {
 
     assertEquals(
         List.of(
-            expected(new ToolOutcome.Failed(), "raw failure"),
-            expected(new ToolOutcome.Failed(), "rewritten")),
+            new ToolResult(new ToolOutcome.Failed(), "raw failure", PNG),
+            new ToolResult(new ToolOutcome.Failed(), "rewritten", PNG)),
         run.toolResults().stream().map(QueryEvent.ToolResult::result).toList());
     assertEquals(List.of("rewritten"), run.toolMessages(1));
   }

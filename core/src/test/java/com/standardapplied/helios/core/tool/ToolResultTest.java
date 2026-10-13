@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 class ToolResultTest {
 
@@ -84,6 +85,16 @@ class ToolResultTest {
   }
 
   @Test
+  void theFrameworkFactoriesRejectAMissingToolNameOrCause() {
+    var cause = new IllegalStateException("x");
+    assertRejectsNull("toolName must not be null", () -> ToolResult.threw(null, cause));
+    assertRejectsNull("cause must not be null", () -> ToolResult.threw("search", null));
+    assertRejectsNull(
+        "toolName must not be null", () -> ToolResult.timedOut(null, Duration.ofSeconds(1)));
+    assertRejectsNull("toolName must not be null", () -> ToolResult.notFound(null));
+  }
+
+  @Test
   void withOutputReplacesOnlyTheOutput() {
     var original =
         new ToolResult(new ToolOutcome.Failed(), "original", List.of(PNG)).withOutput("rewritten");
@@ -147,5 +158,9 @@ class ToolResultTest {
     var result = new ToolResult(new ToolOutcome.Succeeded(), "text", null);
     assertFalse(result.hasAttachments());
     assertEquals(0, result.attachments().size());
+  }
+
+  private static void assertRejectsNull(String message, Executable factory) {
+    assertEquals(message, assertThrows(NullPointerException.class, factory).getMessage());
   }
 }
