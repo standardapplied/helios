@@ -103,8 +103,10 @@ final class AnthropicStreamParser implements SseReader.Parser {
   }
 
   private StreamEvent messageStop() {
-    var openToolUse =
-        blocks.toolUses().open() != null ? blocks.toolUses().open() : blocks.verbatim().open();
+    var openToolUse = blocks.toolUses().open();
+    if (openToolUse == null) {
+      openToolUse = blocks.verbatim().open();
+    }
     if (openToolUse != null) {
       return failed("message_stop while tool use '" + openToolUse + "' is still open", null);
     }

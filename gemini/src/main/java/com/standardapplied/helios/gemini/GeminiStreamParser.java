@@ -13,6 +13,7 @@ import com.standardapplied.helios.gemini.api.InteractionResponse;
 import com.standardapplied.helios.gemini.api.InteractionUsage;
 import com.standardapplied.helios.gemini.api.StreamingEvent;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Parses one Interactions API stream, one event at a time, into {@link StreamEvent}s: the step
@@ -76,8 +77,8 @@ final class GeminiStreamParser implements SseReader.Parser {
     var message =
         StreamErrorMessage.of(
             "API error",
-            code == null ? null : code.toString(),
-            fields.get("message") == null ? null : fields.get("message").toString());
+            Objects.toString(code, null),
+            Objects.toString(fields.get("message"), null));
     var statusCode = code instanceof Number number && number.intValue() > 0 ? number.intValue() : 0;
     return failed(message, new GeminiException(message, statusCode));
   }

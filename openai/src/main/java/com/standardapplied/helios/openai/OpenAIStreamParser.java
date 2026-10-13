@@ -109,11 +109,11 @@ final class OpenAIStreamParser implements SseReader.Parser {
     if (error == null) {
       return failed(StreamErrorMessage.of(summary, null, null), null);
     }
-    var message = StreamErrorMessage.of(summary, error.code(), error.message());
+    var text = StreamErrorMessage.of(summary, error.code(), error.message());
     return failed(
-        message,
+        text,
         error.code() != null && TRANSIENT_CODES.contains(error.code())
-            ? new TransientStreamException(message, null, OpenAIProvider.PROVIDER_NAME)
+            ? new TransientStreamException(text, null, OpenAIProvider.PROVIDER_NAME)
             : null);
   }
 
