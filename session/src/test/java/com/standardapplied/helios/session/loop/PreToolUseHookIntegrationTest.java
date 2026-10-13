@@ -4,6 +4,7 @@ package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ToolCall;
@@ -16,6 +17,7 @@ import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.testing.ScriptedModel;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -68,6 +70,31 @@ final class PreToolUseHookIntegrationTest {
     assertEquals("mutated", mutated.inputAfter().get("v"));
     var toolResult = loop.first(QueryEvent.ToolResult.class);
     assertEquals("echoed: mutated", toolResult.result().output());
+  }
+
+  @Test
+  void preToolUseMutateKeepsAnUntouchedJsonNullArgument() {
+    PreToolUseHook rewriter =
+        (call, ctx) -> {
+          var args = new LinkedHashMap<>(call.arguments());
+          args.put("v", "mutated");
+          return HookOutcome.mutateArgs(args);
+        };
+    var arguments = new LinkedHashMap<String, Object>();
+    arguments.put("v", "original");
+    arguments.put("cursor", null);
+
+    var result = callEchoThenAnswer(arguments, "done", rewriter);
+
+    assertInstanceOf(ResultMessage.Success.class, result);
+    var mutated = loop.first(QueryEvent.ToolMutated.class);
+    assertEquals("mutated", mutated.inputAfter().get("v"));
+    assertTrue(mutated.inputAfter().containsKey("cursor"));
+    assertNull(mutated.inputAfter().get("cursor"));
+    var dispatched = loop.first(QueryEvent.ToolUse.class).call().arguments();
+    assertTrue(dispatched.containsKey("cursor"));
+    assertNull(dispatched.get("cursor"));
+    assertEquals("echoed: mutated", loop.first(QueryEvent.ToolResult.class).result().output());
   }
 
   @Test
