@@ -28,7 +28,7 @@ final class GeminiResponseAssembler {
    */
   static Response<Void> response(
       StepOutput.Result output,
-      InteractionUsage usage,
+      Response.Usage usage,
       String interactionId,
       String apiVersion,
       FinishReason finishReason) {
@@ -44,7 +44,7 @@ final class GeminiResponseAssembler {
         .withContent(output.content())
         .withToolCalls(output.calls())
         .withFinishReason(finishReason)
-        .withUsage(usage(usage))
+        .withUsage(usage)
         .withThinking(output.thinking())
         .withCitations(output.citations())
         .withMetadata(Map.copyOf(metadata))
@@ -71,11 +71,10 @@ final class GeminiResponseAssembler {
    * and {@code total_cached_tokens} as a subset of it, so the uncached input is their difference,
    * never below zero: a subset exceeding the total would be a server accounting bug. Gemini does
    * not charge a premium for implicit cache writes, so none are reported.
+   *
+   * @throws ArithmeticException if the total overflows an {@code int}
    */
-  private static Response.Usage usage(InteractionUsage usage) {
-    if (usage == null) {
-      return null;
-    }
+  static Response.Usage usage(InteractionUsage usage) {
     var input = usage.inputTokens() != null ? usage.inputTokens() : 0;
     var output = usage.outputTokens() != null ? usage.outputTokens() : 0;
     var cached = usage.cachedTokensOrZero();
