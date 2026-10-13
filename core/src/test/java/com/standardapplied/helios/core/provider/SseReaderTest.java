@@ -479,7 +479,7 @@ class SseReaderTest {
 
       assertEquals(FinishReason.ERROR, error.partial().finishReason());
       assertTrue(body.closed);
-      assertEquals("acme: Stream idle timeout: no data received for 0s", error.message());
+      assertEquals("acme: Stream idle timeout: no data received for 50 ms", error.message());
       assertEquals(
           error.message(), assertInstanceOf(ProviderException.class, error.cause()).getMessage());
       assertFalse(reader.hasNext());
