@@ -9,55 +9,31 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
-import java.util.LinkedHashMap;
 import org.junit.jupiter.api.Test;
 
 class ExecutionResultTest {
 
   @Test
   void constructorSetsFields() {
-    var result =
-        new ExecutionResult("code", "out", "err", 1, false, java.util.Map.of(), Duration.ZERO);
-    assertEquals("code", result.executedCode());
+    var result = new ExecutionResult("out", "err", 1, false, Duration.ZERO);
     assertEquals("out", result.stdout());
     assertEquals("err", result.stderr());
     assertEquals(1, result.exitCode());
   }
 
   @Test
-  void nullExecutedCodeDefaultsToEmpty() {
-    var result =
-        new ExecutionResult(null, "out", "err", 0, false, java.util.Map.of(), Duration.ZERO);
-    assertEquals("", result.executedCode());
-  }
-
-  @Test
-  void builderTreatsNullExecutedCodeAndBindingsAsEmpty() {
-    var result = ExecutionResult.newBuilder().withExecutedCode(null).withBindings(null).build();
-    assertEquals("", result.executedCode());
-    assertEquals(java.util.Map.of(), result.bindings());
-  }
-
-  @Test
   void nullStdoutDefaultsToEmpty() {
-    var result = new ExecutionResult("c", null, "err", 0, false, java.util.Map.of(), Duration.ZERO);
+    var result = new ExecutionResult(null, "err", 0, false, Duration.ZERO);
     assertEquals("", result.stdout());
   }
 
   @Test
   void nullStderrDefaultsToEmpty() {
-    var result = new ExecutionResult("c", "out", null, 0, false, java.util.Map.of(), Duration.ZERO);
+    var result = new ExecutionResult("out", null, 0, false, Duration.ZERO);
     assertEquals("", result.stderr());
-  }
-
-  @Test
-  void nullBindingsDefaultToEmpty() {
-    var result = new ExecutionResult("c", "out", "err", 0, false, null, Duration.ZERO);
-    assertEquals(java.util.Map.of(), result.bindings());
   }
 
   @Test
@@ -120,14 +96,13 @@ class ExecutionResultTest {
 
   @Test
   void durationDefaultsToZeroWhenCanonicalReceivesNull() {
-    var result = new ExecutionResult("c", "o", "e", 0, false, java.util.Map.of(), null);
+    var result = new ExecutionResult("o", "e", 0, false, null);
     assertEquals(Duration.ZERO, result.duration());
   }
 
   @Test
   void durationDefaultsToZeroWhenNegative() {
-    var result =
-        new ExecutionResult("c", "o", "e", 0, false, java.util.Map.of(), Duration.ofMillis(-5));
+    var result = new ExecutionResult("o", "e", 0, false, Duration.ofMillis(-5));
     assertEquals(
         Duration.ZERO,
         result.duration(),
@@ -137,7 +112,7 @@ class ExecutionResultTest {
   @Test
   void durationPreservedWhenPositive() {
     var d = Duration.ofMillis(123);
-    var result = new ExecutionResult("c", "o", "e", 0, false, java.util.Map.of(), d);
+    var result = new ExecutionResult("o", "e", 0, false, d);
     assertEquals(d, result.duration());
   }
 
@@ -156,19 +131,15 @@ class ExecutionResultTest {
 
   @Test
   void withDurationReturnsNewInstancePreservingOtherFields() {
-    var original =
-        new ExecutionResult(
-            "code", "stdout", "stderr", 7, true, java.util.Map.of("v", "1"), Duration.ZERO);
+    var original = new ExecutionResult("stdout", "stderr", 7, true, Duration.ZERO);
     var copy = original.withDuration(Duration.ofMillis(50));
 
     assertNotSame(original, copy, "withDuration must return a new instance (record immutability)");
     assertEquals(Duration.ofMillis(50), copy.duration());
-    assertEquals("code", copy.executedCode());
     assertEquals("stdout", copy.stdout());
     assertEquals("stderr", copy.stderr());
     assertEquals(7, copy.exitCode());
     assertTrue(copy.timedOut());
-    assertEquals(java.util.Map.of("v", "1"), copy.bindings());
   }
 
   @Test
@@ -198,26 +169,5 @@ class ExecutionResultTest {
   void failureFactoryHasZeroDuration() {
     assertSame(Duration.ZERO, ExecutionResult.failure("err").duration());
     assertSame(Duration.ZERO, ExecutionResult.failure("err", 137).duration());
-  }
-
-  @Test
-  void bindingsRejectANullNameOrRepr() {
-    var nullRepr = new LinkedHashMap<String, String>();
-    nullRepr.put("n", null);
-    var nullName = new LinkedHashMap<String, String>();
-    nullName.put(null, "5");
-
-    assertEquals(
-        "value of key n must not be null",
-        assertThrows(
-                NullPointerException.class,
-                () -> ExecutionResult.newBuilder().withBindings(nullRepr).build())
-            .getMessage());
-    assertEquals(
-        "key must not be null",
-        assertThrows(
-                NullPointerException.class,
-                () -> ExecutionResult.newBuilder().withBindings(nullName).build())
-            .getMessage());
   }
 }

@@ -40,13 +40,13 @@ public final class Redactor {
   private static final Redactor EMPTY = new Redactor(List.of(), List.of());
 
   private final List<String> patternNames;
-  private final List<byte[]> patterns;
   private final AhoCorasick automaton;
+  private final SecretPrefixes prefixes;
 
   private Redactor(List<String> patternNames, List<byte[]> patterns) {
     this.patternNames = patternNames;
-    this.patterns = patterns;
     this.automaton = AhoCorasick.build(patterns);
+    this.prefixes = new SecretPrefixes(patterns);
   }
 
   /** Build a redactor from a name-to-bytes map. Bytes must be pure ASCII. */
@@ -116,7 +116,7 @@ public final class Redactor {
    */
   public String trimPartialSecret(String text) {
     var bytes = text.getBytes(StandardCharsets.UTF_8);
-    return text.substring(0, text.length() - (bytes.length - keptLength(bytes)));
+    return text.substring(0, text.length() - (bytes.length - prefixes.keptLength(bytes)));
   }
 
   /**
@@ -126,27 +126,7 @@ public final class Redactor {
    * @return the input without its trailing partial secret; a fresh array
    */
   public byte[] trimPartialSecret(byte[] input) {
-    return Arrays.copyOf(input, keptLength(input));
-  }
-
-  private int keptLength(byte[] input) {
-    var end = input.length;
-    for (var cut = partialSecretAt(input, end); cut > 0; cut = partialSecretAt(input, end)) {
-      end -= cut;
-    }
-    return end;
-  }
-
-  private int partialSecretAt(byte[] input, int end) {
-    var longest = 0;
-    for (var pattern : patterns) {
-      for (var k = Math.min(pattern.length - 1, end); k > longest; k--) {
-        if (Arrays.equals(input, end - k, end, pattern, 0, k)) {
-          longest = k;
-        }
-      }
-    }
-    return longest;
+    return Arrays.copyOf(input, prefixes.keptLength(input));
   }
 
   /** Number of registered patterns this redactor matches against. */

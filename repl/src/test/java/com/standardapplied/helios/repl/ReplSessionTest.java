@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
@@ -22,12 +21,8 @@ import com.standardapplied.helios.repl.sandbox.Sandbox;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.BrokenBarrierException;
-import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 class ReplSessionTest {
@@ -110,7 +105,6 @@ class ReplSessionTest {
     var result = session.execute("1 + 1");
 
     assertEquals("ok", result.stdout());
-    assertEquals(1, session.history().size());
 
     session.close();
   }
@@ -131,13 +125,6 @@ class ReplSessionTest {
 
     assertThrows(ReplException.class, () -> session.execute("code"));
 
-    session.close();
-  }
-
-  @Test
-  void historyIsUnmodifiable() {
-    var session = ReplSession.create(configWith(new FakeSandbox()), new Semaphore(1));
-    assertThrows(UnsupportedOperationException.class, () -> session.history().clear());
     session.close();
   }
 
@@ -292,126 +279,6 @@ class ReplSessionTest {
     session.close();
   }
 
-  @Test
-  void executedCodeTruncatedAtCap() {
-    // 1.1.5 ask #3: ExecutionResult.executedCode is capped per ReplConfig.maxExecutedCodeChars.
-    // Truncation appends "... (len=N)" so consumers know the original length.
-    var sandbox = new EchoSandbox();
-    var config =
-        ReplConfig.newBuilder()
-            .withSandboxFactory(registry -> sandbox)
-            .withExecutionTimeout(Duration.ofSeconds(1))
-            .withMaxExecutedCodeChars(20)
-            .build();
-    var session = ReplSession.create(config, new Semaphore(1));
-
-    var bigCode = "var x = " + "a".repeat(100) + ";";
-    var result = session.execute(bigCode);
-
-    assertTrue(
-        result.executedCode().length() <= 50,
-        "truncated length should be ~cap+marker, got len=" + result.executedCode().length());
-    assertTrue(result.executedCode().contains("(len=" + bigCode.length() + ")"));
-    assertTrue(result.executedCode().startsWith("var x = a"));
-    session.close();
-  }
-
-  @Test
-  void executedCodePreservedWhenUnderCap() {
-    var sandbox = new EchoSandbox();
-    var config =
-        ReplConfig.newBuilder()
-            .withSandboxFactory(registry -> sandbox)
-            .withExecutionTimeout(Duration.ofSeconds(1))
-            .withMaxExecutedCodeChars(5000)
-            .build();
-    var session = ReplSession.create(config, new Semaphore(1));
-
-    var smallCode = "var x = 1;";
-    var result = session.execute(smallCode);
-
-    assertEquals(smallCode, result.executedCode(), "code under cap is returned verbatim");
-    session.close();
-  }
-
-  @Test
-  void executedCodeNoTruncationWhenCapIsZero() {
-    var sandbox = new EchoSandbox();
-    var config =
-        ReplConfig.newBuilder()
-            .withSandboxFactory(registry -> sandbox)
-            .withExecutionTimeout(Duration.ofSeconds(1))
-            .withMaxExecutedCodeChars(0) // disabled
-            .build();
-    var session = ReplSession.create(config, new Semaphore(1));
-
-    var bigCode = "x".repeat(50_000);
-    var result = session.execute(bigCode);
-
-    assertEquals(bigCode, result.executedCode(), "cap=0 disables truncation");
-    session.close();
-  }
-
-  @Test
-  void executedCodeCapKeepsTheRestOfTheResult() {
-    var code = "x".repeat(30);
-    var timedOut =
-        new ExecutionResult(
-            code, "partial", "Execution timed out", 1, true, Map.of("v", "1"), Duration.ZERO);
-    var config =
-        ReplConfig.newBuilder()
-            .withSandboxFactory(registry -> new FixedSandbox(timedOut))
-            .withMaxExecutedCodeChars(20)
-            .build();
-    var session = ReplSession.create(config, new Semaphore(1));
-
-    var result = session.execute(code);
-
-    assertEquals(
-        new ExecutionResult(
-            "x".repeat(20) + "... (len=30)",
-            "partial",
-            "Execution timed out",
-            1,
-            true,
-            Map.of("v", "1"),
-            result.duration()),
-        result);
-    session.close();
-  }
-
-  /** Sandbox that answers every execute with the same result. */
-  private record FixedSandbox(ExecutionResult result) implements Sandbox {
-    @Override
-    public ExecutionResult execute(ExecutionRequest request) {
-      return result;
-    }
-
-    @Override
-    public boolean isAlive() {
-      return true;
-    }
-
-    @Override
-    public void close() {}
-  }
-
-  /** Sandbox that echoes the request's code into the result's executedCode field. */
-  private static class EchoSandbox implements Sandbox {
-    @Override
-    public ExecutionResult execute(ExecutionRequest request) {
-      return ExecutionResult.newBuilder().withExecutedCode(request.code()).withStdout("ok").build();
-    }
-
-    @Override
-    public boolean isAlive() {
-      return true;
-    }
-
-    @Override
-    public void close() {}
-  }
-
   /**
    * Sandbox that runs a configurable behavior against the registry on each execute. Lets tests
    * simulate the model emitting code that calls registered host functions, so we can drive
@@ -458,67 +325,6 @@ class ReplSessionTest {
     assertFalse(
         result.duration().isZero(),
         "System.nanoTime delta around the sandbox call should be > 0 ns");
-    session.close();
-  }
-
-  @Test
-  void bindingsListenerThatThrowsDoesNotFailTheExecute() {
-    var config =
-        ReplConfig.newBuilder()
-            .withSandboxFactory(registry -> new FakeSandbox())
-            .withSandboxBindingsListener(
-                (bindings, result) -> {
-                  throw new IllegalStateException("listener broke");
-                })
-            .build();
-    var session = ReplSession.create(config, new Semaphore(1));
-
-    var result = session.execute("x");
-
-    assertEquals(List.of(result), session.history());
-    session.close();
-  }
-
-  @Test
-  void multipleExecutionsAccumulate() {
-    var session = ReplSession.create(configWith(new FakeSandbox()), new Semaphore(1));
-
-    session.execute("a");
-    session.execute("b");
-    session.execute("c");
-
-    assertEquals(3, session.history().size());
-
-    session.close();
-  }
-
-  @Test
-  void concurrentExecutesAllLandInHistory() {
-    var callers = 256;
-    var allInsideTheSandbox = new CyclicBarrier(callers);
-    var sandbox =
-        new FakeSandbox() {
-          @Override
-          public ExecutionResult execute(ExecutionRequest request) {
-            try {
-              allInsideTheSandbox.await();
-            } catch (InterruptedException | BrokenBarrierException e) {
-              throw new IllegalStateException(e);
-            }
-            return super.execute(request);
-          }
-        };
-    var session = ReplSession.create(configWith(sandbox), new Semaphore(1));
-
-    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-      var executions =
-          IntStream.range(0, callers)
-              .mapToObj(i -> executor.submit(() -> session.execute("call " + i)))
-              .toList();
-      executions.forEach(execution -> Await.value("a concurrent execute", execution));
-    }
-
-    assertEquals(callers, session.history().size());
     session.close();
   }
 

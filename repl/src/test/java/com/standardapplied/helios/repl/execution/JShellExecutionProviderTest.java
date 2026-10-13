@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,7 +18,6 @@ import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.repl.ReplConfig;
 import com.standardapplied.helios.repl.ReplException;
-import com.standardapplied.helios.repl.sandbox.ExecuteParams;
 import com.standardapplied.helios.repl.sandbox.Sandbox;
 import com.standardapplied.helios.session.execution.ExecutionRequest;
 import com.standardapplied.helios.session.execution.ExecutionResult;
@@ -98,12 +96,6 @@ final class JShellExecutionProviderTest {
     }
 
     @Override
-    public com.standardapplied.helios.repl.sandbox.ExecutionResult execute(
-        com.standardapplied.helios.repl.sandbox.ExecutionRequest request, ExecuteParams params) {
-      return execute(request);
-    }
-
-    @Override
     public boolean isAlive() {
       return closed.getCount() > 0;
     }
@@ -172,23 +164,6 @@ final class JShellExecutionProviderTest {
         assertThrows(
             IllegalArgumentException.class, () -> b.withMaxTimeout(Duration.ofSeconds(-1)));
     assertEquals("maxTimeout must be strictly positive, got PT-1S", ex.getMessage());
-  }
-
-  @Test
-  void secretRegistryIsTheConfiguredOneOrAFreshEmptyOne() {
-    var registry = new SecretRegistry();
-    try (var configured =
-            JShellExecutionProvider.newBuilder()
-                .withReplConfig(configWithSandbox(new StubSandbox()))
-                .withSecretRegistry(registry)
-                .withShutdownHook(false)
-                .build();
-        var defaulted = providerFor(new StubSandbox())) {
-      assertSame(registry, configured.secretRegistry());
-      assertNotNull(defaulted.secretRegistry());
-      assertNotSame(registry, defaulted.secretRegistry());
-      assertEquals(0, defaulted.secretRegistry().size());
-    }
   }
 
   @Test
@@ -628,7 +603,7 @@ final class JShellExecutionProviderTest {
     var sandbox = new StubSandbox();
     try (var provider = providerFor(sandbox)) {
       var token = new CancellationToken();
-      var session = new SessionContext("scoped", token, Clock.systemUTC());
+      var session = new SessionContext("scoped", token, Clock.systemUTC(), new SecretRegistry());
       provider.onSessionStart(session);
       assertEquals(1, provider.liveSessionCount());
 

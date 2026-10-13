@@ -33,7 +33,7 @@ class BootstrapRepliesTest {
   }
 
   @Test
-  void executeIsAnsweredWithItsOutputExitCodeAndBindings() {
+  void executeIsAnsweredWithItsOutputAndExitCode() {
     env.feedLine(
         "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"execute\",\"params\":{\"code\":\"var x = 6"
             + " * 7; System.out.println(x);\",\"timeoutMs\":"
@@ -43,7 +43,7 @@ class BootstrapRepliesTest {
     assertEquals(
         PREFIX
             + "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"stdout\":\"42\\n\",\"stderr\":\"\","
-            + "\"exitCode\":0,\"timedOut\":false,\"bindings\":{\"x\":\"42\"}}}",
+            + "\"exitCode\":0,\"timedOut\":false}}",
         env.nextLine());
   }
 
@@ -53,7 +53,7 @@ class BootstrapRepliesTest {
         "{\"jsonrpc\":\"2.0\",\"id\":\"2\",\"method\":\"execute\",\"params\":{\"code\":\"int y ="
             + " \\\"text\\\";\",\"timeoutMs\":"
             + BEYOND_HANG_GUARD_MS
-            + ",\"captureBindings\":false}}");
+            + "}}");
 
     assertEquals(
         PREFIX
