@@ -69,7 +69,7 @@ public final class ToolCallJournaling {
    */
   public void complete(UUID runId, String toolCallId, ToolResult toolResult) {
     try {
-      if (toolResult.success()) {
+      if (toolResult.succeeded()) {
         durability.toolCallJournal().complete(runId, toolCallId, toolResult.output());
       } else {
         durability.toolCallJournal().fail(runId, toolCallId, toolResult.output());

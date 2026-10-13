@@ -73,7 +73,7 @@ class ToolTest {
 
     var result = tool.execute(Map.of("a", 5, "b", 3), ToolContext.noop());
 
-    assertTrue(result.success());
+    assertTrue(result.succeeded());
     assertEquals("8", result.output());
   }
 
@@ -91,8 +91,8 @@ class ToolTest {
 
     var result = tool.execute(Map.of(), ToolContext.noop());
 
-    assertFalse(result.success());
-    assertTrue(result.output().contains("Tool execution failed"));
+    assertEquals(new ToolOutcome.Threw("java.lang.RuntimeException"), result.outcome());
+    assertEquals("tool 'fail' threw: Intentional failure", result.output());
   }
 
   @Test
@@ -412,7 +412,7 @@ class ToolTest {
     assertFalse(Thread.currentThread().isInterrupted(), "test precondition");
     try {
       var result = tool.execute(Map.of(), ToolContext.noop());
-      assertFalse(result.success());
+      assertFalse(result.succeeded());
       assertTrue(
           Thread.currentThread().isInterrupted(),
           "InterruptedException-as-cause in the executor must leave the calling thread's interrupt"
@@ -436,7 +436,7 @@ class ToolTest {
             .build();
     assertFalse(Thread.currentThread().isInterrupted(), "test precondition");
     var result = tool.execute(Map.of(), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertFalse(
         Thread.currentThread().isInterrupted(),
         "non-Interrupted failures must not spuriously set the calling thread's interrupt flag");

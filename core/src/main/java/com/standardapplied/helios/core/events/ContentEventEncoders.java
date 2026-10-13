@@ -55,7 +55,8 @@ final class ContentEventEncoders {
 
   static void toolCallCompleted(ToolCallCompleted e, JsonObjectWriter json, boolean full) {
     json.string("toolCallId", e.toolCallId())
-        .bool("success", e.result().success())
+        .bool("success", e.result().succeeded())
+        .string("outcome", e.result().outcome().getClass().getSimpleName())
         .number("tookNanos", e.took().toNanos());
   }
 

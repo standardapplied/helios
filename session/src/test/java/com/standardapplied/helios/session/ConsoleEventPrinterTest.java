@@ -72,7 +72,7 @@ final class ConsoleEventPrinterTest {
             + nl
             + "[result] Read ok"
             + nl
-            + "[result] Read FAILED: nope"
+            + "[result] Read Failed: nope"
             + nl
             + "[blocked] Read: denied"
             + nl

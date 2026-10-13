@@ -7,17 +7,26 @@ package com.standardapplied.helios.core.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.InlineFile;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ToolResultTest {
+
+  private static final InlineFile PNG =
+      InlineFile.of(new byte[] {(byte) 0x89, 'P', 'N', 'G'}, "image/png");
 
   @Test
   void successWithOutput() {
     var result = ToolResult.success("Done!");
 
-    assertTrue(result.success());
+    assertEquals(new ToolOutcome.Succeeded(), result.outcome());
+    assertTrue(result.succeeded());
     assertEquals("Done!", result.output());
   }
 
@@ -25,37 +34,62 @@ class ToolResultTest {
   void failureWithMessage() {
     var result = ToolResult.failure("Something went wrong");
 
-    assertFalse(result.success());
+    assertEquals(new ToolOutcome.Failed(), result.outcome());
+    assertFalse(result.succeeded());
     assertEquals("Something went wrong", result.output());
   }
 
   @Test
-  void failureWithCause() {
-    var cause = new RuntimeException("Root cause");
-    var result = ToolResult.failure("Operation failed", cause);
+  void threwNamesTheToolTheCauseTypeAndItsMessage() {
+    var result = ToolResult.threw("search", new IllegalStateException("index offline"));
 
-    assertFalse(result.success());
-    assertEquals("Operation failed: Root cause", result.output());
+    assertEquals(new ToolOutcome.Threw("java.lang.IllegalStateException"), result.outcome());
+    assertFalse(result.succeeded());
+    assertEquals("tool 'search' threw: index offline", result.output());
   }
 
   @Test
-  void failureWithNullCause() {
-    var result = ToolResult.failure("Operation failed", null);
+  void threwWithoutAMessageNamesTheCauseSimpleClassName() {
+    var result = ToolResult.threw("search", new StackOverflowError());
 
-    assertFalse(result.success());
-    assertEquals("Operation failed", result.output());
+    assertEquals(new ToolOutcome.Threw("java.lang.StackOverflowError"), result.outcome());
+    assertEquals("tool 'search' threw: StackOverflowError", result.output());
   }
 
   @Test
-  void failureWithCauseNoMessage() {
-    var cause = new RuntimeException();
-    var result = ToolResult.failure("Operation failed", cause);
+  void timedOutCarriesTheLimit() {
+    var result = ToolResult.timedOut("search", Duration.ofMinutes(1));
 
-    assertFalse(result.success());
-    assertEquals("Operation failed", result.output());
+    assertEquals(new ToolOutcome.TimedOut(Duration.ofMinutes(1)), result.outcome());
+    assertFalse(result.succeeded());
+    assertEquals("tool 'search' timed out after PT1M", result.output());
   }
 
-  // ── Layer 2: multimodal attachments ────────────────────────────────────
+  @Test
+  void notFoundNamesTheTool() {
+    var result = ToolResult.notFound("serch");
+
+    assertEquals(new ToolOutcome.NotFound(), result.outcome());
+    assertFalse(result.succeeded());
+    assertEquals("tool not found: serch", result.output());
+  }
+
+  @Test
+  void rejectedNamesTheHookAndReason() {
+    var result = ToolResult.rejected("AuditHook", "not allowed");
+
+    assertEquals(new ToolOutcome.Rejected("AuditHook", "not allowed"), result.outcome());
+    assertFalse(result.succeeded());
+    assertEquals("blocked by AuditHook: not allowed", result.output());
+  }
+
+  @Test
+  void withOutputReplacesOnlyTheOutput() {
+    var original =
+        new ToolResult(new ToolOutcome.Failed(), "original", List.of(PNG)).withOutput("rewritten");
+
+    assertEquals(new ToolResult(new ToolOutcome.Failed(), "rewritten", List.of(PNG)), original);
+  }
 
   @Test
   void successByDefaultHasNoAttachments() {
@@ -73,45 +107,44 @@ class ToolResultTest {
 
   @Test
   void successWithAttachmentsCarriesInlineFiles() {
-    var png =
-        com.standardapplied.helios.core.model.InlineFile.of(
-            new byte[] {(byte) 0x89, 'P', 'N', 'G'}, "image/png");
     var result =
-        ToolResult.successWithAttachments(
-            "Returned image/png for inspection.", java.util.List.of(png));
-    assertTrue(result.success());
+        ToolResult.successWithAttachments("Returned image/png for inspection.", List.of(PNG));
+    assertTrue(result.succeeded());
     assertTrue(result.hasAttachments());
-    assertEquals(1, result.attachments().size());
-    assertEquals("image/png", result.attachments().getFirst().mimeType());
+    assertEquals(List.of(PNG), result.attachments());
   }
 
   @Test
   void successWithAttachmentsDefensivelyCopies() {
-    var png =
-        com.standardapplied.helios.core.model.InlineFile.of(
-            new byte[] {(byte) 0x89, 'P', 'N', 'G'}, "image/png");
-    var mutable = new java.util.ArrayList<com.standardapplied.helios.core.model.InlineFile>();
-    mutable.add(png);
+    var mutable = new ArrayList<InlineFile>();
+    mutable.add(PNG);
     var result = ToolResult.successWithAttachments("note", mutable);
     mutable.clear();
     assertEquals(1, result.attachments().size(), "subsequent mutation of input list must not leak");
-    org.junit.jupiter.api.Assertions.assertThrows(
+    assertThrows(
         UnsupportedOperationException.class,
-        () -> result.attachments().add(png),
+        () -> result.attachments().add(PNG),
         "attachments must be unmodifiable");
+  }
+
+  @Test
+  void canonicalConstructorRejectsNullOutcome() {
+    var npe = assertThrows(NullPointerException.class, () -> new ToolResult(null, "", List.of()));
+    assertEquals("outcome must not be null", npe.getMessage());
   }
 
   @Test
   void canonicalConstructorRejectsNullOutput() {
     var npe =
-        org.junit.jupiter.api.Assertions.assertThrows(
-            NullPointerException.class, () -> new ToolResult(true, null, java.util.List.of()));
+        assertThrows(
+            NullPointerException.class,
+            () -> new ToolResult(new ToolOutcome.Succeeded(), null, List.of()));
     assertTrue(npe.getMessage().contains("output"), npe.getMessage());
   }
 
   @Test
   void canonicalConstructorAcceptsNullAttachmentsAsEmpty() {
-    var result = new ToolResult(true, "text", null);
+    var result = new ToolResult(new ToolOutcome.Succeeded(), "text", null);
     assertFalse(result.hasAttachments());
     assertEquals(0, result.attachments().size());
   }

@@ -30,6 +30,8 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 final class ToolDispatchTest {
 
@@ -158,14 +160,25 @@ final class ToolDispatchTest {
     assertEquals("cancellation must not be null", ex.getMessage());
   }
 
+  @ParameterizedTest
+  @ValueSource(longs = {0, -1})
+  void dispatchRejectsANonPositiveTimeout(long millis) {
+    var d = new ToolDispatch(CTX, ToolRegistry.empty(), ConcurrencyLimits.defaults());
+    var call = new ToolCall("c", "read", Map.of());
+    var timeout = Duration.ofMillis(millis);
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> d.dispatch(call, new CancellationToken(), timeout));
+    assertEquals("timeout must be positive, got " + timeout, ex.getMessage());
+  }
+
   @Test
-  void unknownToolReturnsFailure() {
+  void unknownToolReturnsNotFound() {
     var d = new ToolDispatch(CTX, ToolRegistry.empty(), ConcurrencyLimits.defaults());
     var call = new ToolCall("c", "nope", Map.of());
     var result = d.dispatch(call, new CancellationToken(), DEFAULT_TIMEOUT);
-    assertFalse(result.success());
-    assertTrue(result.output().contains("tool not found"));
-    assertTrue(result.output().contains("nope"));
+    assertEquals(ToolResult.notFound("nope"), result);
   }
 
   @Test
@@ -191,7 +204,7 @@ final class ToolDispatchTest {
             new ToolCall("c", "echo", Map.of("v", "hello")),
             new CancellationToken(),
             DEFAULT_TIMEOUT);
-    assertTrue(result.success());
+    assertTrue(result.succeeded());
     assertEquals("echoed: hello", result.output());
   }
 
@@ -202,7 +215,7 @@ final class ToolDispatchTest {
     var d = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
     var result =
         d.dispatch(new ToolCall("c", "bad", Map.of()), new CancellationToken(), DEFAULT_TIMEOUT);
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertEquals("intentional", result.output());
   }
 

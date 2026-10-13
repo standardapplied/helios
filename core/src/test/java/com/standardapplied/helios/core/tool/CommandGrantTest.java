@@ -163,7 +163,7 @@ class CommandGrantTest {
             .execute(
                 Map.of("args", List.of("-c", ": > marker")), sessionWith(new SecretRegistry()));
 
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertEquals(
         "CommandGrant bash was built with a different SecretRegistry than session grant-session;"
             + " build it with the registry passed to SessionOptions.withSecretRegistry",
@@ -178,7 +178,7 @@ class CommandGrantTest {
     var result =
         grant.toTool().execute(Map.of("args", List.of("-c", ": > marker")), sessionOf(grant));
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertTrue(Files.exists(tmp.resolve("marker")));
   }
 
@@ -303,7 +303,7 @@ class CommandGrantTest {
     var tool = grant.toTool();
     var result =
         tool.execute(Map.of("args", List.of("-c", "echo err 1>&2; echo out")), sessionOf(grant));
-    assertTrue(result.success());
+    assertTrue(result.succeeded());
     assertTrue(result.output().contains("out"));
     assertFalse(result.output().contains("err"));
   }
@@ -324,7 +324,7 @@ class CommandGrantTest {
     var grant = bash().build();
     var tool = grant.toTool();
     var result = tool.execute(Map.of(), sessionOf(grant));
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("array of strings"));
   }
 
@@ -333,7 +333,7 @@ class CommandGrantTest {
     var grant = bash().build();
     var tool = grant.toTool();
     var result = tool.execute(Map.of("args", List.of(1, 2)), sessionOf(grant));
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("must be a string"));
   }
 
@@ -343,7 +343,7 @@ class CommandGrantTest {
     var tool = grant.toTool();
     var result = tool.execute(Map.of("args", List.of("-c", "sleep 30")), sessionOf(grant));
     assertTrue(result.output().contains("TIMEOUT"));
-    assertTrue(result.success());
+    assertTrue(result.succeeded());
   }
 
   @Test
@@ -362,7 +362,7 @@ class CommandGrantTest {
     var grant = bash().withArgValidator(args -> Optional.of("nope")).build();
     var tool = grant.toTool();
     var result = tool.execute(Map.of("args", List.of("-c", "echo hi")), sessionOf(grant));
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("nope"));
   }
 
@@ -498,7 +498,7 @@ class CommandGrantTest {
     var grant = bash().withStderrToModel(true).build();
     var tool = grant.toTool();
     var result = tool.execute(Map.of("args", List.of("-c", "echo only-stdout")), sessionOf(grant));
-    assertTrue(result.success());
+    assertTrue(result.succeeded());
     assertTrue(result.output().contains("only-stdout"));
     assertFalse(result.output().contains("[stderr]"));
   }
@@ -551,7 +551,7 @@ class CommandGrantTest {
 
     var interrupted = Await.value("the interrupted invocation", result);
     release(tmp);
-    assertFalse(interrupted.success());
+    assertFalse(interrupted.succeeded());
     assertTrue(interrupted.output().contains("Interrupted"));
   }
 
@@ -565,7 +565,7 @@ class CommandGrantTest {
     Files.delete(fakeBin);
     var tool = grant.toTool();
     var result = tool.execute(Map.of("args", List.of()), sessionOf(grant));
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("I/O error"));
   }
 }

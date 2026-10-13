@@ -44,7 +44,7 @@ final class GlobToolTest {
             .tool()
             .execute(Map.of("pattern", "**/*.md"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     var out = result.output();
     assertTrue(out.contains("intro.md"), "root-level intro.md must match '**/*.md': " + out);
     assertTrue(out.contains("guide.md"), "root-level guide.md must match '**/*.md': " + out);
@@ -66,7 +66,7 @@ final class GlobToolTest {
             .tool()
             .execute(Map.of("pattern", "*.md"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     var out = result.output();
     assertTrue(out.contains("intro.md"), "root intro.md must match bare '*.md': " + out);
     assertFalse(out.contains("deep.md"), "nested deep.md must NOT match bare '*.md': " + out);
@@ -84,7 +84,7 @@ final class GlobToolTest {
             .tool()
             .execute(Map.of("pattern", "**/*.java"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     var out = result.output();
     assertTrue(out.contains("src/main/Foo.java"), out);
     assertTrue(out.contains("src/main/Bar.java"), out);
@@ -113,7 +113,7 @@ final class GlobToolTest {
             .tool()
             .execute(Map.of("pattern", "*.txt"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     var out = result.output();
     assertTrue(out.indexOf("newer.txt") < out.indexOf("older.txt"), out);
   }
@@ -130,7 +130,7 @@ final class GlobToolTest {
             .tool()
             .execute(Map.of("pattern", "*.java", "path", "a"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertTrue(result.output().contains("a/match.java"), result.output());
     assertFalse(result.output().contains("b/match.java"));
   }
@@ -146,7 +146,7 @@ final class GlobToolTest {
             .tool()
             .execute(Map.of("pattern", "*"), ToolContext.noop());
 
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertTrue(result.output().contains("visible.txt"), result.output());
     assertFalse(result.output().contains("HEAD"));
   }
@@ -155,7 +155,7 @@ final class GlobToolTest {
   void missingPatternFails(@TempDir Path tmp) {
     var result =
         GlobTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of(), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("missing required 'pattern'"), result.output());
   }
 
@@ -166,7 +166,7 @@ final class GlobToolTest {
         GlobTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "*", "path", "file.txt"), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("not a directory"), result.output());
   }
 
@@ -176,7 +176,7 @@ final class GlobToolTest {
         GlobTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "*", "path", "absent"), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().startsWith("Glob: I/O error scanning absent: "), result.output());
   }
 
@@ -186,7 +186,7 @@ final class GlobToolTest {
         GlobTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "[unclosed"), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().contains("Glob: invalid pattern"), result.output());
   }
 
@@ -196,7 +196,7 @@ final class GlobToolTest {
         GlobTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "*", "path", "../etc"), ToolContext.noop());
-    assertFalse(result.success());
+    assertFalse(result.succeeded());
     assertTrue(result.output().startsWith("Glob:"), result.output());
   }
 
@@ -227,7 +227,7 @@ final class GlobToolTest {
         GlobTool.binding(WorkspaceRoot.of(root))
             .tool()
             .execute(Map.of("pattern", "**/*.md"), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertEquals("real.md\n", result.output());
   }
 
@@ -240,7 +240,7 @@ final class GlobToolTest {
         GlobTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "*.md"), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     var lines = result.output().split("\n");
     assertEquals(1001, lines.length);
     assertEquals("[truncated at 1000 results]", lines[1000]);
@@ -256,7 +256,7 @@ final class GlobToolTest {
         GlobTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "*.md"), ToolContext.noop());
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertTrue(result.output().endsWith(".md\n[truncated at 1000 results]\n"), result.output());
   }
 
@@ -269,7 +269,7 @@ final class GlobToolTest {
         GlobTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("pattern", "*.md"), ToolContext.of(session, Duration.ofMinutes(1)));
-    assertTrue(result.success(), result.output());
+    assertTrue(result.succeeded(), result.output());
     assertEquals("", result.output());
   }
 }

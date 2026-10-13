@@ -18,6 +18,7 @@ import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
@@ -200,7 +201,10 @@ final class TurnRunnerToolDispatchTest {
                 .filter(e -> e instanceof QueryEvent.ToolResult)
                 .findFirst()
                 .orElseThrow();
-    assertTrue(toolResult.result().output().startsWith("tool dispatch failed:"));
+    assertEquals(
+        new ToolOutcome.Threw("java.util.concurrent.CancellationException"),
+        toolResult.result().outcome());
+    assertEquals("tool 'echo' threw: user-stop", toolResult.result().output());
   }
 
   @Test
@@ -229,7 +233,10 @@ final class TurnRunnerToolDispatchTest {
             .findFirst()
             .orElseThrow();
     assertEquals(
-        "tool dispatch failed: stopped holding <redacted:API_KEY>", toolResult.result().output());
+        "tool 'echo' threw: stopped holding <redacted:API_KEY>", toolResult.result().output());
+    assertEquals(
+        new ToolOutcome.Threw("java.util.concurrent.CancellationException"),
+        toolResult.result().outcome());
     assertEquals(Map.of("API_KEY", 1), toolResult.redactions());
   }
 
