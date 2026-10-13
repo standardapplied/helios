@@ -733,6 +733,21 @@ class StreamingIteratorTest {
   }
 
   @Test
+  void aCompletionWhileANamelessFunctionCallIsOpenIsAnError() {
+    var sse =
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,"
+            + "\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\"}}\n\n"
+            + "data: {\"type\":\"response.function_call_arguments.delta\","
+            + "\"item_id\":\"fc_1\",\"delta\":\"{\"}\n\n"
+            + RESPONSE_COMPLETED;
+
+    var error = assertInstanceOf(StreamEvent.Error.class, drain(sse).getLast());
+
+    assertEquals("Response ended while function call '<unnamed>' is still open", error.message());
+    assertEquals(List.of(), error.partial().toolCalls());
+  }
+
+  @Test
   void theFinalArgumentsOfTheDoneEventWinOverWhatStreamedAndKeepAJsonNull() {
     var sse =
         "data: {\"type\":\"response.output_item.added\",\"output_index\":0,"

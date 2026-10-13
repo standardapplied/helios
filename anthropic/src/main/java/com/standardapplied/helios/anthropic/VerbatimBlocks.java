@@ -7,6 +7,7 @@ import com.standardapplied.helios.anthropic.api.ContentBlock;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -72,11 +73,16 @@ final class VerbatimBlocks implements RawContentEcho.Source {
     return true;
   }
 
-  /** The name of a server tool use still open, or {@code null} when none is. */
+  /**
+   * The name of a server tool use still open, {@code <unnamed>} when it has none, or {@code null}
+   * when none is open.
+   */
   String open() {
     return serverToolInputs.isEmpty()
         ? null
-        : (String) blocks.get(serverToolInputs.keySet().iterator().next()).get("name");
+        : Objects.requireNonNullElse(
+            (String) blocks.get(serverToolInputs.keySet().iterator().next()).get("name"),
+            "<unnamed>");
   }
 
   /** Whether the turn held a verbatim block. */
