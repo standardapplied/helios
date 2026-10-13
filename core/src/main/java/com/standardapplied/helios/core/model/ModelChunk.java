@@ -24,10 +24,9 @@ import java.util.Objects;
  *
  * <h2>Relationship to {@code StreamEvent}</h2>
  *
- * Coexists with the iterator-shaped {@link StreamEvent} that older non-session callers consume. The
- * v2 session loop consumes {@code Flow.Publisher<ModelChunk>} via {@link
- * Model#chatStream(java.util.List, java.util.List,
- * com.standardapplied.helios.core.runtime.CancellationToken)}.
+ * {@link StreamEvent} is what a provider's stream parser reads off the wire; a provider's model
+ * turns those events into these chunks, the one stream {@link Model#chatStream(java.util.List,
+ * java.util.List, com.standardapplied.helios.core.runtime.CancellationToken)} publishes.
  */
 public sealed interface ModelChunk
     permits ModelChunk.TextDelta,
@@ -156,6 +155,37 @@ public sealed interface ModelChunk
     /** Convenience for callers that supply metadata but no grounding citations. */
     public MessageStop(String stopReason, Usage usage, Map<String, String> metadata) {
       this(stopReason, usage, metadata, List.of());
+    }
+
+    /**
+     * The message stop ending a stream that answered with {@code response}: its finish reason
+     * ({@link FinishReason#STOP} when unset), usage (zero when unset), metadata and citations.
+     *
+     * @param response the finished response
+     * @return its message stop
+     */
+    public static MessageStop of(Response<?> response) {
+      return new MessageStop(
+          response.finishReason() != null
+              ? response.finishReason().name()
+              : FinishReason.STOP.name(),
+          response.usage() != null ? response.usage() : Usage.of(0, 0),
+          response.metadata() != null ? response.metadata() : Map.of(),
+          response.citations() != null ? response.citations() : List.of());
+    }
+
+    /**
+     * The stop reason as a {@link FinishReason}: the constant it names, else {@link
+     * FinishReason#STOP} for a provider's own spelling of a normal end.
+     *
+     * @return the finish reason
+     */
+    public FinishReason finishReason() {
+      try {
+        return FinishReason.valueOf(stopReason);
+      } catch (IllegalArgumentException providerSpelling) {
+        return FinishReason.STOP;
+      }
     }
   }
 

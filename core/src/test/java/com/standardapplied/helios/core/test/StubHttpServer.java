@@ -142,7 +142,7 @@ public final class StubHttpServer implements AutoCloseable {
     return new Request(requestLine, Map.copyOf(headers), body);
   }
 
-  private static String readLine(InputStream in) throws IOException {
+  static String readLine(InputStream in) throws IOException {
     var line = new ByteArrayOutputStream();
     for (var b = in.read(); b != '\n'; b = in.read()) {
       if (b == -1) {

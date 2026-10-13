@@ -12,6 +12,7 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolChoice;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
@@ -86,7 +87,8 @@ public abstract class ModelIntegrationContract {
   @Test
   void simpleChat() {
     Accepted.textReply(
-        model().chat(List.of(Message.user("What is 2 + 2? Reply with just the number."))));
+        model()
+            .chat(List.of(Message.user("What is 2 + 2? Reply with just the number.")), List.of()));
   }
 
   @Test
@@ -96,12 +98,12 @@ public abstract class ModelIntegrationContract {
             Message.system("You are a pirate. Always respond in pirate speak."),
             Message.user("Hello, how are you?"));
 
-    Accepted.textReply(model().chat(messages));
+    Accepted.textReply(model().chat(messages, List.of()));
   }
 
   @Test
   void chatWithUsageStats() {
-    var response = model().chat(List.of(Message.user("Say hello")));
+    var response = model().chat(List.of(Message.user("Say hello")), List.of());
 
     assertNotNull(response.usage());
     assertTrue(response.usage().inputTokens() > 0);
@@ -113,7 +115,8 @@ public abstract class ModelIntegrationContract {
   void streamingChat() {
     var messages = List.of(Message.user("Count from 1 to 5, one number per line."));
 
-    Accepted.textReply(Accepted.stream(model().chatStream(messages, List.of())));
+    Accepted.textReply(
+        Accepted.stream(model().chatStream(messages, List.of(), new CancellationToken())));
   }
 
   @Test
@@ -154,12 +157,12 @@ public abstract class ModelIntegrationContract {
   void multiTurnConversation() {
     var messages = new ArrayList<Message>();
     messages.add(Message.user("My name is Alice."));
-    var response1 = Accepted.textReply(model().chat(messages));
+    var response1 = Accepted.textReply(model().chat(messages, List.of()));
 
     messages.add(Message.assistant(response1.content()));
     messages.add(Message.user("What is my name?"));
 
-    Accepted.textReply(model().chat(messages));
+    Accepted.textReply(model().chat(messages, List.of()));
   }
 
   @Test
@@ -218,7 +221,8 @@ public abstract class ModelIntegrationContract {
             Message.user(
                 "Extract the person info: John Smith is a 35-year-old software engineer."));
 
-    Supplier<Response<Person>> call = () -> model().chat(messages, OutputSchema.of(Person.class));
+    Supplier<Response<Person>> call =
+        () -> model().chat(messages, List.of(), OutputSchema.of(Person.class));
     var response =
         unconstrainedStructuredOutputCounterpart()
             .map(counterpart -> Accepted.parsedOrSkip(expectedId, counterpart, call))

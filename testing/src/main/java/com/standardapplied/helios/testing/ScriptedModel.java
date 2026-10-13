@@ -5,6 +5,7 @@
 
 package com.standardapplied.helios.testing;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -28,8 +29,8 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * A deterministic {@link Model} that replays a fixed script of turns. Each model call consumes the
  * next scripted turn in order; when the script is exhausted the model fails fast so a test never
- * silently loops. A response turn answers {@code chat}, and {@code chatStream} through the chunk
- * sequence {@link Model}'s default synthesises from it; a stream turn ({@link
+ * silently loops. A response turn answers {@code chat}, and {@code chatStream} as the chunk
+ * sequence {@link BlockingModel#publisherOf} publishes from it; a stream turn ({@link
  * Builder#withStreamTurn}) answers {@code chatStream} with its publisher verbatim and fails a
  * {@code chat} call. Structured-output calls run the scripted text through the real {@link
  * StructuredContentParser} path, so schema mismatches surface exactly as they would against a live
@@ -79,7 +80,47 @@ public final class ScriptedModel implements Model {
   public <T> Response<T> chat(
       List<Message> messages, List<Tool> tools, OutputSchema<T> outputSchema) {
     Objects.requireNonNull(outputSchema, "outputSchema must not be null");
-    var scripted = script.nextResponse(messages, outputSchema);
+    return typed(script.nextResponse(messages, outputSchema), outputSchema);
+  }
+
+  /** Consumes the next turn now; a response turn is published once the subscriber requests. */
+  @Override
+  public Flow.Publisher<ModelChunk> chatStream(
+      List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
+    Objects.requireNonNull(cancellation, "cancellation must not be null");
+    synchronized (script) {
+      var stream = script.nextStream(messages, null);
+      if (stream.isPresent()) {
+        return stream.get();
+      }
+      var scripted = script.nextResponse(messages, null);
+      return BlockingModel.publisherOf(() -> scripted, cancellation);
+    }
+  }
+
+  /**
+   * Consumes the next turn now; a response turn is parsed against {@code outputSchema} and
+   * published once the subscriber requests, so a mismatch ends the stream with {@code onError}.
+   */
+  @Override
+  public Flow.Publisher<ModelChunk> chatStream(
+      List<Message> messages,
+      List<Tool> tools,
+      OutputSchema<?> outputSchema,
+      CancellationToken cancellation) {
+    Objects.requireNonNull(outputSchema, "outputSchema must not be null");
+    Objects.requireNonNull(cancellation, "cancellation must not be null");
+    synchronized (script) {
+      var stream = script.nextStream(messages, outputSchema);
+      if (stream.isPresent()) {
+        return stream.get();
+      }
+      var scripted = script.nextResponse(messages, outputSchema);
+      return BlockingModel.publisherOf(() -> typed(scripted, outputSchema), cancellation);
+    }
+  }
+
+  private static <T> Response<T> typed(Response<Void> scripted, OutputSchema<T> outputSchema) {
     var builder =
         Response.newBuilder(outputSchema.type())
             .withContent(scripted.content())
@@ -94,32 +135,6 @@ public final class ScriptedModel implements Model {
     }
     var parsed = StructuredContentParser.parse(scripted.content(), outputSchema, JSON_ADAPTER);
     return builder.withParsed(parsed).build();
-  }
-
-  @Override
-  public Flow.Publisher<ModelChunk> chatStream(
-      List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-    Objects.requireNonNull(cancellation, "cancellation must not be null");
-    synchronized (script) {
-      return script
-          .nextStream(messages, null)
-          .orElseGet(() -> Model.super.chatStream(messages, tools, cancellation));
-    }
-  }
-
-  @Override
-  public Flow.Publisher<ModelChunk> chatStream(
-      List<Message> messages,
-      List<Tool> tools,
-      OutputSchema<?> outputSchema,
-      CancellationToken cancellation) {
-    Objects.requireNonNull(outputSchema, "outputSchema must not be null");
-    Objects.requireNonNull(cancellation, "cancellation must not be null");
-    synchronized (script) {
-      return script
-          .nextStream(messages, outputSchema)
-          .orElseGet(() -> Model.super.chatStream(messages, tools, outputSchema, cancellation));
-    }
   }
 
   /**

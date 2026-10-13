@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.FinishReason;
@@ -288,7 +289,7 @@ final class AgentSessionImplTest {
     var firstTurnEntered = new CountDownLatch(1);
     var firstTurnRelease = new CountDownLatch(1);
     Model alternating =
-        new Model() {
+        new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             var call = calls.incrementAndGet();
@@ -417,7 +418,7 @@ final class AgentSessionImplTest {
   @Test
   void modelThatThrowsSynchronouslyProducesErrorTerminal() throws Exception {
     Model throwing =
-        new Model() {
+        new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             throw new RuntimeException("model boom");
@@ -898,7 +899,7 @@ final class AgentSessionImplTest {
     var canary = "session-raw-output-canary";
     var delegate = textOnceModel("{\"name\":\"" + canary + "\"}", FinishReason.STOP);
     Model privacyModel =
-        new Model() {
+        new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             return delegate.chat(messages, tools);
@@ -1163,7 +1164,7 @@ final class AgentSessionImplTest {
 
   /** Model whose chat() awaits {@code release} after signalling {@code entered}. */
   private static Model latchedModel(CountDownLatch entered, CountDownLatch release, String reply) {
-    return new Model() {
+    return new BlockingModel() {
       @Override
       public Response<Void> chat(List<Message> messages, List<Tool> tools) {
         entered.countDown();

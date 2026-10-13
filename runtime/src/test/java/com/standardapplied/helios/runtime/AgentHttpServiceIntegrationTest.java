@@ -7,6 +7,7 @@ package com.standardapplied.helios.runtime;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -48,7 +49,7 @@ final class AgentHttpServiceIntegrationTest {
 
   /** Default model used by tests — returns a fixed response on every chat call. */
   private static Model textModel(String reply) {
-    return new Model() {
+    return new BlockingModel() {
       @Override
       public Response<Void> chat(List<Message> messages, List<Tool> tools) {
         return Response.newBuilder()
@@ -167,7 +168,7 @@ final class AgentHttpServiceIntegrationTest {
   /** A model that makes {@code call} on its first turn and answers "done" on every later one. */
   private static Model callingOnce(ToolCall call) {
     var turns = new AtomicInteger();
-    return new Model() {
+    return new BlockingModel() {
       @Override
       public Response<Void> chat(List<Message> messages, List<Tool> tools) {
         var builder = Response.newBuilder().withUsage(Usage.of(1, 1));
@@ -198,7 +199,7 @@ final class AgentHttpServiceIntegrationTest {
     var firstChatEntered = new CountDownLatch(1);
     var modelLatch = new CountDownLatch(1);
     Model adaptive =
-        new Model() {
+        new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             var call = calls.incrementAndGet();
@@ -578,7 +579,7 @@ final class AgentHttpServiceIntegrationTest {
   void resultLongPollOnLiveSessionTimesOutWith204() throws Exception {
     var blockLatch = new CountDownLatch(1);
     Model blocking =
-        new Model() {
+        new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             try {

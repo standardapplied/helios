@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.common.SecretRegistry;
@@ -39,7 +40,7 @@ import org.junit.jupiter.api.Test;
 final class SessionOptionsTest {
 
   private static Model stubModel() {
-    return new Model() {
+    return new BlockingModel() {
       @Override
       public Response<Void> chat(List<Message> messages, List<Tool> tools) {
         return Response.newBuilder().withContent("x").build();

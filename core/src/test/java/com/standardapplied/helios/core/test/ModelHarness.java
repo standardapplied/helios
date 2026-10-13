@@ -4,6 +4,7 @@ package com.standardapplied.helios.core.test;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetAddress;
@@ -48,8 +49,9 @@ public final class ModelHarness {
   }
 
   /**
-   * The transcript of the recorded golden {@code fixture}: every event {@code chatStream} yields,
-   * then what {@code chat} returns or throws and the body of every follow-up request it sent.
+   * The transcript of the recorded golden {@code fixture}: every chunk {@code chatStream} publishes
+   * and how it ends, then what {@code chat} returns or throws and the body of every follow-up
+   * request it sent.
    */
   public static String transcript(String fixture, Function<URI, Model> modelAt) {
     return transcript(fixture, modelAt, UnaryOperator.identity());
@@ -65,7 +67,11 @@ public final class ModelHarness {
     var replies = Arrays.asList(Golden.read(fixture).split(NEXT_RESPONSE));
     var text = new StringBuilder("== chatStream\n");
     exchange(
-        replies, modelAt, model -> text.append(render.events(model.chatStream(PROMPT, List.of()))));
+        replies,
+        modelAt,
+        model ->
+            text.append(
+                render.stream(model.chatStream(PROMPT, List.of(), new CancellationToken()))));
     text.append("== chat\n");
     var requests =
         exchange(

@@ -44,7 +44,7 @@ class PauseContinuationTest {
 
     var failure =
         assertThrows(
-            AnthropicException.class, () -> continuation(r -> stream(paused)).chat(request));
+            AnthropicException.class, () -> continuation(r -> stream(paused)).chat(request, List.of()));
 
     assertEquals(
         "pause_turn received without capturable assistant content; cannot resume",
@@ -61,7 +61,7 @@ class PauseContinuationTest {
                 RawContentEcho.RAW_CONTENT_KEY,
                 ""));
 
-    assertThrows(AnthropicException.class, () -> continuation(r -> stream(paused)).chat(request));
+    assertThrows(AnthropicException.class, () -> continuation(r -> stream(paused)).chat(request, List.of()));
   }
 
   @Test
@@ -74,7 +74,7 @@ class PauseContinuationTest {
 
     var failure =
         assertThrows(
-            AnthropicException.class, () -> continuation(r -> stream(paused)).chat(request));
+            AnthropicException.class, () -> continuation(r -> stream(paused)).chat(request, List.of()));
 
     assertEquals("Failed to decode paused assistant content for resume", failure.getMessage());
   }

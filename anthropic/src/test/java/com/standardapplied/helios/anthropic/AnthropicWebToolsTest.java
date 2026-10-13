@@ -299,7 +299,7 @@ class AnthropicWebToolsTest {
                   openedRequests.add(request);
                   return iterator(segments.removeFirst());
                 })
-            .chat(initial);
+            .chat(initial, List.of());
 
     assertEquals(2, openedRequests.size(), "paused turn must re-open exactly one continuation");
     assertEquals("Done.", response.content());
@@ -395,7 +395,7 @@ class AnthropicWebToolsTest {
     var initial = requests(config).build(List.of(Message.user("research this")), List.of(), null);
     var segments = new ArrayList<>(List.of(pausedSegment, finalSegment));
     return PauseContinuationTest.continuation(request -> iterator(segments.removeFirst()))
-        .chat(initial);
+        .chat(initial, List.of());
   }
 
   @Test
@@ -470,7 +470,7 @@ class AnthropicWebToolsTest {
 
     var response =
         PauseContinuationTest.continuation(request -> iterator(segments.removeFirst()))
-            .chat(initial);
+            .chat(initial, List.of());
 
     @SuppressWarnings("unchecked")
     var merged =
@@ -513,7 +513,7 @@ class AnthropicWebToolsTest {
 
     var response =
         PauseContinuationTest.continuation(request -> iterator(segments.removeFirst()))
-            .chat(initial);
+            .chat(initial, List.of());
 
     assertEquals("Starting.Done.", response.content());
     assertEquals("end_turn", response.metadata().get(AnthropicResponseAssembler.STOP_REASON_KEY));
@@ -537,7 +537,7 @@ class AnthropicWebToolsTest {
               openedRequests.add(request);
               return iterator(segments.removeFirst());
             })
-        .chat(initial);
+        .chat(initial, List.of());
 
     assertNull(
         openedRequests.get(1).toolChoice(),
@@ -615,7 +615,7 @@ class AnthropicWebToolsTest {
             AnthropicException.class,
             () ->
                 PauseContinuationTest.continuation(request -> iterator(PAUSED_SEGMENT_SSE))
-                    .chat(initial));
+                    .chat(initial, List.of()));
     assertTrue(ex.getMessage().contains("pause_turn"));
   }
 

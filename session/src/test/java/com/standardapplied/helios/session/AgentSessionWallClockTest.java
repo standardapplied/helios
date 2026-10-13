@@ -6,6 +6,7 @@ package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
@@ -66,7 +67,7 @@ final class AgentSessionWallClockTest {
   // ── inline Model whose chatStream hangs forever ──────────────────────────
 
   private static Model hangingChatStreamModel() {
-    return new Model() {
+    return new BlockingModel() {
       @Override
       public Response<Void> chat(List<Message> messages, List<Tool> tools) {
         throw new UnsupportedOperationException("chat() not used by the streaming loop");

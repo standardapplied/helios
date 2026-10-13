@@ -75,7 +75,8 @@ public class OpenAIProvider implements ModelProvider {
         .withHttpClient(httpClient)
         .withRequests(requests)
         .withExchange(
-            new ChatExchange<>(PROVIDER_NAME, "OpenAI API", streams::open, OpenAIException::new))
+            new ChatExchange<>("OpenAI API", streams::open))
+        .withFailure(OpenAIException::new)
         .withJson(OpenAIJson.STRUCTURED)
         .build();
   }

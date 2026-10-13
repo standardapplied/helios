@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
@@ -264,7 +265,7 @@ final class TurnRunnerToolDispatchTest {
     var registry = new ToolRegistry(List.of(echoBinding()));
     var dispatch = fixture.dispatch(registry);
     Model model =
-        new Model() {
+        new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             throw new AssertionError("unused");

@@ -2,18 +2,22 @@
 
 package com.standardapplied.helios.core.test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.IteratorPublisher;
+import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Flow;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -29,8 +33,12 @@ class AcceptedTest {
         .build();
   }
 
-  private static CloseableIterator<StreamEvent> events(StreamEvent... events) {
-    return CloseableIterator.of(List.of(events).iterator());
+  private static final ModelChunk.MessageStop STOP =
+      new ModelChunk.MessageStop("STOP", Response.Usage.of(3, 2), Map.of("k", "v"));
+
+  private static Flow.Publisher<ModelChunk> chunks(ModelChunk... chunks) {
+    return new IteratorPublisher<>(
+        () -> CloseableIterator.of(List.of(chunks).iterator()), new CancellationToken());
   }
 
   @ParameterizedTest
@@ -154,46 +162,54 @@ class AcceptedTest {
   }
 
   @Test
-  void aStreamReturnsTheResponseItsDeltasJoinTo() {
-    var done = new StreamEvent.Done(reply("Hello there", FinishReason.STOP));
+  void aStreamReturnsTheResponseItsChunksAddUpTo() {
+    var call = ToolCall.newBuilder().withId("c1").withName("lookup").build();
 
     var response =
         Accepted.stream(
-            events(new StreamEvent.TextDelta("Hello"), new StreamEvent.TextDelta(" there"), done));
+            chunks(
+                new ModelChunk.TextDelta("Hello"),
+                new ModelChunk.ThinkingDelta("hm"),
+                new ModelChunk.TextDelta(" there"),
+                new ModelChunk.ToolUseStop(call),
+                STOP));
 
-    assertSame(done.response(), response);
+    assertEquals("Hello there", response.content());
+    assertEquals(List.of(call), response.toolCalls());
+    assertEquals(FinishReason.STOP, response.finishReason());
+    assertEquals(STOP.usage(), response.usage());
+    assertEquals(STOP.metadata(), response.metadata());
   }
 
   @Test
-  void aStreamWhoseDeltasDifferFromDoneFails() {
-    var done = new StreamEvent.Done(reply("Hello\n\nthere", FinishReason.STOP));
-    var stream =
-        events(new StreamEvent.TextDelta("Hello"), new StreamEvent.TextDelta("there"), done);
+  void aStreamThatFailsFails() {
+    var failing =
+        new IteratorPublisher<ModelChunk>(
+            () -> {
+              throw new IllegalStateException("overloaded");
+            },
+            new CancellationToken());
+
+    assertThrows(AssertionError.class, () -> Accepted.stream(failing));
+  }
+
+  @Test
+  void aStreamWithoutAStopFails() {
+    var stream = chunks(new ModelChunk.TextDelta("Hello"));
 
     assertThrows(AssertionError.class, () -> Accepted.stream(stream));
   }
 
   @Test
-  void aStreamWithAnErrorEventFails() {
-    var stream =
-        events(
-            new StreamEvent.Error("overloaded", null, reply("", FinishReason.ERROR)),
-            new StreamEvent.Done(reply("", FinishReason.STOP)));
+  void aStreamWithAChunkAfterTheStopFails() {
+    var stream = chunks(STOP, new ModelChunk.TextDelta("x"));
 
     assertThrows(AssertionError.class, () -> Accepted.stream(stream));
   }
 
   @Test
-  void aStreamWithoutDoneFails() {
-    var stream = events(new StreamEvent.TextDelta("Hello"));
-
-    assertThrows(AssertionError.class, () -> Accepted.stream(stream));
-  }
-
-  @Test
-  void aStreamWithAnEventAfterDoneFails() {
-    var stream =
-        events(new StreamEvent.Done(reply("", FinishReason.STOP)), new StreamEvent.TextDelta("x"));
+  void aStreamWithTwoStopsFails() {
+    var stream = chunks(STOP, STOP);
 
     assertThrows(AssertionError.class, () -> Accepted.stream(stream));
   }
