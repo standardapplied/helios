@@ -232,7 +232,7 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
             .start(
                 () -> {
                   try {
-                    future.complete(summaryModel.chat(List.copyOf(request)));
+                    future.complete(summaryModel.chat(List.copyOf(request), List.of()));
                   } catch (Throwable t) {
                     future.completeExceptionally(t);
                   }

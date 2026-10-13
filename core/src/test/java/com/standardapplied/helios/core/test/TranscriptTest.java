@@ -3,12 +3,12 @@
 package com.standardapplied.helios.core.test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.CloseableIterator;
+import com.standardapplied.helios.core.model.IteratorPublisher;
 import com.standardapplied.helios.core.model.ProviderException;
-import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
@@ -51,31 +51,19 @@ class TranscriptTest {
   }
 
   @Test
-  void eventsDrainsTheIteratorOneEventPerLineAndClosesIt() {
-    var closed = new boolean[1];
-    var events =
-        List.<StreamEvent>of(new StreamEvent.TextDelta("hi"), new StreamEvent.TextDelta("!"));
-    var iterator = events.iterator();
-    var closeable =
-        new CloseableIterator<StreamEvent>() {
-          @Override
-          public boolean hasNext() {
-            return iterator.hasNext();
-          }
+  void streamRendersOneItemPerLineThenHowTheStreamEnded() {
+    var completed =
+        new IteratorPublisher<>(
+            () -> CloseableIterator.of(List.of("hi", "!").iterator()), new CancellationToken());
+    var failed =
+        new IteratorPublisher<String>(
+            () -> {
+              throw new IllegalStateException("no");
+            },
+            new CancellationToken());
 
-          @Override
-          public StreamEvent next() {
-            return iterator.next();
-          }
-
-          @Override
-          public void close() {
-            closed[0] = true;
-          }
-        };
-
-    assertEquals("TextDelta[text=hi]\nTextDelta[text=!]\n", new Transcript().events(closeable));
-    assertTrue(closed[0]);
+    assertEquals("hi\n!\nonComplete\n", new Transcript().stream(completed));
+    assertEquals("onError IllegalStateException(no)\n", new Transcript().stream(failed));
   }
 
   @Test

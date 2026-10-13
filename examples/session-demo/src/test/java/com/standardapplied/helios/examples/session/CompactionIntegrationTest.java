@@ -4,6 +4,7 @@ package com.standardapplied.helios.examples.session;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -77,7 +78,7 @@ final class CompactionIntegrationTest {
           + "5. Reply with a one-line summary mentioning all three files.";
 
   private static final Model SUMMARY_MODEL =
-      new Model() {
+      new BlockingModel() {
         @Override
         public Response<Void> chat(List<Message> messages, List<Tool> tools) {
           return Response.newBuilder()

@@ -1,231 +1,218 @@
-/*
- * Copyright (c) 2026 Standard Applied Intelligence Labs
- * SPDX-License-Identifier: MIT
- */
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
 package com.standardapplied.helios.core.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
+import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Flow;
+import java.util.concurrent.FutureTask;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
 class ModelTest {
 
-  record SimpleOutput(String value) {}
+  record Answer(String answer) {}
 
   @Test
-  void chatWithoutTools() {
+  void chatAddsTheStreamUpToItsResponse() {
+    var call = ToolCall.newBuilder().withId("c1").withName("lookup").build();
+    var cite = Citation.of("https://example.com", "snippet");
+    var usage = Response.Usage.of(9, 4);
     var model =
-        new Model() {
-          @Override
-          public Response chat(List<Message> messages, List<Tool> tools) {
-            assertTrue(tools.isEmpty());
-            return Response.newBuilder()
-                .withContent("Response")
-                .withFinishReason(FinishReason.STOP)
-                .build();
-          }
+        streaming(
+            new ModelChunk.ThinkingDelta("Hm"),
+            new ModelChunk.ThinkingDelta("m."),
+            new ModelChunk.TextDelta("Let me "),
+            new ModelChunk.TextDelta("check."),
+            new ModelChunk.ToolUseStart("c1", "lookup"),
+            new ModelChunk.ToolUseDelta("c1", "{}"),
+            new ModelChunk.UsageDelta(usage),
+            new ModelChunk.ToolUseStop(call),
+            new ModelChunk.MessageStop("TOOL_CALLS", usage, Map.of("k", "v"), List.of(cite)));
 
-          @Override
-          public String id() {
-            return "test-model";
-          }
+    var response = model.chat(List.of(), List.of());
 
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
-
-    var response = model.chat(List.of(Message.user("Hello")));
-
-    assertEquals("Response", response.content());
+    assertEquals("Let me check.", response.content());
+    assertEquals("Hmm.", response.thinking());
+    assertEquals(List.of(call), response.toolCalls());
+    assertEquals(FinishReason.TOOL_CALLS, response.finishReason());
+    assertEquals(usage, response.usage());
+    assertEquals(Map.of("k", "v"), response.metadata());
+    assertEquals(List.of(cite), response.citations());
   }
 
   @Test
-  void chatStreamDefaultImplementation() {
-    var model =
-        new Model() {
-          @Override
-          public Response chat(List<Message> messages, List<Tool> tools) {
-            return Response.newBuilder()
-                .withContent("Streamed response")
-                .withFinishReason(FinishReason.STOP)
-                .build();
-          }
+  void chatOnAStreamWithoutAStopIsAPlainStop() {
+    var response = streaming(new ModelChunk.TextDelta("hi")).chat(List.of(), List.of());
 
-          @Override
-          public String id() {
-            return "test-model";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
-
-    var iterator = model.chatStream(List.of(Message.user("Hello")), List.of());
-
-    assertTrue(iterator instanceof CloseableIterator<?>);
-    assertTrue(iterator.hasNext());
-    var event = iterator.next();
-    assertTrue(event instanceof StreamEvent.Done);
-    var doneEvent = (StreamEvent.Done) event;
-    assertEquals("Streamed response", doneEvent.response().content());
-    assertFalse(iterator.hasNext());
-    iterator.close();
+    assertEquals("hi", response.content());
+    assertNull(response.thinking());
+    assertEquals(FinishReason.STOP, response.finishReason());
+    assertEquals(Response.Usage.of(0, 0), response.usage());
+    assertEquals(Map.of(), response.metadata());
+    assertEquals(List.of(), response.citations());
   }
 
   @Test
-  void chatStreamWithoutToolsDefault() {
-    var model =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            assertTrue(tools.isEmpty());
-            return Response.newBuilder()
-                .withContent("Streamed")
-                .withFinishReason(FinishReason.STOP)
-                .build();
-          }
+  void aProvidersOwnStopReasonReadsAsAPlainStop() {
+    var stop = new ModelChunk.MessageStop("end_turn", Response.Usage.of(1, 1), Map.of());
 
-          @Override
-          public String id() {
-            return "test-model";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
-
-    try (var iterator = model.chatStream(List.of(Message.user("Hello")))) {
-      assertTrue(iterator.hasNext());
-      var event = iterator.next();
-      assertTrue(event instanceof StreamEvent.Done);
-    }
+    assertEquals(FinishReason.STOP, stop.finishReason());
+    assertEquals(FinishReason.STOP, streaming(stop).chat(List.of(), List.of()).finishReason());
   }
 
   @Test
-  void chatWithStructuredOutputDefaultThrows() {
-    var model =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            return Response.newBuilder().withContent("ok").build();
-          }
+  void chatThrowsTheStreamsUncheckedFailureAsItCame() {
+    var refused = new IllegalStateException("refused");
 
-          @Override
-          public String id() {
-            return "test-model";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
-
-    assertThrows(
-        UnsupportedOperationException.class,
-        () ->
-            model.chat(
-                List.of(Message.user("Hello")), List.of(), OutputSchema.of(SimpleOutput.class)));
+    assertSame(refused, assertThrows(IllegalStateException.class, () -> failing(refused)));
   }
 
   @Test
-  void chatWithStructuredOutputNoToolsDefault() {
-    var model =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            return Response.newBuilder().withContent("ok").build();
-          }
+  void chatThrowsTheStreamsErrorAsItCame() {
+    var fatal = new StackOverflowError("deep");
 
-          @Override
-          public String id() {
-            return "test-model";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
-
-    assertThrows(
-        UnsupportedOperationException.class,
-        () -> model.chat(List.of(Message.user("Hello")), OutputSchema.of(SimpleOutput.class)));
+    assertSame(fatal, assertThrows(StackOverflowError.class, () -> failing(fatal)));
   }
 
   @Test
-  void defaultCloseIsNoOpAndIdempotent() {
-    var model =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            return Response.newBuilder().withContent("ok").build();
-          }
+  void chatWrapsTheStreamsCheckedFailure() {
+    var reset = new IOException("reset");
 
-          @Override
-          public String id() {
-            return "test-model";
-          }
+    var thrown = assertThrows(IllegalStateException.class, () -> failing(reset));
 
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
-
-    model.close();
-    model.close();
+    assertSame(reset, thrown.getCause());
   }
 
   @Test
-  void modelIsAutoCloseable() {
+  void anInterruptWhileWaitingCancelsTheStreamAndRestoresTheInterrupt() {
+    var subscribed = new CountDownLatch(1);
+    var cancelled = new CountDownLatch(1);
     Model model =
-        new Model() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            return Response.newBuilder().withContent("ok").build();
-          }
+        model(
+            (cancellation) ->
+                subscriber ->
+                    subscriber.onSubscribe(
+                        new Flow.Subscription() {
+                          @Override
+                          public void request(long n) {
+                            subscribed.countDown();
+                          }
 
-          @Override
-          public String id() {
-            return "test-model";
-          }
+                          @Override
+                          public void cancel() {
+                            cancelled.countDown();
+                          }
+                        }));
+    var interruptRestored = new boolean[1];
+    var chat =
+        new FutureTask<>(
+            () -> {
+              try {
+                return model.chat(List.of(), List.of());
+              } finally {
+                interruptRestored[0] = Thread.currentThread().isInterrupted();
+              }
+            });
+    var caller = Thread.ofPlatform().start(chat);
+    Await.latch("the chat subscribed", subscribed);
+    caller.interrupt();
 
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
+    assertInstanceOf(CancellationException.class, Await.failure("the chat", chat));
+    Await.latch("the stream cancelled", cancelled);
+    assertTrue(interruptRestored[0]);
+  }
 
-    assertTrue(model instanceof AutoCloseable);
-    try (model) {
-      assertEquals("test-model", model.id());
+  @Test
+  void structuredOutputIsUnsupportedByDefault() {
+    var model = streaming();
+    var schema = OutputSchema.of(Answer.class);
+    var token = new CancellationToken();
+
+    assertThrows(
+        UnsupportedOperationException.class, () -> model.chat(List.of(), List.of(), schema));
+    assertThrows(
+        UnsupportedOperationException.class,
+        () -> model.chatStream(List.of(), List.of(), schema, token));
+  }
+
+  @Test
+  void identityDefaultsAndCloseAreSafe() {
+    try (var model = streaming()) {
+      assertEquals(0, model.contextWindow());
+      assertEquals(0, model.maxOutputTokens());
+      model.close();
     }
   }
 
   @Test
   void closeableIteratorOfWrapsPlainIterator() {
-    var plain = List.of("a", "b", "c").iterator();
-    var closeable = CloseableIterator.of(plain);
+    var closeable = CloseableIterator.of(List.of("a", "b").iterator());
 
     assertTrue(closeable.hasNext());
     assertEquals("a", closeable.next());
     assertEquals("b", closeable.next());
-    assertEquals("c", closeable.next());
     assertFalse(closeable.hasNext());
-    closeable.close(); // no-op, should not throw
+    closeable.close();
+  }
+
+  private static void failing(Throwable failure) {
+    model(
+            cancellation ->
+                subscriber -> {
+                  subscriber.onSubscribe(
+                      new Flow.Subscription() {
+                        @Override
+                        public void request(long n) {
+                          subscriber.onError(failure);
+                        }
+
+                        @Override
+                        public void cancel() {}
+                      });
+                })
+        .chat(List.of(), List.of());
+  }
+
+  private static Model streaming(ModelChunk... chunks) {
+    return model(
+        cancellation ->
+            new IteratorPublisher<>(
+                () -> CloseableIterator.of(List.of(chunks).iterator()), cancellation));
+  }
+
+  private static Model model(Function<CancellationToken, Flow.Publisher<ModelChunk>> stream) {
+    return new Model() {
+      @Override
+      public Flow.Publisher<ModelChunk> chatStream(
+          List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
+        return stream.apply(cancellation);
+      }
+
+      @Override
+      public String id() {
+        return "test";
+      }
+
+      @Override
+      public String provider() {
+        return "test";
+      }
+    };
   }
 }

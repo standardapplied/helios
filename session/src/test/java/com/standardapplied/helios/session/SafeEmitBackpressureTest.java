@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -128,7 +129,7 @@ final class SafeEmitBackpressureTest {
    * running {@code beforeBurst} ahead of the first chunk and {@code afterBurst} behind the last.
    */
   private static Model burstModel(int count, Runnable beforeBurst, Runnable afterBurst) {
-    return new Model() {
+    return new BlockingModel() {
       @Override
       public Response<Void> chat(List<Message> messages, List<Tool> tools) {
         throw new UnsupportedOperationException("chat() not used by the streaming loop");

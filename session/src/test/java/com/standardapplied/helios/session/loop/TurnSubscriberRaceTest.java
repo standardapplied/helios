@@ -7,6 +7,7 @@ package com.standardapplied.helios.session.loop;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
@@ -106,7 +107,7 @@ final class TurnSubscriberRaceTest {
   // ── fixture ──────────────────────────────────────────────────────────────
 
   private static final Model STUB_MODEL =
-      new Model() {
+      new BlockingModel() {
         @Override
         public Response<Void> chat(List<Message> messages, List<Tool> tools) {
           return Response.newBuilder().build();

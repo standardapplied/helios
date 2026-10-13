@@ -68,7 +68,7 @@ class GeminiRequestSnapshotTest {
     snapshot(
         "url context",
         modelAt(flash, settings(null).withWebFetch(true)),
-        model -> model.chat(List.of(Message.user("Summarise https://example.com"))));
+        model -> model.chat(List.of(Message.user("Summarise https://example.com")), List.of()));
     snapshot(
         "generation settings",
         modelAt(

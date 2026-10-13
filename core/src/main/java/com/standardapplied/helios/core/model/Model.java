@@ -10,12 +10,12 @@ import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.tool.Tool;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.Flow;
 
 /**
  * Interface for LLM providers. Implementations provide the actual integration with model APIs
- * (Gemini, Anthropic, etc.).
+ * (Gemini, Anthropic, etc.). The one way to call a model is its chunk stream, {@link
+ * #chatStream(List, List, CancellationToken)}; the blocking {@code chat} forms wait for it.
  *
  * <p>Models may hold long-lived resources (HTTP connection pools, file descriptors). Long-running
  * hosts that build and discard models should call {@link #close()} to release them. Implementations
@@ -24,154 +24,86 @@ import java.util.concurrent.Flow;
 public interface Model extends AutoCloseable {
 
   /**
-   * Send messages to the model and get a response.
+   * Stream the model's answer to {@code messages} as a {@link Flow.Publisher} of normalized {@link
+   * ModelChunk}s: text, thinking, tool-call fragments and completions as they arrive, then one
+   * {@link ModelChunk.MessageStop} carrying the finish reason, usage, metadata and citations, then
+   * {@code onComplete}. A failed turn ends in {@code onError} instead.
+   *
+   * <p>The contract every implementation keeps:
+   *
+   * <ul>
+   *   <li><b>Lazy.</b> Calling this method does no provider I/O and runs no model work; the work
+   *       starts on the subscriber's first request.
+   *   <li><b>One subscriber, bounded by demand.</b> A second subscriber is refused with {@code
+   *       onError}; no chunk is delivered beyond what was requested.
+   *   <li><b>Cancellable.</b> Cancelling the subscription releases the request, its response body
+   *       and any thread working for it, and ends the signals. Cancelling {@code cancellation} does
+   *       the same and ends the stream with {@code onError} carrying a {@link
+   *       java.util.concurrent.CancellationException} with the token's reason. Neither closes this
+   *       model, which other callers may share.
+   * </ul>
+   *
+   * <p>A model that can only answer blockingly implements {@link BlockingModel}, which runs the
+   * blocking call as work the subscription owns, started on the first request.
    *
    * @param messages the conversation history
-   * @param tools available tools the model can call
-   * @return the model's response
+   * @param tools the tools the model may call
+   * @param cancellation ends the stream once cancelled
+   * @return a single-subscriber publisher of the turn's chunks
    */
-  Response<Void> chat(List<Message> messages, List<Tool> tools);
-
-  /** Send messages without tools. */
-  default Response<Void> chat(List<Message> messages) {
-    return chat(messages, List.of());
-  }
+  Flow.Publisher<ModelChunk> chatStream(
+      List<Message> messages, List<Tool> tools, CancellationToken cancellation);
 
   /**
-   * Send messages with structured output schema.
-   *
-   * @param <T> the type of the structured output
-   * @param messages the conversation history
-   * @param tools available tools the model can call
-   * @param outputSchema the schema for structured output
-   * @return response with parsed structured output
-   */
-  default <T> Response<T> chat(
-      List<Message> messages, List<Tool> tools, OutputSchema<T> outputSchema) {
-    throw new UnsupportedOperationException("Structured output not supported by this model");
-  }
-
-  /**
-   * Send messages with structured output schema, no tools.
-   *
-   * @param <T> the type of the structured output
-   * @param messages the conversation history
-   * @param outputSchema the schema for structured output
-   * @return response with parsed structured output
-   */
-  default <T> Response<T> chat(List<Message> messages, OutputSchema<T> outputSchema) {
-    return chat(messages, List.of(), outputSchema);
-  }
-
-  /**
-   * Stream response from the model. The returned iterator may hold resources (HTTP connections,
-   * streams) and should be used in a try-with-resources block to ensure cleanup.
+   * {@link #chatStream(List, List, CancellationToken)} with the answer constrained to {@code
+   * outputSchema} through the provider's native structured-output channel. The chunks have the same
+   * shape; a text-only turn whose content does not match the schema ends in {@code onError} with a
+   * {@link com.standardapplied.helios.core.schema.StructuredOutputParseException} after its text
+   * has streamed. A turn that calls tools is not checked: it is intermediate, and a later text-only
+   * turn delivers the structured answer. The default throws, for a model without structured output.
    *
    * @param messages the conversation history
-   * @param tools available tools
-   * @return closeable iterator of stream events
-   */
-  default CloseableIterator<StreamEvent> chatStream(List<Message> messages, List<Tool> tools) {
-    var response = chat(messages, tools);
-    return CloseableIterator.of(List.of((StreamEvent) new StreamEvent.Done(response)).iterator());
-  }
-
-  /** Stream response without tools. */
-  default CloseableIterator<StreamEvent> chatStream(List<Message> messages) {
-    return chatStream(messages, List.of());
-  }
-
-  /**
-   * Stream a response as a {@link Flow.Publisher} of normalized {@link ModelChunk} chunks. This is
-   * the streaming entrypoint consumed by the session loop; the iterator-based {@code chatStream}
-   * overload remains available for non-session callers.
-   *
-   * <p>Default implementation invokes the blocking {@link #chat(List, List)} and synthesises a
-   * chunk sequence from the resulting {@link Response} so providers can opt into real streaming one
-   * at a time. The synthesised sequence is: {@link ModelChunk.ThinkingDelta} (if the response has
-   * thinking text), {@link ModelChunk.TextDelta} (if the response has content), one {@link
-   * ModelChunk.ToolUseStart}/{@link ModelChunk.ToolUseStop} pair per tool call in the order
-   * returned, and a final {@link ModelChunk.MessageStop} carrying the response's stop reason and
-   * usage. {@link ModelChunk.ToolUseDelta} is not emitted by the default; real streaming providers
-   * emit it when wire-level argument deltas arrive.
-   *
-   * <p>The returned publisher honors {@link CancellationToken}: when the subscriber first requests
-   * a chunk, if the token is already cancelled the subscriber receives {@code onError} with a
-   * {@link java.util.concurrent.CancellationException} carrying the cancellation reason. The
-   * default implementation evaluates the blocking call eagerly before any subscription is opened,
-   * so cancellation cannot interrupt the underlying {@code chat} call — that protection requires
-   * the provider to override. Subscribers can also unsubscribe via {@link
-   * Flow.Subscription#cancel()} to stop further chunk delivery.
-   *
-   * @param messages the conversation history
-   * @param tools available tools the model can call
-   * @param cancellation cooperative cancellation token; signal flowed through to {@code onError}
-   * @return a single-subscriber publisher of the normalised chunk sequence
-   * @throws NullPointerException if {@code cancellation} is null
-   */
-  default Flow.Publisher<ModelChunk> chatStream(
-      List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-    Objects.requireNonNull(cancellation, "cancellation must not be null");
-    var response = chat(messages, tools);
-    return new DefaultChunkSequence(response, cancellation);
-  }
-
-  /**
-   * Streaming chat with a structured-output schema. The schema is transmitted to the model via the
-   * provider's native structured-output channel (Gemini {@code response_format.schema}, OpenAI
-   * {@code text.format=json_schema}, Anthropic {@code system_instruction} text). The streamed
-   * chunks remain the same {@link ModelChunk} shape as the untyped variant — tool calls and
-   * structured-text responses both arrive as the usual {@code TextDelta} / {@code ToolUseStart} /
-   * {@code ToolUseStop} / {@code MessageStop} sequence. Callers that need the parsed value invoke
-   * {@link com.standardapplied.helios.core.schema.StructuredContentParser} on the accumulated
-   * assistant text after the final {@link ModelChunk.MessageStop}.
-   *
-   * <p>Default implementation falls back to the blocking {@link #chat(List, List, OutputSchema)}
-   * call and synthesises chunks from the resulting {@link Response}; production providers override
-   * to wire the schema into their per-turn streaming dispatch. The cancellation contract is
-   * identical to {@link #chatStream(List, List, CancellationToken)}.
-   *
-   * @param messages the conversation history
-   * @param tools available tools the model can call
-   * @param outputSchema the schema constraining the model's text output; non-null
-   * @param cancellation cooperative cancellation token; signal flowed through to {@code onError}
-   * @return a single-subscriber publisher of the normalised chunk sequence
-   * @throws NullPointerException if {@code outputSchema} or {@code cancellation} is null
+   * @param tools the tools the model may call
+   * @param outputSchema the schema the answer must match
+   * @param cancellation ends the stream once cancelled
+   * @return a single-subscriber publisher of the turn's chunks
+   * @throws UnsupportedOperationException if this model has no structured output
    */
   default Flow.Publisher<ModelChunk> chatStream(
       List<Message> messages,
       List<Tool> tools,
       OutputSchema<?> outputSchema,
       CancellationToken cancellation) {
-    Objects.requireNonNull(outputSchema, "outputSchema must not be null");
-    Objects.requireNonNull(cancellation, "cancellation must not be null");
-    return chatStreamWithCapturedSchema(messages, tools, outputSchema, cancellation);
+    throw new UnsupportedOperationException("Structured output not supported by this model");
   }
 
   /**
-   * Wildcard-capture helper for the default {@link #chatStream(List, List, OutputSchema,
-   * CancellationToken)} implementation. The signature's {@code <T>} captures the call-site wildcard
-   * so {@link #chat(List, List, OutputSchema)} can be invoked without an unchecked cast; the typed
-   * parsed value is then discarded because streaming consumers accumulate the assistant text and
-   * parse it once after the final {@link ModelChunk.MessageStop}.
+   * The model's answer to {@code messages}, waited for. The default drains {@link #chatStream(List,
+   * List, CancellationToken)}; an interrupt while waiting cancels the stream and throws a {@link
+   * java.util.concurrent.CancellationException} with the interrupt restored.
+   *
+   * @param messages the conversation history
+   * @param tools the tools the model may call
+   * @return the model's response
    */
-  private <T> Flow.Publisher<ModelChunk> chatStreamWithCapturedSchema(
-      List<Message> messages,
-      List<Tool> tools,
-      OutputSchema<T> outputSchema,
-      CancellationToken cancellation) {
-    var typed = chat(messages, tools, outputSchema);
-    var erased =
-        Response.newBuilder()
-            .withContent(typed.content())
-            .withToolCalls(typed.toolCalls())
-            .withFinishReason(typed.finishReason())
-            .withUsage(typed.usage())
-            .withThinking(typed.thinking())
-            .withCitations(typed.citations())
-            .withMetadata(typed.metadata())
-            .build();
-    return new DefaultChunkSequence(erased, cancellation);
+  default Response<Void> chat(List<Message> messages, List<Tool> tools) {
+    return ChunkDrain.drain(chatStream(messages, tools, new CancellationToken()));
+  }
+
+  /**
+   * The model's answer to {@code messages}, constrained to and parsed by {@code outputSchema}. The
+   * default throws, for a model without structured output.
+   *
+   * @param <T> the type of the structured output
+   * @param messages the conversation history
+   * @param tools the tools the model may call
+   * @param outputSchema the schema for structured output
+   * @return the response with its parsed value
+   * @throws UnsupportedOperationException if this model has no structured output
+   */
+  default <T> Response<T> chat(
+      List<Message> messages, List<Tool> tools, OutputSchema<T> outputSchema) {
+    throw new UnsupportedOperationException("Structured output not supported by this model");
   }
 
   /** The model identifier (e.g., "gemini-2.0-flash", "claude-3-opus"). */

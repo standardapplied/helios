@@ -938,7 +938,7 @@ class GeminiModelTest extends BoundedErrorBodyContract {
               .withFileReferences(List.of(video))
               .build();
 
-      var error = assertThrows(GeminiException.class, () -> model.chat(List.of(message)));
+      var error = assertThrows(GeminiException.class, () -> model.chat(List.of(message), List.of()));
 
       assertEquals(400, error.statusCode());
       assertTrue(error.getMessage().contains("video"));

@@ -143,7 +143,7 @@ final class OpenAIAzureIntegrationTest {
   void customDeploymentNameRoundTripsAgainstAzure() {
     try (var model = deployment()) {
       Accepted.textReply(
-          model.chat(List.of(Message.user("Reply with the single digit 7 and nothing else."))));
+          model.chat(List.of(Message.user("Reply with the single digit 7 and nothing else.")), List.of()));
     }
   }
 }

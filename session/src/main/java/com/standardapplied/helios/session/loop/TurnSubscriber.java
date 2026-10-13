@@ -4,7 +4,6 @@
  */
 package com.standardapplied.helios.session.loop;
 
-import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response.Usage;
@@ -13,34 +12,33 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.session.QueryEvent;
 import java.time.Duration;
 import java.time.InstantSource;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Translates a model's {@link ModelChunk} stream into per-turn {@link QueryEvent}s and accumulates
  * what the stream produced into a {@link StreamedTurn}.
  *
- * <p>Created once per model turn by {@link TurnRunner}. The subscriber appends to an internal
- * {@code StringBuilder} for text deltas, collects tool calls, records the final {@link Usage} and
- * metadata, and blocks the runner in {@link #awaitDone(CancellationToken)} until {@link
- * #onComplete()} or {@link #onError(Throwable)} fires. An {@link IdleWatchdog} fails a stream that
- * stalls.
+ * <p>Created once per model turn by {@link TurnRunner}. It owns the turn's {@link
+ * Flow.Subscription}: it requests every chunk on subscribe, and cancels the stream when the {@link
+ * IdleWatchdog} finds it stalled, when the session's {@link CancellationToken} is cancelled, or when
+ * the waiting thread is interrupted. The runner blocks in {@link #awaitDone(CancellationToken)}
+ * until the stream ends one of those ways or with {@code onComplete} / {@code onError}.
  *
- * <h2>Thread-safety</h2>
+ * <h2>One terminal transition</h2>
  *
- * The producer (the provider's streaming publisher) calls {@code onSubscribe/onNext/onError/
- * onComplete} on its own thread; the consumer (the runner thread) receives the {@link StreamedTurn}
- * from {@link #awaitDone(CancellationToken)}. When the producer's terminal signal releases the
- * latch, its happens-before edge makes the StringBuilder and List reads safe. When the wait ends
- * another way (cancellation, idle timeout, interrupt), the producer may still be appending: the
- * atomic fields stay consistent, and the snapshot reads the error before the text, as the runner
- * did before the snapshot existed.
+ * The first ending wins: it snapshots what the stream produced into an immutable {@link
+ * StreamedTurn}, under the same lock that guards every accumulation, and releases the runner. A
+ * signal that arrives after it, a second {@code onSubscribe}, or a chunk sent before {@code
+ * onSubscribe} changes nothing and emits nothing; a late {@code onSubscribe} has its subscription
+ * cancelled, and a chunk before {@code onSubscribe} ends the stream with an {@link
+ * IllegalStateException}. A chunk accepted before the ending emits its event outside the lock, so a
+ * stalled event sink or hook never blocks a cancellation.
  */
 final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
@@ -48,15 +46,13 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   private final EventEmitter emitter;
   private final InstantSource clock;
   private final IdleWatchdog idleWatchdog;
-  private final StringBuilder content = new StringBuilder();
-  private final List<ToolCall> toolCalls = new CopyOnWriteArrayList<>();
   private final CountDownLatch done = new CountDownLatch(1);
-  private final AtomicReference<FinishReason> finishReason =
-      new AtomicReference<>(FinishReason.STOP);
-  private final AtomicReference<Usage> usage = new AtomicReference<>(Usage.of(0, 0));
-  private final AtomicReference<Map<String, String>> metadata = new AtomicReference<>(Map.of());
-  private final AtomicReference<List<Citation>> citations = new AtomicReference<>(List.of());
-  private final AtomicReference<Throwable> error = new AtomicReference<>();
+  private final Object lock = new Object();
+  private final StringBuilder content = new StringBuilder();
+  private final List<ToolCall> toolCalls = new ArrayList<>();
+  private ModelChunk.MessageStop stop;
+  private Flow.Subscription subscription;
+  private StreamedTurn outcome;
 
   TurnSubscriber(
       SessionState state,
@@ -68,77 +64,91 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     this.emitter = emitter;
     this.clock = clock;
     this.idleWatchdog =
-        new IdleWatchdog(scheduler, idleTimeout, () -> done.getCount() == 0L, this::fail);
+        new IdleWatchdog(
+            scheduler, idleTimeout, () -> done.getCount() == 0L, stalled -> end(stalled, true));
   }
 
   @Override
   public void onSubscribe(Flow.Subscription subscription) {
+    boolean accepted;
+    synchronized (lock) {
+      accepted = this.subscription == null && outcome == null;
+      if (accepted) {
+        this.subscription = subscription;
+      }
+    }
+    if (!accepted) {
+      subscription.cancel();
+      return;
+    }
     idleWatchdog.arm();
     subscription.request(Long.MAX_VALUE);
   }
 
   @Override
   public void onNext(ModelChunk chunk) {
+    boolean subscribed;
+    synchronized (lock) {
+      if (outcome != null) {
+        return;
+      }
+      subscribed = subscription != null;
+      if (subscribed) {
+        accumulate(chunk);
+      }
+    }
+    if (!subscribed) {
+      end(new IllegalStateException("model stream sent a chunk before onSubscribe"), false);
+      return;
+    }
     idleWatchdog.arm();
     switch (chunk) {
-      case ModelChunk.TextDelta(String text) -> handleTextDelta(text);
-      case ModelChunk.ThinkingDelta(String text) -> handleThinkingDelta(text);
-      case ModelChunk.ToolUseStop(ToolCall call) -> toolCalls.add(call);
-      case ModelChunk.MessageStop ms -> handleMessageStop(ms);
-      case ModelChunk.UsageDelta ignored -> {}
-      case ModelChunk.ToolUseStart ignored -> {}
-      case ModelChunk.ToolUseDelta ignored -> {}
+      case ModelChunk.TextDelta(String text) ->
+          emitter.emit(
+              state,
+              new QueryEvent.AssistantText(
+                  state.sessionId(), state.currentTurnIndex(), clock.instant(), text));
+      case ModelChunk.ThinkingDelta(String text) ->
+          emitter.emit(
+              state,
+              new QueryEvent.AssistantThinking(
+                  state.sessionId(), state.currentTurnIndex(), clock.instant(), text, ""));
+      case ModelChunk.MessageStop messageStop when !messageStop.citations().isEmpty() ->
+          emitter.emit(
+              state,
+              new QueryEvent.AssistantCitations(
+                  state.sessionId(),
+                  state.currentTurnIndex(),
+                  clock.instant(),
+                  messageStop.citations()));
+      default -> {}
     }
   }
 
-  private void handleTextDelta(String text) {
-    content.append(text);
-    emitter.emit(
-        state,
-        new QueryEvent.AssistantText(
-            state.sessionId(), state.currentTurnIndex(), clock.instant(), text));
-  }
-
-  private void handleThinkingDelta(String text) {
-    emitter.emit(
-        state,
-        new QueryEvent.AssistantThinking(
-            state.sessionId(), state.currentTurnIndex(), clock.instant(), text, ""));
-  }
-
-  private void handleMessageStop(ModelChunk.MessageStop chunk) {
-    finishReason.set(parseFinishReason(chunk.stopReason()));
-    usage.set(chunk.usage());
-    metadata.set(chunk.metadata());
-    var turnCitations = chunk.citations();
-    citations.set(turnCitations);
-    if (!turnCitations.isEmpty()) {
-      emitter.emit(
-          state,
-          new QueryEvent.AssistantCitations(
-              state.sessionId(), state.currentTurnIndex(), clock.instant(), turnCitations));
+  private void accumulate(ModelChunk chunk) {
+    switch (chunk) {
+      case ModelChunk.TextDelta(String text) -> content.append(text);
+      case ModelChunk.ToolUseStop(ToolCall call) -> toolCalls.add(call);
+      case ModelChunk.MessageStop messageStop -> stop = messageStop;
+      default -> {}
     }
   }
 
   @Override
   public void onError(Throwable t) {
-    idleWatchdog.cancel();
-    error.set(t);
-    finishReason.set(FinishReason.ERROR);
-    done.countDown();
+    end(t, false);
   }
 
   @Override
   public void onComplete() {
-    idleWatchdog.cancel();
-    done.countDown();
+    end(null, false);
   }
 
   /**
-   * Block until the producer's terminal signal fires, the session's {@link CancellationToken} is
-   * cancelled, or the calling thread is interrupted, then return what the stream produced. Without
-   * the cancellation hook a provider stream that never delivers {@code onComplete} / {@code
-   * onError} (silent socket, hung proxy) would pin this thread indefinitely — defeating {@link
+   * Block until the stream ends, then return what it produced. The session's {@link
+   * CancellationToken} and an interrupt of the calling thread each end the stream and cancel it;
+   * without them a provider stream that never delivers {@code onComplete} / {@code onError}
+   * (silent socket, hung proxy) would pin this thread indefinitely — defeating {@link
    * com.standardapplied.helios.session.SessionLimits#maxWallClock()} which is only re-checked at
    * turn boundaries.
    *
@@ -150,41 +160,53 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     var registration =
         cancellation.onCancel(
             () ->
-                fail(
-                    new CancellationException("session cancelled while waiting for model stream")));
+                end(
+                    new CancellationException("session cancelled while waiting for model stream"),
+                    true));
     try {
       done.await();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      error.compareAndSet(null, e);
-      finishReason.set(FinishReason.ERROR);
+      end(e, true);
     } finally {
       registration.remove();
       idleWatchdog.cancel();
     }
-    var failure = error.get();
-    return new StreamedTurn(
-        content.toString(),
-        List.copyOf(toolCalls),
-        citations.get(),
-        finishReason.get(),
-        usage.get(),
-        metadata.get(),
-        failure);
+    synchronized (lock) {
+      return outcome;
+    }
   }
 
-  /** End the stream with {@code cause} unless it already ended with an error. */
-  private void fail(Throwable cause) {
-    error.compareAndSet(null, cause);
-    finishReason.set(FinishReason.ERROR);
+  /**
+   * The one terminal transition: unless the stream already ended, snapshot it with {@code error}
+   * (or none, for a completion), cancel the subscription when {@code cancelStream} and one is held,
+   * and release the runner.
+   */
+  private void end(Throwable error, boolean cancelStream) {
+    Flow.Subscription toCancel;
+    synchronized (lock) {
+      if (outcome != null) {
+        return;
+      }
+      outcome = snapshot(error);
+      toCancel = cancelStream ? subscription : null;
+    }
+    idleWatchdog.cancel();
+    if (toCancel != null) {
+      toCancel.cancel();
+    }
     done.countDown();
   }
 
-  private static FinishReason parseFinishReason(String stopReason) {
-    try {
-      return FinishReason.valueOf(stopReason);
-    } catch (IllegalArgumentException ignored) {
-      return FinishReason.STOP;
-    }
+  private StreamedTurn snapshot(Throwable error) {
+    var stopped = stop != null;
+    return new StreamedTurn(
+        content.toString(),
+        List.copyOf(toolCalls),
+        stopped ? stop.citations() : List.of(),
+        error != null ? FinishReason.ERROR : stopped ? stop.finishReason() : FinishReason.STOP,
+        stopped ? stop.usage() : Usage.of(0, 0),
+        stopped ? stop.metadata() : Map.of(),
+        error);
   }
 }

@@ -271,7 +271,7 @@ class AnthropicReasoningTest {
             uri ->
                 new AnthropicProvider()
                     .create(modelId, builder.withBaseUrl(uri + "/v1/messages").build()),
-            model -> model.chat(List.of(Message.user("Hi"))))
+            model -> model.chat(List.of(Message.user("Hi")), List.of()))
         .getLast();
   }
 

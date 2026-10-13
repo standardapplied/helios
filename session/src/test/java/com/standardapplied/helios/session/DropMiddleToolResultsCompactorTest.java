@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
@@ -32,7 +33,7 @@ import org.junit.jupiter.api.Test;
 final class DropMiddleToolResultsCompactorTest {
 
   private static Model summaryModel(String content) {
-    return new Model() {
+    return new BlockingModel() {
       @Override
       public Response<Void> chat(List<Message> messages, List<Tool> tools) {
         return Response.newBuilder().withContent(content).build();
@@ -129,7 +130,7 @@ final class DropMiddleToolResultsCompactorTest {
   void longerThanHeadPlusTailReplacesMiddleWithSummary() {
     var summaryCalls = new AtomicInteger(0);
     Model summarizer =
-        new Model() {
+        new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             summaryCalls.incrementAndGet();
@@ -170,7 +171,7 @@ final class DropMiddleToolResultsCompactorTest {
   @Test
   void summarizerThrowingReturnsOriginalHistory() {
     Model thrower =
-        new Model() {
+        new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             throw new RuntimeException("boom");
@@ -211,7 +212,7 @@ final class DropMiddleToolResultsCompactorTest {
   @Test
   void summarizerReturningNullContentReturnsOriginalHistory() {
     Model nullContent =
-        new Model() {
+        new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             return Response.newBuilder().build();
@@ -252,7 +253,7 @@ final class DropMiddleToolResultsCompactorTest {
   void customSummaryPromptUsedInSummaryRequest() {
     var observed = new ArrayList<String>();
     Model capturing =
-        new Model() {
+        new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             for (var m : messages) {
@@ -393,7 +394,7 @@ final class DropMiddleToolResultsCompactorTest {
     var summaryCalls = new AtomicInteger(0);
     var compactor =
         DropMiddleToolResultsCompactor.newBuilder(
-                new Model() {
+                new BlockingModel() {
                   @Override
                   public Response<Void> chat(List<Message> messages, List<Tool> tools) {
                     summaryCalls.incrementAndGet();
@@ -461,7 +462,7 @@ final class DropMiddleToolResultsCompactorTest {
   @Test
   void summaryUsageReportedOnCompactionResult() {
     Model summarizer =
-        new Model() {
+        new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             return Response.newBuilder()
@@ -498,7 +499,7 @@ final class DropMiddleToolResultsCompactorTest {
   void summaryTimeoutLeavesHistoryUnchanged() {
     var interrupted = new CountDownLatch(1);
     Model slow =
-        new Model() {
+        new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
             try {

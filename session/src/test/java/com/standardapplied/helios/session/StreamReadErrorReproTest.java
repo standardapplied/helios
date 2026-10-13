@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
@@ -54,7 +55,7 @@ class StreamReadErrorReproTest {
    * {@code IOException} as its cause and the provider name in {@link
    * TransientStreamException#providerName()}.
    */
-  private static final class TransientStreamFailureModel implements Model {
+  private static final class TransientStreamFailureModel implements BlockingModel {
 
     final AtomicInteger chatStreamInvocations = new AtomicInteger(0);
     final TransientStreamException providerException;
@@ -184,7 +185,7 @@ class StreamReadErrorReproTest {
   @Test
   void retryRecoversWhenStreamSucceedsBeforeBudgetExhaustion() {
     var failTwiceThenSucceed =
-        new Model() {
+        new BlockingModel() {
           final AtomicInteger calls = new AtomicInteger(0);
           final TransientStreamException ex = providerStyleException();
 
