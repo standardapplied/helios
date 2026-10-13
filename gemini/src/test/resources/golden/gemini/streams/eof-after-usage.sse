@@ -1,0 +1,8 @@
+data: {"event_type":"interaction.created","interaction":{"id":"int_xyz","status":"in_progress"}}
+
+data: {"event_type":"step.start","index":0,"step":{"type":"model_output"}}
+
+data: {"event_type":"step.delta","index":0,"delta":{"type":"text","text":"Hello"}}
+
+data: {"event_type":"interaction.status_update","interaction_id":"int_xyz","status":"in_progress","usage":{"total_input_tokens":2006,"total_output_tokens":2,"total_tokens":2008,"total_cached_tokens":1920}}
+

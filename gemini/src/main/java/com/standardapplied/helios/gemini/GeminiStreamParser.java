@@ -81,7 +81,7 @@ final class GeminiStreamParser implements SseReader.Parser {
       case "interaction.created" -> envelope(event.interaction());
       case "interaction.completed" -> completed(event.interaction());
       case "interaction.status_update", "interaction.in_progress", "interaction.requires_action" ->
-          interactionId(event.interactionId());
+          checkpoint(event.interactionId(), event.usage());
       case "step.start" -> steps.start(event.index(), event.step());
       case "step.delta" -> steps.delta(event.index(), event.argumentsDelta(), event.delta());
       case "step.stop" -> steps.stop(event.index());
@@ -132,18 +132,15 @@ final class GeminiStreamParser implements SseReader.Parser {
   }
 
   private StreamEvent envelope(InteractionResponse interaction) {
-    if (interaction != null) {
-      interactionId(interaction.id());
-      if (interaction.usage() != null) {
-        usage = interaction.usage();
-      }
-    }
-    return null;
+    return interaction == null ? null : checkpoint(interaction.id(), interaction.usage());
   }
 
-  private StreamEvent interactionId(String id) {
+  private StreamEvent checkpoint(String id, InteractionUsage reported) {
     if (id != null) {
       interactionId = id;
+    }
+    if (reported != null) {
+      usage = reported;
     }
     return null;
   }
