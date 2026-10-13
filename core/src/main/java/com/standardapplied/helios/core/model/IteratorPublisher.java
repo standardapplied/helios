@@ -206,6 +206,11 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
             break;
           }
           subscriber.onNext(item);
+          synchronized (lock) {
+            if (ended || invalidRequest != null) {
+              break;
+            }
+          }
         }
       } catch (RuntimeException | Error failure) {
         end(failure);

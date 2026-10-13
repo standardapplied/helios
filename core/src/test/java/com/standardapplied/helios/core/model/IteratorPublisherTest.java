@@ -241,6 +241,37 @@ class IteratorPublisherTest {
   }
 
   @Test
+  void aNonPositiveRequestInsideOnNextFailsTheStreamWithoutAnotherPull() {
+    var source = new Source(List.of("a"));
+    source.blockAt = 1;
+    source.ignoresClose = true;
+    var subscriber = new RecordingSubscriber<String>();
+
+    publisherOf(source)
+        .subscribe(onEachItem(subscriber, () -> subscriber.subscription().request(0)));
+
+    assertInstanceOf(IllegalArgumentException.class, subscriber.awaitFailure());
+    Await.until("the owned thread finished", () -> token.activeCallbackCountForTests() == 0);
+    assertEquals(1, source.blocked.getCount());
+    assertEquals(List.of("a"), subscriber.items());
+  }
+
+  @Test
+  void cancellingInsideOnNextEndsTheSignalsWithoutAnotherPull() {
+    var source = new Source(List.of("a"));
+    source.blockAt = 1;
+    source.ignoresClose = true;
+    var subscriber = new RecordingSubscriber<String>();
+
+    publisherOf(source).subscribe(onEachItem(subscriber, subscriber::cancel));
+    assertEquals("a", subscriber.next());
+
+    Await.until("the owned thread finished", () -> token.activeCallbackCountForTests() == 0);
+    assertEquals(1, source.blocked.getCount());
+    assertFalse(subscriber.ended());
+  }
+
+  @Test
   void cancellingTheSubscriptionClosesABlockedSourceAndEndsTheSignals() {
     var source = new Source(List.of("a"));
     source.blockAt = 1;
@@ -406,6 +437,33 @@ class IteratorPublisherTest {
     assertThrows(
         NullPointerException.class,
         () -> new IteratorPublisher<>(() -> new Source(List.of()), null));
+  }
+
+  /** Forwards every signal to {@code recorder}, running {@code action} after each item. */
+  private static Flow.Subscriber<String> onEachItem(
+      RecordingSubscriber<String> recorder, Runnable action) {
+    return new Flow.Subscriber<>() {
+      @Override
+      public void onSubscribe(Flow.Subscription subscription) {
+        recorder.onSubscribe(subscription);
+      }
+
+      @Override
+      public void onNext(String item) {
+        recorder.onNext(item);
+        action.run();
+      }
+
+      @Override
+      public void onError(Throwable failure) {
+        recorder.onError(failure);
+      }
+
+      @Override
+      public void onComplete() {
+        recorder.onComplete();
+      }
+    };
   }
 
   private IteratorPublisher<String> publisherOf(Source source) {

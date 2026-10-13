@@ -192,11 +192,14 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       outcome = snapshot(error);
       toCancel = cancelStream ? subscription : null;
     }
-    idleWatchdog.cancel();
-    if (toCancel != null) {
-      toCancel.cancel();
+    try {
+      idleWatchdog.cancel();
+      if (toCancel != null) {
+        toCancel.cancel();
+      }
+    } finally {
+      done.countDown();
     }
-    done.countDown();
   }
 
   private StreamedTurn snapshot(Throwable error) {
