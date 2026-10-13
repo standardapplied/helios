@@ -13,6 +13,7 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.SseReader;
+import java.util.Objects;
 
 /**
  * Parses one Messages API stream, one event at a time, into {@link StreamEvent}s: text, thinking
@@ -25,10 +26,7 @@ import com.standardapplied.helios.core.provider.SseReader;
 final class AnthropicStreamParser implements SseReader.Parser {
 
   private final ContentBlocks blocks = new ContentBlocks();
-  private int inputTokens;
-  private int outputTokens;
-  private int cacheCreationInputTokens;
-  private int cacheReadInputTokens;
+  private Response.Usage counts = Response.Usage.of(0, 0, 0, 0);
   private String stopReason;
   private ContentDelta.StopDetails stopDetails;
 
@@ -86,23 +84,21 @@ final class AnthropicStreamParser implements SseReader.Parser {
    * The token counts {@code usage} reports. {@code message_start} reports the input, cache and
    * initial output counts; each {@code message_delta} reports cumulative counts, which grow past
    * the start's input count when server tools run, so every count it carries replaces the last.
+   * Counts whose sum overflows fail here, before they replace any count, so the partial stays
+   * readable.
    */
   private void absorb(ApiUsage usage) {
     if (usage == null) {
       return;
     }
-    if (usage.inputTokens() != null) {
-      inputTokens = usage.inputTokens();
-    }
-    if (usage.outputTokens() != null) {
-      outputTokens = usage.outputTokens();
-    }
-    if (usage.cacheCreationInputTokens() != null) {
-      cacheCreationInputTokens = usage.cacheCreationInputTokens();
-    }
-    if (usage.cacheReadInputTokens() != null) {
-      cacheReadInputTokens = usage.cacheReadInputTokens();
-    }
+    counts =
+        Response.Usage.of(
+            Objects.requireNonNullElse(usage.inputTokens(), counts.inputTokens()),
+            Objects.requireNonNullElse(usage.outputTokens(), counts.outputTokens()),
+            Objects.requireNonNullElse(
+                usage.cacheCreationInputTokens(), counts.cacheCreationInputTokens()),
+            Objects.requireNonNullElse(
+                usage.cacheReadInputTokens(), counts.cacheReadInputTokens()));
   }
 
   private StreamEvent messageStop() {
@@ -131,12 +127,11 @@ final class AnthropicStreamParser implements SseReader.Parser {
   }
 
   private Response.Usage usage() {
-    if (inputTokens > 0
-        || outputTokens > 0
-        || cacheCreationInputTokens > 0
-        || cacheReadInputTokens > 0) {
-      return Response.Usage.of(
-          inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens);
+    if (counts.inputTokens() > 0
+        || counts.outputTokens() > 0
+        || counts.cacheCreationInputTokens() > 0
+        || counts.cacheReadInputTokens() > 0) {
+      return counts;
     }
     return null;
   }

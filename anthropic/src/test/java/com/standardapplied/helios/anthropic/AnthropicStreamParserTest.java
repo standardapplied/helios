@@ -203,6 +203,20 @@ class AnthropicStreamParserTest {
   }
 
   @Test
+  void tokenCountsWhoseSumOverflowsEndTheStreamKeepingTheEarlierCounts() {
+    parser.parse("{\"type\":\"message_start\",\"message\":{\"usage\":{\"output_tokens\":1}}}");
+
+    var error =
+        assertInstanceOf(
+            StreamEvent.Error.class,
+            parser.parse("{\"type\":\"message_delta\",\"usage\":{\"input_tokens\":2147483647}}"));
+
+    assertEquals("Failed to parse stream event", error.message());
+    assertInstanceOf(ArithmeticException.class, error.cause());
+    assertEquals(Response.Usage.of(0, 1), error.partial().usage());
+  }
+
+  @Test
   void toolInputThatIsNotAJsonObjectEndsTheStreamNamingTheTool() {
     parser.parse(
         "{\"type\":\"content_block_start\",\"index\":0,"
