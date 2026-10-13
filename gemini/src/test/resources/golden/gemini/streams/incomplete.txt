@@ -1,5 +1,5 @@
 == chatStream
-TextDelta[text=Hello, wor]
-Done[response=Response[content=Hello, wor, parsed=null, toolCalls=[], finishReason=LENGTH, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]]
+TextDelta[text=###]
+Done[response=Response[content=###, parsed=null, toolCalls=[], finishReason=LENGTH, usage=Usage[inputTokens=11, outputTokens=1, cacheCreationInputTokens=0, cacheReadInputTokens=0, totalTokens=12], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=v1_ChdHaGpPYXFDS0o3T3h4TjhQd3BtZzBBcxIXR2hqT2FxQ0tKN094eE44UHdwbWcwQXM, gemini.thoughtSignatures=EmkKZwFpFH0T77G9CqZmYrybCfQ6ZDEFqk9vJhHCH2TTF9KHsGLLlfGLcvjtX/BR55PkhaAHTkU16Ae0d+x0hwi+wvE1ADr0g/qOHqc0Ja2M9DaSi8t959FbpUAYnHhn9tI28NBDbLsrsNc=}]]
 == chat
-Response[content=Hello, wor, parsed=null, toolCalls=[], finishReason=LENGTH, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]
+Response[content=###, parsed=null, toolCalls=[], finishReason=LENGTH, usage=Usage[inputTokens=11, outputTokens=1, cacheCreationInputTokens=0, cacheReadInputTokens=0, totalTokens=12], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=v1_ChdHaGpPYXFDS0o3T3h4TjhQd3BtZzBBcxIXR2hqT2FxQ0tKN094eE44UHdwbWcwQXM, gemini.thoughtSignatures=EmkKZwFpFH0T77G9CqZmYrybCfQ6ZDEFqk9vJhHCH2TTF9KHsGLLlfGLcvjtX/BR55PkhaAHTkU16Ae0d+x0hwi+wvE1ADr0g/qOHqc0Ja2M9DaSi8t959FbpUAYnHhn9tI28NBDbLsrsNc=}]
