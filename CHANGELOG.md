@@ -393,7 +393,7 @@ the stream produced before it failed.
 | `StreamEvent.Error(message, cause)`, `Error(message)` | `Error(message, cause, partial)`: `partial` is the `Response` so far (text, completed tool calls, usage, thinking, citations, metadata), finish reason `ERROR` |
 | A body that ended without the terminal event completed with `STOP` | `Error` "Stream ended before its terminal event", cause `EOFException`; the blocking `chat` throws a retryable `TransientStreamException` |
 | A malformed event or a provider `error` event yielded an `Error`, and the stream read on to a `Done` | the `Error` ends the stream |
-| Tool arguments that were not a JSON object reached the tool as `{"_raw": "..."}` (Gemini: the step's start arguments, or `{}`) | the stream ends in an `Error` naming the tool and the parse failure; the call is never dispatched |
+| Tool arguments that were not a JSON object reached the tool as `{"_raw": "..."}` (Gemini: the step's start arguments, or `{}`; a Gemini step that started with a JSON string holding an object took that object) | the stream ends in an `Error` naming the tool and the parse failure; the call is never dispatched. A Gemini step's start arguments follow the same rule, so a JSON string is an `Error` too |
 | A terminal event that arrived while a tool call was still open completed without that call | `Error` naming the open call |
 | An unknown Anthropic `stop_reason` or a missing one finished `STOP` | `Error` |
 | Anthropic usage took input and cache tokens from `message_start` only, so a server-tool turn reported the input of its first sampling step | each count `message_delta` carries replaces the last; its counts are cumulative, so the turn reports the input of every server-tool step |

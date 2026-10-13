@@ -357,7 +357,16 @@ class StreamedStepsTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"[]", "42", "true", "null", "\"[1]\"", "\"{not json\""})
+  @ValueSource(
+      strings = {
+        "[]",
+        "42",
+        "true",
+        "null",
+        "\"[1]\"",
+        "\"{not json\"",
+        "\"{\\\"city\\\":\\\"NYC\\\"}\""
+      })
   void startArgumentsThatAreNotAJsonObjectEndTheStreamNamingTheTool(String arguments) {
     var events =
         drain(
@@ -380,18 +389,15 @@ class StreamedStepsTest {
   }
 
   @Test
-  void aFunctionCallWhoseStartArgumentsAreAJsonStringTakesTheObjectItEncodes() {
+  void theArgumentsOfAStepThatIsNotAFunctionCallAreNotReadAsToolArguments() {
     var events =
         drain(
-            stepStart(
-                    1,
-                    "{\"type\":\"function_call\",\"id\":\"call_1\",\"name\":\"get_weather\","
-                        + "\"arguments\":\"{\\\"city\\\":\\\"NYC\\\"}\"}")
-                + stepStop(1)
+            stepStart(0, "{\"type\":\"google_search_call\",\"id\":\"g1\",\"arguments\":[\"q\"]}")
+                + stepStop(0)
                 + INTERACTION_COMPLETED);
 
-    var tc = ((StreamEvent.ToolCallComplete) events.get(0)).toolCall();
-    assertEquals(Map.of("city", "NYC"), tc.arguments());
+    assertEquals(1, events.size());
+    assertInstanceOf(StreamEvent.Done.class, events.getFirst());
   }
 
   static Stream<Named<String>> streamedArgumentsThatAreNotAnObject() {

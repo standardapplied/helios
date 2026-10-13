@@ -18,9 +18,6 @@ public final class GeminiJson {
   public static final ObjectMapper LENIENT =
       JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
 
-  /** Jackson's defaults, for arguments the wire carries as a string or an object. */
-  public static final ObjectMapper DEFAULT = JsonMapper.builder().build();
-
   /** Structured output read through {@link #LENIENT}. */
   public static final JsonBinding STRUCTURED =
       new JsonBinding(LENIENT.readerFor(Map.class)::readValue, LENIENT::convertValue);

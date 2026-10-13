@@ -38,20 +38,29 @@ final class StreamedSteps {
      */
     Map<String, Object> arguments() {
       if (!streamedArguments.isEmpty()) {
-        return ToolArguments.read(
-            name,
-            streamedArguments.toString(),
-            GeminiJson.STRUCTURED.reader(),
-            GeminiException::new);
+        return read(streamedArguments.toString());
       }
       return startArguments != null ? startArguments : Map.of();
+    }
+
+    /**
+     * {@code json} as the arguments of this call.
+     *
+     * @throws GeminiException if {@code json} is not a JSON object
+     */
+    Map<String, Object> read(String json) {
+      return ToolArguments.read(name, json, GeminiJson.STRUCTURED.reader(), GeminiException::new);
     }
   }
 
   private final Map<Integer, StepState> steps = new LinkedHashMap<>();
   private final StepOutput output = new StepOutput();
 
-  /** A {@code step.start}. */
+  /**
+   * A {@code step.start}.
+   *
+   * @throws GeminiException if a function call starts with arguments that are not a JSON object
+   */
   StreamEvent start(Integer index, Step step) {
     if (index == null || step == null) {
       return null;
@@ -60,7 +69,8 @@ final class StreamedSteps {
     state.type = step.type();
     state.name = step.name();
     state.id = step.id();
-    state.startArguments = step.arguments();
+    state.startArguments =
+        state.isCall() && step.arguments() != null ? state.read(step.arguments().toString()) : null;
     if (step.hasTypeThought()) {
       thought(step);
       return null;
