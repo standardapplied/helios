@@ -119,11 +119,11 @@ class StreamingIteratorTest {
   @Test
   void reasoningSummaryDeltasStreamAsThinkingAndPartsJoinWithABlankLine() {
     var sse =
-        reasoningDelta(0, "Let me think")
-            + reasoningDelta(0, " about this.")
-            + reasoningDone(0, "Let me think about this.")
-            + reasoningDelta(1, "Then answer.")
-            + reasoningDone(1, "Then answer.")
+        reasoningDelta("rs_1", 0, "Let me think")
+            + reasoningDelta("rs_1", 0, " about this.")
+            + reasoningDone("rs_1", 0, "Let me think about this.")
+            + reasoningDelta("rs_1", 1, "Then answer.")
+            + reasoningDone("rs_1", 1, "Then answer.")
             + TEXT_DELTA
             + RESPONSE_COMPLETED;
 
@@ -147,7 +147,7 @@ class StreamingIteratorTest {
 
   @Test
   void anEmptyReasoningSummaryPartYieldsNoThinking() {
-    var events = drain(reasoningDone(0, "") + TEXT_DELTA + RESPONSE_COMPLETED);
+    var events = drain(reasoningDone("rs_1", 0, "") + TEXT_DELTA + RESPONSE_COMPLETED);
 
     assertEquals(2, events.size());
     var done = (StreamEvent.Done) events.getLast();
@@ -156,11 +156,39 @@ class StreamingIteratorTest {
   }
 
   @Test
+  void aSummaryPartThatStreamedNoDeltaCompletesWithTheTextOfItsDoneEvent() {
+    var events = drain(reasoningDone("rs_1", 0, "Whole.") + TEXT_DELTA + RESPONSE_COMPLETED);
+
+    assertEquals(new StreamEvent.ThinkingComplete("Whole.", null), events.getFirst());
+    assertEquals("Whole.", ((StreamEvent.Done) events.getLast()).response().thinking());
+  }
+
+  @Test
+  void summaryPartsOfSeparateReasoningItemsStayApartAndEmptyPartsAreLeftOut() {
+    var sse =
+        reasoningDelta("rs_1", 0, "First.")
+            + reasoningDone("rs_1", 0, "First.")
+            + reasoningDone("rs_2", 0, "")
+            + reasoningDelta("rs_3", 0, "Second.")
+            + reasoningDone("rs_3", 0, "Second.")
+            + TEXT_DELTA
+            + RESPONSE_COMPLETED;
+
+    var done = (StreamEvent.Done) drain(sse).getLast();
+
+    assertEquals("First.\n\nSecond.", done.response().thinking());
+  }
+
+  @Test
   void reasoningSummaryDoneWithoutTextCompletesWhatStreamed() {
     var reasoningDone =
         "data: {\"type\":\"response.reasoning_summary_text.done\","
             + "\"item_id\":\"rs_1\",\"summary_index\":0}\n\n";
-    var sse = reasoningDelta(0, "Done thinking.") + reasoningDone + TEXT_DELTA + RESPONSE_COMPLETED;
+    var sse =
+        reasoningDelta("rs_1", 0, "Done thinking.")
+            + reasoningDone
+            + TEXT_DELTA
+            + RESPONSE_COMPLETED;
 
     var events = drain(sse);
     var complete =
@@ -376,14 +404,35 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void responseFailedEmitsError() {
+  void aFailedResponseEndsInAnErrorWithItsErrorCodeMessageAndUsage() {
     var failed =
         "data: {\"type\":\"response.failed\",\"response\":{"
-            + "\"id\":\"resp_1\",\"status\":\"failed\"}}\n\n";
-    var sse = TEXT_DELTA + failed;
+            + "\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"failed\","
+            + "\"error\":{\"code\":\"server_error\","
+            + "\"message\":\"The model failed to generate a response.\"},"
+            + "\"instructions\":\"You are a confidential assistant.\",\"output\":[],"
+            + "\"usage\":{\"input_tokens\":25,\"output_tokens\":7}},"
+            + "\"sequence_number\":3}\n\n";
 
-    var events = drain(sse);
-    assertTrue(events.stream().anyMatch(e -> e instanceof StreamEvent.Error));
+    var events = drain(TEXT_DELTA + failed);
+
+    assertEquals(2, events.size());
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals(
+        "API response failed: server_error: The model failed to generate a response.",
+        error.message());
+    assertEquals("Hello", error.partial().content());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
+    assertEquals(7, error.partial().usage().outputTokens());
+  }
+
+  @Test
+  void aFailedEventWithoutAResponseStillEndsInAnError() {
+    var failed = "data: {\"type\":\"response.failed\"}\n\n";
+
+    var error = assertInstanceOf(StreamEvent.Error.class, drain(TEXT_DELTA + failed).getLast());
+
+    assertEquals("API response failed", error.message());
   }
 
   @Test
@@ -565,6 +614,16 @@ class StreamingIteratorTest {
   }
 
   @Test
+  void anEventWithoutATypeIsSkipped() {
+    var untyped = "data: {\"delta\":\"stray\",\"sequence_number\":0}\n\n";
+
+    var events = drain(untyped + TEXT_DELTA + RESPONSE_COMPLETED);
+
+    assertEquals(2, events.size());
+    assertEquals(new StreamEvent.TextDelta("Hello"), events.getFirst());
+  }
+
+  @Test
   void nextWithoutHasNextWorks() {
     try (var iterator = reader(SseEvents.body(TEXT_DELTA + RESPONSE_COMPLETED))) {
       var event = iterator.next();
@@ -715,6 +774,7 @@ class StreamingIteratorTest {
     var done = (StreamEvent.Done) drain(sse).getFirst();
 
     assertEquals(FinishReason.REFUSAL, done.response().finishReason());
+    assertEquals("No.", done.response().metadata().get(Response.REFUSAL_EXPLANATION_KEY));
   }
 
   @Test
@@ -730,6 +790,22 @@ class StreamingIteratorTest {
     assertEquals("Response ended while function call 'weather' is still open", error.message());
     assertEquals(List.of(), error.partial().toolCalls());
     assertEquals(4096, error.partial().usage().outputTokens());
+  }
+
+  @Test
+  void aTerminalWhileSeveralFunctionCallsAreOpenNamesTheFirstOpened() {
+    var sse =
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,"
+            + "\"item\":{\"type\":\"function_call\",\"id\":\"fc_2\","
+            + "\"call_id\":\"call_2\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n"
+            + "data: {\"type\":\"response.output_item.added\",\"output_index\":1,"
+            + "\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\","
+            + "\"call_id\":\"call_1\",\"name\":\"weather\",\"arguments\":\"\"}}\n\n"
+            + RESPONSE_COMPLETED;
+
+    var error = assertInstanceOf(StreamEvent.Error.class, drain(sse).getLast());
+
+    assertEquals("Response ended while function call 'lookup' is still open", error.message());
   }
 
   @Test
@@ -768,18 +844,20 @@ class StreamingIteratorTest {
     assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
   }
 
-  private static String reasoningDelta(int summaryIndex, String delta) {
-    return "data: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"rs_1\","
-        + "\"summary_index\":"
+  private static String reasoningDelta(String itemId, int summaryIndex, String delta) {
+    return "data: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\""
+        + itemId
+        + "\",\"summary_index\":"
         + summaryIndex
         + ",\"delta\":\""
         + delta
         + "\"}\n\n";
   }
 
-  private static String reasoningDone(int summaryIndex, String text) {
-    return "data: {\"type\":\"response.reasoning_summary_text.done\",\"item_id\":\"rs_1\","
-        + "\"summary_index\":"
+  private static String reasoningDone(String itemId, int summaryIndex, String text) {
+    return "data: {\"type\":\"response.reasoning_summary_text.done\",\"item_id\":\""
+        + itemId
+        + "\",\"summary_index\":"
         + summaryIndex
         + ",\"text\":\""
         + text
