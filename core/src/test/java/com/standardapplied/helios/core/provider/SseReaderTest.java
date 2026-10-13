@@ -423,6 +423,30 @@ class SseReaderTest {
   }
 
   @Test
+  void aReaderClosedBetweenEventsEndsInOneErrorInsteadOfThrowing() {
+    var body = new Closing(stream("data: silent\n\ndata: two\n\n"));
+    var readers = new ArrayList<SseReader>();
+    var closingParser =
+        new EchoParser() {
+          @Override
+          public StreamEvent parse(String payload) {
+            readers.getFirst().close();
+            return super.parse(payload);
+          }
+        };
+    var reader = new SseReader(body, NEVER_IDLE, closingParser, ProviderException::new);
+    readers.add(reader);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, reader.next());
+
+    assertEquals("Stream read error", error.message());
+    assertEquals("Stream closed", error.cause().getMessage());
+    assertEquals("silent", error.partial().content());
+    assertTrue(body.closed);
+    assertFalse(reader.hasNext());
+  }
+
+  @Test
   void closeReleasesAReadThatIgnoresInterruptsByClosingTheBodyFirst() {
     var body = new ClosedOnlyByClose();
     var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
