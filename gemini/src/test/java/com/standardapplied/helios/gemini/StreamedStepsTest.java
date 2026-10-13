@@ -32,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The steps of a Gemini stream, from {@code step.start} through {@code step.delta} to {@code
@@ -350,6 +351,44 @@ class StreamedStepsTest {
   void aFunctionCallWithoutStreamedArgumentsTakesTheArgumentsOnItsStart() {
     var events =
         drain(stepStart(1, GET_WEATHER_WITH_ARGUMENTS) + stepStop(1) + INTERACTION_COMPLETED);
+
+    var tc = ((StreamEvent.ToolCallComplete) events.get(0)).toolCall();
+    assertEquals(Map.of("city", "NYC"), tc.arguments());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"[]", "42", "true", "null", "\"[1]\"", "\"{not json\""})
+  void startArgumentsThatAreNotAJsonObjectEndTheStreamNamingTheTool(String arguments) {
+    var events =
+        drain(
+            stepStart(
+                    1,
+                    "{\"type\":\"function_call\",\"id\":\"call_1\",\"name\":\"delete\","
+                        + "\"arguments\":"
+                        + arguments
+                        + "}")
+                + stepStop(1)
+                + INTERACTION_COMPLETED);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertTrue(
+        error.message().startsWith("Arguments of tool call 'delete' are not a JSON object: "),
+        error.message());
+    assertInstanceOf(GeminiException.class, error.cause());
+    assertEquals(List.of(), error.partial().toolCalls());
+    assertEquals(1, events.size());
+  }
+
+  @Test
+  void aFunctionCallWhoseStartArgumentsAreAJsonStringTakesTheObjectItEncodes() {
+    var events =
+        drain(
+            stepStart(
+                    1,
+                    "{\"type\":\"function_call\",\"id\":\"call_1\",\"name\":\"get_weather\","
+                        + "\"arguments\":\"{\\\"city\\\":\\\"NYC\\\"}\"}")
+                + stepStop(1)
+                + INTERACTION_COMPLETED);
 
     var tc = ((StreamEvent.ToolCallComplete) events.get(0)).toolCall();
     assertEquals(Map.of("city", "NYC"), tc.arguments());

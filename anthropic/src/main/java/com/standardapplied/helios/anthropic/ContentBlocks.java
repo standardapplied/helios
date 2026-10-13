@@ -75,7 +75,7 @@ final class ContentBlocks {
     if (index == null || verbatim.stop(index)) {
       return null;
     }
-    if (thinking.holds(index)) {
+    if (thinking.indices().contains(index)) {
       return thinking.complete(index);
     }
     return toolUses.stop(index);
