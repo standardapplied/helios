@@ -704,6 +704,32 @@ class StreamingIteratorTest {
     assertEquals(4096, error.partial().usage().outputTokens());
   }
 
+  @ParameterizedTest
+  @CsvSource({
+    "response.completed, completed",
+    "response.incomplete, incomplete",
+    "response.failed, failed"
+  })
+  void aTerminalUsageThatOverflowsEndsTheStreamInAnErrorKeepingWhatStreamed(
+      String type, String status) {
+    var overflowing =
+        "data: {\"type\":\""
+            + type
+            + "\",\"response\":{\"id\":\"resp_1\",\"status\":\""
+            + status
+            + "\",\"usage\":{\"input_tokens\":2147483647,\"output_tokens\":1}}}\n\n";
+
+    var events = drain(TEXT_DELTA + overflowing);
+
+    assertEquals(2, events.size());
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals("Failed to parse stream event", error.message());
+    assertInstanceOf(ArithmeticException.class, error.cause());
+    assertEquals("Hello", error.partial().content());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
+    assertNull(error.partial().usage());
+  }
+
   @Test
   void anIncompleteResponseIsTruncatedWithItsUsageAndReason() {
     var done = (StreamEvent.Done) drain(TEXT_DELTA + incomplete("max_output_tokens")).getLast();
