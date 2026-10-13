@@ -38,7 +38,7 @@ event: content_block_stop
 data: {"type":"content_block_stop","index":3}
 
 event: message_delta
-data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":15}}
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":60,"cache_creation_input_tokens":5,"cache_read_input_tokens":7,"output_tokens":15,"server_tool_use":{"web_search_requests":1}}}
 
 event: message_stop
 data: {"type":"message_stop"}
