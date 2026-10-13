@@ -21,6 +21,8 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
@@ -174,6 +176,35 @@ class ModelTest {
     var thrown = assertInstanceOf(IllegalStateException.class, Await.failure("the chat", chat));
     assertEquals("close failed", thrown.getMessage());
     assertTrue(interruptRestored[0]);
+  }
+
+  @Test
+  void anInterruptBeforeTheStreamSubscribesCancelsTheLateSubscriptionWithoutARequest() {
+    var subscribers = new LinkedBlockingQueue<Flow.Subscriber<? super ModelChunk>>();
+    Model model = model((cancellation) -> subscribers::add);
+    var chat = new FutureTask<>(() -> model.chat(List.of(), List.of()));
+    var caller = Thread.ofPlatform().start(chat);
+    var late = Await.next("the chat subscribed", subscribers);
+    caller.interrupt();
+    assertInstanceOf(CancellationException.class, Await.failure("the chat", chat));
+
+    var requests = new AtomicInteger();
+    var cancels = new AtomicInteger();
+    late.onSubscribe(
+        new Flow.Subscription() {
+          @Override
+          public void request(long n) {
+            requests.incrementAndGet();
+          }
+
+          @Override
+          public void cancel() {
+            cancels.incrementAndGet();
+          }
+        });
+
+    assertEquals(0, requests.get());
+    assertEquals(1, cancels.get());
   }
 
   @Test
