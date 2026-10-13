@@ -353,7 +353,7 @@ public record SessionOptions(
      * Set the execution provider — the surface the {@code Execute} tool dispatches through.
      * Defaults to {@link NoopExecutionProvider#INSTANCE}, which refuses every runtime so a session
      * that forgot to wire execution cannot silently shell out. Pass {@code
-     * LocalProcessExecutionProvider.defaultPosix(...)} (or your own implementation) to enable code
+     * LocalProcessExecutionProvider.defaultPosix()} (or your own implementation) to enable code
      * execution.
      *
      * @param executionProvider non-null provider
