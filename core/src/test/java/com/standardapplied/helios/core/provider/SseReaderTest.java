@@ -14,6 +14,7 @@ import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.FeedableInputStream;
 import com.standardapplied.helios.core.test.StubHttpServer;
 import java.io.ByteArrayInputStream;
@@ -29,6 +30,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
 
 class SseReaderTest {
@@ -292,6 +295,55 @@ class SseReaderTest {
 
     assertEquals(new StreamEvent.TextDelta("one"), reader.next());
     assertInstanceOf(StreamEvent.Done.class, reader.next());
+  }
+
+  @Test
+  void theTerminalIsYieldedOnceHoweverOftenHasNextAsksAndNothingFollowsIt() {
+    var reader =
+        new SseReader(
+            stream("data: stop\n\n"), NEVER_IDLE, new EchoParser(), ProviderException::new);
+
+    assertTrue(reader.hasNext());
+    assertTrue(reader.hasNext());
+    assertInstanceOf(StreamEvent.Done.class, reader.next());
+    assertFalse(reader.hasNext());
+    assertThrows(NoSuchElementException.class, reader::next);
+  }
+
+  @Test
+  void aClosedReaderHasNoMoreEventsAndHasClosedTheBody() {
+    var feed = new FeedableInputStream();
+    feed.feed("data: one\n\ndata: two\n\n");
+    var body = new Closing(feed);
+    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+    assertEquals(new StreamEvent.TextDelta("one"), reader.next());
+    assertTrue(reader.hasNext());
+
+    reader.close();
+
+    assertTrue(body.closed);
+    assertFalse(reader.hasNext());
+    assertThrows(NoSuchElementException.class, reader::next);
+  }
+
+  @Test
+  void closingTheReaderReleasesALineReadBlockedOnTheBodyAsOneError() {
+    var feed = new FeedableInputStream();
+    var body = new Closing(feed);
+    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+    try (var consumer = Executors.newVirtualThreadPerTaskExecutor()) {
+      var blocked = consumer.submit(reader::next);
+      feed.awaitBlockedRead();
+
+      reader.close();
+
+      var error =
+          assertInstanceOf(StreamEvent.Error.class, Await.value("the blocked next", blocked));
+      assertEquals("Stream read error", error.message());
+      assertInstanceOf(IOException.class, error.cause());
+      assertTrue(body.closed);
+      assertFalse(reader.hasNext());
+    }
   }
 
   @Test
