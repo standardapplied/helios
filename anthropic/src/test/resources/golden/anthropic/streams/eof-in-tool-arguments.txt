@@ -1,5 +1,8 @@
 == chatStream
 TextDelta[text=Checking.]
+ToolUseStart[callId=toolu_1, toolName=weather]
+ToolUseDelta[callId=toolu_1, argumentsDelta={"city":]
+ToolUseDelta[callId=toolu_1, argumentsDelta="Par]
 onError TransientStreamException(Stream ended before its terminal event) provider=anthropic caused by EOFException(the response body ended before the provider's terminal event)
 == chat
 threw TransientStreamException(Stream ended before its terminal event) provider=anthropic caused by EOFException(the response body ended before the provider's terminal event)

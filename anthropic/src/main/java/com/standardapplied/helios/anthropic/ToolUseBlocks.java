@@ -35,17 +35,20 @@ final class ToolUseBlocks implements RawContentEcho.Source {
         name, json, AnthropicJson.STRUCTURED.reader(), AnthropicException::new);
   }
 
-  /** A tool-use block opening at {@code index}. */
-  void start(int index, String id, String name) {
+  /** A tool-use block opening at {@code index}: the start of its call. */
+  StreamEvent start(int index, String id, String name) {
     pending.put(index, new Pending(id, name, new StringBuilder()));
+    return new StreamEvent.ToolCallStart(id, name);
   }
 
-  /** Input JSON streamed into the open block at {@code index}, if there is one. */
-  void appendInput(int index, String json) {
+  /** Input JSON streamed into the open block at {@code index}: its delta, if the block is open. */
+  StreamEvent appendInput(int index, String json) {
     var block = pending.get(index);
-    if (block != null) {
-      block.input().append(json);
+    if (block == null) {
+      return null;
     }
+    block.input().append(json);
+    return new StreamEvent.ToolCallDelta(block.id(), json);
   }
 
   /** The closing of the block at {@code index}: its tool call, or none if no block is open. */

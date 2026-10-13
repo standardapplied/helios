@@ -97,21 +97,30 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
 
     @Override
     public void request(long n) {
+      CloseableIterator<? extends T> open;
+      Thread owner;
       synchronized (lock) {
         if (ended || invalidRequest != null) {
           return;
         }
-        if (n <= 0) {
-          invalidRequest = new IllegalArgumentException("non-positive subscription request: " + n);
-        } else {
+        if (n > 0) {
           demand = demand + n < 0 ? Long.MAX_VALUE : demand + n;
+        } else {
+          invalidRequest = new IllegalArgumentException("non-positive subscription request: " + n);
         }
         if (!started) {
           started = true;
           worker = Thread.ofVirtual().name("helios-iterator-publisher").start(this);
         }
         lock.notifyAll();
+        if (n > 0) {
+          return;
+        }
+        open = source;
+        source = null;
+        owner = worker;
       }
+      release(owner, open);
     }
 
     @Override
@@ -133,6 +142,11 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
         owner = worker;
         lock.notifyAll();
       }
+      release(owner, open);
+    }
+
+    /** Interrupts the owned thread and closes the open iterator, so a blocked pull ends. */
+    private static void release(Thread owner, CloseableIterator<?> open) {
       if (owner != null && owner != Thread.currentThread()) {
         owner.interrupt();
       }
@@ -170,7 +184,7 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
           }
           subscriber.onNext(item);
         }
-      } catch (RuntimeException failure) {
+      } catch (RuntimeException | Error failure) {
         end(failure);
         return;
       }
@@ -208,7 +222,7 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
     }
 
     /** Sends the one terminal signal the stream's state calls for, or none once cancelled. */
-    private void end(RuntimeException failure) {
+    private void end(Throwable failure) {
       Throwable error;
       synchronized (lock) {
         if (invalidRequest != null && !ended) {

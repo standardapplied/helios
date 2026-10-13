@@ -39,6 +39,7 @@ final class FunctionCalls {
       var call = pending.get(itemId);
       if (call != null) {
         call.arguments().append(delta);
+        return new StreamEvent.ToolCallDelta(call.callId(), delta);
       }
     }
     return null;

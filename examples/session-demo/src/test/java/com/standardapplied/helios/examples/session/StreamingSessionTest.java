@@ -6,13 +6,17 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import com.standardapplied.helios.anthropic.AnthropicModelId;
 import com.standardapplied.helios.anthropic.AnthropicProvider;
+import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.HeldSseServer;
 import com.standardapplied.helios.core.test.ModelHarness;
+import com.standardapplied.helios.core.test.RecordingSubscriber;
 import com.standardapplied.helios.core.test.SseReplies;
 import com.standardapplied.helios.core.test.StubHttpServer;
 import com.standardapplied.helios.core.tool.ParameterType;
@@ -56,6 +60,10 @@ import org.junit.jupiter.params.provider.ValueSource;
  *
  * <p>{@code anthropic/sessions/structured-tool.sse} is hand-built from the documented Messages
  * stream shape: a thinking block and a tool call, then a thinking block and the JSON answer.
+ *
+ * <p>{@code <provider>/sessions/held-tool.sse} is the first tool call of the provider's {@code
+ * streams/tool-calls.sse} golden, held after its first argument fragment: argument fragments are
+ * the chunks that keep a session's {@code streamIdleTimeout} from firing while a long call streams.
  */
 final class StreamingSessionTest {
 
@@ -77,6 +85,31 @@ final class StreamingSessionTest {
       assertEquals("Hello", first);
       var success = assertInstanceOf(ResultMessage.Success.class, result(session));
       assertEquals("Hello, world.", success.result());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"anthropic", "gemini", "openai"})
+  void toolArgumentsStreamBeforeTheirCallCompletes(String provider) throws IOException {
+    var reply =
+        HeldSseServer.Reply.of(Golden.read(provider + "/sessions/held-tool.sse").split(HOLD));
+    var chunks = new RecordingSubscriber<ModelChunk>();
+    try (var server = HeldSseServer.start(reply);
+        var model = modelAt(provider, server.uri())) {
+      model
+          .chatStream(
+              List.of(Message.user("Weather?")), List.of(weather().tool()), new CancellationToken())
+          .subscribe(chunks);
+
+      var start = assertInstanceOf(ModelChunk.ToolUseStart.class, chunks.next());
+      var delta = chunks.next();
+      reply.release();
+
+      assertEquals(new ModelChunk.ToolUseDelta(start.callId(), "{\"city\""), delta);
+      assertEquals(
+          new ModelChunk.ToolUseDelta(start.callId(), ":\"Paris\"}"), chunks.next());
+      assertInstanceOf(ModelChunk.ToolUseStop.class, chunks.next());
+      assertInstanceOf(ModelChunk.MessageStop.class, chunks.awaitCompletion().getLast());
     }
   }
 

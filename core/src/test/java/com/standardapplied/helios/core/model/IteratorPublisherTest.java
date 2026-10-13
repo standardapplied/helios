@@ -124,7 +124,7 @@ class IteratorPublisherTest {
   }
 
   @Test
-  void aNonPositiveRequestAfterTheLastItemStillFailsTheStream() {
+  void aNonPositiveRequestClosesABlockedSourceAndFailsTheStream() {
     var subscriber = new RecordingSubscriber<String>(0);
     var source = new Source(List.of());
     source.blockAt = 0;
@@ -133,8 +133,24 @@ class IteratorPublisherTest {
     subscriber.subscription().request(1);
     Await.latch("the pull blocked", source.blocked);
     subscriber.subscription().request(0);
-    source.unblock.countDown();
 
+    assertInstanceOf(IllegalArgumentException.class, subscriber.awaitFailure());
+    Await.latch("the source closed", source.closed);
+  }
+
+  @Test
+  void aNonPositiveRequestInterruptsAPullThatIgnoresClose() {
+    var subscriber = new RecordingSubscriber<String>(0);
+    var source = new Source(List.of());
+    source.blockAt = 0;
+    source.ignoresClose = true;
+
+    publisherOf(source).subscribe(subscriber);
+    subscriber.subscription().request(1);
+    Await.latch("the pull blocked", source.blocked);
+    subscriber.subscription().request(0);
+
+    Await.latch("the owned thread interrupted", source.interrupted);
     assertInstanceOf(IllegalArgumentException.class, subscriber.awaitFailure());
   }
 
@@ -270,6 +286,35 @@ class IteratorPublisherTest {
   }
 
   @Test
+  void anErrorFromTheOpenerEndsTheStreamWithIt() {
+    var broken = new AssertionError("linkage broke");
+    var subscriber = new RecordingSubscriber<String>();
+
+    new IteratorPublisher<String>(
+            () -> {
+              throw broken;
+            },
+            token)
+        .subscribe(subscriber);
+
+    assertSame(broken, subscriber.awaitFailure());
+    Await.until("the owned thread finished", () -> token.activeCallbackCountForTests() == 0);
+  }
+
+  @Test
+  void anErrorFromTheSourceEndsTheStreamWithItAndClosesTheSource() {
+    var overflow = new StackOverflowError("deep");
+    var source = new Source(List.of("a"));
+    source.failure = overflow;
+    var subscriber = new RecordingSubscriber<String>();
+
+    publisherOf(source).subscribe(subscriber);
+
+    assertSame(overflow, subscriber.awaitFailure());
+    Await.latch("the source closed", source.closed);
+  }
+
+  @Test
   void nullArgumentsAreRejected() {
     assertThrows(NullPointerException.class, () -> new IteratorPublisher<String>(null, token));
     assertThrows(
@@ -302,7 +347,7 @@ class IteratorPublisherTest {
     private int next;
     private int blockAt = -1;
     private boolean ignoresClose;
-    private RuntimeException failure;
+    private Throwable failure;
 
     Source(List<String> items) {
       this.items = items;
@@ -326,8 +371,11 @@ class IteratorPublisherTest {
           throw new IllegalStateException("interrupted", e);
         }
       }
-      if (failure != null && next == items.size()) {
-        throw failure;
+      if (failure instanceof RuntimeException runtime && next == items.size()) {
+        throw runtime;
+      }
+      if (failure instanceof Error error && next == items.size()) {
+        throw error;
       }
       return next < items.size();
     }

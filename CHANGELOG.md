@@ -132,7 +132,8 @@ remove the per-call working directory before they release the concurrency permit
 `Flow` form used to call the blocking `chat` before anyone subscribed and replay a chunk sequence
 made up from the finished response, so a session saw no text until the turn was over and could not
 cancel a call already in flight. Now `chatStream(messages, tools, [schema,] cancellation)` is the
-one entry point: every provider publishes each delta as its stream delivers it, nothing is sent
+one entry point: every provider publishes each delta as its stream delivers it (each tool call's
+start and argument fragments, and a Gemini thought's opening summary, included), nothing is sent
 before the subscriber's first request, and cancelling the subscription or the token aborts that
 request (awaiting headers or mid-body) and closes its connection without touching the shared model.
 `chat` drains the same stream. A session's `TurnSubscriber` owns the subscription and cancels it on
