@@ -197,7 +197,7 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
     } catch (TimeoutException e) {
       line.cancel(true);
       throw failure.create(
-          "Stream idle timeout: no data received for " + idleTimeout.toSeconds() + "s", 0, null);
+          "Stream idle timeout: no data received for " + idleTimeout.toMillis() + " ms", 0, null);
     } catch (ExecutionException e) {
       if (e.getCause() instanceof IOException ioe) {
         throw ioe;
