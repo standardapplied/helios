@@ -4,8 +4,8 @@
  */
 package com.standardapplied.helios.session.files;
 
-import com.standardapplied.helios.core.common.Redactor;
 import com.standardapplied.helios.core.common.Result;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
@@ -125,9 +125,10 @@ public final class ReadTool {
   private ReadTool() {}
 
   /**
-   * Build a tool binding bound to the given workspace + tracker, with no secret redaction.
-   * Equivalent to {@link #binding(WorkspaceRoot, FileTracker, Redactor) binding(workspace, tracker,
-   * null)}.
+   * Build a tool binding bound to the given workspace + tracker. The session redacts the text the
+   * tool returns against its secret registry; attachments (images, PDFs) pass through unredacted. A
+   * line cut at {@link #MAX_LINE_BYTES} loses the start of a registered secret the cut went
+   * through, so the session's redaction cannot miss it.
    *
    * @param workspace the path-jail workspace; non-null
    * @param tracker per-session read/write ledger; non-null
@@ -135,29 +136,6 @@ public final class ReadTool {
    * @throws NullPointerException if either argument is null
    */
   public static ToolBinding binding(WorkspaceRoot workspace, FileTracker tracker) {
-    return binding(workspace, tracker, null);
-  }
-
-  /**
-   * Build a tool binding bound to the given workspace + tracker, piping text-path output through
-   * the supplied {@link Redactor} before returning it to the model. Use this overload when wiring
-   * the tool against a corpus that may contain registered secrets (the "curated knowledge corpus"
-   * pattern) — pass {@code registry.redactor()} where {@code registry} is the same {@link
-   * com.standardapplied.helios.core.common.SecretRegistry} you handed to {@code CommandGrant}, so a
-   * token written by one tool is scrubbed when another reads it back.
-   *
-   * <p>Redaction applies to text-body output only. Error messages, attachment notes, and truncation
-   * markers (which may contain workspace-relative paths) are not redacted — paths are structural
-   * information the model needs to navigate, not secret material.
-   *
-   * @param workspace the path-jail workspace; non-null
-   * @param tracker per-session read/write ledger; non-null
-   * @param redactor applied to text-body output before it reaches the model; null = no redaction
-   * @return a ready-to-register binding
-   * @throws NullPointerException if {@code workspace} or {@code tracker} is null
-   */
-  public static ToolBinding binding(
-      WorkspaceRoot workspace, FileTracker tracker, Redactor redactor) {
     Objects.requireNonNull(workspace, "workspace must not be null");
     Objects.requireNonNull(tracker, "tracker must not be null");
     var tool =
@@ -193,7 +171,7 @@ public final class ReadTool {
                         .withRequired(false)
                         .build()))
             .withIdempotent(true)
-            .withExecutor((args, ctx) -> execute(ctx, workspace, tracker, redactor, args))
+            .withExecutor((args, ctx) -> execute(ctx, workspace, tracker, args))
             .build();
     return ToolBinding.newBuilder(tool)
         .withCategory(ToolCategory.READ)
@@ -203,11 +181,7 @@ public final class ReadTool {
   }
 
   private static ToolResult execute(
-      ToolContext ctx,
-      WorkspaceRoot workspace,
-      FileTracker tracker,
-      Redactor redactor,
-      Map<String, Object> args) {
+      ToolContext ctx, WorkspaceRoot workspace, FileTracker tracker, Map<String, Object> args) {
     ctx.cancellation().throwIfCancelled();
     var pathArg = ToolArgs.stringArg(args, "path");
     if (pathArg.isEmpty()) {
@@ -222,7 +196,7 @@ public final class ReadTool {
     return switch (regularFileSize(workspace, resolved)) {
       case Result.Failure<Long> failure -> ToolResult.failure(failure.error());
       case Result.Success<Long> size ->
-          read(workspace, tracker, redactor, args, resolved, size.value());
+          read(workspace, tracker, ctx.sessionContext().secrets(), args, resolved, size.value());
     };
   }
 
@@ -243,7 +217,7 @@ public final class ReadTool {
   private static ToolResult read(
       WorkspaceRoot workspace,
       FileTracker tracker,
-      Redactor redactor,
+      SecretRegistry secrets,
       Map<String, Object> args,
       Path resolved,
       long size) {
@@ -265,10 +239,10 @@ public final class ReadTool {
     if (mimeType.isPresent()) {
       return mimeType.get().channel() == MimeTypes.Channel.ATTACHMENT
           ? readAttachment(workspace, resolved, mimeType.get().name(), size)
-          : readText(workspace, resolved, args, redactor);
+          : readText(workspace, resolved, args, secrets);
     }
     if (MimeTypes.isLikelyText(workspace, resolved, MAX_FILE_SIZE_BYTES)) {
-      return readText(workspace, resolved, args, redactor);
+      return readText(workspace, resolved, args, secrets);
     }
     return ToolResult.failure(
         "Read: refusing to decode binary file as text (detected MIME unknown). Images and PDFs"
@@ -277,7 +251,7 @@ public final class ReadTool {
   }
 
   private static ToolResult readText(
-      WorkspaceRoot workspace, Path file, Map<String, Object> args, Redactor redactor) {
+      WorkspaceRoot workspace, Path file, Map<String, Object> args, SecretRegistry secrets) {
     var offset = ToolArgs.intArg(args, "offset", 1);
     var limit = ToolArgs.intArg(args, "limit", DEFAULT_LIMIT);
     if (offset < 1) {
@@ -286,7 +260,7 @@ public final class ReadTool {
     if (limit < 1) {
       return ToolResult.failure("Read: 'limit' must be >= 1, got " + limit);
     }
-    return TextPage.read(workspace, file, offset, limit, redactor);
+    return TextPage.read(workspace, file, offset, limit, secrets);
   }
 
   /**

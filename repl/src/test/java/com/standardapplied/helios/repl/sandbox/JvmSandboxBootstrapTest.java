@@ -386,9 +386,7 @@ class JvmSandboxBootstrapTest {
                 }
                 """,
                 "timeoutMs",
-                BEYOND_HANG_GUARD_MS,
-                "captureBindings",
-                false)));
+                BEYOND_HANG_GUARD_MS)));
     var parked = env.nextRequest();
     env.timeOut();
 
@@ -667,13 +665,7 @@ class JvmSandboxBootstrapTest {
         env.inSandbox(
             () ->
                 evaluator.handleExecute(
-                    Map.of(
-                        "code",
-                        "__call(\"hold\", null);",
-                        "timeoutMs",
-                        BEYOND_HANG_GUARD_MS,
-                        "captureBindings",
-                        false)));
+                    Map.of("code", "__call(\"hold\", null);", "timeoutMs", BEYOND_HANG_GUARD_MS)));
     var parked = env.nextRequest();
 
     JvmSandboxBootstrap.addHostBridgeToJShellClasspath(closed);
@@ -762,7 +754,7 @@ class JvmSandboxBootstrapTest {
    * The holder is a virtual thread, never a member of a snippet's thread group, and it holds the
    * monitor until the host call the returned request stands for is answered. The monitor is a
    * {@code Vector} so a thread can block on it running JDK code alone, where no stop check is
-   * woven; the bindings snapshot is off because the vector's {@code toString} needs it too.
+   * woven.
    */
   private RpcMessage.Request holdMonitorOutsideTheSnippetGroup() {
     evaluator.handleExecute(
@@ -773,9 +765,7 @@ class JvmSandboxBootstrapTest {
             Thread.startVirtualThread(() -> { synchronized (monitor) { __call("hold", null); } });
             """,
             "timeoutMs",
-            BEYOND_HANG_GUARD_MS,
-            "captureBindings",
-            false));
+            BEYOND_HANG_GUARD_MS));
     return env.nextRequest();
   }
 

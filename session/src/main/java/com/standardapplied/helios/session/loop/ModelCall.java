@@ -93,7 +93,7 @@ final class ModelCall {
               attempt,
               backoff,
               transientErr.providerName(),
-              SerializedError.of(transientErr)));
+              SerializedError.of(transientErr).redactedBy(collaborators.secrets().redactor())));
       if (!sleepHonouringCancellation(backoff, state.cancellation())) {
         return new Attempts(turn, attempt);
       }

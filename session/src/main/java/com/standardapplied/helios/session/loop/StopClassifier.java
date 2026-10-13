@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.loop;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
@@ -44,16 +45,28 @@ import java.util.Optional;
  * <p>Any other outcome returns {@link Optional#empty()}, signalling the loop to continue (currently
  * only {@link FinishReason#TOOL_CALLS}).
  *
+ * <p>Every {@link SerializedError} an error terminal carries has the messages of its chain redacted
+ * against the session's secret registry.
+ *
  * <h2>Thread-safety</h2>
  *
- * Stateless. Safe to share or instantiate per-call. The classifier reads {@link SessionState}
- * fields that are themselves thread-safe; the loop is the only writer, so the read snapshot is
- * coherent.
+ * Holds only the thread-safe registry. Safe to share or instantiate per-call. The classifier reads
+ * {@link SessionState} fields that are themselves thread-safe; the loop is the only writer, so the
+ * read snapshot is coherent.
  */
 public final class StopClassifier {
 
-  /** Default constructor. */
-  public StopClassifier() {}
+  private final SecretRegistry secrets;
+
+  /**
+   * Build a classifier for one session.
+   *
+   * @param secrets the session's secret registry, which error text is redacted against; non-null
+   * @throws NullPointerException if {@code secrets} is null
+   */
+  public StopClassifier(SecretRegistry secrets) {
+    this.secrets = Objects.requireNonNull(secrets, "secrets must not be null");
+  }
 
   /**
    * Classify the turn outcome.
@@ -134,12 +147,13 @@ public final class StopClassifier {
           Optional.of(
               new ResultMessage.ErrorDuringExecution(
                   state.sessionId(),
-                  SerializedError.of(
-                      "max-tokens",
-                      "response truncated at provider max_output_tokens cap"
-                          + (Strings.isBlank(assistantContent)
-                              ? ""
-                              : "; partial content: " + assistantContent)),
+                  redacted(
+                      SerializedError.of(
+                          "max-tokens",
+                          "response truncated at provider max_output_tokens cap"
+                              + (Strings.isBlank(assistantContent)
+                                  ? ""
+                                  : "; partial content: " + assistantContent))),
                   state.totals().usage(),
                   state.totals().cost(),
                   state.elapsed()));
@@ -186,14 +200,14 @@ public final class StopClassifier {
    *       reporting errors via the subscriber's throwable channel.
    * </ul>
    */
-  private static ResultMessage buildErrorTerminal(
+  private ResultMessage buildErrorTerminal(
       SessionState state, String assistantContent, Throwable streamError, int streamAttempts) {
     if (streamError instanceof TransientStreamException tse) {
       return new ResultMessage.ErrorTransientStream(
           state.sessionId(),
           tse.providerName(),
           streamAttempts,
-          SerializedError.of(tse),
+          redacted(SerializedError.of(tse)),
           state.totals().usage(),
           state.totals().cost(),
           state.elapsed());
@@ -201,18 +215,23 @@ public final class StopClassifier {
     if (streamError != null) {
       return new ResultMessage.ErrorDuringExecution(
           state.sessionId(),
-          SerializedError.of(streamError),
+          redacted(SerializedError.of(streamError)),
           state.totals().usage(),
           state.totals().cost(),
           state.elapsed());
     }
     return new ResultMessage.ErrorDuringExecution(
         state.sessionId(),
-        SerializedError.of(
-            "ProviderError",
-            Strings.isBlank(assistantContent) ? "provider reported ERROR" : assistantContent),
+        redacted(
+            SerializedError.of(
+                "ProviderError",
+                Strings.isBlank(assistantContent) ? "provider reported ERROR" : assistantContent)),
         state.totals().usage(),
         state.totals().cost(),
         state.elapsed());
+  }
+
+  private SerializedError redacted(SerializedError error) {
+    return error.redactedBy(secrets.redactor());
   }
 }

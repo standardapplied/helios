@@ -29,7 +29,6 @@ import jdk.jshell.JShell;
 import jdk.jshell.execution.LocalExecutionControl;
 import jdk.jshell.execution.LocalExecutionControlProvider;
 import jdk.jshell.spi.ExecutionControl;
-import jdk.jshell.spi.ExecutionControl.EngineTerminationException;
 import jdk.jshell.spi.ExecutionControlProvider;
 import jdk.jshell.spi.ExecutionEnv;
 
@@ -111,29 +110,6 @@ final class BootstrapEnvironment implements AutoCloseable {
           }
         },
         true);
-  }
-
-  /**
-   * An environment whose executes time out by the clock and whose engine has terminated by the time
-   * a variable's value is read, so JShell fails every read with {@code message}.
-   */
-  static BootstrapEnvironment failingVarValue(String message) {
-    return new BootstrapEnvironment(
-        Await.HANG_GUARD.multipliedBy(5),
-        new LocalExecutionControlProvider() {
-          @Override
-          public ExecutionControl createExecutionControl(
-              ExecutionEnv env, Map<String, String> parameters) {
-            return new LocalExecutionControl() {
-              @Override
-              public String varValue(String className, String varName)
-                  throws EngineTerminationException {
-                throw new EngineTerminationException(message);
-              }
-            };
-          }
-        },
-        false);
   }
 
   /** An environment whose bootstrap is already reading what the test feeds. */

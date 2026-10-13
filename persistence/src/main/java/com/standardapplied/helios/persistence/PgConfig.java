@@ -25,13 +25,11 @@ import java.util.regex.Pattern;
  * @param agentId the agent identifier for scoping data, or null when not needed
  * @param redactor optional {@link Redactor} applied by {@link PgTraceStore} and {@link
  *     PgToolCallJournal} to trace/journal text fields before persisting. {@code null} (default)
- *     preserves verbatim capture — the library's standard behaviour, suitable for evals and
- *     debugging. Deployers who want trace-side redaction without wrapping the journal themselves
- *     can pass {@code registry.redactor()} from their session-level {@link
- *     com.standardapplied.helios.core.common.SecretRegistry}. Source-level redaction (via {@code
- *     CommandGrant}, {@code ReadTool} / {@code GrepTool} wired with a {@code Redactor}, {@code
- *     JShellExecutionProvider}) remains the recommended primary mitigation; this hook is ergonomic
- *     sugar for deployers who need defense-in-depth at the persistence boundary
+ *     preserves verbatim capture, suitable for evals and debugging. The session's own redaction
+ *     pass does not reach persistence, since the session does not feed these stores; to redact what
+ *     is persisted, pass {@code registry.redactor()} from the {@link
+ *     com.standardapplied.helios.core.common.SecretRegistry} given to {@code
+ *     SessionOptions.withSecretRegistry}
  */
 public record PgConfig(DbClient dbClient, String schema, String agentId, Redactor redactor) {
 
@@ -132,10 +130,8 @@ public record PgConfig(DbClient dbClient, String schema, String agentId, Redacto
 
     /**
      * Set the {@link Redactor} applied to trace and journal text fields before persisting. Pass
-     * {@code null} to clear a previously-set redactor (default: unset / no-op). Source-level
-     * redaction at tool boundaries is the recommended primary mitigation; this hook is ergonomic
-     * sugar for deployers who want defense-in-depth at the persistence boundary without wrapping
-     * the journal themselves.
+     * {@code null} to clear a previously-set redactor (default: unset / no-op). This is the only
+     * redaction persistence applies: the session's redaction pass does not reach these stores.
      */
     public Builder withRedactor(Redactor redactor) {
       this.redactor = redactor;

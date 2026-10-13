@@ -7,7 +7,6 @@ package com.standardapplied.helios.core.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -20,17 +19,6 @@ class ToolResultTest {
 
     assertTrue(result.success());
     assertEquals("Done!", result.output());
-    assertNull(result.data());
-  }
-
-  @Test
-  void successWithData() {
-    var data = java.util.Map.of("key", "value");
-    var result = ToolResult.success("Result", data);
-
-    assertTrue(result.success());
-    assertEquals("Result", result.output());
-    assertEquals(data, result.data());
   }
 
   @Test
@@ -39,7 +27,6 @@ class ToolResultTest {
 
     assertFalse(result.success());
     assertEquals("Something went wrong", result.output());
-    assertNull(result.data());
   }
 
   @Test
@@ -96,7 +83,6 @@ class ToolResultTest {
     assertTrue(result.hasAttachments());
     assertEquals(1, result.attachments().size());
     assertEquals("image/png", result.attachments().getFirst().mimeType());
-    assertNull(result.data(), "successWithAttachments leaves data null");
   }
 
   @Test
@@ -119,14 +105,13 @@ class ToolResultTest {
   void canonicalConstructorRejectsNullOutput() {
     var npe =
         org.junit.jupiter.api.Assertions.assertThrows(
-            NullPointerException.class,
-            () -> new ToolResult(true, null, null, java.util.List.of()));
+            NullPointerException.class, () -> new ToolResult(true, null, java.util.List.of()));
     assertTrue(npe.getMessage().contains("output"), npe.getMessage());
   }
 
   @Test
   void canonicalConstructorAcceptsNullAttachmentsAsEmpty() {
-    var result = new ToolResult(true, "text", null, null);
+    var result = new ToolResult(true, "text", null);
     assertFalse(result.hasAttachments());
     assertEquals(0, result.attachments().size());
   }

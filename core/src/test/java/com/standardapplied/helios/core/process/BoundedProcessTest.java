@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.test.Await;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -130,6 +131,41 @@ class BoundedProcessTest {
     assertTrue(outcome.truncated());
     assertEquals("a".repeat(100) + "\n[truncated: output exceeded cap]", text(outcome.stdout()));
     assertArrayEquals(new byte[0], outcome.stderr());
+  }
+
+  @Test
+  void eachStreamReportsItsOwnTruncation() throws Exception {
+    var outcome = run(bash("printf 'a%.0s' $(seq 1 500) >&2; printf out").withMaxOutputBytes(100));
+
+    assertFalse(outcome.stdoutTruncated());
+    assertTrue(outcome.stderrTruncated());
+    assertTrue(outcome.truncated());
+  }
+
+  @Test
+  void aCutStreamDropsThePartOfASecretItEndsIn() throws Exception {
+    var secrets = new SecretRegistry();
+    secrets.register("API_KEY", "sk-test-0123456789abcdef");
+    var outcome =
+        run(
+            bash("printf 'a%.0s' $(seq 1 90); printf sk-test-0123456789abcdef; printf sk-tes >&2")
+                .withMaxOutputBytes(100)
+                .withSecretRegistry(secrets));
+
+    assertEquals("a".repeat(90) + "\n[truncated: output exceeded cap]", text(outcome.stdout()));
+    assertEquals("sk-tes", text(outcome.stderr()));
+  }
+
+  @Test
+  void aCutStreamKeepsACompleteSecretEndingInItsOwnPrefixForRedaction() throws Exception {
+    var secrets = new SecretRegistry();
+    secrets.register("TOKEN", "abcd1234a");
+    var outcome =
+        run(bash("printf 'value=abcd1234a!'").withMaxOutputBytes(15).withSecretRegistry(secrets));
+
+    var redacted = secrets.redactor().redact(text(outcome.stdout()));
+    assertEquals("value=<redacted:TOKEN>\n[truncated: output exceeded cap]", redacted.text());
+    assertEquals(Map.of("TOKEN", 1), redacted.counts());
   }
 
   @Test

@@ -8,6 +8,7 @@ package com.standardapplied.helios.core.process;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -22,7 +23,8 @@ class BoundedSinkTest {
 
     sink.drain(new FailingAfter("partial".getBytes(StandardCharsets.UTF_8)));
 
-    assertArrayEquals("partial".getBytes(StandardCharsets.UTF_8), sink.bytes());
+    assertArrayEquals(
+        "partial".getBytes(StandardCharsets.UTF_8), sink.bytes(new SecretRegistry().redactor()));
     assertFalse(sink.truncated());
   }
 

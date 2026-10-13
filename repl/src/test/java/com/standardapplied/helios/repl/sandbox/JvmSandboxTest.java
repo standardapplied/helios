@@ -317,12 +317,10 @@ class JvmSandboxTest {
 
     assertEquals(
         new ExecutionResult(
-            "1+1",
             "",
             "Sandbox did not answer the execute within PT0.003S; the sandbox is closed",
             1,
             true,
-            Map.of(),
             Duration.ZERO),
         result);
     assertFalse(sandbox.isAlive());
@@ -672,118 +670,6 @@ class JvmSandboxTest {
   }
 
   @Test
-  void endToEndSubprocessReturnsBindingsSnapshot() {
-    // Variables bound during an execute should come back in ExecutionResult.bindings(),
-    // filtered to exclude __-prefixed harness internals and capped per-value.
-    var registry = new HostFunctionRegistry();
-    JvmSandbox sandbox = null;
-    try {
-      sandbox = JvmSandbox.create(END_TO_END, registry);
-      var request =
-          ExecutionRequest.newBuilder()
-              .withCode(
-                  """
-                  var macro = "Fed paused, VIX=18.5";
-                  var count = 42;
-                  var __internal = "should be hidden";
-                  """)
-              .build();
-      var result = sandbox.execute(request, ExecuteParams.DEFAULT);
-
-      assertEquals(0, result.exitCode(), "stderr was:\n" + result.stderr());
-      assertNotNull(result.bindings());
-      assertTrue(result.bindings().containsKey("macro"), "user var present");
-      assertTrue(result.bindings().containsKey("count"), "user var present");
-      assertFalse(
-          result.bindings().containsKey("__internal"), "harness-internal __-prefixed var hidden");
-      // JShell varValue strings include quotes for String values.
-      assertTrue(result.bindings().get("macro").contains("Fed paused"));
-      assertTrue(result.bindings().get("count").contains("42"));
-    } finally {
-      if (sandbox != null) {
-        sandbox.close();
-      }
-    }
-  }
-
-  @Test
-  void endToEndSubprocessRespectsBindingValueCap() {
-    var registry = new HostFunctionRegistry();
-    JvmSandbox sandbox = null;
-    try {
-      sandbox = JvmSandbox.create(END_TO_END, registry);
-      var request =
-          ExecutionRequest.newBuilder()
-              .withCode(
-                  """
-                  var huge = "x".repeat(5000);
-                  var small = 7;
-                  """)
-              .build();
-      var executeParams = new ExecuteParams(true, /* perValue= */ 50, 16 * 1024);
-      var result = sandbox.execute(request, executeParams);
-
-      assertEquals(0, result.exitCode(), "stderr was:\n" + result.stderr());
-      var hugeRepr = result.bindings().get("huge");
-      assertNotNull(hugeRepr);
-      // 50-char cap + truncation marker — the recorded repr is bounded.
-      assertTrue(
-          hugeRepr.length() < 200,
-          "huge var must be capped well below its real length, got len=" + hugeRepr.length());
-      assertTrue(hugeRepr.contains("(len=5002)"), "marker should show real length");
-      // small var fits comfortably.
-      assertTrue(result.bindings().get("small").contains("7"));
-    } finally {
-      if (sandbox != null) {
-        sandbox.close();
-      }
-    }
-  }
-
-  @Test
-  void endToEndSubprocessOmitsBindingsWhenDisabled() {
-    var registry = new HostFunctionRegistry();
-    JvmSandbox sandbox = null;
-    try {
-      sandbox = JvmSandbox.create(END_TO_END, registry);
-      var request = ExecutionRequest.newBuilder().withCode("var x = 1;").build();
-      var result = sandbox.execute(request, ExecuteParams.DISABLED);
-
-      assertEquals(0, result.exitCode());
-      assertTrue(result.bindings().isEmpty(), "DISABLED params produce empty bindings map");
-    } finally {
-      if (sandbox != null) {
-        sandbox.close();
-      }
-    }
-  }
-
-  @Test
-  void endToEndSubprocessReturnsExecutedCodeOnResult() {
-    // 1.1.5 ask #3: ExecutionResult carries the source code that ran. Capture is parent-side
-    // (no protocol change) — JvmSandbox sets executedCode from ExecutionRequest.code() before
-    // returning. This is the substrate for live "user watches the agent think" UX panels that
-    // show code + bindings side-by-side.
-    var registry = new HostFunctionRegistry();
-    JvmSandbox sandbox = null;
-    try {
-      sandbox = JvmSandbox.create(END_TO_END, registry);
-      var snippet = "var x = 42; var y = \"hello\"; println(x + \" \" + y);";
-      var request = ExecutionRequest.newBuilder().withCode(snippet).build();
-      var result = sandbox.execute(request);
-
-      assertEquals(0, result.exitCode(), "stderr was:\n" + result.stderr());
-      assertEquals(
-          snippet, result.executedCode(), "executedCode must be the exact source the sandbox ran");
-      assertTrue(result.stdout().contains("42 hello"));
-    } finally {
-      if (sandbox != null) {
-        sandbox.close();
-      }
-    }
-  }
-
-  @Test
   void endToEndSubprocessHandlesZeroArgCustomFunction() {
     // Zero-param functions synthesize as bare-call wrappers like listSymbols(). Verify the
     // synthesis produces something a model can actually invoke from JShell.
@@ -887,9 +773,8 @@ class JvmSandboxTest {
    * thread, never a member of the snippet's group, blocked on a latch nothing releases. The
    * shutdown hook blocks on the same monitor running JDK code alone, which JShell's stop check
    * never reaches, so the sandbox exits only if it runs no hook. The monitor is a {@code Vector}
-   * for that reason, and the bindings snapshot is off because the vector's {@code toString} needs
-   * it too. The timeout outlasts compiling the statement by far: a stop that landed before the
-   * snippet started would end it at its first stop check instead.
+   * for that reason. The timeout outlasts compiling the statement by far: a stop that landed before
+   * the snippet started would end it at its first stop check instead.
    */
   @Test
   void unstoppableSnippetExitsTheSandboxAfterAnswering() {
@@ -912,8 +797,7 @@ class JvmSandboxTest {
                   });
                   entered.await();
                   Runtime.getRuntime().addShutdownHook(new Thread(monitor::clear));
-                  """),
-              ExecuteParams.DISABLED);
+                  """));
       assertEquals(0, holdMonitor.exitCode(), "stderr was:\n" + holdMonitor.stderr());
 
       var result =
@@ -921,8 +805,7 @@ class JvmSandboxTest {
               ExecutionRequest.newBuilder()
                   .withCode("synchronized (monitor) { }")
                   .withTimeout(Await.HANG_GUARD.dividedBy(6))
-                  .build(),
-              ExecuteParams.DISABLED);
+                  .build());
 
       assertEquals(1, result.exitCode());
       assertTrue(result.timedOut(), result.stderr());
@@ -1142,36 +1025,6 @@ class JvmSandboxTest {
           "the reflection-forged RPC call to reach the host's HostFunction dispatcher",
           forgedCallArrived);
     }
-  }
-
-  @Test
-  void collectBindingsCatchHandlesThrowableNotJustException() throws Exception {
-    // Theme E defensive-hardening assertion: collectBindings catches Throwable (not Exception),
-    // so a binding's toString throwing StackOverflowError or OOM yields a "<error: …>" stub
-    // instead of escaping into the virtual thread's uncaught handler and abandoning the snapshot.
-    //
-    // We assert this at the source level rather than via integration: JShell's varValue catches
-    // most Error subtypes internally and returns null (varies across JDKs), so a behavioural test
-    // that reliably triggers the Throwable branch is brittle. The catch type is the
-    // security-critical invariant; this test prevents an unwitting future revert to
-    // `catch (Exception e)`.
-    var sourcePath =
-        Path.of("src/main/java/com/standardapplied/helios/repl/sandbox/SnippetEvaluator.java");
-    var source = Files.readString(sourcePath, StandardCharsets.UTF_8);
-    var collectBindingsStart = source.indexOf("Map<String, String> collectBindings(");
-    assertTrue(collectBindingsStart > 0, "collectBindings method declaration not found");
-    var collectBindingsEnd = source.indexOf("\n  }", collectBindingsStart);
-    var body = source.substring(collectBindingsStart, collectBindingsEnd);
-    assertTrue(
-        body.contains("catch (Throwable"),
-        "collectBindings must catch Throwable so StackOverflowError / OOM in a binding's"
-            + " toString cannot abort the snapshot; current body:\n"
-            + body);
-    assertFalse(
-        body.contains("catch (Exception e)"),
-        "collectBindings should not narrow to Exception — that's the regression we're guarding"
-            + " against; current body:\n"
-            + body);
   }
 
   /**

@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session;
 
+import com.standardapplied.helios.core.common.Redactor;
 import com.standardapplied.helios.core.common.Strings;
 import java.util.Arrays;
 import java.util.List;
@@ -99,6 +100,19 @@ public record SerializedError(
    */
   public Optional<SerializedError> causeOpt() {
     return Optional.ofNullable(cause);
+  }
+
+  /**
+   * Return a copy of this error with the message of every error in the chain passed through {@code
+   * redactor}. Kind and stack frames are unchanged. The session applies it once to every error it
+   * reports, so no registered secret travels in an exception message.
+   *
+   * @param redactor the redactor to apply; non-null
+   * @return the redacted copy
+   */
+  public SerializedError redactedBy(Redactor redactor) {
+    var redactedCause = cause == null ? null : cause.redactedBy(redactor);
+    return new SerializedError(kind, redactor.redact(message).text(), stackTrace, redactedCause);
   }
 
   /**

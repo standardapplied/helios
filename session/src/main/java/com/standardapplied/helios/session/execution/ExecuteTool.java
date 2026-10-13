@@ -25,8 +25,8 @@ import java.util.concurrent.ExecutionException;
 
 /**
  * Built-in {@code Execute} tool. Routes one execution request through the session's {@link
- * ExecutionProvider}, returning the result as both human-readable text (for the model) and the
- * structured {@link ExecutionResult} (for hooks / consumers via {@link ToolResult#data()}).
+ * ExecutionProvider} and returns the {@link ExecutionResult} as text: runtime, exit code, timeout
+ * flag, duration, stdout and stderr. The session redacts that text like any other tool output.
  *
  * <p>Arguments:
  *
@@ -202,7 +202,7 @@ public final class ExecuteTool {
     } catch (CancellationException e) {
       return ToolResult.failure("Execute: cancelled");
     }
-    return ToolResult.success(format(request.runtime(), result), result);
+    return ToolResult.success(format(request.runtime(), result));
   }
 
   private static String format(Runtime runtime, ExecutionResult result) {

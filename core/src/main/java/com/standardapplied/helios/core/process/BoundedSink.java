@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.core.process;
 
+import com.standardapplied.helios.core.common.Redactor;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -9,7 +10,8 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * Thread-safe capture of one process stream that keeps at most a fixed number of bytes, drops the
- * rest, and appends a truncation marker to what it kept when it dropped anything.
+ * rest, and when it dropped anything trims a secret the cap cut through off what it kept and
+ * appends a truncation marker.
  */
 final class BoundedSink {
 
@@ -49,11 +51,12 @@ final class BoundedSink {
     }
   }
 
-  synchronized byte[] bytes() {
+  synchronized byte[] bytes(Redactor redactor) {
     var raw = out.toByteArray();
     if (!truncated) {
       return raw;
     }
+    raw = redactor.trimPartialSecret(raw);
     var combined = new byte[raw.length + TRUNCATION_MARKER.length];
     System.arraycopy(raw, 0, combined, 0, raw.length);
     System.arraycopy(TRUNCATION_MARKER, 0, combined, raw.length, TRUNCATION_MARKER.length);

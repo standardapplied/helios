@@ -7,6 +7,7 @@ package com.standardapplied.helios.session.files;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -17,7 +18,8 @@ final class TextPageTest {
   void aFileTheConfinedOpenRefusesIsAnIoErrorReadingIt(@TempDir Path tmp) {
     var workspace = WorkspaceRoot.of(tmp);
 
-    var result = TextPage.read(workspace, workspace.resolveSafe("absent.txt"), 1, 10, null);
+    var result =
+        TextPage.read(workspace, workspace.resolveSafe("absent.txt"), 1, 10, new SecretRegistry());
 
     assertFalse(result.success());
     assertTrue(result.output().startsWith("Read: I/O error reading file: "), result.output());

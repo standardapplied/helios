@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.runtime.CancellationToken;
@@ -44,8 +45,15 @@ final class LoopFixture implements AutoCloseable {
 
   /** A tool dispatch over {@code tools}, with the default concurrency limits. */
   ToolDispatch dispatch(ToolRegistry tools) {
+    return dispatch(tools, new SecretRegistry());
+  }
+
+  /** A tool dispatch over {@code tools} in a session whose secret registry is {@code secrets}. */
+  ToolDispatch dispatch(ToolRegistry tools, SecretRegistry secrets) {
     return new ToolDispatch(
-        SessionContext.forTesting(sessionId), tools, ConcurrencyLimits.defaults());
+        new SessionContext(sessionId, new CancellationToken(), clock, secrets),
+        tools,
+        ConcurrencyLimits.defaults());
   }
 
   /** The hook context of {@code state}'s current turn. */
@@ -88,7 +96,8 @@ final class LoopFixture implements AutoCloseable {
       TurnRunner runner,
       TokenCounter counter,
       ContextCompactor compactor) {
-    return new AgentLoop(collaborators, runner, new StopClassifier(), counter, compactor);
+    return new AgentLoop(
+        collaborators, runner, new StopClassifier(collaborators.secrets()), counter, compactor);
   }
 
   /** A fresh state of this fixture's session, cancelled through {@code cancellation}. */

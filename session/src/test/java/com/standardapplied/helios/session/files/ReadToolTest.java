@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.test.SampleDocuments;
 import com.standardapplied.helios.session.tools.ToolCategory;
@@ -18,6 +20,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Assumptions;
@@ -595,60 +599,32 @@ final class ReadToolTest {
   }
 
   @Test
-  void redactorOverloadScrubsSecretsFromTextBody(@TempDir Path tmp) throws IOException {
-    var file = tmp.resolve("config.txt");
-    Files.writeString(
-        file, "user=alice\napi_key=ghp_supersecrettoken_xyz\nhost=prod\n", StandardCharsets.UTF_8);
+  void aLineCutInsideASecretKeepsNoPartOfIt(@TempDir Path tmp) throws IOException {
+    var secret = "sk-test-0123456789abcdef";
     var registry = new SecretRegistry();
-    registry.register("GH_TOKEN", "ghp_supersecrettoken_xyz");
+    registry.register("API_KEY", secret);
+    var kept = "x".repeat(ReadTool.MAX_LINE_BYTES - 10);
+    Files.writeString(
+        tmp.resolve("long.txt"), kept + secret + " tail\nshort sk-test-\n", StandardCharsets.UTF_8);
+    var ctx =
+        ToolContext.of(
+            new SessionContext("read-cut", new CancellationToken(), Clock.systemUTC(), registry),
+            Duration.ofDays(1));
 
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create(), registry.redactor())
-            .tool()
-            .execute(Map.of("path", "config.txt"), ToolContext.noop());
-
-    assertTrue(result.success(), result.output());
-    var out = result.output();
-    assertFalse(out.contains("ghp_supersecrettoken_xyz"), "secret leaked: " + out);
-    assertTrue(out.contains("<redacted:GH_TOKEN>"), "marker missing: " + out);
-    assertTrue(out.contains("alice"), "non-secret content lost: " + out);
-    assertTrue(out.contains("prod"), "non-secret content lost: " + out);
-  }
-
-  @Test
-  void redactorOverloadNullEquivalentToTwoArgBinding(@TempDir Path tmp) throws IOException {
-    var file = tmp.resolve("plain.txt");
-    Files.writeString(file, "one\ntwo\n", StandardCharsets.UTF_8);
-
-    var withNull =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create(), null)
-            .tool()
-            .execute(Map.of("path", "plain.txt"), ToolContext.noop());
-    var twoArg =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
-            .execute(Map.of("path", "plain.txt"), ToolContext.noop());
-
-    assertTrue(withNull.success());
-    assertTrue(twoArg.success());
-    assertEquals(twoArg.output(), withNull.output());
-  }
-
-  @Test
-  void redactorEmptyRegistryIsNoOp(@TempDir Path tmp) throws IOException {
-    var file = tmp.resolve("plain.txt");
-    Files.writeString(file, "ghp_supersecrettoken_xyz\n", StandardCharsets.UTF_8);
-    var registry = new SecretRegistry();
-
-    var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create(), registry.redactor())
-            .tool()
-            .execute(Map.of("path", "plain.txt"), ToolContext.noop());
+            .execute(Map.of("path", "long.txt"), ctx);
 
     assertTrue(result.success(), result.output());
-    assertTrue(
-        result.output().contains("ghp_supersecrettoken_xyz"),
-        "empty registry must not redact: " + result.output());
+    var lines = result.output().split("\n");
+    assertEquals(
+        String.format("%6d\t%s", 1, kept)
+            + " [line truncated to "
+            + ReadTool.MAX_LINE_BYTES
+            + " bytes]",
+        lines[0]);
+    assertEquals(String.format("%6d\t%s", 2, "short sk-test-"), lines[1]);
   }
 
   @Test
