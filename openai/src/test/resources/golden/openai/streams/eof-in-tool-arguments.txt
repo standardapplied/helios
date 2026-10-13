@@ -1,5 +1,7 @@
 == chatStream
 ToolUseStart[callId=call_1, toolName=weather]
+ToolUseDelta[callId=call_1, argumentsDelta={"city":]
+ToolUseDelta[callId=call_1, argumentsDelta="Par]
 onError TransientStreamException(Stream ended before its terminal event) provider=openai caused by EOFException(the response body ended before the provider's terminal event)
 == chat
 threw TransientStreamException(Stream ended before its terminal event) provider=openai caused by EOFException(the response body ended before the provider's terminal event)

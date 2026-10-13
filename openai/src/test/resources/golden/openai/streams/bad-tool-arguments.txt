@@ -1,5 +1,6 @@
 == chatStream
 ToolUseStart[callId=call_1, toolName=weather]
+ToolUseDelta[callId=call_1, argumentsDelta={"city":]
 onError OpenAIException(Arguments of tool call 'weather' are not a JSON object: Unexpected end-of-input within/between Object entries
  at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN]) status=0 caused by UnexpectedEndOfInputException(Unexpected end-of-input within/between Object entries
  at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN])

@@ -102,19 +102,16 @@ class StreamingIteratorTest {
     var sse = toolItemAdded + argsDelta1 + argsDelta2 + argsDone + RESPONSE_COMPLETED;
 
     var events = drain(sse);
-    assertEquals(3, events.size());
-    assertInstanceOf(StreamEvent.ToolCallStart.class, events.get(0));
-    var start = (StreamEvent.ToolCallStart) events.get(0);
-    assertEquals("call_1", start.callId());
-    assertEquals("get_weather", start.toolName());
-
-    assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(1));
-    var tc = ((StreamEvent.ToolCallComplete) events.get(1)).toolCall();
+    assertEquals(5, events.size());
+    assertEquals(new StreamEvent.ToolCallStart("call_1", "get_weather"), events.get(0));
+    assertEquals(new StreamEvent.ToolCallDelta("call_1", "{\"city\""), events.get(1));
+    assertEquals(new StreamEvent.ToolCallDelta("call_1", ":\"NYC\"}"), events.get(2));
+    var tc = assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(3)).toolCall();
     assertEquals("get_weather", tc.name());
     assertEquals("call_1", tc.id());
     assertEquals(Map.of("city", "NYC"), tc.arguments());
 
-    var done = (StreamEvent.Done) events.get(2);
+    var done = (StreamEvent.Done) events.get(4);
     assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
     assertFalse(done.response().toolCalls().isEmpty());
   }
@@ -613,13 +610,14 @@ class StreamingIteratorTest {
     var events = drain(sse);
 
     assertEquals(new StreamEvent.ToolCallStart("call_1", "test_fn"), events.getFirst());
-    var error = assertInstanceOf(StreamEvent.Error.class, events.get(1));
+    assertEquals(new StreamEvent.ToolCallDelta("call_1", "not valid json"), events.get(1));
+    var error = assertInstanceOf(StreamEvent.Error.class, events.get(2));
     assertTrue(
         error.message().startsWith("Arguments of tool call 'test_fn' are not a JSON object: "),
         error.message());
     assertInstanceOf(OpenAIException.class, error.cause());
     assertEquals(List.of(), error.partial().toolCalls());
-    assertEquals(2, events.size());
+    assertEquals(3, events.size());
   }
 
   @Test

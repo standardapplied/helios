@@ -11,6 +11,7 @@ import com.standardapplied.helios.gemini.api.Step;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.StringJoiner;
 
 /**
  * The steps of a streamed interaction, by index, from {@code step.start} through {@code step.delta}
@@ -29,6 +30,12 @@ final class StreamedSteps {
 
     boolean isCall() {
       return "function_call".equals(type);
+    }
+
+    /** {@code fragment} streamed into the arguments of this call, as its delta. */
+    StreamEvent stream(String fragment) {
+      streamedArguments.append(fragment);
+      return new StreamEvent.ToolCallDelta(id, fragment);
     }
 
     /**
@@ -72,8 +79,10 @@ final class StreamedSteps {
     state.startArguments =
         state.isCall() && step.arguments() != null ? state.read(step.arguments().toString()) : null;
     if (step.hasTypeThought()) {
-      thought(step);
-      return null;
+      return thought(step);
+    }
+    if (state.isCall()) {
+      return new StreamEvent.ToolCallStart(state.id, state.name);
     }
     return step.hasTypeModelOutput() && step.hasContent() ? output.initialText(step) : null;
   }
@@ -86,8 +95,7 @@ final class StreamedSteps {
     var state = steps.get(index);
     var isCall = state != null && state.isCall();
     if (argumentsDelta != null && isCall) {
-      state.streamedArguments.append(argumentsDelta);
-      return null;
+      return state.stream(argumentsDelta);
     }
     if (delta == null) {
       return null;
@@ -97,8 +105,7 @@ final class StreamedSteps {
         if (!isCall || delta.arguments() == null) {
           yield annotations(delta);
         }
-        state.streamedArguments.append(delta.arguments());
-        yield null;
+        yield state.stream(delta.arguments());
       }
       case "thought_signature" -> signature(delta);
       case "thought_summary" -> thinking(delta.content());
@@ -140,15 +147,19 @@ final class StreamedSteps {
     return output.result();
   }
 
-  private void thought(Step step) {
+  /** The summary a thought starts with, one item per line, as thinking. */
+  private StreamEvent thought(Step step) {
     output.signature(step.signature());
+    var summary = new StringJoiner("\n");
     if (step.hasSummary()) {
       for (var item : step.summary()) {
         if (item.hasTypeText() && item.text() != null && !item.text().isEmpty()) {
           output.thought(item.text());
+          summary.add(item.text());
         }
       }
     }
+    return summary.length() == 0 ? null : new StreamEvent.ThinkingDelta(summary.toString());
   }
 
   private StreamEvent signature(ContentItem delta) {
