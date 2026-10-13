@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
@@ -31,7 +32,7 @@ final class StopClassifierTest {
 
   private static final String SID = "sess-1";
 
-  private final StopClassifier classifier = new StopClassifier();
+  private final StopClassifier classifier = new StopClassifier(new SecretRegistry());
 
   /**
    * Convenience overload mirroring the pre-2.5.5 5-arg shape — no stream error, single attempt. The
@@ -400,5 +401,76 @@ final class StopClassifierTest {
     var err = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, terminal);
     assertEquals("ProviderError", err.error().kind());
     assertEquals("rate limited", err.error().message());
+  }
+
+  @Test
+  void everyErrorTerminalHasTheMessagesOfItsChainRedacted() {
+    var secret = "sk-test-0123456789abcdef";
+    var secrets = new SecretRegistry();
+    secrets.register("API_KEY", secret);
+    var redacting = new StopClassifier(secrets);
+    var marker = "<redacted:API_KEY>";
+
+    var transientError =
+        new TransientStreamException("overloaded " + secret, new IOException(secret), "p");
+    var transientTerminal =
+        assertInstanceOf(
+            ResultMessage.ErrorTransientStream.class,
+            redacting
+                .classify(
+                    state(),
+                    defaults(),
+                    new TurnOutcome(
+                        FinishReason.ERROR, "", Usage.of(0, 0), Map.of(), transientError, 3),
+                    false)
+                .orElseThrow());
+    var streamTerminal =
+        assertInstanceOf(
+            ResultMessage.ErrorDuringExecution.class,
+            redacting
+                .classify(
+                    state(),
+                    defaults(),
+                    new TurnOutcome(
+                        FinishReason.ERROR,
+                        "",
+                        Usage.of(0, 0),
+                        Map.of(),
+                        new IllegalStateException("broke " + secret),
+                        1),
+                    false)
+                .orElseThrow());
+    var providerTerminal =
+        assertInstanceOf(
+            ResultMessage.ErrorDuringExecution.class,
+            redacting
+                .classify(
+                    state(),
+                    defaults(),
+                    new TurnOutcome(FinishReason.ERROR, "said " + secret, Usage.of(0, 0)),
+                    false)
+                .orElseThrow());
+    var lengthTerminal =
+        assertInstanceOf(
+            ResultMessage.ErrorDuringExecution.class,
+            redacting
+                .classify(
+                    state(),
+                    defaults(),
+                    new TurnOutcome(FinishReason.LENGTH, "said " + secret, Usage.of(0, 0)),
+                    false)
+                .orElseThrow());
+
+    assertEquals("overloaded " + marker, transientTerminal.error().message());
+    assertEquals(marker, transientTerminal.error().cause().message());
+    assertEquals("broke " + marker, streamTerminal.error().message());
+    assertEquals("said " + marker, providerTerminal.error().message());
+    assertTrue(lengthTerminal.error().message().endsWith("; partial content: said " + marker));
+  }
+
+  @Test
+  void rejectsANullRegistry() {
+    var ex = assertThrows(NullPointerException.class, () -> new StopClassifier(null));
+    assertEquals("secrets must not be null", ex.getMessage());
   }
 }

@@ -5,6 +5,7 @@
 
 package com.standardapplied.helios.core.common;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -26,6 +27,134 @@ class RedactorTest {
       registry.register(namesAndValues[i], namesAndValues[i + 1]);
     }
     return registry.redactor();
+  }
+
+  private static final String SECRET = "sk-test-0123456789abcdef";
+
+  @Test
+  void trimPartialSecretLeavesTextWithoutOneUnchanged() {
+    assertEquals(
+        "ends in sk-tes", build("OTHER", "zzzzzzzzzz").trimPartialSecret("ends in sk-tes"));
+    assertEquals("plain text", build("API_KEY", SECRET).trimPartialSecret("plain text"));
+  }
+
+  @Test
+  void trimPartialSecretDropsAOneCharacterPrefix() {
+    assertEquals("cut at ", build("API_KEY", SECRET).trimPartialSecret("cut at s"));
+  }
+
+  @Test
+  void trimPartialSecretDropsAPrefixOneShortOfTheWholeSecret() {
+    var redactor = build("API_KEY", SECRET);
+
+    assertEquals("cut at ", redactor.trimPartialSecret("cut at " + SECRET.substring(0, 23)));
+  }
+
+  @Test
+  void trimPartialSecretLeavesACompleteSecretForRedaction() {
+    var redactor = build("API_KEY", SECRET);
+
+    assertEquals("key " + SECRET, redactor.trimPartialSecret("key " + SECRET));
+  }
+
+  @Test
+  void trimPartialSecretLeavesACompleteSecretEndingInItsOwnPrefix() {
+    var redactor = build("TOKEN", "abcd1234a");
+
+    assertEquals("value=abcd1234a", redactor.trimPartialSecret("value=abcd1234a"));
+    assertEquals(
+        "value=abcd1234a",
+        new String(
+            redactor.trimPartialSecret("value=abcd1234a".getBytes(StandardCharsets.UTF_8)),
+            StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void trimPartialSecretLeavesACompleteSecretEndingInAnotherSecretsPrefix() {
+    var redactor = build("A", "abcdefgh12", "B", "h12345678");
+
+    assertEquals("xx abcdefgh12", redactor.trimPartialSecret("xx abcdefgh12"));
+  }
+
+  @Test
+  void trimPartialSecretDropsAPartialSecretReachingBeforeACompleteOne() {
+    var redactor = build("A", "defgh123", "B", "abcdefgh123456");
+
+    assertEquals("xx ", redactor.trimPartialSecret("xx abcdefgh123"));
+  }
+
+  @Test
+  void trimPartialSecretDropsTheLongestOfOverlappingPrefixes() {
+    var redactor = build("A", "abcdefgh12", "B", "fgh12345678");
+
+    assertEquals("xx ", redactor.trimPartialSecret("xx abcdefgh1"));
+  }
+
+  @Test
+  void trimPartialSecretDropsAPrefixThatDroppingAnOverlappingOneExposes() {
+    var redactor = build("A", "abcdefgh12", "B", "fgh12345678");
+
+    assertEquals("xx ", redactor.trimPartialSecret("xx abcdefgh12345"));
+  }
+
+  @Test
+  void trimPartialSecretKeepsTextBeforeTheCutSecretThatOnlyLooksLikeItsStart() {
+    var redactor = build("API_KEY", SECRET);
+
+    assertEquals("tasks: sk-", redactor.trimPartialSecret("tasks: sk-" + SECRET.substring(0, 10)));
+  }
+
+  @Test
+  void trimPartialSecretDropsOnlyTheCutSecretFromARepeatingRun() {
+    var redactor = build("TOKEN", "aaaaaaaa1");
+
+    assertEquals("a".repeat(992), redactor.trimPartialSecret("a".repeat(1000)));
+  }
+
+  @Test
+  void trimPartialSecretLeavesAnInputThatIsOneCompleteSecret() {
+    assertEquals("abcd1234a", build("TOKEN", "abcd1234a").trimPartialSecret("abcd1234a"));
+  }
+
+  @Test
+  void trimPartialSecretLeavesACompleteSecretThatStartsALongerOne() {
+    var redactor = build("SHORT", "abcd1234", "LONG", "abcd1234wxyz");
+
+    assertEquals("key abcd1234", redactor.trimPartialSecret("key abcd1234"));
+  }
+
+  @Test
+  void trimPartialSecretKeepsACompleteSecretBeforeTheCutOne() {
+    var redactor = build("API_KEY", SECRET, "OTHER", "zz-other-token");
+
+    assertEquals("key " + SECRET, redactor.trimPartialSecret("key " + SECRET + "zz-oth"));
+    assertEquals("key " + SECRET, redactor.trimPartialSecret("key " + SECRET + "sk-te"));
+  }
+
+  @Test
+  void trimPartialSecretDropsACompleteSecretAtTheEndThatRedactionWouldNotReplace() {
+    var redactor = build("A", "xyz-1234", "S", "1234-key", "T", "key-9999");
+
+    var kept = redactor.trimPartialSecret("id xyz-1234-key");
+
+    assertEquals("id ", kept);
+    assertEquals("id <redacted:A>-key", redactor.redact("id xyz-1234-key").text());
+  }
+
+  @Test
+  void trimPartialSecretOnBytesReturnsAFreshArray() {
+    var input = ("cut at " + SECRET.substring(0, 10)).getBytes(StandardCharsets.UTF_8);
+    var copy = input.clone();
+
+    var trimmed = build("API_KEY", SECRET).trimPartialSecret(input);
+
+    assertEquals("cut at ", new String(trimmed, StandardCharsets.UTF_8));
+    assertArrayEquals(copy, input);
+  }
+
+  @Test
+  void trimPartialSecretKeepsNonAsciiTextBeforeTheCut() {
+    assertEquals("héllo ", build("API_KEY", SECRET).trimPartialSecret("héllo sk-"));
   }
 
   @Test

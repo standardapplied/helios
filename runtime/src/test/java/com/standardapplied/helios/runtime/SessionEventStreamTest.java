@@ -6,13 +6,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import io.helidon.http.sse.SseEvent;
 import io.helidon.webserver.CloseConnectionException;
 import io.helidon.webserver.sse.SseSink;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Flow;
@@ -61,6 +64,31 @@ final class SessionEventStreamTest {
         List.of(
             "AssistantText:{\"sessionId\":\"sess-1\",\"turnIndex\":0,"
                 + "\"timestamp\":\"1970-01-01T00:00:00Z\",\"text\":\"hello\"}"),
+        sink.emitted);
+  }
+
+  @Test
+  void aToolResultIsEmittedWithItsRedactionsAndNoData() {
+    var sink = new RecordingSink(null);
+    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
+
+    stream.onNext(
+        new QueryEvent.ToolResult(
+            "sess-1",
+            0L,
+            Instant.EPOCH,
+            new ToolCall("c1", "leak", Map.of()),
+            ToolResult.success("token=<redacted:API_KEY>"),
+            Map.of("API_KEY", 1)));
+
+    assertEquals(
+        List.of(
+            "ToolResult:{\"sessionId\":\"sess-1\",\"turnIndex\":0,"
+                + "\"timestamp\":\"1970-01-01T00:00:00Z\","
+                + "\"call\":{\"id\":\"c1\",\"name\":\"leak\",\"arguments\":{}},"
+                + "\"result\":{\"success\":true,\"output\":\"token=<redacted:API_KEY>\","
+                + "\"attachments\":[]},"
+                + "\"redactions\":{\"API_KEY\":1}}"),
         sink.emitted);
   }
 

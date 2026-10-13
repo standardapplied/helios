@@ -128,7 +128,7 @@ public final class TurnRunner {
       return turnEnded(state, new TurnOutcome(FinishReason.TOOL_CALLS, "", state.totals().usage()));
     }
 
-    var streamOutcome = streamed.toOutcome(attempts.count());
+    var streamOutcome = streamed.toOutcome(attempts.count(), collaborators.secrets().redactor());
     var toolCalls =
         isRefused(streamOutcome.finishReason()) ? List.<ToolCall>of() : streamed.toolCalls();
 

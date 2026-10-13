@@ -48,7 +48,6 @@ final class NoopExecutionProviderTest {
     assertTrue(result.stderr().contains("PYTHON"));
     assertEquals(Duration.ZERO, result.duration());
     assertFalse(result.timedOut());
-    assertEquals(0, result.totalRedactions());
   }
 
   @Test

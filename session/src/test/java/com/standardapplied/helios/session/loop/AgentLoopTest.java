@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
@@ -94,7 +95,7 @@ final class AgentLoopTest {
     var queue = new SteeringQueue(8);
     var collaborators = fixture.collaborators(hooks, dispatch, queue);
     var runner = fixture.runner(collaborators, fixedModel("x", FinishReason.STOP, Usage.of(1, 1)));
-    var classifier = new StopClassifier();
+    var classifier = new StopClassifier(new SecretRegistry());
     var counter = TokenCounter.charBased();
     var compactor = ContextCompactor.disabled();
     var clock = fixture.clock;
@@ -547,6 +548,29 @@ final class AgentLoopTest {
     // Loop completes cleanly — a thrown compactor must be swallowed.
     assertInstanceOf(ResultMessage.Success.class, result);
     assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited));
+  }
+
+  @Test
+  void anExceptionThatEndsTheLoopIsReportedRedacted() {
+    var secrets = new SecretRegistry();
+    secrets.register("API_KEY", "sk-test-0123456789abcdef");
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("hi"));
+    TokenCounter broken =
+        msgs -> {
+          throw new IllegalStateException("counter saw sk-test-0123456789abcdef");
+        };
+    var loop =
+        fixture.loop(
+            fixture.collaborators(hooks, fixture.dispatch(ToolRegistry.empty(), secrets), queue),
+            fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)),
+            broken,
+            ContextCompactor.disabled());
+
+    var result = loop.run(freshState(), SessionLimits.defaults());
+
+    var error = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result).error();
+    assertEquals("counter saw <redacted:API_KEY>", error.message());
   }
 
   @Test

@@ -184,11 +184,6 @@ public final class JvmSandbox implements Sandbox {
 
   @Override
   public ExecutionResult execute(ExecutionRequest request) {
-    return execute(request, ExecuteParams.DEFAULT);
-  }
-
-  @Override
-  public ExecutionResult execute(ExecutionRequest request, ExecuteParams executeParams) {
     if (!isAlive()) {
       return ExecutionReplies.notAlive(closed.get(), process);
     }
@@ -197,18 +192,15 @@ public final class JvmSandbox implements Sandbox {
     params.put("code", request.code());
     params.put("language", request.language());
     params.put("timeoutMs", budget.toMillis());
-    params.put("captureBindings", executeParams.captureBindings());
-    params.put("maxBindingValueChars", executeParams.maxBindingValueChars());
-    params.put("maxBindingSnapshotChars", executeParams.maxBindingSnapshotChars());
     var wait = config.executeReplyWait(budget);
     try {
       var reply = rpc.channel().call("execute", params, wait);
-      return ExecutionReplies.toExecutionResult(request.code(), reply, stdout.drain());
+      return ExecutionReplies.toExecutionResult(reply, stdout.drain());
     } catch (RpcChannel.RpcTimeoutException e) {
       close();
-      return ExecutionReplies.unanswered(request.code(), stdout.drain(), wait);
+      return ExecutionReplies.unanswered(stdout.drain(), wait);
     } catch (RpcChannel.RpcException e) {
-      return ExecutionReplies.rpcFailure(request.code(), stdout.drain(), e.getMessage());
+      return ExecutionReplies.rpcFailure(stdout.drain(), e.getMessage());
     }
   }
 

@@ -8,6 +8,7 @@ package com.standardapplied.helios.core.common;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -36,14 +37,16 @@ public final class Redactor {
 
   private static final byte[] MARKER_PREFIX = "<redacted:".getBytes(StandardCharsets.US_ASCII);
   private static final byte[] MARKER_SUFFIX = ">".getBytes(StandardCharsets.US_ASCII);
-  private static final Redactor EMPTY = new Redactor(List.of(), AhoCorasick.build(List.of()));
+  private static final Redactor EMPTY = new Redactor(List.of(), List.of());
 
   private final List<String> patternNames;
   private final AhoCorasick automaton;
+  private final SecretPrefixes prefixes;
 
-  private Redactor(List<String> patternNames, AhoCorasick automaton) {
+  private Redactor(List<String> patternNames, List<byte[]> patterns) {
     this.patternNames = patternNames;
-    this.automaton = automaton;
+    this.automaton = AhoCorasick.build(patterns);
+    this.prefixes = new SecretPrefixes(patterns);
   }
 
   /** Build a redactor from a name-to-bytes map. Bytes must be pure ASCII. */
@@ -58,7 +61,7 @@ public final class Redactor {
       names.add(entry.getKey());
       patterns.add(entry.getValue().clone());
     }
-    return new Redactor(List.copyOf(names), AhoCorasick.build(patterns));
+    return new Redactor(List.copyOf(names), List.copyOf(patterns));
   }
 
   private static void requireAscii(String name, byte[] bytes) {
@@ -97,6 +100,34 @@ public final class Redactor {
       return new RedactionResult(new byte[0], Map.of());
     }
     return redact(input.getBytes(StandardCharsets.UTF_8));
+  }
+
+  /**
+   * Drop the start of a secret that a size cap cut off. Returns {@code text} without its longest
+   * suffix that is a non-empty proper prefix of a registered secret, or {@code text} unchanged when
+   * it has none. Where secrets overlap, that shorter end can cut through a complete secret; it is
+   * then dropped from its start too. Call it on the part of a cut output that is kept, before a
+   * truncation marker is appended: the cut secret no longer matches in full, so {@link
+   * #redact(String)} would leave its prefix. A complete secret at the end is not touched, even when
+   * it ends in its own or another secret's prefix, so {@link #redact(String)} replaces it; unless
+   * another secret overlaps its start, which redaction would replace instead.
+   *
+   * @param text the kept part of a cut output; non-null
+   * @return {@code text}, possibly shortened
+   */
+  public String trimPartialSecret(String text) {
+    var bytes = text.getBytes(StandardCharsets.UTF_8);
+    return text.substring(0, text.length() - (bytes.length - prefixes.keptLength(bytes)));
+  }
+
+  /**
+   * The byte form of {@link #trimPartialSecret(String)}. The input array is not mutated.
+   *
+   * @param input the kept part of a cut output; non-null
+   * @return the input without its trailing partial secret; a fresh array
+   */
+  public byte[] trimPartialSecret(byte[] input) {
+    return Arrays.copyOf(input, prefixes.keptLength(input));
   }
 
   /** Number of registered patterns this redactor matches against. */

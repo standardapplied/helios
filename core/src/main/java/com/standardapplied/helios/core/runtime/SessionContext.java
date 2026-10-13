@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.core.runtime;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
 import java.time.Clock;
 import java.time.InstantSource;
@@ -12,7 +13,7 @@ import java.util.Objects;
 /**
  * Per-session metadata threaded through dispatch surfaces — tool executors, execution providers,
  * lifecycle hooks. Carries the stable session identifier, the session's cooperative cancellation
- * token, and the clock the session uses for timestamps.
+ * token, the clock the session uses for timestamps, and the session's secret registry.
  *
  * <p>Lives in {@code core.runtime} (alongside {@link CancellationToken}) because it's needed by
  * both the session module (lifecycle hooks, agent loop) and the core tool surface ({@link
@@ -31,9 +32,11 @@ import java.util.Objects;
  *     stop (user-initiated, timeout, budget) so per-session resources can clean up. Non-null
  * @param clock the time source the session uses for event timestamps and elapsed-time measurements.
  *     Tests pass one they advance by hand. Non-null
+ * @param secrets the registry the session redacts tool output and error text against. A component
+ *     that cuts tool output at a size cap trims a partial secret off the cut through it. Non-null
  */
 public record SessionContext(
-    String sessionId, CancellationToken cancellation, InstantSource clock) {
+    String sessionId, CancellationToken cancellation, InstantSource clock, SecretRegistry secrets) {
 
   private static final InstantSource SYSTEM_CLOCK = Clock.systemUTC();
 
@@ -50,11 +53,12 @@ public record SessionContext(
     }
     Objects.requireNonNull(cancellation, "cancellation must not be null");
     Objects.requireNonNull(clock, "clock must not be null");
+    Objects.requireNonNull(secrets, "secrets must not be null");
   }
 
   /**
-   * Build a context for tests or direct library use, with a fresh never-cancelled token and the
-   * system UTC clock.
+   * Build a context for tests or direct library use, with a fresh never-cancelled token, the system
+   * UTC clock and a new empty secret registry.
    *
    * @param sessionId non-blank session id
    * @return a fresh context
@@ -62,6 +66,7 @@ public record SessionContext(
    * @throws IllegalArgumentException if {@code sessionId} is blank
    */
   public static SessionContext forTesting(String sessionId) {
-    return new SessionContext(sessionId, new CancellationToken(), SYSTEM_CLOCK);
+    return new SessionContext(
+        sessionId, new CancellationToken(), SYSTEM_CLOCK, new SecretRegistry());
   }
 }

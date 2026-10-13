@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -200,6 +201,36 @@ final class TurnRunnerToolDispatchTest {
                 .findFirst()
                 .orElseThrow();
     assertTrue(toolResult.result().output().startsWith("tool dispatch failed:"));
+  }
+
+  @Test
+  void aDispatchFailureIsRedacted() {
+    var secrets = new SecretRegistry();
+    secrets.register("API_KEY", "sk-test-0123456789abcdef");
+    var token = new CancellationToken();
+    token.cancel("stopped holding sk-test-0123456789abcdef");
+    var call = new ToolCall("c1", "echo", Map.of("v", "hi"));
+    var model =
+        fixedChunkModel(
+            List.of(
+                new ModelChunk.ToolUseStop(call),
+                new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of())));
+    var runner = runner(model, fixture.dispatch(new ToolRegistry(List.of(echoBinding())), secrets));
+    var state = fixture.state(token);
+    state.history().append(Message.user("call echo"));
+    state.beginTurn();
+
+    runner.runTurn(state, SessionLimits.defaults());
+
+    var toolResult =
+        events.stream()
+            .filter(e -> e instanceof QueryEvent.ToolResult)
+            .map(QueryEvent.ToolResult.class::cast)
+            .findFirst()
+            .orElseThrow();
+    assertEquals(
+        "tool dispatch failed: stopped holding <redacted:API_KEY>", toolResult.result().output());
+    assertEquals(Map.of("API_KEY", 1), toolResult.redactions());
   }
 
   @Test

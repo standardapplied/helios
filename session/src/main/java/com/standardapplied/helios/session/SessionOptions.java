@@ -6,6 +6,7 @@ package com.standardapplied.helios.session;
 
 import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.Ids;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Model;
@@ -60,8 +61,8 @@ import java.util.Optional;
  * @param executionProvider routes {@code Execute} tool dispatches to an isolation boundary
  *     (subprocess, JShell sandbox, Incus instance, …). Defaults to {@link
  *     NoopExecutionProvider#INSTANCE} which refuses every runtime — wire {@code
- *     LocalProcessExecutionProvider.defaultPosix(secretRegistry)} (or your own implementation) when
- *     the session legitimately needs to run code. Non-null
+ *     LocalProcessExecutionProvider.defaultPosix()} (or your own implementation) when the session
+ *     legitimately needs to run code. Non-null
  * @param outputSchema optional schema constraining the model's text output. When present, the
  *     schema rides every model turn via the provider's native structured-output channel — Gemini
  *     {@code response_format.schema}, OpenAI {@code text.format=json_schema}, Anthropic {@code
@@ -83,6 +84,12 @@ import java.util.Optional;
  *     opening turn + recent trajectory, summarises the middle. Library users can override via
  *     {@code Builder.withContextCompactor} or opt out wholesale with {@link
  *     ContextCompactor#disabled()}. Non-null
+ * @param secretRegistry the secrets no tool output or session error text may carry. The session
+ *     redacts every tool result once, before any event, hook or the model sees it, and the error
+ *     text of every {@link SerializedError} it builds, each time against a fresh snapshot of this
+ *     registry so a secret registered mid-session is honoured from the next redaction on. Sessions
+ *     built from the same options share it. Defaults to a new empty registry, which redacts
+ *     nothing. Non-null
  */
 public record SessionOptions(
     Model model,
@@ -99,7 +106,8 @@ public record SessionOptions(
     Optional<OutputSchema<?>> outputSchema,
     Optional<String> systemPrompt,
     TokenCounter tokenCounter,
-    ContextCompactor contextCompactor) {
+    ContextCompactor contextCompactor,
+    SecretRegistry secretRegistry) {
 
   /**
    * Canonical constructor.
@@ -127,6 +135,7 @@ public record SessionOptions(
     Objects.requireNonNull(systemPrompt, "systemPrompt must not be null");
     Objects.requireNonNull(tokenCounter, "tokenCounter must not be null");
     Objects.requireNonNull(contextCompactor, "contextCompactor must not be null");
+    Objects.requireNonNull(secretRegistry, "secretRegistry must not be null");
   }
 
   /**
@@ -160,7 +169,8 @@ public record SessionOptions(
         .withOutputSchema(outputSchema.orElse(null))
         .withSystemPrompt(systemPrompt.orElse(null))
         .withTokenCounter(tokenCounter)
-        .withContextCompactor(contextCompactor);
+        .withContextCompactor(contextCompactor)
+        .withSecretRegistry(secretRegistry);
   }
 
   /**
@@ -185,6 +195,7 @@ public record SessionOptions(
     private String systemPrompt;
     private TokenCounter tokenCounter = TokenCounter.charBased();
     private ContextCompactor contextCompactor;
+    private SecretRegistry secretRegistry;
 
     private Builder() {}
 
@@ -342,7 +353,7 @@ public record SessionOptions(
      * Set the execution provider — the surface the {@code Execute} tool dispatches through.
      * Defaults to {@link NoopExecutionProvider#INSTANCE}, which refuses every runtime so a session
      * that forgot to wire execution cannot silently shell out. Pass {@code
-     * LocalProcessExecutionProvider.defaultPosix(...)} (or your own implementation) to enable code
+     * LocalProcessExecutionProvider.defaultPosix()} (or your own implementation) to enable code
      * execution.
      *
      * @param executionProvider non-null provider
@@ -430,6 +441,21 @@ public record SessionOptions(
     }
 
     /**
+     * Set the registry of secrets the session redacts from every tool result and from the error
+     * text it reports. Pass the same registry to every component that registers or needs secrets,
+     * such as {@code CommandGrant.Builder.withSecretRegistry}. Defaults to a new empty registry.
+     *
+     * @param secretRegistry non-null registry
+     * @return this builder
+     * @throws NullPointerException if {@code secretRegistry} is null
+     */
+    public Builder withSecretRegistry(SecretRegistry secretRegistry) {
+      this.secretRegistry =
+          Objects.requireNonNull(secretRegistry, "secretRegistry must not be null");
+      return this;
+    }
+
+    /**
      * Apply a {@link SessionPreset} to this builder. The preset's {@code apply} function receives
      * this builder, layers configuration onto it, and returns it for chaining. Multiple presets
      * stack associatively — later {@code withPreset(...)} calls overwrite earlier ones when they
@@ -476,7 +502,8 @@ public record SessionOptions(
           Optional.ofNullable(outputSchema),
           Optional.ofNullable(systemPrompt),
           tokenCounter,
-          compactor);
+          compactor,
+          secretRegistry != null ? secretRegistry : new SecretRegistry());
     }
   }
 }

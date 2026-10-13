@@ -10,12 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.process.BinaryResolver;
 import com.standardapplied.helios.session.execution.ExecuteTool;
-import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.execution.LocalProcessExecutionProvider;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
@@ -72,7 +70,7 @@ final class Phase5AcceptanceTest {
   /** Runs {@code prompt} through a session with Execute on a local process provider. */
   private static Run run(
       String sessionPrefix, ScriptedModel model, Permission permission, String prompt) {
-    var provider = LocalProcessExecutionProvider.defaultPosix(new SecretRegistry());
+    var provider = LocalProcessExecutionProvider.defaultPosix();
     var options =
         SessionOptions.newBuilder()
             .withModel(model)
@@ -100,10 +98,9 @@ final class Phase5AcceptanceTest {
 
     var toolResults = run.events().eventsOf(QueryEvent.ToolResult.class);
     assertEquals(1, toolResults.size());
-    var execResult = assertInstanceOf(ExecutionResult.class, toolResults.get(0).result().data());
-    assertEquals(0, execResult.exitCode());
-    assertEquals("phase-5\n", execResult.stdout());
-    assertTrue(toolResults.get(0).result().output().contains("phase-5"));
+    var output = toolResults.get(0).result().output();
+    assertTrue(output.startsWith("[runtime PYTHON exit 0 "), output);
+    assertTrue(output.endsWith("]\nphase-5\n"), output);
   }
 
   @Test
@@ -126,7 +123,7 @@ final class Phase5AcceptanceTest {
   void slowBashCallAgainstTightTimeoutSurfacesTimedOutTrue() throws Exception {
     assumeBashAvailable();
     // The script cannot finish on its own before the hang guard, so only the one-second execution
-    // timeout can end it; ExecuteTool surfaces timedOut=true in the structured tool result.
+    // timeout can end it; ExecuteTool reports TIMEOUT in the tool result's text.
     var model =
         executing(Map.of("runtime", "BASH", "script", "exec sleep 600", "timeoutSeconds", 1));
 
@@ -135,10 +132,8 @@ final class Phase5AcceptanceTest {
 
     var toolResult =
         run.events().eventsOf(QueryEvent.ToolResult.class).stream().findFirst().orElseThrow();
-    var execResult = assertInstanceOf(ExecutionResult.class, toolResult.result().data());
-    assertTrue(execResult.timedOut(), "expected timedOut=true on the structured result");
-    assertEquals(-1, execResult.exitCode());
-    assertTrue(toolResult.result().output().contains("TIMEOUT"));
+    var output = toolResult.result().output();
+    assertTrue(output.startsWith("[runtime BASH exit -1 TIMEOUT "), output);
   }
 
   private static void assumeBashAvailable() {

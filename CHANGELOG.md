@@ -331,12 +331,35 @@ throws `IllegalStateException("session ended with Success but produced no result
 `Success`, and `StructuredContentParser.parse` still returns `null` for blank input.
 
 **A sandbox execute reports its timeout, and an RPC timeout has its own type.**
-`repl.sandbox.ExecutionResult` gains a `boolean timedOut` component after `exitCode`, which
-changes the canonical constructor to `ExecutionResult(executedCode, stdout, stderr, exitCode,
-timedOut, bindings, duration)`; `ExecutionResult.Builder.withTimedOut(boolean)` sets it.
+`repl.sandbox.ExecutionResult` gains a `boolean timedOut` component after `exitCode` (the
+3.0 canonical constructor, after the removals under the secret registry entry below, is
+`ExecutionResult(stdout, stderr, exitCode, timedOut, duration)`);
+`ExecutionResult.Builder.withTimedOut(boolean)` sets it.
 `RpcChannel.RpcException` is now `sealed`, with `RpcChannel.RpcTimeoutException` as its only
 subclass: a call whose response does not arrive in time throws it, with the same message. New:
 `RpcChannel.call(method, params, timeout)`.
+
+**One secret registry per session, applied once where tool output enters the session.** A session
+redacts every tool result's output once, against its own `SecretRegistry`, before the
+`QueryEvent.ToolResult`, `PostToolUse` hooks and the history see it, and redacts the messages of
+every error it reports. No tool or execution provider redacts its own output any more, and the
+REPL's bindings listener is gone.
+
+| 2.x | 3.0 |
+|---|---|
+| Each component held its own `SecretRegistry`; sessions had none | `SessionOptions` gains a `secretRegistry` component and `Builder.withSecretRegistry(SecretRegistry)` (default: a new empty registry). `SessionContext` gains a `secrets` component, `SessionContext(sessionId, cancellation, clock, secrets)`; `SessionContext.forTesting` uses a new empty registry. Tools reach it as `ToolContext.sessionContext().secrets()` |
+| `StopClassifier()` | `StopClassifier(SecretRegistry)`: the session's registry, which its error terminals are redacted against |
+| `ReadTool.binding(workspace, tracker, Redactor)`, `GrepTool.binding(workspace, Redactor)` | removed; `ReadTool.binding(workspace, tracker)` and `GrepTool.binding(workspace)`, whose output the session redacts |
+| `LocalProcessExecutionProvider.defaultPosix(SecretRegistry)`, `Builder.withSecretRegistry`, `secretRegistry()` | `defaultPosix()`; the other two removed. Stdout and stderr are returned raw |
+| `JShellExecutionProvider.Builder.withSecretRegistry`, `secretRegistry()` | removed. Stdout and stderr are returned raw |
+| `ToolResult(success, output, data, attachments)`, `ToolResult.data()`, `ToolResult.success(String, Object)` | `ToolResult(success, output, attachments)`; `data` is gone, since an object cannot be redacted. `ExecuteTool` and the `CommandGrant` tool return their text only, which already names exit code, timeout and truncation |
+| `session.execution.ExecutionResult.secretRedactionCounts()`, `totalRedactions()`, `Builder.withSecretRedactionCounts`; `CommandGrant.InvocationResult.redactionCounts()`, `totalRedactions()`; `RedactionResult.mergeCounts` | removed; `QueryEvent.ToolResult` gains `Map<String, Integer> redactions`, the per-secret counts of the session's pass over that result. `ExecutionResult(exitCode, stdout, stderr, duration, timedOut)` |
+| `QueryEvent.ToolResult(sessionId, turnIndex, timestamp, call, result)` | `QueryEvent.ToolResult(sessionId, turnIndex, timestamp, call, result, redactions)` |
+| `CommandGrant.Builder.withSecretRegistry` optional (a private registry by default) | required: `build()` without it throws `IllegalStateException`. The tool refuses to run, starting no process, in a session whose registry is a different instance |
+| `CommandGrant.invoke(List)`, `CommandGrant.InvocationResult` and `CommandGrant.RejectedException` public, output redacted | package-private, output raw; `InvocationResult.duration` is removed |
+| `ProcessOutcome(exitCode, stdout, stderr, timedOut, truncated, elapsed)` | `ProcessOutcome(exitCode, stdout, stderr, timedOut, stdoutTruncated, stderrTruncated, elapsed)`; `truncated()` is derived. `BoundedProcess.Builder.withSecretRegistry` names the secrets whose trailing start a cut stream drops, through the new `Redactor.trimPartialSecret` |
+| `repl.SandboxBindingsListener`, `ReplConfig.sandboxBindingsListener`, `maxBindingValueChars`, `maxBindingSnapshotChars`, `DEFAULT_MAX_BINDING_VALUE_CHARS`, `DEFAULT_MAX_BINDING_SNAPSHOT_CHARS` and their builder methods; `sandbox.ExecuteParams`; `Sandbox.execute(request, ExecuteParams)`; `sandbox.ExecutionResult.bindings()` and `Builder.withBindings`; the `captureBindings`, `maxBindingValueChars` and `maxBindingSnapshotChars` execute parameters and the reply's `bindings` | removed: the listener received unredacted output, served every session and carried no session id, and nothing registered one |
+| `sandbox.ExecutionResult.executedCode()`, `Builder.withExecutedCode`; `ReplConfig.maxExecutedCodeChars`, `DEFAULT_MAX_EXECUTED_CODE_CHARS`, `Builder.withMaxExecutedCodeChars`; `ReplSession.history()` | removed: only the listener's observers used them. `sandbox.ExecutionResult(stdout, stderr, exitCode, timedOut, duration)`; `ReplConfig(sandboxFactory, executionTimeout, maxConcurrentSessions, hostFunctions)` |
 
 ### Added
 
@@ -535,6 +558,21 @@ subclass: a call whose response does not arrive in time throws it, with the same
   `deniedPackages:java.lang.reflect`.
 
 ### Security
+
+- **A registered secret no longer reaches the model or the session's events through paths 2.x left
+  unredacted.** In 2.x each component redacted only when handed its own registry, so a registered
+  value leaked through: `Read` and `Grep` built by `SessionPresets` (no redactor); every custom
+  tool, `MemoryRead` and a `PostToolUse` `MutateResult`; the text of tool failures built from
+  exception messages (`threw:`, `tool dispatch failed:`, `Tool execution failed:`); the messages in
+  `TurnRetried` and terminal `SerializedError` cause chains and the reason of
+  `ErrorProviderUnavailable` (which carried the JShell startup snippet's raw output); the error
+  message a model stream failed with after completing a tool call, which became the turn's assistant
+  message and so reached the next request; `ToolResult.data`, which the runtime's SSE stream
+  serialised unredacted; the prefix of a secret that straddled an output cap, since output was
+  capped before it was redacted; and the stdout, stderr and code a `SandboxBindingsListener`
+  received. The session now redacts every tool result and every error it reports against its one
+  registry, a cut stream drops a trailing partial secret first, and `data` and the listener are gone
+  (see Breaking).
 
 - **`helios-persistence` resolves the PostgreSQL JDBC driver `org.postgresql:postgresql` 42.7.12
   (was 42.7.7).** 42.7.7 is inside the affected range of two pgJDBC advisories:

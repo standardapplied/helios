@@ -28,12 +28,11 @@ final class SessionExecution {
       ReplSession session,
       ExecutionRequest request,
       Duration timeout,
-      CancellationToken cancellation,
-      OutputRedaction redaction) {
+      CancellationToken cancellation) {
     var future = new CompletableFuture<ExecutionResult>();
     Thread.ofVirtual()
         .name("helios-jshell-" + sessionId)
-        .start(() -> run(session, request, timeout, cancellation, redaction, future));
+        .start(() -> run(session, request, timeout, cancellation, future));
     return future;
   }
 
@@ -48,7 +47,6 @@ final class SessionExecution {
       ExecutionRequest request,
       Duration timeout,
       CancellationToken cancellation,
-      OutputRedaction redaction,
       CompletableFuture<ExecutionResult> future) {
     var killed = new AtomicBoolean();
     var killRegistration =
@@ -62,7 +60,7 @@ final class SessionExecution {
     try {
       var raw = session.execute(request.script(), timeout);
       var elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
-      complete(future, cancellation, () -> redaction.redact(raw, elapsed));
+      complete(future, cancellation, () -> sessionResult(raw, elapsed));
     } catch (ReplException e) {
       complete(future, cancellation, () -> failure(request, e));
     } catch (Throwable t) {
@@ -88,6 +86,12 @@ final class SessionExecution {
       return;
     }
     future.complete(result.get());
+  }
+
+  /** The session-level result of what the sandbox reported, taking {@code elapsed}. */
+  private static ExecutionResult sessionResult(
+      com.standardapplied.helios.repl.sandbox.ExecutionResult raw, Duration elapsed) {
+    return new ExecutionResult(raw.exitCode(), raw.stdout(), raw.stderr(), elapsed, raw.timedOut());
   }
 
   private static ExecutionResult failure(ExecutionRequest request, ReplException e) {

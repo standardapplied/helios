@@ -44,8 +44,7 @@ Helios is used in production but has documented limitations that you should unde
 - **Sandboxed subprocess execution with dedicated RPC channel and descendant reaping.** The `JvmSandbox` ↔ host RPC runs on a per-session Unix domain socket bound in a private temp directory (mode 0700); the host accepts exactly one connection then closes the listener, so no other process — including a JShell snippet inside the subprocess — can forge frames by writing to subprocess stdout. (Earlier versions used a `\0RPC:`-prefixed channel multiplexed on stdout, which a snippet could forge via `new PrintStream(new FileOutputStream(FileDescriptor.out))`. C1 in the original review.) Subprocess stdout stays for captured output only and is never parsed as RPC. `JvmSandbox.close()` and its JVM-shutdown-hook path snapshot descendants before killing the parent, then forcibly destroy the snapshot — snippets that call `Runtime.exec(...)` cannot orphan grandchildren past sandbox lifetime. A snippet that outlives its timeout is stopped through `jshell.stop()`, repeated until it and every thread it started have ended; one still running after `JvmSandboxConfig.stopGrace` (5 s by default) cannot be reached inside the JVM, so the sandbox answers the execute and halts with exit code 3.
 - **Path-traversal jails on every filesystem boundary.** `WorkspaceRoot` backing the session's `Read` / `Grep` / `Glob` tools and the filesystem memory backend (lexical `..`/absolute refusal + canonicalisation of the deepest existing prefix + no-follow opens), `OnnxModelDownloader` (refuses absolute paths and traversal in HuggingFace-supplied filenames), and `CommandGrant` (per-call temp working directory, argv pre-scan refusing registered secrets).
 - **SQL identifier validation on the persistence schema name.** `PgConfig` rejects schema names that don't match Postgres' unquoted-identifier shape, so configuration-driven schema names cannot inject SQL via the qualifier substitution.
-- **Secret redaction at the documented boundaries.** `CommandGrant` flows model-visible output through a shared `SecretRegistry`-derived `Redactor`; the workspace `Read` and `Grep` tools accept an optional `Redactor` overload that does the same for any file content they return to the model. The REPL `SandboxBindingsListener` (operator telemetry of sandbox working memory) also redacts against the registry. `ModelConfig.toString()` redacts the API key and header values so accidental `log.info("config={}", cfg)` callsites don't leak credentials.
-- **No `Error` propagation from sandbox bindings collection.** `JvmSandboxBootstrap.collectBindings` catches `Throwable` per binding so a malicious `toString()` that throws `StackOverflowError` / `OutOfMemoryError` yields an `<error: …>` stub instead of escaping into the virtual thread's uncaught handler.
+- **One secret registry per session, applied where tool output enters it.** `SessionOptions.withSecretRegistry(registry)` gives the session its `SecretRegistry`. The session redacts every tool result's text once, before its `ToolResult` event, a `PostToolUse` hook or the history sees it, and the messages of every error it reports. Output cut at a size cap first loses any trailing start of a registered secret. `ModelConfig.toString()` redacts the API key and header values so accidental `log.info("config={}", cfg)` callsites don't leak credentials. See [Secret redaction](#secret-redaction-secretregistry--redactor) for the promise and what it does not cover.
 - **Bounded HTTP/SSE backpressure.** `AgentSession`'s event publisher uses `SubmissionPublisher.offer(...)` with bounded timeouts (1s for routine events, 30s for control events like `LoopEnded` / `QuestionAsked` / `Error`). A slow or paused SSE client cannot pin the agent loop. Routine events may be dropped on a sustained slow consumer with a FINE log; control events use the longer timeout to maximise delivery.
 - **Test coverage.** JaCoCo gates at 95% instruction / 90% branch on `helios-core`, `helios-session`, `helios-runtime`. Tests across the project: ~3,200 unit tests. Provider modules (`helios-gemini`, `helios-anthropic`, `helios-openai`) are gated by environment variables for live-API integration tests; CI runs unit tests without those keys.
 
@@ -53,7 +52,7 @@ Helios is used in production but has documented limitations that you should unde
 
 These are documented intentionally — they're real and you should plan around them. We are working through them in priority order; this README will move them from "limitation" to "hardened" as each lands.
 
-- **Persistence layer stores trace/journal payloads verbatim — by design.** `helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, and `helios_spans.attributes` capture exactly what the loop and tools produced. That faithful capture is what makes the audit trail useful for evals, debugging, and post-hoc analysis — forcing redaction would replace the actual signal with placeholders. The deployer's responsibility: redact at the source if needed. `CommandGrant` already redacts model-visible output through `SecretRegistry` contractually; `ReadTool` / `GrepTool` and `JShellExecutionProvider` redact through any registry you pass them. Custom tools that handle registered secrets are the deployer's call. Deployers who want defense-in-depth at the persistence boundary without wrapping the journal themselves can opt in via `PgConfig.Builder.withRedactor(registry.redactor())`.
+- **Persistence layer stores trace/journal payloads verbatim unless you set a redactor.** `helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, and `helios_spans.attributes` capture exactly what they are given. That faithful capture is what makes the audit trail useful for evals, debugging, and post-hoc analysis. The session does not feed persistence today, so its redaction pass does not reach these tables; to redact at the persistence boundary, set `PgConfig.Builder.withRedactor(registry.redactor())`, which runs every text field and JSON-serialised attribute map through the redactor before it reaches the database.
 - **No backwards compatibility guarantee.** Helios is pre-1.0 in spirit — the public API may change between minor versions. Tag a known good version and pin it.
 - **`FinishReason.LENGTH` is terminal.** When the model truncates output at its `max_output_tokens` cap, the loop terminates with `ResultMessage.ErrorDuringExecution(kind="max-tokens")` rather than re-issuing. Deployers that previously relied on the loop continuing past LENGTH should adjust `max_output_tokens` in `ModelConfig`. This is a deliberate change from earlier behaviour — silent re-issue burned `maxTurns` of budget without making progress.
 - **Live integration coverage is environment-gated.** Provider integration tests run in CI under deployer-supplied API keys; you should add equivalent live tests for the workloads that matter to you before relying on the SDK in production-critical paths.
@@ -339,16 +338,16 @@ var weatherTool = Tool.newBuilder()
     .build();
 ```
 
-Mark read-only tools as idempotent at build time — `Tool.newBuilder().withIdempotent(true)`. The session loop dispatches non-idempotent tools through a no-retry fault-tolerance envelope so side-effecting calls never replay.
+`Tool.newBuilder().withIdempotent(true)` records that a tool is safe to repeat; the session loop does not read it, because it never retries a tool: `ToolDispatch` acquires the call's per-category permit, runs the tool once on a virtual thread bounded by the per-call timeout, and turns an unknown tool, a timeout or a thrown exception into a failed result the model sees.
 
 ### CommandGrant — give the agent a CLI without giving it the secrets
 
-`CommandGrant` produces a `Tool` that lets the model invoke a single CLI binary under tight controls. Secrets registered via `withEnv(...)` are auto-redacted from any model-visible output:
+`CommandGrant` produces a `Tool` that lets the model invoke a single CLI binary under tight controls. It must be built with the registry of the sessions that run it; `build()` registers every `withEnv(...)` value there, and the session redacts the tool's output against it:
 
 ```java
 var registry = new SecretRegistry();
 var gh = CommandGrant.builder("gh")
-    .withSecretRegistry(registry)
+    .withSecretRegistry(registry)                     // required: the sessions' registry
     .withEnv("GH_TOKEN", System.getenv("GH_TOKEN"))   // value never reaches the model
     .withTimeout(Duration.ofSeconds(30))
     .withMaxOutputBytes(50_000)
@@ -357,22 +356,32 @@ var gh = CommandGrant.builder("gh")
             ? Optional.empty()
             : Optional.of("'gh auth' is not allowed via this grant"))
     .build();
+
+var options = SessionOptions.newBuilder()
+    .withModel(model)
+    .withSecretRegistry(registry)                     // the same instance
+    .withTools(new ToolRegistry(List.of(ToolBinding.newBuilder(gh.toTool()).build())))
+    .build();
 ```
 
-Hardening is on by default: binary path pinned at build, argv-only (no shell), `ProcessBuilder` env cleared then injected so the JVM's environment never leaks into the child, argv pre-scan refuses any registered secret value (forces env-only secret transport), per-call temp working directory, output capped, descendants killed on timeout, stderr hidden from the model unless `withStderrToModel(true)`. The same `SecretRegistry` can be shared across grants and any tool that produces model-visible output — cross-tool redaction is automatic.
+`build()` without `withSecretRegistry` throws, and the tool refuses to start a process in a session whose registry is a different instance. Hardening is on by default: binary path pinned at build, argv-only (no shell), `ProcessBuilder` env cleared then injected so the JVM's environment never leaks into the child, argv pre-scan refuses any registered secret value (forces env-only secret transport), per-call temp working directory, output capped (a stream cut at the cap loses any trailing start of a registered secret), descendants killed on timeout, stderr hidden from the model unless `withStderrToModel(true)`.
 
 ### Curated corpus — point the workspace tools at any root
 
-The session's `Read` / `Grep` / `Glob` tools accept any `WorkspaceRoot`, not just the agent's working directory — point them at a curated reference tree to give the model native lexical search over operator-supplied content (the "no vector DB needed for a bounded corpus" pattern). `Read` and `Grep` have a 3-arg / 2-arg overload that takes a `Redactor`; share one `SecretRegistry` with your `CommandGrant`s and a token written to a file by `gh auth login` stays scrubbed when the agent later reads it back.
+The session's `Read` / `Grep` / `Glob` tools accept any `WorkspaceRoot`, not just the agent's working directory — point them at a curated reference tree to give the model native lexical search over operator-supplied content (the "no vector DB needed for a bounded corpus" pattern). Their text output is redacted by the session like every tool's, so with one `SecretRegistry` set on the session and on your `CommandGrant`s, a token written to a file by `gh auth login` stays scrubbed when the agent later reads it back.
 
 ```java
-var corpus    = WorkspaceRoot.of(Path.of("/var/kb/support"));
-var tracker   = InMemoryFileTracker.create();
-var redactor  = registry.redactor();
-var bindings  = List.of(
-    ReadTool.binding(corpus, tracker, redactor),   // text-body output redacted
-    GrepTool.binding(corpus, redactor),            // match content redacted; path:line: prefix left alone
-    GlobTool.binding(corpus));                     // paths only — no redactor
+var corpus  = WorkspaceRoot.of(Path.of("/var/kb/support"));
+var tools   = new ToolRegistry(List.of(
+    ReadTool.binding(corpus, InMemoryFileTracker.create()),
+    GrepTool.binding(corpus),
+    GlobTool.binding(corpus)));
+var options = SessionOptions.newBuilder()
+    .withModel(model)
+    .withSecretRegistry(registry)
+    .withTools(tools)
+    .withPermission(Permission.planMode())
+    .build();
 ```
 
 Path-jail (`..` / absolute refusal + canonicalisation + no-follow opens) is built into `WorkspaceRoot`; per-file size caps, per-output byte caps, hidden-directory pruning, symlink/special-file skipping during walks, and binary skip are built into the tools. `Permission.planMode()` or a curated `Permission` policy enforces read-only at the session level — there is no `Write` tool to disable.
@@ -440,7 +449,7 @@ var ft = FaultTolerance.newBuilder()
 var result = ft.execute(() -> model.chat(messages));   // checked exceptions: see Javadoc
 ```
 
-`FaultTolerance.withoutRetry()` returns a sibling envelope with retry stripped (circuit breaker + timeout retained) — the session loop's tool dispatch uses this for non-idempotent tools so side-effecting calls never replay.
+`FaultTolerance.withoutRetry()` returns a sibling envelope with retry stripped (circuit breaker + timeout retained), for wrapping an operation that must not replay.
 
 ## Observability
 
@@ -564,7 +573,7 @@ Schema lives on the classpath at `com/standardapplied/helios/persistence/schema.
 
 **Annotations.** `core.trace.Annotation` is a structured note attached to a real trace or span (`subjectId`). An optional `facet` addresses a named sub-coordinate within the subject, so one author can hold several judgments about one subject — e.g. one rating per evaluation dimension — without minting synthetic ids; `authorKind` (`HUMAN | MODEL | SYSTEM`) types the author and `metadata` (a `jsonb` map) carries opaque consumer context. `PgAnnotationStore.upsertAnnotation` persists the full record and is idempotent on `(subjectId, facet, label, authorId)`. Read through the same store via `findAnnotationsBySubject(id)`, `findAnnotationsBySubjects(ids)` (batch), or `listAnnotations(paginate, scimFilter)` (SCIM over the first-class columns). `facet`, `label`, and `metadata` are opaque to Helios — it stores and returns them without interpretation.
 
-**Trace fidelity by design.** Trace and journal payloads (`helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, `helios_spans.attributes`) are persisted verbatim. That's what makes the audit trail useful for evals and debugging — placeholders would replace the actual signal. Redaction is the deployer's call: tool sources like `CommandGrant`, `ReadTool` / `GrepTool` (when wired with a `Redactor`), and `JShellExecutionProvider` already redact through any `SecretRegistry` you pass them, so traces capture the already-redacted output. For custom tools that handle registered secrets, redact at the tool boundary before returning. Deployers who want defense-in-depth at the persistence boundary can opt in via `PgConfig.Builder.withRedactor(registry.redactor())` — every trace/journal text field and JSON-serialised attribute map runs through the supplied `Redactor` before reaching the DB. Default unset = verbatim (current behaviour).
+**Trace fidelity by design.** Trace and journal payloads (`helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, `helios_spans.attributes`) are persisted verbatim unless `PgConfig.Builder.withRedactor(registry.redactor())` is set, in which case every trace/journal text field and JSON-serialised attribute map runs through the supplied `Redactor` before reaching the DB. The session's redaction pass does not reach persistence: the session does not feed these stores today, so whatever you record into them yourself is stored as you give it.
 
 ## Security
 
@@ -572,22 +581,33 @@ Helios is designed for production but has known limitations — see [Production 
 
 ### Secret redaction (`SecretRegistry` + `Redactor`)
 
-`core.common.SecretRegistry` is a thread-safe registry of secret values; `Redactor` (built via `registry.redactor()`) is an immutable Aho-Corasick byte-level scrubber that replaces every contiguous occurrence of a registered secret with `<redacted:NAME>`. Operates on raw bytes BEFORE UTF-8 decode so encoding mangling cannot bypass it. Validation: secrets must be ≥8 chars and pure ASCII. Overlap policy: leftmost-longest.
+`core.common.SecretRegistry` is a thread-safe registry of secret values; `Redactor` (built via `registry.redactor()`) is an immutable Aho-Corasick byte-level scrubber that replaces every contiguous occurrence of a registered secret with `<redacted:NAME>`. It operates on raw bytes before UTF-8 decode so encoding mangling cannot bypass it. Overlap policy: leftmost-longest.
+
+A secret is registered under a non-blank name (re-registering a name replaces its value) and its value must be at least 8 characters of JSON-safe printable ASCII: every character in `0x20`–`0x7E` except `"` and `\`. `register` throws `IllegalArgumentException` otherwise: on a null value, a value shorter than 8 characters, a control character (`0x00`–`0x1F`, `0x7F`), `"` or `\` (Jackson escapes these, so the serialised bytes would no longer match), or any non-ASCII character (the redactor matches ASCII bytes).
 
 ```java
 var registry = new SecretRegistry();
 registry.register("STRIPE_KEY", System.getenv("STRIPE_KEY"));
 registry.register("GH_TOKEN", System.getenv("GH_TOKEN"));
+
+var options = SessionOptions.newBuilder()
+    .withModel(model)
+    .withSecretRegistry(registry)
+    .build();
 ```
 
-Share one registry across every component that produces model-visible or operator-visible output:
+**The promise: no registered value reaches the model, and none appears in anything the session emits.** Each session has one registry, set with `SessionOptions.withSecretRegistry` (default: a new empty registry, which redacts nothing; sessions built from the same options share it). The session redacts each tool result's text once, right after the tool returns, before its `QueryEvent.ToolResult` (in-process subscribers, `OnStreamEvent` hooks, the runtime's SSE stream), `PostToolUse` hooks and the conversation history see it. That covers every tool — built-in, custom, `MemoryRead`, `CommandGrant`, `Execute` — successes and failures, the results the loop substitutes (blocked, skipped, timed out, threw, not found, dispatch failed), and the text a `PostToolUse` `MutateResult` supplies. `QueryEvent.ToolResult.redactions()` reports how many occurrences of each secret that pass replaced. The messages of every error the session reports — `TurnRetried`, error terminals, `ErrorProviderUnavailable`'s reason and cause — are redacted the same way. Each redaction takes a fresh snapshot of the registry, so a secret registered mid-session (a tool can reach the registry through `ToolContext.sessionContext().secrets()`) is honoured from the next result on. Where a tool cuts its output at a size cap (`CommandGrant`, `LocalProcessExecutionProvider`, `Read`'s per-line cap), the cut first drops any trailing start of a registered secret, so half a secret never survives the cap.
 
-- `CommandGrant.builder("gh").withSecretRegistry(registry)` — redacts stdout / stderr; refuses argv carrying a registered secret.
-- `ReadTool.binding(workspace, tracker, registry.redactor())` and `GrepTool.binding(workspace, registry.redactor())` — redact text-body output and match content respectively. A token a `CommandGrant("gh")` writes to a file stays redacted when the agent later reads it via `Read`.
-- `JShellExecutionProvider.Builder.withSecretRegistry(registry)` — redacts subprocess stdout / stderr, and wraps the deployer's `SandboxBindingsListener` so operator telemetry of working memory also redacts registered secrets.
-- `ModelConfig.toString()` — automatically elides the `apiKey` and every header value regardless of registry contents; safe to log a `ModelConfig` directly.
+Not covered:
 
-The persistence layer does **not** route through the registry today — see [Known limitations](#known-limitations).
+- Text that does not come from tools: user messages, the system prompt, hook `Inject` messages and `ToolBlocked` reasons (deployer code), `ToolMutated` arguments, and the model's own output.
+- `Read` attachments: images and PDFs pass through unredacted.
+- Runtime HTTP error bodies.
+- Persistence: verbatim unless `PgConfig.Builder.withRedactor(...)` is set; the session does not feed persistence.
+- Telemetry content capture.
+- Secrets the model rebuilds from pieces (encoded, or split across calls): redaction matches exact bytes.
+
+`ModelConfig.toString()` elides the `apiKey` and every header value regardless of registry contents, so a `ModelConfig` is safe to log directly.
 
 ### Sandbox security model
 

@@ -4,7 +4,6 @@
  */
 package com.standardapplied.helios.session.execution;
 
-import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Validate;
 import com.standardapplied.helios.core.process.BinaryResolver;
 import com.standardapplied.helios.core.process.BoundedProcess;
@@ -49,8 +48,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li><b>Per-call temp cwd by default.</b> If the request omits {@link
  *       ExecutionRequest#workingDirectory()}, a fresh temp directory is created and deleted after
  *       the invocation.
- *   <li><b>Output redaction is mandatory.</b> Both stdout and stderr are scrubbed against the
- *       provider's {@link SecretRegistry} before they leave the host process.
+ *   <li><b>Output is redacted by the session.</b> Stdout and stderr are returned raw and the
+ *       session redacts the {@code Execute} tool's output against its secret registry. A stream cut
+ *       at the output cap loses the start of a secret registered there that the cut went through,
+ *       so the session's redaction cannot miss it.
  *   <li><b>Process tree reaped on timeout / cancellation.</b> Descendants are destroyed alongside
  *       the direct child.
  *   <li><b>Concurrency-bounded.</b> Per-provider {@link Semaphore}; overflows wait rather than fail
@@ -61,10 +62,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <h2>Phase 5 scope</h2>
  *
- * The default factory {@link #defaultPosix(SecretRegistry)} wires {@link Runtime#BASH} (to {@code
- * bash}) and {@link Runtime#PYTHON} (to {@code python3}). Other {@link Runtime} values stay
- * declared but unhandled — customers register their own handlers via {@link
- * Builder#withRuntime(Runtime, RuntimeHandler)}.
+ * The default factory {@link #defaultPosix()} wires {@link Runtime#BASH} (to {@code bash}) and
+ * {@link Runtime#PYTHON} (to {@code python3}). Other {@link Runtime} values stay declared but
+ * unhandled — customers register their own handlers via {@link Builder#withRuntime(Runtime,
+ * RuntimeHandler)}.
  *
  * <p>{@code Runtime.JSHELL} is intentionally absent: {@code helios-repl}'s {@code
  * JShellExecutionProvider} serves it. {@code Runtime.SQL} is declared in the enum but needs a
@@ -79,9 +80,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * leave orphaned subprocesses behind. After {@code close()}, calls to {@link
  * #execute(SessionContext, ExecutionRequest, CancellationToken) execute} complete exceptionally
  * with an {@link IllegalStateException}.
- *
- * <p>The provider does NOT close its {@link SecretRegistry} — the registry is typically shared
- * across many tools and the caller owns its lifecycle.
  */
 public final class LocalProcessExecutionProvider implements ExecutionProvider, AutoCloseable {
 
@@ -91,7 +89,6 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
   private static final String DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin";
 
   private final Map<Runtime, RuntimeHandler> handlers;
-  private final SecretRegistry secretRegistry;
   private final ExecutionCapabilities capabilities;
   private final String path;
   private final int maxOutputBytes;
@@ -100,7 +97,6 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
 
   private LocalProcessExecutionProvider(Builder b) {
     this.handlers = Map.copyOf(b.handlers);
-    this.secretRegistry = b.secretRegistry != null ? b.secretRegistry : new SecretRegistry();
     this.path = b.path != null ? b.path : DEFAULT_PATH;
     this.maxOutputBytes = b.maxOutputBytes;
     this.concurrency = new Semaphore(b.maxConcurrent);
@@ -119,15 +115,11 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
    * Runtime#PYTHON} to {@code python3} using {@code -c} script dispatch. Mirrors the binaries the
    * spec calls out as the Phase 5 acceptance baseline.
    *
-   * @param secretRegistry the registry used for stdout/stderr redaction; non-null
    * @return a fresh provider
-   * @throws NullPointerException if {@code secretRegistry} is null
    * @throws IllegalStateException if either binary cannot be resolved on the host {@code PATH}
    */
-  public static LocalProcessExecutionProvider defaultPosix(SecretRegistry secretRegistry) {
-    Objects.requireNonNull(secretRegistry, "secretRegistry must not be null");
+  public static LocalProcessExecutionProvider defaultPosix() {
     return newBuilder()
-        .withSecretRegistry(secretRegistry)
         .withRuntime(Runtime.BASH, RuntimeHandler.dashC("bash"))
         .withRuntime(Runtime.PYTHON, RuntimeHandler.dashC("python3"))
         .build();
@@ -140,11 +132,6 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
    */
   public static Builder newBuilder() {
     return new Builder();
-  }
-
-  /** The secret registry this provider redacts against. */
-  public SecretRegistry secretRegistry() {
-    return secretRegistry;
   }
 
   @Override
@@ -167,7 +154,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
         .start(
             () -> {
               try {
-                future.complete(runSync(request, cancellation));
+                future.complete(runSync(session, request, cancellation));
               } catch (CancellationException e) {
                 future.completeExceptionally(e);
               } catch (Throwable t) {
@@ -177,7 +164,8 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
     return future;
   }
 
-  private ExecutionResult runSync(ExecutionRequest request, CancellationToken cancellation) {
+  private ExecutionResult runSync(
+      SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
     var handler = handlers.get(request.runtime());
     if (handler == null) {
       return ExecutionResult.refusal(
@@ -221,7 +209,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
         throw new CancellationException(
             "provider closed before " + request.runtime() + " could start");
       }
-      return runProcess(request, handler, effectiveTimeout, cancellation);
+      return runProcess(session, request, handler, effectiveTimeout, cancellation);
     } catch (IOException e) {
       return ExecutionResult.refusal(
           "I/O error launching " + request.runtime() + ": " + e.getMessage());
@@ -231,6 +219,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
   }
 
   private ExecutionResult runProcess(
+      SessionContext session,
       ExecutionRequest request,
       RuntimeHandler handler,
       Duration timeout,
@@ -246,6 +235,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
             .withTempDirectoryPrefix("helios-exec-")
             .withTimeout(timeout)
             .withMaxOutputBytes(maxOutputBytes)
+            .withSecretRegistry(session.secrets())
             .start()) {
       return awaitProcess(request, process, cancellation);
     }
@@ -294,16 +284,12 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
       throw new CancellationException(
           "execution of " + request.runtime() + " cancelled: " + cancellation.reason().orElse(""));
     }
-    var redactor = secretRegistry.redactor();
-    var stdoutResult = redactor.redact(outcome.stdout());
-    var stderrResult = redactor.redact(outcome.stderr());
     return new ExecutionResult(
         outcome.exitCode(),
-        stdoutResult.text(),
-        stderrResult.text(),
+        new String(outcome.stdout(), StandardCharsets.UTF_8),
+        new String(outcome.stderr(), StandardCharsets.UTF_8),
         outcome.elapsed(),
-        outcome.timedOut(),
-        stdoutResult.mergeCounts(stderrResult));
+        outcome.timedOut());
   }
 
   /**
@@ -410,7 +396,6 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
   public static final class Builder {
 
     private final Map<Runtime, RuntimeHandler> handlers = new EnumMap<>(Runtime.class);
-    private SecretRegistry secretRegistry;
     private String path;
     private int maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES;
     private int maxConcurrent = DEFAULT_MAX_CONCURRENT;
@@ -433,21 +418,6 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
       Objects.requireNonNull(runtime, "runtime must not be null");
       Objects.requireNonNull(handler, "handler must not be null");
       this.handlers.put(runtime, handler);
-      return this;
-    }
-
-    /**
-     * Set the shared {@link SecretRegistry} the provider redacts stdout / stderr against. Defaults
-     * to a fresh empty registry — usable but invisible to the rest of the session, so callers that
-     * want cross-tool redaction should wire the session-shared registry here.
-     *
-     * @param secretRegistry the registry; non-null
-     * @return this builder
-     * @throws NullPointerException if {@code secretRegistry} is null
-     */
-    public Builder withSecretRegistry(SecretRegistry secretRegistry) {
-      this.secretRegistry =
-          Objects.requireNonNull(secretRegistry, "secretRegistry must not be null");
       return this;
     }
 

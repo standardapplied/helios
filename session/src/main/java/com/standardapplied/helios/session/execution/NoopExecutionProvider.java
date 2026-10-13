@@ -7,7 +7,6 @@ package com.standardapplied.helios.session.execution;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import java.time.Duration;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -62,8 +61,7 @@ public final class NoopExecutionProvider implements ExecutionProvider {
                 + "). Configure LocalProcessExecutionProvider (or your own ExecutionProvider) via"
                 + " SessionOptions.Builder#withExecutionProvider to enable execution.",
             Duration.ZERO,
-            false,
-            Map.of());
+            false);
     return CompletableFuture.completedFuture(result);
   }
 }

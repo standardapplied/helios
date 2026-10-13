@@ -5,52 +5,29 @@
 
 package com.standardapplied.helios.repl.sandbox;
 
-import com.standardapplied.helios.core.common.OrderedMaps;
 import java.time.Duration;
-import java.util.Map;
 
 /**
  * Result of executing code in a sandbox.
  *
- * @param executedCode the source the sandbox actually ran (the model-emitted JShell snippet, or a
- *     harness-internal init snippet). Captured parent-side from {@link ExecutionRequest#code()} —
- *     no protocol change. May be truncated per {@link
- *     com.standardapplied.helios.repl.ReplConfig#maxExecutedCodeChars()} with a {@code (len=N)}
- *     marker. Empty string when not captured
  * @param stdout captured standard output
  * @param stderr captured standard error
  * @param exitCode the exit code (0 = success)
  * @param timedOut whether the snippet outlived its timeout, or the sandbox did not answer the
  *     execute within the snippet's timeout, its stop grace and the call timeout, and was closed
- * @param bindings post-execute snapshot of every user-declared {@code var} in the sandbox, mapped
- *     to a length-capped {@code toString} repr. Excludes harness-internal {@code __}-prefixed
- *     names. Empty (not {@code null}) when no bindings were captured (sandbox not configured to
- *     emit them, or no user vars exist yet). Drives the {@code SandboxBindingsListener} callback so
- *     live observers can watch the agent's working memory across iterations. Kept in the given
- *     order, the sandbox's declaration order; a null name or repr is rejected
  * @param duration wall-clock time the sandbox spent on this execute, measured around {@link
  *     Sandbox#execute}. {@link Duration#ZERO} when not measured
  */
 public record ExecutionResult(
-    String executedCode,
-    String stdout,
-    String stderr,
-    int exitCode,
-    boolean timedOut,
-    Map<String, String> bindings,
-    Duration duration) {
+    String stdout, String stderr, int exitCode, boolean timedOut, Duration duration) {
 
   public ExecutionResult {
-    if (executedCode == null) {
-      executedCode = "";
-    }
     if (stdout == null) {
       stdout = "";
     }
     if (stderr == null) {
       stderr = "";
     }
-    bindings = bindings == null ? Map.of() : OrderedMaps.copyOf(bindings);
     if (duration == null || duration.isNegative()) {
       duration = Duration.ZERO;
     }
@@ -62,8 +39,7 @@ public record ExecutionResult(
    * the value the sandbox returned.
    */
   public ExecutionResult withDuration(Duration duration) {
-    return new ExecutionResult(
-        executedCode, stdout, stderr, exitCode, timedOut, bindings, duration);
+    return new ExecutionResult(stdout, stderr, exitCode, timedOut, duration);
   }
 
   /** Whether the execution completed successfully (exit code 0). */
@@ -91,20 +67,13 @@ public record ExecutionResult(
   }
 
   public static class Builder {
-    private String executedCode = "";
     private String stdout = "";
     private String stderr = "";
     private int exitCode;
     private boolean timedOut;
-    private Map<String, String> bindings = Map.of();
     private Duration duration = Duration.ZERO;
 
     private Builder() {}
-
-    public Builder withExecutedCode(String executedCode) {
-      this.executedCode = executedCode == null ? "" : executedCode;
-      return this;
-    }
 
     public Builder withStdout(String stdout) {
       this.stdout = stdout;
@@ -126,19 +95,13 @@ public record ExecutionResult(
       return this;
     }
 
-    public Builder withBindings(Map<String, String> bindings) {
-      this.bindings = bindings == null ? Map.of() : bindings;
-      return this;
-    }
-
     public Builder withDuration(Duration duration) {
       this.duration = duration == null ? Duration.ZERO : duration;
       return this;
     }
 
     public ExecutionResult build() {
-      return new ExecutionResult(
-          executedCode, stdout, stderr, exitCode, timedOut, bindings, duration);
+      return new ExecutionResult(stdout, stderr, exitCode, timedOut, duration);
     }
   }
 }

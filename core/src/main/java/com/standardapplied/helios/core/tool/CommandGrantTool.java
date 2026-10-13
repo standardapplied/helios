@@ -11,7 +11,8 @@ import java.util.Map;
 
 /**
  * The model-facing side of a {@link CommandGrant}: one {@code args} array parameter in, the exit
- * status and redacted output rendered as text out.
+ * status and output rendered as text out. It runs only in a session whose secret registry is the
+ * grant's, the registry the session redacts that output against.
  */
 record CommandGrantTool(CommandGrant grant, String description, boolean stderrToModel) {
 
@@ -35,6 +36,15 @@ record CommandGrantTool(CommandGrant grant, String description, boolean stderrTo
 
   private ToolResult execute(Map<String, Object> args, ToolContext ctx) {
     ctx.cancellation().throwIfCancelled();
+    var session = ctx.sessionContext();
+    if (session.secrets() != grant.secretRegistry()) {
+      return ToolResult.failure(
+          "CommandGrant "
+              + grant.name()
+              + " was built with a different SecretRegistry than session "
+              + session.sessionId()
+              + "; build it with the registry passed to SessionOptions.withSecretRegistry");
+    }
     var raw = args.get("args");
     if (!(raw instanceof List<?> list)) {
       return ToolResult.failure("Parameter 'args' is required and must be an array of strings");
@@ -51,8 +61,7 @@ record CommandGrantTool(CommandGrant grant, String description, boolean stderrTo
 
   private ToolResult invoke(List<String> argv) {
     try {
-      var result = grant.invoke(argv);
-      return ToolResult.success(render(result), result);
+      return ToolResult.success(render(grant.invoke(argv)));
     } catch (RejectedException e) {
       return ToolResult.failure(e.getMessage());
     } catch (InterruptedException e) {

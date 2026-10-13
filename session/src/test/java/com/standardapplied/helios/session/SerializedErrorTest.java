@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -207,5 +208,23 @@ final class SerializedErrorTest {
     assertEquals(List.of(), stripped.cause().stackTrace(), "cause frames stripped too");
     assertEquals("outer", stripped.message(), "messages preserved");
     assertEquals("root", stripped.cause().message(), "cause message preserved");
+  }
+
+  @Test
+  void redactedByRedactsEveryMessageInTheChainAndKeepsKindAndFrames() {
+    var secrets = new SecretRegistry();
+    secrets.register("API_KEY", "sk-test-0123456789abcdef");
+    var cause = new SerializedError("inner", "saw sk-test-0123456789abcdef", List.of("f2"), null);
+    var error = new SerializedError("outer", "sk-test-0123456789abcdef!", List.of("f1"), cause);
+
+    var redacted = error.redactedBy(secrets.redactor());
+
+    assertEquals(
+        new SerializedError(
+            "outer",
+            "<redacted:API_KEY>!",
+            List.of("f1"),
+            new SerializedError("inner", "saw <redacted:API_KEY>", List.of("f2"), null)),
+        redacted);
   }
 }

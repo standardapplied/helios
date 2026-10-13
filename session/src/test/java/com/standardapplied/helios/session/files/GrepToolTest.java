@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.tools.ToolCategory;
@@ -216,44 +215,6 @@ final class GrepToolTest {
   @Test
   void rejectsNullWorkspace() {
     assertThrows(NullPointerException.class, () -> GrepTool.binding(null));
-    assertThrows(NullPointerException.class, () -> GrepTool.binding(null, null));
-  }
-
-  @Test
-  void redactorOverloadScrubsMatchContentButLeavesPath(@TempDir Path tmp) throws IOException {
-    Files.writeString(
-        tmp.resolve("config.txt"),
-        "user=alice\napi_key=ghp_supersecrettoken_xyz\n",
-        StandardCharsets.UTF_8);
-    var registry = new SecretRegistry();
-    registry.register("GH_TOKEN", "ghp_supersecrettoken_xyz");
-
-    var result =
-        GrepTool.binding(WorkspaceRoot.of(tmp), registry.redactor())
-            .tool()
-            .execute(Map.of("pattern", "api_key"), ToolContext.noop());
-
-    assertTrue(result.success(), result.output());
-    var out = result.output();
-    assertFalse(out.contains("ghp_supersecrettoken_xyz"), "secret leaked: " + out);
-    assertTrue(out.contains("<redacted:GH_TOKEN>"), "marker missing: " + out);
-    assertTrue(out.contains("config.txt:2:"), "path prefix should remain: " + out);
-  }
-
-  @Test
-  void redactorNullEquivalentToOneArgBinding(@TempDir Path tmp) throws IOException {
-    Files.writeString(tmp.resolve("a.txt"), "hello\n", StandardCharsets.UTF_8);
-    var withNull =
-        GrepTool.binding(WorkspaceRoot.of(tmp), null)
-            .tool()
-            .execute(Map.of("pattern", "hello"), ToolContext.noop());
-    var oneArg =
-        GrepTool.binding(WorkspaceRoot.of(tmp))
-            .tool()
-            .execute(Map.of("pattern", "hello"), ToolContext.noop());
-    assertTrue(withNull.success());
-    assertTrue(oneArg.success());
-    assertEquals(oneArg.output(), withNull.output());
   }
 
   @Test

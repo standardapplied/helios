@@ -83,8 +83,9 @@ final class SessionLifecycle {
   /**
    * Fire {@code executionProvider.onSessionStart(sessionContext)} and react to its outcome. When
    * the provider returns {@link SessionStartOutcome.Refuse}, settle the result future immediately
-   * with {@link ResultMessage.ErrorProviderUnavailable} so subsequent {@code send} / {@code
-   * interrupt} calls observe a terminal session.
+   * with {@link ResultMessage.ErrorProviderUnavailable}, its reason and cause redacted against the
+   * session's secret registry, so subsequent {@code send} / {@code interrupt} calls observe a
+   * terminal session.
    *
    * @return {@code true} when the provider accepted (so {@link #closeRuntime} must fire {@code
    *     onSessionEnd}); {@code false} when the session was refused
@@ -111,12 +112,13 @@ final class SessionLifecycle {
   }
 
   private void markRefused(String reason, Throwable cause) {
-    var serialised = cause == null ? null : SerializedError.of(cause);
+    var redactor = sessionContext.secrets().redactor();
+    var serialised = cause == null ? null : SerializedError.of(cause).redactedBy(redactor);
     var refusal =
         new ResultMessage.ErrorProviderUnavailable(
             state.sessionId(),
             executionProvider.getClass().getSimpleName(),
-            reason,
+            redactor.redact(reason).text(),
             serialised,
             state.totals().usage(),
             state.totals().cost(),

@@ -192,7 +192,7 @@ class JsonlEventSinkTest {
               runId,
               Optional.empty(),
               "call-1",
-              ToolResult.success(canary, Map.of("private", canary)),
+              ToolResult.success(canary),
               Duration.ofMillis(2)));
       sink.onEvent(new HeliosEvent.ToolCallFailed(NOW, runId, Optional.empty(), "call-1", canary));
       sink.onEvent(new HeliosEvent.MemoryWritten(NOW, runId, Optional.empty(), canary, canary));

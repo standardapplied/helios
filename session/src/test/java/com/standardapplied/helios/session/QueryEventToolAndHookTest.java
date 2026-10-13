@@ -15,6 +15,7 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -49,7 +50,7 @@ final class QueryEventToolAndHookTest {
   @Test
   void toolResultAccessorsExposeFields() {
     var r = ToolResult.success("done");
-    var e = new QueryEvent.ToolResult(SID, TURN, TS, CALL, r);
+    var e = new QueryEvent.ToolResult(SID, TURN, TS, CALL, r, Map.of());
     assertSame(CALL, e.call());
     assertSame(r, e.result());
   }
@@ -59,7 +60,8 @@ final class QueryEventToolAndHookTest {
     var r = ToolResult.success("done");
     var ex =
         assertThrows(
-            NullPointerException.class, () -> new QueryEvent.ToolResult(SID, TURN, TS, null, r));
+            NullPointerException.class,
+            () -> new QueryEvent.ToolResult(SID, TURN, TS, null, r, Map.of()));
     assertEquals("call must not be null", ex.getMessage());
   }
 
@@ -67,8 +69,40 @@ final class QueryEventToolAndHookTest {
   void toolResultRejectsNullResult() {
     var ex =
         assertThrows(
-            NullPointerException.class, () -> new QueryEvent.ToolResult(SID, TURN, TS, CALL, null));
+            NullPointerException.class,
+            () -> new QueryEvent.ToolResult(SID, TURN, TS, CALL, null, Map.of()));
     assertEquals("result must not be null", ex.getMessage());
+  }
+
+  @Test
+  void toolResultKeepsAnUnmodifiableCopyOfItsRedactionsInOrder() {
+    var counts = new LinkedHashMap<String, Integer>();
+    counts.put("B_KEY", 2);
+    counts.put("A_KEY", 1);
+    var e = new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.success("x"), counts);
+    counts.put("C_KEY", 3);
+
+    assertEquals(List.of("B_KEY", "A_KEY"), List.copyOf(e.redactions().keySet()));
+    assertThrows(UnsupportedOperationException.class, () -> e.redactions().put("D_KEY", 4));
+  }
+
+  @Test
+  void toolResultRejectsNullRedactions() {
+    var r = ToolResult.success("done");
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new QueryEvent.ToolResult(SID, TURN, TS, CALL, r, null));
+    assertEquals("redactions must not be null", ex.getMessage());
+  }
+
+  @Test
+  void toolResultRejectsANullRedactionCount() {
+    var counts = new HashMap<String, Integer>();
+    counts.put("A_KEY", null);
+    assertThrows(
+        NullPointerException.class,
+        () -> new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.success("x"), counts));
   }
 
   // ── ToolBlocked ──────────────────────────────────────────────────────────
@@ -270,7 +304,7 @@ final class QueryEventToolAndHookTest {
   @Test
   void allFiveNewSubtypesAreQueryEvents() {
     var u = new QueryEvent.ToolUse(SID, TURN, TS, CALL);
-    var r = new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.success("x"));
+    var r = new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.success("x"), Map.of());
     var b = new QueryEvent.ToolBlocked(SID, TURN, TS, CALL, "h", "r");
     var m = new QueryEvent.ToolMutated(SID, TURN, TS, CALL, "h", Map.of(), Map.of());
     var f = new QueryEvent.HookFired(SID, TURN, TS, "h", "p", "Block");

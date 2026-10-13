@@ -6,7 +6,6 @@
 package com.standardapplied.helios.repl;
 
 import com.standardapplied.helios.repl.host.HostFunction;
-import com.standardapplied.helios.repl.sandbox.ExecutionResult;
 import com.standardapplied.helios.repl.sandbox.SandboxFactory;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -15,54 +14,24 @@ import java.util.List;
 /**
  * Configuration for REPL sessions. Immutable and reusable across sessions.
  *
- * <p>This is the substrate-only shape: sandbox factory, execution caps, host-function registry, and
- * bindings-snapshot bounds.
+ * <p>This is the substrate-only shape: sandbox factory, execution caps and host-function registry.
  *
  * @param sandboxFactory creates the sandbox for each session
  * @param executionTimeout default timeout per code execution
  * @param maxConcurrentSessions maximum concurrent sessions (enforced via semaphore)
  * @param hostFunctions additional host functions registered for each session
- * @param sandboxBindingsListener optional observer of the sandbox's working memory after each
- *     {@code Execute}. Fires synchronously inside {@link ReplSession#execute(String)} after the
- *     underlying sandbox returns. {@code null} disables the callback (default)
- * @param maxBindingValueChars per-value cap on the sandbox-side {@code toString} repr emitted in
- *     {@link ExecutionResult#bindings()}. Defaults to {@value #DEFAULT_MAX_BINDING_VALUE_CHARS}.
- *     Set to {@code 0} to disable per-value truncation
- * @param maxBindingSnapshotChars total cap across all values in a single bindings snapshot.
- *     Defaults to {@value #DEFAULT_MAX_BINDING_SNAPSHOT_CHARS}. Once exceeded, remaining variables
- *     are dropped from the snapshot. Set to {@code 0} to disable the total cap
- * @param maxExecutedCodeChars per-call cap on the {@code executedCode} field returned in {@link
- *     ExecutionResult}. Defaults to {@value #DEFAULT_MAX_EXECUTED_CODE_CHARS}. Set to {@code 0} to
- *     disable per-call truncation (full snippet always returned). Truncation appends a {@code ...
- *     (len=N)} marker so consumers know the original length
  */
 public record ReplConfig(
     SandboxFactory sandboxFactory,
     Duration executionTimeout,
     int maxConcurrentSessions,
-    List<HostFunction> hostFunctions,
-    SandboxBindingsListener sandboxBindingsListener,
-    int maxBindingValueChars,
-    int maxBindingSnapshotChars,
-    int maxExecutedCodeChars) {
+    List<HostFunction> hostFunctions) {
 
   /** Default execution timeout: 30 seconds. */
   public static final Duration DEFAULT_EXECUTION_TIMEOUT = Duration.ofSeconds(30);
 
   /** Default max concurrent sessions. */
   public static final int DEFAULT_MAX_CONCURRENT_SESSIONS = 50;
-
-  /** Default per-value cap on the {@code toString} repr in a bindings snapshot. */
-  public static final int DEFAULT_MAX_BINDING_VALUE_CHARS = 200;
-
-  /** Default total cap on a bindings snapshot. */
-  public static final int DEFAULT_MAX_BINDING_SNAPSHOT_CHARS = 16 * 1024;
-
-  /**
-   * Default per-call cap on the {@code executedCode} field. Matches the model-facing output cap so
-   * a 5K snippet renders the same as 5K of stdout — keeps live-UI displays aligned.
-   */
-  public static final int DEFAULT_MAX_EXECUTED_CODE_CHARS = 5000;
 
   /** Canonical constructor with full validation; defensively copies {@code hostFunctions}. */
   public ReplConfig {
@@ -74,18 +43,6 @@ public record ReplConfig(
     }
     if (maxConcurrentSessions <= 0) {
       throw new IllegalArgumentException("Max concurrent sessions must be positive");
-    }
-    if (maxBindingValueChars < 0) {
-      throw new IllegalArgumentException(
-          "maxBindingValueChars must be >= 0 (0 disables per-value truncation)");
-    }
-    if (maxBindingSnapshotChars < 0) {
-      throw new IllegalArgumentException(
-          "maxBindingSnapshotChars must be >= 0 (0 disables the total cap)");
-    }
-    if (maxExecutedCodeChars < 0) {
-      throw new IllegalArgumentException(
-          "maxExecutedCodeChars must be >= 0 (0 disables per-call truncation)");
     }
     hostFunctions = List.copyOf(hostFunctions);
   }
@@ -101,10 +58,6 @@ public record ReplConfig(
     private Duration executionTimeout = DEFAULT_EXECUTION_TIMEOUT;
     private int maxConcurrentSessions = DEFAULT_MAX_CONCURRENT_SESSIONS;
     private final List<HostFunction> hostFunctions = new ArrayList<>();
-    private SandboxBindingsListener sandboxBindingsListener;
-    private int maxBindingValueChars = DEFAULT_MAX_BINDING_VALUE_CHARS;
-    private int maxBindingSnapshotChars = DEFAULT_MAX_BINDING_SNAPSHOT_CHARS;
-    private int maxExecutedCodeChars = DEFAULT_MAX_EXECUTED_CODE_CHARS;
 
     private Builder() {}
 
@@ -138,47 +91,9 @@ public record ReplConfig(
       return this;
     }
 
-    /**
-     * Listener that observes the sandbox's working memory after each {@code Execute}. {@code null}
-     * disables the callback (default).
-     */
-    public Builder withSandboxBindingsListener(SandboxBindingsListener listener) {
-      this.sandboxBindingsListener = listener;
-      return this;
-    }
-
-    /** Per-value cap on the bindings snapshot. */
-    public Builder withMaxBindingValueChars(int chars) {
-      this.maxBindingValueChars = chars;
-      return this;
-    }
-
-    /** Total cap on a single bindings snapshot. */
-    public Builder withMaxBindingSnapshotChars(int chars) {
-      this.maxBindingSnapshotChars = chars;
-      return this;
-    }
-
-    /**
-     * Per-call cap on {@link ExecutionResult#executedCode()}. {@code 0} disables truncation (full
-     * snippet returned). Truncated values get a {@code ... (len=N)} marker.
-     */
-    public Builder withMaxExecutedCodeChars(int chars) {
-      this.maxExecutedCodeChars = chars;
-      return this;
-    }
-
     /** Build the immutable config. */
     public ReplConfig build() {
-      return new ReplConfig(
-          sandboxFactory,
-          executionTimeout,
-          maxConcurrentSessions,
-          hostFunctions,
-          sandboxBindingsListener,
-          maxBindingValueChars,
-          maxBindingSnapshotChars,
-          maxExecutedCodeChars);
+      return new ReplConfig(sandboxFactory, executionTimeout, maxConcurrentSessions, hostFunctions);
     }
   }
 }
