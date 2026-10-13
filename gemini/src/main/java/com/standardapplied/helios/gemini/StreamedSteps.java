@@ -10,6 +10,7 @@ import com.standardapplied.helios.gemini.api.GeminiJson;
 import com.standardapplied.helios.gemini.api.Step;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * The steps of a streamed interaction, by index, from {@code step.start} through {@code step.delta}
@@ -113,11 +114,14 @@ final class StreamedSteps {
     return "thought".equals(state.type) ? output.thinkingComplete() : null;
   }
 
-  /** The name of a function call whose step is still open, or {@code null} when none is. */
+  /**
+   * The name of a function call whose step is still open, {@code <unnamed>} when it has none, or
+   * {@code null} when none is open.
+   */
   String openCall() {
     return steps.values().stream()
         .filter(StepState::isCall)
-        .map(state -> state.name)
+        .map(state -> Objects.requireNonNullElse(state.name, "<unnamed>"))
         .findFirst()
         .orElse(null);
   }
