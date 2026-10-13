@@ -50,8 +50,10 @@ final class ConsoleEventPrinterTest {
                 Citation.newBuilder().withSourceId("s1").withTitle("Docs").build(),
                 Citation.of("s2", "body"))));
     printer.onNext(new QueryEvent.ToolUse(SID, TURN, TS, CALL));
-    printer.onNext(new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.success("x")));
-    printer.onNext(new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.failure("nope")));
+    printer.onNext(
+        new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.success("x"), Map.of()));
+    printer.onNext(
+        new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.failure("nope"), Map.of()));
     printer.onNext(new QueryEvent.ToolBlocked(SID, TURN, TS, CALL, "perm", "denied"));
     printer.onNext(new QueryEvent.TurnEnded(SID, TURN, TS, StopReason.END_TURN));
     printer.onNext(

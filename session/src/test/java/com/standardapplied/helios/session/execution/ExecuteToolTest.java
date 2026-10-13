@@ -6,11 +6,10 @@ package com.standardapplied.helios.session.execution;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
@@ -63,7 +62,7 @@ final class ExecuteToolTest {
   }
 
   private static ExecutionResult ok(String stdout) {
-    return new ExecutionResult(0, stdout, "", Duration.ofMillis(10), false, Map.of());
+    return new ExecutionResult(0, stdout, "", Duration.ofMillis(10), false);
   }
 
   private static ToolContext ctx() {
@@ -290,8 +289,6 @@ final class ExecuteToolTest {
     assertTrue(result.output().contains("runtime BASH"));
     assertTrue(result.output().contains("exit 0"));
     assertTrue(result.output().contains("hello"));
-    assertInstanceOf(ExecutionResult.class, result.data());
-    assertSame(provider.result, result.data());
     assertEquals(Runtime.BASH, provider.lastRequest.runtime());
     assertEquals("echo hello", provider.lastRequest.script());
     assertEquals(List.of("a", "b"), provider.lastRequest.args());
@@ -303,7 +300,7 @@ final class ExecuteToolTest {
 
   @Test
   void timeoutFlagPropagatedToOutput() {
-    var timedOut = new ExecutionResult(-1, "", "", Duration.ofMillis(50), true, Map.of());
+    var timedOut = new ExecutionResult(-1, "", "", Duration.ofMillis(50), true);
     var provider = new RecordingProvider(timedOut);
     var binding = ExecuteTool.binding(provider);
     var result =
@@ -311,14 +308,12 @@ final class ExecuteToolTest {
             .tool()
             .execute(Map.of("runtime", "BASH", "script", "sleep 5", "timeoutSeconds", 1), ctx());
     assertTrue(result.success(), "tool dispatch should succeed even when execution timed out");
-    assertTrue(result.output().contains("TIMEOUT"));
-    var data = assertInstanceOf(ExecutionResult.class, result.data());
-    assertTrue(data.timedOut());
+    assertTrue(result.output().startsWith("[runtime BASH exit -1 TIMEOUT"), result.output());
   }
 
   @Test
   void formatIncludesStderrWhenPresent() {
-    var withErr = new ExecutionResult(2, "out\n", "err\n", Duration.ofMillis(5), false, Map.of());
+    var withErr = new ExecutionResult(2, "out\n", "err\n", Duration.ofMillis(5), false);
     var provider = new RecordingProvider(withErr);
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), ctx());
@@ -393,8 +388,7 @@ final class ExecuteToolTest {
 
   @Test
   void formatAddsNewlineBetweenStdoutWithoutTrailingNewlineAndStderr() {
-    var withErr =
-        new ExecutionResult(2, "out-no-newline", "err\n", Duration.ofMillis(5), false, Map.of());
+    var withErr = new ExecutionResult(2, "out-no-newline", "err\n", Duration.ofMillis(5), false);
     var provider = new RecordingProvider(withErr);
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), ctx());
@@ -415,7 +409,8 @@ final class ExecuteToolTest {
     token.cancel("test");
     var toolCtx =
         ToolContext.of(
-            new SessionContext("cancel-test", token, Clock.systemUTC()), Duration.ofSeconds(1));
+            new SessionContext("cancel-test", token, Clock.systemUTC(), new SecretRegistry()),
+            Duration.ofSeconds(1));
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), toolCtx);
     assertFalse(result.success());
     assertTrue(result.output().contains("test"));

@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
@@ -56,7 +55,6 @@ final class LocalProcessExecutionProviderRobustnessTest {
 
   private static LocalProcessExecutionProvider testProvider() {
     return LocalProcessExecutionProvider.newBuilder()
-        .withSecretRegistry(new SecretRegistry())
         .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
         .withShutdownHook(false)
         .build();
@@ -64,7 +62,6 @@ final class LocalProcessExecutionProviderRobustnessTest {
 
   private static LocalProcessExecutionProvider testProvider(int maxConcurrent) {
     return LocalProcessExecutionProvider.newBuilder()
-        .withSecretRegistry(new SecretRegistry())
         .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
         .withMaxConcurrent(maxConcurrent)
         .withShutdownHook(false)
@@ -198,7 +195,6 @@ final class LocalProcessExecutionProviderRobustnessTest {
     var launching = new AtomicReference<LocalProcessExecutionProvider>();
     var provider =
         LocalProcessExecutionProvider.newBuilder()
-            .withSecretRegistry(new SecretRegistry())
             .withRuntime(
                 Runtime.BASH,
                 request -> {
@@ -391,7 +387,6 @@ final class LocalProcessExecutionProviderRobustnessTest {
     // The hook is observable only via Runtime.removeShutdownHook returning true or throwing.
     var provider =
         LocalProcessExecutionProvider.newBuilder()
-            .withSecretRegistry(new SecretRegistry())
             .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
             .build();
     var ref = new AtomicReference<Thread>();
@@ -448,7 +443,6 @@ final class LocalProcessExecutionProviderRobustnessTest {
     assumeBashAvailable();
     try (var provider =
         LocalProcessExecutionProvider.newBuilder()
-            .withSecretRegistry(new SecretRegistry())
             .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
             .withMaxOutputBytes(1024)
             .withShutdownHook(false)
@@ -502,31 +496,11 @@ final class LocalProcessExecutionProviderRobustnessTest {
     }
   }
 
-  /** Redaction counts merge correctly when a secret appears only in stderr (not stdout). */
-  @Test
-  void secretRedactedFromStderrAlsoCounted() {
-    assumeBashAvailable();
-    var registry = new SecretRegistry();
-    registry.register("TOKEN", "stderr-secret-12345");
-    try (var provider =
-        LocalProcessExecutionProvider.newBuilder()
-            .withSecretRegistry(registry)
-            .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
-            .withShutdownHook(false)
-            .build()) {
-      var result = run(provider, bash("printf clean; printf stderr-secret-12345 >&2").build());
-      assertEquals("clean", result.stdout());
-      assertEquals("<redacted:TOKEN>", result.stderr());
-      assertEquals(Integer.valueOf(1), result.secretRedactionCounts().get("TOKEN"));
-    }
-  }
-
   /** Runtime handler throwing Error must surface through the future, not silently swallow. */
   @Test
   void handlerThrowingErrorSurfacesThroughFuture() {
     try (var provider =
         LocalProcessExecutionProvider.newBuilder()
-            .withSecretRegistry(new SecretRegistry())
             .withRuntime(
                 Runtime.BASH,
                 req -> {
@@ -547,7 +521,6 @@ final class LocalProcessExecutionProviderRobustnessTest {
     assumeBashAvailable();
     var provider =
         LocalProcessExecutionProvider.newBuilder()
-            .withSecretRegistry(new SecretRegistry())
             .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
             .withShutdownHook(true)
             .build();

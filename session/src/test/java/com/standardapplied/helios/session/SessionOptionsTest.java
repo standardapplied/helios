@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -56,6 +57,61 @@ final class SessionOptionsTest {
     };
   }
 
+  // ── secret registry ───────────────────────────────────────────────────────
+
+  @Test
+  void secretRegistryDefaultsToANewEmptyRegistryPerBuild() {
+    var builder = SessionOptions.newBuilder().withModel(stubModel());
+
+    var first = builder.build().secretRegistry();
+
+    assertEquals(0, first.size());
+    assertNotSame(first, builder.build().secretRegistry());
+  }
+
+  @Test
+  void secretRegistryIsTheOneSetAndSurvivesToBuilder() {
+    var registry = new SecretRegistry();
+
+    var options = SessionOptions.newBuilder().withModel(stubModel()).withSecretRegistry(registry);
+
+    assertSame(registry, options.build().secretRegistry());
+    assertSame(registry, options.build().toBuilder().build().secretRegistry());
+  }
+
+  @Test
+  void withSecretRegistryRejectsNull() {
+    var builder = SessionOptions.newBuilder();
+    var ex = assertThrows(NullPointerException.class, () -> builder.withSecretRegistry(null));
+    assertEquals("secretRegistry must not be null", ex.getMessage());
+  }
+
+  @Test
+  void canonicalConstructorRejectsNullSecretRegistry() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new SessionOptions(
+                    stubModel(),
+                    "sess",
+                    SessionLimits.defaults(),
+                    ConcurrencyLimits.defaults(),
+                    Clock.systemUTC(),
+                    ToolRegistry.empty(),
+                    List.of(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    CostCalculator.ZERO,
+                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    Optional.empty(),
+                    TokenCounter.charBased(),
+                    ContextCompactor.disabled(),
+                    null));
+    assertEquals("secretRegistry must not be null", ex.getMessage());
+  }
+
   // ── canonical constructor validation ──────────────────────────────────────
 
   @Test
@@ -79,7 +135,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("model must not be null", ex.getMessage());
   }
 
@@ -104,7 +161,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("sessionId must not be null", ex.getMessage());
   }
 
@@ -129,7 +187,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("sessionId must not be blank", ex.getMessage());
   }
 
@@ -154,7 +213,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("limits must not be null", ex.getMessage());
   }
 
@@ -179,7 +239,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("concurrency must not be null", ex.getMessage());
   }
 
@@ -204,7 +265,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("clock must not be null", ex.getMessage());
   }
 
@@ -229,7 +291,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("tools must not be null", ex.getMessage());
   }
 
@@ -254,7 +317,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("hooks must not be null", ex.getMessage());
   }
 
@@ -279,7 +343,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("permission must not be null", ex.getMessage());
   }
 
@@ -304,7 +369,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("memoryBackend must not be null", ex.getMessage());
   }
 
@@ -329,7 +395,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("costCalculator must not be null", ex.getMessage());
   }
 
@@ -354,7 +421,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("executionProvider must not be null", ex.getMessage());
   }
 
@@ -379,7 +447,8 @@ final class SessionOptionsTest {
                     null,
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("outputSchema must not be null", ex.getMessage());
   }
 
@@ -404,7 +473,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     null,
                     TokenCounter.charBased(),
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("systemPrompt must not be null", ex.getMessage());
   }
 
@@ -429,7 +499,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     null,
-                    ContextCompactor.disabled()));
+                    ContextCompactor.disabled(),
+                    new SecretRegistry()));
     assertEquals("tokenCounter must not be null", ex.getMessage());
   }
 
@@ -454,7 +525,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
-                    null));
+                    null,
+                    new SecretRegistry()));
     assertEquals("contextCompactor must not be null", ex.getMessage());
   }
 
