@@ -29,7 +29,8 @@ import tools.jackson.databind.json.JsonMapper;
  * available to record it live. The other streams are hand-built from the documented event shapes
  * (Responses API streaming events reference, checked 2026-10-13); the {@code eof-*} and {@code
  * empty} streams are bodies cut short, which end in an error carrying what they produced. The
- * Responses API reports usage only on its terminal event, so no stream is cut after usage.
+ * reference documents a usage only on the terminal events; its {@code response.created} and {@code
+ * response.in_progress} examples carry {@code "usage": null}, so no stream is cut after usage.
  */
 class OpenAIStreamTranscriptTest {
 

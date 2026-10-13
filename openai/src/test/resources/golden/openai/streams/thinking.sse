@@ -1,24 +1,24 @@
-data: {"type":"response.created","response":{"id":"resp_1","object":"response","status":"in_progress","output":[],"model":"gpt-5.6","usage":null}}
+data: {"type":"response.created","response":{"id":"resp_1","object":"response","status":"in_progress","output":[],"model":"gpt-5.6","usage":null},"sequence_number":0}
 
-data: {"type":"response.reasoning_summary_part.added","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}
+data: {"type":"response.reasoning_summary_part.added","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""},"sequence_number":1}
 
-data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"**Planning**\n\nLet me think"}
+data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"**Planning**\n\nLet me think","sequence_number":2}
 
-data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":" about this."}
+data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":" about this.","sequence_number":3}
 
-data: {"type":"response.reasoning_summary_text.done","item_id":"rs_1","output_index":0,"summary_index":0,"text":"**Planning**\n\nLet me think about this."}
+data: {"type":"response.reasoning_summary_text.done","item_id":"rs_1","output_index":0,"summary_index":0,"text":"**Planning**\n\nLet me think about this.","sequence_number":4}
 
-data: {"type":"response.reasoning_summary_part.done","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"**Planning**\n\nLet me think about this."}}
+data: {"type":"response.reasoning_summary_part.done","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"**Planning**\n\nLet me think about this."},"sequence_number":5}
 
-data: {"type":"response.reasoning_summary_part.added","item_id":"rs_1","output_index":0,"summary_index":1,"part":{"type":"summary_text","text":""}}
+data: {"type":"response.reasoning_summary_part.added","item_id":"rs_1","output_index":0,"summary_index":1,"part":{"type":"summary_text","text":""},"sequence_number":6}
 
-data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":1,"delta":"Then answer."}
+data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":1,"delta":"Then answer.","sequence_number":7}
 
-data: {"type":"response.reasoning_summary_text.done","item_id":"rs_1","output_index":0,"summary_index":1,"text":"Then answer."}
+data: {"type":"response.reasoning_summary_text.done","item_id":"rs_1","output_index":0,"summary_index":1,"text":"Then answer.","sequence_number":8}
 
-data: {"type":"response.reasoning_summary_part.done","item_id":"rs_1","output_index":0,"summary_index":1,"part":{"type":"summary_text","text":"Then answer."}}
+data: {"type":"response.reasoning_summary_part.done","item_id":"rs_1","output_index":0,"summary_index":1,"part":{"type":"summary_text","text":"Then answer."},"sequence_number":9}
 
-data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"Hello!"}
+data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"Hello!","sequence_number":10}
 
-data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[],"model":"gpt-5.6","usage":{"input_tokens":2006,"output_tokens":150,"total_tokens":2156,"input_tokens_details":{"cached_tokens":1920,"cache_write_tokens":40}}}}
+data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[],"model":"gpt-5.6","usage":{"input_tokens":2006,"output_tokens":150,"total_tokens":2156,"input_tokens_details":{"cached_tokens":1920,"cache_write_tokens":40}}},"sequence_number":11}
 
