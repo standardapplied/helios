@@ -660,13 +660,29 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void anIncompleteEventWithoutAResponseIsTruncated() {
-    var done =
-        (StreamEvent.Done)
+  void anIncompleteEventWithoutAResponseIsAnError() {
+    var error =
+        (StreamEvent.Error)
             drain(TEXT_DELTA + "data: {\"type\":\"response.incomplete\"}\n\n").getLast();
 
-    assertEquals(FinishReason.LENGTH, done.response().finishReason());
-    assertNull(done.response().usage());
+    assertEquals("response.incomplete with status null", error.message());
+    assertEquals("Hello", error.partial().content());
+    assertNull(error.partial().usage());
+  }
+
+  @Test
+  void anIncompleteEventWithAnotherStatusIsAnError() {
+    var failedStatus =
+        "data: {\"type\":\"response.incomplete\",\"response\":{"
+            + "\"id\":\"resp_1\",\"status\":\"failed\","
+            + "\"incomplete_details\":{\"reason\":\"max_output_tokens\"},"
+            + "\"usage\":{\"input_tokens\":25,\"output_tokens\":4096}}}\n\n";
+
+    var error = (StreamEvent.Error) drain(TEXT_DELTA + failedStatus).getLast();
+
+    assertEquals("response.incomplete with status failed", error.message());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
+    assertEquals(4096, error.partial().usage().outputTokens());
   }
 
   @Test

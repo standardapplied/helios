@@ -52,7 +52,7 @@ final class AnthropicResponseAssembler {
         .withToolCalls(blocks.toolUses().calls())
         .withFinishReason(finishReason)
         .withUsage(usage)
-        .withThinking(joined(thinkingBlocks))
+        .withThinking(blocks.thinking().text())
         .withCitations(blocks.text().citations())
         .withMetadata(metadata(blocks, thinkingBlocks, stopReason, stopDetails))
         .build();
@@ -71,17 +71,6 @@ final class AnthropicResponseAssembler {
       case "refusal" -> FinishReason.REFUSAL;
       case null, default -> null;
     };
-  }
-
-  private static String joined(List<ThinkingBlock> thinkingBlocks) {
-    var text = new StringBuilder();
-    for (var block : thinkingBlocks) {
-      if (!text.isEmpty()) {
-        text.append("\n\n");
-      }
-      text.append(block.text());
-    }
-    return text.isEmpty() ? null : text.toString();
   }
 
   private static Map<String, String> metadata(

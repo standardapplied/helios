@@ -16,10 +16,10 @@ import com.standardapplied.helios.openai.api.ResponsesResponse;
  * Parses one Responses API stream, one event at a time, into {@link StreamEvent}s: text, reasoning
  * summaries and function calls as they stream, and the assembled response at the terminal event.
  * {@code response.completed} with status {@code completed} ends the turn, refused when the model
- * streamed a refusal; {@code response.incomplete} ends it truncated or filtered, with its usage.
- * {@code response.failed}, an {@code error} event, an unreadable event, function arguments that are
- * not a JSON object and a terminal reached while a function call is still open end the stream in an
- * error.
+ * streamed a refusal; {@code response.incomplete} with status {@code incomplete} ends it truncated
+ * or filtered, with its usage. Either terminal with another status, {@code response.failed}, an
+ * {@code error} event, an unreadable event, function arguments that are not a JSON object and a
+ * terminal reached while a function call is still open end the stream in an error.
  */
 final class OpenAIStreamParser implements SseReader.Parser {
 
@@ -83,7 +83,11 @@ final class OpenAIStreamParser implements SseReader.Parser {
 
   private StreamEvent incomplete(ResponsesResponse response) {
     record(response);
-    if (response != null && response.incompleteDetails() != null) {
+    var status = response == null ? null : response.status();
+    if (!"incomplete".equals(status)) {
+      return failed("response.incomplete with status " + status, null);
+    }
+    if (response.incompleteDetails() != null) {
       incompleteReason = response.incompleteDetails().reason();
     }
     return terminal(OpenAIResponseAssembler.incompleteReason(incompleteReason));
