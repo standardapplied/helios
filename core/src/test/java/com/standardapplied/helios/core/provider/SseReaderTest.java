@@ -165,6 +165,21 @@ class SseReaderTest {
   }
 
   @Test
+  void dropsOneByteOrderMarkAtTheStartOfTheBodyAndKeepsEveryOther() {
+    var parser = new EchoParser();
+    var reader =
+        new SseReader(
+            stream("﻿data: one\n\n﻿data: lost\n\ndata: ﻿two\n\ndata: stop\n\n"),
+            NEVER_IDLE,
+            parser,
+            ProviderException::new);
+
+    drain(reader);
+
+    assertEquals(List.of("one", "﻿two", "stop"), parser.payloads);
+  }
+
+  @Test
   void aParserErrorEndsTheStreamAndClosesTheBody() {
     var body = new TrackingStream("data: one\n\ndata: fail\n\ndata: never\n\n");
     var parser = new EchoParser();

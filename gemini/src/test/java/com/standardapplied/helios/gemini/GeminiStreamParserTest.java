@@ -111,6 +111,36 @@ class GeminiStreamParserTest {
     assertFalse(error.partial().metadata().containsKey(ContinuationPoint.INTERACTION_ID_KEY));
   }
 
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"event_type\":\"interaction.completed\"}",
+        "{\"event_type\":\"interaction.completed\",\"interaction\":"
+            + "{\"id\":\"int_xyz\",\"usage\":{\"total_input_tokens\":10,\"total_output_tokens\":5}}}"
+      })
+  void interactionCompletedWithoutItsOwnStatusIsAnErrorAfterARequiresActionUpdate(String terminal) {
+    var requiresAction =
+        "data: {\"event_type\":\"interaction.status_update\",\"interaction_id\":\"int_xyz\","
+            + "\"status\":\"requires_action\"}\n\n";
+    var events = drain(INTERACTION_CREATED + requiresAction + "data: " + terminal + "\n\n");
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals("Interaction completed with status null", error.message());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
+  }
+
+  @Test
+  void interactionCompletedWithoutItsOwnStatusKeepsTheUsageItReported() {
+    var terminal =
+        "data: {\"event_type\":\"interaction.completed\",\"interaction\":"
+            + "{\"usage\":{\"total_input_tokens\":10,\"total_output_tokens\":5}}}\n\n";
+    var events = drain(INTERACTION_CREATED + terminal);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals(10, error.partial().usage().inputTokens());
+    assertEquals(5, error.partial().usage().outputTokens());
+  }
+
   @Test
   void aStreamEndingWithoutInteractionCompletedIsAnErrorCarryingItsOutput() {
     var events = drain(INTERACTION_CREATED + MODEL_OUTPUT_START + HELLO_DELTA);
