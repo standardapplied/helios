@@ -25,6 +25,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class StreamingIteratorTest {
 
@@ -435,13 +437,26 @@ class StreamingIteratorTest {
     assertEquals("API response failed", error.message());
   }
 
-  @Test
-  void errorEventEmitsError() {
-    var error = "data: {\"type\":\"error\",\"message\":\"something went wrong\"}\n\n";
-    var sse = error + TEXT_DELTA + RESPONSE_COMPLETED;
+  @ParameterizedTest
+  @CsvSource(
+      delimiter = '|',
+      value = {
+        "{\"type\":\"error\",\"code\":\"server_error\",\"message\":\"something went wrong\","
+            + "\"param\":null,\"sequence_number\":1}"
+            + "|API stream error: server_error: something went wrong",
+        "{\"type\":\"error\",\"code\":null,\"message\":\"something went wrong\"}"
+            + "|API stream error: something went wrong",
+        "{\"type\":\"error\"}|API stream error"
+      })
+  void anErrorEventEndsTheStreamWithItsCodeAndMessageNeverItsPayload(
+      String payload, String message) {
+    var events = drain("data: " + payload + "\n\n" + TEXT_DELTA + RESPONSE_COMPLETED);
 
-    var events = drain(sse);
-    assertInstanceOf(StreamEvent.Error.class, events.get(0));
+    assertEquals(1, events.size());
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getFirst());
+    assertEquals(message, error.message());
+    assertNull(error.cause());
+    assertEquals(FinishReason.ERROR, error.partial().finishReason());
   }
 
   @Test

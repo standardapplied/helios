@@ -28,6 +28,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * @param text the full text of a completed reasoning summary part
  * @param summaryIndex the index of a reasoning summary part within its reasoning item
  * @param refusal the full text of a completed refusal
+ * @param code the error code (for error)
+ * @param message the error message (for error)
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ApiStreamEvent(
@@ -44,4 +46,6 @@ public record ApiStreamEvent(
     ResponsesResponse response,
     String text,
     @JsonProperty("summary_index") Integer summaryIndex,
-    String refusal) {}
+    String refusal,
+    String code,
+    String message) {}
