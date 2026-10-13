@@ -12,8 +12,10 @@ import java.util.function.Supplier;
 /**
  * A single-subscriber {@link Flow.Publisher} of what a blocking {@link CloseableIterator} yields.
  * Nothing runs before the subscriber's first request: that request starts one virtual thread, owned
- * by the subscription, which opens the iterator and pulls it at most one item ahead of demand. That
- * thread sends every signal after {@code onSubscribe}, so signals never overlap.
+ * by the subscription, which opens the iterator and pulls it at most one item ahead of demand. A
+ * request made inside {@code onSubscribe} starts the thread once {@code onSubscribe} returns. That
+ * thread sends every signal after {@code onSubscribe}, so signals never overlap. A subscriber whose
+ * {@code onSubscribe} throws has its subscription cancelled.
  *
  * <p>Cancelling the subscription or the {@link CancellationToken} interrupts the owned thread and
  * closes the iterator from the cancelling thread, so a pull blocked on I/O ends whether or not it
@@ -56,7 +58,24 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
       subscriber.onError(new IllegalStateException("this publisher admits one subscriber"));
       return;
     }
-    subscriber.onSubscribe(new Pull<>(opener, cancellation, subscriber));
+    var pull = new Pull<>(opener, cancellation, subscriber);
+    try {
+      subscriber.onSubscribe(pull);
+    } catch (RuntimeException | Error failure) {
+      pull.cancel();
+      throw failure;
+    }
+    pull.readyToRun();
+  }
+
+  /** Interrupts the owned thread and closes the open iterator, so a blocked pull ends. */
+  private static void release(Thread owner, CloseableIterator<?> open) {
+    if (owner != null && owner != Thread.currentThread()) {
+      owner.interrupt();
+    }
+    if (open != null) {
+      open.close();
+    }
   }
 
   private record Refused() implements Flow.Subscription {
@@ -79,6 +98,7 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
     private final Flow.Subscriber<? super T> subscriber;
     private final Object lock = new Object();
     private long demand;
+    private boolean ready;
     private boolean started;
     private boolean ended;
     private String cancelReason;
@@ -110,7 +130,10 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
         }
         if (!started) {
           started = true;
-          worker = Thread.ofVirtual().name("helios-iterator-publisher").start(this);
+          worker = Thread.ofVirtual().name("helios-iterator-publisher").unstarted(this);
+          if (ready) {
+            worker.start();
+          }
         }
         lock.notifyAll();
         if (n > 0) {
@@ -128,6 +151,16 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
       stop(null);
     }
 
+    /** Lets the owned thread run, starting it now when {@code onSubscribe} already requested. */
+    void readyToRun() {
+      synchronized (lock) {
+        ready = true;
+        if (worker != null && !ended) {
+          worker.start();
+        }
+      }
+    }
+
     private void stop(String reason) {
       CloseableIterator<? extends T> open;
       Thread owner;
@@ -143,16 +176,6 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
         lock.notifyAll();
       }
       release(owner, open);
-    }
-
-    /** Interrupts the owned thread and closes the open iterator, so a blocked pull ends. */
-    private static void release(Thread owner, CloseableIterator<?> open) {
-      if (owner != null && owner != Thread.currentThread()) {
-        owner.interrupt();
-      }
-      if (open != null) {
-        open.close();
-      }
     }
 
     @Override

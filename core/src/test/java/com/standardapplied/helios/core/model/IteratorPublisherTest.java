@@ -14,7 +14,11 @@ import com.standardapplied.helios.core.test.RecordingSubscriber;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Flow;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class IteratorPublisherTest {
@@ -95,6 +99,88 @@ class IteratorPublisherTest {
     var publisher = publisherOf(new Source(List.of()));
 
     assertThrows(NullPointerException.class, () -> publisher.subscribe(null));
+  }
+
+  @Test
+  void aRequestInsideOnSubscribeIsServedOnlyAfterOnSubscribeReturns() throws InterruptedException {
+    var source = new Source(List.of("a"));
+    var returned = new AtomicBoolean();
+    var overlaps = new AtomicInteger();
+    var completed = new CountDownLatch(1);
+    var subscriber =
+        new Flow.Subscriber<String>() {
+          @Override
+          public void onSubscribe(Flow.Subscription subscription) {
+            subscription.request(1);
+            try {
+              source.pulled(1).await(200, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+            }
+            returned.set(true);
+          }
+
+          @Override
+          public void onNext(String item) {
+            countOverlap();
+          }
+
+          @Override
+          public void onError(Throwable failure) {
+            countOverlap();
+            completed.countDown();
+          }
+
+          @Override
+          public void onComplete() {
+            countOverlap();
+            completed.countDown();
+          }
+
+          private void countOverlap() {
+            if (!returned.get()) {
+              overlaps.incrementAndGet();
+            }
+          }
+        };
+
+    publisherOf(source).subscribe(subscriber);
+
+    Await.latch("the stream completed", completed);
+    assertEquals(0, overlaps.get());
+  }
+
+  @Test
+  void anOnSubscribeThatThrowsCancelsTheSubscriptionItRequestedOn() throws InterruptedException {
+    var broken = new IllegalStateException("broken subscriber");
+    var subscription = new AtomicReference<Flow.Subscription>();
+    var subscriber =
+        new Flow.Subscriber<String>() {
+          @Override
+          public void onSubscribe(Flow.Subscription granted) {
+            subscription.set(granted);
+            granted.request(1);
+            throw broken;
+          }
+
+          @Override
+          public void onNext(String item) {}
+
+          @Override
+          public void onError(Throwable failure) {}
+
+          @Override
+          public void onComplete() {}
+        };
+    var source = new Source(List.of("a"));
+    var publisher = publisherOf(source);
+
+    assertSame(
+        broken, assertThrows(IllegalStateException.class, () -> publisher.subscribe(subscriber)));
+    subscription.get().request(1);
+
+    assertFalse(source.pulled(1).await(200, TimeUnit.MILLISECONDS));
+    assertEquals(0, opened.get());
   }
 
   @Test
