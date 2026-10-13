@@ -487,6 +487,8 @@ the stream produced before it failed.
 
 ### Fixed
 
+- **A stream idle timeout under a second was reported as "0s".** The message rounded the timeout
+  down to whole seconds; it now gives milliseconds: `Stream idle timeout: no data received for 50 ms`.
 - **`Execute` on the JShell runtime ignored its time budget; every snippet stopped at 30 seconds.**
   `JShellExecutionProvider` ran each snippet under `ReplConfig.executionTimeout()` (30 s by
   default), whatever `timeoutSeconds` the model passed, and `Execute` itself defaulted to 30 s
