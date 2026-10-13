@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
@@ -101,14 +100,18 @@ class OpenAIRestructuredPartsTest {
 
   @Test
   void usageCountsAnyReportedTokenClassAndNothingWhenAllAreZero() {
-    assertNull(usage(new ApiUsage(0, 0, 0, null, null)));
-    assertEquals(Response.Usage.of(0, 4, 0, 0), usage(new ApiUsage(null, 4, 4, null, null)));
+    assertNull(OpenAIResponseAssembler.usage(new ApiUsage(0, 0, 0, null, null)));
+    assertEquals(
+        Response.Usage.of(0, 4, 0, 0),
+        OpenAIResponseAssembler.usage(new ApiUsage(null, 4, 4, null, null)));
     assertEquals(
         Response.Usage.of(0, 0, 0, 3),
-        usage(new ApiUsage(0, 0, 0, new ApiUsage.InputTokensDetails(3, null), null)));
+        OpenAIResponseAssembler.usage(
+            new ApiUsage(0, 0, 0, new ApiUsage.InputTokensDetails(3, null), null)));
     assertEquals(
         Response.Usage.of(0, 0, 2, 0),
-        usage(new ApiUsage(0, 0, 0, new ApiUsage.InputTokensDetails(null, 2), null)));
+        OpenAIResponseAssembler.usage(
+            new ApiUsage(0, 0, 0, new ApiUsage.InputTokensDetails(null, 2), null)));
   }
 
   @Test
@@ -125,12 +128,5 @@ class OpenAIRestructuredPartsTest {
     var properties = (Map<?, ?>) strict.get("properties");
     assertEquals(true, properties.get("flag"));
     assertEquals(Map.of("type", "array", "items", true), properties.get("tags"));
-  }
-
-  private static Response.Usage usage(ApiUsage usage) {
-    return OpenAIResponseAssembler.response(
-            new OpenAIResponseAssembler.Turn("", List.of(), null, "", null, usage),
-            FinishReason.STOP)
-        .usage();
   }
 }

@@ -30,7 +30,7 @@ final class OpenAIResponseAssembler {
    * @param thinking the reasoning summary, or {@code null}
    * @param refusal the refusal text, empty without one
    * @param incompleteReason why an incomplete response stopped, or {@code null}
-   * @param usage the reported usage, or {@code null}
+   * @param usage the reported usage in Helios's shape, or {@code null}
    */
   record Turn(
       String content,
@@ -38,7 +38,7 @@ final class OpenAIResponseAssembler {
       String thinking,
       String refusal,
       String incompleteReason,
-      ApiUsage usage) {}
+      Response.Usage usage) {}
 
   private OpenAIResponseAssembler() {}
 
@@ -58,7 +58,7 @@ final class OpenAIResponseAssembler {
         .withContent(turn.content())
         .withToolCalls(turn.calls())
         .withFinishReason(finishReason)
-        .withUsage(usage(turn.usage()))
+        .withUsage(turn.usage())
         .withThinking(turn.thinking())
         .withMetadata(metadata)
         .build();
@@ -85,11 +85,10 @@ final class OpenAIResponseAssembler {
    * cached and cache-write counts as subsets of it, so both are subtracted, never below zero: a
    * subset exceeding the total would be a server accounting bug, better under-reported than
    * negative. Cache writes bill at a premium on gpt-5.6 and later and are zero elsewhere.
+   *
+   * @throws ArithmeticException if the counts sum past {@link Integer#MAX_VALUE}
    */
-  private static Response.Usage usage(ApiUsage usage) {
-    if (usage == null) {
-      return null;
-    }
+  static Response.Usage usage(ApiUsage usage) {
     var input = usage.inputTokens() != null ? usage.inputTokens() : 0;
     var output = usage.outputTokens() != null ? usage.outputTokens() : 0;
     var cached = usage.cachedTokensOrZero();

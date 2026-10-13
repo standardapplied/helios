@@ -8,7 +8,6 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.openai.api.ApiStreamEvent;
-import com.standardapplied.helios.openai.api.ApiUsage;
 import com.standardapplied.helios.openai.api.OpenAIJson;
 import com.standardapplied.helios.openai.api.ResponsesResponse;
 import java.util.Objects;
@@ -29,7 +28,7 @@ final class OpenAIStreamParser implements SseReader.Parser {
   private final OutputMessage message = new OutputMessage();
   private final ReasoningSummary reasoning = new ReasoningSummary();
   private final FunctionCalls functionCalls = new FunctionCalls();
-  private ApiUsage usage;
+  private Response.Usage usage;
   private String incompleteReason;
 
   @Override
@@ -119,7 +118,7 @@ final class OpenAIStreamParser implements SseReader.Parser {
 
   private void record(ResponsesResponse response) {
     if (response != null && response.usage() != null) {
-      usage = response.usage();
+      usage = OpenAIResponseAssembler.usage(response.usage());
     }
   }
 
