@@ -17,10 +17,11 @@ import java.util.function.Supplier;
  * onSubscribe} returns. That thread sends every signal after {@code onSubscribe}, so signals never
  * overlap. A subscriber whose {@code onSubscribe} throws has its subscription cancelled.
  *
- * <p>Cancelling the subscription or the {@link CancellationToken} interrupts the owned thread and
- * closes the iterator from the cancelling thread, so a pull blocked on I/O ends whether or not it
- * honours interrupts. A cancelled subscription receives no further signal; a cancelled token ends
- * the stream with {@code onError} carrying a {@link CancellationException} with the token's reason,
+ * <p>Cancelling the subscription or the {@link CancellationToken} interrupts the owned thread while
+ * it opens or pulls the iterator, never while it runs the subscriber's code, and closes the
+ * iterator from the cancelling thread, so a pull blocked on I/O ends whether or not it honours
+ * interrupts. A cancelled subscription receives no further signal; a cancelled token ends the
+ * stream with {@code onError} carrying a {@link CancellationException} with the token's reason,
  * including when the token was cancelled before any request. Work that ignores both an interrupt
  * and a closed iterator runs until it returns, and what it yields is dropped: Java cannot end a
  * thread by force.
@@ -68,11 +69,20 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
     pull.readyToRun();
   }
 
-  /** Interrupts the owned thread and closes the open iterator, so a blocked pull ends. */
-  private static void release(Thread owner, CloseableIterator<?> open) {
-    if (owner != null && owner != Thread.currentThread()) {
+  /**
+   * Interrupts the owned thread if it is pulling, so a blocked pull ends; called under the lock
+   * that guards {@code pulling}, so the interrupt never reaches the subscriber's code.
+   */
+  private static void interrupt(Thread owner, boolean pulling) {
+    if (pulling && owner != Thread.currentThread()) {
       owner.interrupt();
     }
+  }
+
+  /**
+   * Closes the open iterator, so a pull blocked on I/O ends whether or not it honours interrupts.
+   */
+  private static void close(CloseableIterator<?> open) {
     if (open != null) {
       open.close();
     }
@@ -99,6 +109,7 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
     private final Object lock = new Object();
     private long demand;
     private boolean ready;
+    private boolean pulling;
     private boolean ended;
     private String cancelReason;
     private IllegalArgumentException invalidRequest;
@@ -119,7 +130,6 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
     @Override
     public void request(long n) {
       CloseableIterator<? extends T> open;
-      Thread owner;
       synchronized (lock) {
         if (ended || invalidRequest != null) {
           return;
@@ -136,9 +146,9 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
         }
         open = source;
         source = null;
-        owner = worker;
+        interrupt(worker, pulling);
       }
-      release(owner, open);
+      close(open);
     }
 
     @Override
@@ -184,13 +194,12 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
      */
     private void stop(String reason) {
       CloseableIterator<? extends T> open;
-      Thread owner = null;
       CancellationToken.Registration watch;
       synchronized (lock) {
         if (!ended) {
           ended = true;
           cancelReason = reason;
-          owner = worker;
+          interrupt(worker, pulling);
           lock.notifyAll();
         }
         open = source;
@@ -198,7 +207,7 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
         watch = pendingCancellation;
       }
       watch.remove();
-      release(owner, open);
+      close(open);
     }
 
     @Override
@@ -234,6 +243,7 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
             if (ended || invalidRequest != null) {
               break;
             }
+            pulling = true;
           }
         }
       } catch (RuntimeException | Error failure) {
@@ -244,19 +254,24 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
     }
 
     /**
-     * Holds {@code opened}, or nothing yet, for a cancel to close; {@code false} when the stream
-     * already ended or was sent an invalid request, and nothing more must be opened or pulled.
+     * Holds {@code opened}, or nothing yet, for a cancel to close, and marks the thread as pulling;
+     * {@code false} when the stream already ended or was sent an invalid request, and nothing more
+     * must be opened or pulled.
      */
     private boolean adopt(CloseableIterator<? extends T> opened) {
       synchronized (lock) {
         source = opened;
-        return !ended && invalidRequest == null;
+        pulling = !ended && invalidRequest == null;
+        return pulling;
       }
     }
 
-    /** Waits until the item may be delivered; {@code false} when the stream ended instead. */
+    /**
+     * Ends the pull and waits until the item may be delivered; {@code false} when the stream ended.
+     */
     private boolean awaitDemand() {
       synchronized (lock) {
+        pulling = false;
         while (demand == 0 && !ended && invalidRequest == null) {
           try {
             lock.wait();
@@ -273,10 +288,14 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
       }
     }
 
-    /** Sends the one terminal signal the stream's state calls for, or none once cancelled. */
+    /**
+     * Sends the one terminal signal the stream's state calls for, or none once cancelled, clearing
+     * an interrupt a cancel sent the pull.
+     */
     private void end(Throwable failure) {
       Throwable error;
       synchronized (lock) {
+        Thread.interrupted();
         if (invalidRequest != null && !ended) {
           error = invalidRequest;
         } else if (cancelReason != null) {
