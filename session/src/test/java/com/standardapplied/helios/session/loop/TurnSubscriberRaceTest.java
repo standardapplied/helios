@@ -90,6 +90,18 @@ final class TurnSubscriberRaceTest {
   }
 
   @Test
+  void eachChunkReArmsTheIdleTimer() {
+    var scheduler = countingScheduler();
+    var subscriber = newSubscriber(scheduler);
+    subscriber.onSubscribe(new NoopSubscription());
+
+    subscriber.onNext(new ModelChunk.TextDelta("still streaming"));
+
+    assertEquals(2L, scheduler.scheduleCount.get());
+    assertEquals(1, scheduler.outstandingCount());
+  }
+
+  @Test
   void awaitDoneClearsIdleTimerAfterTerminal() {
     var scheduler = countingScheduler();
     var subscriber = newSubscriber(scheduler);

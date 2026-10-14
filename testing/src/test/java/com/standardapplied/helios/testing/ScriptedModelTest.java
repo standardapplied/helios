@@ -6,6 +6,7 @@
 package com.standardapplied.helios.testing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -102,6 +103,22 @@ class ScriptedModelTest {
         StructuredOutputParseException.class,
         () ->
             model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class)));
+  }
+
+  @Test
+  void aStructuredStreamWithASchemaMismatchEndsWithTheParseException() {
+    var model = ScriptedModel.newBuilder().withTextTurn("{\"unexpected\": true}").build();
+    var chunks = new RecordingSubscriber<ModelChunk>();
+
+    model
+        .chatStream(
+            List.of(Message.user("judge")),
+            List.of(),
+            OutputSchema.of(Verdict.class),
+            new CancellationToken())
+        .subscribe(chunks);
+
+    assertInstanceOf(StructuredOutputParseException.class, chunks.awaitFailure());
   }
 
   @Test
