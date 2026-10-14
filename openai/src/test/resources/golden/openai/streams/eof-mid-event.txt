@@ -1,4 +1,5 @@
 == chatStream
+KeepAlive[]
 TextDelta[text=Hello]
 onError TransientStreamException(Stream ended before its terminal event) provider=openai caused by EOFException(the response body ended before the provider's terminal event)
 == chat

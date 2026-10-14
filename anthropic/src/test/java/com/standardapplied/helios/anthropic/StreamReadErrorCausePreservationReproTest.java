@@ -94,6 +94,8 @@ class StreamReadErrorCausePreservationReproTest {
             Duration.ofSeconds(5),
             new AnthropicStreamParser(),
             AnthropicException::new)) {
+      assertEquals(new StreamEvent.KeepAlive(), iterator.next());
+      assertEquals(new StreamEvent.KeepAlive(), iterator.next());
       assertTrue(iterator.hasNext());
       assertInstanceOf(StreamEvent.TextDelta.class, iterator.next());
 

@@ -1,5 +1,8 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Checking.]
+KeepAlive[]
 ToolUseStart[callId=toolu_1, toolName=weather]
 ToolUseDelta[callId=toolu_1, argumentsDelta={"city":]
 ToolUseDelta[callId=toolu_1, argumentsDelta="Par]

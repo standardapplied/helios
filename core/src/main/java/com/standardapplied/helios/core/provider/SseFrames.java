@@ -10,10 +10,11 @@ import java.io.Reader;
  * The server-sent-events wire format of one response body: its lines, each ending with CR, LF or
  * CRLF, and the data of each event they frame. One byte order mark at the start of the body is
  * dropped. A line {@code data:value} or {@code data: value} appends {@code value} to the event's
- * data, several {@code data} lines joining with a newline; a blank line ends the event; comment
- * lines and every other field are ignored; an event the body cuts off before its blank line is
- * dropped. A line and an event's data are each bounded by {@link #MAX_FRAME_CHARS}; past the bound
- * reading fails with the provider's exception.
+ * data, several {@code data} lines joining with a newline; a blank line ends the event its lines
+ * began, and a blank line no line began is no event; comment lines and every other field add no
+ * data; an event the body cuts off before its blank line is dropped. A line and an event's data are
+ * each bounded by {@link #MAX_FRAME_CHARS}; past the bound reading fails with the provider's
+ * exception.
  */
 final class SseFrames {
 
@@ -48,23 +49,23 @@ final class SseFrames {
   }
 
   /**
-   * The data of the next event read from {@code lines}, trimmed, skipping events with no data and
-   * the {@code [DONE]} marker; {@code null} at the end of the body.
+   * The data of the next event read from {@code lines}, trimmed; empty for an event that carries
+   * none, such as a comment-only heartbeat, blank data or the {@code [DONE]} marker; {@code null}
+   * at the end of the body.
    *
    * @throws ProviderException if the event's data exceeds {@link #MAX_FRAME_CHARS}
    */
   String payload(Lines lines) throws IOException {
     StringBuilder data = null;
+    var framed = false;
     for (var line = lines.next(); line != null; line = lines.next()) {
       if (!line.isEmpty()) {
         data = appendData(data, line);
-        continue;
+        framed = true;
+      } else if (framed) {
+        var payload = data == null ? "" : data.toString().trim();
+        return DONE_MARKER.equals(payload) ? "" : payload;
       }
-      var payload = data == null ? "" : data.toString().trim();
-      if (!payload.isEmpty() && !DONE_MARKER.equals(payload)) {
-        return payload;
-      }
-      data = null;
     }
     return null;
   }

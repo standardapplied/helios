@@ -1,4 +1,6 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 ThinkingDelta[text=The user greets me. ]
 ThinkingDelta[text=I greet back.]
 onError TransientStreamException(API stream error: overloaded_error: Overloaded) provider=anthropic

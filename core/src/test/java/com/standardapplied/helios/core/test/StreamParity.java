@@ -24,8 +24,9 @@ import java.util.function.Function;
  * Proves that a provider's chunk stream and its blocking {@code chat} tell the same story for one
  * recorded stream: the text deltas add up to the content, the tool-use stops are the tool calls in
  * order, each call's start precedes its deltas and its stop, the thinking deltas add up to the
- * thinking, separators between blocks included, and the message stop carries the response's finish
- * reason, usage, metadata and citations. A failed turn fails both ways with the same exception.
+ * thinking, separators between blocks included, the {@link ModelChunk.KeepAlive}s published for
+ * frames without content add nothing, and the message stop carries the response's finish reason,
+ * usage, metadata and citations. A failed turn fails both ways with the same exception.
  */
 public final class StreamParity {
 

@@ -10,12 +10,12 @@ import java.util.concurrent.Flow;
 import java.util.function.Consumer;
 
 /**
- * A turn's event stream as the {@link ModelChunk}s a model publishes. Each event becomes its chunk
- * as it arrives; the {@link StreamEvent.Done} becomes the {@link ModelChunk.MessageStop}, once its
- * response passes the turn's check; the {@link StreamEvent.Error} becomes {@code onError} with the
- * exception it ends in. Demand and cancellation pass through to the event stream, and an event with
- * no chunk is replaced by a request for one more, so no chunk arrives beyond demand and none is
- * held back.
+ * A turn's event stream as the {@link ModelChunk}s a model publishes. Each event becomes exactly
+ * one chunk as it arrives: a {@link StreamEvent.KeepAlive} and a {@link
+ * StreamEvent.ThinkingComplete} a {@link ModelChunk.KeepAlive}; the {@link StreamEvent.Done} the
+ * {@link ModelChunk.MessageStop}, once its response passes the turn's check; the {@link
+ * StreamEvent.Error} becomes {@code onError} with the exception it ends in. Demand and cancellation
+ * pass straight through to the event stream.
  */
 final class ChunkStream implements Flow.Publisher<ModelChunk> {
 
@@ -86,11 +86,7 @@ final class ChunkStream implements Flow.Publisher<ModelChunk> {
         }
         return;
       }
-      if (chunk == null) {
-        upstream.request(1);
-      } else {
-        downstream.onNext(chunk);
-      }
+      downstream.onNext(chunk);
     }
 
     @SuppressWarnings("unchecked")
@@ -98,7 +94,8 @@ final class ChunkStream implements Flow.Publisher<ModelChunk> {
       return switch (event) {
         case StreamEvent.TextDelta(var text) -> new ModelChunk.TextDelta(text);
         case StreamEvent.ThinkingDelta(var text) -> new ModelChunk.ThinkingDelta(text);
-        case StreamEvent.ThinkingComplete ignored -> null;
+        case StreamEvent.ThinkingComplete _ -> new ModelChunk.KeepAlive();
+        case StreamEvent.KeepAlive _ -> new ModelChunk.KeepAlive();
         case StreamEvent.ToolCallStart(var callId, var toolName) ->
             new ModelChunk.ToolUseStart(callId, toolName);
         case StreamEvent.ToolCallDelta(var callId, var arguments) ->

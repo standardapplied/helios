@@ -954,10 +954,11 @@ class StreamingIteratorTest {
   }
 
   private static List<StreamEvent> drain(String sse) {
-    return SseEvents.drain(reader(SseEvents.body(sse)));
+    return SseEvents.drainContent(reader(SseEvents.body(sse)));
   }
 
   private static StreamEvent.Error firstError(InputStream body) {
-    return assertInstanceOf(StreamEvent.Error.class, SseEvents.drain(reader(body)).getFirst());
+    return assertInstanceOf(
+        StreamEvent.Error.class, SseEvents.drainContent(reader(body)).getFirst());
   }
 }

@@ -38,6 +38,7 @@ class ModelTest {
         streaming(
             new ModelChunk.ThinkingDelta("Hm"),
             new ModelChunk.ThinkingDelta("m."),
+            new ModelChunk.KeepAlive(),
             new ModelChunk.TextDelta("Let me "),
             new ModelChunk.TextDelta("check."),
             new ModelChunk.ToolUseStart("c1", "lookup"),

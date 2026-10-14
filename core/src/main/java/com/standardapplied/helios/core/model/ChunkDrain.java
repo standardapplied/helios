@@ -59,6 +59,7 @@ final class ChunkDrain implements Flow.Subscriber<ModelChunk> {
       case ModelChunk.ToolUseStart ignored -> {}
       case ModelChunk.ToolUseDelta ignored -> {}
       case ModelChunk.UsageDelta ignored -> {}
+      case ModelChunk.KeepAlive ignored -> {}
     }
   }
 

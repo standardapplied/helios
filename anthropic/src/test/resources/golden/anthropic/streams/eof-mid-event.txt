@@ -1,5 +1,9 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Hello]
+KeepAlive[]
+KeepAlive[]
 onError TransientStreamException(Stream ended before its terminal event) provider=anthropic caused by EOFException(the response body ended before the provider's terminal event)
 == chat
 threw TransientStreamException(Stream ended before its terminal event) provider=anthropic caused by EOFException(the response body ended before the provider's terminal event)

@@ -1,5 +1,9 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Hello, wor]
+KeepAlive[]
+KeepAlive[]
 MessageStop[stopReason=LENGTH, usage=Usage[inputTokens=25, outputTokens=4, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=41], metadata={anthropic.stopReason=max_tokens}, citations=[]]
 onComplete
 == chat
