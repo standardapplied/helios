@@ -3,7 +3,9 @@ ThinkingDelta[text=**Planning**
 
 Let me think]
 ThinkingDelta[text= about this.]
-ThinkingDelta[text=Then answer.]
+ThinkingDelta[text=
+
+Then answer.]
 TextDelta[text=Hello!]
 MessageStop[stopReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], metadata={openai.reasoning=**Planning**
 

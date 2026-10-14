@@ -11,7 +11,6 @@ import com.standardapplied.helios.gemini.api.Step;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.StringJoiner;
 
 /**
  * The steps of a streamed interaction, by index, from {@code step.start} through {@code step.delta}
@@ -150,16 +149,15 @@ final class StreamedSteps {
   /** The summary a thought starts with, one item per line, as thinking. */
   private StreamEvent thought(Step step) {
     output.signature(step.signature());
-    var summary = new StringJoiner("\n");
+    var summary = new StringBuilder();
     if (step.hasSummary()) {
       for (var item : step.summary()) {
         if (item.hasTypeText() && item.text() != null && !item.text().isEmpty()) {
-          output.thought(item.text());
-          summary.add(item.text());
+          summary.append(output.thought(item.text()));
         }
       }
     }
-    return summary.length() == 0 ? null : new StreamEvent.ThinkingDelta(summary.toString());
+    return summary.isEmpty() ? null : new StreamEvent.ThinkingDelta(summary.toString());
   }
 
   private StreamEvent signature(ContentItem delta) {
@@ -184,8 +182,7 @@ final class StreamedSteps {
     if (item == null || !item.hasTypeText() || item.text() == null) {
       return null;
     }
-    output.thought(item.text());
-    return new StreamEvent.ThinkingDelta(item.text());
+    return new StreamEvent.ThinkingDelta(output.thought(item.text()));
   }
 
   private StreamEvent annotations(ContentItem delta) {

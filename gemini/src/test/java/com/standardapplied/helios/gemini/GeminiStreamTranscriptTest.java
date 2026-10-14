@@ -7,7 +7,6 @@ import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.ModelHarness;
 import com.standardapplied.helios.core.test.StreamParity;
-import com.standardapplied.helios.core.test.StreamParity.ThinkingJoin;
 import java.net.URI;
 import java.util.List;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -54,9 +53,7 @@ class GeminiStreamTranscriptTest {
   @MethodSource("streams")
   void chunkStreamAgreesWithChat(String name) {
     StreamParity.assertAgrees(
-        "gemini/streams/" + name + ".sse",
-        GeminiStreamTranscriptTest::modelAt,
-        ThinkingJoin.betweenDeltas("\n"));
+        "gemini/streams/" + name + ".sse", GeminiStreamTranscriptTest::modelAt);
   }
 
   @ParameterizedTest

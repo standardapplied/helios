@@ -225,7 +225,7 @@ class StreamedStepsTest {
     var events = drain(thoughtStart + second + third + stepStop(0) + TEXT_FLOW);
 
     assertEquals(
-        List.of("First.", "Second.", "Third."),
+        List.of("First.", "\nSecond.", "\nThird."),
         events.stream()
             .filter(StreamEvent.ThinkingDelta.class::isInstance)
             .map(event -> ((StreamEvent.ThinkingDelta) event).text())

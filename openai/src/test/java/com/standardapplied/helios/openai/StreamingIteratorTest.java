@@ -117,6 +117,28 @@ class StreamingIteratorTest {
   }
 
   @Test
+  void anEmptyFirstDeltaOfALaterPartLeavesItsBlankLineToTheNextDelta() {
+    var sse =
+        reasoningDelta("rs_1", 0, "Plan.")
+            + reasoningDone("rs_1", 0, "Plan.")
+            + reasoningDelta("rs_1", 1, "")
+            + reasoningDelta("rs_1", 1, "Answer.")
+            + reasoningDone("rs_1", 1, "Answer.")
+            + TEXT_DELTA
+            + RESPONSE_COMPLETED;
+
+    var events = drain(sse);
+
+    var thinking = new StringBuilder();
+    for (var event : events) {
+      if (event instanceof StreamEvent.ThinkingDelta(var text)) {
+        thinking.append(text);
+      }
+    }
+    assertEquals(((StreamEvent.Done) events.getLast()).response().thinking(), thinking.toString());
+  }
+
+  @Test
   void reasoningSummaryDeltasStreamAsThinkingAndPartsJoinWithABlankLine() {
     var sse =
         reasoningDelta("rs_1", 0, "Let me think")
@@ -134,7 +156,7 @@ class StreamingIteratorTest {
             new StreamEvent.ThinkingDelta("Let me think"),
             new StreamEvent.ThinkingDelta(" about this."),
             new StreamEvent.ThinkingComplete("Let me think about this.", null),
-            new StreamEvent.ThinkingDelta("Then answer."),
+            new StreamEvent.ThinkingDelta("\n\nThen answer."),
             new StreamEvent.ThinkingComplete("Then answer.", null),
             new StreamEvent.TextDelta("Hello")),
         events.subList(0, 6));

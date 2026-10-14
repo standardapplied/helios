@@ -11,7 +11,6 @@ import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.ModelHarness;
 import com.standardapplied.helios.core.test.StreamParity;
-import com.standardapplied.helios.core.test.StreamParity.ThinkingJoin;
 import com.standardapplied.helios.openai.OpenAIAzureIntegrationTest.ResponseWithMaps;
 import java.net.URI;
 import java.util.ArrayList;
@@ -61,9 +60,7 @@ class OpenAIStreamTranscriptTest {
   @MethodSource("streams")
   void chunkStreamAgreesWithChat(String name) {
     StreamParity.assertAgrees(
-        "openai/streams/" + name + ".sse",
-        uri -> modelAt(uri, OpenAIModelId.GPT_5_6.id()),
-        ThinkingJoin.betweenBlocks("\n\n"));
+        "openai/streams/" + name + ".sse", uri -> modelAt(uri, OpenAIModelId.GPT_5_6.id()));
   }
 
   @ParameterizedTest

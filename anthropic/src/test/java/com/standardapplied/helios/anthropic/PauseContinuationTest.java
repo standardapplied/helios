@@ -206,6 +206,41 @@ class PauseContinuationTest {
   }
 
   @Test
+  void thinkingDeltasAcrossSegmentsAddUpToTheMergedThinking() {
+    var opened = new AtomicInteger();
+    var continued =
+        Response.newBuilder()
+            .withContent("Found.")
+            .withFinishReason(FinishReason.STOP)
+            .withThinking("Then found.")
+            .withMetadata(Map.of(AnthropicResponseAssembler.STOP_REASON_KEY, "end_turn"))
+            .build();
+
+    var events =
+        events(
+            r ->
+                opened.getAndIncrement() == 0
+                    ? new Events(
+                        List.of(
+                            new StreamEvent.ThinkingDelta("Planning."),
+                            new StreamEvent.Done(pausedWithContent())))
+                    : new Events(
+                        List.of(
+                            new StreamEvent.ThinkingDelta("Then "),
+                            new StreamEvent.ThinkingDelta("found."),
+                            new StreamEvent.Done(continued))));
+
+    var thinking = new StringBuilder();
+    for (var event : events) {
+      if (event instanceof StreamEvent.ThinkingDelta(var text)) {
+        thinking.append(text);
+      }
+    }
+    var done = assertInstanceOf(StreamEvent.Done.class, events.getLast());
+    assertEquals(done.response().thinking(), thinking.toString());
+  }
+
+  @Test
   void demandNotYetServedCarriesOverToTheNextSegment() {
     var opened = new AtomicInteger();
     var subscriber = new RecordingSubscriber<StreamEvent>(1);
