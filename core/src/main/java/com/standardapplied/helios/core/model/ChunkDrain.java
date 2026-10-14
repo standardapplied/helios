@@ -4,7 +4,6 @@ package com.standardapplied.helios.core.model;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
@@ -12,7 +11,8 @@ import java.util.concurrent.Flow;
 /**
  * The response a chunk stream adds up to, for {@link Model}'s blocking {@code chat}: text and
  * thinking deltas joined, completed tool calls in order, and the finish reason, usage, metadata and
- * citations of the {@link ModelChunk.MessageStop}. The stream's failure is thrown as it came.
+ * citations of the {@link ModelChunk.MessageStop}. The stream's failure is thrown as it came, and a
+ * stream that completes without its {@code MessageStop} throws {@link IllegalStateException}.
  */
 final class ChunkDrain implements Flow.Subscriber<ModelChunk> {
 
@@ -78,10 +78,10 @@ final class ChunkDrain implements Flow.Subscriber<ModelChunk> {
         .withContent(content.toString())
         .withThinking(thinking.isEmpty() ? null : thinking.toString())
         .withToolCalls(toolCalls)
-        .withFinishReason(stop != null ? stop.finishReason() : FinishReason.STOP)
-        .withUsage(stop != null ? stop.usage() : Response.Usage.of(0, 0))
-        .withMetadata(stop != null ? stop.metadata() : Map.of())
-        .withCitations(stop != null ? stop.citations() : List.of())
+        .withFinishReason(stop.finishReason())
+        .withUsage(stop.usage())
+        .withMetadata(stop.metadata())
+        .withCitations(stop.citations())
         .build();
   }
 
@@ -102,6 +102,9 @@ final class ChunkDrain implements Flow.Subscriber<ModelChunk> {
     }
     if (failure != null) {
       throw rethrown(failure);
+    }
+    if (stop == null) {
+      throw new IllegalStateException("the model's stream completed without its MessageStop");
     }
     return response();
   }

@@ -38,9 +38,12 @@ import java.util.concurrent.ScheduledExecutorService;
  * signal that arrives after it, a second {@code onSubscribe}, or a chunk sent before {@code
  * onSubscribe} changes nothing and emits nothing; a late {@code onSubscribe} has its subscription
  * cancelled, and a chunk before {@code onSubscribe} ends the stream with an {@link
- * IllegalStateException}. A chunk accepted before the ending emits its event outside the lock, so a
- * stalled event sink or hook never blocks a cancellation of the stream; the runner is released once
- * that event is out, so every event of the turn precedes the runner's next one.
+ * IllegalStateException}, as does an {@code onComplete} without the {@link ModelChunk.MessageStop}
+ * that {@link com.standardapplied.helios.core.model.Model#chatStream(List, List,
+ * CancellationToken)} ends a successful turn with. A chunk accepted before the ending emits its
+ * event outside the lock, so a stalled event sink or hook never blocks a cancellation of the
+ * stream; the runner is released once that event is out, so every event of the turn precedes the
+ * runner's next one.
  */
 final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
@@ -230,13 +233,17 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
   private StreamedTurn snapshot(Throwable error) {
     var stopped = stop != null;
+    var failure =
+        stopped || error != null
+            ? error
+            : new IllegalStateException("model stream completed without its MessageStop");
     return new StreamedTurn(
         content.toString(),
         List.copyOf(toolCalls),
         stopped ? stop.citations() : List.of(),
-        error != null ? FinishReason.ERROR : stopped ? stop.finishReason() : FinishReason.STOP,
+        failure != null ? FinishReason.ERROR : stop.finishReason(),
         stopped ? stop.usage() : Usage.of(0, 0),
         stopped ? stop.metadata() : Map.of(),
-        error);
+        failure);
   }
 }

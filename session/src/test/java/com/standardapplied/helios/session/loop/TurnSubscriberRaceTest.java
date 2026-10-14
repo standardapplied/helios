@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Flow;
 import java.util.concurrent.RunnableScheduledFuture;
 import java.util.concurrent.ScheduledExecutorService;
@@ -107,6 +108,7 @@ final class TurnSubscriberRaceTest {
     var subscriber = newSubscriber(scheduler);
 
     subscriber.onSubscribe(new NoopSubscription());
+    subscriber.onNext(new ModelChunk.MessageStop("STOP", Response.Usage.of(0, 0), Map.of()));
     subscriber.onComplete();
     var streamed = subscriber.awaitDone(new CancellationToken());
 

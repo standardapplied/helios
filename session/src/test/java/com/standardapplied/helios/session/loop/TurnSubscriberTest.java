@@ -180,6 +180,19 @@ final class TurnSubscriberTest {
   }
 
   @Test
+  void aCompletionWithoutAMessageStopEndsTheTurnWithAnIllegalState() {
+    subscriber.onSubscribe(subscription);
+    subscriber.onNext(new ModelChunk.TextDelta("Hel"));
+
+    subscriber.onComplete();
+    var turn = subscriber.awaitDone(new CancellationToken());
+
+    assertInstanceOf(IllegalStateException.class, turn.error());
+    assertEquals(FinishReason.ERROR, turn.finishReason());
+    assertEquals("Hel", turn.content());
+  }
+
+  @Test
   void aSubscriptionArrivingAfterTheTurnEndedIsCancelledUnrequested() {
     var token = new CancellationToken();
     token.cancel("closed before the stream subscribed");
