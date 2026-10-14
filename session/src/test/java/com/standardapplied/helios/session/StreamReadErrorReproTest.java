@@ -20,6 +20,8 @@ import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.testing.ModelStreams;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -246,6 +248,44 @@ class StreamReadErrorReproTest {
       var success = assertInstanceOf(ResultMessage.Success.class, terminal);
       assertEquals("recovered", success.result());
       assertEquals(3, failTwiceThenSucceed.calls.get(), "third attempt succeeded");
+    }
+  }
+
+  @Test
+  void aRetriedAttemptStreamsItsTextAgainAfterTheTurnRetriedEvent() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                ModelStreams.failing(providerStyleException(), new ModelChunk.TextDelta("Hel")))
+            .withStreamTurn(
+                ModelStreams.of(
+                    new ModelChunk.TextDelta("Hello"),
+                    new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of())))
+            .build();
+    var events = new CollectingSubscriber();
+    try (var session =
+        AgentSession.create(
+            SessionOptions.newBuilder()
+                .withModel(model)
+                .withLimits(limitsWithFastRetry(2))
+                .build())) {
+      session.events().subscribe(events);
+      var terminal = session.runBlocking(UserMessage.text("hi"));
+      events.awaitDone();
+
+      assertEquals("Hello", assertInstanceOf(ResultMessage.Success.class, terminal).result());
+      assertEquals(
+          List.of("text Hel", "retried", "text Hello"),
+          events.events().stream()
+              .<String>mapMulti(
+                  (event, out) -> {
+                    switch (event) {
+                      case QueryEvent.AssistantText text -> out.accept("text " + text.text());
+                      case QueryEvent.TurnRetried ignored -> out.accept("retried");
+                      default -> {}
+                    }
+                  })
+              .toList());
     }
   }
 

@@ -138,8 +138,10 @@ before the subscriber's first request, and cancelling the subscription or the to
 request (awaiting headers or mid-body) and closes its connection without touching the shared model.
 `chat` drains the same stream. A session's `TurnSubscriber` owns the subscription and cancels it on
 the idle timeout, cancellation or an interrupt; one terminal transition ignores every late signal.
-A stream that completes without its `ModelChunk.MessageStop` fails the turn, and `chat`, with
-`IllegalStateException` instead of reading as a plain stop.
+A session's `QueryEvent.AssistantText` and `AssistantThinking` therefore arrive delta by delta
+instead of once per turn, and after a `QueryEvent.TurnRetried` the next attempt streams its answer
+again from the start. A stream that completes without its `ModelChunk.MessageStop` fails the turn,
+and `chat`, with `IllegalStateException` instead of reading as a plain stop.
 
 | 2.x | 3.0 |
 |---|---|
