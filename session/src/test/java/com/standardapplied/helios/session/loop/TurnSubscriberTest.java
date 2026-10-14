@@ -63,7 +63,51 @@ final class TurnSubscriberTest {
   }
 
   @Test
-  void theIdleDeadlineCancelsTheSubscriptionOnceAndLateSignalsChangeNothing() {
+  void noIdleDeadlineIsArmedBeforeTheFirstChunk() {
+    subscriber.onSubscribe(subscription);
+
+    assertEquals(List.of(), scheduler.cancelled());
+  }
+
+  @Test
+  void theFirstChunkArmsTheIdleDeadline() {
+    subscriber.onSubscribe(subscription);
+
+    subscriber.onNext(new ModelChunk.TextDelta("Hel"));
+
+    assertEquals(List.of(false), scheduler.cancelled());
+  }
+
+  @Test
+  void aKeepAliveReArmsTheIdleDeadline() {
+    subscriber.onSubscribe(subscription);
+    subscriber.onNext(new ModelChunk.TextDelta("Hel"));
+
+    subscriber.onNext(new ModelChunk.KeepAlive());
+
+    assertEquals(List.of(true, false), scheduler.cancelled());
+  }
+
+  @Test
+  void aKeepAliveAddsNothingToTheTurnAndEmitsNothing() {
+    subscriber.onSubscribe(subscription);
+    subscriber.onNext(new ModelChunk.KeepAlive());
+    subscriber.onNext(new ModelChunk.TextDelta("Hel"));
+    subscriber.onNext(new ModelChunk.KeepAlive());
+    subscriber.onNext(new ModelChunk.MessageStop("STOP", USAGE, Map.of()));
+
+    subscriber.onComplete();
+    var turn = subscriber.awaitDone(new CancellationToken());
+
+    assertEquals(
+        new StreamedTurn("Hel", List.of(), List.of(), FinishReason.STOP, USAGE, Map.of(), null),
+        turn);
+    assertEquals(List.of("Hel"), assistantTexts());
+    assertEquals(1, events.size());
+  }
+
+  @Test
+  void aStreamSilentAfterItsFirstChunkTimesOutCancelsOnceAndLateSignalsChangeNothing() {
     var call = ToolCall.newBuilder().withId("c1").withName("lookup").build();
     subscriber.onSubscribe(subscription);
     subscriber.onNext(new ModelChunk.TextDelta("Hel"));
@@ -113,6 +157,7 @@ final class TurnSubscriberTest {
             throw new IllegalStateException("close failed");
           }
         });
+    subscriber.onNext(new ModelChunk.TextDelta("Hel"));
 
     var failure = assertThrows(IllegalStateException.class, scheduler::fireLatest);
     var turn =
@@ -142,6 +187,7 @@ final class TurnSubscriberTest {
     subscriber.onSubscribe(subscription);
 
     subscriber.onSubscribe(second);
+    subscriber.onNext(new ModelChunk.TextDelta("Hel"));
     scheduler.fireLatest();
 
     assertEquals(1, second.cancels);
@@ -321,6 +367,7 @@ final class TurnSubscriberTest {
   private static final class ManualScheduler extends ScheduledThreadPoolExecutor {
 
     private final List<Runnable> scheduled = new CopyOnWriteArrayList<>();
+    private final List<RunnableScheduledFuture<?>> deadlines = new CopyOnWriteArrayList<>();
 
     ManualScheduler() {
       super(1);
@@ -330,11 +377,17 @@ final class TurnSubscriberTest {
     protected <V> RunnableScheduledFuture<V> decorateTask(
         Runnable runnable, RunnableScheduledFuture<V> task) {
       scheduled.add(runnable);
+      deadlines.add(task);
       return task;
     }
 
     void fireLatest() {
       scheduled.getLast().run();
+    }
+
+    /** Whether each deadline scheduled so far, in order, has been cancelled. */
+    List<Boolean> cancelled() {
+      return deadlines.stream().map(RunnableScheduledFuture::isCancelled).toList();
     }
   }
 }

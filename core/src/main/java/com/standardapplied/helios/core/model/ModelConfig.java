@@ -25,7 +25,11 @@ import java.util.Optional;
  * @param reasoning what the model is asked to do about reasoning; empty sends no reasoning field
  *     and leaves the provider's defaults in force. Never null
  * @param connectTimeout maximum time to establish HTTP connection
- * @param responseTimeout maximum time to wait for HTTP response headers
+ * @param responseTimeout maximum time to wait for HTTP response headers. Default 60s. A model may
+ *     think before it sends them (Gemini sends nothing until it has), and while it does this is the
+ *     only limit that runs: a session's {@code streamIdleTimeout} starts at the stream's first
+ *     chunk, which arrives with the headers. Expiry fails the turn with a retryable {@link
+ *     TransientStreamException}
  * @param temperature controls randomness (0.0 = deterministic, 2.0 = very random)
  * @param topP nucleus sampling threshold (0.0-1.0)
  * @param maxOutputTokens maximum tokens to generate
@@ -49,10 +53,13 @@ import java.util.Optional;
  *     Choose a key that groups requests sharing a long common prefix (e.g. per tenant or per
  *     agent). Providers without the concept ignore it. Not a secret, but avoid embedding end-user
  *     PII — it travels on every request
- * @param streamIdleTimeout maximum time to wait for next SSE data line during streaming. Default
- *     120s — high enough for reasoning models that pause for tens of seconds during extended
- *     thinking before emitting tokens. Override via the builder for chat-only workloads where
- *     faster network-failure detection matters more than tolerating long pauses.
+ * @param streamIdleTimeout maximum time to wait for the next SSE line once the response headers
+ *     have arrived. Default 120s — high enough for reasoning models that pause for tens of seconds
+ *     during extended thinking before emitting tokens. It is the backstop of a direct {@code chat}
+ *     or {@code chatStream} caller: in a session, whose {@code streamIdleTimeout} (default 60s) is
+ *     re-armed by every chunk, every frame included, the session's fires first. Override via the
+ *     builder for chat-only workloads where faster network-failure detection matters more than
+ *     tolerating long pauses.
  * @param baseUrl override the provider's default API endpoint. {@code null} (default) means use the
  *     provider's canonical URL ({@code https://api.openai.com/v1/responses}, {@code
  *     https://api.anthropic.com/v1/messages}, {@code

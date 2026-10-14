@@ -27,7 +27,10 @@ import java.util.concurrent.ScheduledExecutorService;
  * <p>Created once per model turn by {@link TurnRunner}. It owns the turn's {@link
  * Flow.Subscription}: it requests every chunk on subscribe, and cancels the stream when the {@link
  * IdleWatchdog} finds it stalled, when the session's {@link CancellationToken} is cancelled, or
- * when the waiting thread is interrupted. The runner blocks in {@link
+ * when the waiting thread is interrupted. The idle clock starts at the first chunk, so a request
+ * still awaiting its headers is bounded by the provider's response timeout, the session's wall
+ * clock and its cancellation, never by the idle clock; every chunk re-arms it, a {@link
+ * ModelChunk.KeepAlive} included, which adds and emits nothing. The runner blocks in {@link
  * #awaitDone(CancellationToken)} until the stream ends one of those ways or with {@code onComplete}
  * / {@code onError}.
  *
@@ -86,7 +89,6 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       subscription.cancel();
       return;
     }
-    idleWatchdog.arm();
     subscription.request(Long.MAX_VALUE);
   }
 

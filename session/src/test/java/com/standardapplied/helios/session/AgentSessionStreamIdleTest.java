@@ -24,24 +24,37 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Regression coverage for the second hung-session failure mode: a model stream that emits a few
- * chunks (or zero) and then goes silent without delivering {@code onComplete} / {@code onError}.
- * The session's {@link SessionLimits#streamIdleTimeout()} bounds how long the loop waits between
+ * chunks and then goes silent without delivering {@code onComplete} / {@code onError}. The
+ * session's {@link SessionLimits#streamIdleTimeout()} bounds how long the loop waits between
  * chunks; without it, only {@link SessionLimits#maxWallClock()} would eventually terminate the
- * session — typically minutes after the agent has stopped making progress.
+ * session — typically minutes after the agent has stopped making progress. Before the first chunk
+ * the idle clock does not run: a model may think before it answers, and that wait is the wall
+ * clock's.
  *
  * <p>The tests construct an inline {@link Model} whose {@code chatStream} optionally emits a single
- * text chunk and then never signals again. The only limit short enough to end that wait is the 300
- * ms {@code streamIdleTimeout}; {@code maxWallClock} is an hour. The terminal must be the idle
- * watchdog's {@link TimeoutException}, surfaced as {@link ResultMessage.ErrorDuringExecution}.
+ * text chunk and then never signals again. After a chunk the only limit short enough to end that
+ * wait is the 300 ms {@code streamIdleTimeout}, and {@code maxWallClock} is an hour: the terminal
+ * must be the idle watchdog's {@link TimeoutException}, surfaced as {@link
+ * ResultMessage.ErrorDuringExecution}.
  */
 final class AgentSessionStreamIdleTest {
 
   /**
    * Zero-chunk case: provider opens the stream, calls {@code onSubscribe}, then is forever silent.
+   * The idle timeout is a millisecond and the wall clock half a second; the wall clock ends it.
    */
   @Test
-  void zeroChunkStreamFailsWithinStreamIdleTimeout() {
-    assertIdleTimeout(terminalOf("sess-idle-zero", silentStreamModel()));
+  void aStreamSilentBeforeItsFirstChunkIsEndedByTheWallClockNotTheIdleTimeout() {
+    var terminal =
+        terminalOf(
+            "sess-idle-zero",
+            silentStreamModel(),
+            SessionLimits.newBuilder()
+                .withMaxWallClock(Duration.ofMillis(500))
+                .withStreamIdleTimeout(Duration.ofMillis(1))
+                .build());
+
+    assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, terminal);
   }
 
   /**
@@ -51,23 +64,26 @@ final class AgentSessionStreamIdleTest {
    */
   @Test
   void midStreamStallFailsWithinStreamIdleTimeout() {
-    assertIdleTimeout(terminalOf("sess-idle-mid", stallsAfterFirstChunkModel()));
+    assertIdleTimeout(
+        terminalOf(
+            "sess-idle-mid",
+            stallsAfterFirstChunkModel(),
+            SessionLimits.newBuilder()
+                .withMaxWallClock(Duration.ofHours(1))
+                .withStreamIdleTimeout(Duration.ofMillis(300))
+                .build()));
   }
 
-  private static ResultMessage terminalOf(String sessionId, Model model) {
+  private static ResultMessage terminalOf(String sessionId, Model model, SessionLimits limits) {
     var options =
         SessionOptions.newBuilder()
             .withModel(model)
             .withSessionId(sessionId)
-            .withLimits(
-                SessionLimits.newBuilder()
-                    .withMaxWallClock(Duration.ofHours(1))
-                    .withStreamIdleTimeout(Duration.ofMillis(300))
-                    .build())
+            .withLimits(limits)
             .build();
     try (var session = AgentSession.create(options)) {
       session.send(UserMessage.text("hi"));
-      return Await.value("the idle-timeout terminal", session.result());
+      return Await.value("the terminal", session.result());
     }
   }
 

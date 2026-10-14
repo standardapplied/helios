@@ -31,7 +31,9 @@ import com.standardapplied.helios.openai.OpenAIProvider;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.StreamRetryPolicy;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
@@ -42,9 +44,11 @@ import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -69,6 +73,9 @@ import org.junit.jupiter.params.provider.ValueSource;
  * streams/tool-calls.sse} golden, held after its first argument fragment: argument fragments, like
  * every frame, are chunks that keep a session's {@code streamIdleTimeout} from firing while a long
  * call streams.
+ *
+ * <p>The idle-clock tests hold the Gemini {@code held-text.sse} reply at its headers, as Gemini
+ * does while it thinks, or after its first part.
  */
 final class StreamingSessionTest {
 
@@ -115,6 +122,52 @@ final class StreamingSessionTest {
       assertEquals(new ModelChunk.ToolUseDelta(start.callId(), ":\"Paris\"}"), nextContent(chunks));
       assertInstanceOf(ModelChunk.ToolUseStop.class, nextContent(chunks));
       assertInstanceOf(ModelChunk.MessageStop.class, chunks.awaitCompletion().getLast());
+    }
+  }
+
+  @Test
+  void aModelHoldingBackItsHeadersIsEndedByTheRetryableResponseTimeoutNotTheIdleClock()
+      throws IOException {
+    var reply =
+        HeldSseServer.Reply.holdingHeaders(
+            Golden.read("gemini/sessions/held-text.sse").split(HOLD));
+    var limits =
+        SessionLimits.newBuilder()
+            .withStreamIdleTimeout(Duration.ofMillis(1))
+            .withStreamRetryPolicy(StreamRetryPolicy.disabled())
+            .build();
+    try (var server = HeldSseServer.start(reply);
+        var model =
+            modelAt(
+                "gemini",
+                server.uri(),
+                ModelConfig.newBuilder().withResponseTimeout(Duration.ofMillis(200)));
+        var session =
+            AgentSession.create(
+                SessionOptions.newBuilder().withModel(model).withLimits(limits).build())) {
+
+      session.send(UserMessage.text("Hi"));
+
+      assertInstanceOf(ResultMessage.ErrorTransientStream.class, result(session));
+    }
+  }
+
+  @Test
+  void aStreamSilentAfterItsFirstFrameIsEndedByTheIdleClockWhichClosesTheConnection()
+      throws IOException {
+    var reply = held("gemini");
+    var limits = SessionLimits.newBuilder().withStreamIdleTimeout(Duration.ofMillis(1)).build();
+    try (var server = HeldSseServer.start(reply);
+        var model = modelAt("gemini", server.uri());
+        var session =
+            AgentSession.create(
+                SessionOptions.newBuilder().withModel(model).withLimits(limits).build())) {
+      session.send(UserMessage.text("Hi"));
+
+      reply.awaitClientClosed();
+
+      var failed = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result(session));
+      assertEquals(TimeoutException.class.getName(), failed.error().kind());
     }
   }
 
@@ -316,8 +369,12 @@ final class StreamingSessionTest {
   }
 
   private static Model modelAt(String provider, URI uri) {
+    return modelAt(provider, uri, ModelConfig.newBuilder());
+  }
+
+  private static Model modelAt(String provider, URI uri, ModelConfig.Builder settings) {
     Function<String, ModelConfig> config =
-        baseUrl -> ModelConfig.newBuilder().withApiKey("test-key").withBaseUrl(baseUrl).build();
+        baseUrl -> settings.withApiKey("test-key").withBaseUrl(baseUrl).build();
     return switch (provider) {
       case "anthropic" ->
           new AnthropicProvider()

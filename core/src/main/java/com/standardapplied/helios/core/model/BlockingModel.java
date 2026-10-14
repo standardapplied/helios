@@ -15,9 +15,11 @@ import java.util.function.Supplier;
  * A {@link Model} that can only answer blockingly. It implements {@code chat}; its chunk stream
  * runs that call as work the subscription owns, on its own thread, started by the subscriber's
  * first request and never before. The finished response is published whole: thinking, text, a
- * start/stop pair per tool call, then the message stop. Cancelling the subscription or the token
- * interrupts that thread; a call that ignores the interrupt runs until it returns and its answer is
- * dropped, since Java cannot end a thread by force.
+ * start/stop pair per tool call, then the message stop. Nothing is published before the call
+ * returns, so a session's idle clock, which starts at the first chunk, does not run during the
+ * call; its {@code maxWallClock} and cancellation bound it. Cancelling the subscription or the
+ * token interrupts that thread; a call that ignores the interrupt runs until it returns and its
+ * answer is dropped, since Java cannot end a thread by force.
  */
 public interface BlockingModel extends Model {
 
