@@ -8,6 +8,8 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * A single-subscriber {@link Flow.Publisher} of what a blocking {@link CloseableIterator} yields.
@@ -24,11 +26,14 @@ import java.util.function.Supplier;
  * stream with {@code onError} carrying a {@link CancellationException} with the token's reason,
  * including when the token was cancelled before any request. Work that ignores both an interrupt
  * and a closed iterator runs until it returns, and what it yields is dropped: Java cannot end a
- * thread by force.
+ * thread by force. An iterator whose {@code close} throws a {@link RuntimeException} has it logged
+ * at {@code WARNING}, so {@code cancel} and {@code request} return normally.
  *
  * @param <T> the item type
  */
 public final class IteratorPublisher<T> implements Flow.Publisher<T> {
+
+  private static final Logger LOGGER = Logger.getLogger(IteratorPublisher.class.getName());
 
   private final Supplier<? extends CloseableIterator<? extends T>> opener;
   private final CancellationToken cancellation;
@@ -80,11 +85,18 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
   }
 
   /**
-   * Closes the open iterator, so a pull blocked on I/O ends whether or not it honours interrupts.
+   * Closes the open iterator, so a pull blocked on I/O ends whether or not it honours interrupts. A
+   * close that throws is logged: no caller of {@code cancel}, {@code request} or the owned thread
+   * can act on it.
    */
   private static void close(CloseableIterator<?> open) {
-    if (open != null) {
+    if (open == null) {
+      return;
+    }
+    try {
       open.close();
+    } catch (RuntimeException ex) {
+      LOGGER.log(Level.WARNING, "closing the iterator threw", ex);
     }
   }
 

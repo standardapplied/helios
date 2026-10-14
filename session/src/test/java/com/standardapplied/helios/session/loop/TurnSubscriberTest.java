@@ -11,9 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Citation;
-import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
-import com.standardapplied.helios.core.model.IteratorPublisher;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
@@ -31,11 +29,9 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.RunnableScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -105,33 +101,17 @@ final class TurnSubscriberTest {
   }
 
   @Test
-  void aCancelWhoseSourceFailsToCloseStillReleasesTheWaiter() {
-    var blocked = new CountDownLatch(1);
-    var source =
-        new CloseableIterator<ModelChunk>() {
+  void aCancelThatThrowsStillReleasesTheWaiter() {
+    subscriber.onSubscribe(
+        new Flow.Subscription() {
           @Override
-          public boolean hasNext() {
-            blocked.countDown();
-            try {
-              new CountDownLatch(1).await();
-            } catch (InterruptedException e) {
-              throw new IllegalStateException("interrupted", e);
-            }
-            return false;
-          }
+          public void request(long n) {}
 
           @Override
-          public ModelChunk next() {
-            throw new NoSuchElementException();
-          }
-
-          @Override
-          public void close() {
+          public void cancel() {
             throw new IllegalStateException("close failed");
           }
-        };
-    new IteratorPublisher<>(() -> source, new CancellationToken()).subscribe(subscriber);
-    Await.latch("the pull blocked", blocked);
+        });
 
     var failure = assertThrows(IllegalStateException.class, scheduler::fireLatest);
     var turn =
