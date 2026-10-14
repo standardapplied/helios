@@ -19,6 +19,7 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
 class IteratorPublisherTest {
@@ -244,11 +245,46 @@ class IteratorPublisherTest {
     var subscriber = new RecordingSubscriber<String>();
 
     publisherOf(source)
-        .subscribe(onEachItem(subscriber, () -> subscriber.subscription().request(0)));
+        .subscribe(
+            onEachItem(
+                subscriber,
+                () -> {
+                  subscriber.subscription().request(0);
+                  subscriber.subscription().request(1);
+                }));
 
     assertInstanceOf(IllegalArgumentException.class, subscriber.awaitFailure());
     Await.until("the owned thread finished", () -> token.activeCallbackCountForTests() == 0);
     assertEquals(1, source.blocked.getCount());
+    assertEquals(List.of("a"), subscriber.items());
+  }
+
+  @Test
+  void aCancelAfterANonPositiveRequestInsideOnNextEndsTheSignals() {
+    var subscriber = new RecordingSubscriber<String>();
+
+    publisherOf(new Source(List.of("a", "b")))
+        .subscribe(
+            onEachItem(
+                subscriber,
+                () -> {
+                  subscriber.subscription().request(0);
+                  subscriber.cancel();
+                }));
+    assertEquals("a", subscriber.next());
+
+    Await.until("the owned thread finished", () -> token.activeCallbackCountForTests() == 0);
+    assertFalse(subscriber.ended());
+  }
+
+  @Test
+  void anInterruptTheSubscriberLeavesSetFailsAStreamWaitingForDemand() {
+    var subscriber = new RecordingSubscriber<String>(1);
+
+    publisherOf(new Source(List.of("a", "b")))
+        .subscribe(onEachItem(subscriber, () -> Thread.currentThread().interrupt()));
+
+    assertInstanceOf(CancellationException.class, subscriber.awaitFailure());
     assertEquals(List.of("a"), subscriber.items());
   }
 
@@ -328,6 +364,35 @@ class IteratorPublisherTest {
 
     assertEquals(List.of("a"), subscriber.items());
     assertFalse(subscriber.ended());
+  }
+
+  @Test
+  void aSubscriptionCancelledInsideOnSubscribeLeavesNothingWatchingTheToken() {
+    var subscriber = new RecordingSubscriber<String>(0);
+
+    publisherOf(new Source(List.of("a")))
+        .subscribe(
+            onSubscribe(
+                subscriber,
+                subscription -> {
+                  subscription.request(1);
+                  subscription.cancel();
+                }));
+
+    assertEquals(0, token.activeCallbackCountForTests());
+    assertEquals(0, opened.get());
+  }
+
+  @Test
+  void aSubscriptionCancelledInsideOnSubscribeHearsNothingOfATokenCancelledBefore() {
+    token.cancel("too late");
+    var subscriber = new RecordingSubscriber<String>(0);
+
+    publisherOf(new Source(List.of("a")))
+        .subscribe(onSubscribe(subscriber, Flow.Subscription::cancel));
+
+    assertFalse(subscriber.ended());
+    assertEquals(0, opened.get());
   }
 
   @Test
@@ -550,6 +615,35 @@ class IteratorPublisherTest {
       public void onNext(String item) {
         recorder.onNext(item);
         action.run();
+      }
+
+      @Override
+      public void onError(Throwable failure) {
+        recorder.onError(failure);
+      }
+
+      @Override
+      public void onComplete() {
+        recorder.onComplete();
+      }
+    };
+  }
+
+  /**
+   * Forwards every signal to {@code recorder}, running {@code action} on the subscription first.
+   */
+  private static Flow.Subscriber<String> onSubscribe(
+      RecordingSubscriber<String> recorder, Consumer<Flow.Subscription> action) {
+    return new Flow.Subscriber<>() {
+      @Override
+      public void onSubscribe(Flow.Subscription subscription) {
+        action.accept(subscription);
+        recorder.onSubscribe(subscription);
+      }
+
+      @Override
+      public void onNext(String item) {
+        recorder.onNext(item);
       }
 
       @Override
