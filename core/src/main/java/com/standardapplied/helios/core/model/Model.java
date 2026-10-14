@@ -15,7 +15,7 @@ import java.util.concurrent.Flow;
 /**
  * Interface for LLM providers. Implementations provide the actual integration with model APIs
  * (Gemini, Anthropic, etc.). The one way to call a model is its chunk stream, {@link
- * #chatStream(List, List, CancellationToken)}; the blocking {@code chat} forms wait for it.
+ * #chatStream(List, List, CancellationToken)}; the blocking {@code chat} waits for it.
  *
  * <p>Models may hold long-lived resources (HTTP connection pools, file descriptors). Long-running
  * hosts that build and discard models should call {@link #close()} to release them. Implementations
@@ -93,7 +93,9 @@ public interface Model extends AutoCloseable {
 
   /**
    * The model's answer to {@code messages}, constrained to and parsed by {@code outputSchema}. The
-   * default throws, for a model without structured output.
+   * default throws, for a model without structured output: unlike {@link #chat(List, List)} it
+   * cannot drain the structured stream, since parsing the answer needs the model's own JSON
+   * binding. A model that overrides the structured {@code chatStream} overrides this too.
    *
    * @param <T> the type of the structured output
    * @param messages the conversation history
