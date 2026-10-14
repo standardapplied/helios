@@ -177,7 +177,7 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
           subscription.cancel();
         } else if (invalid != null) {
           subscription.request(invalid);
-        } else {
+        } else if (carried > 0) {
           subscription.request(carried);
         }
       }
@@ -245,7 +245,13 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
       public void onComplete() {
         if (next == null) {
           downstream.onComplete();
-        } else {
+          return;
+        }
+        boolean stop;
+        synchronized (lock) {
+          stop = cancelled;
+        }
+        if (!stop) {
           exchange.stream(next, cancellation).subscribe(new Segment());
         }
       }
