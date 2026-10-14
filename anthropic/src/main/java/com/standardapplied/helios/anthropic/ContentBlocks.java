@@ -34,13 +34,18 @@ final class ContentBlocks {
     return verbatim;
   }
 
-  /** A {@code content_block_start} for {@code block} at {@code index}, from {@code payload}. */
-  void start(Integer index, ContentBlock block, String payload) {
+  /**
+   * A {@code content_block_start} for {@code block} at {@code index}, from {@code payload}: the
+   * event it yields, if any.
+   */
+  StreamEvent start(Integer index, ContentBlock block, String payload) {
     if (block == null || index == null) {
-      return;
+      return null;
+    }
+    if ("tool_use".equals(block.type())) {
+      return toolUses.start(index, block.id(), block.name());
     }
     switch (block.type()) {
-      case "tool_use" -> toolUses.start(index, block.id(), block.name());
       case "thinking" -> thinking.start(index);
       case "text" -> text.start(index, block.text());
       case "server_tool_use" -> verbatim.startServerToolUse(index, block);
@@ -50,6 +55,7 @@ final class ContentBlocks {
         }
       }
     }
+    return null;
   }
 
   /** A {@code content_block_delta} for the block at {@code index}: the event it yields, if any. */
@@ -82,10 +88,10 @@ final class ContentBlocks {
   }
 
   private StreamEvent inputJson(Integer index, String json) {
-    if (json != null && index != null && !verbatim.appendInput(index, json)) {
-      toolUses.appendInput(index, json);
+    if (json == null || index == null || verbatim.appendInput(index, json)) {
+      return null;
     }
-    return null;
+    return toolUses.appendInput(index, json);
   }
 
   private StreamEvent citation(Integer index, Map<String, Object> citation) {

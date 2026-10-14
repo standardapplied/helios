@@ -10,6 +10,7 @@ import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.ModelHarness;
+import com.standardapplied.helios.core.test.StreamParity;
 import com.standardapplied.helios.openai.OpenAIAzureIntegrationTest.ResponseWithMaps;
 import java.net.URI;
 import java.util.ArrayList;
@@ -17,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -31,15 +32,17 @@ import tools.jackson.databind.json.JsonMapper;
  * empty} streams are bodies cut short, which end in an error carrying what they produced. The
  * reference documents a usage only on the terminal events; its {@code response.created} and {@code
  * response.in_progress} examples carry {@code "usage": null}, so no stream is cut after usage.
+ * {@code thinking-done-only} is {@code thinking} with a summary part whose text arrives only in its
+ * {@code done} event, so its golden streams the same thinking.
  */
 class OpenAIStreamTranscriptTest {
 
-  @ParameterizedTest
-  @ValueSource(
-      strings = {
+  static List<String> streams() {
+    return List.of(
         "text",
         "tool-calls",
         "thinking",
+        "thinking-done-only",
         "error",
         "failed",
         "malformed",
@@ -50,8 +53,18 @@ class OpenAIStreamTranscriptTest {
         "incomplete",
         "refusal",
         "bad-tool-arguments",
-        "null-argument"
-      })
+        "null-argument");
+  }
+
+  @ParameterizedTest
+  @MethodSource("streams")
+  void chunkStreamAgreesWithChat(String name) {
+    StreamParity.assertAgrees(
+        "openai/streams/" + name + ".sse", uri -> modelAt(uri, OpenAIModelId.GPT_5_6.id()));
+  }
+
+  @ParameterizedTest
+  @MethodSource("streams")
   void transcriptMatchesItsGolden(String name) {
     var transcript =
         ModelHarness.transcript(

@@ -18,6 +18,9 @@ import java.util.stream.Collectors;
  */
 final class ThinkingBlocks implements RawContentEcho.Source {
 
+  /** What stands between the texts of two thinking blocks. */
+  static final String SEPARATOR = "\n\n";
+
   private record Thinking(StringBuilder text, StringBuilder signature) {
     Thinking() {
       this(new StringBuilder(), new StringBuilder());
@@ -34,10 +37,17 @@ final class ThinkingBlocks implements RawContentEcho.Source {
   /**
    * Thinking streamed into the block at {@code index}, surfaced token by token so a live UI can
    * render it; an empty delta, the one a block streams under {@code display=omitted}, yields none.
+   * A block's first text after another block's carries the {@link #SEPARATOR} {@link #text()} puts
+   * between them, so the deltas add up to the thinking.
    */
   StreamEvent append(int index, String text) {
-    at(index).text().append(text);
-    return text.isEmpty() ? null : new StreamEvent.ThinkingDelta(text);
+    if (text.isEmpty()) {
+      return null;
+    }
+    var block = at(index).text();
+    var separator = block.isEmpty() && text() != null ? SEPARATOR : "";
+    block.append(text);
+    return new StreamEvent.ThinkingDelta(separator + text);
   }
 
   /** Signature streamed into the block at {@code index}. */
@@ -65,7 +75,7 @@ final class ThinkingBlocks implements RawContentEcho.Source {
         blocks.values().stream()
             .map(thinking -> thinking.text().toString())
             .filter(value -> !value.isEmpty())
-            .collect(Collectors.joining("\n\n"));
+            .collect(Collectors.joining(SEPARATOR));
     return text.isEmpty() ? null : text;
   }
 

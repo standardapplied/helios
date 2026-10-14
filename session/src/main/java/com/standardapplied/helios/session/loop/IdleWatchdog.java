@@ -13,8 +13,10 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
- * Fails a model stream that stalls: re-armed on subscribe and on every chunk, it reports a {@link
- * TimeoutException} when no chunk arrives for {@code streamIdleTimeout}.
+ * Finds a model stream that stalls: armed by the stream's first chunk and re-armed by every chunk
+ * after it, it reports a {@link TimeoutException} to its owner when no chunk arrives for {@code
+ * streamIdleTimeout}. The owner, {@link TurnSubscriber}, ends the turn with it and cancels the
+ * stream's subscription.
  *
  * <p>Two race-safety guards: after detaching the prior task, {@link #arm()} checks whether the
  * stream already ended before scheduling a fresh one, and the post-schedule {@code compareAndSet}

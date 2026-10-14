@@ -31,6 +31,12 @@ final class StreamedSteps {
       return "function_call".equals(type);
     }
 
+    /** {@code fragment} streamed into the arguments of this call, as its delta. */
+    StreamEvent stream(String fragment) {
+      streamedArguments.append(fragment);
+      return new StreamEvent.ToolCallDelta(id, fragment);
+    }
+
     /**
      * The streamed arguments, or the arguments the step started with when none streamed.
      *
@@ -72,8 +78,10 @@ final class StreamedSteps {
     state.startArguments =
         state.isCall() && step.arguments() != null ? state.read(step.arguments().toString()) : null;
     if (step.hasTypeThought()) {
-      thought(step);
-      return null;
+      return thought(step);
+    }
+    if (state.isCall()) {
+      return new StreamEvent.ToolCallStart(state.id, state.name);
     }
     return step.hasTypeModelOutput() && step.hasContent() ? output.initialText(step) : null;
   }
@@ -86,8 +94,7 @@ final class StreamedSteps {
     var state = steps.get(index);
     var isCall = state != null && state.isCall();
     if (argumentsDelta != null && isCall) {
-      state.streamedArguments.append(argumentsDelta);
-      return null;
+      return state.stream(argumentsDelta);
     }
     if (delta == null) {
       return null;
@@ -97,8 +104,7 @@ final class StreamedSteps {
         if (!isCall || delta.arguments() == null) {
           yield annotations(delta);
         }
-        state.streamedArguments.append(delta.arguments());
-        yield null;
+        yield state.stream(delta.arguments());
       }
       case "thought_signature" -> signature(delta);
       case "thought_summary" -> thinking(delta.content());
@@ -140,15 +146,18 @@ final class StreamedSteps {
     return output.result();
   }
 
-  private void thought(Step step) {
+  /** The summary a thought starts with, one item per line, as thinking. */
+  private StreamEvent thought(Step step) {
     output.signature(step.signature());
+    var summary = new StringBuilder();
     if (step.hasSummary()) {
       for (var item : step.summary()) {
         if (item.hasTypeText() && item.text() != null && !item.text().isEmpty()) {
-          output.thought(item.text());
+          summary.append(output.thought(item.text()));
         }
       }
     }
+    return summary.isEmpty() ? null : new StreamEvent.ThinkingDelta(summary.toString());
   }
 
   private StreamEvent signature(ContentItem delta) {
@@ -173,8 +182,7 @@ final class StreamedSteps {
     if (item == null || !item.hasTypeText() || item.text() == null) {
       return null;
     }
-    output.thought(item.text());
-    return new StreamEvent.ThinkingDelta(item.text());
+    return new StreamEvent.ThinkingDelta(output.thought(item.text()));
   }
 
   private StreamEvent annotations(ContentItem delta) {

@@ -128,6 +128,37 @@ remove the per-call working directory before they release the concurrency permit
 | `SessionOptions.Builder.apply(preset)` | `withPreset(preset)` |
 | `DurabilityCoordinator.journalStart(...)`, `journalTerminal(...)`, `journalTerminalFailure(...)`, `inflightFor(runId)`, `markInflightFailed(...)` | `new ToolCallJournaling(durability)` with `start(...)`, `complete(...)`, `fail(...)`, `inflight(runId)`, `markInflightFailed(...)`; `DurabilityCoordinator` keeps the run lifecycle, and journal warnings log under `com.standardapplied.helios.core.runtime.ToolCallJournaling` |
 
+**A model streams one way: a lazy, cancellable `Flow.Publisher<ModelChunk>`.** `Model`'s default
+`Flow` form used to call the blocking `chat` before anyone subscribed and replay a chunk sequence
+made up from the finished response, so a session saw no text until the turn was over and could not
+cancel a call already in flight. Now `chatStream(messages, tools, [schema,] cancellation)` is the
+one entry point: every provider publishes each delta as its stream delivers it (each tool call's
+start and argument fragments, and a Gemini thought's opening summary, included), nothing is sent
+before the subscriber's first request, and cancelling the subscription or the token aborts that
+request (awaiting headers or mid-body) and closes its connection without touching the shared model.
+`chat` drains the same stream. A session's `TurnSubscriber` owns the subscription and cancels it on
+the idle timeout, cancellation or an interrupt; one terminal transition ignores every late signal.
+A session's `QueryEvent.AssistantText` and `AssistantThinking` therefore arrive delta by delta
+instead of once per turn, and after a `QueryEvent.TurnRetried` the next attempt streams its answer
+again from the start. A stream that completes without its `ModelChunk.MessageStop` fails the turn,
+and `chat`, with `IllegalStateException` instead of reading as a plain stop. Every frame of a
+provider's stream is liveness: one without content, and a completed thinking block, arrive as a
+`ModelChunk.KeepAlive`, so an exhaustive `switch` over `ModelChunk` or `StreamEvent` needs a
+`KeepAlive` branch. `SessionLimits.streamIdleTimeout` starts at the stream's first chunk, not at
+subscribe, and every chunk re-arms it, a `KeepAlive` included: a model that thinks before it sends
+its headers (Gemini does) is bounded only by `ModelConfig.responseTimeout`, a retryable failure, and
+by `maxWallClock` and cancellation, never by the idle clock. Once the stream is open the session's
+60 s idle clock fires before the provider's 120 s per-line `ModelConfig.streamIdleTimeout`, and it
+ends the turn in `ResultMessage.ErrorDuringExecution` carrying the `TimeoutException`, not retried.
+
+| 2.x | 3.0 |
+|---|---|
+| `CloseableIterator<StreamEvent> chatStream(messages, tools)`, `chatStream(messages)` | `Flow.Publisher<ModelChunk> chatStream(messages, tools, cancellation)`, the one streaming form; `Model.chat(messages, tools)` drains it by default |
+| A `Model` implementing only the blocking `chat`; the `Flow` default ran it eagerly and synthesised chunks | implement `core.model.BlockingModel`: its `chat` runs as work the subscription owns, started on the first request and interrupted on cancellation; `BlockingModel.publisherOf(call, cancellation)` does the same for one call |
+| `Model.chat(messages)`, `Model.chat(messages, schema)` | `chat(messages, List.of())`, `chat(messages, List.of(), schema)` |
+| `Exchange.chat(request)`, `CloseableIterator<StreamEvent> Exchange.stream(request)` | `Flow.Publisher<StreamEvent> Exchange.stream(request, cancellation)`; `StreamingModel` drains it for `chat` |
+| `new ChatExchange<>(providerName, apiName, opener, failure)` | `new ChatExchange<>(apiName, opener)` plus `StreamingModel.Builder.withFailure(failure)`, which maps a failed turn's exception |
+
 **The provider model classes are removed; every provider returns a `Model`.** `AnthropicModel`,
 `OpenAIModel` and `GeminiModel` were one forwarding surface written three times. Each provider now
 assembles a `core.provider.StreamingModel` from its own request builder, stream parser and JSON
@@ -424,11 +455,16 @@ the stream produced before it failed.
   asserts its output is the same in each; `DeclarationOrderFixture` is a conversation whose
   schema, tool parameters and replayed arguments each have eight or more names in a declared
   order, and asserts a request body or prompt keeps it. `FailingInputStream` fails on read or
-  close, and `SseEvents` writes and drains server-sent events. `ReasoningMatrix` is the
+  close, and `SseEvents` writes server-sent events and drains every event a reader yields, or
+  only those with content. `ReasoningMatrix` is the
   model-by-`Reasoning` matrix each provider's reasoning test runs. `Accepted` holds the checks a
-  live test makes whatever the model writes: a reply the request allows, deltas that join to the
-  `Done` content, and a skip naming the recorded counterpart when an unconstrained structured reply
-  does not parse. Abstract contract tests run one set of cases against every implementation:
+  live test makes whatever the model writes: a reply the request allows, a chunk stream that
+  completes and ends in exactly one `MessageStop`, and a skip naming the recorded counterpart when
+  an unconstrained structured reply does not parse. `RecordingSubscriber` subscribes to a
+  `Flow.Publisher` with chosen demand and records its signals and protocol violations,
+  `HeldSseServer` holds a reply open part by part and reports when the client closes the
+  connection, and `ExchangeTurns` runs one request through a provider's `Exchange` the way
+  `StreamingModel` does. Abstract contract tests run one set of cases against every implementation:
   `ModelIntegrationContract` (live provider parity, asserting only what holds for any model
   output), `ConversationRequestContract` (the system message and earlier turns a request carries,
   offline), `BoundedErrorBodyContract`, `PromptRegistryContract` and `ToolCallJournalContract`.
@@ -463,16 +499,28 @@ the stream produced before it failed.
 - **`core.provider`: what every streaming provider shares**, for the built-in providers and for a
   provider written outside Helios. `StreamingModel` is the `Model` a provider assembles through
   `StreamingModel.newBuilder()` from its identity, `ModelConfig`, HTTP client, `RequestFactory`
-  (one turn's request), `Exchange` (how a turn runs) and a JSON adapter; it implements chat,
-  structured chat (parsed unless the turn called tools), streaming and close once. `ChatExchange`
-  is the standard `Exchange`: it opens a stream, drains it or hands it back, and maps failures
-  one way (the provider's exception and `TransientStreamException` pass through, an `IOException`
-  becomes a retryable `TransientStreamException`, an interrupt is restored). `SseReader` reads
+  (one turn's request), `Exchange` (how a turn's event stream is published), a `ProviderFailure`
+  and a JSON adapter; it implements streaming (each event as its `ModelChunk`, structured turns
+  checked once complete unless they called tools), chat (the stream drained), structured chat and
+  close once, and maps a failed turn's exception one way (the provider's exception and
+  `TransientStreamException` pass through, an `IOException` becomes a retryable
+  `TransientStreamException`). `ChatExchange` is the standard `Exchange`: a lazy
+  `core.model.IteratorPublisher` over the provider's response stream, with a failure to open it
+  as the stream's one error event. `SseReader` reads
   server-sent events with a per-line idle timeout, `JsonPost` builds the JSON `POST` with default
   and configured headers, `ProviderFailure` creates a provider's exception, and `JsonBinding`
   adapts a JSON library to structured output from two functions. Architecture rules keep provider
   modules on them: no class in a provider implements `Model`, reads a stream with a
   `BufferedReader`, or builds a Jackson mapper outside its `api` holder.
+- **`StreamEvent.KeepAlive` and `ModelChunk.KeepAlive`** mark a part of a provider's stream that
+  carries nothing for the turn. `SseReader` yields a `StreamEvent.KeepAlive` for every event
+  without content: one the parser yields nothing for, one with no or blank data, the `[DONE]`
+  marker and a comment-only heartbeat (`: ping`). `StreamingModel` publishes it, and a completed
+  thinking block, as a `ModelChunk.KeepAlive`; `chat` and a session add nothing for it, and a
+  session's idle clock re-arms on it.
+- **`ModelChunk.MessageStop.of(response)` and `MessageStop.finishReason()`** build the message
+  stop that ends a turn's chunk stream from its response (finish reason `STOP` and zero usage when
+  unset) and read its stop reason back as a `FinishReason` (`STOP` for a spelling that names none).
 - **`RedactionResult.mergeCounts(other)`** sums two streams' per-secret counts in encounter order.
 - **`session.ConsoleEventPrinter`** prints a session's event stream for a command-line host:
   `session.events().subscribe(new ConsoleEventPrinter(System.out))`. Assistant text is written as

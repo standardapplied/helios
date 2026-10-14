@@ -5,15 +5,15 @@
 
 package com.standardapplied.helios.core.test;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.tool.Tool;
 import java.util.List;
 
 /** Shared test utility that returns a canned response and captures the last messages sent. */
-public class MockModel implements Model {
+public class MockModel implements BlockingModel {
   private final String response;
   private List<Message> lastMessages;
 

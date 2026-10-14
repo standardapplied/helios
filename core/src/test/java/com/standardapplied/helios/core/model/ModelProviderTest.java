@@ -90,7 +90,7 @@ class ModelProviderTest {
     }
   }
 
-  static class TestModel implements Model {
+  static class TestModel implements BlockingModel {
     private final String modelId;
 
     TestModel(String modelId) {

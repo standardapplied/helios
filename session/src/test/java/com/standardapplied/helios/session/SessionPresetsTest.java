@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
@@ -31,7 +32,7 @@ import org.junit.jupiter.api.io.TempDir;
 final class SessionPresetsTest {
 
   private static Model stubModel() {
-    return new Model() {
+    return new BlockingModel() {
       @Override
       public Response<Void> chat(List<Message> messages, List<Tool> tools) {
         return Response.newBuilder().withContent("x").build();

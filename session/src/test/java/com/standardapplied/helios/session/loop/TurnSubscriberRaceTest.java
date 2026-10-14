@@ -7,6 +7,7 @@ package com.standardapplied.helios.session.loop;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
@@ -20,6 +21,7 @@ import java.time.Duration;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Flow;
 import java.util.concurrent.RunnableScheduledFuture;
 import java.util.concurrent.ScheduledExecutorService;
@@ -58,8 +60,9 @@ final class TurnSubscriberRaceTest {
     var subscriber = newSubscriber(scheduler);
 
     subscriber.onSubscribe(new NoopSubscription());
+    subscriber.onNext(new ModelChunk.TextDelta("first"));
     var scheduledAtArm = scheduler.scheduleCount.get();
-    assertEquals(1L, scheduledAtArm, "onSubscribe must arm the idle timer exactly once");
+    assertEquals(1L, scheduledAtArm, "the first chunk must arm the idle timer exactly once");
 
     subscriber.onComplete();
     // Post-terminal chunk — illegal per Reactive Streams but Helios must handle it gracefully.
@@ -89,11 +92,25 @@ final class TurnSubscriberRaceTest {
   }
 
   @Test
+  void eachChunkReArmsTheIdleTimer() {
+    var scheduler = countingScheduler();
+    var subscriber = newSubscriber(scheduler);
+    subscriber.onSubscribe(new NoopSubscription());
+    subscriber.onNext(new ModelChunk.TextDelta("first"));
+
+    subscriber.onNext(new ModelChunk.TextDelta("still streaming"));
+
+    assertEquals(2L, scheduler.scheduleCount.get());
+    assertEquals(1, scheduler.outstandingCount());
+  }
+
+  @Test
   void awaitDoneClearsIdleTimerAfterTerminal() {
     var scheduler = countingScheduler();
     var subscriber = newSubscriber(scheduler);
 
     subscriber.onSubscribe(new NoopSubscription());
+    subscriber.onNext(new ModelChunk.MessageStop("STOP", Response.Usage.of(0, 0), Map.of()));
     subscriber.onComplete();
     var streamed = subscriber.awaitDone(new CancellationToken());
 
@@ -106,7 +123,7 @@ final class TurnSubscriberRaceTest {
   // ── fixture ──────────────────────────────────────────────────────────────
 
   private static final Model STUB_MODEL =
-      new Model() {
+      new BlockingModel() {
         @Override
         public Response<Void> chat(List<Message> messages, List<Tool> tools) {
           return Response.newBuilder().build();

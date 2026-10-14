@@ -9,9 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.test.Await;
@@ -458,7 +458,7 @@ final class SessionEventPublisherTest {
     void close();
   }
 
-  private static final class OneReplyModel implements Model {
+  private static final class OneReplyModel implements BlockingModel {
 
     @Override
     public Response<Void> chat(List<Message> messages, List<Tool> tools) {

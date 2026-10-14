@@ -11,12 +11,13 @@ import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.ModelHarness;
 import com.standardapplied.helios.core.test.ModelIntegrationContract.Person;
+import com.standardapplied.helios.core.test.StreamParity;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
@@ -38,9 +39,8 @@ class AnthropicStreamTranscriptTest {
   private static final JsonMapper SORTED =
       JsonMapper.builder().enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS).build();
 
-  @ParameterizedTest
-  @ValueSource(
-      strings = {
+  static List<String> streams() {
+    return List.of(
         "text",
         "tool-calls",
         "thinking",
@@ -62,8 +62,19 @@ class AnthropicStreamTranscriptTest {
         "eof-mid-event",
         "max-tokens",
         "bad-tool-arguments",
-        "null-argument"
-      })
+        "null-argument");
+  }
+
+  @ParameterizedTest
+  @MethodSource("streams")
+  void chunkStreamAgreesWithChat(String name) {
+    StreamParity.assertAgrees(
+        "anthropic/streams/" + name + ".sse",
+        uri -> modelAt(uri, AnthropicModelId.CLAUDE_OPUS_5_5));
+  }
+
+  @ParameterizedTest
+  @MethodSource("streams")
   void transcriptMatchesItsGolden(String name) {
     var transcript =
         ModelHarness.transcript(
@@ -85,7 +96,9 @@ class AnthropicStreamTranscriptTest {
             parsed.add(
                 model
                     .chat(
-                        List.of(Message.user("Extract the person")), OutputSchema.of(Person.class))
+                        List.of(Message.user("Extract the person")),
+                        List.of(),
+                        OutputSchema.of(Person.class))
                     .parsed()));
 
     assertEquals(List.of(new Person("John Smith", 35, "software engineer")), parsed);

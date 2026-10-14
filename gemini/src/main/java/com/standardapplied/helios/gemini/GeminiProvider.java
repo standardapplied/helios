@@ -61,8 +61,8 @@ public class GeminiProvider implements ModelProvider {
         .withMaxOutputTokens(id.maxOutputTokens())
         .withHttpClient(httpClient)
         .withRequests(requests)
-        .withExchange(
-            new ChatExchange<>(PROVIDER_NAME, "Gemini API", streams::open, GeminiException::new))
+        .withExchange(new ChatExchange<>("Gemini API", streams::open))
+        .withFailure(GeminiException::new)
         .withJson(GeminiJson.STRUCTURED)
         .build();
   }

@@ -102,21 +102,40 @@ class StreamingIteratorTest {
     var sse = toolItemAdded + argsDelta1 + argsDelta2 + argsDone + RESPONSE_COMPLETED;
 
     var events = drain(sse);
-    assertEquals(3, events.size());
-    assertInstanceOf(StreamEvent.ToolCallStart.class, events.get(0));
-    var start = (StreamEvent.ToolCallStart) events.get(0);
-    assertEquals("call_1", start.callId());
-    assertEquals("get_weather", start.toolName());
-
-    assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(1));
-    var tc = ((StreamEvent.ToolCallComplete) events.get(1)).toolCall();
+    assertEquals(5, events.size());
+    assertEquals(new StreamEvent.ToolCallStart("call_1", "get_weather"), events.get(0));
+    assertEquals(new StreamEvent.ToolCallDelta("call_1", "{\"city\""), events.get(1));
+    assertEquals(new StreamEvent.ToolCallDelta("call_1", ":\"NYC\"}"), events.get(2));
+    var tc = assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(3)).toolCall();
     assertEquals("get_weather", tc.name());
     assertEquals("call_1", tc.id());
     assertEquals(Map.of("city", "NYC"), tc.arguments());
 
-    var done = (StreamEvent.Done) events.get(2);
+    var done = (StreamEvent.Done) events.get(4);
     assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
     assertFalse(done.response().toolCalls().isEmpty());
+  }
+
+  @Test
+  void anEmptyFirstDeltaOfALaterPartLeavesItsBlankLineToTheNextDelta() {
+    var sse =
+        reasoningDelta("rs_1", 0, "Plan.")
+            + reasoningDone("rs_1", 0, "Plan.")
+            + reasoningDelta("rs_1", 1, "")
+            + reasoningDelta("rs_1", 1, "Answer.")
+            + reasoningDone("rs_1", 1, "Answer.")
+            + TEXT_DELTA
+            + RESPONSE_COMPLETED;
+
+    var events = drain(sse);
+
+    var thinking = new StringBuilder();
+    for (var event : events) {
+      if (event instanceof StreamEvent.ThinkingDelta(var text)) {
+        thinking.append(text);
+      }
+    }
+    assertEquals(((StreamEvent.Done) events.getLast()).response().thinking(), thinking.toString());
   }
 
   @Test
@@ -137,7 +156,7 @@ class StreamingIteratorTest {
             new StreamEvent.ThinkingDelta("Let me think"),
             new StreamEvent.ThinkingDelta(" about this."),
             new StreamEvent.ThinkingComplete("Let me think about this.", null),
-            new StreamEvent.ThinkingDelta("Then answer."),
+            new StreamEvent.ThinkingDelta("\n\nThen answer."),
             new StreamEvent.ThinkingComplete("Then answer.", null),
             new StreamEvent.TextDelta("Hello")),
         events.subList(0, 6));
@@ -159,10 +178,10 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void aSummaryPartThatStreamedNoDeltaCompletesWithTheTextOfItsDoneEvent() {
+  void aSummaryPartThatStreamedNoDeltaStreamsTheTextOfItsDoneEvent() {
     var events = drain(reasoningDone("rs_1", 0, "Whole.") + TEXT_DELTA + RESPONSE_COMPLETED);
 
-    assertEquals(new StreamEvent.ThinkingComplete("Whole.", null), events.getFirst());
+    assertEquals(new StreamEvent.ThinkingDelta("Whole."), events.getFirst());
     assertEquals("Whole.", ((StreamEvent.Done) events.getLast()).response().thinking());
   }
 
@@ -613,13 +632,14 @@ class StreamingIteratorTest {
     var events = drain(sse);
 
     assertEquals(new StreamEvent.ToolCallStart("call_1", "test_fn"), events.getFirst());
-    var error = assertInstanceOf(StreamEvent.Error.class, events.get(1));
+    assertEquals(new StreamEvent.ToolCallDelta("call_1", "not valid json"), events.get(1));
+    var error = assertInstanceOf(StreamEvent.Error.class, events.get(2));
     assertTrue(
         error.message().startsWith("Arguments of tool call 'test_fn' are not a JSON object: "),
         error.message());
     assertInstanceOf(OpenAIException.class, error.cause());
     assertEquals(List.of(), error.partial().toolCalls());
-    assertEquals(2, events.size());
+    assertEquals(3, events.size());
   }
 
   @Test
@@ -934,10 +954,11 @@ class StreamingIteratorTest {
   }
 
   private static List<StreamEvent> drain(String sse) {
-    return SseEvents.drain(reader(SseEvents.body(sse)));
+    return SseEvents.drainContent(reader(SseEvents.body(sse)));
   }
 
   private static StreamEvent.Error firstError(InputStream body) {
-    return assertInstanceOf(StreamEvent.Error.class, SseEvents.drain(reader(body)).getFirst());
+    return assertInstanceOf(
+        StreamEvent.Error.class, SseEvents.drainContent(reader(body)).getFirst());
   }
 }

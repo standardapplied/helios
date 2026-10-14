@@ -110,10 +110,10 @@ class StreamingIteratorTest {
   void nextWithoutHasNextStillReadsAhead() {
     // Exercises StreamingIterator.next() when nextEvent is not pre-buffered by hasNext().
     try (var iterator = reader(SseEvents.body(TEXT_FLOW))) {
-      var first = iterator.next();
-      assertInstanceOf(StreamEvent.TextDelta.class, first);
-      var second = iterator.next();
-      assertInstanceOf(StreamEvent.Done.class, second);
+      assertEquals(new StreamEvent.KeepAlive(), iterator.next());
+      assertInstanceOf(StreamEvent.TextDelta.class, iterator.next());
+      assertEquals(new StreamEvent.KeepAlive(), iterator.next());
+      assertInstanceOf(StreamEvent.Done.class, iterator.next());
       assertFalse(iterator.hasNext());
     }
   }
@@ -124,6 +124,8 @@ class StreamingIteratorTest {
       assertTrue(iterator.hasNext());
       // Second call must short-circuit through the already-buffered nextEvent path.
       assertTrue(iterator.hasNext());
+      iterator.next();
+      iterator.next();
       iterator.next();
       iterator.next();
       // After Done: hasNext must return false even when called again.

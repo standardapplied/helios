@@ -2,15 +2,14 @@
 
 package com.standardapplied.helios.core.test;
 
-import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.ProviderException;
-import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.RecordComponent;
 import java.util.Collection;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.Flow;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
@@ -38,15 +37,21 @@ public final class Transcript {
     this.mapStrings = mapStrings;
   }
 
-  /** Drains and closes {@code events}, one rendered event per line. */
-  public String events(CloseableIterator<StreamEvent> events) {
+  /**
+   * Subscribes to {@code stream} and waits for it to end: one rendered item per line, then {@code
+   * onComplete} or {@code onError} with the rendered failure.
+   */
+  public String stream(Flow.Publisher<?> stream) {
+    var recorder = new RecordingSubscriber<Object>();
+    stream.subscribe(recorder);
+    var failure = recorder.awaitEnd();
     var text = new StringBuilder();
-    try (events) {
-      while (events.hasNext()) {
-        text.append(render(events.next())).append('\n');
-      }
+    for (var item : recorder.items()) {
+      text.append(render(item)).append('\n');
     }
-    return text.toString();
+    return text.append(failure == null ? "onComplete" : "onError " + render(failure))
+        .append('\n')
+        .toString();
   }
 
   /** The rendered value {@code call} returns, or the rendered exception it throws. */

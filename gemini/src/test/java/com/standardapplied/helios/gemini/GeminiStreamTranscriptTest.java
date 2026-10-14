@@ -2,11 +2,15 @@
 
 package com.standardapplied.helios.gemini;
 
+import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.ModelHarness;
+import com.standardapplied.helios.core.test.StreamParity;
+import java.net.URI;
+import java.util.List;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Characterization: for each recorded stream under {@code golden/gemini/streams}, the exact events
@@ -23,9 +27,8 @@ import org.junit.jupiter.params.provider.ValueSource;
  */
 class GeminiStreamTranscriptTest {
 
-  @ParameterizedTest
-  @ValueSource(
-      strings = {
+  static List<String> streams() {
+    return List.of(
         "text",
         "tool-calls",
         "thinking",
@@ -43,21 +46,30 @@ class GeminiStreamTranscriptTest {
         "requires-action",
         "failed",
         "bad-tool-arguments",
-        "null-argument"
-      })
+        "null-argument");
+  }
+
+  @ParameterizedTest
+  @MethodSource("streams")
+  void chunkStreamAgreesWithChat(String name) {
+    StreamParity.assertAgrees(
+        "gemini/streams/" + name + ".sse", GeminiStreamTranscriptTest::modelAt);
+  }
+
+  @ParameterizedTest
+  @MethodSource("streams")
   void transcriptMatchesItsGolden(String name) {
     var transcript =
         ModelHarness.transcript(
-            "gemini/streams/" + name + ".sse",
-            uri ->
-                new GeminiProvider()
-                    .create(
-                        GeminiModelId.GEMINI_3_5_FLASH.id(),
-                        ModelConfig.newBuilder()
-                            .withApiKey("test-key")
-                            .withBaseUrl(uri + "/v1beta")
-                            .build()));
+            "gemini/streams/" + name + ".sse", GeminiStreamTranscriptTest::modelAt);
 
     Golden.assertMatches("gemini/streams/" + name + ".txt", transcript);
+  }
+
+  private static Model modelAt(URI uri) {
+    return new GeminiProvider()
+        .create(
+            GeminiModelId.GEMINI_3_5_FLASH.id(),
+            ModelConfig.newBuilder().withApiKey("test-key").withBaseUrl(uri + "/v1beta").build());
   }
 }

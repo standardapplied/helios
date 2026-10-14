@@ -1,5 +1,8 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Partial]
-Error[message=Interaction completed with status failed, cause=null, partial=Response[content=Partial, parsed=null, toolCalls=[], finishReason=ERROR, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]]
+KeepAlive[]
+onError GeminiException(Interaction completed with status failed) status=0
 == chat
 threw GeminiException(Interaction completed with status failed) status=0

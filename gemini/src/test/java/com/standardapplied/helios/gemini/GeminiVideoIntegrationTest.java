@@ -88,7 +88,8 @@ class GeminiVideoIntegrationTest {
               .withFileReferences(List.of(managed.reference()))
               .build();
 
-      var response = model.chat(List.of(message), OutputSchema.of(VideoObservation.class));
+      var response =
+          model.chat(List.of(message), List.of(), OutputSchema.of(VideoObservation.class));
 
       assertNotNull(response.parsed());
     }

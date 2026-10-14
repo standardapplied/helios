@@ -4,6 +4,7 @@ package com.standardapplied.helios.core.test;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetAddress;
@@ -27,7 +28,7 @@ public final class ModelHarness {
    */
   public static final String NEXT_RESPONSE = "=== next response ===\n";
 
-  private static final List<Message> PROMPT = List.of(Message.user("Hi"));
+  static final List<Message> PROMPT = List.of(Message.user("Hi"));
 
   private ModelHarness() {}
 
@@ -48,8 +49,9 @@ public final class ModelHarness {
   }
 
   /**
-   * The transcript of the recorded golden {@code fixture}: every event {@code chatStream} yields,
-   * then what {@code chat} returns or throws and the body of every follow-up request it sent.
+   * The transcript of the recorded golden {@code fixture}: every chunk {@code chatStream} publishes
+   * and how it ends, then what {@code chat} returns or throws and the body of every follow-up
+   * request it sent.
    */
   public static String transcript(String fixture, Function<URI, Model> modelAt) {
     return transcript(fixture, modelAt, UnaryOperator.identity());
@@ -62,10 +64,14 @@ public final class ModelHarness {
   public static String transcript(
       String fixture, Function<URI, Model> modelAt, UnaryOperator<String> canonical) {
     var render = new Transcript(canonical);
-    var replies = Arrays.asList(Golden.read(fixture).split(NEXT_RESPONSE));
+    var replies = replies(fixture);
     var text = new StringBuilder("== chatStream\n");
     exchange(
-        replies, modelAt, model -> text.append(render.events(model.chatStream(PROMPT, List.of()))));
+        replies,
+        modelAt,
+        model ->
+            text.append(
+                render.stream(model.chatStream(PROMPT, List.of(), new CancellationToken()))));
     text.append("== chat\n");
     var requests =
         exchange(
@@ -76,5 +82,10 @@ public final class ModelHarness {
       text.append("== follow-up request\n").append(canonical.apply(request.body())).append('\n');
     }
     return text.toString();
+  }
+
+  /** The responses recorded in {@code fixture}, in order. */
+  static List<String> replies(String fixture) {
+    return Arrays.asList(Golden.read(fixture).split(NEXT_RESPONSE));
   }
 }

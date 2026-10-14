@@ -1,0 +1,17 @@
+data: {"event_type":"interaction.created","interaction":{"id":"int_xyz","status":"in_progress"}}
+
+data: {"event_type":"step.start","index":0,"step":{"type":"function_call","id":"call_1","name":"weather"}}
+
+data: {"event_type":"step.delta","index":0,"arguments_delta":"{\"city\""}
+
+=== hold ===
+data: {"event_type":"step.delta","index":0,"arguments_delta":":\"Paris\"}"}
+
+data: {"event_type":"step.stop","index":0,"status":"done"}
+
+data: {"event_type":"interaction.status_update","interaction_id":"int_xyz","status":"requires_action"}
+
+data: {"event_type":"interaction.completed","interaction":{"id":"int_xyz","status":"requires_action","usage":{"total_input_tokens":120,"total_output_tokens":30,"total_tokens":150,"total_cached_tokens":0}}}
+
+data: [DONE]
+

@@ -32,14 +32,17 @@ import java.util.concurrent.TimeoutException;
  * The events of one server-sent-event response. Owns the response body: reads it a line at a time,
  * failing a line that does not arrive within the idle timeout, hands the data of each event the
  * lines frame to the provider's {@link Parser}, and closes the body and its reader thread once the
- * stream ends, fails or is closed.
+ * stream ends, fails or is closed. Every event the lines frame yields one stream event: an event
+ * with no data, or whose data the parser yields nothing for, yields a {@link
+ * StreamEvent.KeepAlive}, so a consumer sees each frame as proof the stream is alive.
  *
- * <p>A stream ends with exactly one terminal event: the {@link StreamEvent.Done} or {@link
- * StreamEvent.Error} the parser yields, or an error this reader raises. A body that ends before the
- * parser's terminal is never a completion: it ends in an error whose cause is an {@link
- * EOFException}. A failure to read ends in an error carrying its {@link IOException}, an idle
- * timeout or an oversized line or event one carrying the provider's own exception. Each error
- * carries the parser's {@link Parser#partial()}. {@link SseFrames} frames the lines into events.
+ * <p>A stream that is not closed first ends with exactly one terminal event: the {@link
+ * StreamEvent.Done} or {@link StreamEvent.Error} the parser yields, or an error this reader raises.
+ * A body that ends before the parser's terminal is never a completion: it ends in an error whose
+ * cause is an {@link EOFException}. A failure to read ends in an error carrying its {@link
+ * IOException}, an idle timeout or an oversized line or event one carrying the provider's own
+ * exception. Each error carries the parser's {@link Parser#partial()}. {@link SseFrames} frames the
+ * lines into events.
  */
 public final class SseReader implements CloseableIterator<StreamEvent> {
 
@@ -51,7 +54,8 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
      * StreamEvent.Error}. A {@link StreamEvent.Done} or {@link StreamEvent.Error} ends the stream.
      *
      * @param payload the event's data, trimmed; never empty or {@code [DONE]}
-     * @return the event the payload yields, or {@code null} when it yields none
+     * @return the event the payload yields, or {@code null} when it yields none, which the reader
+     *     passes on as a {@link StreamEvent.KeepAlive}
      */
     StreamEvent parse(String payload);
 
@@ -150,21 +154,17 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
 
   private StreamEvent readNextEvent() {
     try {
-      for (var payload = frames.payload(this::readLine);
-          payload != null;
-          payload = frames.payload(this::readLine)) {
-        var event = parser.parse(payload);
-        if (event instanceof StreamEvent.Done || event instanceof StreamEvent.Error) {
-          close();
-          return event;
-        }
-        if (event != null) {
-          return event;
-        }
+      var payload = frames.payload(this::readLine);
+      if (payload == null) {
+        return failed(
+            "Stream ended before its terminal event",
+            new EOFException("the response body ended before the provider's terminal event"));
       }
-      return failed(
-          "Stream ended before its terminal event",
-          new EOFException("the response body ended before the provider's terminal event"));
+      var event = payload.isEmpty() ? null : parser.parse(payload);
+      if (event instanceof StreamEvent.Done || event instanceof StreamEvent.Error) {
+        close();
+      }
+      return event == null ? new StreamEvent.KeepAlive() : event;
     } catch (ProviderException e) {
       return failed(e.getMessage(), e);
     } catch (IOException e) {

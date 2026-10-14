@@ -10,9 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.ProviderException;
-import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetAddress;
@@ -133,14 +134,15 @@ public final class RedirectTrap implements AutoCloseable {
       throws IOException {
     try (var trap = open(scenario);
         var model = provider.apply(trap.config())) {
-      var error = assertThrows(errorType, () -> model.chat(List.of(Message.user(PROMPT))));
+      var error =
+          assertThrows(errorType, () -> model.chat(List.of(Message.user(PROMPT)), List.of()));
       trap.assertRefused(error, error.getMessage());
     }
   }
 
   /**
-   * Assert {@code chatStream} on a model built against the origin yields one error event whose
-   * cause is {@code errorType} carrying the redirect status, having forwarded nothing.
+   * Assert {@code chatStream} on a model built against the origin ends, before any chunk, in {@code
+   * onError} with {@code errorType} carrying the redirect status, having forwarded nothing.
    *
    * @param scenario the redirect the origin answers with
    * @param provider builds the provider's model from a config
@@ -153,11 +155,14 @@ public final class RedirectTrap implements AutoCloseable {
       Class<? extends ProviderException> errorType)
       throws IOException {
     try (var trap = open(scenario);
-        var model = provider.apply(trap.config());
-        var stream = model.chatStream(List.of(Message.user(PROMPT)))) {
-      var event = assertInstanceOf(StreamEvent.Error.class, stream.next());
-      assertFalse(stream.hasNext(), "events after the error");
-      trap.assertRefused(assertInstanceOf(errorType, event.cause()), event.message());
+        var model = provider.apply(trap.config())) {
+      var recorder = new RecordingSubscriber<ModelChunk>();
+      model
+          .chatStream(List.of(Message.user(PROMPT)), List.of(), new CancellationToken())
+          .subscribe(recorder);
+      var error = assertInstanceOf(errorType, recorder.awaitFailure());
+      assertEquals(List.of(), recorder.items(), "chunks before the error");
+      trap.assertRefused(error, error.getMessage());
     }
   }
 
@@ -175,7 +180,7 @@ public final class RedirectTrap implements AutoCloseable {
     try (var trap = open(new Scenario(307, Shape.PORT_CHANGE));
         var model = provider.apply(trap.config())) {
       for (var call = 0; call < 2; call++) {
-        assertThrows(errorType, () -> model.chat(List.of(Message.user(PROMPT))));
+        assertThrows(errorType, () -> model.chat(List.of(Message.user(PROMPT)), List.of()));
       }
       assertEquals(2, trap.origin.requests().size(), "origin requests");
       assertEquals(1, trap.origin.connections(), "origin connections");

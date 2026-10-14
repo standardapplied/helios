@@ -1,5 +1,11 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Checking.]
-Error[message=Stream ended before its terminal event, cause=EOFException(the response body ended before the provider's terminal event), partial=Response[content=Checking., parsed=null, toolCalls=[], finishReason=ERROR, usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38], thinking=null, citations=[], metadata={}]]
+KeepAlive[]
+ToolUseStart[callId=toolu_1, toolName=weather]
+ToolUseDelta[callId=toolu_1, argumentsDelta={"city":]
+ToolUseDelta[callId=toolu_1, argumentsDelta="Par]
+onError TransientStreamException(Stream ended before its terminal event) provider=anthropic caused by EOFException(the response body ended before the provider's terminal event)
 == chat
 threw TransientStreamException(Stream ended before its terminal event) provider=anthropic caused by EOFException(the response body ended before the provider's terminal event)

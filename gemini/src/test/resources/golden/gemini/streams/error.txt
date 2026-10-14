@@ -1,5 +1,7 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Partial]
-Error[message=API error: 503: The model is overloaded, cause=GeminiException(API error: 503: The model is overloaded) status=503, partial=Response[content=Partial, parsed=null, toolCalls=[], finishReason=ERROR, usage=null, thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]]
+onError GeminiException(API error: 503: The model is overloaded) status=503
 == chat
 threw GeminiException(API error: 503: The model is overloaded) status=503

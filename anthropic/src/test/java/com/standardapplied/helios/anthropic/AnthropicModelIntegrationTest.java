@@ -18,6 +18,7 @@ import com.standardapplied.helios.core.model.Reasoning;
 import com.standardapplied.helios.core.model.Reasoning.Display;
 import com.standardapplied.helios.core.model.Reasoning.Level;
 import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.Description;
 import com.standardapplied.helios.core.schema.Nullable;
 import com.standardapplied.helios.core.schema.OutputSchema;
@@ -93,7 +94,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
                     "Three friends split a bill of $187.40 so that Ana pays twice what Ben pays and"
                         + " Cy pays $12 more than Ben. How much does each pay? Verify the total.")));
     try (var thinkingModel = sonnet46(config)) {
-      var response = Accepted.textReply(thinkingModel.chat(messages));
+      var response = Accepted.textReply(thinkingModel.chat(messages, List.of()));
 
       assumeTrue(
           response.hasThinking(),
@@ -103,7 +104,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
       assertFalse(ThinkingBlock.decodeAll(response.metadata()).isEmpty());
       messages.add(response.toMessage());
       messages.add(Message.user("Now split it four ways evenly."));
-      Accepted.textReply(thinkingModel.chat(messages));
+      Accepted.textReply(thinkingModel.chat(messages, List.of()));
     }
   }
 
@@ -204,7 +205,9 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
           var response =
               availableOrSkip(
                   modelId,
-                  () -> candidate.chat(List.of(Message.user("Reply with the single word: ok"))));
+                  () ->
+                      candidate.chat(
+                          List.of(Message.user("Reply with the single word: ok")), List.of()));
 
           Accepted.textReply(response);
           assertTrue(calculator.cost(candidate.id(), response.usage()).microUsd() > 0, label);
@@ -290,7 +293,8 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
             .withTopP(0.95)
             .withMaxOutputTokens(4_000);
     try (var sonnet = sonnet46(config)) {
-      Accepted.textReply(sonnet.chat(List.of(Message.user("Reply with the single word: ok"))));
+      Accepted.textReply(
+          sonnet.chat(List.of(Message.user("Reply with the single word: ok")), List.of()));
     }
   }
 
@@ -414,7 +418,8 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   @Test
   void datedSnapshotIdKeepsItsFamilyRequestShape() {
     try (var haiku = modelFor("claude-haiku-4-5-20251001", new Reasoning.Off())) {
-      Accepted.textReply(haiku.chat(List.of(Message.user("What is 17 * 23? Think it through."))));
+      Accepted.textReply(
+          haiku.chat(List.of(Message.user("What is 17 * 23? Think it through.")), List.of()));
     }
   }
 
@@ -422,7 +427,10 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   void aStreamCompletesOnlyAtMessageStopWithTheFinishReasonOfItsStopReason() {
     var response =
         Accepted.stream(
-            model.chatStream(List.of(Message.user("Reply with the single word: ok")), List.of()));
+            model.chatStream(
+                List.of(Message.user("Reply with the single word: ok")),
+                List.of(),
+                new CancellationToken()));
 
     var stopReason = response.metadata().get(AnthropicResponseAssembler.STOP_REASON_KEY);
     assertNotNull(stopReason, "message_delta carried no stop_reason");
@@ -435,7 +443,9 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
       Accepted.textReply(
           Accepted.stream(
               sonnet.chatStream(
-                  List.of(Message.user("Count from 1 to 3, one per line.")), List.of())));
+                  List.of(Message.user("Count from 1 to 3, one per line.")),
+                  List.of(),
+                  new CancellationToken())));
     }
   }
 
@@ -460,7 +470,8 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
             .withReasoning(new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))
             .build();
     try (var opus = new AnthropicProvider().create(modelId.id(), config)) {
-      Accepted.textReply(opus.chat(List.of(Message.user("What is 2+2? Think briefly."))));
+      Accepted.textReply(
+          opus.chat(List.of(Message.user("What is 2+2? Think briefly.")), List.of()));
     }
   }
 
@@ -497,7 +508,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
         Accepted.parsedOrSkip(
             AnthropicModelId.CLAUDE_SONNET_4_6.id(),
             STRUCTURED_COUNTERPART,
-            () -> model.chat(messages, OutputSchema.of(UiResponse.class)));
+            () -> model.chat(messages, List.of(), OutputSchema.of(UiResponse.class)));
 
     assertNotNull(response.parsed().component());
   }

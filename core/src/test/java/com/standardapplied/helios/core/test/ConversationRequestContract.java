@@ -88,7 +88,7 @@ public abstract class ConversationRequestContract {
   private Map<String, Object> send(List<Message> messages) {
     var requests =
         ModelHarness.exchange(
-            List.of(Golden.read(reply())), modelAt(), model -> model.chat(messages));
+            List.of(Golden.read(reply())), modelAt(), model -> model.chat(messages, List.of()));
     assertEquals(1, requests.size());
     return parse(requests.getFirst().body());
   }
