@@ -39,7 +39,7 @@ Helios is used in production but has documented limitations that you should unde
 
 ### What's hardened
 
-- **Fail-secure defaults.** `RuntimeServer.Builder` binds `127.0.0.1` (loopback) by default — external traffic is explicit opt-in via `withHost("0.0.0.0")`. The HTTP routes are unauthenticated and create real model-spending sessions, so deployers that expose externally should sit behind authenticated fronting infrastructure.
+- **Fail-secure defaults.** `RuntimeServer.Builder` binds `127.0.0.1` (loopback) by default — external traffic is explicit opt-in via `withHost("0.0.0.0")`. Every HTTP route authenticates the request through the configured `Authenticator` and acts only on the caller's own sessions; an unauthenticated server (`withoutAuthentication()`) is accepted only on a loopback bind.
 - **Cooperative cancellation, no `Error` swallowing.** `RetryPolicy` and the session loop catch `Exception`, not `Throwable` — OOM / StackOverflow / LinkageError escape cleanly so the host JVM dies rather than retrying a corrupted process. `Tool.execute` preserves the calling thread's interrupt status when the executor's exception chain carries `InterruptedException`.
 - **Sandboxed subprocess execution with dedicated RPC channel and descendant reaping.** The `JvmSandbox` ↔ host RPC runs on a per-session Unix domain socket bound in a private temp directory (mode 0700); the host accepts exactly one connection then closes the listener, so no other process — including a JShell snippet inside the subprocess — can forge frames by writing to subprocess stdout. (Earlier versions used a `\0RPC:`-prefixed channel multiplexed on stdout, which a snippet could forge via `new PrintStream(new FileOutputStream(FileDescriptor.out))`. C1 in the original review.) Subprocess stdout stays for captured output only and is never parsed as RPC. `JvmSandbox.close()` and its JVM-shutdown-hook path snapshot descendants before killing the parent, then forcibly destroy the snapshot — snippets that call `Runtime.exec(...)` cannot orphan grandchildren past sandbox lifetime. A snippet that outlives its timeout is stopped through `jshell.stop()`, repeated until it and every thread it started have ended; one still running after `JvmSandboxConfig.stopGrace` (5 s by default) cannot be reached inside the JVM, so the sandbox answers the execute and halts with exit code 3.
 - **Path-traversal jails on every filesystem boundary.** `WorkspaceRoot` backing the session's `Read` / `Grep` / `Glob` tools and the filesystem memory backend (lexical `..`/absolute refusal + canonicalisation of the deepest existing prefix + no-follow opens), `OnnxModelDownloader` (refuses absolute paths and traversal in HuggingFace-supplied filenames), and `CommandGrant` (per-call temp working directory, argv pre-scan refusing registered secrets).
@@ -253,7 +253,7 @@ See [Sessions](#sessions-helios-session) below.
 
 ### 3) HTTP surface
 
-`helios-runtime` exposes a session over REST + SSE so non-JVM clients can drive it. `POST /sessions`, `POST /sessions/{id}/messages`, SSE `GET /sessions/{id}/events`, long-poll `GET /sessions/{id}/result?timeout=<s>`, `DELETE /sessions/{id}`. See `runtime/` for routes.
+`helios-runtime` exposes a session over REST + SSE so non-JVM clients can drive it. `POST /sessions`, `POST /sessions/{id}/messages`, SSE `GET /sessions/{id}/events`, long-poll `GET /sessions/{id}/result?timeout=<s>`, `DELETE /sessions/{id}`, each authenticated and scoped to the caller's own sessions (see [HTTP surface defaults](#http-surface-defaults)). See `runtime/` for routes.
 
 ## Sessions (`helios-session`)
 
@@ -680,15 +680,22 @@ Descriptor confinement prevents symlink substitution from redirecting an operati
 
 ### HTTP surface defaults
 
-`RuntimeServer.Builder` binds **`127.0.0.1` by default** (loopback only). The routes are unauthenticated; expose externally only behind authenticated fronting infrastructure:
+`RuntimeServer.Builder` binds **`127.0.0.1` by default** (loopback only). Every route authenticates the request through one `Authenticator` before it reads the body or looks up a session, and a session is reachable only by the `Principal` (tenant and subject) that created it; another principal's session answers the same `404` as an unknown id. A missing, malformed, expired, revoked or forged credential is `401`. When an identity expires or is revoked, an open SSE stream closes and a pending result long poll answers `401`.
+
+Behind an authenticating reverse proxy, trust the identity it asserts only on its connections:
 
 ```java
 var server = RuntimeServer.builder()
     .withRegistry(SessionRegistry.inMemory())
     .withOptionsFactory(sessionId -> ...)
-    // .withHost("0.0.0.0")  // opt-in for external traffic; document your auth story first
+    .withHost("0.0.0.0")
+    .withAuthenticator(TrustedProxyAuthenticator.newBuilder()
+        .withTrustedProxy(InetAddress.getByName("10.0.0.5"))  // reads X-Authenticated-Tenant / -Subject
+        .build())
     .build();
 ```
+
+The proxy must strip client-supplied copies of both headers. Any other verifier (a JWT library, mutual TLS) plugs in as an `Authenticator` returning an `Authentication` with the principal, the credential's remaining lifetime and a stage that completes on revocation. `withoutAuthentication()` serves a loopback bind as one local principal; on any other host `build()` refuses it, as it refuses a non-loopback host with no authenticator.
 
 ## Design Principles
 

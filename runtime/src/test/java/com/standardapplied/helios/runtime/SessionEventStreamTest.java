@@ -160,6 +160,36 @@ final class SessionEventStreamTest {
   }
 
   @Test
+  void endingCancelsTheSubscriptionAndEndsTheStreamWithoutAFurtherEvent() {
+    var sink = new RecordingSink(null);
+    var subscription = new RecordingSubscription();
+    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
+    stream.onSubscribe(subscription);
+
+    stream.end();
+
+    assertTrue(subscription.cancelled.get());
+    awaitEnd(stream);
+    assertEquals(List.of("Ready:{}"), sink.emitted);
+    assertTrue(sink.closed.get());
+  }
+
+  @Test
+  void aSubscriptionArrivingAfterTheEndIsCancelledAndNothingIsRequested() {
+    var sink = new RecordingSink(null);
+    var subscription = new RecordingSubscription();
+    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
+    stream.end();
+
+    stream.onSubscribe(subscription);
+
+    assertTrue(subscription.cancelled.get());
+    assertEquals(0L, subscription.requested.get());
+    assertTrue(sink.emitted.isEmpty());
+    awaitEnd(stream);
+  }
+
+  @Test
   void aPublisherErrorEndsTheStream() {
     var sink = new RecordingSink(null);
     var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
