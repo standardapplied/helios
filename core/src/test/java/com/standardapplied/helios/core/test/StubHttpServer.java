@@ -3,9 +3,7 @@
 package com.standardapplied.helios.core.test;
 
 import java.io.BufferedInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.net.InetAddress;
@@ -15,13 +13,13 @@ import java.net.Socket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 /**
@@ -29,7 +27,10 @@ import java.util.function.Function;
  * the reply its handler computes, and keeps connections alive. Because a request is recorded before
  * its reply is written, a client call that has returned has had every request it sent recorded: a
  * test asserts what arrived without waiting. Speaks only what the JDK {@code HttpClient} sends: a
- * request line, headers and a {@code Content-Length} body.
+ * request line, headers and a {@code Content-Length} body. A request it cannot read, or a handler
+ * that throws or returns no reply, fails the server: it drops every connection, and {@link
+ * #requests()}, {@link #connections()} and {@link #close()} throw an {@link AssertionError} naming
+ * the misuse.
  */
 public final class StubHttpServer implements AutoCloseable {
 
@@ -37,13 +38,21 @@ public final class StubHttpServer implements AutoCloseable {
   public record Request(String requestLine, Map<String, String> headers, String body) {}
 
   /** The reply to a request; {@code Content-Length} is added. */
-  public record Reply(int status, Map<String, String> headers, String body) {}
+  public record Reply(int status, Map<String, String> headers, String body) {
+
+    /** Copies {@code headers}; neither it nor {@code body} may be null. */
+    public Reply {
+      headers = Map.copyOf(headers);
+      Objects.requireNonNull(body, "body");
+    }
+  }
 
   private final ServerSocket serverSocket;
   private final Function<Request, Reply> handler;
   private final List<Request> requests = new CopyOnWriteArrayList<>();
   private final AtomicInteger connections = new AtomicInteger();
   private final Set<Socket> openSockets = ConcurrentHashMap.newKeySet();
+  private final AtomicReference<AssertionError> failure = new AtomicReference<>();
 
   private StubHttpServer(ServerSocket serverSocket, Function<Request, Reply> handler) {
     this.serverSocket = serverSocket;
@@ -83,19 +92,37 @@ public final class StubHttpServer implements AutoCloseable {
 
   /** Every request received so far, in arrival order. */
   public List<Request> requests() {
+    PlainHttp.throwIfFailed(failure.get());
     return List.copyOf(requests);
   }
 
   /** How many connections this server has accepted. */
   public int connections() {
+    PlainHttp.throwIfFailed(failure.get());
     return connections.get();
   }
 
   @Override
   public void close() throws IOException {
+    shutDown();
+    PlainHttp.throwIfFailed(failure.get());
+  }
+
+  private void shutDown() throws IOException {
     serverSocket.close();
     for (var socket : openSockets) {
       socket.close();
+    }
+  }
+
+  private void fail(AssertionError error) {
+    if (!failure.compareAndSet(null, error)) {
+      return;
+    }
+    try {
+      shutDown();
+    } catch (IOException e) {
+      error.addSuppressed(e);
     }
   }
 
@@ -114,45 +141,39 @@ public final class StubHttpServer implements AutoCloseable {
 
   private void serve(Socket socket) {
     try (socket) {
-      var in = new BufferedInputStream(socket.getInputStream());
-      var out = socket.getOutputStream();
-      for (var request = readRequest(in); request != null; request = readRequest(in)) {
-        requests.add(request);
-        write(out, handler.apply(request));
-      }
+      answer(socket);
     } catch (IOException disconnected) {
       openSockets.remove(socket);
     }
   }
 
-  private static Request readRequest(InputStream in) throws IOException {
-    var requestLine = readLine(in);
-    if (requestLine == null) {
-      return null;
+  /** Records a misuse before {@link #serve} closes the socket, so a dropped client finds it. */
+  private void answer(Socket socket) throws IOException {
+    var in = new BufferedInputStream(socket.getInputStream());
+    var out = socket.getOutputStream();
+    try {
+      for (var request = PlainHttp.readRequest(in);
+          request != null;
+          request = PlainHttp.readRequest(in)) {
+        requests.add(request);
+        write(out, reply(request));
+      }
+    } catch (AssertionError misuse) {
+      fail(misuse);
     }
-    var headers = new TreeMap<String, String>();
-    for (var line = readLine(in); line != null && !line.isEmpty(); line = readLine(in)) {
-      var colon = line.indexOf(':');
-      headers.put(
-          line.substring(0, colon).trim().toLowerCase(Locale.ROOT),
-          line.substring(colon + 1).trim());
-    }
-    var length = Integer.parseInt(headers.getOrDefault("content-length", "0"));
-    var body = new String(in.readNBytes(length), StandardCharsets.UTF_8);
-    return new Request(requestLine, Map.copyOf(headers), body);
   }
 
-  static String readLine(InputStream in) throws IOException {
-    var line = new ByteArrayOutputStream();
-    for (var b = in.read(); b != '\n'; b = in.read()) {
-      if (b == -1) {
-        return line.size() == 0 ? null : line.toString(StandardCharsets.ISO_8859_1);
-      }
-      if (b != '\r') {
-        line.write(b);
-      }
+  private Reply reply(Request request) {
+    Reply reply;
+    try {
+      reply = handler.apply(request);
+    } catch (RuntimeException | AssertionError e) {
+      throw new AssertionError("The handler failed on " + request.requestLine(), e);
     }
-    return line.toString(StandardCharsets.ISO_8859_1);
+    if (reply == null) {
+      throw new AssertionError("The handler returned no reply to " + request.requestLine());
+    }
+    return reply;
   }
 
   private static void write(OutputStream out, Reply reply) throws IOException {
