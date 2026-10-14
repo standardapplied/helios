@@ -122,9 +122,6 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
     public void request(long n) {
       Flow.Subscription segment;
       synchronized (lock) {
-        if (cancelled || invalidRequest != null) {
-          return;
-        }
         if (n > 0) {
           demand = demand + n < 0 ? Long.MAX_VALUE : demand + n;
         } else {
@@ -178,7 +175,7 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
           subscription.cancel();
         } else if (invalid != null) {
           subscription.request(invalid);
-        } else if (carried > 0) {
+        } else {
           subscription.request(carried);
         }
       }
@@ -233,13 +230,7 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
       public void onComplete() {
         if (next == null) {
           downstream.onComplete();
-          return;
-        }
-        boolean stop;
-        synchronized (lock) {
-          stop = cancelled;
-        }
-        if (!stop) {
+        } else {
           exchange.stream(next, cancellation).subscribe(new Segment());
         }
       }
