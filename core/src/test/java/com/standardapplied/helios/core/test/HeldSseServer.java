@@ -4,7 +4,6 @@ package com.standardapplied.helios.core.test;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.net.InetAddress;
@@ -14,7 +13,6 @@ import java.net.Socket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -88,7 +86,7 @@ public final class HeldSseServer implements AutoCloseable {
 
     private void await(String description, CountDownLatch latch) {
       Await.latch(description, latch);
-      throwIfFailed(failure);
+      PlainHttp.throwIfFailed(failure);
     }
 
     private synchronized boolean awaitGate(int gate) throws InterruptedException {
@@ -175,20 +173,14 @@ public final class HeldSseServer implements AutoCloseable {
 
   /** How many requests have arrived. */
   public int requests() {
-    throwIfFailed(failure.get());
+    PlainHttp.throwIfFailed(failure.get());
     return next.get();
   }
 
   @Override
   public void close() throws IOException {
     shutDown();
-    throwIfFailed(failure.get());
-  }
-
-  private static void throwIfFailed(AssertionError failure) {
-    if (failure != null) {
-      throw new AssertionError(failure.getMessage(), failure);
-    }
+    PlainHttp.throwIfFailed(failure.get());
   }
 
   private void shutDown() throws IOException {
@@ -246,7 +238,7 @@ public final class HeldSseServer implements AutoCloseable {
     Reply current = null;
     try {
       var in = new BufferedInputStream(socket.getInputStream());
-      while (readRequest(in)) {
+      while (PlainHttp.readRequest(in) != null) {
         current = nextReply();
         current.requested.countDown();
         requests.add(Optional.of(current));
@@ -268,40 +260,5 @@ public final class HeldSseServer implements AutoCloseable {
       throw new AssertionError("Request " + (index + 1) + " arrived with no reply left for it");
     }
     return replies.get(index);
-  }
-
-  private static boolean readRequest(InputStream in) throws IOException {
-    if (StubHttpServer.readLine(in) == null) {
-      return false;
-    }
-    var length = 0;
-    for (var line = StubHttpServer.readLine(in);
-        line != null && !line.isEmpty();
-        line = StubHttpServer.readLine(in)) {
-      var colon = line.indexOf(':');
-      if (colon < 0) {
-        throw new AssertionError("Request header without a colon: " + line);
-      }
-      var name = line.substring(0, colon).trim().toLowerCase(Locale.ROOT);
-      var value = line.substring(colon + 1).trim();
-      if (name.equals("transfer-encoding")) {
-        throw new AssertionError(
-            "Request body sent with Transfer-Encoding: "
-                + value
-                + "; only a Content-Length body is read");
-      }
-      if (name.equals("content-length")) {
-        length = contentLength(value);
-      }
-    }
-    in.readNBytes(length);
-    return true;
-  }
-
-  private static int contentLength(String value) {
-    if (!value.matches("\\d{1,9}")) {
-      throw new AssertionError("Unreadable Content-Length: " + value);
-    }
-    return Integer.parseInt(value);
   }
 }
