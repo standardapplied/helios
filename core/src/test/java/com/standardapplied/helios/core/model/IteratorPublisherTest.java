@@ -13,6 +13,7 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.RecordingSubscriber;
 import java.util.List;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -300,6 +301,21 @@ class IteratorPublisherTest {
   }
 
   @Test
+  void cancellingInterruptsALaterPullThatIgnoresClose() {
+    var source = new Source(List.of("a"));
+    source.blockAt = 1;
+    source.ignoresClose = true;
+    var subscriber = new RecordingSubscriber<String>();
+
+    publisherOf(source).subscribe(subscriber);
+    assertEquals("a", subscriber.next());
+    Await.latch("the second pull blocked", source.blocked);
+    subscriber.cancel();
+
+    Await.latch("the owned thread interrupted", source.interrupted);
+  }
+
+  @Test
   void cancellingWhileWaitingForDemandEndsTheSignals() {
     var source = new Source(List.of("a", "b"));
     var subscriber = new RecordingSubscriber<String>(1);
@@ -325,6 +341,66 @@ class IteratorPublisherTest {
     assertEquals(0, opened.get());
     assertFalse(subscriber.ended());
     assertEquals(0, token.activeCallbackCountForTests());
+  }
+
+  @Test
+  void cancellingTheTokenLeavesTheSubscribersOwnWaitUninterrupted() {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var interrupted = new CompletableFuture<Boolean>();
+    var subscriber = new RecordingSubscriber<String>();
+
+    publisherOf(new Source(List.of("a")))
+        .subscribe(
+            onEachItem(
+                subscriber,
+                () -> {
+                  entered.countDown();
+                  try {
+                    release.await();
+                    interrupted.complete(false);
+                  } catch (InterruptedException e) {
+                    interrupted.complete(true);
+                  }
+                }));
+    Await.latch("onNext entered", entered);
+    token.cancel("user stopped");
+    release.countDown();
+
+    assertFalse(Await.value("the subscriber's own wait", interrupted));
+  }
+
+  @Test
+  void aCancelledStreamsErrorArrivesWithoutTheInterruptThatEndedThePull() {
+    var source = new Source(List.of());
+    source.blockAt = 0;
+    source.ignoresClose = true;
+    source.restoresInterrupt = true;
+    var interruptedAtError = new CompletableFuture<Boolean>();
+    var subscriber =
+        new Flow.Subscriber<String>() {
+          @Override
+          public void onSubscribe(Flow.Subscription subscription) {
+            subscription.request(Long.MAX_VALUE);
+          }
+
+          @Override
+          public void onNext(String item) {}
+
+          @Override
+          public void onError(Throwable failure) {
+            interruptedAtError.complete(Thread.currentThread().isInterrupted());
+          }
+
+          @Override
+          public void onComplete() {}
+        };
+
+    publisherOf(source).subscribe(subscriber);
+    Await.latch("the pull blocked", source.blocked);
+    token.cancel("user stopped");
+
+    assertFalse(Await.value("onError", interruptedAtError));
   }
 
   @Test
@@ -499,7 +575,8 @@ class IteratorPublisherTest {
 
   /**
    * A source of fixed items that can block a pull until it is closed, or interrupted when it
-   * ignores close, and can fail its last pull.
+   * ignores close (then ending with the interrupt restored, when asked), and can fail its last
+   * pull.
    */
   private static final class Source implements CloseableIterator<String> {
 
@@ -513,6 +590,7 @@ class IteratorPublisherTest {
     private int next;
     private int blockAt = -1;
     private boolean ignoresClose;
+    private boolean restoresInterrupt;
     private Throwable failure;
 
     Source(List<String> items) {
@@ -534,6 +612,10 @@ class IteratorPublisherTest {
           unblock.await();
         } catch (InterruptedException e) {
           interrupted.countDown();
+          if (restoresInterrupt) {
+            Thread.currentThread().interrupt();
+            return false;
+          }
           throw new IllegalStateException("interrupted", e);
         }
       }
