@@ -319,6 +319,32 @@ class StreamingModelTest {
   }
 
   @Test
+  void chatStreamIgnoresWhatAnEventStreamSendsAfterItFailedTheTurn() {
+    var reset = new IOException("reset");
+    publisher =
+        subscriber ->
+            subscriber.onSubscribe(
+                new Flow.Subscription() {
+                  @Override
+                  public void request(long n) {
+                    subscriber.onNext(error("Stream read error", reset));
+                    subscriber.onNext(new StreamEvent.TextDelta("late"));
+                    subscriber.onError(new IllegalStateException("late"));
+                    subscriber.onComplete();
+                  }
+
+                  @Override
+                  public void cancel() {}
+                });
+
+    var subscriber = streamed(model(config()));
+
+    assertSame(reset, subscriber.awaitFailure().getCause());
+    assertEquals(List.of(), subscriber.items());
+    assertEquals(0, subscriber.violations());
+  }
+
+  @Test
   void chatStreamEndsAFailedTurnWithItsExceptionEvenWhenClosingTheStreamThrows() {
     var reset = new IOException("reset");
     var closes = new AtomicInteger();
