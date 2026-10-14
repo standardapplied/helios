@@ -122,6 +122,23 @@ class ScriptedModelTest {
   }
 
   @Test
+  void aStructuredStreamOfAMatchingAnswerPublishesItsChunks() {
+    var json = "{\"answer\": \"yes\", \"score\": 4}";
+    var model = ScriptedModel.newBuilder().withTextTurn(json).build();
+    var chunks = new RecordingSubscriber<ModelChunk>();
+
+    model
+        .chatStream(
+            List.of(Message.user("judge")),
+            List.of(),
+            OutputSchema.of(Verdict.class),
+            new CancellationToken())
+        .subscribe(chunks);
+
+    assertEquals(new ModelChunk.TextDelta(json), chunks.awaitCompletion().getFirst());
+  }
+
+  @Test
   void toolCallTurnSkipsStructuredParse() {
     var call = ToolCall.newBuilder().withId("tc-1").withName("search").build();
     var model = ScriptedModel.newBuilder().withToolCallsTurn(call).build();
