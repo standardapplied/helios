@@ -96,7 +96,8 @@ public sealed interface QueryEvent
    *
    * <p>{@code text} may be empty — providers occasionally emit empty deltas during a stream.
    * Subscribers concatenate the {@code text} across the turn to assemble the full assistant
-   * message.
+   * message. A {@link TurnRetried} discards the failed attempt: the next attempt streams the
+   * message again from its start, so a subscriber restarts the turn's text there.
    *
    * @param sessionId the session id
    * @param turnIndex the turn index
@@ -113,7 +114,8 @@ public sealed interface QueryEvent
   }
 
   /**
-   * Assistant produced a reasoning / thinking delta (extended-thinking models only).
+   * Assistant produced a reasoning / thinking delta (extended-thinking models only). Like {@link
+   * AssistantText}, a {@link TurnRetried} restarts the turn's thinking.
    *
    * @param sessionId the session id
    * @param turnIndex the turn index
@@ -295,7 +297,9 @@ public sealed interface QueryEvent
    * com.standardapplied.helios.core.model.TransientStreamException}) and the agent loop is about to
    * retry the turn. Fires after each failed attempt, before the configured back-off delay; the next
    * attempt is the {@code attemptNumber + 1}-th overall. Subscribers can use this to surface
-   * "retrying…" UI affordances and to correlate per-attempt token usage in their own ledgers.
+   * "retrying…" UI affordances and to correlate per-attempt token usage in their own ledgers. The
+   * {@link AssistantText} and {@link AssistantThinking} deltas the failed attempt streamed are
+   * superseded: the next attempt streams its answer from the start.
    *
    * <p>Does <em>not</em> fire on the final exhausted attempt — that one terminates the session via
    * {@link ResultMessage.ErrorTransientStream} which is surfaced through the subsequent {@link
