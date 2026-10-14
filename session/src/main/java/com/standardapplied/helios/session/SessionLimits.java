@@ -36,13 +36,23 @@ import java.util.OptionalLong;
  *       they want to compact earlier (or use a tighter cost ceiling). Any positive value is treated
  *       as a hard cap and clamped against the model's actual window to avoid requesting more
  *       context than the provider supports.
- *   <li>{@code streamIdleTimeout}: 60 seconds — if a provider stream emits no chunk for this long,
- *       the turn fails with {@link com.standardapplied.helios.core.model.FinishReason#ERROR},
- *       surfaced as {@link ResultMessage.ErrorDuringExecution} with a {@code stream-idle-timeout}
- *       error code. Guards against silent-socket / hung-edge stalls that {@code maxWallClock} would
- *       otherwise catch only at the end of the wall-clock budget. Composes with stream retry — a
- *       turn that idle-times-out becomes a retry candidate when the provider classifies the failure
- *       as transient.
+ *   <li>{@code streamIdleTimeout}: 60 seconds — once a model stream has published its first chunk,
+ *       if it publishes none for this long the turn fails with {@link
+ *       com.standardapplied.helios.core.model.FinishReason#ERROR} and the stream is cancelled,
+ *       surfaced as {@link ResultMessage.ErrorDuringExecution} carrying the {@link
+ *       java.util.concurrent.TimeoutException}; the turn is not retried. Every chunk re-arms it,
+ *       including a {@link com.standardapplied.helios.core.model.ModelChunk.KeepAlive}, which a
+ *       provider publishes for each frame that carries no content. The clock does not run before
+ *       the first chunk: a provider's first frame arrives with its response headers, which a model
+ *       may hold back while it thinks, and that wait is bounded by {@code
+ *       ModelConfig.responseTimeout} (default 60 seconds, a retryable failure), {@code
+ *       maxWallClock} and cancellation. A {@link
+ *       com.standardapplied.helios.core.model.BlockingModel} publishes nothing until it answers, so
+ *       the clock does not run during its call. The defaults never race: once the stream is open
+ *       this clock always fires before the provider's per-line {@code
+ *       ModelConfig.streamIdleTimeout} (default 120 seconds), which guards direct {@code chat} /
+ *       {@code chatStream} callers. Guards against silent-socket / hung-edge stalls that {@code
+ *       maxWallClock} would otherwise catch only at the end of the wall-clock budget.
  *   <li>{@code streamRetryPolicy}: 3 attempts, 1 s/4 s/16 s exponential back-off capped at 30 s,
  *       ±25% jitter (see {@link StreamRetryPolicy#defaults()}). The loop retries a turn that failed
  *       with {@link com.standardapplied.helios.core.model.TransientStreamException}; on exhaustion
@@ -67,8 +77,8 @@ import java.util.OptionalLong;
  *     Must be non-negative. {@code 0} signals "auto" — the agent loop resolves an effective ceiling
  *     from {@link com.standardapplied.helios.core.model.Model#contextWindow()}. Any positive value
  *     is an explicit cap clamped against the model's actual window
- * @param streamIdleTimeout per-chunk idle ceiling on a model stream; must be non-null and strictly
- *     positive
+ * @param streamIdleTimeout per-chunk idle ceiling on a model stream, from its first chunk; must be
+ *     non-null and strictly positive
  * @param streamRetryPolicy how the loop retries a turn that failed with {@link
  *     com.standardapplied.helios.core.model.TransientStreamException}; non-null
  */
@@ -249,9 +259,10 @@ public record SessionLimits(
     }
 
     /**
-     * Set the per-chunk stream-idle ceiling. A model stream that emits no chunk within this
-     * duration is treated as stalled and the turn fails with {@link
-     * com.standardapplied.helios.core.model.FinishReason#ERROR}.
+     * Set the per-chunk stream-idle ceiling. A model stream that, after its first chunk, emits no
+     * chunk within this duration is treated as stalled and the turn fails with {@link
+     * com.standardapplied.helios.core.model.FinishReason#ERROR}. Keep it below the model's {@code
+     * ModelConfig.streamIdleTimeout} so the session's clock fires first.
      */
     public Builder withStreamIdleTimeout(Duration streamIdleTimeout) {
       this.streamIdleTimeout = streamIdleTimeout;

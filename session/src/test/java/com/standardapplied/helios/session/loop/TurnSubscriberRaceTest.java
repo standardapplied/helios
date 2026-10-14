@@ -60,8 +60,9 @@ final class TurnSubscriberRaceTest {
     var subscriber = newSubscriber(scheduler);
 
     subscriber.onSubscribe(new NoopSubscription());
+    subscriber.onNext(new ModelChunk.TextDelta("first"));
     var scheduledAtArm = scheduler.scheduleCount.get();
-    assertEquals(1L, scheduledAtArm, "onSubscribe must arm the idle timer exactly once");
+    assertEquals(1L, scheduledAtArm, "the first chunk must arm the idle timer exactly once");
 
     subscriber.onComplete();
     // Post-terminal chunk — illegal per Reactive Streams but Helios must handle it gracefully.
@@ -95,6 +96,7 @@ final class TurnSubscriberRaceTest {
     var scheduler = countingScheduler();
     var subscriber = newSubscriber(scheduler);
     subscriber.onSubscribe(new NoopSubscription());
+    subscriber.onNext(new ModelChunk.TextDelta("first"));
 
     subscriber.onNext(new ModelChunk.TextDelta("still streaming"));
 
