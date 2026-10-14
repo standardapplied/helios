@@ -141,7 +141,15 @@ the idle timeout, cancellation or an interrupt; one terminal transition ignores 
 A session's `QueryEvent.AssistantText` and `AssistantThinking` therefore arrive delta by delta
 instead of once per turn, and after a `QueryEvent.TurnRetried` the next attempt streams its answer
 again from the start. A stream that completes without its `ModelChunk.MessageStop` fails the turn,
-and `chat`, with `IllegalStateException` instead of reading as a plain stop.
+and `chat`, with `IllegalStateException` instead of reading as a plain stop. Every frame of a
+provider's stream is liveness: one without content, and a completed thinking block, arrive as a
+`ModelChunk.KeepAlive`, so an exhaustive `switch` over `ModelChunk` or `StreamEvent` needs a
+`KeepAlive` branch. `SessionLimits.streamIdleTimeout` starts at the stream's first chunk, not at
+subscribe, and every chunk re-arms it, a `KeepAlive` included: a model that thinks before it sends
+its headers (Gemini does) is bounded only by `ModelConfig.responseTimeout`, a retryable failure, and
+by `maxWallClock` and cancellation, never by the idle clock. Once the stream is open the session's
+60 s idle clock fires before the provider's 120 s per-line `ModelConfig.streamIdleTimeout`, and it
+ends the turn in `ResultMessage.ErrorDuringExecution` carrying the `TimeoutException`, not retried.
 
 | 2.x | 3.0 |
 |---|---|
@@ -447,7 +455,8 @@ the stream produced before it failed.
   asserts its output is the same in each; `DeclarationOrderFixture` is a conversation whose
   schema, tool parameters and replayed arguments each have eight or more names in a declared
   order, and asserts a request body or prompt keeps it. `FailingInputStream` fails on read or
-  close, and `SseEvents` writes and drains server-sent events. `ReasoningMatrix` is the
+  close, and `SseEvents` writes server-sent events and drains every event a reader yields, or
+  only those with content. `ReasoningMatrix` is the
   model-by-`Reasoning` matrix each provider's reasoning test runs. `Accepted` holds the checks a
   live test makes whatever the model writes: a reply the request allows, a chunk stream that
   completes and ends in exactly one `MessageStop`, and a skip naming the recorded counterpart when
@@ -503,6 +512,12 @@ the stream produced before it failed.
   adapts a JSON library to structured output from two functions. Architecture rules keep provider
   modules on them: no class in a provider implements `Model`, reads a stream with a
   `BufferedReader`, or builds a Jackson mapper outside its `api` holder.
+- **`StreamEvent.KeepAlive` and `ModelChunk.KeepAlive`** mark a part of a provider's stream that
+  carries nothing for the turn. `SseReader` yields a `StreamEvent.KeepAlive` for every event
+  without content: one the parser yields nothing for, one with no or blank data, the `[DONE]`
+  marker and a comment-only heartbeat (`: ping`). `StreamingModel` publishes it, and a completed
+  thinking block, as a `ModelChunk.KeepAlive`; `chat` and a session add nothing for it, and a
+  session's idle clock re-arms on it.
 - **`ModelChunk.MessageStop.of(response)` and `MessageStop.finishReason()`** build the message
   stop that ends a turn's chunk stream from its response (finish reason `STOP` and zero usage when
   unset) and read its stop reason back as a `FinishReason` (`STOP` for a spelling that names none).
