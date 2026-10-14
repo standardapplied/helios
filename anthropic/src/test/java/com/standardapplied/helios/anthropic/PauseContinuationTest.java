@@ -33,6 +33,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class PauseContinuationTest {
@@ -396,6 +397,61 @@ class PauseContinuationTest {
   }
 
   @Test
+  void aRequestAfterANonPositiveOneDuringTheHandoffStillFailsTheContinuation() {
+    var handoff = new Handoff();
+    var subscriber = new RecordingSubscriber<StreamEvent>();
+
+    new PauseContinuation(handoff).stream(request, new CancellationToken()).subscribe(subscriber);
+    Await.latch("the continuation handoff", handoff.reached);
+    subscriber.subscription().request(0);
+    subscriber.request(1);
+    handoff.release.countDown();
+
+    assertInstanceOf(IllegalArgumentException.class, subscriber.awaitFailure());
+    assertEquals(1, handoff.opened.get());
+  }
+
+  @Test
+  void aSegmentThatEndsWithoutTheDemandItsDoneNeededLeavesTheNextOneUnrequested() {
+    var continued = new ChatExchange<MessagesRequest>("Anthropic API", r -> stream(finished()));
+    var subscriber = new RecordingSubscriber<StreamEvent>(1);
+
+    new PauseContinuation(
+            (r, t) ->
+                r == request
+                    ? pushedRegardlessOfDemand(pausedWithContent())
+                    : continued.stream(r, t))
+        .stream(request, new CancellationToken()).subscribe(subscriber);
+    subscriber.request(1);
+
+    var done = (StreamEvent.Done) subscriber.awaitCompletion().getLast();
+    assertEquals("Searching. Found.", done.response().content());
+  }
+
+  @Test
+  void aCancelBetweenAPausedSegmentsDoneAndItsCompletionOpensNoContinuation() {
+    var streams = new AtomicInteger();
+    var subscriber = new RecordingSubscriber<StreamEvent>();
+    var segment = new AtomicReference<Flow.Subscriber<? super StreamEvent>>();
+
+    new PauseContinuation(
+            (r, t) -> {
+              streams.incrementAndGet();
+              return events -> {
+                segment.set(events);
+                events.onSubscribe(new NoSubscription());
+              };
+            })
+        .stream(request, new CancellationToken()).subscribe(subscriber);
+    segment.get().onNext(new StreamEvent.Done(pausedWithContent()));
+    subscriber.cancel();
+    segment.get().onComplete();
+
+    assertEquals(1, streams.get());
+    assertFalse(subscriber.ended());
+  }
+
+  @Test
   void aSecondSubscriberIsRefused() {
     var publisher = continuation(r -> stream(finished())).stream(request, new CancellationToken());
     var first = new RecordingSubscriber<StreamEvent>();
@@ -483,6 +539,29 @@ class PauseContinuationTest {
 
   private static Events stream(Response<Void> response) {
     return new Events(List.of(new StreamEvent.Done(response)));
+  }
+
+  /** A segment that sends its text and its {@code Done} at once, whatever was requested. */
+  private static Flow.Publisher<StreamEvent> pushedRegardlessOfDemand(Response<Void> paused) {
+    return events -> {
+      events.onSubscribe(new NoSubscription());
+      events.onNext(new StreamEvent.TextDelta("Searching. "));
+      events.onNext(new StreamEvent.Done(paused));
+      events.onComplete();
+    };
+  }
+
+  /** A subscription that ignores every request and cancel. */
+  private static final class NoSubscription implements Flow.Subscription {
+    @Override
+    public void request(long n) {
+      // Ignored: the segment pushes what it has.
+    }
+
+    @Override
+    public void cancel() {
+      // Ignored: the segment pushes what it has.
+    }
   }
 
   /**
