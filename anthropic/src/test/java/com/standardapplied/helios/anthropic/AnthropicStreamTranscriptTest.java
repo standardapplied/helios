@@ -11,12 +11,14 @@ import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.ModelHarness;
 import com.standardapplied.helios.core.test.ModelIntegrationContract.Person;
+import com.standardapplied.helios.core.test.StreamParity;
+import com.standardapplied.helios.core.test.StreamParity.ThinkingJoin;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
@@ -38,9 +40,8 @@ class AnthropicStreamTranscriptTest {
   private static final JsonMapper SORTED =
       JsonMapper.builder().enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS).build();
 
-  @ParameterizedTest
-  @ValueSource(
-      strings = {
+  static List<String> streams() {
+    return List.of(
         "text",
         "tool-calls",
         "thinking",
@@ -62,8 +63,20 @@ class AnthropicStreamTranscriptTest {
         "eof-mid-event",
         "max-tokens",
         "bad-tool-arguments",
-        "null-argument"
-      })
+        "null-argument");
+  }
+
+  @ParameterizedTest
+  @MethodSource("streams")
+  void chunkStreamAgreesWithChat(String name) {
+    StreamParity.assertAgrees(
+        "anthropic/streams/" + name + ".sse",
+        uri -> modelAt(uri, AnthropicModelId.CLAUDE_OPUS_5_5),
+        ThinkingJoin.betweenBlocks("\n\n"));
+  }
+
+  @ParameterizedTest
+  @MethodSource("streams")
   void transcriptMatchesItsGolden(String name) {
     var transcript =
         ModelHarness.transcript(
