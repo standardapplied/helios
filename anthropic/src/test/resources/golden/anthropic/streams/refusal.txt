@@ -1,5 +1,9 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=I cannot]
+KeepAlive[]
+KeepAlive[]
 MessageStop[stopReason=REFUSAL, usage=Usage[inputTokens=25, outputTokens=3, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=40], metadata={anthropic.stopReason=refusal, refusal.category=cyber, refusal.explanation=This request was declined because it could enable cyber harm.}, citations=[]]
 onComplete
 == chat

@@ -13,7 +13,7 @@ import java.util.Objects;
  * Normalized streaming chunk emitted by a {@link Model} during {@code chatStream}.
  *
  * <p>Provider modules ({@code helios-anthropic}, {@code helios-openai}, {@code helios-gemini})
- * translate wire-level streaming events into the seven subtypes below so the agent loop never sees
+ * translate wire-level streaming events into the eight subtypes below so the agent loop never sees
  * provider-specific payloads. Subscribers pattern-match the subtype via {@code switch}; the sealed
  * permits list is the closed contract.
  *
@@ -35,7 +35,8 @@ public sealed interface ModelChunk
         ModelChunk.ToolUseDelta,
         ModelChunk.ToolUseStop,
         ModelChunk.MessageStop,
-        ModelChunk.UsageDelta {
+        ModelChunk.UsageDelta,
+        ModelChunk.KeepAlive {
 
   /**
    * A fragment of assistant text. {@code text} may be empty (some providers emit empty deltas);
@@ -204,4 +205,12 @@ public sealed interface ModelChunk
       Objects.requireNonNull(usage, "usage must not be null");
     }
   }
+
+  /**
+   * The stream is alive but this part of it carries nothing for the turn: a provider frame without
+   * content (a ping, a status or envelope event, an SSE comment) or a completed thinking block,
+   * whose text the {@link ThinkingDelta}s already carried. A subscriber adds nothing for it; a
+   * session re-arms its idle clock on it, as on every chunk.
+   */
+  record KeepAlive() implements ModelChunk {}
 }

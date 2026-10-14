@@ -66,8 +66,9 @@ import org.junit.jupiter.params.provider.ValueSource;
  * golden: a text answer whose annotations become the turn's citations.
  *
  * <p>{@code <provider>/sessions/held-tool.sse} is the first tool call of the provider's {@code
- * streams/tool-calls.sse} golden, held after its first argument fragment: argument fragments are
- * the chunks that keep a session's {@code streamIdleTimeout} from firing while a long call streams.
+ * streams/tool-calls.sse} golden, held after its first argument fragment: argument fragments, like
+ * every frame, are chunks that keep a session's {@code streamIdleTimeout} from firing while a long
+ * call streams.
  */
 final class StreamingSessionTest {
 
@@ -106,13 +107,13 @@ final class StreamingSessionTest {
               List.of(Message.user("Weather?")), List.of(weather().tool()), new CancellationToken())
           .subscribe(chunks);
 
-      var start = assertInstanceOf(ModelChunk.ToolUseStart.class, chunks.next());
-      var delta = chunks.next();
+      var start = assertInstanceOf(ModelChunk.ToolUseStart.class, nextContent(chunks));
+      var delta = nextContent(chunks);
       reply.release();
 
       assertEquals(new ModelChunk.ToolUseDelta(start.callId(), "{\"city\""), delta);
-      assertEquals(new ModelChunk.ToolUseDelta(start.callId(), ":\"Paris\"}"), chunks.next());
-      assertInstanceOf(ModelChunk.ToolUseStop.class, chunks.next());
+      assertEquals(new ModelChunk.ToolUseDelta(start.callId(), ":\"Paris\"}"), nextContent(chunks));
+      assertInstanceOf(ModelChunk.ToolUseStop.class, nextContent(chunks));
       assertInstanceOf(ModelChunk.MessageStop.class, chunks.awaitCompletion().getLast());
     }
   }
@@ -304,6 +305,14 @@ final class StreamingSessionTest {
 
   private static ResultMessage result(AgentSession session) {
     return Await.value("the session's result", session.result());
+  }
+
+  private static ModelChunk nextContent(RecordingSubscriber<ModelChunk> chunks) {
+    var chunk = chunks.next();
+    while (chunk instanceof ModelChunk.KeepAlive) {
+      chunk = chunks.next();
+    }
+    return chunk;
   }
 
   private static Model modelAt(String provider, URI uri) {

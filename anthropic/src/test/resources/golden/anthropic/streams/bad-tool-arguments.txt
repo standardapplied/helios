@@ -1,4 +1,5 @@
 == chatStream
+KeepAlive[]
 ToolUseStart[callId=toolu_1, toolName=weather]
 ToolUseDelta[callId=toolu_1, argumentsDelta={"city":]
 onError AnthropicException(Arguments of tool call 'weather' are not a JSON object: Unexpected end-of-input within/between Object entries

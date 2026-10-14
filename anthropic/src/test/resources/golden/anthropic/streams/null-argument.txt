@@ -1,8 +1,10 @@
 == chatStream
+KeepAlive[]
 ToolUseStart[callId=toolu_1, toolName=weather]
 ToolUseDelta[callId=toolu_1, argumentsDelta={"city":"Paris",]
 ToolUseDelta[callId=toolu_1, argumentsDelta="unit":null}]
 ToolUseStop[toolCall=ToolCall[id=toolu_1, name=weather, arguments={city=Paris, unit=null}]]
+KeepAlive[]
 MessageStop[stopReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=9, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=46], metadata={anthropic.stopReason=tool_use}, citations=[]]
 onComplete
 == chat

@@ -269,6 +269,38 @@ class PauseContinuationTest {
   }
 
   @Test
+  void keepAlivesOnBothSidesOfAHandoffPassThroughOneRequestAtATime() {
+    var opened = new AtomicInteger();
+    var keepAlive = new StreamEvent.KeepAlive();
+    var searching = new StreamEvent.TextDelta("Searching. ");
+    var found = new StreamEvent.TextDelta("Found.");
+    var subscriber = new RecordingSubscriber<StreamEvent>(1);
+
+    continuation(
+            r ->
+                opened.getAndIncrement() == 0
+                    ? new Events(
+                        List.of(
+                            keepAlive,
+                            searching,
+                            keepAlive,
+                            new StreamEvent.Done(pausedWithContent())))
+                    : new Events(List.of(keepAlive, found, new StreamEvent.Done(finished()))))
+        .stream(request, new CancellationToken())
+        .subscribe(subscriber);
+    for (var i = 0; i < 5; i++) {
+      subscriber.next();
+      subscriber.request(1);
+    }
+
+    var events = subscriber.awaitCompletion();
+    assertEquals(List.of(keepAlive, searching, keepAlive, keepAlive, found), events.subList(0, 5));
+    assertEquals("Searching. Found.", ((StreamEvent.Done) events.getLast()).response().content());
+    assertEquals(6, events.size());
+    assertEquals(0, subscriber.violations());
+  }
+
+  @Test
   void cancellingCancelsTheSegmentInFlight() {
     var opened = new AtomicInteger();
     var stalled = new Events(List.of(new StreamEvent.TextDelta("Fou")));

@@ -1,8 +1,13 @@
 == chatStream
+KeepAlive[]
 ThinkingDelta[text=Plan the answer.]
+KeepAlive[]
 ThinkingDelta[text=
 Then greet.]
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Hello!]
+KeepAlive[]
 MessageStop[stopReason=STOP, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz, gemini.thoughtSignatures=wireSig}, citations=[]]
 onComplete
 == chat

@@ -1,4 +1,6 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 ThinkingDelta[text=The user greets me. ]
 ThinkingDelta[text=I greet back.]
 onError TransientStreamException(Stream ended before its terminal event) provider=anthropic caused by EOFException(the response body ended before the provider's terminal event)

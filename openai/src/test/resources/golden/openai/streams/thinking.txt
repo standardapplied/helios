@@ -1,11 +1,18 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 ThinkingDelta[text=**Planning**
 
 Let me think]
 ThinkingDelta[text= about this.]
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
 ThinkingDelta[text=
 
 Then answer.]
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Hello!]
 MessageStop[stopReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], metadata={openai.reasoning=**Planning**
 

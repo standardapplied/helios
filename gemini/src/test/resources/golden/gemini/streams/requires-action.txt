@@ -1,4 +1,9 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
 ToolUseStart[callId=call_291525, toolName=weather]
 ToolUseDelta[callId=call_291525, argumentsDelta={"city":"Paris"}]
 ToolUseStop[toolCall=ToolCall[id=call_291525, name=weather, arguments={city=Paris}]]

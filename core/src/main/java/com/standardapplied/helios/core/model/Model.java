@@ -27,7 +27,9 @@ public interface Model extends AutoCloseable {
    * Stream the model's answer to {@code messages} as a {@link Flow.Publisher} of normalized {@link
    * ModelChunk}s: text, thinking, tool-call fragments and completions as they arrive, then one
    * {@link ModelChunk.MessageStop} carrying the finish reason, usage, metadata and citations, then
-   * {@code onComplete}. A failed turn ends in {@code onError} instead.
+   * {@code onComplete}. A failed turn ends in {@code onError} instead. Between them the stream may
+   * publish {@link ModelChunk.KeepAlive}s, one for each part of the provider's stream that carries
+   * nothing for the turn: they prove the stream is alive, and a subscriber adds nothing for them.
    *
    * <p>The contract every implementation keeps:
    *

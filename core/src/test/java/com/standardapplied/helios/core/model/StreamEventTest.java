@@ -154,6 +154,7 @@ class StreamEventTest {
       case StreamEvent.ToolCallStart(var id, var name) -> "start";
       case StreamEvent.ToolCallDelta(var id, var delta) -> "delta";
       case StreamEvent.ToolCallComplete(var tc) -> "complete";
+      case StreamEvent.KeepAlive() -> "keep-alive";
       case StreamEvent.Done(var r) -> "done";
       case StreamEvent.Error(var msg, var cause, var partial) -> "error: " + msg;
     };

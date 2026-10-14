@@ -1,4 +1,6 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Hello]
 TextDelta[text=, wor]
 onError TransientStreamException(Stream ended before its terminal event) provider=gemini caused by EOFException(the response body ended before the provider's terminal event)

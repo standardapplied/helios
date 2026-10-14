@@ -1,4 +1,6 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Before]
 onError AnthropicException(Failed to parse stream event) status=0 caused by UnexpectedEndOfInputException(Unexpected end-of-input within/between Object entries
  at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN])

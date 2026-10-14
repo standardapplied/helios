@@ -158,12 +158,63 @@ class SseReaderTest {
     assertEquals(
         List.of(
             new StreamEvent.TextDelta("one"),
+            new StreamEvent.KeepAlive(),
+            new StreamEvent.KeepAlive(),
+            new StreamEvent.KeepAlive(),
             new StreamEvent.TextDelta("two"),
+            new StreamEvent.KeepAlive(),
             new StreamEvent.Done(Response.newBuilder().withContent("done").build())),
         drain(reader));
     assertEquals(List.of("one", "two", "silent", "stop"), parser.payloads);
     assertTrue(body.closed);
     assertFalse(reader.hasNext());
+  }
+
+  @Test
+  void everyEventWithoutContentIsAKeepAliveTheParserNeverSees() {
+    var parser = new EchoParser();
+    var reader =
+        new SseReader(
+            stream(
+                ": ping\n\n"
+                    + "event: ping\n\n"
+                    + "data:\n\n"
+                    + "data: [DONE]\n\n"
+                    + "data: silent\n\n"
+                    + "data: stop\n\n"),
+            NEVER_IDLE,
+            parser,
+            ProviderException::new);
+
+    var events = drain(reader);
+
+    var keepAlive = new StreamEvent.KeepAlive();
+    assertEquals(
+        List.of(
+            keepAlive,
+            keepAlive,
+            keepAlive,
+            keepAlive,
+            keepAlive,
+            new StreamEvent.Done(Response.newBuilder().withContent("done").build())),
+        events);
+    assertEquals(List.of("silent", "stop"), parser.payloads);
+  }
+
+  @Test
+  void aBlankLineThatEndsNoEventYieldsNothing() {
+    var reader =
+        new SseReader(
+            stream("\n\r\n\ndata: one\n\n\n\ndata: stop\n\n"),
+            NEVER_IDLE,
+            new EchoParser(),
+            ProviderException::new);
+
+    assertEquals(
+        List.of(
+            new StreamEvent.TextDelta("one"),
+            new StreamEvent.Done(Response.newBuilder().withContent("done").build())),
+        drain(reader));
   }
 
   @Test
@@ -423,7 +474,7 @@ class SseReaderTest {
   }
 
   @Test
-  void aReaderClosedBetweenEventsEndsInOneErrorInsteadOfThrowing() {
+  void aReaderClosedWhileItsParserReadsAnEventYieldsThatEventAndNothingAfter() {
     var body = new Closing(stream("data: silent\n\ndata: two\n\n"));
     var readers = new ArrayList<SseReader>();
     var closingParser =
@@ -437,12 +488,42 @@ class SseReaderTest {
     var reader = new SseReader(body, NEVER_IDLE, closingParser, ProviderException::new);
     readers.add(reader);
 
+    assertEquals(new StreamEvent.KeepAlive(), reader.next());
+    assertTrue(body.closed);
+    assertFalse(reader.hasNext());
+  }
+
+  @Test
+  void aReaderClosedBetweenTheLinesOfAnEventEndsInOneErrorInsteadOfThrowing() {
+    var readers = new ArrayList<SseReader>();
+    var firstLine = "data: one\n".getBytes(StandardCharsets.UTF_8);
+    var body =
+        new InputStream() {
+          private boolean served;
+
+          @Override
+          public int read() {
+            throw new UnsupportedOperationException("read in bulk");
+          }
+
+          @Override
+          public int read(byte[] target, int offset, int length) {
+            if (served) {
+              return -1;
+            }
+            served = true;
+            System.arraycopy(firstLine, 0, target, offset, firstLine.length);
+            readers.getFirst().close();
+            return firstLine.length;
+          }
+        };
+    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+    readers.add(reader);
+
     var error = assertInstanceOf(StreamEvent.Error.class, reader.next());
 
     assertEquals("Stream read error", error.message());
     assertEquals("Stream closed", error.cause().getMessage());
-    assertEquals("silent", error.partial().content());
-    assertTrue(body.closed);
     assertFalse(reader.hasNext());
   }
 

@@ -15,7 +15,8 @@ import java.util.function.Function;
 
 /**
  * Server-sent events for a provider stream test: the wire text of one event, a response body
- * carrying such text, and every {@link StreamEvent} a reader yields from a body.
+ * carrying such text, and every {@link StreamEvent} a reader yields from a body, or only those that
+ * carry content.
  */
 public final class SseEvents {
 
@@ -51,6 +52,16 @@ public final class SseEvents {
       }
       return drained;
     }
+  }
+
+  /**
+   * Every event {@code events} yields until it ends except its {@link StreamEvent.KeepAlive}s: what
+   * a provider's parser makes of the stream's content; closes it.
+   */
+  public static List<StreamEvent> drainContent(CloseableIterator<StreamEvent> events) {
+    return drain(events).stream()
+        .filter(event -> !(event instanceof StreamEvent.KeepAlive))
+        .toList();
   }
 
   /**

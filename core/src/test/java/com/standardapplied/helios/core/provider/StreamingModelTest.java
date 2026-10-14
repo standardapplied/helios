@@ -273,7 +273,9 @@ class StreamingModelTest {
         List.of(
             new StreamEvent.ThinkingDelta("hm"),
             new StreamEvent.ThinkingComplete("hm", "sig"),
+            new StreamEvent.KeepAlive(),
             new StreamEvent.TextDelta("Hi"),
+            new StreamEvent.KeepAlive(),
             new StreamEvent.ToolCallStart("c1", "lookup"),
             new StreamEvent.ToolCallDelta("c1", "{}"),
             new StreamEvent.ToolCallComplete(call),
@@ -281,7 +283,7 @@ class StreamingModelTest {
     var subscriber = new RecordingSubscriber<ModelChunk>(1);
 
     model(config()).chatStream(MESSAGES, List.of(), new CancellationToken()).subscribe(subscriber);
-    for (var i = 0; i < 6; i++) {
+    for (var i = 0; i < 9; i++) {
       subscriber.next();
       subscriber.request(1);
     }
@@ -289,7 +291,10 @@ class StreamingModelTest {
     assertEquals(
         List.of(
             new ModelChunk.ThinkingDelta("hm"),
+            new ModelChunk.KeepAlive(),
+            new ModelChunk.KeepAlive(),
             new ModelChunk.TextDelta("Hi"),
+            new ModelChunk.KeepAlive(),
             new ModelChunk.ToolUseStart("c1", "lookup"),
             new ModelChunk.ToolUseDelta("c1", "{}"),
             new ModelChunk.ToolUseStop(call),

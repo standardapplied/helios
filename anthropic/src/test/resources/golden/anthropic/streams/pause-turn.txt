@@ -1,5 +1,14 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Done.]
+KeepAlive[]
+KeepAlive[]
 MessageStop[stopReason=STOP, usage=Usage[inputTokens=50, outputTokens=7, cacheCreationInputTokens=10, cacheReadInputTokens=14, totalTokens=81], metadata={anthropic.rawContent=[{"id":"srv1","input":{"query":"q"},"name":"web_search","type":"server_tool_use"},{"text":"Done.","type":"text"}], anthropic.stopReason=end_turn}, citations=[]]
 onComplete
 == chat
