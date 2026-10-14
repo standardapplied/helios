@@ -150,7 +150,6 @@ and `chat`, with `IllegalStateException` instead of reading as a plain stop.
 | `Model.chat(messages)`, `Model.chat(messages, schema)` | `chat(messages, List.of())`, `chat(messages, List.of(), schema)` |
 | `Exchange.chat(request)`, `CloseableIterator<StreamEvent> Exchange.stream(request)` | `Flow.Publisher<StreamEvent> Exchange.stream(request, cancellation)`; `StreamingModel` drains it for `chat` |
 | `new ChatExchange<>(providerName, apiName, opener, failure)` | `new ChatExchange<>(apiName, opener)` plus `StreamingModel.Builder.withFailure(failure)`, which maps a failed turn's exception |
-| `new PauseContinuation(exchange, opener)` (Anthropic, package-private) | `new PauseContinuation(exchange)`, splicing each continuation segment's publisher into one stream |
 
 **The provider model classes are removed; every provider returns a `Model`.** `AnthropicModel`,
 `OpenAIModel` and `GeminiModel` were one forwarding surface written three times. Each provider now
@@ -450,9 +449,13 @@ the stream produced before it failed.
   order, and asserts a request body or prompt keeps it. `FailingInputStream` fails on read or
   close, and `SseEvents` writes and drains server-sent events. `ReasoningMatrix` is the
   model-by-`Reasoning` matrix each provider's reasoning test runs. `Accepted` holds the checks a
-  live test makes whatever the model writes: a reply the request allows, deltas that join to the
-  `Done` content, and a skip naming the recorded counterpart when an unconstrained structured reply
-  does not parse. Abstract contract tests run one set of cases against every implementation:
+  live test makes whatever the model writes: a reply the request allows, a chunk stream that
+  completes and ends in exactly one `MessageStop`, and a skip naming the recorded counterpart when
+  an unconstrained structured reply does not parse. `RecordingSubscriber` subscribes to a
+  `Flow.Publisher` with chosen demand and records its signals and protocol violations,
+  `HeldSseServer` holds a reply open part by part and reports when the client closes the
+  connection, and `ExchangeTurns` runs one request through a provider's `Exchange` the way
+  `StreamingModel` does. Abstract contract tests run one set of cases against every implementation:
   `ModelIntegrationContract` (live provider parity, asserting only what holds for any model
   output), `ConversationRequestContract` (the system message and earlier turns a request carries,
   offline), `BoundedErrorBodyContract`, `PromptRegistryContract` and `ToolCallJournalContract`.
@@ -500,6 +503,9 @@ the stream produced before it failed.
   adapts a JSON library to structured output from two functions. Architecture rules keep provider
   modules on them: no class in a provider implements `Model`, reads a stream with a
   `BufferedReader`, or builds a Jackson mapper outside its `api` holder.
+- **`ModelChunk.MessageStop.of(response)` and `MessageStop.finishReason()`** build the message
+  stop that ends a turn's chunk stream from its response (finish reason `STOP` and zero usage when
+  unset) and read its stop reason back as a `FinishReason` (`STOP` for a spelling that names none).
 - **`RedactionResult.mergeCounts(other)`** sums two streams' per-secret counts in encounter order.
 - **`session.ConsoleEventPrinter`** prints a session's event stream for a command-line host:
   `session.events().subscribe(new ConsoleEventPrinter(System.out))`. Assistant text is written as
