@@ -392,12 +392,13 @@ class StreamingModelTest {
 
   @Test
   void chatStreamFailsAnEventItCannotTurnIntoAChunkAndCancelsTheStream() {
-    events = List.of(new StreamEvent.ToolCallStart(" ", "lookup"), new StreamEvent.Done(reply));
+    events = List.of(new StreamEvent.ToolCallStart(" ", "lookup"));
+    blockAtEnd = true;
 
     var subscriber = streamed(model(config()));
 
     assertInstanceOf(IllegalArgumentException.class, subscriber.awaitFailure());
-    Await.latch("the stream closed", opened.closed);
+    Await.latch("the stream closed", blockedStream().closed);
   }
 
   @Test
