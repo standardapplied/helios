@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import com.standardapplied.helios.anthropic.AnthropicModelId;
 import com.standardapplied.helios.anthropic.AnthropicProvider;
+import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
@@ -61,6 +62,9 @@ import org.junit.jupiter.params.provider.ValueSource;
  * <p>{@code anthropic/sessions/structured-tool.sse} is hand-built from the documented Messages
  * stream shape: a thinking block and a tool call, then a thinking block and the JSON answer.
  *
+ * <p>{@code gemini/sessions/cited.sse} is a copy of the {@code gemini/streams/citations.sse}
+ * golden: a text answer whose annotations become the turn's citations.
+ *
  * <p>{@code <provider>/sessions/held-tool.sse} is the first tool call of the provider's {@code
  * streams/tool-calls.sse} golden, held after its first argument fragment: argument fragments are
  * the chunks that keep a session's {@code streamIdleTimeout} from firing while a long call streams.
@@ -85,6 +89,7 @@ final class StreamingSessionTest {
       assertEquals("Hello", first);
       var success = assertInstanceOf(ResultMessage.Success.class, result(session));
       assertEquals("Hello, world.", success.result());
+      assertEquals(1, server.requests());
     }
   }
 
@@ -149,6 +154,30 @@ final class StreamingSessionTest {
               .toList());
       assertEquals(
           "sunny", events.eventsOf(QueryEvent.ToolResult.class).getFirst().result().output());
+    }
+  }
+
+  @Test
+  void citationsTraverseTheStreamingPath() throws IOException {
+    var events = new CollectingSubscriber();
+    try (var server =
+            StubHttpServer.start(
+                InetAddress.getLoopbackAddress(),
+                0,
+                SseReplies.inOrder(List.of(Golden.read("gemini/sessions/cited.sse"))));
+        var model = modelAt("gemini", server.uri());
+        var session = AgentSession.create(SessionOptions.newBuilder().withModel(model).build())) {
+      session.events().subscribe(events);
+
+      session.send(UserMessage.text("Paris?"));
+      var success = assertInstanceOf(ResultMessage.Success.class, result(session));
+      events.awaitDone();
+
+      var cited = events.eventsOf(QueryEvent.AssistantCitations.class).getFirst().citations();
+      assertEquals(
+          List.of("https://a.example", "https://b.example", "https://c.example"),
+          cited.stream().map(Citation::sourceId).toList());
+      assertEquals(cited, success.citations());
     }
   }
 
