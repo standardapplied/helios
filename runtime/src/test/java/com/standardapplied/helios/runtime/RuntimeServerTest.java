@@ -19,6 +19,7 @@ import com.standardapplied.helios.session.SessionOptions;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -143,6 +144,100 @@ final class RuntimeServerTest {
     assertEquals("host must not be blank", ex.getMessage());
   }
 
+  @Test
+  void withAuthenticatorRejectsNull() {
+    var ex =
+        assertThrows(
+            NullPointerException.class, () -> RuntimeServer.builder().withAuthenticator(null));
+    assertEquals("authenticator must not be null", ex.getMessage());
+  }
+
+  // ── authentication against the bind address ──────────────────────────────
+
+  @Test
+  void aLoopbackServerWithNoAuthenticationChoiceIsRefused() {
+    var builder =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory());
+    var ex = assertThrows(IllegalStateException.class, builder::build);
+    assertEquals(
+        "an authenticator is required — call withAuthenticator, or withoutAuthentication to serve"
+            + " the loopback host 127.0.0.1 unauthenticated",
+        ex.getMessage());
+  }
+
+  @Test
+  void withoutAuthenticationOnANonLoopbackHostIsRefusedNamingTheHost() {
+    var builder =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory())
+            .withHost("0.0.0.0")
+            .withoutAuthentication();
+    var ex = assertThrows(IllegalStateException.class, builder::build);
+    assertEquals(nonLoopbackRefusal("0.0.0.0"), ex.getMessage());
+  }
+
+  @Test
+  void aNonLoopbackHostWithNoAuthenticatorIsRefusedNamingTheHost() {
+    var builder =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory())
+            .withHost("0.0.0.0");
+    var ex = assertThrows(IllegalStateException.class, builder::build);
+    assertEquals(nonLoopbackRefusal("0.0.0.0"), ex.getMessage());
+  }
+
+  @Test
+  void anAuthenticatorChosenAfterWithoutAuthenticationReplacesIt() {
+    var server =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory())
+            .withHost("0.0.0.0")
+            .withoutAuthentication()
+            .withAuthenticator(request -> Optional.empty())
+            .build();
+    try (server) {
+      assertTrue(server.port() > 0);
+    }
+  }
+
+  @Test
+  void withoutAuthenticationIsAcceptedForTheLoopbackHostName() {
+    var server =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory())
+            .withHost("localhost")
+            .withoutAuthentication()
+            .build();
+    try (server) {
+      assertTrue(server.port() > 0);
+    }
+  }
+
+  @Test
+  void anUnresolvableHostIsRefused() {
+    var builder =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory())
+            .withHost("helios-runtime-test.invalid")
+            .withoutAuthentication();
+    var ex = assertThrows(IllegalArgumentException.class, builder::build);
+    assertEquals("host helios-runtime-test.invalid cannot be resolved", ex.getMessage());
+  }
+
+  private static String nonLoopbackRefusal(String host) {
+    return "host "
+        + host
+        + " is not a loopback address and no authenticator is set; a server reachable from other"
+        + " hosts requires withAuthenticator(...), for example a TrustedProxyAuthenticator";
+  }
+
   // ── lifecycle ────────────────────────────────────────────────────────────
 
   @Test
@@ -153,6 +248,7 @@ final class RuntimeServerTest {
             .withRegistry(registry)
             .withOptionsFactory(factory())
             .withPort(0)
+            .withoutAuthentication()
             .withHost("127.0.0.1")
             .build();
     try {
@@ -170,6 +266,7 @@ final class RuntimeServerTest {
             .withRegistry(SessionRegistry.inMemory())
             .withOptionsFactory(factory())
             .withPort(0)
+            .withoutAuthentication()
             .withHost("127.0.0.1")
             .build();
     server.close();
@@ -185,6 +282,7 @@ final class RuntimeServerTest {
             .withOptionsFactory(factory())
             .withObjectMapper(customMapper)
             .withPort(0)
+            .withoutAuthentication()
             .withHost("127.0.0.1")
             .build();
     try {
@@ -197,16 +295,13 @@ final class RuntimeServerTest {
 
   @Test
   void defaultHostIsLoopbackNotAllInterfaces() throws Exception {
-    // Fail-secure default: a deployer who forgets withHost(...) should NOT have their service
-    // exposed on every interface. POST /sessions is unauthenticated and spends real money on the
-    // configured model. Loopback is the conservative default; explicit withHost("0.0.0.0") is
-    // the opt-in for all-interfaces binding.
     assertEquals("127.0.0.1", RuntimeServer.Builder.defaultHostForTests());
     var server =
         RuntimeServer.builder()
             .withRegistry(SessionRegistry.inMemory())
             .withOptionsFactory(factory())
             .withPort(0)
+            .withoutAuthentication()
             .build();
     try (server;
         var socket = new Socket()) {
@@ -223,6 +318,7 @@ final class RuntimeServerTest {
             .withOptionsFactory(factory())
             .withRoutePrefix("/api")
             .withPort(0)
+            .withoutAuthentication()
             .withHost("127.0.0.1")
             .build();
     try {

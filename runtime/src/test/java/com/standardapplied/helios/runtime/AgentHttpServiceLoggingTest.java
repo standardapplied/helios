@@ -15,8 +15,8 @@ import io.helidon.webserver.sse.SseSink;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutionException;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -112,13 +112,13 @@ final class AgentHttpServiceLoggingTest {
     var future = new CompletableFuture<ResultMessage>();
     future.completeExceptionally(failure);
 
-    ResultLongPoll.awaitResult(future, 5L, SESSION_ID);
+    ResultLongPoll.awaitResult(future, new CompletableFuture<>(), 5L, SESSION_ID);
 
     var logged = onlyRecordForTheSession();
     assertEquals(Level.WARNING, logged.getLevel());
     assertEquals(
         "session " + SESSION_ID + " result future failed exceptionally", logged.getMessage());
-    assertSame(failure, assertInstanceOf(ExecutionException.class, logged.getThrown()).getCause());
+    assertSame(failure, assertInstanceOf(CompletionException.class, logged.getThrown()).getCause());
   }
 
   private LogRecord onlyRecordForTheSession() {
