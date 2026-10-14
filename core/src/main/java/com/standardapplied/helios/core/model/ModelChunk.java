@@ -176,7 +176,8 @@ public sealed interface ModelChunk
 
     /**
      * The stop reason as a {@link FinishReason}: the constant it names, else {@link
-     * FinishReason#STOP} for a provider's own spelling of a normal end.
+     * FinishReason#STOP} for any other spelling, such as a provider's own {@code end_turn} or
+     * {@code max_tokens}.
      *
      * @return the finish reason
      */
