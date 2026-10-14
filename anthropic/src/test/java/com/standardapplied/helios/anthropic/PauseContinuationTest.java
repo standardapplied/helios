@@ -19,6 +19,7 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.provider.ChatExchange;
+import com.standardapplied.helios.core.provider.Exchange;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.ExchangeTurns;
@@ -29,6 +30,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Flow;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -304,35 +307,57 @@ class PauseContinuationTest {
 
   @Test
   void aNonPositiveRequestDuringTheHandoffFailsTheContinuationBeforeItOpens() {
-    var opened = new AtomicInteger();
-    var segments =
-        new ChatExchange<MessagesRequest>(
-            "Anthropic API",
-            r -> {
-              opened.incrementAndGet();
-              return opened.get() == 1 ? stream(pausedWithContent()) : stream(finished());
-            });
-    var handoff = new CountDownLatch(1);
-    var release = new CountDownLatch(1);
-    var streams = new AtomicInteger();
+    var handoff = new Handoff();
     var subscriber = new RecordingSubscriber<StreamEvent>();
 
-    new PauseContinuation(
-            (r, token) -> {
-              if (streams.getAndIncrement() == 1) {
-                handoff.countDown();
-                Await.latch("the handoff released", release);
-              }
-              return segments.stream(r, token);
-            })
-        .stream(request, new CancellationToken()).subscribe(subscriber);
-    Await.latch("the continuation handoff", handoff);
+    new PauseContinuation(handoff).stream(request, new CancellationToken()).subscribe(subscriber);
+    Await.latch("the continuation handoff", handoff.reached);
     subscriber.subscription().request(0);
-    release.countDown();
+    handoff.release.countDown();
 
     assertInstanceOf(IllegalArgumentException.class, subscriber.awaitFailure());
-    assertEquals(1, opened.get());
+    assertEquals(1, handoff.opened.get());
     assertEquals(0, subscriber.violations());
+  }
+
+  @Test
+  void theContinuationIsRequestedOnlyTheDemandTheFirstSegmentLeftUnserved() {
+    var handoff = new Handoff();
+    handoff.release.countDown();
+    var subscriber = new RecordingSubscriber<StreamEvent>(2);
+
+    new PauseContinuation(handoff).stream(request, new CancellationToken()).subscribe(subscriber);
+
+    assertEquals(
+        "request 1", Await.next("the continuation's first call", handoff.continuationCalls));
+  }
+
+  @Test
+  void cancellingDuringTheHandoffCancelsTheContinuationWithoutARequest() {
+    var handoff = new Handoff();
+    var subscriber = new RecordingSubscriber<StreamEvent>();
+
+    new PauseContinuation(handoff).stream(request, new CancellationToken()).subscribe(subscriber);
+    Await.latch("the continuation handoff", handoff.reached);
+    subscriber.cancel();
+    handoff.release.countDown();
+
+    assertEquals("cancel", Await.next("the continuation's first call", handoff.continuationCalls));
+  }
+
+  @Test
+  void cancellingTheTokenDuringTheHandoffEndsTheTurnWithoutOpeningTheContinuation() {
+    var token = new CancellationToken();
+    var handoff = new Handoff();
+    var subscriber = new RecordingSubscriber<StreamEvent>();
+
+    new PauseContinuation(handoff).stream(request, token).subscribe(subscriber);
+    Await.latch("the continuation handoff", handoff.reached);
+    token.cancel("session closed");
+    handoff.release.countDown();
+
+    assertInstanceOf(CancellationException.class, subscriber.awaitFailure());
+    assertEquals(1, handoff.opened.get());
   }
 
   @Test
@@ -423,6 +448,81 @@ class PauseContinuationTest {
 
   private static Events stream(Response<Void> response) {
     return new Events(List.of(new StreamEvent.Done(response)));
+  }
+
+  /**
+   * Segments whose continuation is held at its opening until released: the first segment streams
+   * one text delta and pauses, the second finishes and records the first call made on its
+   * subscription.
+   */
+  private static final class Handoff implements Exchange<MessagesRequest> {
+    private final AtomicInteger opened = new AtomicInteger();
+    private final ChatExchange<MessagesRequest> segments =
+        new ChatExchange<>(
+            "Anthropic API",
+            r ->
+                opened.getAndIncrement() == 0
+                    ? new Events(
+                        List.of(
+                            new StreamEvent.TextDelta("Searching. "),
+                            new StreamEvent.Done(pausedWithContent())))
+                    : PauseContinuationTest.stream(finished()));
+    private final CountDownLatch reached = new CountDownLatch(1);
+    private final CountDownLatch release = new CountDownLatch(1);
+    private final LinkedBlockingQueue<String> continuationCalls = new LinkedBlockingQueue<>();
+    private final AtomicInteger streams = new AtomicInteger();
+
+    @Override
+    public Flow.Publisher<StreamEvent> stream(MessagesRequest r, CancellationToken token) {
+      var events = segments.stream(r, token);
+      if (streams.getAndIncrement() == 0) {
+        return events;
+      }
+      reached.countDown();
+      Await.latch("the handoff released", release);
+      return subscriber -> events.subscribe(new Recorded(subscriber));
+    }
+
+    private final class Recorded implements Flow.Subscriber<StreamEvent> {
+      private final Flow.Subscriber<? super StreamEvent> downstream;
+
+      Recorded(Flow.Subscriber<? super StreamEvent> downstream) {
+        this.downstream = downstream;
+      }
+
+      @Override
+      public void onSubscribe(Flow.Subscription subscription) {
+        downstream.onSubscribe(
+            new Flow.Subscription() {
+              @Override
+              public void request(long n) {
+                continuationCalls.add("request " + n);
+                subscription.request(n);
+              }
+
+              @Override
+              public void cancel() {
+                continuationCalls.add("cancel");
+                subscription.cancel();
+              }
+            });
+      }
+
+      @Override
+      public void onNext(StreamEvent event) {
+        downstream.onNext(event);
+      }
+
+      @Override
+      public void onError(Throwable failure) {
+        downstream.onError(failure);
+      }
+
+      @Override
+      public void onComplete() {
+        downstream.onComplete();
+      }
+    }
   }
 
   /** Recorded events; one that stalls blocks after its last event until closed. */
