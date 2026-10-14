@@ -16,16 +16,49 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class IteratorPublisherTest {
 
   private final CancellationToken token = new CancellationToken();
   private final AtomicInteger opened = new AtomicInteger();
+  private final Logger log = Logger.getLogger(IteratorPublisher.class.getName());
+  private final LinkedBlockingQueue<LogRecord> logged = new LinkedBlockingQueue<>();
+  private final Handler capture =
+      new Handler() {
+        @Override
+        public void publish(LogRecord logRecord) {
+          logged.add(logRecord);
+        }
+
+        @Override
+        public void flush() {}
+
+        @Override
+        public void close() {}
+      };
+
+  @BeforeEach
+  void captureTheLog() {
+    log.addHandler(capture);
+    log.setUseParentHandlers(false);
+  }
+
+  @AfterEach
+  void releaseTheLog() {
+    log.removeHandler(capture);
+    log.setUseParentHandlers(true);
+  }
 
   @Test
   void nothingIsOpenedBeforeTheFirstRequest() {
@@ -320,6 +353,66 @@ class IteratorPublisherTest {
 
     assertFalse(subscriber.ended());
     assertEquals(0, subscriber.violations());
+  }
+
+  @Test
+  void cancellingReturnsAndLogsWhenTheSourceFailsToClose() {
+    var broken = new IllegalStateException("close failed");
+    var source = new Source(List.of());
+    source.blockAt = 0;
+    source.closeFailure = broken;
+    var subscriber = new RecordingSubscriber<String>();
+
+    publisherOf(source).subscribe(subscriber);
+    Await.latch("the pull blocked", source.blocked);
+    subscriber.cancel();
+
+    assertSame(broken, Await.next("the logged close failure", logged).getThrown());
+    Await.until("the owned thread finished", () -> token.activeCallbackCountForTests() == 0);
+    assertFalse(subscriber.ended());
+  }
+
+  @Test
+  void aNonPositiveRequestReturnsAndFailsTheStreamWhenTheSourceFailsToClose() {
+    var broken = new IllegalStateException("close failed");
+    var source = new Source(List.of());
+    source.blockAt = 0;
+    source.closeFailure = broken;
+    var subscriber = new RecordingSubscriber<String>();
+
+    publisherOf(source).subscribe(subscriber);
+    Await.latch("the pull blocked", source.blocked);
+    subscriber.subscription().request(0);
+
+    assertInstanceOf(IllegalArgumentException.class, subscriber.awaitFailure());
+    assertSame(broken, Await.next("the logged close failure", logged).getThrown());
+  }
+
+  @Test
+  void aSourceThatFailsToCloseAfterTheStreamCompletedIsLogged() {
+    var broken = new IllegalStateException("close failed");
+    var source = new Source(List.of("a"));
+    source.closeFailure = broken;
+    var subscriber = new RecordingSubscriber<String>();
+
+    publisherOf(source).subscribe(subscriber);
+
+    assertEquals(List.of("a"), subscriber.awaitCompletion());
+    assertSame(broken, Await.next("the logged close failure", logged).getThrown());
+  }
+
+  @Test
+  void anErrorClosingTheSourcePropagatesFromTheCancel() {
+    var broken = new AssertionError("close broke");
+    var source = new Source(List.of());
+    source.blockAt = 0;
+    source.closeFailure = broken;
+    var subscriber = new RecordingSubscriber<String>();
+
+    publisherOf(source).subscribe(subscriber);
+    Await.latch("the pull blocked", source.blocked);
+
+    assertSame(broken, assertThrows(AssertionError.class, subscriber::cancel));
   }
 
   @Test
@@ -669,8 +762,8 @@ class IteratorPublisherTest {
 
   /**
    * A source of fixed items that can block a pull until it is closed, or interrupted when it
-   * ignores close (then ending with the interrupt restored, when asked), and can fail its last
-   * pull.
+   * ignores close (then ending with the interrupt restored, when asked), and can fail its last pull
+   * and its close.
    */
   private static final class Source implements CloseableIterator<String> {
 
@@ -686,6 +779,7 @@ class IteratorPublisherTest {
     private boolean ignoresClose;
     private boolean restoresInterrupt;
     private Throwable failure;
+    private Throwable closeFailure;
 
     Source(List<String> items) {
       this.items = items;
@@ -733,6 +827,12 @@ class IteratorPublisherTest {
       closed.countDown();
       if (!ignoresClose) {
         unblock.countDown();
+      }
+      if (closeFailure instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      if (closeFailure instanceof Error error) {
+        throw error;
       }
     }
   }

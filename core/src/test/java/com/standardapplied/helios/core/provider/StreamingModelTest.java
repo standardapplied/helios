@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.Citation;
-import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.IteratorPublisher;
 import com.standardapplied.helios.core.model.Message;
@@ -34,6 +33,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
@@ -345,39 +345,37 @@ class StreamingModelTest {
   }
 
   @Test
-  void chatStreamEndsAFailedTurnWithItsExceptionEvenWhenClosingTheStreamThrows() {
+  void chatStreamEndsAFailedTurnWithItsExceptionEvenWhenCancellingTheStreamThrows() {
     var reset = new IOException("reset");
-    var closes = new AtomicInteger();
+    var escaped = new CompletableFuture<Throwable>();
     publisher =
-        new IteratorPublisher<>(
-            () ->
-                new CloseableIterator<StreamEvent>() {
-                  private boolean read;
-
+        subscriber ->
+            subscriber.onSubscribe(
+                new Flow.Subscription() {
                   @Override
-                  public boolean hasNext() {
-                    return !read;
+                  public void request(long n) {
+                    Thread.ofVirtual()
+                        .start(
+                            () -> {
+                              try {
+                                subscriber.onNext(error("Stream read error", reset));
+                              } catch (IllegalStateException thrown) {
+                                escaped.complete(thrown);
+                              }
+                            });
                   }
 
                   @Override
-                  public StreamEvent next() {
-                    read = true;
-                    return error("Stream read error", reset);
-                  }
-
-                  @Override
-                  public void close() {
-                    closes.incrementAndGet();
+                  public void cancel() {
                     throw new IllegalStateException("close failed");
                   }
-                },
-            new CancellationToken());
+                });
 
     var subscriber = streamed(model(config()));
 
     var thrown = assertInstanceOf(TransientStreamException.class, subscriber.awaitFailure());
     assertSame(reset, thrown.getCause());
-    Await.until("the stream closed", () -> closes.get() > 0);
+    assertEquals("close failed", Await.value("the cancel's failure", escaped).getMessage());
     assertEquals(0, subscriber.violations());
   }
 
