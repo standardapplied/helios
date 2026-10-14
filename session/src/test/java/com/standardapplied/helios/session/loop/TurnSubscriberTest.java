@@ -40,6 +40,7 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.RunnableScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -238,6 +239,30 @@ final class TurnSubscriberTest {
     assertEquals(0, subscription.cancels);
   }
 
+  @Test
+  void anEndingWhileAChunksEventIsEmittedReleasesTheRunnerOnlyAfterThatEvent() {
+    var emitting = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var stalled =
+        newSubscriber(
+            event -> {
+              emitting.countDown();
+              Await.latch("the sink released", release);
+            });
+    stalled.onSubscribe(subscription);
+    var delivery =
+        CompletableFuture.runAsync(() -> stalled.onNext(new ModelChunk.TextDelta("Hel")));
+    Await.latch("the chunk's event being emitted", emitting);
+
+    Await.value("the idle deadline", CompletableFuture.runAsync(scheduler::fireLatest));
+    var releasedWhileEmitting = stalled.released();
+    release.countDown();
+    Await.value("the chunk delivered", delivery);
+
+    assertEquals(List.of(false, true), List.of(releasedWhileEmitting, stalled.released()));
+    assertEquals(1, subscription.cancels);
+  }
+
   private List<String> assistantTexts() {
     return events.stream()
         .filter(QueryEvent.AssistantText.class::isInstance)
@@ -246,6 +271,10 @@ final class TurnSubscriberTest {
   }
 
   private TurnSubscriber newSubscriber() {
+    return newSubscriber(events::add);
+  }
+
+  private TurnSubscriber newSubscriber(Consumer<QueryEvent> sink) {
     var state = new SessionState("sess", new CancellationToken(), CLOCK);
     var model =
         new BlockingModel() {
@@ -266,7 +295,7 @@ final class TurnSubscriberTest {
         };
     var emitter =
         new EventEmitter(
-            events::add,
+            sink,
             HookRegistry.empty(),
             s ->
                 new DefaultHookContext(

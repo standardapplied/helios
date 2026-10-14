@@ -39,7 +39,8 @@ import java.util.concurrent.ScheduledExecutorService;
  * onSubscribe} changes nothing and emits nothing; a late {@code onSubscribe} has its subscription
  * cancelled, and a chunk before {@code onSubscribe} ends the stream with an {@link
  * IllegalStateException}. A chunk accepted before the ending emits its event outside the lock, so a
- * stalled event sink or hook never blocks a cancellation.
+ * stalled event sink or hook never blocks a cancellation of the stream; the runner is released once
+ * that event is out, so every event of the turn precedes the runner's next one.
  */
 final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
@@ -53,6 +54,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   private final List<ToolCall> toolCalls = new ArrayList<>();
   private ModelChunk.MessageStop stop;
   private Flow.Subscription subscription;
+  private boolean emitting;
   private StreamedTurn outcome;
 
   TurnSubscriber(
@@ -65,8 +67,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     this.emitter = emitter;
     this.clock = clock;
     this.idleWatchdog =
-        new IdleWatchdog(
-            scheduler, idleTimeout, () -> done.getCount() == 0L, stalled -> end(stalled, true));
+        new IdleWatchdog(scheduler, idleTimeout, this::released, stalled -> end(stalled, true));
   }
 
   @Override
@@ -96,13 +97,29 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       subscribed = subscription != null;
       if (subscribed) {
         accumulate(chunk);
+        emitting = true;
       }
     }
     if (!subscribed) {
       end(new IllegalStateException("model stream sent a chunk before onSubscribe"), false);
       return;
     }
-    idleWatchdog.arm();
+    try {
+      idleWatchdog.arm();
+      emit(chunk);
+    } finally {
+      boolean ended;
+      synchronized (lock) {
+        emitting = false;
+        ended = outcome != null;
+      }
+      if (ended) {
+        done.countDown();
+      }
+    }
+  }
+
+  private void emit(ModelChunk chunk) {
     switch (chunk) {
       case ModelChunk.TextDelta(String text) ->
           emitter.emit(
@@ -178,19 +195,26 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     }
   }
 
+  /** Whether the stream has ended and the runner has been released. */
+  boolean released() {
+    return done.getCount() == 0L;
+  }
+
   /**
    * The one terminal transition: unless the stream already ended, snapshot it with {@code error}
    * (or none, for a completion), cancel the subscription when {@code cancelStream} and one is held,
-   * and release the runner.
+   * and release the runner, or leave its release to the chunk whose event is being emitted.
    */
   private void end(Throwable error, boolean cancelStream) {
     Flow.Subscription toCancel;
+    boolean release;
     synchronized (lock) {
       if (outcome != null) {
         return;
       }
       outcome = snapshot(error);
       toCancel = cancelStream ? subscription : null;
+      release = !emitting;
     }
     try {
       idleWatchdog.cancel();
@@ -198,7 +222,9 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
         toCancel.cancel();
       }
     } finally {
-      done.countDown();
+      if (release) {
+        done.countDown();
+      }
     }
   }
 
