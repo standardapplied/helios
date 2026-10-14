@@ -12,7 +12,6 @@ import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.ModelHarness;
 import com.standardapplied.helios.core.test.ModelIntegrationContract.Person;
 import com.standardapplied.helios.core.test.StreamParity;
-import com.standardapplied.helios.core.test.StreamParity.ThinkingJoin;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,8 +70,7 @@ class AnthropicStreamTranscriptTest {
   void chunkStreamAgreesWithChat(String name) {
     StreamParity.assertAgrees(
         "anthropic/streams/" + name + ".sse",
-        uri -> modelAt(uri, AnthropicModelId.CLAUDE_OPUS_5_5),
-        ThinkingJoin.betweenBlocks("\n\n"));
+        uri -> modelAt(uri, AnthropicModelId.CLAUDE_OPUS_5_5));
   }
 
   @ParameterizedTest

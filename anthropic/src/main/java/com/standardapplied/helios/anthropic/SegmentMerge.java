@@ -68,7 +68,7 @@ final class SegmentMerge {
     if (first == null) {
       return second;
     }
-    return second == null ? first : first + "\n\n" + second;
+    return second == null ? first : first + ThinkingBlocks.SEPARATOR + second;
   }
 
   private static List<Citation> citations(List<Citation> first, List<Citation> second) {

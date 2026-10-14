@@ -20,10 +20,11 @@ import java.util.concurrent.Flow;
  * appended unchanged. The segments' events are spliced into one stream: a paused segment's
  * completion is swallowed, the continuation is opened once that segment's stream has completed, and
  * the one terminal carries the merged turn — the completion its response, an error after a pause
- * its partial response. A caller never sees the pause. Demand the caller has not yet been served,
- * or a non-positive request, carries over to the next segment, and cancelling cancels the segment
- * in flight. At most {@link #MAX_PAUSE_CONTINUATIONS} resumes, which turns a pause loop into a loud
- * failure.
+ * its partial response. A caller never sees the pause; a continuation's first thinking delta
+ * carries the separator the merge puts before its thinking. Demand the caller has not yet been
+ * served, or a non-positive request, carries over to the next segment, and cancelling cancels the
+ * segment in flight. At most {@link #MAX_PAUSE_CONTINUATIONS} resumes, which turns a pause loop
+ * into a loud failure.
  */
 final class PauseContinuation implements Exchange<MessagesRequest> {
 
@@ -155,6 +156,7 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
     private final class Segment implements Flow.Subscriber<StreamEvent> {
 
       private MessagesRequest next;
+      private boolean thinkingStreamed;
 
       @Override
       public void onSubscribe(Flow.Subscription subscription) {
@@ -187,8 +189,21 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
           case StreamEvent.Error(var message, var cause, var partial) when mergedSoFar != null ->
               deliver(
                   new StreamEvent.Error(message, cause, SegmentMerge.merge(mergedSoFar, partial)));
+          case StreamEvent.ThinkingDelta delta -> deliver(separated(delta));
           default -> deliver(event);
         }
+      }
+
+      /**
+       * {@code delta}, the segment's first thinking prefixed with the separator the merge puts
+       * between the turn's thinking so far and this segment's, so the deltas add up to the turn's.
+       */
+      private StreamEvent separated(StreamEvent.ThinkingDelta delta) {
+        var first = !thinkingStreamed;
+        thinkingStreamed = true;
+        return first && mergedSoFar != null && mergedSoFar.thinking() != null
+            ? new StreamEvent.ThinkingDelta(ThinkingBlocks.SEPARATOR + delta.text())
+            : delta;
       }
 
       /** Completes the turn at the end of a segment, or arranges the next segment's opening. */

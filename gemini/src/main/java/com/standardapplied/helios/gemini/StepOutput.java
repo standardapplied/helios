@@ -60,9 +60,14 @@ final class StepOutput {
     return initialText.isEmpty() ? null : text(initialText.toString());
   }
 
-  /** {@code text} added to the thinking on a line of its own. */
-  void thought(String text) {
-    thinking = (thinking == null ? "" : thinking + "\n") + text;
+  /**
+   * {@code text} added to the thinking on a line of its own: what the thinking grew by, the newline
+   * before it included.
+   */
+  String thought(String text) {
+    var added = thinking == null ? text : "\n" + text;
+    thinking = thinking == null ? added : thinking + added;
+    return added;
   }
 
   /** A thought signature, kept when it is not empty. */
