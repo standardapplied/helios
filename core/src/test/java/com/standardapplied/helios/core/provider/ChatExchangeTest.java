@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
@@ -14,8 +15,12 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.HeldSseServer;
 import com.standardapplied.helios.core.test.RecordingSubscriber;
 import java.io.IOException;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -108,6 +113,36 @@ class ChatExchangeTest {
   }
 
   @Test
+  void cancellingTheSubscriptionWhileAwaitingHeadersClosesTheConnection() throws IOException {
+    var reply = HeldSseServer.Reply.holdingHeaders("data: a\n\n");
+    try (var client = HttpClientFactory.create();
+        var server = HeldSseServer.start(reply)) {
+      var subscriber = new RecordingSubscriber<StreamEvent>();
+      overHttp(client, server).stream("{}", new CancellationToken()).subscribe(subscriber);
+      reply.awaitRequest();
+
+      subscriber.cancel();
+
+      reply.awaitClientClosed();
+    }
+  }
+
+  @Test
+  void cancellingTheSubscriptionDuringAStalledBodyClosesTheConnection() throws IOException {
+    var reply = HeldSseServer.Reply.of("data: a\n\n", "data: b\n\n");
+    try (var client = HttpClientFactory.create();
+        var server = HeldSseServer.start(reply)) {
+      var subscriber = new RecordingSubscriber<StreamEvent>();
+      overHttp(client, server).stream("{}", new CancellationToken()).subscribe(subscriber);
+      assertEquals(new StreamEvent.TextDelta("a"), subscriber.next());
+
+      subscriber.cancel();
+
+      reply.awaitClientClosed();
+    }
+  }
+
+  @Test
   void nullPartsAreRejected() {
     assertThrows(NullPointerException.class, () -> new ChatExchange<String>(null, r -> null));
     assertThrows(NullPointerException.class, () -> new ChatExchange<String>("Acme API", null));
@@ -119,6 +154,31 @@ class ChatExchangeTest {
     var events = subscriber.awaitCompletion();
     assertEquals(1, events.size());
     return assertInstanceOf(StreamEvent.Error.class, events.getFirst());
+  }
+
+  /** An exchange posting its request to {@code server}, each event payload read as text. */
+  private static ChatExchange<String> overHttp(HttpClient client, HeldSseServer server) {
+    return new ChatExchange<>(
+        "Acme API",
+        body ->
+            SseReader.open(
+                client,
+                HttpRequest.newBuilder(server.uri())
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build(),
+                Duration.ofHours(1),
+                new SseReader.Parser() {
+                  @Override
+                  public StreamEvent parse(String payload) {
+                    return new StreamEvent.TextDelta(payload);
+                  }
+
+                  @Override
+                  public Response<Void> partial() {
+                    return NOTHING;
+                  }
+                },
+                (message, status, cause) -> new ProviderException(message, status, cause)));
   }
 
   private ChatExchange<String> exchange(ChatExchange.StreamOpener<String> opener) {
