@@ -1,8 +1,10 @@
 == chatStream
-Error[message=Arguments of tool call 'weather' are not a JSON object: Unexpected end-of-input within/between Object entries
- at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN], cause=GeminiException(Arguments of tool call 'weather' are not a JSON object: Unexpected end-of-input within/between Object entries
+KeepAlive[]
+ToolUseStart[callId=call_1, toolName=weather]
+ToolUseDelta[callId=call_1, argumentsDelta={"city":]
+onError GeminiException(Arguments of tool call 'weather' are not a JSON object: Unexpected end-of-input within/between Object entries
  at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN]) status=0 caused by UnexpectedEndOfInputException(Unexpected end-of-input within/between Object entries
- at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN]), partial=Response[content=, parsed=null, toolCalls=[], finishReason=ERROR, usage=null, thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]]
+ at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN])
 == chat
 threw GeminiException(Arguments of tool call 'weather' are not a JSON object: Unexpected end-of-input within/between Object entries
  at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN]) status=0 caused by UnexpectedEndOfInputException(Unexpected end-of-input within/between Object entries

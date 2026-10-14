@@ -94,6 +94,8 @@ class StreamReadErrorCausePreservationReproTest {
             Duration.ofSeconds(5),
             new AnthropicStreamParser(),
             AnthropicException::new)) {
+      assertEquals(new StreamEvent.KeepAlive(), iterator.next());
+      assertEquals(new StreamEvent.KeepAlive(), iterator.next());
       assertTrue(iterator.hasNext());
       assertInstanceOf(StreamEvent.TextDelta.class, iterator.next());
 
@@ -230,7 +232,7 @@ class StreamReadErrorCausePreservationReproTest {
                 new AnthropicStreamParser(),
                 AnthropicException::new);
     return org.junit.jupiter.api.Assertions.assertThrows(
-        RuntimeException.class, () -> PauseContinuationTest.continuation(segments).chat(request));
+        RuntimeException.class, () -> PauseContinuationTest.turn(segments, request));
   }
 
   @org.junit.jupiter.api.Test

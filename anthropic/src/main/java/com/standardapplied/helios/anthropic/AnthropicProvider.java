@@ -93,8 +93,7 @@ public class AnthropicProvider implements ModelProvider {
     var requests = new AnthropicRequestBuilder(wireModelId, knownModel, config, cachePolicy);
     var httpClient = HttpClientFactory.create(config);
     var streams = new AnthropicStreams(config, httpClient, requests.betas());
-    var exchange =
-        new ChatExchange<>(PROVIDER_NAME, "Anthropic API", streams::open, AnthropicException::new);
+    var exchange = new ChatExchange<>("Anthropic API", streams::open);
     return StreamingModel.<MessagesRequest>newBuilder()
         .withId(wireModelId)
         .withProvider(PROVIDER_NAME)
@@ -103,7 +102,8 @@ public class AnthropicProvider implements ModelProvider {
         .withMaxOutputTokens(requests.defaultMaxTokens())
         .withHttpClient(httpClient)
         .withRequests(requests)
-        .withExchange(new PauseContinuation(exchange, streams::open))
+        .withExchange(new PauseContinuation(exchange))
+        .withFailure(AnthropicException::new)
         .withJson(AnthropicJson.STRUCTURED)
         .build();
   }

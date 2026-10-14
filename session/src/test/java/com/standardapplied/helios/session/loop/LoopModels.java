@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.session.loop;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -48,7 +49,7 @@ final class LoopModels {
   }
 
   private record Observed(ScriptedModel script, IntConsumer onCall, int contextWindow)
-      implements Model {
+      implements BlockingModel {
 
     @Override
     public Response<Void> chat(List<Message> messages, List<Tool> tools) {

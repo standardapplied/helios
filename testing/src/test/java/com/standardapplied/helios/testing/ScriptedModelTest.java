@@ -18,11 +18,11 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
-import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
+import com.standardapplied.helios.core.test.RecordingSubscriber;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -49,7 +49,7 @@ class ScriptedModelTest {
   void textTurnReturnsContentWithStopFinish() {
     var model = ScriptedModel.newBuilder().withTextTurn("hello").build();
 
-    var response = model.chat(List.of(Message.user("hi")));
+    var response = model.chat(List.of(Message.user("hi")), List.of());
 
     assertEquals("hello", response.content());
     assertEquals(FinishReason.STOP, response.finishReason());
@@ -61,7 +61,7 @@ class ScriptedModelTest {
   void textTurnCarriesScriptedUsage() {
     var model = ScriptedModel.newBuilder().withTextTurn("hello", Usage.of(100, 50, 20, 10)).build();
 
-    var response = model.chat(List.of(Message.user("hi")));
+    var response = model.chat(List.of(Message.user("hi")), List.of());
 
     assertEquals(Usage.of(100, 50, 20, 10), response.usage());
   }
@@ -76,11 +76,11 @@ class ScriptedModelTest {
             .build();
     var model = ScriptedModel.newBuilder().withToolCallsTurn(call).withTextTurn("done").build();
 
-    var first = model.chat(List.of(Message.user("go")));
+    var first = model.chat(List.of(Message.user("go")), List.of());
     assertEquals(FinishReason.TOOL_CALLS, first.finishReason());
     assertEquals(List.of(call), first.toolCalls());
 
-    var second = model.chat(List.of(Message.user("result")));
+    var second = model.chat(List.of(Message.user("result")), List.of());
     assertEquals("done", second.content());
   }
 
@@ -89,7 +89,8 @@ class ScriptedModelTest {
     var model =
         ScriptedModel.newBuilder().withTextTurn("{\"answer\": \"yes\", \"score\": 4}").build();
 
-    var response = model.chat(List.of(Message.user("judge")), OutputSchema.of(Verdict.class));
+    var response =
+        model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class));
 
     assertEquals(new Verdict("yes", 4), response.parsed());
   }
@@ -100,7 +101,41 @@ class ScriptedModelTest {
 
     assertThrows(
         StructuredOutputParseException.class,
-        () -> model.chat(List.of(Message.user("judge")), OutputSchema.of(Verdict.class)));
+        () ->
+            model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class)));
+  }
+
+  @Test
+  void aStructuredStreamWithASchemaMismatchEndsWithTheParseException() {
+    var model = ScriptedModel.newBuilder().withTextTurn("{\"unexpected\": true}").build();
+    var chunks = new RecordingSubscriber<ModelChunk>();
+
+    model
+        .chatStream(
+            List.of(Message.user("judge")),
+            List.of(),
+            OutputSchema.of(Verdict.class),
+            new CancellationToken())
+        .subscribe(chunks);
+
+    assertInstanceOf(StructuredOutputParseException.class, chunks.awaitFailure());
+  }
+
+  @Test
+  void aStructuredStreamOfAMatchingAnswerPublishesItsChunks() {
+    var json = "{\"answer\": \"yes\", \"score\": 4}";
+    var model = ScriptedModel.newBuilder().withTextTurn(json).build();
+    var chunks = new RecordingSubscriber<ModelChunk>();
+
+    model
+        .chatStream(
+            List.of(Message.user("judge")),
+            List.of(),
+            OutputSchema.of(Verdict.class),
+            new CancellationToken())
+        .subscribe(chunks);
+
+    assertEquals(new ModelChunk.TextDelta(json), chunks.awaitCompletion().getFirst());
   }
 
   @Test
@@ -119,7 +154,7 @@ class ScriptedModelTest {
   void refusalTurnCarriesRefusalFinishReason() {
     var model = ScriptedModel.newBuilder().withRefusalTurn("I can't help with that.").build();
 
-    var response = model.chat(List.of(Message.user("do the thing")));
+    var response = model.chat(List.of(Message.user("do the thing")), List.of());
 
     assertEquals(FinishReason.REFUSAL, response.finishReason());
     assertEquals("I can't help with that.", response.content());
@@ -129,10 +164,11 @@ class ScriptedModelTest {
   @Test
   void exhaustedScriptFailsFast() {
     var model = ScriptedModel.newBuilder().withTextTurn("only").build();
-    model.chat(List.of(Message.user("one")));
+    model.chat(List.of(Message.user("one")), List.of());
 
     var ex =
-        assertThrows(IllegalStateException.class, () -> model.chat(List.of(Message.user("two"))));
+        assertThrows(
+            IllegalStateException.class, () -> model.chat(List.of(Message.user("two")), List.of()));
     assertTrue(ex.getMessage().contains("1 turn(s) scripted"));
   }
 
@@ -140,8 +176,8 @@ class ScriptedModelTest {
   void capturesEveryCallForAssertions() {
     var model = ScriptedModel.newBuilder().withTextTurn("a").withTextTurn("b").build();
 
-    model.chat(List.of(Message.user("first")));
-    model.chat(List.of(Message.system("sys"), Message.user("second")));
+    model.chat(List.of(Message.user("first")), List.of());
+    model.chat(List.of(Message.system("sys"), Message.user("second")), List.of());
 
     assertEquals(2, model.calls().size());
     assertEquals("first", model.calls().get(0).getFirst().content());
@@ -157,14 +193,15 @@ class ScriptedModelTest {
   }
 
   @Test
-  void worksThroughDefaultStreamingPath() {
+  void aResponseTurnStreamsAsItsChunksOnceRequested() {
     var model = ScriptedModel.newBuilder().withTextTurn("streamed").build();
+    var subscriber = new RecordingSubscriber<ModelChunk>();
 
-    try (var stream = model.chatStream(List.of(Message.user("hi")))) {
-      var event = stream.next();
-      var done = assertInstanceOf(StreamEvent.Done.class, event);
-      assertEquals("streamed", done.response().content());
-    }
+    model
+        .chatStream(List.of(Message.user("hi")), List.of(), new CancellationToken())
+        .subscribe(subscriber);
+
+    assertEquals(new ModelChunk.TextDelta("streamed"), subscriber.awaitCompletion().getFirst());
   }
 
   @Test
@@ -179,7 +216,7 @@ class ScriptedModelTest {
             .build();
     var model = ScriptedModel.newBuilder().withResponseTurn(scripted).build();
 
-    assertSame(scripted, model.chat(List.of(Message.user("hi"))));
+    assertSame(scripted, model.chat(List.of(Message.user("hi")), List.of()));
   }
 
   @Test
@@ -195,7 +232,8 @@ class ScriptedModelTest {
                     .build())
             .build();
 
-    var response = model.chat(List.of(Message.user("judge")), OutputSchema.of(Verdict.class));
+    var response =
+        model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class));
 
     assertEquals(new Verdict("yes", 4), response.parsed());
     assertEquals("sure", response.thinking());
@@ -215,7 +253,8 @@ class ScriptedModelTest {
             .build();
     var model = ScriptedModel.newBuilder().withResponseTurn(scripted).build();
 
-    var response = model.chat(List.of(Message.user("judge")), OutputSchema.of(Verdict.class));
+    var response =
+        model.chat(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class));
 
     assertEquals(scripted, response);
   }
@@ -234,19 +273,19 @@ class ScriptedModelTest {
                     .build())
             .build();
 
-    var recorder =
-        ChunkRecorder.drain(
-            model.chatStream(List.of(Message.user("go")), List.of(), new CancellationToken()));
+    var chunks = new RecordingSubscriber<ModelChunk>();
+    model
+        .chatStream(List.of(Message.user("go")), List.of(), new CancellationToken())
+        .subscribe(chunks);
 
     assertEquals(
         List.of(
-            "subscribed",
-            new ModelChunk.TextDelta("calling").toString(),
-            new ModelChunk.ToolUseStart("c1", "search").toString(),
-            new ModelChunk.ToolUseStop(call).toString(),
-            new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of()).toString(),
-            "complete"),
-        recorder.signals);
+            new ModelChunk.TextDelta("calling"),
+            new ModelChunk.ToolUseStart("c1", "search"),
+            new ModelChunk.ToolUseStop(call),
+            new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of())),
+        chunks.awaitCompletion());
+    assertEquals(0, chunks.violations());
   }
 
   @Test
@@ -270,7 +309,8 @@ class ScriptedModelTest {
     var model = ScriptedModel.newBuilder().withStreamTurn(ModelStreams.of()).build();
 
     var ex =
-        assertThrows(IllegalStateException.class, () -> model.chat(List.of(Message.user("hi"))));
+        assertThrows(
+            IllegalStateException.class, () -> model.chat(List.of(Message.user("hi")), List.of()));
     assertEquals(
         "Scripted turn 1 is a stream turn: only chatStream with a CancellationToken answers it",
         ex.getMessage());
@@ -299,8 +339,8 @@ class ScriptedModelTest {
             .withTextTurn("{\"answer\": \"no\", \"score\": 1}")
             .build();
 
-    model.chat(List.of(Message.user("1")));
-    model.chat(List.of(Message.user("2")), schema);
+    model.chat(List.of(Message.user("1")), List.of());
+    model.chat(List.of(Message.user("2")), List.of(), schema);
     model.chatStream(List.of(Message.user("3")), List.of(), schema, new CancellationToken());
 
     assertEquals(

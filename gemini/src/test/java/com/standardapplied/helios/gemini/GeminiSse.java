@@ -93,6 +93,6 @@ final class GeminiSse {
 
   /** Every event the stateful parser yields from {@code sse}. */
   static List<StreamEvent> drain(String sse) {
-    return SseEvents.drain(reader(SseEvents.body(sse)));
+    return SseEvents.drainContent(reader(SseEvents.body(sse)));
   }
 }

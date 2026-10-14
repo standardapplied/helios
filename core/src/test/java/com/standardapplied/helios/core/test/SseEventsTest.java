@@ -53,6 +53,22 @@ class SseEventsTest {
   }
 
   @Test
+  void drainContentLeavesOutTheKeepAlives() {
+    var reader =
+        new SseReader(
+            SseEvents.body(": ping\n\n" + SseEvents.data("a") + "event: ping\n\n"),
+            SseEvents.NEVER_IDLE,
+            ECHO,
+            ProviderException::new);
+
+    var drained = SseEvents.drainContent(reader);
+
+    assertEquals(new StreamEvent.TextDelta("a"), drained.getFirst());
+    assertInstanceOf(StreamEvent.Error.class, drained.getLast());
+    assertEquals(2, drained.size());
+  }
+
+  @Test
   void drainReturnsEveryEventInOrderAndClosesTheIterator() {
     var events =
         List.<StreamEvent>of(new StreamEvent.TextDelta("a"), new StreamEvent.TextDelta("b"));

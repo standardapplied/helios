@@ -9,11 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.FileReference;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
@@ -42,7 +42,7 @@ import org.junit.jupiter.api.io.TempDir;
  */
 final class Phase3AcceptanceTest {
 
-  private static final class RecordingModel implements Model {
+  private static final class RecordingModel implements BlockingModel {
     final List<Message> observedMessages = new CopyOnWriteArrayList<>();
 
     @Override

@@ -1,6 +1,16 @@
 == chatStream
-ToolCallComplete[toolCall=ToolCall[id=call_291525, name=weather, arguments={city=Paris}]]
-ToolCallComplete[toolCall=ToolCall[id=call_291528, name=weather, arguments={city=Rome}]]
-Done[response=Response[content=, parsed=null, toolCalls=[ToolCall[id=call_291525, name=weather, arguments={city=Paris}], ToolCall[id=call_291528, name=weather, arguments={city=Rome}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=63, outputTokens=28, cacheCreationInputTokens=0, cacheReadInputTokens=0, totalTokens=91], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=v1_ChdDUmpPYXNESUJwajhrZFVQbUxpSW9BcxIXQ1JqT2FzRElCcGo4a2RVUG1MaUlvQXM, gemini.thoughtSignatures=EtoCCtcCAWkUfROGf8Xhels0SiN1ADDyy6mP3c8+Sx5VSTs+EB78KngdPcgTY7r+qZ2MMlUTNHn1jtDkaqSGCpnH1wRMcljRQWktY1Xiol3D8i0Uz1qJqLw1qBgvVd3yADkw7/zTb2iLJt5dBmunFNOpc2oYBjEtjFwVjPESKpOLWvQB0RgmEDsGZh832y7cFpL0YetqgKe8MZK5lbGOSA3fAcJfA0ufBdqWaMR0S4C5JR1tb7yA+EZ4agEhEK1RQGXYq9I7lHokLaeRbI3XYJFi33pTkX03ll9SGoWOg8Je2SCzf0XakQGDDaRnEnGpndxfiHatXmyLiki3GsG+A99ByuP1PAqM2klX7ldNIagbzMYfiOHd0JRuegelOlFHn4PcVxs6uzeZYTvvPMwhIMAz8HT2wesPr6/+lrgqc+JQMhzuJ2Kh1rXWD0o3Du4gDLyxEgBT7zTdn77Iag==}]]
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
+ToolUseStart[callId=call_291525, toolName=weather]
+ToolUseDelta[callId=call_291525, argumentsDelta={"city":"Paris"}]
+ToolUseStop[toolCall=ToolCall[id=call_291525, name=weather, arguments={city=Paris}]]
+ToolUseStart[callId=call_291528, toolName=weather]
+ToolUseDelta[callId=call_291528, argumentsDelta={"city":"Rome"}]
+ToolUseStop[toolCall=ToolCall[id=call_291528, name=weather, arguments={city=Rome}]]
+MessageStop[stopReason=TOOL_CALLS, usage=Usage[inputTokens=63, outputTokens=28, cacheCreationInputTokens=0, cacheReadInputTokens=0, totalTokens=91], metadata={gemini.apiVersion=v1beta, gemini.interactionId=v1_ChdDUmpPYXNESUJwajhrZFVQbUxpSW9BcxIXQ1JqT2FzRElCcGo4a2RVUG1MaUlvQXM, gemini.thoughtSignatures=EtoCCtcCAWkUfROGf8Xhels0SiN1ADDyy6mP3c8+Sx5VSTs+EB78KngdPcgTY7r+qZ2MMlUTNHn1jtDkaqSGCpnH1wRMcljRQWktY1Xiol3D8i0Uz1qJqLw1qBgvVd3yADkw7/zTb2iLJt5dBmunFNOpc2oYBjEtjFwVjPESKpOLWvQB0RgmEDsGZh832y7cFpL0YetqgKe8MZK5lbGOSA3fAcJfA0ufBdqWaMR0S4C5JR1tb7yA+EZ4agEhEK1RQGXYq9I7lHokLaeRbI3XYJFi33pTkX03ll9SGoWOg8Je2SCzf0XakQGDDaRnEnGpndxfiHatXmyLiki3GsG+A99ByuP1PAqM2klX7ldNIagbzMYfiOHd0JRuegelOlFHn4PcVxs6uzeZYTvvPMwhIMAz8HT2wesPr6/+lrgqc+JQMhzuJ2Kh1rXWD0o3Du4gDLyxEgBT7zTdn77Iag==}, citations=[]]
+onComplete
 == chat
 Response[content=, parsed=null, toolCalls=[ToolCall[id=call_291525, name=weather, arguments={city=Paris}], ToolCall[id=call_291528, name=weather, arguments={city=Rome}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=63, outputTokens=28, cacheCreationInputTokens=0, cacheReadInputTokens=0, totalTokens=91], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=v1_ChdDUmpPYXNESUJwajhrZFVQbUxpSW9BcxIXQ1JqT2FzRElCcGo4a2RVUG1MaUlvQXM, gemini.thoughtSignatures=EtoCCtcCAWkUfROGf8Xhels0SiN1ADDyy6mP3c8+Sx5VSTs+EB78KngdPcgTY7r+qZ2MMlUTNHn1jtDkaqSGCpnH1wRMcljRQWktY1Xiol3D8i0Uz1qJqLw1qBgvVd3yADkw7/zTb2iLJt5dBmunFNOpc2oYBjEtjFwVjPESKpOLWvQB0RgmEDsGZh832y7cFpL0YetqgKe8MZK5lbGOSA3fAcJfA0ufBdqWaMR0S4C5JR1tb7yA+EZ4agEhEK1RQGXYq9I7lHokLaeRbI3XYJFi33pTkX03ll9SGoWOg8Je2SCzf0XakQGDDaRnEnGpndxfiHatXmyLiki3GsG+A99ByuP1PAqM2klX7ldNIagbzMYfiOHd0JRuegelOlFHn4PcVxs6uzeZYTvvPMwhIMAz8HT2wesPr6/+lrgqc+JQMhzuJ2Kh1rXWD0o3Du4gDLyxEgBT7zTdn77Iag==}]

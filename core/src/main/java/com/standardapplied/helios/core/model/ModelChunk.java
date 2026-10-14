@@ -13,7 +13,7 @@ import java.util.Objects;
  * Normalized streaming chunk emitted by a {@link Model} during {@code chatStream}.
  *
  * <p>Provider modules ({@code helios-anthropic}, {@code helios-openai}, {@code helios-gemini})
- * translate wire-level streaming events into the seven subtypes below so the agent loop never sees
+ * translate wire-level streaming events into the eight subtypes below so the agent loop never sees
  * provider-specific payloads. Subscribers pattern-match the subtype via {@code switch}; the sealed
  * permits list is the closed contract.
  *
@@ -24,10 +24,9 @@ import java.util.Objects;
  *
  * <h2>Relationship to {@code StreamEvent}</h2>
  *
- * Coexists with the iterator-shaped {@link StreamEvent} that older non-session callers consume. The
- * v2 session loop consumes {@code Flow.Publisher<ModelChunk>} via {@link
- * Model#chatStream(java.util.List, java.util.List,
- * com.standardapplied.helios.core.runtime.CancellationToken)}.
+ * {@link StreamEvent} is what a provider's stream parser reads off the wire; a provider's model
+ * turns those events into these chunks, the one stream {@link Model#chatStream(java.util.List,
+ * java.util.List, com.standardapplied.helios.core.runtime.CancellationToken)} publishes.
  */
 public sealed interface ModelChunk
     permits ModelChunk.TextDelta,
@@ -36,7 +35,8 @@ public sealed interface ModelChunk
         ModelChunk.ToolUseDelta,
         ModelChunk.ToolUseStop,
         ModelChunk.MessageStop,
-        ModelChunk.UsageDelta {
+        ModelChunk.UsageDelta,
+        ModelChunk.KeepAlive {
 
   /**
    * A fragment of assistant text. {@code text} may be empty (some providers emit empty deltas);
@@ -157,6 +157,38 @@ public sealed interface ModelChunk
     public MessageStop(String stopReason, Usage usage, Map<String, String> metadata) {
       this(stopReason, usage, metadata, List.of());
     }
+
+    /**
+     * The message stop ending a stream that answered with {@code response}: its finish reason
+     * ({@link FinishReason#STOP} when unset), usage (zero when unset), metadata and citations.
+     *
+     * @param response the finished response
+     * @return its message stop
+     */
+    public static MessageStop of(Response<?> response) {
+      return new MessageStop(
+          response.finishReason() != null
+              ? response.finishReason().name()
+              : FinishReason.STOP.name(),
+          response.usage() != null ? response.usage() : Usage.of(0, 0),
+          response.metadata() != null ? response.metadata() : Map.of(),
+          response.citations() != null ? response.citations() : List.of());
+    }
+
+    /**
+     * The stop reason as a {@link FinishReason}: the constant it names, else {@link
+     * FinishReason#STOP} for any other spelling, such as a provider's own {@code end_turn} or
+     * {@code max_tokens}.
+     *
+     * @return the finish reason
+     */
+    public FinishReason finishReason() {
+      try {
+        return FinishReason.valueOf(stopReason);
+      } catch (IllegalArgumentException providerSpelling) {
+        return FinishReason.STOP;
+      }
+    }
   }
 
   /**
@@ -173,4 +205,12 @@ public sealed interface ModelChunk
       Objects.requireNonNull(usage, "usage must not be null");
     }
   }
+
+  /**
+   * The stream is alive but this part of it carries nothing for the turn: a provider frame without
+   * content (a ping, a status or envelope event, an SSE comment) or a completed thinking block,
+   * whose text the {@link ThinkingDelta}s already carried. A subscriber adds nothing for it; a
+   * session re-arms its idle clock on it, as on every chunk.
+   */
+  record KeepAlive() implements ModelChunk {}
 }

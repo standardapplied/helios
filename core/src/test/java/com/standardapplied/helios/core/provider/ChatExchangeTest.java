@@ -3,243 +3,215 @@
 package com.standardapplied.helios.core.provider;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
-import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.HeldSseServer;
+import com.standardapplied.helios.core.test.RecordingSubscriber;
 import java.io.IOException;
-import java.util.ArrayList;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import org.junit.jupiter.api.Test;
 
 class ChatExchangeTest {
 
-  /** The exception a test provider throws, so a pass-through is told apart from a wrap. */
-  static final class AcmeException extends ProviderException {
-    AcmeException(String message, int statusCode, Throwable cause) {
-      super(message, statusCode, cause);
-    }
-  }
-
   private static final Response<Void> DONE =
-      Response.newBuilder()
-          .withContent("{\"summary\":\"ok\"}")
-          .withFinishReason(FinishReason.STOP)
-          .build();
+      Response.newBuilder().withContent("ok").withFinishReason(FinishReason.STOP).build();
 
   private static final Response<Void> NOTHING =
-      Response.newBuilder().withFinishReason(FinishReason.ERROR).build();
+      Response.newBuilder().withContent("").withFinishReason(FinishReason.ERROR).build();
 
-  private final List<String> opened = new ArrayList<>();
+  private final List<String> opened = new CopyOnWriteArrayList<>();
 
   @Test
-  void chatDrainsTheStreamToItsResponseAndClosesIt() {
-    var stream = new Recorded(new StreamEvent.TextDelta("ok"), new StreamEvent.Done(DONE));
+  void theStreamOpensOnTheFirstRequestAndPublishesItsEventsThenClosesIt() {
+    var events = List.<StreamEvent>of(new StreamEvent.TextDelta("ok"), new StreamEvent.Done(DONE));
+    var stream = new Recorded(events);
+    var subscriber = new RecordingSubscriber<StreamEvent>(0);
 
-    assertSame(DONE, exchange(request -> stream).chat("req"));
-    assertTrue(stream.closed);
+    exchange(request -> stream).stream("req", new CancellationToken()).subscribe(subscriber);
+    subscriber.subscription();
+    var openedBeforeRequest = List.copyOf(opened);
+    subscriber.request(Long.MAX_VALUE);
+
+    assertEquals(List.of(), openedBeforeRequest);
+    assertEquals(events, subscriber.awaitCompletion());
     assertEquals(List.of("req"), opened);
+    Await.latch("the stream closed", stream.closed);
   }
 
   @Test
-  void chatRethrowsTheProvidersOwnExceptionFromAnErrorEvent() {
-    var own = new AcmeException("boom", 503, null);
-
-    var thrown =
-        assertThrows(AcmeException.class, () -> chatOn(new StreamEvent.Error("x", own, NOTHING)));
-
-    assertSame(own, thrown);
-  }
-
-  @Test
-  void chatRethrowsATransientFailureFromAnErrorEvent() {
-    var transientFailure = new TransientStreamException("overloaded", null, "acme");
-
-    var thrown =
-        assertThrows(
-            TransientStreamException.class,
-            () -> chatOn(new StreamEvent.Error("x", transientFailure, NOTHING)));
-
-    assertSame(transientFailure, thrown);
-  }
-
-  @Test
-  void chatTurnsAMidStreamReadFailureIntoARetryableFailureNamingTheProvider() {
-    var reset = new IOException("reset");
-
-    var thrown =
-        assertThrows(
-            TransientStreamException.class,
-            () -> chatOn(new StreamEvent.Error("Stream read error", reset, NOTHING)));
-
-    assertEquals("Stream read error", thrown.getMessage());
-    assertSame(reset, thrown.getCause());
-    assertEquals("acme", thrown.providerName());
-  }
-
-  @Test
-  void chatWrapsAnyOtherErrorInTheProvidersException() {
-    var parse = new IllegalArgumentException("bad json");
-
-    var wrapped =
-        assertThrows(
-            AcmeException.class,
-            () -> chatOn(new StreamEvent.Error("Failed to parse", parse, NOTHING)));
-    var bare =
-        assertThrows(
-            AcmeException.class, () -> chatOn(new StreamEvent.Error("API error", null, NOTHING)));
-
-    assertEquals("Failed to parse", wrapped.getMessage());
-    assertSame(parse, wrapped.getCause());
-    assertEquals("API error", bare.getMessage());
-    assertNull(bare.getCause());
-  }
-
-  @Test
-  void chatFailsAStreamThatEndsWithoutCompleting() {
-    var thrown = assertThrows(AcmeException.class, () -> chatOn(new StreamEvent.TextDelta("x")));
-
-    assertEquals("Stream ended without completion event", thrown.getMessage());
-  }
-
-  @Test
-  void chatTurnsAFailureToSendIntoARetryableFailureNamingTheApi() {
-    var refused = new IOException("refused");
-
-    var thrown =
-        assertThrows(
-            TransientStreamException.class,
-            () ->
-                exchange(
-                        request -> {
-                          throw refused;
-                        })
-                    .chat("req"));
-
-    assertEquals("Failed to communicate with Acme API", thrown.getMessage());
-    assertSame(refused, thrown.getCause());
-    assertEquals("acme", thrown.providerName());
-  }
-
-  @Test
-  void chatRestoresAnInterruptAndFailsWithTheProvidersException() {
-    var interrupt = new InterruptedException();
-
-    var thrown =
-        assertThrows(
-            AcmeException.class,
-            () ->
-                exchange(
-                        request -> {
-                          throw interrupt;
-                        })
-                    .chat("req"));
-
-    assertTrue(Thread.interrupted());
-    assertEquals("Request interrupted", thrown.getMessage());
-    assertSame(interrupt, thrown.getCause());
-  }
-
-  @Test
-  void streamHandsBackTheOpenedStream() {
-    var stream = new Recorded(new StreamEvent.Done(DONE));
-
-    assertSame(stream, exchange(request -> stream).stream("req"));
-  }
-
-  @Test
-  void streamTurnsTheProvidersExceptionIntoItsOneErrorEvent() {
-    var own = new AcmeException("API error (status 400): bad", 400, null);
+  void theProvidersExceptionIsTheStreamsOneErrorEvent() {
+    var own = new ProviderException("API error (status 400): bad", 400, null);
 
     var error =
         onlyError(
-            exchange(
-                request -> {
-                  throw own;
-                })
-                .stream("req"));
+            request -> {
+              throw own;
+            });
 
     assertEquals(own.getMessage(), error.message());
     assertSame(own, error.cause());
+    assertEquals(NOTHING, error.partial());
   }
 
   @Test
-  void streamTurnsAFailureToConnectIntoItsOneErrorEvent() {
+  void aFailureToCommunicateIsTheStreamsOneErrorEventNamingTheApi() {
     var refused = new IOException("refused");
 
     var error =
         onlyError(
-            exchange(
-                request -> {
-                  throw refused;
-                })
-                .stream("req"));
+            request -> {
+              throw refused;
+            });
 
-    assertEquals("Failed to connect", error.message());
+    assertEquals("Failed to communicate with Acme API", error.message());
     assertSame(refused, error.cause());
-    assertEquals(
-        Response.newBuilder().withContent("").withFinishReason(FinishReason.ERROR).build(),
-        error.partial());
   }
 
   @Test
-  void streamRestoresAnInterruptAndReportsItAsItsOneErrorEvent() {
+  void anInterruptWhileSendingIsTheStreamsOneErrorEvent() {
     var interrupt = new InterruptedException();
 
     var error =
         onlyError(
-            exchange(
-                request -> {
-                  throw interrupt;
-                })
-                .stream("req"));
+            request -> {
+              throw interrupt;
+            });
 
-    assertTrue(Thread.interrupted());
     assertEquals("Request interrupted", error.message());
     assertSame(interrupt, error.cause());
   }
 
-  private Response<Void> chatOn(StreamEvent... events) {
-    return exchange(request -> new Recorded(events)).chat("req");
+  @Test
+  void cancellingTheTokenEndsTheStreamAndClosesIt() {
+    var token = new CancellationToken();
+    var stream = new Recorded(List.of());
+    stream.blocks = true;
+    var subscriber = new RecordingSubscriber<StreamEvent>();
+
+    exchange(request -> stream).stream("req", token).subscribe(subscriber);
+    Await.latch("the read blocked", stream.blocked);
+    token.cancel("stop");
+
+    assertInstanceOf(CancellationException.class, subscriber.awaitFailure());
+    Await.latch("the stream closed", stream.closed);
+  }
+
+  @Test
+  void cancellingTheSubscriptionWhileAwaitingHeadersClosesTheConnection() throws IOException {
+    var reply = HeldSseServer.Reply.holdingHeaders("data: a\n\n");
+    try (var client = HttpClientFactory.create();
+        var server = HeldSseServer.start(reply)) {
+      var subscriber = new RecordingSubscriber<StreamEvent>();
+      overHttp(client, server).stream("{}", new CancellationToken()).subscribe(subscriber);
+      reply.awaitRequest();
+
+      subscriber.cancel();
+
+      reply.awaitClientClosed();
+    }
+  }
+
+  @Test
+  void cancellingTheSubscriptionDuringAStalledBodyClosesTheConnection() throws IOException {
+    var reply = HeldSseServer.Reply.of("data: a\n\n", "data: b\n\n");
+    try (var client = HttpClientFactory.create();
+        var server = HeldSseServer.start(reply)) {
+      var subscriber = new RecordingSubscriber<StreamEvent>();
+      overHttp(client, server).stream("{}", new CancellationToken()).subscribe(subscriber);
+      assertEquals(new StreamEvent.TextDelta("a"), subscriber.next());
+
+      subscriber.cancel();
+
+      reply.awaitClientClosed();
+    }
+  }
+
+  @Test
+  void nullPartsAreRejected() {
+    assertThrows(NullPointerException.class, () -> new ChatExchange<String>(null, r -> null));
+    assertThrows(NullPointerException.class, () -> new ChatExchange<String>("Acme API", null));
+  }
+
+  private StreamEvent.Error onlyError(ChatExchange.StreamOpener<String> opener) {
+    var subscriber = new RecordingSubscriber<StreamEvent>();
+    exchange(opener).stream("req", new CancellationToken()).subscribe(subscriber);
+    var events = subscriber.awaitCompletion();
+    assertEquals(1, events.size());
+    return assertInstanceOf(StreamEvent.Error.class, events.getFirst());
+  }
+
+  /** An exchange posting its request to {@code server}, each event payload read as text. */
+  private static ChatExchange<String> overHttp(HttpClient client, HeldSseServer server) {
+    return new ChatExchange<>(
+        "Acme API",
+        body ->
+            SseReader.open(
+                client,
+                HttpRequest.newBuilder(server.uri())
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build(),
+                Duration.ofHours(1),
+                new SseReader.Parser() {
+                  @Override
+                  public StreamEvent parse(String payload) {
+                    return new StreamEvent.TextDelta(payload);
+                  }
+
+                  @Override
+                  public Response<Void> partial() {
+                    return NOTHING;
+                  }
+                },
+                (message, status, cause) -> new ProviderException(message, status, cause)));
   }
 
   private ChatExchange<String> exchange(ChatExchange.StreamOpener<String> opener) {
     return new ChatExchange<>(
-        "acme",
         "Acme API",
         request -> {
           opened.add(request);
           return opener.open(request);
-        },
-        AcmeException::new);
+        });
   }
 
-  private static StreamEvent.Error onlyError(CloseableIterator<StreamEvent> events) {
-    var error = assertInstanceOf(StreamEvent.Error.class, events.next());
-    assertFalse(events.hasNext());
-    return error;
-  }
-
-  private static final class Recorded implements CloseableIterator<StreamEvent> {
+  /** Recorded events, optionally blocking the read after the last one until closed. */
+  static final class Recorded implements CloseableIterator<StreamEvent> {
     private final List<StreamEvent> events;
+    final CountDownLatch closed = new CountDownLatch(1);
+    final CountDownLatch blocked = new CountDownLatch(1);
     private int next;
-    private boolean closed;
+    boolean blocks;
 
-    Recorded(StreamEvent... events) {
-      this.events = List.of(events);
+    Recorded(List<StreamEvent> events) {
+      this.events = events;
     }
 
     @Override
     public boolean hasNext() {
+      if (blocks && next == events.size()) {
+        blocked.countDown();
+        try {
+          closed.await();
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+        }
+      }
       return next < events.size();
     }
 
@@ -250,7 +222,7 @@ class ChatExchangeTest {
 
     @Override
     public void close() {
-      closed = true;
+      closed.countDown();
     }
   }
 }

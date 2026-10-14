@@ -95,7 +95,7 @@ try (var model = new AnthropicProvider().create(
     ModelConfig.newBuilder().withApiKey(System.getenv("ANTHROPIC_API_KEY")).build())) {
   var response = model.chat(List.of(
       Message.system("You are a helpful assistant."),
-      Message.user("What is the capital of France?")));
+      Message.user("What is the capital of France?")), List.of());
   System.out.println(response.content());
 }
 ```
@@ -144,7 +144,7 @@ try (var files = new GeminiFilesClient(config);
       .withFileReferences(List.of(video.reference()))
       .build();
 
-  System.out.println(model.chat(List.of(message)).content());
+  System.out.println(model.chat(List.of(message), List.of()).content());
 }
 ```
 
@@ -177,7 +177,7 @@ try (var events = JsonlEventSink.openMetadataOnly(Path.of("events.jsonl"));
       .withContent("Analyze the video.")
       .withFileReferences(List.of(media.reference()))
       .build();
-  var response = model.chat(List.of(input));
+  var response = model.chat(List.of(input), List.of());
 }
 ```
 
@@ -393,7 +393,7 @@ Path-jail (`..` / absolute refusal + canonicalisation + no-follow opens) is buil
 ```java
 record Sentiment(String label, double confidence) {}
 
-var response = model.chat(messages, OutputSchema.of(Sentiment.class));
+var response = model.chat(messages, List.of(), OutputSchema.of(Sentiment.class));
 Sentiment s = response.parsed();
 ```
 
@@ -401,7 +401,7 @@ For provenance-tagged output (Basis-style — every field carries source citatio
 
 ```java
 var schema = OutputSchema.provenancedOf(MappingProposal.class);
-var response = model.chat(messages, schema);
+var response = model.chat(messages, List.of(), schema);
 Provenanced<MappingProposal> result = response.parsed();
 // result.output() = the typed output; result.provenance() = per-field sources + confidence
 ```
@@ -415,19 +415,23 @@ Through `session.runBlocking(message, schema)`, the loop intercepts `StructuredO
 The session's `events()` publisher is the primary streaming surface — see [Sessions](#sessions-helios-session). For direct model use without a session:
 
 ```java
-try (var events = model.chatStream(messages, tools)) {
-  while (events.hasNext()) {
-    switch (events.next()) {
-      case StreamEvent.TextDelta d -> System.out.print(d.text());
-      case StreamEvent.ToolCallComplete tc -> System.out.println("Called: " + tc.toolCall().name());
-      case StreamEvent.Done d -> System.out.println("\n" + d.response().content());
+var cancellation = new CancellationToken();
+model.chatStream(messages, tools, cancellation).subscribe(new Flow.Subscriber<ModelChunk>() {
+  public void onSubscribe(Flow.Subscription s) { s.request(Long.MAX_VALUE); }
+  public void onNext(ModelChunk chunk) {
+    switch (chunk) {
+      case ModelChunk.TextDelta d -> System.out.print(d.text());
+      case ModelChunk.ToolUseStop stop -> System.out.println("Called: " + stop.toolCall().name());
+      case ModelChunk.MessageStop stop -> System.out.println("\n" + stop.finishReason());
       default -> {}
     }
   }
-}
+  public void onError(Throwable failure) { failure.printStackTrace(); }
+  public void onComplete() {}
+});
 ```
 
-The iterator is `Closeable` — use try-with-resources to release the underlying connection promptly. For the session loop's `Flow.Publisher<ModelChunk>` overload (with cancellation), see `Model.chatStream(messages, tools, cancellation)`.
+Nothing is sent until the subscriber's first request; each chunk arrives as the provider streams it. Cancelling the subscription, or `cancellation.cancel(reason)`, aborts the request and closes its connection without closing the model. `model.chat(messages, tools)` drains the same stream. A model you write that can only answer blockingly implements `BlockingModel`.
 
 ## Fault Tolerance
 
@@ -446,7 +450,7 @@ var ft = FaultTolerance.newBuilder()
     .withOperationTimeout(Duration.ofMinutes(5))
     .build();
 
-var result = ft.execute(() -> model.chat(messages));   // checked exceptions: see Javadoc
+var result = ft.execute(() -> model.chat(messages, List.of()));   // checked exceptions: see Javadoc
 ```
 
 `FaultTolerance.withoutRetry()` returns a sibling envelope with retry stripped (circuit breaker + timeout retained), for wrapping an operation that must not replay.

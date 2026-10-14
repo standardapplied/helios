@@ -9,18 +9,8 @@ import java.util.Iterator;
 
 /**
  * An iterator that holds resources (e.g., HTTP connections, streams) that must be released when
- * iteration is complete or abandoned early.
- *
- * <p>Consumers should use try-with-resources:
- *
- * <pre>{@code
- * try (var events = model.chatStream(messages, tools)) {
- *   while (events.hasNext()) {
- *     var event = events.next();
- *     // process event
- *   }
- * }
- * }</pre>
+ * iteration is complete or abandoned early: what an {@link IteratorPublisher} pulls, such as a
+ * provider's response stream. Its owner closes it once done, in a try-with-resources block.
  *
  * @param <T> the element type
  */
@@ -31,8 +21,7 @@ public interface CloseableIterator<T> extends Iterator<T>, AutoCloseable {
   void close();
 
   /**
-   * Wraps a plain iterator as a no-op closeable iterator. Useful for default implementations that
-   * don't hold resources.
+   * Wraps a plain iterator as a no-op closeable iterator, for a source that holds no resources.
    *
    * @param <T> the element type
    * @param iterator the iterator to wrap

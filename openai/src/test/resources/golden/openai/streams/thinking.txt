@@ -1,23 +1,25 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 ThinkingDelta[text=**Planning**
 
 Let me think]
 ThinkingDelta[text= about this.]
-ThinkingComplete[fullThinking=**Planning**
+KeepAlive[]
+KeepAlive[]
+KeepAlive[]
+ThinkingDelta[text=
 
-Let me think about this., signature=null]
-ThinkingDelta[text=Then answer.]
-ThinkingComplete[fullThinking=Then answer., signature=null]
+Then answer.]
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Hello!]
-Done[response=Response[content=Hello!, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], thinking=**Planning**
+MessageStop[stopReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], metadata={openai.reasoning=**Planning**
 
 Let me think about this.
 
-Then answer., citations=[], metadata={openai.reasoning=**Planning**
-
-Let me think about this.
-
-Then answer.}]]
+Then answer.}, citations=[]]
+onComplete
 == chat
 Response[content=Hello!, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], thinking=**Planning**
 

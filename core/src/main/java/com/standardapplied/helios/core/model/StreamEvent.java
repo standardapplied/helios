@@ -67,6 +67,12 @@ public sealed interface StreamEvent {
   record ToolCallComplete(ToolCall toolCall) implements StreamEvent {}
 
   /**
+   * A frame of the stream that carries no content, such as a provider's ping, a status or envelope
+   * event, or an SSE comment. It proves the stream is alive and adds nothing to the turn.
+   */
+  record KeepAlive() implements StreamEvent {}
+
+  /**
    * The stream is complete.
    *
    * @param response the final aggregated response (accumulated text, tool calls, usage, finish

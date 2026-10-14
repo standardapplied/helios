@@ -4,12 +4,12 @@ package com.standardapplied.helios.core.provider;
 
 import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.common.Strings;
-import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.schema.StructuredContentParser;
@@ -17,14 +17,17 @@ import com.standardapplied.helios.core.tool.Tool;
 import java.net.http.HttpClient;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Flow;
 
 /**
  * The {@link Model} of a streaming HTTP provider, assembled from the provider's parts: each turn
- * becomes the provider's request, runs through its {@link Exchange}, and is drained, parsed against
- * an output schema, or streamed. A structured turn that called tools is left unparsed: it is
- * intermediate, and a later text-only turn delivers the structured answer. Closing the model shuts
- * its HTTP client down. A provider builds one per model id and configuration through {@link
- * #newBuilder()}.
+ * becomes the provider's request, and its {@link Exchange}'s event stream is published as chunks as
+ * they arrive, or drained by the blocking forms. A structured turn is checked against its output
+ * schema once it completes, unless it called tools: it is then intermediate, and a later text-only
+ * turn delivers the structured answer. A failed turn ends in one exception, mapped the same way for
+ * every provider (see {@link Builder#withFailure}). Cancelling one turn's stream releases that
+ * turn's request alone; closing the model shuts its HTTP client down. A provider builds one per
+ * model id and configuration through {@link #newBuilder()}.
  *
  * @param <R> the provider's request type
  */
@@ -39,6 +42,7 @@ public final class StreamingModel<R> implements Model {
   private final RequestFactory<R> requests;
   private final Exchange<R> exchange;
   private final StructuredOutput structured;
+  private final StreamFailure failures;
 
   private StreamingModel(Builder<R> builder) {
     this.id = builder.id;
@@ -50,6 +54,7 @@ public final class StreamingModel<R> implements Model {
     this.requests = builder.requests;
     this.exchange = builder.exchange;
     this.structured = new StructuredOutput(builder.json, config.rawOutputCapturePolicy());
+    this.failures = new StreamFailure(provider, builder.failure);
   }
 
   /**
@@ -88,21 +93,42 @@ public final class StreamingModel<R> implements Model {
     return config.rawOutputCapturePolicy();
   }
 
+  /** Drains the turn's event stream to the response its completion carries. */
   @Override
   public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-    return exchange.chat(requests.build(messages, tools, null));
+    return ResponseDrain.drain(
+        exchange.stream(requests.build(messages, tools, null), new CancellationToken()), failures);
   }
 
+  /** Drains the turn's event stream and parses its response against {@code outputSchema}. */
   @Override
   public <T> Response<T> chat(
       List<Message> messages, List<Tool> tools, OutputSchema<T> outputSchema) {
     var request = requests.build(messages, tools, outputSchema.schema().toMap());
-    return structured.of(exchange.chat(request), outputSchema);
+    var response = ResponseDrain.drain(exchange.stream(request, new CancellationToken()), failures);
+    return structured.of(response, outputSchema);
   }
 
   @Override
-  public CloseableIterator<StreamEvent> chatStream(List<Message> messages, List<Tool> tools) {
-    return exchange.stream(requests.build(messages, tools, null));
+  public Flow.Publisher<ModelChunk> chatStream(
+      List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
+    Objects.requireNonNull(cancellation, "cancellation must not be null");
+    var request = requests.build(messages, tools, null);
+    return new ChunkStream(exchange.stream(request, cancellation), failures, response -> {});
+  }
+
+  @Override
+  public Flow.Publisher<ModelChunk> chatStream(
+      List<Message> messages,
+      List<Tool> tools,
+      OutputSchema<?> outputSchema,
+      CancellationToken cancellation) {
+    Objects.requireNonNull(cancellation, "cancellation must not be null");
+    var request = requests.build(messages, tools, outputSchema.schema().toMap());
+    return new ChunkStream(
+        exchange.stream(request, cancellation),
+        failures,
+        response -> structured.of(response, outputSchema));
   }
 
   /** Shuts the model's HTTP client down, waiting briefly for requests in flight. */
@@ -128,6 +154,7 @@ public final class StreamingModel<R> implements Model {
     private RequestFactory<R> requests;
     private Exchange<R> exchange;
     private StructuredContentParser.JsonAdapter json;
+    private ProviderFailure failure;
 
     private Builder() {}
 
@@ -231,6 +258,20 @@ public final class StreamingModel<R> implements Model {
     }
 
     /**
+     * Creates the provider's exception for a failed turn. A turn that fails with the provider's own
+     * exception or a {@link com.standardapplied.helios.core.model.TransientStreamException} ends in
+     * it; one that fails on I/O ends in a retryable {@code TransientStreamException} naming the
+     * provider; any other failure ends in the exception this creates.
+     *
+     * @param failure the provider's exception constructor, e.g. {@code AnthropicException::new}
+     * @return this builder
+     */
+    public Builder<R> withFailure(ProviderFailure failure) {
+      this.failure = failure;
+      return this;
+    }
+
+    /**
      * The model.
      *
      * @return a new model
@@ -247,6 +288,7 @@ public final class StreamingModel<R> implements Model {
       Objects.requireNonNull(requests, "requests must not be null");
       Objects.requireNonNull(exchange, "exchange must not be null");
       Objects.requireNonNull(json, "json must not be null");
+      Objects.requireNonNull(failure, "failure must not be null");
       return new StreamingModel<>(this);
     }
 

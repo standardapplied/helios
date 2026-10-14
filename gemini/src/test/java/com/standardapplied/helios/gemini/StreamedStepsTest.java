@@ -53,14 +53,16 @@ class StreamedStepsTest {
             + stepStop(1)
             + INTERACTION_COMPLETED;
     var events = drain(sse);
-    assertEquals(2, events.size());
-    assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(0));
-    var tc = ((StreamEvent.ToolCallComplete) events.get(0)).toolCall();
+    assertEquals(5, events.size());
+    assertEquals(new StreamEvent.ToolCallStart("call_1", "get_weather"), events.get(0));
+    assertEquals(new StreamEvent.ToolCallDelta("call_1", "{\"city\":\""), events.get(1));
+    assertEquals(new StreamEvent.ToolCallDelta("call_1", "NYC\"}"), events.get(2));
+    var tc = ((StreamEvent.ToolCallComplete) events.get(3)).toolCall();
     assertEquals("get_weather", tc.name());
     assertEquals("call_1", tc.id());
     assertEquals(Map.of("city", "NYC"), tc.arguments());
 
-    var done = (StreamEvent.Done) events.get(1);
+    var done = (StreamEvent.Done) events.get(4);
     assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
     assertFalse(done.response().toolCalls().isEmpty());
   }
@@ -72,7 +74,7 @@ class StreamedStepsTest {
             + stepStop(1)
             + INTERACTION_COMPLETED;
     var events = drain(sse);
-    var tc = ((StreamEvent.ToolCallComplete) events.get(0)).toolCall();
+    var tc = ((StreamEvent.ToolCallComplete) events.get(1)).toolCall();
     assertEquals(Map.of(), tc.arguments());
   }
 
@@ -207,7 +209,7 @@ class StreamedStepsTest {
   }
 
   @Test
-  void eachSummaryDeltaAddsAnItemAfterTheSummaryAThoughtStartsWith() {
+  void theSummaryAThoughtStartsWithAndEachSummaryDeltaStreamAsThinking() {
     var thoughtStart =
         stepStart(
             0, "{\"type\":\"thought\",\"summary\":[{\"type\":\"text\",\"text\":\"First.\"}]}");
@@ -223,7 +225,7 @@ class StreamedStepsTest {
     var events = drain(thoughtStart + second + third + stepStop(0) + TEXT_FLOW);
 
     assertEquals(
-        List.of("Second.", "Third."),
+        List.of("First.", "\nSecond.", "\nThird."),
         events.stream()
             .filter(StreamEvent.ThinkingDelta.class::isInstance)
             .map(event -> ((StreamEvent.ThinkingDelta) event).text())
@@ -352,7 +354,7 @@ class StreamedStepsTest {
     var events =
         drain(stepStart(1, GET_WEATHER_WITH_ARGUMENTS) + stepStop(1) + INTERACTION_COMPLETED);
 
-    var tc = ((StreamEvent.ToolCallComplete) events.get(0)).toolCall();
+    var tc = ((StreamEvent.ToolCallComplete) events.get(1)).toolCall();
     assertEquals(Map.of("city", "NYC"), tc.arguments());
   }
 
@@ -422,7 +424,7 @@ class StreamedStepsTest {
         error.message());
     assertInstanceOf(GeminiException.class, error.cause());
     assertEquals(List.of(), error.partial().toolCalls());
-    assertEquals(1, events.size());
+    assertEquals(3, events.size());
   }
 
   static Stream<Named<String>> thoughtsWithAnEmptySignature() {

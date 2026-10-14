@@ -1,5 +1,8 @@
 == chatStream
+KeepAlive[]
+KeepAlive[]
 TextDelta[text=Hello]
-Error[message=Stream ended before its terminal event, cause=EOFException(the response body ended before the provider's terminal event), partial=Response[content=Hello, parsed=null, toolCalls=[], finishReason=ERROR, usage=Usage[inputTokens=86, outputTokens=2, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2008], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]]
+KeepAlive[]
+onError TransientStreamException(Stream ended before its terminal event) provider=gemini caused by EOFException(the response body ended before the provider's terminal event)
 == chat
 threw TransientStreamException(Stream ended before its terminal event) provider=gemini caused by EOFException(the response body ended before the provider's terminal event)

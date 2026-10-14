@@ -51,10 +51,7 @@ final class AnthropicStreamParser implements SseReader.Parser {
   private StreamEvent on(ApiStreamEvent event, String payload) {
     return switch (event.type()) {
       case "message_start" -> messageStart(event.message());
-      case "content_block_start" -> {
-        blocks.start(event.index(), event.contentBlock(), payload);
-        yield null;
-      }
+      case "content_block_start" -> blocks.start(event.index(), event.contentBlock(), payload);
       case "content_block_delta" ->
           event.delta() == null ? null : blocks.delta(event.index(), event.delta());
       case "content_block_stop" -> blocks.stop(event.index());

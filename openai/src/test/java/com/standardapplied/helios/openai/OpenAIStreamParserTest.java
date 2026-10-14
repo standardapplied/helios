@@ -12,6 +12,7 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.ChatExchange;
 import com.standardapplied.helios.core.provider.SseReader;
+import com.standardapplied.helios.core.test.ExchangeTurns;
 import com.standardapplied.helios.core.test.SseEvents;
 import com.standardapplied.helios.openai.api.ResponsesRequest;
 import java.io.EOFException;
@@ -26,9 +27,11 @@ class OpenAIStreamParserTest {
             SseEvents.NEVER_IDLE,
             new OpenAIStreamParser(),
             OpenAIException::new)) {
-      return new ChatExchange<ResponsesRequest>(
-              OpenAIProvider.PROVIDER_NAME, "OpenAI API", request -> events, OpenAIException::new)
-          .chat(null);
+      return ExchangeTurns.chat(
+          new ChatExchange<ResponsesRequest>("OpenAI API", request -> events),
+          null,
+          OpenAIProvider.PROVIDER_NAME,
+          OpenAIException::new);
     }
   }
 

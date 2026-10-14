@@ -129,13 +129,16 @@ class StreamingIteratorTest {
                 + messageDeltaToolUse
                 + MESSAGE_STOP);
 
-    assertEquals(2, events.size());
-    var tc = assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(0)).toolCall();
+    assertEquals(5, events.size());
+    assertEquals(new StreamEvent.ToolCallStart("toolu_1", "get_weather"), events.get(0));
+    assertEquals(new StreamEvent.ToolCallDelta("toolu_1", "{\"city\""), events.get(1));
+    assertEquals(new StreamEvent.ToolCallDelta("toolu_1", ":\"NYC\"}"), events.get(2));
+    var tc = assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(3)).toolCall();
     assertEquals("get_weather", tc.name());
     assertEquals("toolu_1", tc.id());
     assertEquals(Map.of("city", "NYC"), tc.arguments());
 
-    var done = (StreamEvent.Done) events.get(1);
+    var done = (StreamEvent.Done) events.get(4);
     assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
     assertFalse(done.response().toolCalls().isEmpty());
   }
@@ -351,8 +354,8 @@ class StreamingIteratorTest {
     var events =
         drain(MESSAGE_START + toolBlockStart + CONTENT_BLOCK_STOP_0 + messageDelta + MESSAGE_STOP);
 
-    assertEquals(2, events.size());
-    var tc = ((StreamEvent.ToolCallComplete) events.get(0)).toolCall();
+    assertEquals(3, events.size());
+    var tc = ((StreamEvent.ToolCallComplete) events.get(1)).toolCall();
     assertEquals("list_items", tc.name());
     assertEquals(Map.of(), tc.arguments());
   }
@@ -717,10 +720,11 @@ class StreamingIteratorTest {
   }
 
   private static List<StreamEvent> drain(String sse) {
-    return SseEvents.drain(reader(SseEvents.body(sse)));
+    return SseEvents.drainContent(reader(SseEvents.body(sse)));
   }
 
   private static StreamEvent.Error firstError(InputStream body) {
-    return assertInstanceOf(StreamEvent.Error.class, SseEvents.drain(reader(body)).getFirst());
+    return assertInstanceOf(
+        StreamEvent.Error.class, SseEvents.drainContent(reader(body)).getFirst());
   }
 }

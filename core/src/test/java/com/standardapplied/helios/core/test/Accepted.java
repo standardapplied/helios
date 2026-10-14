@@ -3,18 +3,19 @@
 package com.standardapplied.helios.core.test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.Set;
+import java.util.concurrent.Flow;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Assumptions;
 
@@ -84,27 +85,34 @@ public final class Accepted {
   }
 
   /**
-   * Drains and closes {@code events}, asserting that no event is an error, that the stream ends in
-   * one {@code Done}, and that its text deltas join to exactly the content {@code Done} reports;
-   * returns that {@code Done}'s response.
+   * Subscribes to {@code chunks} and waits for them, asserting that the stream completes without an
+   * error and ends in exactly one {@link ModelChunk.MessageStop}; returns the response the chunks
+   * add up to: the text deltas joined, the completed tool calls, and the stop's finish reason,
+   * usage, metadata and citations.
    */
-  public static Response<?> stream(CloseableIterator<StreamEvent> events) {
+  public static Response<Void> stream(Flow.Publisher<ModelChunk> chunks) {
+    var recorder = new RecordingSubscriber<ModelChunk>();
+    chunks.subscribe(recorder);
+    var received = recorder.awaitCompletion();
+    var stops = received.stream().filter(ModelChunk.MessageStop.class::isInstance).toList();
+    assertEquals(1, stops.size(), () -> "message stops in " + received);
+    var stop = assertInstanceOf(ModelChunk.MessageStop.class, received.getLast(), "last chunk");
     var text = new StringBuilder();
-    StreamEvent.Done done = null;
-    try (events) {
-      while (events.hasNext()) {
-        var event = events.next();
-        assertFalse(event instanceof StreamEvent.Error, () -> "stream error: " + event);
-        assertNull(done, () -> "event after Done: " + event);
-        switch (event) {
-          case StreamEvent.TextDelta(var delta) -> text.append(delta);
-          case StreamEvent.Done ended -> done = ended;
-          default -> {}
-        }
+    var toolCalls = new ArrayList<ToolCall>();
+    for (var chunk : received) {
+      switch (chunk) {
+        case ModelChunk.TextDelta(var delta) -> text.append(delta);
+        case ModelChunk.ToolUseStop(var call) -> toolCalls.add(call);
+        default -> {}
       }
     }
-    assertNotNull(done, "the stream ended without Done");
-    assertEquals(done.response().content(), text.toString());
-    return done.response();
+    return Response.newBuilder()
+        .withContent(text.toString())
+        .withToolCalls(toolCalls)
+        .withFinishReason(stop.finishReason())
+        .withUsage(stop.usage())
+        .withMetadata(stop.metadata())
+        .withCitations(stop.citations())
+        .build();
   }
 }
