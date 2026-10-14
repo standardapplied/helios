@@ -21,16 +21,20 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A plain-socket HTTP/1.1 server that streams server-sent-event replies a test releases part by
  * part, and reports when the client closes the connection a reply is held on. The n-th request
  * receives the n-th {@link Reply}, written as a chunked {@code 200} response: one chunk per part,
  * each part after the first behind a gate the test opens with {@link Reply#release()}, and with
- * {@link Reply#holdingHeaders} the status line too. A reply's connection is read throughout, so a
- * client that closes it while a gate is down is seen at once ({@link Reply#awaitClientClosed()}).
- * Speaks only what the JDK {@code HttpClient} sends: a request line, headers and a {@code
- * Content-Length} body.
+ * {@link Reply#holdingHeaders} the status line too. An empty part sends nothing, so {@code
+ * Reply.of("", ...)} sends the headers alone and holds the body. A reply's connection is read
+ * throughout, so a client that closes it while a gate is down is seen at once ({@link
+ * Reply#awaitClientClosed()}). Speaks only what the JDK {@code HttpClient} sends: a request line,
+ * headers and a {@code Content-Length} body. A request it cannot read, or one beyond the replies,
+ * fails the server: it drops every connection, and every {@link Reply} wait, {@link #requests()}
+ * and {@link #close()} throw an {@link AssertionError} naming the misuse.
  */
 public final class HeldSseServer implements AutoCloseable {
 
@@ -44,6 +48,7 @@ public final class HeldSseServer implements AutoCloseable {
     private final CountDownLatch finished = new CountDownLatch(1);
     private int released;
     private boolean closed;
+    private volatile AssertionError failure;
 
     private Reply(boolean holdHeaders, List<String> parts) {
       this.holdHeaders = holdHeaders;
@@ -68,17 +73,22 @@ public final class HeldSseServer implements AutoCloseable {
 
     /** Waits until the request this reply answers has arrived. */
     public void awaitRequest() {
-      Await.latch("the request", requested);
+      await("the request", requested);
     }
 
     /** Waits until the client has closed the connection this reply is written on. */
     public void awaitClientClosed() {
-      Await.latch("the client closing the connection", clientClosed);
+      await("the client closing the connection", clientClosed);
     }
 
     /** Waits until every part has been written. */
     public void awaitFinished() {
-      Await.latch("the whole reply written", finished);
+      await("the whole reply written", finished);
+    }
+
+    private void await(String description, CountDownLatch latch) {
+      Await.latch(description, latch);
+      throwIfFailed(failure);
     }
 
     private synchronized boolean awaitGate(int gate) throws InterruptedException {
@@ -86,6 +96,15 @@ public final class HeldSseServer implements AutoCloseable {
         wait();
       }
       return !closed;
+    }
+
+    private synchronized void fail(AssertionError error) {
+      failure = error;
+      closed = true;
+      requested.countDown();
+      clientClosed.countDown();
+      finished.countDown();
+      notifyAll();
     }
 
     private synchronized void connectionClosed() {
@@ -107,10 +126,13 @@ public final class HeldSseServer implements AutoCloseable {
           return;
         }
         var bytes = parts.get(i).getBytes(StandardCharsets.UTF_8);
-        out.write((Integer.toHexString(bytes.length) + "\r\n").getBytes(StandardCharsets.US_ASCII));
-        out.write(bytes);
-        out.write("\r\n".getBytes(StandardCharsets.US_ASCII));
-        out.flush();
+        if (bytes.length > 0) {
+          out.write(
+              (Integer.toHexString(bytes.length) + "\r\n").getBytes(StandardCharsets.US_ASCII));
+          out.write(bytes);
+          out.write("\r\n".getBytes(StandardCharsets.US_ASCII));
+          out.flush();
+        }
       }
       out.write("0\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
       out.flush();
@@ -122,6 +144,7 @@ public final class HeldSseServer implements AutoCloseable {
   private final List<Reply> replies;
   private final AtomicInteger next = new AtomicInteger();
   private final Set<Socket> openSockets = ConcurrentHashMap.newKeySet();
+  private final AtomicReference<AssertionError> failure = new AtomicReference<>();
 
   private HeldSseServer(ServerSocket serverSocket, List<Reply> replies) {
     this.serverSocket = serverSocket;
@@ -152,14 +175,40 @@ public final class HeldSseServer implements AutoCloseable {
 
   /** How many requests have arrived. */
   public int requests() {
+    throwIfFailed(failure.get());
     return next.get();
   }
 
   @Override
   public void close() throws IOException {
+    shutDown();
+    throwIfFailed(failure.get());
+  }
+
+  private static void throwIfFailed(AssertionError failure) {
+    if (failure != null) {
+      throw new AssertionError(failure.getMessage(), failure);
+    }
+  }
+
+  private void shutDown() throws IOException {
     serverSocket.close();
     for (var socket : openSockets) {
       socket.close();
+    }
+  }
+
+  private void fail(AssertionError error) {
+    if (!failure.compareAndSet(null, error)) {
+      return;
+    }
+    for (var reply : replies) {
+      reply.fail(error);
+    }
+    try {
+      shutDown();
+    } catch (IOException e) {
+      error.addSuppressed(e);
     }
   }
 
@@ -198,17 +247,27 @@ public final class HeldSseServer implements AutoCloseable {
     try {
       var in = new BufferedInputStream(socket.getInputStream());
       while (readRequest(in)) {
-        current = replies.get(next.getAndIncrement());
+        current = nextReply();
         current.requested.countDown();
         requests.add(Optional.of(current));
       }
     } catch (IOException disconnected) {
       openSockets.remove(socket);
+    } catch (AssertionError misuse) {
+      fail(misuse);
     }
     if (current != null) {
       current.connectionClosed();
     }
     requests.add(Optional.empty());
+  }
+
+  private Reply nextReply() {
+    var index = next.getAndIncrement();
+    if (index >= replies.size()) {
+      throw new AssertionError("Request " + (index + 1) + " arrived with no reply left for it");
+    }
+    return replies.get(index);
   }
 
   private static boolean readRequest(InputStream in) throws IOException {
@@ -220,11 +279,29 @@ public final class HeldSseServer implements AutoCloseable {
         line != null && !line.isEmpty();
         line = StubHttpServer.readLine(in)) {
       var colon = line.indexOf(':');
-      if (line.substring(0, colon).trim().toLowerCase(Locale.ROOT).equals("content-length")) {
-        length = Integer.parseInt(line.substring(colon + 1).trim());
+      if (colon < 0) {
+        throw new AssertionError("Request header without a colon: " + line);
+      }
+      var name = line.substring(0, colon).trim().toLowerCase(Locale.ROOT);
+      var value = line.substring(colon + 1).trim();
+      if (name.equals("transfer-encoding")) {
+        throw new AssertionError(
+            "Request body sent with Transfer-Encoding: "
+                + value
+                + "; only a Content-Length body is read");
+      }
+      if (name.equals("content-length")) {
+        length = contentLength(value);
       }
     }
     in.readNBytes(length);
     return true;
+  }
+
+  private static int contentLength(String value) {
+    if (!value.matches("\\d{1,9}")) {
+      throw new AssertionError("Unreadable Content-Length: " + value);
+    }
+    return Integer.parseInt(value);
   }
 }
