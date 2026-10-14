@@ -80,7 +80,8 @@ public interface Model extends AutoCloseable {
   /**
    * The model's answer to {@code messages}, waited for. The default drains {@link #chatStream(List,
    * List, CancellationToken)}; an interrupt while waiting cancels the stream and throws a {@link
-   * java.util.concurrent.CancellationException} with the interrupt restored.
+   * java.util.concurrent.CancellationException} with the interrupt restored, and a stream that
+   * completes without its {@link ModelChunk.MessageStop} throws {@link IllegalStateException}.
    *
    * @param messages the conversation history
    * @param tools the tools the model may call

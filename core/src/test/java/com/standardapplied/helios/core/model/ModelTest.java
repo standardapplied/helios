@@ -5,7 +5,6 @@ package com.standardapplied.helios.core.model;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -59,15 +58,12 @@ class ModelTest {
   }
 
   @Test
-  void chatOnAStreamWithoutAStopIsAPlainStop() {
-    var response = streaming(new ModelChunk.TextDelta("hi")).chat(List.of(), List.of());
+  void chatOnAStreamThatCompletesWithoutItsStopThrows() {
+    var model = streaming(new ModelChunk.TextDelta("hi"));
 
-    assertEquals("hi", response.content());
-    assertNull(response.thinking());
-    assertEquals(FinishReason.STOP, response.finishReason());
-    assertEquals(Response.Usage.of(0, 0), response.usage());
-    assertEquals(Map.of(), response.metadata());
-    assertEquals(List.of(), response.citations());
+    var failure = assertThrows(IllegalStateException.class, () -> model.chat(List.of(), List.of()));
+
+    assertEquals("the model's stream completed without its MessageStop", failure.getMessage());
   }
 
   @Test
