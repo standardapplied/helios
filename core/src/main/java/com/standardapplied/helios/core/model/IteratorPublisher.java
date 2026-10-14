@@ -268,6 +268,9 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
 
     /**
      * Ends the pull and waits until the item may be delivered; {@code false} when the stream ended.
+     *
+     * @throws CancellationException if the thread is interrupted while waiting, which only the
+     *     subscriber's own code can do
      */
     private boolean awaitDemand() {
       synchronized (lock) {
@@ -276,8 +279,7 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
           try {
             lock.wait();
           } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            return false;
+            throw new CancellationException("interrupted while waiting for demand");
           }
         }
         if (ended || invalidRequest != null) {
