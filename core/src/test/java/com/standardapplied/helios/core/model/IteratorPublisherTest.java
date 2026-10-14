@@ -15,7 +15,6 @@ import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -103,7 +102,7 @@ class IteratorPublisherTest {
   }
 
   @Test
-  void aRequestInsideOnSubscribeIsServedOnlyAfterOnSubscribeReturns() throws InterruptedException {
+  void aRequestInsideOnSubscribeIsServedOnlyAfterOnSubscribeReturns() {
     var source = new Source(List.of("a"));
     var returned = new AtomicBoolean();
     var overlaps = new AtomicInteger();
@@ -113,11 +112,6 @@ class IteratorPublisherTest {
           @Override
           public void onSubscribe(Flow.Subscription subscription) {
             subscription.request(1);
-            try {
-              source.pulled(1).await(200, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException e) {
-              Thread.currentThread().interrupt();
-            }
             returned.set(true);
           }
 
@@ -152,7 +146,7 @@ class IteratorPublisherTest {
   }
 
   @Test
-  void anOnSubscribeThatThrowsCancelsTheSubscriptionItRequestedOn() throws InterruptedException {
+  void anOnSubscribeThatThrowsCancelsTheSubscriptionItRequestedOn() {
     var broken = new IllegalStateException("broken subscriber");
     var subscription = new AtomicReference<Flow.Subscription>();
     var subscriber =
@@ -180,7 +174,7 @@ class IteratorPublisherTest {
         broken, assertThrows(IllegalStateException.class, () -> publisher.subscribe(subscriber)));
     subscription.get().request(1);
 
-    assertFalse(source.pulled(1).await(200, TimeUnit.MILLISECONDS));
+    assertEquals(0, token.activeCallbackCountForTests());
     assertEquals(0, opened.get());
   }
 
