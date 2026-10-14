@@ -106,10 +106,10 @@ class IteratorPublisherTest {
   void demandBeyondTheLargestLongSaturates() {
     var subscriber = new RecordingSubscriber<String>(Long.MAX_VALUE);
 
-    publisherOf(new Source(List.of("a"))).subscribe(subscriber);
-    subscriber.subscription().request(Long.MAX_VALUE);
+    publisherOf(new Source(List.of("a", "b")))
+        .subscribe(onSubscribe(subscriber, granted -> granted.request(Long.MAX_VALUE)));
 
-    assertEquals(List.of("a"), subscriber.awaitCompletion());
+    assertEquals(List.of("a", "b"), subscriber.awaitCompletion());
     assertEquals(0, subscriber.violations());
   }
 
