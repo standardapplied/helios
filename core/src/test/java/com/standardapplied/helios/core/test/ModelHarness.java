@@ -28,7 +28,7 @@ public final class ModelHarness {
    */
   public static final String NEXT_RESPONSE = "=== next response ===\n";
 
-  private static final List<Message> PROMPT = List.of(Message.user("Hi"));
+  static final List<Message> PROMPT = List.of(Message.user("Hi"));
 
   private ModelHarness() {}
 
@@ -64,7 +64,7 @@ public final class ModelHarness {
   public static String transcript(
       String fixture, Function<URI, Model> modelAt, UnaryOperator<String> canonical) {
     var render = new Transcript(canonical);
-    var replies = Arrays.asList(Golden.read(fixture).split(NEXT_RESPONSE));
+    var replies = replies(fixture);
     var text = new StringBuilder("== chatStream\n");
     exchange(
         replies,
@@ -82,5 +82,10 @@ public final class ModelHarness {
       text.append("== follow-up request\n").append(canonical.apply(request.body())).append('\n');
     }
     return text.toString();
+  }
+
+  /** The responses recorded in {@code fixture}, in order. */
+  static List<String> replies(String fixture) {
+    return Arrays.asList(Golden.read(fixture).split(NEXT_RESPONSE));
   }
 }

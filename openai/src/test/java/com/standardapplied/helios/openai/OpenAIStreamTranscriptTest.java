@@ -10,6 +10,8 @@ import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.ModelHarness;
+import com.standardapplied.helios.core.test.StreamParity;
+import com.standardapplied.helios.core.test.StreamParity.ThinkingJoin;
 import com.standardapplied.helios.openai.OpenAIAzureIntegrationTest.ResponseWithMaps;
 import java.net.URI;
 import java.util.ArrayList;
@@ -17,7 +19,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -36,9 +38,8 @@ import tools.jackson.databind.json.JsonMapper;
  */
 class OpenAIStreamTranscriptTest {
 
-  @ParameterizedTest
-  @ValueSource(
-      strings = {
+  static List<String> streams() {
+    return List.of(
         "text",
         "tool-calls",
         "thinking",
@@ -53,8 +54,20 @@ class OpenAIStreamTranscriptTest {
         "incomplete",
         "refusal",
         "bad-tool-arguments",
-        "null-argument"
-      })
+        "null-argument");
+  }
+
+  @ParameterizedTest
+  @MethodSource("streams")
+  void chunkStreamAgreesWithChat(String name) {
+    StreamParity.assertAgrees(
+        "openai/streams/" + name + ".sse",
+        uri -> modelAt(uri, OpenAIModelId.GPT_5_6.id()),
+        ThinkingJoin.betweenBlocks("\n\n"));
+  }
+
+  @ParameterizedTest
+  @MethodSource("streams")
   void transcriptMatchesItsGolden(String name) {
     var transcript =
         ModelHarness.transcript(
