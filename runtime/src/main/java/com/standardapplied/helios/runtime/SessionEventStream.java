@@ -76,6 +76,7 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
       done.await();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      end();
     } finally {
       try {
         sink.close();
