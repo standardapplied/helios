@@ -467,8 +467,8 @@ capacity atomically before the options factory runs, under four hard caps that c
 reservations: sessions held and active sessions, across the registry and per `Principal`. Room for
 a create comes only from evicting the same principal's oldest terminal session, never another
 principal's. Terminal and never-started sessions are swept on the registry's clock, and
-`RuntimeServer` runs the sweep itself. Every refusal is immediate, with a fixed body and
-`Retry-After: 5`.
+`RuntimeServer` runs the sweep itself. Every refusal is immediate, with a fixed body; a `429` or
+`503` also carries `Retry-After: 5`.
 
 | 2.x | 3.0 |
 |---|---|

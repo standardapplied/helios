@@ -7,8 +7,8 @@ package com.standardapplied.helios.runtime;
  *
  * @param sessions {@code POST /sessions}: admitted when capacity was reserved, rejected when a
  *     session cap refused it
- * @param messages messages and interrupts: admitted when queued, rejected when an upload bound in
- *     {@link RequestLimits} or the session's full steering queue refused it
+ * @param messages messages and interrupts: admitted when queued, rejected when the uploads in
+ *     progress {@link RequestLimits} allows or the session's full steering queue refused it
  * @param eventStreams {@code GET .../events}: admitted when the stream opened, rejected when the
  *     session, the principal or the service already had its maximum of streams
  * @param resultPolls {@code GET .../result}: admitted when the poll began waiting, rejected when
