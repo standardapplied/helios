@@ -697,6 +697,16 @@ principal's. Terminal and never-started sessions are swept on the registry's clo
 
 ### Security
 
+- **`helios-runtime` and `helios-persistence` resolve Helidon 4.5.5 (was 4.4.1).** No advisory is
+  filed against 4.4.1; the upgrade fixes framing. Through 4.5.3 a response carrying `Connection:
+  close` did not end the connection: Helidon skipped draining the request body and then parsed the
+  body's bytes as the next request, so a body smuggled a request even without `Expect:
+  100-continue`. 4.5.4 is the first release that flushes such a response and ends the connection;
+  4.5.5 is the latest 4.x release and also stops trusting a client's own `X-Forwarded-For` and
+  `X-Forwarded-Port` on a PROXY-protocol listener. `UnreadBodyGuard` relies on the 4.5.4 behaviour;
+  an application that pins its own Helidon must move to 4.5.4 or later. Helidon 4.5.5 still parses
+  the body of an `Expect: 100-continue` request answered without a `100 Continue` as a new request
+  when the connection stays open, which the guard prevents by closing it.
 - **A registered secret no longer reaches the model or the session's events through paths 2.x left
   unredacted.** In 2.x each component redacted only when handed its own registry, so a registered
   value leaked through: `Read` and `Grep` built by `SessionPresets` (no redactor); every custom
