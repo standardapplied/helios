@@ -10,9 +10,7 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.ResultMessage;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -66,9 +64,7 @@ final class AgentHttpServiceChurnAdmissionTest {
 
     harness.sessions.get(deleted).completeEvents();
     drain(held);
-    var reopened = open(server, replacement, "alice");
-    assertEquals(200, reopened.statusCode());
-    reopened.body().close();
+    harness.openEventsAdmitted(server, replacement, "alice").body().close();
     bobs.body().close();
   }
 
@@ -83,15 +79,13 @@ final class AgentHttpServiceChurnAdmissionTest {
                 .build(),
             heldCancellations());
     var deleted = harness.create(server, "alice");
-    var held = harness.sendAsync(server, "GET", result(deleted), "alice");
-    var session = harness.sessions.get(deleted);
-    Await.until("the poll to wait on the result", () -> session.result.getNumberOfDependents() > 0);
+    var held = waitingPoll(server, deleted, "alice");
     assertEquals(204, harness.send(server, "DELETE", path(deleted), "alice").statusCode());
     Await.latch("the cancelled result to be serialized", serializing);
     var replacement = harness.create(server, "alice");
 
     var aliceRefused = harness.send(server, "GET", result(replacement), "alice");
-    var bobs = harness.sendAsync(server, "GET", result(harness.create(server, "bob")), "bob");
+    var bobs = waitingPoll(server, harness.create(server, "bob"), "bob");
     var carolRefused =
         harness.send(server, "GET", result(harness.create(server, "carol")), "carol");
 
@@ -104,7 +98,8 @@ final class AgentHttpServiceChurnAdmissionTest {
     release.countDown();
     assertEquals(200, Await.value("the held poll to be answered", held).statusCode());
     harness.sessions.get(replacement).terminate();
-    assertEquals(200, harness.send(server, "GET", result(replacement), "alice").statusCode());
+    assertEquals(
+        200, harness.sendAdmitted(server, "GET", result(replacement), "alice").statusCode());
     harness.sessions.values().forEach(StubSession::terminate);
     assertEquals(200, Await.value("bob's poll to be answered", bobs).statusCode());
   }
@@ -112,6 +107,17 @@ final class AgentHttpServiceChurnAdmissionTest {
   private HttpResponse<InputStream> open(RuntimeServer server, String sessionId, String token) {
     return Await.value(
         "the event stream to be answered", harness.openEvents(server, sessionId, token));
+  }
+
+  /** Send a result poll and return once it waits on the session's result. */
+  private CompletableFuture<HttpResponse<String>> waitingPoll(
+      RuntimeServer server, String sessionId, String token) {
+    var result = harness.sessions.get(sessionId).result;
+    var watchers = result.getNumberOfDependents();
+    var poll = harness.sendAsync(server, "GET", result(sessionId), token);
+    Await.until(
+        "the poll to wait on the result", () -> result.getNumberOfDependents() == watchers + 1);
+    return poll;
   }
 
   private SessionRegistry.Builder oneSessionPerPrincipal() {
@@ -131,27 +137,16 @@ final class AgentHttpServiceChurnAdmissionTest {
     return "/sessions/" + sessionId;
   }
 
-  private static void assertStreamRefused(HttpResponse<InputStream> resp, int status, String body)
-      throws IOException {
+  private static void assertStreamRefused(HttpResponse<InputStream> resp, int status, String body) {
     assertEquals(status, resp.statusCode());
     assertEquals(
         Optional.of(Overload.RETRY_AFTER_SECONDS), resp.headers().firstValue("Retry-After"));
-    try (var in = resp.body()) {
-      assertEquals(body, new String(in.readAllBytes(), StandardCharsets.UTF_8));
-    }
+    assertEquals(body, ResponseBodies.text(resp.body()));
   }
 
   private static void drain(HttpResponse<InputStream> resp) {
     Await.value(
-        "the stream to end",
-        CompletableFuture.supplyAsync(
-            () -> {
-              try (var in = resp.body()) {
-                return in.readAllBytes().length;
-              } catch (IOException e) {
-                throw new UncheckedIOException(e);
-              }
-            }));
+        "the stream to end", CompletableFuture.supplyAsync(() -> ResponseBodies.text(resp.body())));
   }
 
   private final class HeldSerializer extends StdSerializer<ResultMessage.Cancelled> {
