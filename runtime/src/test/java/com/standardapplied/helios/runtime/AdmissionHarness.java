@@ -8,8 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.testing.ScriptedModel;
-import io.helidon.http.HeaderNames;
-import io.helidon.webserver.http.ServerRequest;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -31,9 +29,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Runtime servers over {@link StubSession}s for the admission tests, and an HTTP client to drive
- * them. A bearer token {@code <name>} authenticates as subject {@code <name>} of tenant {@code
- * tenant-<name>}. Each session's steering queue holds two messages. Closing the harness ends every
- * stream and result and stops every server.
+ * them. Requests authenticate through {@link #tokens}. Each session's steering queue holds two
+ * messages. Closing the harness ends every stream and result and stops every server.
  */
 final class AdmissionHarness implements AutoCloseable {
 
@@ -57,8 +54,10 @@ final class AdmissionHarness implements AutoCloseable {
   final Map<String, StubSession> sessions = new ConcurrentHashMap<>();
   final AtomicReference<Runnable> duringFactory = new AtomicReference<>(() -> {});
   final AtomicInteger factoryRuns = new AtomicInteger();
+  final RevocableTokens tokens = new RevocableTokens();
   private final JsonMapper mapper = JsonMapper.builder().build();
   private final HttpClient http = HttpClient.newBuilder().connectTimeout(Await.HANG_GUARD).build();
+  private final List<HttpClient> ownConnections = new ArrayList<>();
   private final List<RuntimeServer> servers = new ArrayList<>();
 
   SessionRegistry.Builder registry() {
@@ -80,7 +79,7 @@ final class AdmissionHarness implements AutoCloseable {
         RuntimeServer.builder()
             .withRegistry(registry.build())
             .withOptionsFactory(this::options)
-            .withAuthenticator(AdmissionHarness::authenticate)
+            .withAuthenticator(tokens)
             .withRequestLimits(limits)
             .withObjectMapper(mapper)
             .build();
@@ -178,12 +177,27 @@ final class AdmissionHarness implements AutoCloseable {
         BodyHandlers.ofInputStream());
   }
 
+  /**
+   * {@link #openEvents} on a connection no later request reuses: a request kept alive on the
+   * connection of a stream whose handler still runs would wait for that handler, not be admitted or
+   * refused.
+   */
+  CompletableFuture<HttpResponse<InputStream>> openEventsOnOwnConnection(
+      RuntimeServer server, String sessionId, String token) {
+    var client = HttpClient.newBuilder().connectTimeout(Await.HANG_GUARD).build();
+    ownConnections.add(client);
+    return client.sendAsync(
+        builder(server, "GET", events(sessionId), token, BodyPublishers.noBody()).build(),
+        BodyHandlers.ofInputStream());
+  }
+
   @Override
   public void close() {
     sessions.values().forEach(StubSession::completeEvents);
     sessions.values().forEach(StubSession::terminate);
     servers.forEach(RuntimeServer::close);
     http.shutdownNow();
+    ownConnections.forEach(HttpClient::shutdownNow);
   }
 
   /** A body valid for both the message and the interrupt route, exactly {@code bytes} long. */
@@ -234,14 +248,6 @@ final class AdmissionHarness implements AutoCloseable {
         .withModel(ScriptedModel.newBuilder().withTextTurn("x").build())
         .withSessionId(sessionId)
         .build();
-  }
-
-  private static Optional<Authentication> authenticate(ServerRequest request) {
-    return request
-        .headers()
-        .first(HeaderNames.AUTHORIZATION)
-        .map(header -> header.substring("Bearer ".length()))
-        .map(name -> Authentication.of(new Principal("tenant-" + name, name)));
   }
 
   private static HttpRequest.Builder builder(

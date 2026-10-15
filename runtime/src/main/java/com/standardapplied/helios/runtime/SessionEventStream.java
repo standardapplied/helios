@@ -14,6 +14,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import tools.jackson.databind.ObjectMapper;
@@ -23,8 +25,10 @@ import tools.jackson.databind.ObjectMapper;
  * {@link QueryEvent}s, emits a synthetic {@code Ready} event once subscribed and then each event
  * named by its subtype, and holds the request thread until the publisher completes or errors, the
  * client disconnects, or the caller's identity ends. An ended identity (expired or revoked) cancels
- * the subscription and closes the stream without a further event: an event is written only if the
- * stream has not ended by the time it is serialized.
+ * the subscription and closes the stream without a further event: an event is serialized only while
+ * the stream is open, and written only if it still is once serialized. The request thread returns
+ * only after a delivery under way has finished, so the stream's admission covers every callback
+ * still holding one of its events.
  */
 final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
 
@@ -36,6 +40,7 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
   private final ObjectMapper objectMapper;
   private final CountDownLatch done = new CountDownLatch(1);
   private final AtomicReference<Flow.Subscription> subscription = new AtomicReference<>();
+  private final ReentrantLock delivery = new ReentrantLock();
 
   SessionEventStream(String sessionId, SseSink sink, ObjectMapper objectMapper) {
     this.sessionId = sessionId;
@@ -62,7 +67,10 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
     stream.awaitEndThenClose();
   }
 
-  /** Wait until the stream ends, then close the sink. Package-private for tests. */
+  /**
+   * Wait until the stream ends, close the sink, then wait for a delivery under way to finish.
+   * Package-private for tests.
+   */
   void awaitEndThenClose() {
     try {
       done.await();
@@ -74,13 +82,15 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
       } catch (Exception ignored) {
         // sink may already be closed by Helidon if the client disconnected
       }
+      delivery.lock();
+      delivery.unlock();
     }
   }
 
   @Override
   public void onSubscribe(Flow.Subscription s) {
     subscription.set(s);
-    if (done.getCount() == 0) {
+    if (!isOpen()) {
       s.cancel();
       return;
     }
@@ -89,7 +99,7 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
     // live before triggering work — closes the race between Helidon writing 200 OK
     // and the subscriber actually registering on the SubmissionPublisher.
     try {
-      emit(SseEvent.builder().name("Ready").data("{}").build());
+      emit(() -> SseEvent.builder().name("Ready").data("{}").build());
     } catch (Exception ignored) {
       // sink failures are handled in onNext below
     }
@@ -99,10 +109,11 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
   public void onNext(QueryEvent event) {
     try {
       emit(
-          SseEvent.builder()
-              .name(eventName(event))
-              .data(objectMapper.writeValueAsString(event))
-              .build());
+          () ->
+              SseEvent.builder()
+                  .name(eventName(event))
+                  .data(objectMapper.writeValueAsString(event))
+                  .build());
     } catch (Exception ex) {
       if (!isDisconnect(ex)) {
         LOGGER.log(Level.WARNING, "SSE emit failed for session " + sessionId, ex);
@@ -112,15 +123,26 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
   }
 
   /**
-   * Write {@code event} unless the stream has ended. Checked once the event is serialized, so an
-   * event whose serialization outlasts the identity is dropped; only a write already under way when
-   * the stream ends can still complete.
+   * Serialize and write {@code event} unless the stream has ended, one delivery at a time. Checked
+   * again once the event is serialized, so an event whose serialization outlasts the identity is
+   * dropped; only a write already under way when the stream ends can still complete.
    */
-  private void emit(SseEvent event) {
-    if (done.getCount() == 0) {
-      return;
+  private void emit(Supplier<SseEvent> event) {
+    delivery.lock();
+    try {
+      if (isOpen()) {
+        var serialized = event.get();
+        if (isOpen()) {
+          sink.emit(serialized);
+        }
+      }
+    } finally {
+      delivery.unlock();
     }
-    sink.emit(event);
+  }
+
+  private boolean isOpen() {
+    return done.getCount() != 0;
   }
 
   /** Stop forwarding: cancel the subscription and release the request thread. */

@@ -197,6 +197,28 @@ final class SessionEventStreamTest {
   }
 
   @Test
+  void anEventArrivingAfterTheEndIsNeitherSerializedNorWritten() {
+    var sink = new RecordingSink(null);
+    var serialized = new AtomicBoolean();
+    var recording =
+        new ObjectMapper() {
+          @Override
+          public String writeValueAsString(Object value) {
+            serialized.set(true);
+            return super.writeValueAsString(value);
+          }
+        };
+    var stream = new SessionEventStream("sess-1", sink, recording);
+    stream.end();
+
+    stream.onNext(EVENT);
+
+    assertFalse(serialized.get());
+    assertTrue(sink.emitted.isEmpty());
+    awaitEnd(stream);
+  }
+
+  @Test
   void aSubscriptionArrivingAfterTheEndIsCancelledAndNothingIsRequested() {
     var sink = new RecordingSink(null);
     var subscription = new RecordingSubscription();
