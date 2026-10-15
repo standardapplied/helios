@@ -260,7 +260,8 @@ public final class AgentHttpService implements HttpService {
   @SuppressWarnings("unchecked")
   private Map<String, Object> readJsonBody(ServerRequest req) {
     try {
-      return (Map<String, Object>) req.content().as(Map.class);
+      return (Map<String, Object>)
+          Objects.requireNonNull(req.content().as(Map.class), "body is JSON null");
     } catch (RuntimeException e) {
       throw new JacksonRuntimeException("failed to parse request body", e);
     }
