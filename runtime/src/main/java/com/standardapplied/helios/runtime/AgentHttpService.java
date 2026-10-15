@@ -74,6 +74,18 @@ import tools.jackson.databind.ObjectMapper;
  * {@code 429} and {@code 503} has a fixed body and a {@code Retry-After} header; {@link
  * #counters()} reports what was admitted and refused.
  *
+ * <h2>Unread bodies</h2>
+ *
+ * Every route applies the {@link UnreadBodyGuard}: an answer sent while the request's body is not
+ * read to its end, such as a {@code 401}, {@code 404}, {@code 413}, {@code 429} or {@code 503}
+ * refused before the body, or a {@code 201} for a create that sent one, is written whole and then
+ * ends the connection, so nothing the client sends after it is drained or run as a request. On a
+ * {@link io.helidon.webserver.WebServer} of your own, also install the guard on its routing ({@code
+ * routing.addFeature(new UnreadBodyGuard())}) so Helidon's own answers there, an unmatched path or
+ * an exception a route lets escape, are covered too; {@link RuntimeServer} does. The guard needs
+ * Helidon 4.5.4 or later, the first to end the connection after a {@code Connection: close}
+ * response.
+ *
  * <p>The {@code optionsFactory} is the seam through which deployments choose how a new session is
  * configured: the runtime takes the generated session id and produces a fully-populated {@link
  * SessionOptions} for exactly that id; options for any other id are refused, so a factory can never
@@ -177,6 +189,7 @@ public final class AgentHttpService implements HttpService {
 
   private Handler authenticated(CallerHandler handler) {
     return (req, resp) -> {
+      UnreadBodyGuard.apply(req, resp);
       var caller = gate.admit(req, resp);
       if (caller.isEmpty()) {
         return;
