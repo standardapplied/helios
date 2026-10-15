@@ -59,13 +59,12 @@ final class SessionQuota {
     return usage(owner).sessions() >= maxSessionsPerPrincipal || total.sessions() >= maxSessions;
   }
 
-  /** Count one more session and active session for {@code owner}, or refuse if a cap is full. */
+  /**
+   * Count one more session and active session for {@code owner}, or refuse if the registry holds
+   * its maximum of sessions. The owner's own caps were checked by {@link #requireActiveRoom}, and
+   * an owner at its cap on sessions held has had a terminal session evicted to make room.
+   */
   void reserve(Principal owner) {
-    require(
-        usage(owner).sessions(),
-        maxSessionsPerPrincipal,
-        Scope.PRINCIPAL,
-        "sessions of the principal");
     require(total.sessions(), maxSessions, Scope.SERVER, "sessions");
     change(owner, 1, 1);
   }
