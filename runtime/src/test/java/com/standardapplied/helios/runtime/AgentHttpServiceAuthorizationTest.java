@@ -17,11 +17,15 @@ import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import io.helidon.http.HeaderNames;
 import io.helidon.webserver.http.ServerRequest;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -59,6 +63,7 @@ final class AgentHttpServiceAuthorizationTest {
           .withTextTurn("done")
           .build();
   private final CompletableFuture<Void> carolRevoked = new CompletableFuture<>();
+  private final CompletableFuture<Void> uploadRevoked = new CompletableFuture<>();
   private final Map<String, Authentication> identities =
       Map.of(
           "alice",
@@ -69,12 +74,15 @@ final class AgentHttpServiceAuthorizationTest {
           Authentication.of(new Principal("globex", "alice")),
           "carol",
           new Authentication(new Principal("acme", "carol"), Duration.ofDays(1), carolRevoked),
+          "carol-upload",
+          new Authentication(new Principal("acme", "carol"), Duration.ofDays(1), uploadRevoked),
           "expired",
           new Authentication(ALICE, Duration.ZERO, new CompletableFuture<>()),
           "revoked",
           new Authentication(ALICE, Duration.ofDays(1), CompletableFuture.completedFuture(null)));
   private final BlockingQueue<String> authenticated = new LinkedBlockingQueue<>();
   private final AtomicReference<String> hijackedId = new AtomicReference<>();
+  private final AtomicReference<Runnable> duringFactory = new AtomicReference<>(() -> {});
   private RuntimeServer server;
 
   @BeforeEach
@@ -207,6 +215,52 @@ final class AgentHttpServiceAuthorizationTest {
     assertEquals(1, server.registry().size());
   }
 
+  @Test
+  void revokingTheIdentityWhileAMessageBodyUploadsQueuesNoWork() throws Exception {
+    var sessionId = create("carol");
+    var body = "{\"text\":\"go\"}".getBytes(StandardCharsets.UTF_8);
+    try (var socket = new Socket("127.0.0.1", server.port())) {
+      var out = socket.getOutputStream();
+      out.write(
+          ("POST /v1/sessions/"
+                  + sessionId
+                  + "/messages HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer carol-upload\r\n"
+                  + "Content-Type: application/json\r\nContent-Length: "
+                  + body.length
+                  + "\r\n\r\n")
+              .getBytes(StandardCharsets.US_ASCII));
+      out.write(body, 0, 1);
+      out.flush();
+      Await.until(
+          "the request to watch carol's revocation",
+          () -> uploadRevoked.getNumberOfDependents() > 0);
+
+      uploadRevoked.complete(null);
+      out.write(body, 1, body.length - 1);
+      out.flush();
+
+      var status =
+          new BufferedReader(
+                  new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII))
+              .readLine();
+      assertEquals("HTTP/1.1 401 Unauthorized", status);
+    }
+    assertTrue(model.calls().isEmpty());
+    assertEquals(0, toolRuns.get());
+  }
+
+  @Test
+  void revokingTheIdentityWhileTheOptionsFactoryRunsCreatesNoSession() throws Exception {
+    duringFactory.set(() -> carolRevoked.complete(null));
+
+    var resp = send("POST", "/sessions", "carol");
+
+    assertEquals(401, resp.statusCode());
+    assertEquals(UNAUTHENTICATED, resp.body());
+    assertTrue(carolRevoked.isDone());
+    assertEquals(0, server.registry().size());
+  }
+
   private Optional<Authentication> authenticate(ServerRequest request) {
     var token =
         request
@@ -219,6 +273,7 @@ final class AgentHttpServiceAuthorizationTest {
   }
 
   private SessionOptions options(String sessionId) {
+    duringFactory.get().run();
     var probe =
         Tool.newBuilder()
             .withName("probe")

@@ -15,9 +15,8 @@ import java.util.concurrent.CompletionStage;
  * <p>The identity holds for {@code lifetime} from verification, or until {@code revoked} completes,
  * whichever comes first. A request whose identity has already ended is answered {@code 401}. A
  * long-lived request ends when its identity does: an SSE event stream closes without a further
- * event, and a result long poll answers {@code 401}. The runtime attaches one completion action to
- * {@code revoked} per request, so a verifier that shares one stage across many requests must
- * complete it eventually.
+ * event, and a result long poll answers {@code 401}. A request watches {@code revoked} only while
+ * it runs, so one stage may be shared by any number of requests and need never complete.
  *
  * @param principal the verified identity
  * @param lifetime how long the identity stays valid from now; zero or negative means it has expired
@@ -29,12 +28,16 @@ public record Authentication(
   /**
    * Validate the components.
    *
+   * <p>{@code revoked} is held as its {@link CompletionStage#toCompletableFuture()} view, taken
+   * once here so that requests sharing this authentication share one stage.
+   *
    * @throws NullPointerException if any component is null
+   * @throws UnsupportedOperationException if {@code revoked} has no {@code CompletableFuture} view
    */
   public Authentication {
     Objects.requireNonNull(principal, "principal must not be null");
     Objects.requireNonNull(lifetime, "lifetime must not be null");
-    Objects.requireNonNull(revoked, "revoked must not be null");
+    revoked = Objects.requireNonNull(revoked, "revoked must not be null").toCompletableFuture();
   }
 
   /**

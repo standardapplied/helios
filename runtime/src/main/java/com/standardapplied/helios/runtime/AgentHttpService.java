@@ -182,6 +182,9 @@ public final class AgentHttpService implements HttpService {
       resp.status(Status.INTERNAL_SERVER_ERROR_500).send(FACTORY_FAILED);
       return;
     }
+    if (identityEnded(caller, resp)) {
+      return;
+    }
     registry.create(options, caller.principal());
     var created = new LinkedHashMap<String, String>();
     created.put("sessionId", sessionId);
@@ -203,6 +206,9 @@ public final class AgentHttpService implements HttpService {
             .send(Map.of("error", "'" + field + "' field must be a non-blank string"));
         return;
       }
+      if (identityEnded(caller, resp)) {
+        return;
+      }
       try {
         action.accept(session, text);
       } catch (IllegalStateException e) {
@@ -219,6 +225,18 @@ public final class AgentHttpService implements HttpService {
       return;
     }
     resp.status(Status.NO_CONTENT_204).send();
+  }
+
+  /**
+   * Answer {@code 401} if the caller's identity ended while the request waited, on a slow body or
+   * options factory, so no work is queued for an expired or revoked identity.
+   */
+  private static boolean identityEnded(Caller caller, ServerResponse resp) {
+    if (caller.valid()) {
+      return false;
+    }
+    resp.status(Status.UNAUTHORIZED_401).send(AuthenticationGate.UNAUTHENTICATED);
+    return true;
   }
 
   private static String sessionId(ServerRequest req) {

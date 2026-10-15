@@ -74,11 +74,12 @@ final class AuthenticationGate {
       } else {
         ended.complete(null);
       }
-      authentication.revoked().whenComplete((ignored, failure) -> ended.complete(null));
+      CompletableFuture.anyOf(authentication.revoked().toCompletableFuture(), ended)
+          .whenComplete((ignored, failure) -> ended.complete(null));
       return new Caller(authentication.principal(), ended);
     }
 
-    private boolean valid() {
+    boolean valid() {
       return !ended.isDone();
     }
 
