@@ -46,8 +46,8 @@ final class SessionRegistrySweepTest {
   }
 
   @Test
-  void aSweepClosesTerminalSessionsHeldPastTheRetentionAndKeepsYoungerOnes() {
-    var older = startedSession();
+  void aSweepClosesTerminalSessionsOfEveryOwnerHeldPastTheRetentionAndKeepsYoungerOnes() {
+    var older = startedSession(EVE);
     older.terminate();
     advance(Duration.ofMinutes(4));
     var younger = startedSession();
@@ -57,7 +57,7 @@ final class SessionRegistrySweepTest {
     assertEquals(1, registry.sweep());
 
     assertEquals(1, older.closes.get());
-    assertTrue(registry.find(older.sessionId(), ALICE).isEmpty());
+    assertTrue(registry.find(older.sessionId(), EVE).isEmpty());
     assertTrue(registry.find(younger.sessionId(), ALICE).isPresent());
   }
 
@@ -158,7 +158,11 @@ final class SessionRegistrySweepTest {
   }
 
   private StubSession startedSession() {
-    var session = create(ALICE);
+    return startedSession(ALICE);
+  }
+
+  private StubSession startedSession(Principal owner) {
+    var session = create(owner);
     session.send(UserMessage.text("go"));
     return session;
   }

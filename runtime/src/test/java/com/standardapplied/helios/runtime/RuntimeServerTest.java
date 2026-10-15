@@ -154,6 +154,14 @@ final class RuntimeServerTest {
     assertEquals("authenticator must not be null", ex.getMessage());
   }
 
+  @Test
+  void withRequestLimitsRejectsNull() {
+    var ex =
+        assertThrows(
+            NullPointerException.class, () -> RuntimeServer.builder().withRequestLimits(null));
+    assertEquals("requestLimits must not be null", ex.getMessage());
+  }
+
   // ── authentication against the bind address ──────────────────────────────
 
   @Test
