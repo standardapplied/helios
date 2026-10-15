@@ -9,6 +9,7 @@ import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.testing.ScriptedModel;
+import io.helidon.webserver.http.ErrorHandlers;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
@@ -17,15 +18,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Flow;
 import java.util.function.Function;
-import java.util.logging.Handler;
+import java.util.logging.Level;
 import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
@@ -48,16 +46,22 @@ final class AgentHttpServiceFailureTest {
   }
 
   @Test
-  void aRouteThatFailsAnswers500WithoutTheFailuresMessage() throws Exception {
-    try (var server =
-        server(
-            options -> {
-              throw new IllegalStateException("cannot open store: password=hunter22");
-            })) {
+  void aRouteThatFailsAnswers500WithoutTheFailuresMessageAndLogsTheFailure() throws Exception {
+    var failure = new IllegalStateException("cannot open store: password=hunter22");
+    try (var log = LogCapture.of(AgentHttpService.class);
+        var server =
+            server(
+                options -> {
+                  throw failure;
+                })) {
       var resp = send(HttpRequest.newBuilder(uri(server, "/sessions")).POST(json()));
 
       assertEquals(500, resp.statusCode());
       assertEquals("{\"error\":\"internal server error\"}", resp.body());
+      var logged = log.records().stream().filter(r -> r.getThrown() == failure).toList();
+      assertEquals(1, logged.size(), () -> "logged: " + log.records());
+      assertEquals(Level.WARNING, logged.getFirst().getLevel());
+      assertEquals("request failed", logged.getFirst().getMessage());
     }
   }
 
@@ -77,11 +81,8 @@ final class AgentHttpServiceFailureTest {
 
   @Test
   void aStreamThatFailsAfterItOpenedIsLeftToHelidonWithItsOwnFailure() throws Exception {
-    var reported = new CopyOnWriteArrayList<Throwable>();
-    var helidonErrors = Logger.getLogger("io.helidon.webserver.http.ErrorHandlers");
-    var handler = recordingHandler(reported);
-    helidonErrors.addHandler(handler);
-    try (var server = server(options -> withBrokenEvents(AgentSession.create(options)))) {
+    try (var helidonErrors = LogCapture.of(ErrorHandlers.class);
+        var server = server(options -> withBrokenEvents(AgentSession.create(options)))) {
       var sessionId = create(server);
       var stream =
           CompletableFuture.runAsync(
@@ -92,9 +93,10 @@ final class AgentHttpServiceFailureTest {
 
       Await.until(
           "Helidon to report the stream's own failure",
-          () -> reported.stream().anyMatch(AgentHttpServiceFailureTest::isTheBrokenPublisher));
-    } finally {
-      helidonErrors.removeHandler(handler);
+          () ->
+              helidonErrors.records().stream()
+                  .map(LogRecord::getThrown)
+                  .anyMatch(AgentHttpServiceFailureTest::isTheBrokenPublisher));
     }
   }
 
@@ -166,22 +168,5 @@ final class AgentHttpServiceFailureTest {
 
   private static URI uri(RuntimeServer server, String path) {
     return URI.create("http://127.0.0.1:" + server.port() + "/v1" + path);
-  }
-
-  private static Handler recordingHandler(List<Throwable> reported) {
-    return new Handler() {
-      @Override
-      public void publish(LogRecord logRecord) {
-        if (logRecord.getThrown() != null) {
-          reported.add(logRecord.getThrown());
-        }
-      }
-
-      @Override
-      public void flush() {}
-
-      @Override
-      public void close() {}
-    };
   }
 }

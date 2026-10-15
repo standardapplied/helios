@@ -25,14 +25,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
-import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
@@ -43,40 +39,16 @@ import tools.jackson.databind.ObjectMapper;
  */
 final class AgentHttpServiceLoggingTest {
 
-  private static final Logger LOGGER = Logger.getLogger(AgentHttpService.class.getName());
   private static final String SESSION_ID = "sess-logging";
   private static final QueryEvent EVENT =
       new QueryEvent.AssistantText(SESSION_ID, 0L, Instant.EPOCH, "hello");
 
   private final HttpClient http = HttpClient.newBuilder().connectTimeout(Await.HANG_GUARD).build();
-  private final List<LogRecord> records = new CopyOnWriteArrayList<>();
-  private final Handler handler =
-      new Handler() {
-        @Override
-        public void publish(LogRecord logRecord) {
-          records.add(logRecord);
-        }
-
-        @Override
-        public void flush() {}
-
-        @Override
-        public void close() {}
-      };
-  private Level previousLevel;
-
-  @BeforeEach
-  void captureTheLog() {
-    previousLevel = LOGGER.getLevel();
-    handler.setLevel(Level.ALL);
-    LOGGER.setLevel(Level.ALL);
-    LOGGER.addHandler(handler);
-  }
+  private final LogCapture log = LogCapture.of(AgentHttpService.class);
 
   @AfterEach
   void releaseTheLog() {
-    LOGGER.removeHandler(handler);
-    LOGGER.setLevel(previousLevel);
+    log.close();
     http.shutdownNow();
   }
 
@@ -167,7 +139,8 @@ final class AgentHttpServiceLoggingTest {
             "authenticator failed with java.lang.NullPointerException"),
         failures.stream().map(LogRecord::getMessage).toList());
     failures.forEach(r -> assertNull(r.getThrown()));
-    assertTrue(records.stream().noneMatch(r -> String.valueOf(r.getMessage()).contains(secret)));
+    assertTrue(
+        log.records().stream().noneMatch(r -> String.valueOf(r.getMessage()).contains(secret)));
   }
 
   @Test
@@ -216,7 +189,7 @@ final class AgentHttpServiceLoggingTest {
   }
 
   private List<LogRecord> recordsStartingWith(String prefix) {
-    return records.stream().filter(r -> r.getMessage().startsWith(prefix)).toList();
+    return log.records().stream().filter(r -> r.getMessage().startsWith(prefix)).toList();
   }
 
   private LogRecord onlyRecordStartingWith(String prefix) {
@@ -234,7 +207,7 @@ final class AgentHttpServiceLoggingTest {
   }
 
   private List<LogRecord> recordsForTheSession() {
-    return records.stream().filter(r -> r.getMessage().contains(SESSION_ID)).toList();
+    return log.records().stream().filter(r -> r.getMessage().contains(SESSION_ID)).toList();
   }
 
   private static SseSink failingSink(RuntimeException failure) {
