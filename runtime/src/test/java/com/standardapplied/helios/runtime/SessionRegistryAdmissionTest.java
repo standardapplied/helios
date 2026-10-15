@@ -293,6 +293,18 @@ final class SessionRegistryAdmissionTest {
   }
 
   @Test
+  void aCreateWithoutOptionsEvictsNothing() {
+    var registry = stubs().withMaxSessionsPerPrincipal(1).build();
+    var terminal = create(registry, ALICE);
+    terminal.terminate();
+
+    assertThrows(NullPointerException.class, () -> registry.create(null, ALICE));
+
+    assertEquals(0, terminal.closes.get());
+    assertSame(terminal, registry.find(terminal.sessionId(), ALICE).orElseThrow());
+  }
+
+  @Test
   void anEvictedSessionThatFailsToCloseIsLoggedAndTheCreateStillSucceeds() {
     var registry = stubs().withMaxSessionsPerPrincipal(1).build();
     var broken = create(registry, ALICE);
