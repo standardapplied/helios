@@ -145,23 +145,22 @@ final class SessionLifecycle {
   /**
    * End the runtime of a session whose loop never started, writing a {@link
    * ResultMessage.Cancelled} terminal unless one is already recorded (a refused session set {@link
-   * ResultMessage.ErrorProviderUnavailable} at construction). No-op once the loop started: the
-   * running loop observes the cancellation and ends the runtime itself.
+   * ResultMessage.ErrorProviderUnavailable} at construction). The result future settles only once
+   * the runtime has ended, as after a run, so a host that frees capacity on the result never frees
+   * it while the provider still holds the session. No-op once the loop started: the running loop
+   * observes the cancellation and ends the runtime itself.
    */
   void closeBeforeStart() {
     if (started.compareAndSet(false, true)) {
-      if (!state.isTerminal()) {
-        var preStartResult =
-            new ResultMessage.Cancelled(
-                state.sessionId(),
-                "session closed",
-                state.totals().usage(),
-                state.totals().cost(),
-                state.elapsed());
-        state.setTerminal(preStartResult);
-        result.complete(preStartResult);
-      }
+      state.setTerminal(
+          new ResultMessage.Cancelled(
+              state.sessionId(),
+              "session closed",
+              state.totals().usage(),
+              state.totals().cost(),
+              state.elapsed()));
       closeRuntime();
+      result.complete(state.terminal().orElseThrow());
     }
   }
 
@@ -224,8 +223,8 @@ final class SessionLifecycle {
   /**
    * End the session's runtime: notify the execution provider, close the event stream and stop the
    * wall-clock deadline. Called from exactly one of two mutually-exclusive paths — {@link
-   * #closeBeforeStart()}, or {@link #runLoop} (after the loop returns, BEFORE the result future
-   * settles) — and never both, because the {@code started} CAS gates entry.
+   * #closeBeforeStart()}, or {@link #runLoop} after the loop returns — and never both, because the
+   * {@code started} CAS gates entry. Either path settles the result future only after this returns.
    *
    * <p>{@link SessionEventPublisher#close()} waits a bounded grace period for live subscribers to
    * drain, so by the time this method returns every responsive subscriber has observed every

@@ -53,13 +53,23 @@ final class SessionSlots {
       Overload.reject(resp, Status.TOO_MANY_REQUESTS_429, sessionRefusal);
       return false;
     }
-    if (!limit.admit(principal, resp)) {
+    var admitted = false;
+    try {
+      admitted = limit.admit(principal, resp);
+      return admitted;
+    } finally {
+      settle(sessionId, admitted);
+    }
+  }
+
+  /** Count the outcome; unless admitted, give the session's slot back, even if refusing threw. */
+  private void settle(String sessionId, boolean admitted) {
+    if (admitted) {
+      counter.admit();
+    } else {
       slots.release(sessionId);
       counter.reject();
-      return false;
     }
-    counter.admit();
-    return true;
   }
 
   /** Give back a request that {@link #admit} admitted. */

@@ -9,16 +9,24 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.runtime.SessionCapacityException.Scope;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.execution.ExecutionCapabilities;
+import com.standardapplied.helios.session.execution.ExecutionProvider;
+import com.standardapplied.helios.session.execution.ExecutionRequest;
+import com.standardapplied.helios.session.execution.ExecutionResult;
+import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -451,6 +459,39 @@ final class SessionRegistryAdmissionTest {
   }
 
   @Test
+  void anUnstartedSessionKeepsItsCapacityUntilItsProviderHasEndedIt() throws Exception {
+    var provider = new HeldEndProvider();
+    var registry =
+        SessionRegistry.newBuilder()
+            .withClock(now::get)
+            .withMaxSessions(1)
+            .withMaxActiveSessions(1)
+            .withMaxSessionsPerPrincipal(1)
+            .withMaxActiveSessionsPerPrincipal(1)
+            .build();
+    var first = registry.create(withProvider(provider), ALICE);
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var closing = executor.submit(() -> registry.close(first.sessionId(), ALICE));
+      try {
+        Await.latch("the first session's provider cleanup", provider.ending);
+
+        var refused =
+            assertThrows(
+                SessionCapacityException.class,
+                () -> registry.create(withProvider(provider), ALICE));
+        assertEquals("active sessions of the principal at cap 1", refused.getMessage());
+        assertFalse(first.result().isDone());
+      } finally {
+        provider.release.countDown();
+      }
+      assertTrue(Await.value("the close of the first session", closing));
+    }
+    registry.create(withProvider(provider), ALICE);
+    assertEquals(2, provider.started.get());
+    registry.closeAll();
+  }
+
+  @Test
   void aSessionThatFailsToCloseIsStillUnregisteredAndTheFailureLogged() {
     var registry = stubs().withMaxSessions(1).build();
     var broken = create(registry, ALICE);
@@ -478,6 +519,45 @@ final class SessionRegistryAdmissionTest {
 
   private StubSession create(SessionRegistry registry, Principal owner) {
     return (StubSession) registry.create(options(), owner);
+  }
+
+  private SessionOptions withProvider(ExecutionProvider provider) {
+    return SessionOptions.newBuilder()
+        .withModel(ScriptedModel.newBuilder().withTextTurn("x").build())
+        .withSessionId("s" + ids.incrementAndGet())
+        .withExecutionProvider(provider)
+        .build();
+  }
+
+  /** Counts the sessions it starts and holds the first session's end until released. */
+  private static final class HeldEndProvider implements ExecutionProvider {
+
+    private final AtomicInteger started = new AtomicInteger();
+    private final CountDownLatch ending = new CountDownLatch(1);
+    private final CountDownLatch release = new CountDownLatch(1);
+
+    @Override
+    public ExecutionCapabilities capabilities() {
+      return ExecutionCapabilities.newBuilder().build();
+    }
+
+    @Override
+    public SessionStartOutcome onSessionStart(SessionContext ctx) {
+      started.incrementAndGet();
+      return SessionStartOutcome.accept();
+    }
+
+    @Override
+    public void onSessionEnd(SessionContext ctx) {
+      ending.countDown();
+      awaitRelease(release);
+    }
+
+    @Override
+    public CompletionStage<ExecutionResult> execute(
+        SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
+      throw new AssertionError("not used");
+    }
   }
 
   private SessionOptions options() {

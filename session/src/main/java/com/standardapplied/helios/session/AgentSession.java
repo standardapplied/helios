@@ -135,6 +135,8 @@ public interface AgentSession extends AutoCloseable {
    * underlying virtual thread. Idempotent — safe to call multiple times, and safe to call after
    * natural termination. A loop at work stops cooperatively: {@link #result()} completes once it
    * has stopped, which may be after this returns; for a session never started, before it returns.
+   * Either way it completes only after the session's runtime has ended, its {@link
+   * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd} included.
    */
   @Override
   void close();
