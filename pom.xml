@@ -38,7 +38,7 @@
         <junit-version>6.0.2</junit-version>
         <jackson-tools-version>3.1.7</jackson-tools-version>
         <jackson-old-version>2.18.2</jackson-old-version>
-        <helidon-version>4.4.1</helidon-version>
+        <helidon-version>4.5.5</helidon-version>
         <testcontainers-version>1.21.4</testcontainers-version>
         <postgresql-driver-version>42.7.12</postgresql-driver-version>
         <maven-pmd-plugin-version>3.28.0</maven-pmd-plugin-version>

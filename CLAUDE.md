@@ -17,7 +17,7 @@ Production-grade agentic framework for Java. Simple, explicit, no magic.
 
 - **Jackson 3.x** for JSON ([migration guide](https://github.com/FasterXML/jackson/blob/main/jackson3/MIGRATING_TO_JACKSON_3.md))
 - **JUnit 6.x** for testing ([docs](https://docs.junit.org/6.0.2/overview.html))
-- **Helidon SE 4.4.x** for HTTP / persistence modules ([DbClient docs](https://helidon.io/docs/v4/se/dbclient))
+- **Helidon SE 4.5.x** for HTTP / persistence modules ([DbClient docs](https://helidon.io/docs/v4/se/dbclient))
 
 ## Coding Conventions
 
