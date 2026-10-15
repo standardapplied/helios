@@ -93,6 +93,21 @@ final class RuntimeServerSweepTest {
     }
   }
 
+  @Test
+  void aServerKeepsSweepingItsOwnRegistryWhenItsBuilderIsReused() {
+    var closed = new CountDownLatch(1);
+    terminalSession(closed);
+    var builder = builder();
+
+    try (var server = builder.build()) {
+      builder.withRegistry(SessionRegistry.inMemory());
+      now.set(now.get().plus(RETENTION));
+
+      Await.latch("the server's own registry to be swept", closed);
+      assertEquals(0, server.registry().size());
+    }
+  }
+
   private Instant instant() {
     if (clockFails.getAndSet(false)) {
       throw new IllegalStateException("clock unavailable");
@@ -115,6 +130,10 @@ final class RuntimeServerSweepTest {
   }
 
   private RuntimeServer server() {
+    return builder().build();
+  }
+
+  private RuntimeServer.Builder builder() {
     return RuntimeServer.builder()
         .withRegistry(registry)
         .withOptionsFactory(
@@ -122,7 +141,6 @@ final class RuntimeServerSweepTest {
               throw new IllegalStateException("no session is created over HTTP here");
             })
         .withoutAuthentication()
-        .withSweepInterval(Duration.ofMillis(1))
-        .build();
+        .withSweepInterval(Duration.ofMillis(1));
   }
 }

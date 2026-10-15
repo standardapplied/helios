@@ -16,6 +16,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * to what is reserved, registered or active happens under the table's lock, so admission is atomic:
  * concurrent creates never pass a cap. Lookups read without the lock. The table never closes a
  * session; it returns the sessions it unregistered so the registry closes them outside the lock.
+ *
+ * <p>An unregistered session that has not reached its terminal result keeps its charge as an active
+ * session: closing it only asks its loop to stop, so it is released when the result completes,
+ * never before.
  */
 final class SessionTable {
 
@@ -75,9 +79,11 @@ final class SessionTable {
         .whenComplete(
             (result, failure) -> {
               synchronized (this) {
+                entry.terminatedAt = clock.instant();
                 if (entries.get(id) == entry) {
-                  entry.terminatedAt = clock.instant();
                   quota.terminated(owner);
+                } else {
+                  quota.release(owner, true);
                 }
               }
             });
@@ -126,7 +132,9 @@ final class SessionTable {
 
   private void unregister(Entry entry) {
     entries.remove(entry.id);
-    quota.release(entry.owner, entry.terminatedAt == null);
+    if (entry.terminatedAt != null) {
+      quota.release(entry.owner, false);
+    }
   }
 
   /**

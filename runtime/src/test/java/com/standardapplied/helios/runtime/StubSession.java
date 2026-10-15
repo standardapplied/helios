@@ -21,8 +21,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * An {@link AgentSession} with no agent loop: messages go into a real {@link SteeringQueue} that
  * nothing drains, event subscribers are held until {@link #completeEvents()}, and the result
- * completes only through {@link #terminate()}. It counts its closes and runs {@link #onClose} on
- * each.
+ * completes through {@link #terminate()}, standing for the end of the loop. Like a real session,
+ * closing it before the first message completes the result at once, while a started one keeps
+ * running until terminated. It counts its closes and runs {@link #onClose} on each.
  */
 final class StubSession implements AgentSession {
 
@@ -111,6 +112,16 @@ final class StubSession implements AgentSession {
   @Override
   public void close() {
     closes.incrementAndGet();
+    if (!started) {
+      started = true;
+      result.complete(
+          new ResultMessage.Cancelled(
+              sessionId,
+              "session closed",
+              Response.Usage.of(0, 0),
+              CostEstimate.zero(),
+              Duration.ZERO));
+    }
     onClose.run();
   }
 

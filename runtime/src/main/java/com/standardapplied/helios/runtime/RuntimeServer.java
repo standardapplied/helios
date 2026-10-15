@@ -351,14 +351,19 @@ public final class RuntimeServer implements AutoCloseable {
               .routing((HttpRouting.Builder routing) -> routing.register(routePrefix, service))
               .build()
               .start();
-      return new RuntimeServer(server, registry, service, startSweeper());
+      return new RuntimeServer(server, registry, service, startSweeper(registry, sweepInterval));
     }
 
-    private ScheduledExecutorService startSweeper() {
+    /**
+     * Sweep {@code registry} every {@code interval}. Static, so the task holds what this server was
+     * built with and never this builder, whose later changes must not reach a running server.
+     */
+    private static ScheduledExecutorService startSweeper(
+        SessionRegistry registry, Duration interval) {
       var sweeper =
           Executors.newSingleThreadScheduledExecutor(
               Thread.ofVirtual().name("helios-session-sweep").factory());
-      var period = sweepInterval.toMillis();
+      var period = interval.toMillis();
       sweeper.scheduleWithFixedDelay(() -> sweep(registry), period, period, TimeUnit.MILLISECONDS);
       return sweeper;
     }

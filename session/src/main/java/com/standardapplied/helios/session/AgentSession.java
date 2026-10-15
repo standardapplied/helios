@@ -133,7 +133,8 @@ public interface AgentSession extends AutoCloseable {
   /**
    * Release session resources. Cancels the agent loop, closes the event publisher, and releases the
    * underlying virtual thread. Idempotent — safe to call multiple times, and safe to call after
-   * natural termination.
+   * natural termination. A loop at work stops cooperatively: {@link #result()} completes once it
+   * has stopped, which may be after this returns; for a session never started, before it returns.
    */
   @Override
   void close();

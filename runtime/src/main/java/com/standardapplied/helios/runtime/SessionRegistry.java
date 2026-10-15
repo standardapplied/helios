@@ -60,7 +60,14 @@ import java.util.logging.Logger;
  *
  * Thread-safe. All routes share one registry; concurrent create / find / close are common. A
  * session the registry unregisters is closed outside its lock, and a failure to close it is logged,
- * never thrown, since the session no longer holds capacity either way.
+ * never thrown.
+ *
+ * <h2>Release</h2>
+ *
+ * Unregistering a session removes it from lookup at once. A terminal session gives back its
+ * capacity at the same moment; one still at work keeps counting as a held, active session until its
+ * {@link AgentSession#result()} completes, since closing it only asks its loop to stop. So a client
+ * deleting running sessions and creating new ones never runs more sessions than the caps.
  */
 public final class SessionRegistry {
 
@@ -168,8 +175,9 @@ public final class SessionRegistry {
   }
 
   /**
-   * Unregister and close a session {@code requester} owns, giving back the capacity it held. A
-   * session that is not registered, or belongs to another principal, is left untouched.
+   * Unregister and close a session {@code requester} owns; its capacity is given back once its
+   * result completes. A session that is not registered, or belongs to another principal, is left
+   * untouched.
    *
    * @param sessionId non-null id
    * @param requester the principal asking; non-null

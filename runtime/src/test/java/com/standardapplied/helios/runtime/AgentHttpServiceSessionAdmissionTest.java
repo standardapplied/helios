@@ -89,6 +89,28 @@ final class AgentHttpServiceSessionAdmissionTest {
   }
 
   @Test
+  void aPrincipalAtItsCapIsAnsweredTheSameWhenAnotherFillsTheServersActiveCap() {
+    var server =
+        harness.server(
+            harness.registry().withMaxSessionsPerPrincipal(1).withMaxActiveSessions(2),
+            RequestLimits.defaults());
+    harness.create(server, "alice");
+
+    var alone = harness.send(server, "POST", "/sessions", "alice");
+    harness.create(server, "eve");
+    var crowded = harness.send(server, "POST", "/sessions", "alice");
+
+    assertEquals(429, alone.statusCode());
+    assertRefused(alone, "{\"error\":\"session quota reached\"}");
+    assertEquals(alone.statusCode(), crowded.statusCode());
+    assertEquals(alone.body(), crowded.body());
+    for (var header : List.of("Content-Type", "Content-Length", "Retry-After")) {
+      assertEquals(alone.headers().allValues(header), crowded.headers().allValues(header), header);
+    }
+    assertEquals(2, harness.factoryRuns.get());
+  }
+
+  @Test
   void aCreateRefusedAmongAnotherTenantsSessionsIsAnsweredAsIfTheyHeldNone() {
     var crowded = harness.server(harness.registry().withMaxSessions(2), RequestLimits.defaults());
     var oldest = harness.sessions.get(harness.create(crowded, "alice"));

@@ -36,14 +36,21 @@ final class SessionQuota {
 
   /**
    * Refuse unless {@code owner} may hold one more active session. Evicting a terminal session never
-   * makes room for an active one, so this is checked before any eviction.
+   * makes room for an active one, so this is checked before any eviction. A refusal by the owner's
+   * own caps that no eviction could avoid comes before the registry's, so an owner at its cap is
+   * answered the same whatever other principals hold.
    */
   void requireActiveRoom(Principal owner) {
+    var held = usage(owner);
     require(
-        usage(owner).active(),
+        held.active(),
         maxActiveSessionsPerPrincipal,
         Scope.PRINCIPAL,
         "active sessions of the principal");
+    if (held.sessions() == held.active()) {
+      require(
+          held.sessions(), maxSessionsPerPrincipal, Scope.PRINCIPAL, "sessions of the principal");
+    }
     require(total.active(), maxActiveSessions, Scope.SERVER, "active sessions");
   }
 
