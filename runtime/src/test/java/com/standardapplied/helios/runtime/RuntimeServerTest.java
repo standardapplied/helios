@@ -16,10 +16,12 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.SessionOptions;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -231,10 +233,57 @@ final class RuntimeServerTest {
     assertEquals("host helios-runtime-test.invalid cannot be resolved", ex.getMessage());
   }
 
+  @Test
+  void theServerBindsTheAddressTheLoopbackCheckApprovedWhateverTheNameResolvesToLater()
+      throws Exception {
+    var lookups = new AtomicInteger();
+    RuntimeServer.HostResolver rebinding =
+        host ->
+            InetAddress.getByAddress(
+                host,
+                lookups.getAndIncrement() == 0
+                    ? new byte[] {127, 0, 0, 1}
+                    : new byte[] {(byte) 192, 0, 2, 1});
+    var server =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory())
+            .withHost("rebinding.test")
+            .withResolverForTests(rebinding)
+            .withoutAuthentication()
+            .build();
+    try (server;
+        var socket = new Socket()) {
+      socket.connect(new InetSocketAddress("127.0.0.1", server.port()));
+      assertTrue(socket.isConnected());
+    }
+    assertEquals(1, lookups.get());
+  }
+
+  @Test
+  void aNameResolvingToAnExternalAddressIsRefusedNamingTheHostAndTheAddress() {
+    var builder =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory())
+            .withHost("external.test")
+            .withResolverForTests(
+                host -> InetAddress.getByAddress(host, new byte[] {(byte) 192, 0, 2, 1}))
+            .withoutAuthentication();
+    var ex = assertThrows(IllegalStateException.class, builder::build);
+    assertEquals(nonLoopbackRefusal("external.test", "192.0.2.1"), ex.getMessage());
+  }
+
   private static String nonLoopbackRefusal(String host) {
+    return nonLoopbackRefusal(host, host);
+  }
+
+  private static String nonLoopbackRefusal(String host, String address) {
     return "host "
         + host
-        + " is not a loopback address and no authenticator is set; a server reachable from other"
+        + " ("
+        + address
+        + ") is not a loopback address and no authenticator is set; a server reachable from other"
         + " hosts requires withAuthenticator(...), for example a TrustedProxyAuthenticator";
   }
 

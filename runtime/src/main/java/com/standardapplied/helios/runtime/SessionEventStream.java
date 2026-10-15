@@ -23,7 +23,8 @@ import tools.jackson.databind.ObjectMapper;
  * {@link QueryEvent}s, emits a synthetic {@code Ready} event once subscribed and then each event
  * named by its subtype, and holds the request thread until the publisher completes or errors, the
  * client disconnects, or the caller's identity ends. An ended identity (expired or revoked) cancels
- * the subscription and closes the stream without a further event.
+ * the subscription and closes the stream without a further event: an event is written only if the
+ * stream has not ended by the time it is serialized.
  */
 final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
 
@@ -88,7 +89,7 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
     // live before triggering work — closes the race between Helidon writing 200 OK
     // and the subscriber actually registering on the SubmissionPublisher.
     try {
-      sink.emit(SseEvent.builder().name("Ready").data("{}").build());
+      emit(SseEvent.builder().name("Ready").data("{}").build());
     } catch (Exception ignored) {
       // sink failures are handled in onNext below
     }
@@ -97,7 +98,7 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
   @Override
   public void onNext(QueryEvent event) {
     try {
-      sink.emit(
+      emit(
           SseEvent.builder()
               .name(eventName(event))
               .data(objectMapper.writeValueAsString(event))
@@ -108,6 +109,18 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
       }
       end();
     }
+  }
+
+  /**
+   * Write {@code event} unless the stream has ended. Checked once the event is serialized, so an
+   * event whose serialization outlasts the identity is dropped; only a write already under way when
+   * the stream ends can still complete.
+   */
+  private void emit(SseEvent event) {
+    if (done.getCount() == 0) {
+      return;
+    }
+    sink.emit(event);
   }
 
   /** Stop forwarding: cancel the subscription and release the request thread. */

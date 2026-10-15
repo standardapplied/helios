@@ -117,8 +117,15 @@ public final class RuntimeServer implements AutoCloseable {
     private int port = 0;
     private String host = DEFAULT_HOST;
     private Authenticator authenticator;
+    private HostResolver resolver = InetAddress::getByName;
 
     private Builder() {}
+
+    /** Resolve the host through {@code resolver} instead of the JDK, for tests. */
+    Builder withResolverForTests(HostResolver resolver) {
+      this.resolver = resolver;
+      return this;
+    }
 
     /**
      * Authenticate every request with {@code authenticator}.
@@ -244,14 +251,15 @@ public final class RuntimeServer implements AutoCloseable {
         throw new IllegalStateException(
             "optionsFactory is required — call withOptionsFactory before build");
       }
-      requireAuthenticationFitsHost();
+      var bindAddress = resolveHost();
+      requireAuthenticationFits(bindAddress);
       var mapper = objectMapper != null ? objectMapper : JsonMapper.builder().build();
       var service =
           new AgentHttpService(registry, optionsFactory, authenticator, mapper, routePrefix);
       var jacksonSupport = JacksonSupport.create(mapper);
       var server =
           WebServer.builder()
-              .host(host)
+              .address(bindAddress)
               .port(port)
               .mediaContext(
                   mc -> mc.mediaSupportsDiscoverServices(false).addMediaSupport(jacksonSupport))
@@ -261,12 +269,14 @@ public final class RuntimeServer implements AutoCloseable {
       return new RuntimeServer(server, registry);
     }
 
-    private void requireAuthenticationFitsHost() {
-      if ((authenticator == null || authenticator == LOCAL) && !isLoopback(host)) {
+    private void requireAuthenticationFits(InetAddress bindAddress) {
+      if ((authenticator == null || authenticator == LOCAL) && !bindAddress.isLoopbackAddress()) {
         throw new IllegalStateException(
             "host "
                 + host
-                + " is not a loopback address and no authenticator is set; a server reachable"
+                + " ("
+                + bindAddress.getHostAddress()
+                + ") is not a loopback address and no authenticator is set; a server reachable"
                 + " from other hosts requires withAuthenticator(...), for example a"
                 + " TrustedProxyAuthenticator");
       }
@@ -279,12 +289,22 @@ public final class RuntimeServer implements AutoCloseable {
       }
     }
 
-    private static boolean isLoopback(String host) {
+    /**
+     * Resolve {@code host} once; the server binds this address, so a later DNS answer cannot move
+     * it off the address the loopback check approved.
+     */
+    private InetAddress resolveHost() {
       try {
-        return InetAddress.getByName(host).isLoopbackAddress();
+        return resolver.resolve(host);
       } catch (UnknownHostException e) {
         throw new IllegalArgumentException("host " + host + " cannot be resolved", e);
       }
     }
+  }
+
+  /** Resolves a host name to the one address the server binds. */
+  @FunctionalInterface
+  interface HostResolver {
+    InetAddress resolve(String host) throws UnknownHostException;
   }
 }

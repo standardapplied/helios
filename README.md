@@ -680,7 +680,7 @@ Descriptor confinement prevents symlink substitution from redirecting an operati
 
 ### HTTP surface defaults
 
-`RuntimeServer.Builder` binds **`127.0.0.1` by default** (loopback only). Every route authenticates the request through one `Authenticator` before it reads the body or looks up a session, and a session is reachable only by the `Principal` (tenant and subject) that created it; another principal's session answers the same `404` as an unknown id. A missing, malformed, expired, revoked or forged credential is `401`. When an identity expires or is revoked, an open SSE stream closes and a pending result long poll answers `401`.
+`RuntimeServer.Builder` binds **`127.0.0.1` by default** (loopback only). Every route authenticates the request through one `Authenticator` before it reads the body or looks up a session, and a session is reachable only by the `Principal` (tenant and subject) that created it; another principal's session answers the same `404` as an unknown id. A missing, malformed, expired, revoked or forged credential is `401`. When an identity expires or is revoked, an open SSE stream closes, a pending result long poll answers `401`, and a message or interrupt still uploading its body, or a create whose options factory is still running, answers `401` and does nothing.
 
 Behind an authenticating reverse proxy, trust the identity it asserts only on its connections:
 

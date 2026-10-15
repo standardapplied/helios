@@ -22,6 +22,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -172,6 +173,27 @@ final class SessionEventStreamTest {
     awaitEnd(stream);
     assertEquals(List.of("Ready:{}"), sink.emitted);
     assertTrue(sink.closed.get());
+  }
+
+  @Test
+  void anEventStillSerializingWhenTheStreamEndsIsNotWritten() {
+    var sink = new RecordingSink(null);
+    var stream = new AtomicReference<SessionEventStream>();
+    var endingMidSerialization =
+        new ObjectMapper() {
+          @Override
+          public String writeValueAsString(Object value) {
+            stream.get().end();
+            return super.writeValueAsString(value);
+          }
+        };
+    stream.set(new SessionEventStream("sess-1", sink, endingMidSerialization));
+    stream.get().onSubscribe(new RecordingSubscription());
+
+    stream.get().onNext(EVENT);
+
+    assertEquals(List.of("Ready:{}"), sink.emitted);
+    awaitEnd(stream.get());
   }
 
   @Test
