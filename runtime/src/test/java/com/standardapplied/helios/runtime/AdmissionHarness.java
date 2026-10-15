@@ -25,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.UnaryOperator;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -70,21 +71,17 @@ final class AdmissionHarness implements AutoCloseable {
             });
   }
 
+  /** A server with the default {@link RequestLimits}. */
+  RuntimeServer server(SessionRegistry.Builder registry) {
+    return start(registry, UnaryOperator.identity());
+  }
+
   RuntimeServer server(SessionRegistry.Builder registry, RequestLimits limits) {
-    return server(registry, limits, JsonMapper.builder().build());
+    return start(registry, builder -> builder.withRequestLimits(limits));
   }
 
   RuntimeServer server(SessionRegistry.Builder registry, RequestLimits limits, JsonMapper mapper) {
-    var server =
-        RuntimeServer.builder()
-            .withRegistry(registry.build())
-            .withOptionsFactory(this::options)
-            .withAuthenticator(tokens)
-            .withRequestLimits(limits)
-            .withObjectMapper(mapper)
-            .build();
-    servers.add(server);
-    return server;
+    return start(registry, builder -> builder.withRequestLimits(limits).withObjectMapper(mapper));
   }
 
   String create(RuntimeServer server, String token) {
@@ -116,7 +113,10 @@ final class AdmissionHarness implements AutoCloseable {
     return sendAdmitted(server, method, path, token, defaultBody(method));
   }
 
-  /** Open {@code sessionId}'s event stream once no concurrency bound refuses it. */
+  /**
+   * Open {@code sessionId}'s event stream once no concurrency bound refuses it, and read its {@code
+   * Ready} event, so the stream is subscribed and {@link #close()} ends it.
+   */
   HttpResponse<InputStream> openEventsAdmitted(
       RuntimeServer server, String sessionId, String token) {
     var answer = new AtomicReference<HttpResponse<InputStream>>();
@@ -133,6 +133,7 @@ final class AdmissionHarness implements AutoCloseable {
           assertTrue(isConcurrencyRefusal(resp.statusCode(), text), text);
           return false;
         });
+    ResponseBodies.afterReady(answer.get());
     return answer.get();
   }
 
@@ -247,13 +248,26 @@ final class AdmissionHarness implements AutoCloseable {
     return method.equals("POST") ? BodyPublishers.ofByteArray(BODY) : BodyPublishers.noBody();
   }
 
-  private SessionOptions options(String sessionId) {
-    factoryRuns.incrementAndGet();
-    duringFactory.get().run();
-    return SessionOptions.newBuilder()
-        .withModel(ScriptedModel.newBuilder().withTextTurn("x").build())
-        .withSessionId(sessionId)
-        .build();
+  private RuntimeServer start(
+      SessionRegistry.Builder registry, UnaryOperator<RuntimeServer.Builder> configure) {
+    var server =
+        configure
+            .apply(
+                RuntimeServer.builder()
+                    .withRegistry(registry.build())
+                    .withOptionsFactory(
+                        sessionId -> {
+                          factoryRuns.incrementAndGet();
+                          duringFactory.get().run();
+                          return SessionOptions.newBuilder()
+                              .withModel(ScriptedModel.newBuilder().withTextTurn("x").build())
+                              .withSessionId(sessionId)
+                              .build();
+                        })
+                    .withAuthenticator(tokens))
+            .build();
+    servers.add(server);
+    return server;
   }
 
   private static HttpRequest.Builder builder(
