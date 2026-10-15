@@ -555,6 +555,7 @@ final class AgentHttpServiceIntegrationTest {
           httpClient()
               .send(postJson(baseUrl(server) + "/sessions", Map.of()), BodyHandlers.ofString());
       assertEquals(500, resp.statusCode());
+      assertEquals("{\"error\":\"session options factory failed\"}", resp.body());
       assertEquals(0, server.registry().size());
     }
   }

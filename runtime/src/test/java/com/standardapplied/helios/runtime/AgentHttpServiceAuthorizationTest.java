@@ -263,6 +263,17 @@ final class AgentHttpServiceAuthorizationTest {
     assertEquals(0, server.registry().size());
   }
 
+  @Test
+  void answeredRequestsStopWatchingTheirCredentialsRevocation() throws Exception {
+    var sessionId = create("carol");
+    assertEquals(
+        204, send("GET", "/sessions/" + sessionId + "/result?timeout=0", "carol").statusCode());
+
+    Await.until(
+        "answered requests to stop watching carol's revocation",
+        () -> carolRevoked.getNumberOfDependents() == 0);
+  }
+
   private Optional<Authentication> authenticate(ServerRequest request) {
     var token =
         request
