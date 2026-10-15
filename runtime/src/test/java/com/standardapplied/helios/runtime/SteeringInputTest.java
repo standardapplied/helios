@@ -53,11 +53,13 @@ final class SteeringInputTest {
         CloseConnectionException.class,
         () -> steering.send(session, ALICE, untouchedRequest(), disconnectedResponse()));
     assertEquals(new AdmissionCounts(0, 1), steering.counts());
+    steering.send(session, ALICE, untouchedRequest(), answeredResponse());
+    assertEquals(new AdmissionCounts(0, 2), steering.counts());
 
     held.end();
     var again = new HeldUpload(steering, ALICE);
     steering.send(session, ALICE, untouchedRequest(), answeredResponse());
-    assertEquals(new AdmissionCounts(0, 2), steering.counts());
+    assertEquals(new AdmissionCounts(0, 3), steering.counts());
     again.end();
   }
 
@@ -70,11 +72,13 @@ final class SteeringInputTest {
         CloseConnectionException.class,
         () -> steering.interrupt(session, BOB, untouchedRequest(), disconnectedResponse()));
     assertEquals(new AdmissionCounts(0, 1), steering.counts());
+    steering.interrupt(session, BOB, untouchedRequest(), answeredResponse());
+    assertEquals(new AdmissionCounts(0, 2), steering.counts());
 
     held.end();
     var again = new HeldUpload(steering, ALICE);
     steering.interrupt(session, BOB, untouchedRequest(), answeredResponse());
-    assertEquals(new AdmissionCounts(0, 2), steering.counts());
+    assertEquals(new AdmissionCounts(0, 3), steering.counts());
     again.end();
   }
 
