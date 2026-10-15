@@ -10,10 +10,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -123,16 +128,18 @@ final class AgentHttpServiceChurnAdmissionTest {
         Await.value(
             "the event stream to be answered",
             harness.openEventsOnOwnConnection(server, sessionId, "alice"));
+    var afterReady = afterReady(revoked);
     var session = harness.sessions.get(sessionId);
-    Await.until("the stream to subscribe", () -> !session.subscribers.isEmpty());
     var delivery = CompletableFuture.runAsync(() -> session.subscribers.getFirst().onNext(EVENT));
     Await.latch("the event to be serialized", serializing);
 
     harness.tokens.revoke("alice");
-    var streamed = drain(revoked);
+    var streamed =
+        Await.value(
+            "the stream to end", CompletableFuture.supplyAsync(() -> afterReady.lines().toList()));
     var refused = open(server, sessionId, "alice");
 
-    assertEquals("event:Ready\ndata:{}", streamed.strip());
+    assertEquals(List.of(), streamed);
     assertStreamRefused(refused, 429, "{\"error\":\"too many event streams on this session\"}");
     assertFalse(delivery.isDone());
     release.countDown();
@@ -178,8 +185,25 @@ final class AgentHttpServiceChurnAdmissionTest {
     assertEquals(body, ResponseBodies.text(resp.body()));
   }
 
-  private static String drain(HttpResponse<InputStream> resp) {
-    return Await.value(
+  /** Read {@code resp}'s {@code Ready} event, so its subscription is live, and return the rest. */
+  private static BufferedReader afterReady(HttpResponse<InputStream> resp) {
+    var reader = new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
+    var ready =
+        CompletableFuture.supplyAsync(() -> List.of(line(reader), line(reader), line(reader)));
+    assertEquals(List.of("event:Ready", "data:{}", ""), Await.value("the Ready event", ready));
+    return reader;
+  }
+
+  private static String line(BufferedReader reader) {
+    try {
+      return reader.readLine();
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  private static void drain(HttpResponse<InputStream> resp) {
+    Await.value(
         "the stream to end", CompletableFuture.supplyAsync(() -> ResponseBodies.text(resp.body())));
   }
 
