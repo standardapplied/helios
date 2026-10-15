@@ -5,6 +5,7 @@ package com.standardapplied.helios.runtime;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.ResultMessage;
+import io.helidon.http.HeaderValues;
 import io.helidon.http.Status;
 import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
@@ -18,13 +19,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * The long-poll behind {@code GET /sessions/{sessionId}/result?timeout=<seconds>}: waits up to the
  * clamped timeout for the session's terminal {@link ResultMessage} and answers {@code 200} with
  * {@code {type, result}}, {@code 204} when the wait ends first, {@code 401} when the caller's
  * identity expires or is revoked first, or an error status when the wait is interrupted or the
- * session failed. Once the identity has ended the result is never disclosed, even if it is ready.
+ * session failed. Once the identity has ended the result is never disclosed, even if it is ready:
+ * the body is serialized before the response is committed and the identity is checked again
+ * immediately before it is sent.
  */
 final class ResultLongPoll {
 
@@ -48,20 +52,28 @@ final class ResultLongPoll {
    * @param session the session whose result is awaited; non-null
    * @param req the request carrying the optional {@code timeout} query parameter; non-null
    * @param resp the response the outcome is sent on; non-null
+   * @param objectMapper serializes the outcome's body; non-null
    * @param identityEnded completes when the caller's identity expires or is revoked; non-null
    */
   static void respond(
       AgentSession session,
       ServerRequest req,
       ServerResponse resp,
+      ObjectMapper objectMapper,
       CompletableFuture<Void> identityEnded) {
     var timeoutSeconds = parseResultTimeoutSeconds(req.query().first("timeout").orElse(null));
     var outcome = awaitResult(session.result(), identityEnded, timeoutSeconds, session.sessionId());
     if (outcome.body() == null) {
       resp.status(outcome.status()).send();
-    } else {
-      resp.status(outcome.status()).send(outcome.body());
+      return;
     }
+    var body = objectMapper.writeValueAsBytes(outcome.body());
+    if (identityEnded.isDone()) {
+      resp.status(Status.UNAUTHORIZED_401).send(AuthenticationGate.UNAUTHENTICATED);
+      return;
+    }
+    resp.headers().setIfAbsent(HeaderValues.CONTENT_TYPE_JSON);
+    resp.status(outcome.status()).send(body);
   }
 
   /**
