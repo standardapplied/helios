@@ -32,9 +32,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -51,6 +49,7 @@ final class AgentHttpServiceAuthorizationTest {
 
   private static final Duration HTTP_TIMEOUT = Await.HANG_GUARD;
   private static final Principal ALICE = new Principal("acme", "alice");
+  private static final Principal CAROL = new Principal("acme", "carol");
   private static final String NOT_FOUND = "{\"error\":\"session not found\"}";
   private static final String UNAUTHENTICATED = "{\"error\":\"unauthenticated\"}";
 
@@ -73,14 +72,13 @@ final class AgentHttpServiceAuthorizationTest {
           "eve",
           Authentication.of(new Principal("globex", "alice")),
           "carol",
-          new Authentication(new Principal("acme", "carol"), Duration.ofDays(1), carolRevoked),
+          new Authentication(CAROL, Duration.ofDays(1), carolRevoked),
           "carol-upload",
-          new Authentication(new Principal("acme", "carol"), Duration.ofDays(1), uploadRevoked),
+          new Authentication(CAROL, Duration.ofDays(1), uploadRevoked),
           "expired",
           new Authentication(ALICE, Duration.ZERO, new CompletableFuture<>()),
           "revoked",
           new Authentication(ALICE, Duration.ofDays(1), CompletableFuture.completedFuture(null)));
-  private final BlockingQueue<String> authenticated = new LinkedBlockingQueue<>();
   private final AtomicReference<String> hijackedId = new AtomicReference<>();
   private final AtomicReference<Runnable> duringFactory = new AtomicReference<>(() -> {});
   private RuntimeServer server;
@@ -112,7 +110,7 @@ final class AgentHttpServiceAuthorizationTest {
     var interrupt = send("POST", interrupt(sessionId), "alice");
     var delete = send("DELETE", "/sessions/" + sessionId, "alice");
 
-    assertTrue(streamed.contains("event:LoopEnded"), () -> "streamed: " + streamed);
+    assertTrue(streamed.endsWith("event:LoopEnded"), () -> "streamed: " + streamed);
     assertEquals(200, result.statusCode());
     assertEquals(Optional.of("application/json"), result.headers().firstValue("Content-Type"));
     assertTrue(result.body().contains("\"result\":\"done\""), result::body);
@@ -181,24 +179,39 @@ final class AgentHttpServiceAuthorizationTest {
     carolRevoked.complete(null);
 
     assertEquals("", events.awaitEnd());
-    var session = server.registry().find(sessionId, new Principal("acme", "carol")).orElseThrow();
+    var session = server.registry().find(sessionId, CAROL).orElseThrow();
     assertFalse(session.result().isDone());
   }
 
   @Test
   void revokingTheIdentityAnswersAPendingResultLongPollWith401() throws Exception {
     var sessionId = create("carol");
-    authenticated.clear();
+    var result = server.registry().find(sessionId, CAROL).orElseThrow().result();
+    var watchersBeforePoll = result.getNumberOfDependents();
     var poll =
         CompletableFuture.supplyAsync(
             () -> sendUnchecked("GET", "/sessions/" + sessionId + "/result?timeout=300", "carol"));
-    assertEquals("carol", Await.next("the long poll to be authenticated", authenticated));
+    Await.until(
+        "the long poll to wait on the result",
+        () -> result.getNumberOfDependents() > watchersBeforePoll);
 
     carolRevoked.complete(null);
 
     var resp = Await.value("the long poll to be answered", poll);
     assertEquals(401, resp.statusCode());
     assertEquals(UNAUTHENTICATED, resp.body());
+  }
+
+  @Test
+  void answeredRequestsLeaveNothingWatchingTheirCredentialsRevocation() throws Exception {
+    var sessionId = create("carol");
+    assertEquals(
+        204, send("GET", "/sessions/" + sessionId + "/result?timeout=0", "carol").statusCode());
+    assertEquals(204, send("DELETE", "/sessions/" + sessionId, "carol").statusCode());
+
+    Await.until(
+        "the answered requests to stop watching carol's revocation",
+        () -> carolRevoked.getNumberOfDependents() == 0);
   }
 
   @Test
@@ -263,26 +276,12 @@ final class AgentHttpServiceAuthorizationTest {
     assertEquals(0, server.registry().size());
   }
 
-  @Test
-  void answeredRequestsStopWatchingTheirCredentialsRevocation() throws Exception {
-    var sessionId = create("carol");
-    assertEquals(
-        204, send("GET", "/sessions/" + sessionId + "/result?timeout=0", "carol").statusCode());
-
-    Await.until(
-        "answered requests to stop watching carol's revocation",
-        () -> carolRevoked.getNumberOfDependents() == 0);
-  }
-
   private Optional<Authentication> authenticate(ServerRequest request) {
-    var token =
-        request
-            .headers()
-            .first(HeaderNames.AUTHORIZATION)
-            .filter(header -> header.startsWith("Bearer "))
-            .map(header -> header.substring("Bearer ".length()));
-    token.ifPresent(authenticated::add);
-    return token.map(identities::get);
+    return request
+        .headers()
+        .first(HeaderNames.AUTHORIZATION)
+        .filter(header -> header.startsWith("Bearer "))
+        .map(header -> identities.get(header.substring("Bearer ".length())));
   }
 
   private SessionOptions options(String sessionId) {
