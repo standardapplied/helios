@@ -3,6 +3,7 @@
 package com.standardapplied.helios.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.test.Await;
@@ -106,6 +107,34 @@ final class RuntimeServerSweepTest {
       Await.latch("the server's own registry to be swept", closed);
       assertEquals(0, server.registry().size());
     }
+  }
+
+  @Test
+  void closingTheServerLetsASweepUnderWayFinishClosingItsSession() {
+    var closing = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var closed = new CountDownLatch(1);
+    var interrupted = new AtomicBoolean();
+    var session = terminalSession(closed);
+    session.onClose =
+        () -> {
+          closing.countDown();
+          try {
+            release.await();
+          } catch (InterruptedException e) {
+            interrupted.set(true);
+          }
+          closed.countDown();
+        };
+    var server = server();
+    now.set(now.get().plus(RETENTION));
+    Await.latch("the sweep to start closing the session", closing);
+
+    server.close();
+    release.countDown();
+
+    Await.latch("the sweep to finish closing the session", closed);
+    assertFalse(interrupted.get());
   }
 
   private Instant instant() {
