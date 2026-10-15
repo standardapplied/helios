@@ -508,6 +508,22 @@ final class SessionRegistryAdmissionTest {
     create(registry, EVE);
   }
 
+  @Test
+  void aPrincipalThatHoldsNothingMoreLeavesNoEntryBehind() {
+    var quota = new SessionQuota(4, 4, 2, 2);
+    quota.reserve(ALICE);
+    quota.reserve(ALICE);
+    quota.reserve(EVE);
+
+    quota.terminated(ALICE);
+    quota.release(ALICE, false);
+    quota.release(ALICE, true);
+
+    assertEquals(1, quota.principalsForTests());
+    quota.release(EVE, true);
+    assertEquals(0, quota.principalsForTests());
+  }
+
   // ── fixtures ─────────────────────────────────────────────────────────────
 
   private SessionRegistry.Builder stubs() {

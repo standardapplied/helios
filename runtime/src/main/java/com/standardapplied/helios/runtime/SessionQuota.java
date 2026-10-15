@@ -82,6 +82,11 @@ final class SessionQuota {
     change(owner, -1, active ? -1 : 0);
   }
 
+  /** Number of principals holding a session or a reservation. Visible for tests. */
+  int principalsForTests() {
+    return byPrincipal.size();
+  }
+
   private Usage usage(Principal owner) {
     return byPrincipal.getOrDefault(owner, Usage.NONE);
   }
