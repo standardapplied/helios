@@ -17,7 +17,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -56,16 +55,17 @@ final class ResultLongPollAwaitResultTest {
   }
 
   @Test
-  void timedOutPollsLeaveNothingWatchingAnUnfinishedResult() {
+  void aTimedOutPollLeavesNothingWatchingAnUnfinishedResultWhileItsIdentityLives() {
     var future = new CompletableFuture<ResultMessage>();
 
     for (var i = 0; i < 1_000; i++) {
       assertEquals(
           io.helidon.http.Status.NO_CONTENT_204,
-          ResultLongPoll.awaitResult(future, new CompletableFuture<>(), 0L, "sess-1").status());
+          ResultLongPoll.awaitResult(future, LIVE, 0L, "sess-1").status());
     }
 
     assertEquals(0, future.getNumberOfDependents());
+    assertEquals(0, LIVE.getNumberOfDependents());
   }
 
   @Test
@@ -120,23 +120,24 @@ final class ResultLongPollAwaitResultTest {
   }
 
   @Test
-  void anIdentityEndingWhileWaitingEndsTheWaitWith401() throws Exception {
+  void anIdentityEndingWhileWaitingEndsTheWaitWith401() {
     var identity = new CompletableFuture<Void>();
-    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-      var waiting =
-          executor.submit(
-              () ->
-                  ResultLongPoll.awaitResult(
-                      new CompletableFuture<>(),
-                      identity,
-                      ResultLongPoll.MAX_RESULT_TIMEOUT_SECONDS,
-                      "sess-1"));
-      Await.until(
-          "the long poll to wait on the identity", () -> identity.getNumberOfDependents() > 0);
-      identity.complete(null);
-      var outcome = Await.value("the long poll to end", waiting);
-      assertEquals(io.helidon.http.Status.UNAUTHORIZED_401, outcome.status());
-    }
+    var waiting =
+        CompletableFuture.supplyAsync(
+            () ->
+                ResultLongPoll.awaitResult(
+                    new CompletableFuture<>(),
+                    identity,
+                    ResultLongPoll.MAX_RESULT_TIMEOUT_SECONDS,
+                    "sess-1"));
+    Await.until(
+        "the long poll to wait on the identity", () -> identity.getNumberOfDependents() > 0);
+
+    identity.complete(null);
+
+    var outcome = Await.value("the long poll to end", waiting);
+    assertEquals(io.helidon.http.Status.UNAUTHORIZED_401, outcome.status());
+    assertEquals(Map.of("error", "unauthenticated"), outcome.body());
   }
 
   private static CompletableFuture<Void> ended() {
