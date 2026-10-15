@@ -21,17 +21,24 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 /**
- * In-memory registry of live sessions. The HTTP service holds one per process; route handlers
- * lookup sessions by id to dispatch send / interrupt / events / close.
+ * In-memory registry of live sessions. The HTTP service holds one per process; route handlers look
+ * sessions up by id to dispatch send / interrupt / events / close.
  *
- * <p>Sessions are created via {@link #create(SessionOptions)} — a {@link Function} factory wired at
- * construction (typically {@code AgentSession::create}) builds the impl. The factory is injectable
- * so tests can substitute a stub session.
+ * <p>Sessions are created via {@link #create(SessionOptions, Principal)} — a {@link Function}
+ * factory wired at construction (typically {@code AgentSession::create}) builds the impl. The
+ * factory is injectable so tests can substitute a stub session.
  *
- * <p>Sessions remain in the registry until {@link #close(String)} is called, even after they reach
- * a terminal {@link com.standardapplied.helios.session.ResultMessage ResultMessage} — keeping them
- * around lets late SSE subscribers fetch the final {@code LoopEnded} event after termination, and
- * lets the {@code DELETE /sessions/{id}} route be the explicit cleanup boundary.
+ * <h2>Ownership</h2>
+ *
+ * Every session is registered with the {@link Principal} that created it, and that owner never
+ * changes. {@link #find(String, Principal)} and {@link #close(String, Principal)} reach a session
+ * only for an equal principal; for anyone else they answer exactly as for an id that was never
+ * registered, so a caller cannot learn whether another owner's id exists.
+ *
+ * <p>Sessions remain in the registry until {@link #close(String, Principal)} is called, even after
+ * they reach a terminal {@link com.standardapplied.helios.session.ResultMessage ResultMessage} —
+ * keeping them around lets late SSE subscribers fetch the final {@code LoopEnded} event after
+ * termination, and lets the {@code DELETE /sessions/{id}} route be the explicit cleanup boundary.
  *
  * <h2>Retention</h2>
  *
@@ -43,17 +50,17 @@ import java.util.function.Function;
  *       age. Live sessions are never touched. Best called periodically (every minute or so) from
  *       the deployer's scheduler.
  *   <li>{@code SessionRegistry.newBuilder().withMaxSessions(int)} — cap on registered sessions.
- *       When {@link #create(SessionOptions)} would push the count over the cap, the registry evicts
- *       the oldest terminal session first; if none is available, the create call throws {@link
- *       IllegalStateException}. Live sessions are never evicted.
+ *       When {@link #create(SessionOptions, Principal)} would push the count over the cap, the
+ *       registry evicts the oldest terminal session first; if none is available, the create call
+ *       throws {@link IllegalStateException}. Live sessions are never evicted.
  * </ul>
  *
  * <h2>Thread-safety</h2>
  *
- * Thread-safe. All routes share one registry; concurrent create / get / close are common. Backed by
- * {@link ConcurrentHashMap}; {@link #create(SessionOptions)} rejects duplicate ids. The cap check
- * is best-effort under contention — under a flood of concurrent creates the count may briefly
- * exceed the cap before evictions catch up; the cap is an SLA hint, not a hard barrier.
+ * Thread-safe. All routes share one registry; concurrent create / find / close are common. Backed
+ * by {@link ConcurrentHashMap}; {@link #create(SessionOptions, Principal)} rejects duplicate ids.
+ * The cap check is best-effort under contention — under a flood of concurrent creates the count may
+ * briefly exceed the cap before evictions catch up; the cap is an SLA hint, not a hard barrier.
  */
 public final class SessionRegistry {
 
@@ -105,17 +112,21 @@ public final class SessionRegistry {
   }
 
   /**
-   * Create a new session from the given options and register it under its session id.
+   * Create a new session from the given options and register it under its session id, owned by
+   * {@code owner}. A duplicate id is rejected before anything is registered, so an existing
+   * session's owner is never replaced.
    *
    * @param options the composition record; non-null
+   * @param owner the principal the session belongs to; non-null
    * @return the freshly-created, unstarted session
-   * @throws NullPointerException if {@code options} is null
+   * @throws NullPointerException if {@code options} or {@code owner} is null
    * @throws IllegalStateException if a session with the same id is already registered, or if the
    *     registry is at its configured {@code maxSessions} cap and no terminal session is available
    *     to evict
    */
-  public AgentSession create(SessionOptions options) {
+  public AgentSession create(SessionOptions options, Principal owner) {
     Objects.requireNonNull(options, "options must not be null");
+    Objects.requireNonNull(owner, "owner must not be null");
     if (sessions.size() >= maxSessions && !tryEvictOldestTerminal()) {
       throw new IllegalStateException(
           "registry at capacity "
@@ -124,7 +135,7 @@ public final class SessionRegistry {
     }
     var session = factory.apply(options);
     Objects.requireNonNull(session, "factory returned null session");
-    var entry = new SessionEntry(session, new AtomicReference<>());
+    var entry = new SessionEntry(session, owner, new AtomicReference<>());
     var prev = sessions.putIfAbsent(options.sessionId(), entry);
     if (prev != null) {
       session.close();
@@ -135,35 +146,38 @@ public final class SessionRegistry {
   }
 
   /**
-   * Look up a registered session by id.
+   * Look up a session {@code requester} owns.
    *
    * @param sessionId non-null id
-   * @return the session if present
-   * @throws NullPointerException if {@code sessionId} is null
+   * @param requester the principal asking; non-null
+   * @return the session when it is registered and owned by {@code requester}; empty otherwise
+   * @throws NullPointerException if either argument is null
    */
-  public Optional<AgentSession> get(String sessionId) {
+  public Optional<AgentSession> find(String sessionId, Principal requester) {
     Objects.requireNonNull(sessionId, "sessionId must not be null");
-    var entry = sessions.get(sessionId);
-    return entry == null ? Optional.empty() : Optional.of(entry.session());
+    Objects.requireNonNull(requester, "requester must not be null");
+    return Optional.ofNullable(sessions.get(sessionId))
+        .filter(entry -> entry.isOwnedBy(requester))
+        .map(SessionEntry::session);
   }
 
   /**
-   * Close and unregister the session. If no session is registered under {@code sessionId} this is a
-   * no-op.
+   * Close and unregister a session {@code requester} owns. A session that is not registered, or
+   * belongs to another principal, is left untouched.
    *
    * @param sessionId non-null id
-   * @return {@code true} if a session was found and closed; {@code false} if no session was
-   *     registered
-   * @throws NullPointerException if {@code sessionId} is null
+   * @param requester the principal asking; non-null
+   * @return {@code true} if the session was found, owned by {@code requester} and closed
+   * @throws NullPointerException if either argument is null
    */
-  public boolean close(String sessionId) {
+  public boolean close(String sessionId, Principal requester) {
     Objects.requireNonNull(sessionId, "sessionId must not be null");
-    var entry = sessions.remove(sessionId);
-    if (entry == null) {
-      return false;
-    }
-    entry.session().close();
-    return true;
+    Objects.requireNonNull(requester, "requester must not be null");
+    return Optional.ofNullable(sessions.get(sessionId))
+        .filter(entry -> entry.isOwnedBy(requester))
+        .filter(entry -> sessions.remove(sessionId, entry))
+        .map(SessionEntry::close)
+        .orElse(false);
   }
 
   /**
@@ -187,8 +201,8 @@ public final class SessionRegistry {
 
   /** Close and unregister every session. Idempotent. */
   public void closeAll() {
-    for (var id : Set.copyOf(sessions.keySet())) {
-      close(id);
+    for (var entry : Map.copyOf(sessions).entrySet()) {
+      close(entry.getKey(), entry.getValue().owner());
     }
   }
 
@@ -217,7 +231,7 @@ public final class SessionRegistry {
     for (var entry : sessions.entrySet()) {
       var terminated = entry.getValue().terminatedAt().get();
       if (terminated != null && !terminated.isAfter(cutoff)) {
-        if (close(entry.getKey())) {
+        if (close(entry.getKey(), entry.getValue().owner())) {
           purged++;
         }
       }
@@ -230,18 +244,30 @@ public final class SessionRegistry {
    * removed and closed; {@code false} when no terminal session was available.
    */
   private boolean tryEvictOldestTerminal() {
-    var oldestId =
-        sessions.entrySet().stream()
-            .filter(e -> e.getValue().terminatedAt().get() != null)
-            .min(
-                Comparator.comparing(
-                    e -> e.getValue().terminatedAt().get(), Comparator.naturalOrder()))
-            .map(Map.Entry::getKey);
-    return oldestId.map(this::close).orElse(false);
+    return sessions.entrySet().stream()
+        .filter(e -> e.getValue().terminatedAt().get() != null)
+        .min(
+            Comparator.comparing(e -> e.getValue().terminatedAt().get(), Comparator.naturalOrder()))
+        .map(e -> close(e.getKey(), e.getValue().owner()))
+        .orElse(false);
   }
 
-  /** Per-session bookkeeping: the session itself + the instant its result-future completed. */
-  private record SessionEntry(AgentSession session, AtomicReference<Instant> terminatedAt) {}
+  /**
+   * Per-session bookkeeping: the session, its immutable owner, and the instant its result-future
+   * completed.
+   */
+  private record SessionEntry(
+      AgentSession session, Principal owner, AtomicReference<Instant> terminatedAt) {
+
+    private boolean isOwnedBy(Principal requester) {
+      return owner.equals(requester);
+    }
+
+    private boolean close() {
+      session.close();
+      return true;
+    }
+  }
 
   /** Fluent builder for {@link SessionRegistry}. */
   public static final class Builder {
@@ -278,9 +304,9 @@ public final class SessionRegistry {
     }
 
     /**
-     * Cap registered sessions. When {@link #create(SessionOptions)} would push the count over this
-     * number, the registry evicts the oldest terminal session first; if no terminal session is
-     * available, the create call throws.
+     * Cap registered sessions. When {@link #create(SessionOptions, Principal)} would push the count
+     * over this number, the registry evicts the oldest terminal session first; if no terminal
+     * session is available, the create call throws.
      *
      * @param maxSessions positive cap
      * @return this builder

@@ -439,6 +439,29 @@ the stream produced before it failed.
 | `SseReader.Parser.finished()` and `complete()` | removed; a `Done` or `Error` from `parse` ends the stream, and `partial()` gives what a cut-off stream produced |
 | `ToolCall.Builder.withArguments` rejected a `null` value | a JSON `null` argument stays a `null` value (`OrderedMaps.copyOfKeepingNullValues`); `HookOutcome.MutateArgs`, both `QueryEvent.ToolMutated` inputs and `HeliosEvent.ToolCallStarted.args` keep it too |
 
+**Every runtime route requires an authenticated identity and acts only on its caller's own
+sessions.** `RuntimeServer` and `AgentHttpService` authenticate every request through one
+`runtime.Authenticator` before they read its body, look up a session, subscribe or queue work. A
+session is owned by the `runtime.Principal` (tenant, subject) that created it; any other principal
+gets the same `404` as an unknown id. To keep an externally bound runtime working, configure
+`RuntimeServer.Builder.withAuthenticator(...)`: behind an authenticating reverse proxy that is
+`TrustedProxyAuthenticator.newBuilder().withTrustedProxy(proxyAddress).build()`, which reads
+`X-Authenticated-Tenant` and `X-Authenticated-Subject` only from that proxy's connections (the
+proxy must strip client-supplied copies); otherwise an `Authenticator` over the deployer's token
+or certificate verifier. A loopback-bound runtime may instead call `withoutAuthentication()`.
+There is no unauthenticated external bind.
+
+| 2.x | 3.0 |
+|---|---|
+| `RuntimeServer.Builder.build()` served unauthenticated on any host | `build()` throws `IllegalStateException` unless `withAuthenticator(...)` or, for a loopback host only, `withoutAuthentication()` was called; a non-loopback host without an authenticator is refused with a message naming the host and the address it resolved to. The host is resolved once and the server binds that address. An unresolvable host throws `IllegalArgumentException` |
+| `new AgentHttpService(registry, optionsFactory, objectMapper, eventsPathPrefix)` | `new AgentHttpService(registry, optionsFactory, authenticator, objectMapper, eventsPathPrefix)`; there is no unauthenticated `AgentHttpService` |
+| Any request reached any session by id | `401 {"error":"unauthenticated"}` for a missing, malformed, expired, revoked or forged credential, `503 {"error":"authentication unavailable"}` when the authenticator throws (logged by exception type only), `404 {"error":"session not found"}` for another principal's session |
+| An SSE stream and a result long poll outlived the client's credential | an identity holds for `Authentication.lifetime()` or until `Authentication.revoked()` completes; then an open SSE stream closes without a further event, a pending long poll, or one whose result is still serializing, answers `401`, and a message or interrupt whose body upload, or a create whose options factory, outlived the identity answers `401` and does nothing. `revoked` is a `CompletableFuture<Void>` that a verifier shares across every authentication of one credential; a request watches it only while it runs |
+| `RuntimeServer` installed every Helidon `ServerFeature` found on the classpath through service discovery | no discovered feature is installed, so none can mount a route the `Authenticator` does not see; mount `AgentHttpService` on your own `WebServer` to combine it with Helidon features |
+| `SessionRegistry.create(options)`, `get(id)`, `close(id)` | `create(options, owner)`, `find(id, requester)`, `close(id, requester)`; `find` and `close` act only for the owner |
+| An options factory returning options for another session id was logged and its id used | `500 {"error":"session options factory failed"}` and no session is created, so a factory cannot attach a caller to another user's session; a factory returning `null` gets the same answer |
+| The `500` bodies for a failed options factory and a session that terminated abnormally quoted the exception message, and any other exception escaping a route reached the client as Helidon's default `500` body, its message | fixed messages, `session options factory failed`, `session terminated abnormally` and, for any other failure in a route, `internal server error`; the exception is logged |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`

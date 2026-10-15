@@ -22,6 +22,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -157,6 +158,79 @@ final class SessionEventStreamTest {
     stream.onNext(EVENT);
 
     awaitEnd(stream);
+  }
+
+  @Test
+  void endingCancelsTheSubscriptionAndEndsTheStreamWithoutAFurtherEvent() {
+    var sink = new RecordingSink(null);
+    var subscription = new RecordingSubscription();
+    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
+    stream.onSubscribe(subscription);
+
+    stream.end();
+
+    assertTrue(subscription.cancelled.get());
+    awaitEnd(stream);
+    assertEquals(List.of("Ready:{}"), sink.emitted);
+    assertTrue(sink.closed.get());
+  }
+
+  @Test
+  void anEventStillSerializingWhenTheStreamEndsIsNotWritten() {
+    var sink = new RecordingSink(null);
+    var stream = new AtomicReference<SessionEventStream>();
+    var endingMidSerialization =
+        new ObjectMapper() {
+          @Override
+          public String writeValueAsString(Object value) {
+            stream.get().end();
+            return super.writeValueAsString(value);
+          }
+        };
+    stream.set(new SessionEventStream("sess-1", sink, endingMidSerialization));
+    stream.get().onSubscribe(new RecordingSubscription());
+
+    stream.get().onNext(EVENT);
+
+    assertEquals(List.of("Ready:{}"), sink.emitted);
+    awaitEnd(stream.get());
+  }
+
+  @Test
+  void aSubscriptionArrivingAfterTheEndIsCancelledAndNothingIsRequested() {
+    var sink = new RecordingSink(null);
+    var subscription = new RecordingSubscription();
+    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
+    stream.end();
+
+    stream.onSubscribe(subscription);
+
+    assertTrue(subscription.cancelled.get());
+    assertEquals(0L, subscription.requested.get());
+    assertTrue(sink.emitted.isEmpty());
+    awaitEnd(stream);
+  }
+
+  @Test
+  void aStreamEndingAsItSubscribesWritesNoReady() {
+    var sink = new RecordingSink(null);
+    var stream = new AtomicReference<SessionEventStream>();
+    var endingOnRequest =
+        new Flow.Subscription() {
+          @Override
+          public void request(long n) {
+            stream.get().end();
+          }
+
+          @Override
+          public void cancel() {}
+        };
+    stream.set(new SessionEventStream("sess-1", sink, new ObjectMapper()));
+
+    stream.get().onSubscribe(endingOnRequest);
+
+    assertTrue(sink.emitted.isEmpty());
+    awaitEnd(stream.get());
   }
 
   @Test
