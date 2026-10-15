@@ -14,8 +14,6 @@ import com.standardapplied.helios.core.test.Await;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.UncheckedIOException;
 import java.net.http.HttpRequest.BodyPublisher;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
@@ -119,7 +117,7 @@ final class AgentHttpServiceRequestAdmissionTest {
       assertEquals(202, Await.value("a held upload to be queued", upload).statusCode());
     }
     assertEquals(2, harness.sessions.get(alice).queue.size());
-    assertEquals(202, harness.send(server, "POST", messages(bob), "bob").statusCode());
+    assertEquals(202, harness.sendAdmitted(server, "POST", messages(bob), "bob").statusCode());
     assertEquals(new AdmissionCounts(4, 2), server.counters().messages());
   }
 
@@ -190,7 +188,7 @@ final class AgentHttpServiceRequestAdmissionTest {
             Optional.of(Overload.RETRY_AFTER_SECONDS), resp.headers().firstValue("Retry-After"));
         assertEquals(
             "{\"error\":\"too many event streams on this session\"}",
-            new String(resp.body().readAllBytes(), StandardCharsets.UTF_8));
+            ResponseBodies.text(resp.body()));
       }
     }
 
@@ -200,13 +198,11 @@ final class AgentHttpServiceRequestAdmissionTest {
 
     session.completeEvents();
     for (var resp : open) {
-      try (var body = resp.body()) {
-        Await.value("the stream to end", CompletableFuture.supplyAsync(() -> drain(body)));
-      }
+      Await.value(
+          "the stream to end",
+          CompletableFuture.supplyAsync(() -> ResponseBodies.text(resp.body())));
     }
-    var next = Await.value("a new stream", harness.openEvents(server, sessionId, "alice"));
-    assertEquals(200, next.statusCode());
-    next.body().close();
+    harness.openEventsAdmitted(server, sessionId, "alice").body().close();
   }
 
   @Test
@@ -246,12 +242,12 @@ final class AgentHttpServiceRequestAdmissionTest {
       }
     }
     assertEquals(2, answered);
-    assertEquals(200, harness.send(server, "GET", result(sessionId), "alice").statusCode());
+    assertEquals(200, harness.sendAdmitted(server, "GET", result(sessionId), "alice").statusCode());
   }
 
   private int post(RuntimeServer server, String path, byte[] body) {
     return harness
-        .send(server, "POST", path, "alice", BodyPublishers.ofByteArray(body))
+        .sendAdmitted(server, "POST", path, "alice", BodyPublishers.ofByteArray(body))
         .statusCode();
   }
 
@@ -298,14 +294,6 @@ final class AgentHttpServiceRequestAdmissionTest {
         Thread.currentThread().interrupt();
         throw new IOException(e);
       }
-    }
-  }
-
-  private static long drain(InputStream body) {
-    try {
-      return body.transferTo(OutputStream.nullOutputStream());
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
     }
   }
 }

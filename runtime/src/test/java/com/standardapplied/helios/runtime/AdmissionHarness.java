@@ -3,6 +3,7 @@
 package com.standardapplied.helios.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.SessionOptions;
@@ -42,6 +43,17 @@ final class AdmissionHarness implements AutoCloseable {
   /** A message and interrupt body of 32 bytes. */
   static final byte[] BODY = textBody(32);
 
+  private static final List<Map<String, String>> CONCURRENCY_REFUSALS =
+      List.of(
+          Overload.TOO_MANY_UPLOADS,
+          Overload.SERVER_AT_UPLOAD_CAPACITY,
+          Overload.TOO_MANY_EVENT_STREAMS,
+          Overload.TOO_MANY_OPEN_EVENT_STREAMS,
+          Overload.SERVER_AT_EVENT_STREAM_CAPACITY,
+          Overload.TOO_MANY_RESULT_POLLS,
+          Overload.TOO_MANY_WAITING_RESULT_POLLS,
+          Overload.SERVER_AT_RESULT_POLL_CAPACITY);
+
   final Map<String, StubSession> sessions = new ConcurrentHashMap<>();
   final AtomicReference<Runnable> duringFactory = new AtomicReference<>(() -> {});
   final AtomicInteger factoryRuns = new AtomicInteger();
@@ -60,17 +72,69 @@ final class AdmissionHarness implements AutoCloseable {
   }
 
   RuntimeServer server(SessionRegistry.Builder registry, RequestLimits limits) {
-    return start(builder(registry, limits));
+    return server(registry, limits, JsonMapper.builder().build());
   }
 
   RuntimeServer server(SessionRegistry.Builder registry, RequestLimits limits, JsonMapper mapper) {
-    return start(builder(registry, limits).withObjectMapper(mapper));
+    var server =
+        RuntimeServer.builder()
+            .withRegistry(registry.build())
+            .withOptionsFactory(this::options)
+            .withAuthenticator(AdmissionHarness::authenticate)
+            .withRequestLimits(limits)
+            .withObjectMapper(mapper)
+            .build();
+    servers.add(server);
+    return server;
   }
 
   String create(RuntimeServer server, String token) {
     var resp = send(server, "POST", "/sessions", token);
     assertEquals(201, resp.statusCode(), resp::body);
     return (String) mapper.readValue(resp.body(), Map.class).get("sessionId");
+  }
+
+  /**
+   * Send until no concurrency bound refuses the request. A stream, poll or upload gives its
+   * admission back just after its response is sent, so a request sent as soon as the client has
+   * that response may still find the admission held.
+   */
+  HttpResponse<String> sendAdmitted(
+      RuntimeServer server, String method, String path, String token, BodyPublisher body) {
+    var answer = new AtomicReference<HttpResponse<String>>();
+    Await.until(
+        "the request to be admitted",
+        () -> {
+          answer.set(send(server, method, path, token, body));
+          return !isConcurrencyRefusal(answer.get().statusCode(), answer.get().body());
+        });
+    return answer.get();
+  }
+
+  /** {@link #sendAdmitted} with the default body for {@code method}. */
+  HttpResponse<String> sendAdmitted(
+      RuntimeServer server, String method, String path, String token) {
+    return sendAdmitted(server, method, path, token, defaultBody(method));
+  }
+
+  /** Open {@code sessionId}'s event stream once no concurrency bound refuses it. */
+  HttpResponse<InputStream> openEventsAdmitted(
+      RuntimeServer server, String sessionId, String token) {
+    var answer = new AtomicReference<HttpResponse<InputStream>>();
+    Await.until(
+        "the event stream to be admitted",
+        () -> {
+          var resp =
+              Await.value("the event stream to be answered", openEvents(server, sessionId, token));
+          if (resp.statusCode() == 200) {
+            answer.set(resp);
+            return true;
+          }
+          var text = ResponseBodies.text(resp.body());
+          assertTrue(isConcurrencyRefusal(resp.statusCode(), text), text);
+          return false;
+        });
+    return answer.get();
   }
 
   HttpResponse<String> send(RuntimeServer server, String method, String path, String token) {
@@ -81,13 +145,14 @@ final class AdmissionHarness implements AutoCloseable {
       RuntimeServer server, String method, String path, String token, BodyPublisher body) {
     return Await.value(
         "the request to be answered",
-        http.sendAsync(request(server, method, path, token, body), BodyHandlers.ofString()));
+        http.sendAsync(
+            builder(server, method, path, token, body).build(), BodyHandlers.ofString()));
   }
 
   CompletableFuture<HttpResponse<String>> sendAsync(
       RuntimeServer server, String method, String path, String token) {
-    var body = method.equals("POST") ? BodyPublishers.ofByteArray(BODY) : BodyPublishers.noBody();
-    return http.sendAsync(request(server, method, path, token, body), BodyHandlers.ofString());
+    return http.sendAsync(
+        builder(server, method, path, token, defaultBody(method)).build(), BodyHandlers.ofString());
   }
 
   /**
@@ -97,19 +162,19 @@ final class AdmissionHarness implements AutoCloseable {
    */
   CompletableFuture<HttpResponse<String>> upload(
       RuntimeServer server, String path, String token, InputStream body) {
-    var request =
+    return http.sendAsync(
         builder(server, "POST", path, token, BodyPublishers.ofInputStream(() -> body))
             .version(HttpClient.Version.HTTP_1_1)
             .expectContinue(true)
-            .build();
-    return http.sendAsync(request, BodyHandlers.ofString());
+            .build(),
+        BodyHandlers.ofString());
   }
 
   /** Open {@code sessionId}'s event stream; the future completes when its headers arrive. */
   CompletableFuture<HttpResponse<InputStream>> openEvents(
       RuntimeServer server, String sessionId, String token) {
     return http.sendAsync(
-        request(server, "GET", events(sessionId), token, BodyPublishers.noBody()),
+        builder(server, "GET", events(sessionId), token, BodyPublishers.noBody()).build(),
         BodyHandlers.ofInputStream());
   }
 
@@ -153,18 +218,13 @@ final class AdmissionHarness implements AutoCloseable {
     return "/sessions/" + sessionId + "/result?timeout=300";
   }
 
-  private RuntimeServer.Builder builder(SessionRegistry.Builder registry, RequestLimits limits) {
-    return RuntimeServer.builder()
-        .withRegistry(registry.build())
-        .withOptionsFactory(this::options)
-        .withAuthenticator(AdmissionHarness::authenticate)
-        .withRequestLimits(limits);
+  private boolean isConcurrencyRefusal(int status, String body) {
+    return (status == 429 || status == 503)
+        && CONCURRENCY_REFUSALS.stream().map(mapper::writeValueAsString).anyMatch(body::equals);
   }
 
-  private RuntimeServer start(RuntimeServer.Builder builder) {
-    var server = builder.build();
-    servers.add(server);
-    return server;
+  private static BodyPublisher defaultBody(String method) {
+    return method.equals("POST") ? BodyPublishers.ofByteArray(BODY) : BodyPublishers.noBody();
   }
 
   private SessionOptions options(String sessionId) {
@@ -182,11 +242,6 @@ final class AdmissionHarness implements AutoCloseable {
         .first(HeaderNames.AUTHORIZATION)
         .map(header -> header.substring("Bearer ".length()))
         .map(name -> Authentication.of(new Principal("tenant-" + name, name)));
-  }
-
-  private static HttpRequest request(
-      RuntimeServer server, String method, String path, String token, BodyPublisher body) {
-    return builder(server, method, path, token, body).build();
   }
 
   private static HttpRequest.Builder builder(
