@@ -161,8 +161,14 @@ final class AdmissionHarness implements AutoCloseable {
    */
   CompletableFuture<HttpResponse<String>> upload(
       RuntimeServer server, String path, String token, InputStream body) {
+    return upload(server, path, token, BodyPublishers.ofInputStream(() -> body));
+  }
+
+  /** {@link #upload(RuntimeServer, String, String, InputStream)} with any body publisher. */
+  CompletableFuture<HttpResponse<String>> upload(
+      RuntimeServer server, String path, String token, BodyPublisher body) {
     return http.sendAsync(
-        builder(server, "POST", path, token, BodyPublishers.ofInputStream(() -> body))
+        builder(server, "POST", path, token, body)
             .version(HttpClient.Version.HTTP_1_1)
             .expectContinue(true)
             .build(),

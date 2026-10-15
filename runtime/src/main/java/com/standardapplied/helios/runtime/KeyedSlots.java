@@ -41,4 +41,9 @@ final class KeyedSlots<K> {
   void release(K key) {
     held.computeIfPresent(key, (k, count) -> count == 1 ? null : count - 1);
   }
+
+  /** How many keys have an entry; package-private for tests. */
+  int heldKeys() {
+    return held.size();
+  }
 }
