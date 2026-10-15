@@ -74,7 +74,7 @@ final class AuthenticationGate {
       } else {
         ended.complete(null);
       }
-      CompletableFuture.anyOf(authentication.revoked().toCompletableFuture(), ended)
+      CompletableFuture.anyOf(authentication.revoked(), ended)
           .whenComplete((ignored, failure) -> ended.complete(null));
       return new Caller(authentication.principal(), ended);
     }
