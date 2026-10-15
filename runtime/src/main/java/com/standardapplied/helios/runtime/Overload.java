@@ -34,8 +34,20 @@ final class Overload {
   static final Map<String, String> TOO_MANY_EVENT_STREAMS =
       Map.of("error", "too many event streams on this session");
 
+  static final Map<String, String> TOO_MANY_OPEN_EVENT_STREAMS =
+      Map.of("error", "too many event streams open");
+
+  static final Map<String, String> SERVER_AT_EVENT_STREAM_CAPACITY =
+      Map.of("error", "server at event stream capacity");
+
   static final Map<String, String> TOO_MANY_RESULT_POLLS =
       Map.of("error", "too many result polls on this session");
+
+  static final Map<String, String> TOO_MANY_WAITING_RESULT_POLLS =
+      Map.of("error", "too many result polls waiting");
+
+  static final Map<String, String> SERVER_AT_RESULT_POLL_CAPACITY =
+      Map.of("error", "server at result poll capacity");
 
   private Overload() {}
 

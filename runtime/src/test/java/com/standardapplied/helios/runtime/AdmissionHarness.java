@@ -60,15 +60,11 @@ final class AdmissionHarness implements AutoCloseable {
   }
 
   RuntimeServer server(SessionRegistry.Builder registry, RequestLimits limits) {
-    var server =
-        RuntimeServer.builder()
-            .withRegistry(registry.build())
-            .withOptionsFactory(this::options)
-            .withAuthenticator(AdmissionHarness::authenticate)
-            .withRequestLimits(limits)
-            .build();
-    servers.add(server);
-    return server;
+    return start(builder(registry, limits));
+  }
+
+  RuntimeServer server(SessionRegistry.Builder registry, RequestLimits limits, JsonMapper mapper) {
+    return start(builder(registry, limits).withObjectMapper(mapper));
   }
 
   String create(RuntimeServer server, String token) {
@@ -155,6 +151,20 @@ final class AdmissionHarness implements AutoCloseable {
 
   static String result(String sessionId) {
     return "/sessions/" + sessionId + "/result?timeout=300";
+  }
+
+  private RuntimeServer.Builder builder(SessionRegistry.Builder registry, RequestLimits limits) {
+    return RuntimeServer.builder()
+        .withRegistry(registry.build())
+        .withOptionsFactory(this::options)
+        .withAuthenticator(AdmissionHarness::authenticate)
+        .withRequestLimits(limits);
+  }
+
+  private RuntimeServer start(RuntimeServer.Builder builder) {
+    var server = builder.build();
+    servers.add(server);
+    return server;
   }
 
   private SessionOptions options(String sessionId) {

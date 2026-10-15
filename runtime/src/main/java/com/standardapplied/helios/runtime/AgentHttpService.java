@@ -69,9 +69,10 @@ import tools.jackson.databind.ObjectMapper;
  * RequestLimits#maxRequestBytes()} is {@code 413}; a message or interrupt beyond the caller's own
  * concurrent uploads in {@link RequestLimits} is {@code 429}, beyond the service's {@code 503}; one
  * refused by a full steering queue is {@code 429}; an event stream or result poll beyond the
- * session's limit in {@link RequestLimits} is {@code 429}. Each {@code 429} and {@code 503} has a
- * fixed body and a {@code Retry-After} header; {@link #counters()} reports what was admitted and
- * refused.
+ * session's or the caller's own limit in {@link RequestLimits} is {@code 429}, beyond the service's
+ * {@code 503}, and holds its admission until it is answered even if its session is deleted. Each
+ * {@code 429} and {@code 503} has a fixed body and a {@code Retry-After} header; {@link
+ * #counters()} reports what was admitted and refused.
  *
  * <p>The {@code optionsFactory} is the seam through which deployments choose how a new session is
  * configured: the runtime takes the generated session id and produces a fully-populated {@link
@@ -135,8 +136,8 @@ public final class AgentHttpService implements HttpService {
             Objects.requireNonNull(objectMapper, "objectMapper must not be null"));
     Objects.requireNonNull(limits, "limits must not be null");
     this.steering = new SteeringInput(limits, this.objectMapper);
-    this.eventStreams = new SessionSlots(limits.maxEventStreamsPerSession());
-    this.resultPolls = new SessionSlots(limits.maxResultPollsPerSession());
+    this.eventStreams = SessionSlots.eventStreams(limits);
+    this.resultPolls = SessionSlots.resultPolls(limits);
   }
 
   /**
@@ -160,7 +161,6 @@ public final class AgentHttpService implements HttpService {
             owned(
                 limited(
                     eventStreams,
-                    Overload.TOO_MANY_EVENT_STREAMS,
                     (session, caller, req, resp) ->
                         SessionEventStream.stream(session, resp, objectMapper, caller.ended())))));
     rules.get(
@@ -169,7 +169,6 @@ public final class AgentHttpService implements HttpService {
             owned(
                 limited(
                     resultPolls,
-                    Overload.TOO_MANY_RESULT_POLLS,
                     (session, caller, req, resp) ->
                         ResultLongPoll.respond(
                             session, req, resp, objectMapper, caller.ended())))));
@@ -218,20 +217,19 @@ public final class AgentHttpService implements HttpService {
   }
 
   /**
-   * Answer {@code 429} without running {@code handler} when every slot of the session is held;
-   * otherwise hold one slot for as long as {@code handler} runs.
+   * Answer the refusal without running {@code handler} when {@code slots} refuses the request;
+   * otherwise hold its admission for as long as {@code handler} runs, even past the session's
+   * removal.
    */
-  private static SessionHandler limited(
-      SessionSlots slots, Map<String, String> refusal, SessionHandler handler) {
+  private static SessionHandler limited(SessionSlots slots, SessionHandler handler) {
     return (session, caller, req, resp) -> {
-      if (!slots.tryAcquire(session.sessionId())) {
-        Overload.reject(resp, Status.TOO_MANY_REQUESTS_429, refusal);
+      if (!slots.admit(session.sessionId(), caller.principal(), resp)) {
         return;
       }
       try {
         handler.handle(session, caller, req, resp);
       } finally {
-        slots.release(session.sessionId());
+        slots.release(session.sessionId(), caller.principal());
       }
     };
   }

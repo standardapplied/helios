@@ -11,7 +11,8 @@ final class RequestLimitsTest {
 
   @Test
   void theDefaultsAreTheDocumentedProductionValues() {
-    assertEquals(new RequestLimits(262_144, 256, 16, 4, 4), RequestLimits.defaults());
+    assertEquals(
+        new RequestLimits(262_144, 256, 16, 256, 16, 4, 256, 16, 4), RequestLimits.defaults());
     assertEquals(RequestLimits.defaults(), RequestLimits.newBuilder().build());
   }
 
@@ -22,11 +23,15 @@ final class RequestLimitsTest {
             .withMaxRequestBytes(1024)
             .withMaxMessageUploads(5)
             .withMaxMessageUploadsPerPrincipal(4)
+            .withMaxEventStreams(9)
+            .withMaxEventStreamsPerPrincipal(8)
             .withMaxEventStreamsPerSession(2)
+            .withMaxResultPolls(7)
+            .withMaxResultPollsPerPrincipal(6)
             .withMaxResultPollsPerSession(3)
             .build();
 
-    assertEquals(new RequestLimits(1024, 5, 4, 2, 3), limits);
+    assertEquals(new RequestLimits(1024, 5, 4, 9, 8, 2, 7, 6, 3), limits);
   }
 
   @Test
@@ -41,8 +46,19 @@ final class RequestLimitsTest {
         "maxMessageUploadsPerPrincipal must be positive, got -2",
         RequestLimits.newBuilder().withMaxMessageUploadsPerPrincipal(-2));
     assertRejected(
+        "maxEventStreams must be positive, got 0",
+        RequestLimits.newBuilder().withMaxEventStreams(0));
+    assertRejected(
+        "maxEventStreamsPerPrincipal must be positive, got 0",
+        RequestLimits.newBuilder().withMaxEventStreamsPerPrincipal(0));
+    assertRejected(
         "maxEventStreamsPerSession must be positive, got -1",
         RequestLimits.newBuilder().withMaxEventStreamsPerSession(-1));
+    assertRejected(
+        "maxResultPolls must be positive, got 0", RequestLimits.newBuilder().withMaxResultPolls(0));
+    assertRejected(
+        "maxResultPollsPerPrincipal must be positive, got 0",
+        RequestLimits.newBuilder().withMaxResultPollsPerPrincipal(0));
     assertRejected(
         "maxResultPollsPerSession must be positive, got 0",
         RequestLimits.newBuilder().withMaxResultPollsPerSession(0));
