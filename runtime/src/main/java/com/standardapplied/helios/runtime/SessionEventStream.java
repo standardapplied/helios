@@ -10,6 +10,7 @@ import io.helidon.webserver.http.ServerResponse;
 import io.helidon.webserver.sse.SseSink;
 import java.io.IOException;
 import java.net.SocketException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicReference;
@@ -20,8 +21,10 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * The SSE stream behind {@code GET /sessions/{sessionId}/events}: subscribes to one session's
  * {@link QueryEvent}s, emits a synthetic {@code Ready} event once subscribed and then each event
- * named by its subtype, and holds the request thread until the publisher completes or errors or the
- * client disconnects.
+ * named by its subtype, and holds the request thread until the publisher completes or errors, the
+ * client disconnects, or the caller's identity ends. An ended identity (expired or revoked) cancels
+ * the subscription and closes the stream without a further event: an event is written only if the
+ * stream has not ended by the time it is serialized.
  */
 final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
 
@@ -46,9 +49,15 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
    * @param session the session whose events are streamed; non-null
    * @param resp the response the SSE sink is opened on; non-null
    * @param objectMapper serializes each event as the SSE data; non-null
+   * @param identityEnded completes when the caller's identity expires or is revoked; non-null
    */
-  static void stream(AgentSession session, ServerResponse resp, ObjectMapper objectMapper) {
+  static void stream(
+      AgentSession session,
+      ServerResponse resp,
+      ObjectMapper objectMapper,
+      CompletableFuture<Void> identityEnded) {
     var stream = new SessionEventStream(session.sessionId(), resp.sink(SseSink.TYPE), objectMapper);
+    identityEnded.thenRun(stream::end);
     session.events().subscribe(stream);
     stream.awaitEndThenClose();
   }
@@ -71,12 +80,16 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
   @Override
   public void onSubscribe(Flow.Subscription s) {
     subscription.set(s);
+    if (done.getCount() == 0) {
+      s.cancel();
+      return;
+    }
     s.request(Long.MAX_VALUE);
     // Synthetic Ready event so clients can synchronously confirm subscription is
     // live before triggering work — closes the race between Helidon writing 200 OK
     // and the subscriber actually registering on the SubmissionPublisher.
     try {
-      sink.emit(SseEvent.builder().name("Ready").data("{}").build());
+      emit(SseEvent.builder().name("Ready").data("{}").build());
     } catch (Exception ignored) {
       // sink failures are handled in onNext below
     }
@@ -85,7 +98,7 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
   @Override
   public void onNext(QueryEvent event) {
     try {
-      sink.emit(
+      emit(
           SseEvent.builder()
               .name(eventName(event))
               .data(objectMapper.writeValueAsString(event))
@@ -94,11 +107,28 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
       if (!isDisconnect(ex)) {
         LOGGER.log(Level.WARNING, "SSE emit failed for session " + sessionId, ex);
       }
-      var s = subscription.get();
-      if (s != null) {
-        s.cancel();
-      }
-      done.countDown();
+      end();
+    }
+  }
+
+  /**
+   * Write {@code event} unless the stream has ended. Checked once the event is serialized, so an
+   * event whose serialization outlasts the identity is dropped; only a write already under way when
+   * the stream ends can still complete.
+   */
+  private void emit(SseEvent event) {
+    if (done.getCount() == 0) {
+      return;
+    }
+    sink.emit(event);
+  }
+
+  /** Stop forwarding: cancel the subscription and release the request thread. */
+  void end() {
+    done.countDown();
+    var s = subscription.get();
+    if (s != null) {
+      s.cancel();
     }
   }
 

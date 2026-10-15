@@ -5,23 +5,30 @@ package com.standardapplied.helios.runtime;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.ResultMessage;
+import io.helidon.http.HeaderValues;
 import io.helidon.http.Status;
 import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * The long-poll behind {@code GET /sessions/{sessionId}/result?timeout=<seconds>}: waits up to the
  * clamped timeout for the session's terminal {@link ResultMessage} and answers {@code 200} with
- * {@code {type, result}}, {@code 204} when the wait ends first, or an error status when the wait is
- * interrupted or the session failed.
+ * {@code {type, result}}, {@code 204} when the wait ends first, {@code 401} when the caller's
+ * identity expires or is revoked first, or an error status when the wait is interrupted or the
+ * session failed. Once the identity has ended the result is never disclosed, even if it is ready:
+ * the body is serialized before the response is committed and the identity is checked again
+ * immediately before it is sent.
  */
 final class ResultLongPoll {
 
@@ -34,6 +41,9 @@ final class ResultLongPoll {
   /** Hard cap on the long-poll timeout so one request cannot pin a server thread indefinitely. */
   static final long MAX_RESULT_TIMEOUT_SECONDS = 300L;
 
+  private static final Outcome IDENTITY_ENDED =
+      new Outcome(Status.UNAUTHORIZED_401, AuthenticationGate.UNAUTHENTICATED);
+
   private ResultLongPoll() {}
 
   /**
@@ -42,15 +52,28 @@ final class ResultLongPoll {
    * @param session the session whose result is awaited; non-null
    * @param req the request carrying the optional {@code timeout} query parameter; non-null
    * @param resp the response the outcome is sent on; non-null
+   * @param objectMapper serializes the outcome's body; non-null
+   * @param identityEnded completes when the caller's identity expires or is revoked; non-null
    */
-  static void respond(AgentSession session, ServerRequest req, ServerResponse resp) {
+  static void respond(
+      AgentSession session,
+      ServerRequest req,
+      ServerResponse resp,
+      ObjectMapper objectMapper,
+      CompletableFuture<Void> identityEnded) {
     var timeoutSeconds = parseResultTimeoutSeconds(req.query().first("timeout").orElse(null));
-    var outcome = awaitResult(session.result(), timeoutSeconds, session.sessionId());
+    var outcome = awaitResult(session.result(), identityEnded, timeoutSeconds, session.sessionId());
     if (outcome.body() == null) {
       resp.status(outcome.status()).send();
-    } else {
-      resp.status(outcome.status()).send(outcome.body());
+      return;
     }
+    var body = objectMapper.writeValueAsBytes(outcome.body());
+    if (identityEnded.isDone()) {
+      resp.status(Status.UNAUTHORIZED_401).send(AuthenticationGate.UNAUTHENTICATED);
+      return;
+    }
+    resp.headers().setIfAbsent(HeaderValues.CONTENT_TYPE_JSON);
+    resp.status(outcome.status()).send(body);
   }
 
   /**
@@ -67,18 +90,20 @@ final class ResultLongPoll {
    * HTTP test.
    *
    * @param future the session's result future; non-null
+   * @param identityEnded completes when the caller's identity ends; non-null
    * @param timeoutSeconds non-negative wait budget
    * @param sessionIdForLog session id used only for the WARNING log on execution failure
    * @return outcome to translate to the HTTP response
    */
   static Outcome awaitResult(
-      CompletableFuture<ResultMessage> future, long timeoutSeconds, String sessionIdForLog) {
+      CompletableFuture<ResultMessage> future,
+      CompletableFuture<Void> identityEnded,
+      long timeoutSeconds,
+      String sessionIdForLog) {
+    var answered = new CompletableFuture<Void>();
+    var first = CompletableFuture.anyOf(future, identityEnded, answered);
     try {
-      var terminal = future.get(timeoutSeconds, TimeUnit.SECONDS);
-      var body = new LinkedHashMap<String, Object>();
-      body.put("type", terminal.getClass().getSimpleName());
-      body.put("result", terminal);
-      return new Outcome(Status.OK_200, body);
+      first.get(timeoutSeconds, TimeUnit.SECONDS);
     } catch (TimeoutException e) {
       return new Outcome(Status.NO_CONTENT_204, null);
     } catch (InterruptedException e) {
@@ -87,19 +112,35 @@ final class ResultLongPoll {
           Status.SERVICE_UNAVAILABLE_503,
           Map.of("error", "request interrupted while waiting for session result"));
     } catch (ExecutionException e) {
-      // Helios is a library; diagnostic info reaches the deployer, who decides whether to
-      // forward it to their downstream HTTP clients. The cause message is part of that
-      // diagnostic surface — stripping it here would force deployers to dig through server-side
-      // logs to correlate a failed request with what actually went wrong. Deployers that need to
-      // sanitise the body can wrap this response at their HTTP layer.
+      return settled(future, identityEnded, sessionIdForLog);
+    } finally {
+      answered.complete(null);
+    }
+    return settled(future, identityEnded, sessionIdForLog);
+  }
+
+  private static Outcome settled(
+      CompletableFuture<ResultMessage> future,
+      CompletableFuture<Void> identityEnded,
+      String sessionIdForLog) {
+    if (identityEnded.isDone()) {
+      return IDENTITY_ENDED;
+    }
+    try {
+      return success(future.join());
+    } catch (CompletionException | CancellationException e) {
       LOGGER.log(
           Level.WARNING, "session " + sessionIdForLog + " result future failed exceptionally", e);
-      var cause = e.getCause();
-      var msg = cause.getMessage() == null ? "unknown" : cause.getMessage();
       return new Outcome(
-          Status.INTERNAL_SERVER_ERROR_500,
-          Map.of("error", "session terminated abnormally: " + msg));
+          Status.INTERNAL_SERVER_ERROR_500, Map.of("error", "session terminated abnormally"));
     }
+  }
+
+  private static Outcome success(ResultMessage terminal) {
+    var body = new LinkedHashMap<String, Object>();
+    body.put("type", terminal.getClass().getSimpleName());
+    body.put("result", terminal);
+    return new Outcome(Status.OK_200, body);
   }
 
   /**

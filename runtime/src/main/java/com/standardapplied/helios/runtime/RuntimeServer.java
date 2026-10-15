@@ -7,8 +7,12 @@ package com.standardapplied.helios.runtime;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.session.SessionOptions;
 import io.helidon.webserver.WebServer;
+import io.helidon.webserver.WebServerConfig;
 import io.helidon.webserver.http.HttpRouting;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Function;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -24,12 +28,25 @@ import tools.jackson.databind.json.JsonMapper;
  *     .withRegistry(SessionRegistry.inMemory())
  *     .withOptionsFactory(sessionId -> SessionOptions.newBuilder()
  *         .withModel(myModel).withSessionId(sessionId).build())
- *     .withPort(0)             // random
+ *     .withHost("0.0.0.0")
+ *     .withPort(8080)
+ *     .withAuthenticator(TrustedProxyAuthenticator.newBuilder()
+ *         .withTrustedProxy(InetAddress.getByName("10.0.0.5"))
+ *         .build())
  *     .build()) {
- *   var port = server.port();
- *   // … drive over HTTP …
+ *   // serve until shutdown
  * }
  * }</pre>
+ *
+ * <p>Every request is authenticated by the configured {@link Authenticator}. A server bound to a
+ * loopback address may instead be built {@link Builder#withoutAuthentication()}, for local tools
+ * and tests: every request then acts as one local principal. A server bound to any other address
+ * has no unauthenticated mode; a deployer behind an authenticating proxy configures {@link
+ * TrustedProxyAuthenticator}.
+ *
+ * <p>The server installs no Helidon feature discovered on the classpath, since a discovered feature
+ * could mount routes the {@link Authenticator} never sees. To combine the runtime with Helidon
+ * features, mount {@link AgentHttpService} on a {@link WebServer} of your own.
  *
  * <h2>Thread-safety</h2>
  *
@@ -72,6 +89,11 @@ public final class RuntimeServer implements AutoCloseable {
     return registry;
   }
 
+  /** The configuration the server started with. Visible for tests. */
+  WebServerConfig configForTests() {
+    return webServer.prototype();
+  }
+
   /** Stop the server and close every registered session. Idempotent. */
   @Override
   public void close() {
@@ -82,12 +104,14 @@ public final class RuntimeServer implements AutoCloseable {
   /** Mutable builder for {@link RuntimeServer}. */
   public static final class Builder {
 
+    private static final Principal LOCAL_PRINCIPAL = new Principal("local", "local");
+
+    private static final Authenticator LOCAL =
+        request -> Optional.of(Authentication.of(LOCAL_PRINCIPAL));
+
     /**
-     * Fail-secure default: loopback only. The {@code POST /sessions} route is unauthenticated and
-     * creates real sessions on the configured model; binding all interfaces by default would expose
-     * that surface to anything that can route to the host. Deployers who genuinely want external
-     * traffic must opt in via {@link #withHost(String)} with {@code "0.0.0.0"} (or a specific
-     * external interface).
+     * Fail-secure default: loopback only, so a server is reachable from other hosts only when the
+     * deployer names an external interface through {@link #withHost(String)}.
      */
     static final String DEFAULT_HOST = "127.0.0.1";
 
@@ -102,8 +126,39 @@ public final class RuntimeServer implements AutoCloseable {
     private String routePrefix = "/v1";
     private int port = 0;
     private String host = DEFAULT_HOST;
+    private Authenticator authenticator;
+    private HostResolver resolver = InetAddress::getByName;
 
     private Builder() {}
+
+    /** Resolve the host through {@code resolver} instead of the JDK, for tests. */
+    Builder withResolverForTests(HostResolver resolver) {
+      this.resolver = resolver;
+      return this;
+    }
+
+    /**
+     * Authenticate every request with {@code authenticator}.
+     *
+     * @param authenticator non-null authenticator
+     * @return this builder
+     * @throws NullPointerException if {@code authenticator} is null
+     */
+    public Builder withAuthenticator(Authenticator authenticator) {
+      this.authenticator = Objects.requireNonNull(authenticator, "authenticator must not be null");
+      return this;
+    }
+
+    /**
+     * Serve every request unauthenticated, as one local principal. Accepted only for a loopback
+     * host; {@link #build()} refuses it for any other.
+     *
+     * @return this builder
+     */
+    public Builder withoutAuthentication() {
+      this.authenticator = LOCAL;
+      return this;
+    }
 
     /**
      * Bind the registry the service exposes.
@@ -174,10 +229,8 @@ public final class RuntimeServer implements AutoCloseable {
 
     /**
      * Bind the HTTP listen host. Default {@code 127.0.0.1} (loopback only — fail-secure). Pass
-     * {@code "0.0.0.0"} or a specific external interface to expose the service beyond the host;
-     * note that the HTTP routes are unauthenticated and the {@code POST /sessions} surface creates
-     * real model-spending sessions, so external binds should sit behind authenticated fronting
-     * infrastructure.
+     * {@code "0.0.0.0"} or a specific external interface to expose the service beyond the host,
+     * which requires {@link #withAuthenticator(Authenticator)}.
      *
      * @param host non-blank host
      * @return this builder
@@ -195,7 +248,10 @@ public final class RuntimeServer implements AutoCloseable {
      * Build and start the server.
      *
      * @return the started server
-     * @throws IllegalStateException if {@code registry} or {@code optionsFactory} was never set
+     * @throws IllegalStateException if {@code registry} or {@code optionsFactory} was never set,
+     *     neither an authenticator nor {@link #withoutAuthentication()} was chosen, or the host is
+     *     not a loopback address and no authenticator was set
+     * @throws IllegalArgumentException if the host cannot be resolved
      */
     public RuntimeServer build() {
       if (registry == null) {
@@ -205,13 +261,17 @@ public final class RuntimeServer implements AutoCloseable {
         throw new IllegalStateException(
             "optionsFactory is required — call withOptionsFactory before build");
       }
+      var bindAddress = resolveHost();
+      requireAuthenticationFits(bindAddress);
       var mapper = objectMapper != null ? objectMapper : JsonMapper.builder().build();
-      var service = new AgentHttpService(registry, optionsFactory, mapper, routePrefix);
+      var service =
+          new AgentHttpService(registry, optionsFactory, authenticator, mapper, routePrefix);
       var jacksonSupport = JacksonSupport.create(mapper);
       var server =
           WebServer.builder()
-              .host(host)
+              .address(bindAddress)
               .port(port)
+              .featuresDiscoverServices(false)
               .mediaContext(
                   mc -> mc.mediaSupportsDiscoverServices(false).addMediaSupport(jacksonSupport))
               .routing((HttpRouting.Builder routing) -> routing.register(routePrefix, service))
@@ -219,5 +279,43 @@ public final class RuntimeServer implements AutoCloseable {
               .start();
       return new RuntimeServer(server, registry);
     }
+
+    private void requireAuthenticationFits(InetAddress bindAddress) {
+      if ((authenticator == null || authenticator == LOCAL) && !bindAddress.isLoopbackAddress()) {
+        throw new IllegalStateException(
+            "host "
+                + host
+                + " ("
+                + bindAddress.getHostAddress()
+                + ") is not a loopback address and no authenticator is set; a server reachable"
+                + " from other hosts requires withAuthenticator(...), for example a"
+                + " TrustedProxyAuthenticator");
+      }
+      if (authenticator == null) {
+        throw new IllegalStateException(
+            "an authenticator is required — call withAuthenticator, or withoutAuthentication to"
+                + " serve the loopback host "
+                + host
+                + " unauthenticated");
+      }
+    }
+
+    /**
+     * Resolve {@code host} once; the server binds this address, so a later DNS answer cannot move
+     * it off the address the loopback check approved.
+     */
+    private InetAddress resolveHost() {
+      try {
+        return resolver.resolve(host);
+      } catch (UnknownHostException e) {
+        throw new IllegalArgumentException("host " + host + " cannot be resolved", e);
+      }
+    }
+  }
+
+  /** Resolves a host name to the one address the server binds. */
+  @FunctionalInterface
+  interface HostResolver {
+    InetAddress resolve(String host) throws UnknownHostException;
   }
 }

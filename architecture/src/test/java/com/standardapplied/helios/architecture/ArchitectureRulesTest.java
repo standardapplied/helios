@@ -89,6 +89,9 @@ class ArchitectureRulesTest {
   /** The one launcher outside core.process: the REPL sandbox starts its own JVM. */
   private static final String SANDBOX_LAUNCHER = HELIOS + ".repl.sandbox.SandboxLauncher";
 
+  /** The one place the runtime decides a request's identity. */
+  private static final String AUTHENTICATION_GATE = HELIOS + ".runtime.AuthenticationGate";
+
   /** The one class that swaps the JVM-global standard streams: the sandbox's snippet evaluator. */
   private static final String STREAM_SWAPPER = HELIOS + ".repl.sandbox.SnippetEvaluator";
 
@@ -318,6 +321,22 @@ class ArchitectureRulesTest {
             targetOwner(type(HttpClient.class))
                 .and(target(name("newBuilder").or(name("newHttpClient")))))
         .because("every java.net.http.HttpClient comes from core.common.HttpClientFactory")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void theRuntimeAuthenticatesRequestsOnlyThroughTheAuthenticationGate() {
+    noClasses()
+        .that()
+        .doNotHaveFullyQualifiedName(AUTHENTICATION_GATE)
+        .should()
+        .accessTargetWhere(
+            targetOwner(assignableTo(HELIOS + ".runtime.Authenticator"))
+                .and(target(name("authenticate"))))
+        .because(
+            "every runtime route is admitted by runtime.AuthenticationGate, which runs the"
+                + " deployer's Authenticator before any session lookup, body read or work; a route"
+                + " never checks identity a second way")
         .check(LIBRARY);
   }
 

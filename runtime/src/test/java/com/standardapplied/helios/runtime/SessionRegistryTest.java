@@ -24,6 +24,10 @@ import org.junit.jupiter.api.Test;
 
 final class SessionRegistryTest {
 
+  private static final Principal OWNER = new Principal("acme", "alice");
+  private static final Principal SAME_TENANT = new Principal("acme", "bob");
+  private static final Principal OTHER_TENANT = new Principal("globex", "alice");
+
   private static Model stubModel() {
     return new BlockingModel() {
       @Override
@@ -63,25 +67,26 @@ final class SessionRegistryTest {
   @Test
   void createRegistersAndReturnsSession() {
     var registry = SessionRegistry.inMemory();
-    var session = registry.create(optionsFor("s1"));
+    var session = registry.create(optionsFor("s1"), OWNER);
     assertEquals("s1", session.sessionId());
     assertEquals(1, registry.size());
-    assertTrue(registry.get("s1").isPresent());
+    assertTrue(registry.find("s1", OWNER).isPresent());
     registry.closeAll();
   }
 
   @Test
   void createRejectsNullOptions() {
     var registry = SessionRegistry.inMemory();
-    var ex = assertThrows(NullPointerException.class, () -> registry.create(null));
+    var ex = assertThrows(NullPointerException.class, () -> registry.create(null, OWNER));
     assertEquals("options must not be null", ex.getMessage());
   }
 
   @Test
   void createRejectsDuplicateSessionId() {
     var registry = SessionRegistry.inMemory();
-    registry.create(optionsFor("dup"));
-    var ex = assertThrows(IllegalStateException.class, () -> registry.create(optionsFor("dup")));
+    registry.create(optionsFor("dup"), OWNER);
+    var ex =
+        assertThrows(IllegalStateException.class, () -> registry.create(optionsFor("dup"), OWNER));
     assertTrue(ex.getMessage().contains("already registered"));
     assertEquals(1, registry.size());
     registry.closeAll();
@@ -90,58 +95,129 @@ final class SessionRegistryTest {
   @Test
   void createRejectsFactoryReturningNull() {
     var registry = SessionRegistry.withFactory(opts -> null);
-    var ex = assertThrows(NullPointerException.class, () -> registry.create(optionsFor("ignored")));
+    var ex =
+        assertThrows(
+            NullPointerException.class, () -> registry.create(optionsFor("ignored"), OWNER));
     assertEquals("factory returned null session", ex.getMessage());
   }
 
   @Test
   void getRejectsNullId() {
     var registry = SessionRegistry.inMemory();
-    var ex = assertThrows(NullPointerException.class, () -> registry.get(null));
+    var ex = assertThrows(NullPointerException.class, () -> registry.find(null, OWNER));
     assertEquals("sessionId must not be null", ex.getMessage());
   }
 
   @Test
   void getReturnsEmptyForUnknownId() {
-    assertTrue(SessionRegistry.inMemory().get("nope").isEmpty());
+    assertTrue(SessionRegistry.inMemory().find("nope", OWNER).isEmpty());
   }
 
   @Test
   void getReturnsSameInstanceAcrossCalls() {
     var registry = SessionRegistry.inMemory();
-    var session = registry.create(optionsFor("s1"));
-    assertSame(session, registry.get("s1").orElseThrow());
-    assertSame(session, registry.get("s1").orElseThrow());
+    var session = registry.create(optionsFor("s1"), OWNER);
+    assertSame(session, registry.find("s1", OWNER).orElseThrow());
+    assertSame(session, registry.find("s1", OWNER).orElseThrow());
     registry.closeAll();
   }
 
   @Test
   void closeRemovesAndClosesSession() {
     var registry = SessionRegistry.inMemory();
-    registry.create(optionsFor("s1"));
-    assertTrue(registry.close("s1"));
+    registry.create(optionsFor("s1"), OWNER);
+    assertTrue(registry.close("s1", OWNER));
     assertEquals(0, registry.size());
-    assertTrue(registry.get("s1").isEmpty());
+    assertTrue(registry.find("s1", OWNER).isEmpty());
   }
 
   @Test
   void closeReturnsFalseForUnknownId() {
-    assertFalse(SessionRegistry.inMemory().close("nope"));
+    assertFalse(SessionRegistry.inMemory().close("nope", OWNER));
   }
 
   @Test
   void closeRejectsNullId() {
     var registry = SessionRegistry.inMemory();
-    var ex = assertThrows(NullPointerException.class, () -> registry.close(null));
+    var ex = assertThrows(NullPointerException.class, () -> registry.close(null, OWNER));
     assertEquals("sessionId must not be null", ex.getMessage());
+  }
+
+  // ── ownership ────────────────────────────────────────────────────────────
+
+  @Test
+  void createRejectsNullOwner() {
+    var registry = SessionRegistry.inMemory();
+    var ex =
+        assertThrows(NullPointerException.class, () -> registry.create(optionsFor("s1"), null));
+    assertEquals("owner must not be null", ex.getMessage());
+    assertEquals(0, registry.size());
+  }
+
+  @Test
+  void findRejectsNullRequester() {
+    var registry = SessionRegistry.inMemory();
+    var ex = assertThrows(NullPointerException.class, () -> registry.find("s1", null));
+    assertEquals("requester must not be null", ex.getMessage());
+  }
+
+  @Test
+  void closeRejectsNullRequester() {
+    var registry = SessionRegistry.inMemory();
+    var ex = assertThrows(NullPointerException.class, () -> registry.close("s1", null));
+    assertEquals("requester must not be null", ex.getMessage());
+  }
+
+  @Test
+  void anotherSubjectOfTheSameTenantCannotFindTheSession() {
+    var registry = SessionRegistry.inMemory();
+    registry.create(optionsFor("s1"), OWNER);
+    assertTrue(registry.find("s1", SAME_TENANT).isEmpty());
+    registry.closeAll();
+  }
+
+  @Test
+  void theSameSubjectInAnotherTenantCannotFindTheSession() {
+    var registry = SessionRegistry.inMemory();
+    registry.create(optionsFor("s1"), OWNER);
+    assertTrue(registry.find("s1", OTHER_TENANT).isEmpty());
+    registry.closeAll();
+  }
+
+  @Test
+  void anotherPrincipalCannotCloseTheSession() {
+    var closeCount = new AtomicInteger();
+    var registry =
+        SessionRegistry.withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount));
+    registry.create(optionsFor("s1"), OWNER);
+
+    assertFalse(registry.close("s1", SAME_TENANT));
+    assertFalse(registry.close("s1", OTHER_TENANT));
+
+    assertEquals(0, closeCount.get());
+    assertTrue(registry.find("s1", OWNER).isPresent());
+    registry.closeAll();
+  }
+
+  @Test
+  void aDuplicateIdFromAnotherPrincipalLeavesTheOwnerInPlace() {
+    var registry = SessionRegistry.inMemory();
+    var original = registry.create(optionsFor("s1"), OWNER);
+
+    assertThrows(
+        IllegalStateException.class, () -> registry.create(optionsFor("s1"), OTHER_TENANT));
+
+    assertSame(original, registry.find("s1", OWNER).orElseThrow());
+    assertTrue(registry.find("s1", OTHER_TENANT).isEmpty());
+    registry.closeAll();
   }
 
   @Test
   void closeAllUnregistersAllSessions() {
     var registry = SessionRegistry.inMemory();
-    registry.create(optionsFor("s1"));
-    registry.create(optionsFor("s2"));
-    registry.create(optionsFor("s3"));
+    registry.create(optionsFor("s1"), OWNER);
+    registry.create(optionsFor("s2"), SAME_TENANT);
+    registry.create(optionsFor("s3"), OTHER_TENANT);
     assertEquals(3, registry.size());
     registry.closeAll();
     assertEquals(0, registry.size());
@@ -157,10 +233,10 @@ final class SessionRegistryTest {
   @Test
   void sessionIdsSnapshotIsImmutable() {
     var registry = SessionRegistry.inMemory();
-    registry.create(optionsFor("s1"));
+    registry.create(optionsFor("s1"), OWNER);
     var snapshot = registry.sessionIds();
     assertEquals(1, snapshot.size());
-    registry.create(optionsFor("s2"));
+    registry.create(optionsFor("s2"), OWNER);
     assertEquals(1, snapshot.size(), "snapshot is point-in-time");
     assertEquals(2, registry.size());
     registry.closeAll();
@@ -171,8 +247,8 @@ final class SessionRegistryTest {
     var closeCount = new AtomicInteger();
     var registry =
         SessionRegistry.withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount));
-    registry.create(optionsFor("s1"));
-    assertThrows(IllegalStateException.class, () -> registry.create(optionsFor("s1")));
+    registry.create(optionsFor("s1"), OWNER);
+    assertThrows(IllegalStateException.class, () -> registry.create(optionsFor("s1"), OWNER));
     // The freshly-built tracking session for the rejected duplicate should be closed once;
     // the original remains open until we tear down.
     assertEquals(1, closeCount.get(), "rejected duplicate must close its freshly-built session");
@@ -183,8 +259,8 @@ final class SessionRegistryTest {
   @Test
   void createReturnsFreshInstancePerCall() {
     var registry = SessionRegistry.inMemory();
-    var a = registry.create(optionsFor("a"));
-    var b = registry.create(optionsFor("b"));
+    var a = registry.create(optionsFor("a"), OWNER);
+    var b = registry.create(optionsFor("b"), OWNER);
     assertNotSame(a, b);
     registry.closeAll();
   }
@@ -213,18 +289,18 @@ final class SessionRegistryTest {
             .withMaxSessions(7)
             .build();
     // Factory: passes through to create().
-    var session = (TrackingSession) registry.create(optionsFor("s1"));
+    var session = (TrackingSession) registry.create(optionsFor("s1"), OWNER);
     assertEquals("s1", session.sessionId());
     // Clock: drives terminatedAt timestamping; close session and confirm purge with age 0 evicts.
     session.future.complete(stubTerminal("s1"));
     assertEquals(1, registry.purgeTerminalOlderThan(java.time.Duration.ZERO));
     // MaxSessions: now empty; create up to cap.
     for (int i = 0; i < 7; i++) {
-      registry.create(optionsFor("c" + i));
+      registry.create(optionsFor("c" + i), OWNER);
     }
     assertEquals(7, registry.size());
     // Eighth create with no terminal to evict → reject.
-    assertThrows(IllegalStateException.class, () -> registry.create(optionsFor("overflow")));
+    assertThrows(IllegalStateException.class, () -> registry.create(optionsFor("overflow"), OWNER));
     registry.closeAll();
   }
 
@@ -292,7 +368,7 @@ final class SessionRegistryTest {
             .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
             .withClock(clock)
             .build();
-    registry.create(optionsFor("live"));
+    registry.create(optionsFor("live"), OWNER);
     // Live → terminatedAt remains null → not purged regardless of age.
     assertEquals(0, registry.purgeTerminalOlderThan(java.time.Duration.ZERO));
     assertEquals(1, registry.size());
@@ -308,17 +384,17 @@ final class SessionRegistryTest {
             .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
             .withClock(clock)
             .build();
-    var old = (TrackingSession) registry.create(optionsFor("old"));
+    var old = (TrackingSession) registry.create(optionsFor("old"), OWNER);
     old.future.complete(stubTerminal(old.sessionId()));
     // Advance clock 10 s.
     clock.advance(java.time.Duration.ofSeconds(10));
-    var fresh = (TrackingSession) registry.create(optionsFor("fresh"));
+    var fresh = (TrackingSession) registry.create(optionsFor("fresh"), OWNER);
     fresh.future.complete(stubTerminal(fresh.sessionId()));
     // Now: old was terminated at T+0, fresh at T+10, now is T+10. Purge anything ≥5 s old.
     var purged = registry.purgeTerminalOlderThan(java.time.Duration.ofSeconds(5));
     assertEquals(1, purged);
-    assertTrue(registry.get("fresh").isPresent());
-    assertFalse(registry.get("old").isPresent());
+    assertTrue(registry.find("fresh", OWNER).isPresent());
+    assertFalse(registry.find("old", OWNER).isPresent());
     registry.closeAll();
   }
 
@@ -331,12 +407,32 @@ final class SessionRegistryTest {
             .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
             .withClock(clock)
             .build();
-    var a = (TrackingSession) registry.create(optionsFor("a"));
-    var b = (TrackingSession) registry.create(optionsFor("b"));
+    var a = (TrackingSession) registry.create(optionsFor("a"), OWNER);
+    var b = (TrackingSession) registry.create(optionsFor("b"), OTHER_TENANT);
     a.future.complete(stubTerminal(a.sessionId()));
     b.future.complete(stubTerminal(b.sessionId()));
     assertEquals(2, registry.purgeTerminalOlderThan(java.time.Duration.ZERO));
     assertEquals(0, registry.size());
+  }
+
+  @Test
+  void aSessionClosedByItsOwnerDuringASweepIsNotCountedAsPurged() {
+    var closeCount = new AtomicInteger();
+    var registry =
+        SessionRegistry.newBuilder()
+            .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
+            .withClock(new MutableClock(java.time.Instant.parse("2026-05-16T12:00:00Z")))
+            .build();
+    var a = (TrackingSession) registry.create(optionsFor("a"), OWNER);
+    var b = (TrackingSession) registry.create(optionsFor("b"), OWNER);
+    a.onClose = () -> registry.close("b", OWNER);
+    b.onClose = () -> registry.close("a", OWNER);
+    a.future.complete(stubTerminal(a.sessionId()));
+    b.future.complete(stubTerminal(b.sessionId()));
+
+    assertEquals(1, registry.purgeTerminalOlderThan(java.time.Duration.ZERO));
+    assertEquals(0, registry.size());
+    assertEquals(2, closeCount.get());
   }
 
   // ── withMaxSessions cap ──────────────────────────────────────────────────
@@ -349,9 +445,10 @@ final class SessionRegistryTest {
             .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
             .withMaxSessions(2)
             .build();
-    registry.create(optionsFor("s1"));
-    registry.create(optionsFor("s2"));
-    var ex = assertThrows(IllegalStateException.class, () -> registry.create(optionsFor("s3")));
+    registry.create(optionsFor("s1"), OWNER);
+    registry.create(optionsFor("s2"), OWNER);
+    var ex =
+        assertThrows(IllegalStateException.class, () -> registry.create(optionsFor("s3"), OWNER));
     assertTrue(ex.getMessage().contains("registry at capacity"));
     assertEquals(2, registry.size());
     registry.closeAll();
@@ -367,18 +464,18 @@ final class SessionRegistryTest {
             .withClock(clock)
             .withMaxSessions(2)
             .build();
-    var a = (TrackingSession) registry.create(optionsFor("a"));
+    var a = (TrackingSession) registry.create(optionsFor("a"), OWNER);
     a.future.complete(stubTerminal(a.sessionId()));
     clock.advance(java.time.Duration.ofSeconds(1));
-    var b = (TrackingSession) registry.create(optionsFor("b"));
+    var b = (TrackingSession) registry.create(optionsFor("b"), OWNER);
     b.future.complete(stubTerminal(b.sessionId()));
     clock.advance(java.time.Duration.ofSeconds(1));
     // Now at cap with two terminals. Creating "c" should evict "a" (oldest terminal).
-    registry.create(optionsFor("c"));
+    registry.create(optionsFor("c"), OWNER);
     assertEquals(2, registry.size());
-    assertFalse(registry.get("a").isPresent());
-    assertTrue(registry.get("b").isPresent());
-    assertTrue(registry.get("c").isPresent());
+    assertFalse(registry.find("a", OWNER).isPresent());
+    assertTrue(registry.find("b", OWNER).isPresent());
+    assertTrue(registry.find("c", OWNER).isPresent());
     registry.closeAll();
   }
 
@@ -390,11 +487,11 @@ final class SessionRegistryTest {
             .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
             .withMaxSessions(10)
             .build();
-    var a = (TrackingSession) registry.create(optionsFor("a"));
+    var a = (TrackingSession) registry.create(optionsFor("a"), OWNER);
     a.future.complete(stubTerminal(a.sessionId()));
-    registry.create(optionsFor("b"));
+    registry.create(optionsFor("b"), OWNER);
     assertEquals(2, registry.size());
-    assertTrue(registry.get("a").isPresent());
+    assertTrue(registry.find("a", OWNER).isPresent());
     registry.closeAll();
   }
 
@@ -442,6 +539,7 @@ final class SessionRegistryTest {
 
     private final String sessionId;
     private final AtomicInteger closeCount;
+    private volatile Runnable onClose = () -> {};
     private final java.util.concurrent.CompletableFuture<
             com.standardapplied.helios.session.ResultMessage>
         future = new java.util.concurrent.CompletableFuture<>();
@@ -482,6 +580,7 @@ final class SessionRegistryTest {
     @Override
     public void close() {
       closeCount.incrementAndGet();
+      onClose.run();
     }
 
     @Override

@@ -36,6 +36,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -78,6 +79,7 @@ final class AgentHttpServiceIntegrationTest {
             sessionId ->
                 SessionOptions.newBuilder().withModel(model).withSessionId(sessionId).build())
         .withPort(0)
+        .withoutAuthentication()
         .withHost("127.0.0.1")
         .build();
   }
@@ -144,6 +146,7 @@ final class AgentHttpServiceIntegrationTest {
                         .withSessionId(sessionId)
                         .build())
             .withPort(0)
+            .withoutAuthentication()
             .withHost("127.0.0.1")
             .build();
     try (server) {
@@ -243,6 +246,7 @@ final class AgentHttpServiceIntegrationTest {
                         .withSessionId(sessionId)
                         .build())
             .withPort(0)
+            .withoutAuthentication()
             .withHost("127.0.0.1")
             .build()) {
       var http = httpClient();
@@ -444,6 +448,25 @@ final class AgentHttpServiceIntegrationTest {
   }
 
   @Test
+  void sendWithAJsonNullBodyReturns400() throws Exception {
+    try (var server = startServer(textModel("x"))) {
+      var http = httpClient();
+      var base = baseUrl(server);
+      var sessionId = createSession(http, base);
+      var resp =
+          http.send(
+              HttpRequest.newBuilder(URI.create(base + "/sessions/" + sessionId + "/messages"))
+                  .timeout(HTTP_TIMEOUT)
+                  .header("Content-Type", "application/json")
+                  .POST(HttpRequest.BodyPublishers.ofString("null"))
+                  .build(),
+              BodyHandlers.ofString());
+      assertEquals(400, resp.statusCode());
+      assertEquals("{\"error\":\"invalid JSON body\"}", resp.body());
+    }
+  }
+
+  @Test
   void interruptWithoutReasonReturns400() throws Exception {
     try (var server = startServer(textModel("x"))) {
       var http = httpClient();
@@ -492,58 +515,58 @@ final class AgentHttpServiceIntegrationTest {
   // ── 500 path ─────────────────────────────────────────────────────────────
 
   @Test
-  void factoryThatThrowsReturns500() throws Exception {
+  void factoryThatThrowsReturns500WithoutItsMessage() throws Exception {
     try (var server =
-        RuntimeServer.builder()
-            .withRegistry(SessionRegistry.inMemory())
-            .withOptionsFactory(
-                sessionId -> {
-                  throw new RuntimeException("nope");
-                })
-            .withPort(0)
-            .withHost("127.0.0.1")
-            .build()) {
+        serverWithFactory(
+            sessionId -> {
+              throw new RuntimeException("nope: password=hunter22");
+            })) {
       var resp =
           httpClient()
-              .send(
-                  HttpRequest.newBuilder(URI.create(baseUrl(server) + "/sessions"))
-                      .timeout(HTTP_TIMEOUT)
-                      .header("Content-Type", "application/json")
-                      .POST(HttpRequest.BodyPublishers.ofString("{}"))
-                      .build(),
-                  BodyHandlers.ofString());
+              .send(postJson(baseUrl(server) + "/sessions", Map.of()), BodyHandlers.ofString());
       assertEquals(500, resp.statusCode());
+      assertEquals("{\"error\":\"session options factory failed\"}", resp.body());
+      assertEquals(0, server.registry().size());
     }
   }
 
   @Test
-  void factoryReturningDifferentSessionIdLogsButProceeds() throws Exception {
+  void factoryReturningOptionsForAnotherSessionIdIsRefused() throws Exception {
     try (var server =
-        RuntimeServer.builder()
-            .withRegistry(SessionRegistry.inMemory())
-            .withOptionsFactory(
-                sessionId ->
-                    SessionOptions.newBuilder()
-                        .withModel(textModel("x"))
-                        .withSessionId("override-" + sessionId)
-                        .build())
-            .withPort(0)
-            .withHost("127.0.0.1")
-            .build()) {
+        serverWithFactory(
+            sessionId ->
+                SessionOptions.newBuilder()
+                    .withModel(textModel("x"))
+                    .withSessionId("override-" + sessionId)
+                    .build())) {
       var resp =
           httpClient()
-              .send(
-                  HttpRequest.newBuilder(URI.create(baseUrl(server) + "/sessions"))
-                      .timeout(HTTP_TIMEOUT)
-                      .header("Content-Type", "application/json")
-                      .POST(HttpRequest.BodyPublishers.ofString("{}"))
-                      .build(),
-                  BodyHandlers.ofString());
-      assertEquals(201, resp.statusCode());
-      var body = mapper.readValue(resp.body(), Map.class);
-      var returnedId = (String) body.get("sessionId");
-      assertTrue(returnedId.startsWith("override-sess-"), "factory's override must surface");
+              .send(postJson(baseUrl(server) + "/sessions", Map.of()), BodyHandlers.ofString());
+      assertEquals(500, resp.statusCode());
+      assertEquals("{\"error\":\"session options factory failed\"}", resp.body());
+      assertEquals(0, server.registry().size());
     }
+  }
+
+  @Test
+  void factoryReturningNullIsRefused() throws Exception {
+    try (var server = serverWithFactory(sessionId -> null)) {
+      var resp =
+          httpClient()
+              .send(postJson(baseUrl(server) + "/sessions", Map.of()), BodyHandlers.ofString());
+      assertEquals(500, resp.statusCode());
+      assertEquals("{\"error\":\"session options factory failed\"}", resp.body());
+      assertEquals(0, server.registry().size());
+    }
+  }
+
+  private static RuntimeServer serverWithFactory(Function<String, SessionOptions> factory) {
+    return RuntimeServer.builder()
+        .withRegistry(SessionRegistry.inMemory())
+        .withOptionsFactory(factory)
+        .withPort(0)
+        .withoutAuthentication()
+        .build();
   }
 
   // ── GET /sessions/{id}/result long-poll (Phase D #23) ────────────────────

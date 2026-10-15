@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SerializedError;
 import java.time.Duration;
@@ -19,12 +20,14 @@ import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unit tests for the package-private {@link ResultLongPoll#awaitResult(CompletableFuture, long,
- * String)} helper. The integration test covers the happy and timeout paths through HTTP; this
- * fixture covers the exception paths (interrupted, execution-exception) that are awkward to reach
- * via a black-box HTTP call.
+ * Unit tests for the package-private {@link ResultLongPoll#awaitResult(CompletableFuture,
+ * CompletableFuture, long, String)} helper. The integration test covers the happy and timeout paths
+ * through HTTP; this fixture covers the exception paths (interrupted, execution-exception) that are
+ * awkward to reach via a black-box HTTP call.
  */
 final class ResultLongPollAwaitResultTest {
+
+  private static final CompletableFuture<Void> LIVE = new CompletableFuture<>();
 
   private static ResultMessage stubSuccess() {
     return new ResultMessage.Success(
@@ -34,7 +37,7 @@ final class ResultLongPollAwaitResultTest {
   @Test
   void successFutureReturns200WithTypedBody() {
     var future = CompletableFuture.completedFuture(stubSuccess());
-    var outcome = ResultLongPoll.awaitResult(future, 5L, "sess-1");
+    var outcome = ResultLongPoll.awaitResult(future, LIVE, 5L, "sess-1");
     assertEquals(io.helidon.http.Status.OK_200, outcome.status());
     @SuppressWarnings("unchecked")
     var body = (Map<String, Object>) outcome.body();
@@ -46,9 +49,23 @@ final class ResultLongPollAwaitResultTest {
   @Test
   void unresolvedFutureWithinShortTimeoutReturns204() {
     var future = new CompletableFuture<ResultMessage>();
-    var outcome = ResultLongPoll.awaitResult(future, 0L, "sess-1");
+    var outcome = ResultLongPoll.awaitResult(future, LIVE, 0L, "sess-1");
     assertEquals(io.helidon.http.Status.NO_CONTENT_204, outcome.status());
     assertNull(outcome.body(), "204 must carry a null body sentinel");
+  }
+
+  @Test
+  void aTimedOutPollLeavesNothingWatchingAnUnfinishedResultWhileItsIdentityLives() {
+    var future = new CompletableFuture<ResultMessage>();
+
+    for (var i = 0; i < 1_000; i++) {
+      assertEquals(
+          io.helidon.http.Status.NO_CONTENT_204,
+          ResultLongPoll.awaitResult(future, LIVE, 0L, "sess-1").status());
+    }
+
+    assertEquals(0, future.getNumberOfDependents());
+    assertEquals(0, LIVE.getNumberOfDependents());
   }
 
   @Test
@@ -56,7 +73,7 @@ final class ResultLongPollAwaitResultTest {
     var future = new CompletableFuture<ResultMessage>();
     Thread.currentThread().interrupt();
     try {
-      var outcome = ResultLongPoll.awaitResult(future, 60L, "sess-1");
+      var outcome = ResultLongPoll.awaitResult(future, LIVE, 60L, "sess-1");
       assertEquals(io.helidon.http.Status.SERVICE_UNAVAILABLE_503, outcome.status());
       @SuppressWarnings("unchecked")
       var body = (Map<String, Object>) outcome.body();
@@ -68,29 +85,63 @@ final class ResultLongPollAwaitResultTest {
   }
 
   @Test
-  void exceptionallyCompletedFutureReturns500WithCauseMessage() {
-    // Helios is a library — diagnostic info flows to the deployer, who decides what to forward
-    // to downstream HTTP clients. Stripping cause.getMessage() here would force deployers to dig
-    // through server-side logs to correlate failed requests with what actually went wrong. The
-    // full cause is also logged at WARNING for server-side observability.
+  void exceptionallyCompletedFutureReturns500WithoutTheCauseMessage() {
     var future = new CompletableFuture<ResultMessage>();
-    future.completeExceptionally(new IllegalStateException("backend exploded"));
-    var outcome = ResultLongPoll.awaitResult(future, 5L, "sess-1");
+    future.completeExceptionally(new IllegalStateException("backend exploded: token=s3cr3t"));
+    var outcome = ResultLongPoll.awaitResult(future, LIVE, 5L, "sess-1");
     assertEquals(io.helidon.http.Status.INTERNAL_SERVER_ERROR_500, outcome.status());
-    @SuppressWarnings("unchecked")
-    var body = (Map<String, Object>) outcome.body();
-    assertTrue(body.get("error").toString().contains("backend exploded"));
+    assertEquals(Map.of("error", "session terminated abnormally"), outcome.body());
   }
 
   @Test
-  void exceptionallyCompletedFutureWithNullMessageStillReports500() {
+  void cancelledFutureReturns500() {
     var future = new CompletableFuture<ResultMessage>();
-    future.completeExceptionally(new RuntimeException((String) null));
-    var outcome = ResultLongPoll.awaitResult(future, 5L, "sess-1");
+    future.cancel(true);
+    var outcome = ResultLongPoll.awaitResult(future, LIVE, 5L, "sess-1");
     assertEquals(io.helidon.http.Status.INTERNAL_SERVER_ERROR_500, outcome.status());
-    @SuppressWarnings("unchecked")
-    var body = (Map<String, Object>) outcome.body();
-    assertTrue(body.get("error").toString().contains("unknown"));
+    assertEquals(Map.of("error", "session terminated abnormally"), outcome.body());
+  }
+
+  @Test
+  void anEndedIdentityIsAnswered401EvenWhenTheResultIsReady() {
+    var outcome =
+        ResultLongPoll.awaitResult(
+            CompletableFuture.completedFuture(stubSuccess()), ended(), 5L, "sess-1");
+    assertEquals(io.helidon.http.Status.UNAUTHORIZED_401, outcome.status());
+    assertEquals(Map.of("error", "unauthenticated"), outcome.body());
+  }
+
+  @Test
+  void anEndedIdentityIsAnswered401EvenWhenTheResultFailed() {
+    var future = new CompletableFuture<ResultMessage>();
+    future.completeExceptionally(new IllegalStateException("backend exploded"));
+    var outcome = ResultLongPoll.awaitResult(future, ended(), 5L, "sess-1");
+    assertEquals(io.helidon.http.Status.UNAUTHORIZED_401, outcome.status());
+  }
+
+  @Test
+  void anIdentityEndingWhileWaitingEndsTheWaitWith401() {
+    var identity = new CompletableFuture<Void>();
+    var waiting =
+        CompletableFuture.supplyAsync(
+            () ->
+                ResultLongPoll.awaitResult(
+                    new CompletableFuture<>(),
+                    identity,
+                    ResultLongPoll.MAX_RESULT_TIMEOUT_SECONDS,
+                    "sess-1"));
+    Await.until(
+        "the long poll to wait on the identity", () -> identity.getNumberOfDependents() > 0);
+
+    identity.complete(null);
+
+    var outcome = Await.value("the long poll to end", waiting);
+    assertEquals(io.helidon.http.Status.UNAUTHORIZED_401, outcome.status());
+    assertEquals(Map.of("error", "unauthenticated"), outcome.body());
+  }
+
+  private static CompletableFuture<Void> ended() {
+    return CompletableFuture.completedFuture(null);
   }
 
   @Test
@@ -105,7 +156,7 @@ final class ResultLongPollAwaitResultTest {
             "sess-1", carrying, Usage.of(1, 1), CostEstimate.zero(), Duration.ZERO);
     var future = CompletableFuture.completedFuture((ResultMessage) terminal);
 
-    var outcome = ResultLongPoll.awaitResult(future, 5L, "sess-1");
+    var outcome = ResultLongPoll.awaitResult(future, LIVE, 5L, "sess-1");
     assertEquals(io.helidon.http.Status.OK_200, outcome.status());
     @SuppressWarnings("unchecked")
     var body = (Map<String, Object>) outcome.body();
