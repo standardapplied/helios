@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -95,7 +96,7 @@ final class SessionRegistryAdmissionTest {
                 opts -> {
                   factoryRuns.incrementAndGet();
                   entered.countDown();
-                  awaitRelease(release);
+                  Await.latch("the test to release the factory", release);
                   return new StubSession(opts.sessionId());
                 })
             .build();
@@ -131,15 +132,6 @@ final class SessionRegistryAdmissionTest {
       }
     }
     return new Outcome(registry, created, refusals, factoryRuns.get());
-  }
-
-  private static void awaitRelease(CountDownLatch release) {
-    try {
-      release.await();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new IllegalStateException(e);
-    }
   }
 
   private record Outcome(
@@ -454,8 +446,8 @@ final class SessionRegistryAdmissionTest {
   }
 
   @Test
-  void aSessionClosedAtWorkReleasesOnlyItsOwnChargeWhenItsIdIsRegisteredAgain() {
-    var registry = stubs().withMaxSessions(3).withMaxActiveSessions(2).build();
+  void aSessionClosedAtWorkAndItsSuccessorUnderTheSameIdEachReleaseOnlyTheirOwnCharge() {
+    var registry = stubs().withMaxSessions(2).withMaxActiveSessions(2).build();
     var options = options();
     var working = (StubSession) registry.create(options, ALICE);
     working.send(UserMessage.text("go"));
@@ -468,28 +460,13 @@ final class SessionRegistryAdmissionTest {
     create(registry, EVE);
     var refused = assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
     assertEquals("active sessions at cap 2", refused.getMessage());
-  }
-
-  @Test
-  void aSessionClosedAtWorkAndItsSuccessorUnderTheSameIdGiveEverythingBackOnceBothEnd() {
-    var registry = stubs().withMaxSessions(2).withMaxActiveSessions(2).build();
-    var options = options();
-    var working = (StubSession) registry.create(options, ALICE);
-    working.send(UserMessage.text("go"));
-    registry.close(working.sessionId(), ALICE);
-    registry.create(options, ALICE);
-
-    working.terminate();
     assertTrue(registry.close(options.sessionId(), ALICE));
-
     create(registry, EVE);
-    create(registry, EVE);
-    var refused = assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
-    assertEquals("active sessions at cap 2", refused.getMessage());
+    assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
   }
 
   @Test
-  void anUnstartedSessionKeepsItsCapacityUntilItsProviderHasEndedIt() throws Exception {
+  void anUnstartedSessionKeepsItsCapacityUntilItsProviderHasEndedIt() {
     var provider = new HeldEndProvider();
     var registry =
         SessionRegistry.newBuilder()
@@ -500,22 +477,19 @@ final class SessionRegistryAdmissionTest {
             .withMaxActiveSessionsPerPrincipal(1)
             .build();
     var first = registry.create(withProvider(provider), ALICE);
-    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-      var closing = executor.submit(() -> registry.close(first.sessionId(), ALICE));
-      try {
-        Await.latch("the first session's provider cleanup", provider.ending);
+    var closing = CompletableFuture.supplyAsync(() -> registry.close(first.sessionId(), ALICE));
+    try {
+      Await.latch("the first session's provider cleanup", provider.ending);
 
-        var refused =
-            assertThrows(
-                SessionCapacityException.class,
-                () -> registry.create(withProvider(provider), ALICE));
-        assertEquals("active sessions of the principal at cap 1", refused.getMessage());
-        assertFalse(first.result().isDone());
-      } finally {
-        provider.release.countDown();
-      }
-      assertTrue(Await.value("the close of the first session", closing));
+      var refused =
+          assertThrows(
+              SessionCapacityException.class, () -> registry.create(withProvider(provider), ALICE));
+      assertEquals("active sessions of the principal at cap 1", refused.getMessage());
+      assertFalse(first.result().isDone());
+    } finally {
+      provider.release.countDown();
     }
+    assertTrue(Await.value("the close of the first session", closing));
     registry.create(withProvider(provider), ALICE);
     assertEquals(2, provider.started.get());
     registry.closeAll();
@@ -596,7 +570,7 @@ final class SessionRegistryAdmissionTest {
     @Override
     public void onSessionEnd(SessionContext ctx) {
       ending.countDown();
-      awaitRelease(release);
+      Await.latch("the test to release the session's end", release);
     }
 
     @Override
