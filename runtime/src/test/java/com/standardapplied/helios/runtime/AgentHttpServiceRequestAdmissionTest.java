@@ -11,9 +11,14 @@ import static com.standardapplied.helios.runtime.AdmissionHarness.textBody;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.session.ResultMessage;
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
+import java.net.Socket;
 import java.net.http.HttpRequest.BodyPublisher;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
@@ -25,6 +30,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JsonGenerator;
+import tools.jackson.databind.SerializationContext;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.module.SimpleModule;
+import tools.jackson.databind.ser.std.StdSerializer;
 
 /**
  * Message bodies, steering-queue entries, event streams and result polls are each admitted against
@@ -72,6 +82,40 @@ final class AgentHttpServiceRequestAdmissionTest {
   }
 
   @Test
+  void aBodyDeclaredOverTheBoundIsRefusedUnreadAndOneDeclaredAtTheBoundIsQueued() {
+    var max = AdmissionHarness.BODY.length - 1;
+    var server =
+        harness.server(
+            harness.registry(), RequestLimits.newBuilder().withMaxRequestBytes(max).build());
+    var sessionId = harness.create(server, "alice");
+    var overBound = new HeldBody(new CountDownLatch(1), new CountDownLatch(0));
+
+    var refused =
+        Await.value(
+            "the declared over-bound body to be refused",
+            harness.upload(
+                server,
+                messages(sessionId),
+                "alice",
+                BodyPublishers.fromPublisher(
+                    BodyPublishers.ofInputStream(() -> overBound), max + 1)));
+    var atBound =
+        harness.send(
+            server,
+            "POST",
+            messages(sessionId),
+            "alice",
+            BodyPublishers.ofByteArray(textBody(max)));
+
+    assertEquals(413, refused.statusCode());
+    assertEquals(TOO_LARGE, refused.body());
+    assertEquals(Optional.empty(), refused.headers().firstValue("Retry-After"));
+    assertEquals(1, overBound.reading.getCount());
+    assertEquals(202, atBound.statusCode());
+    assertEquals(1, harness.sessions.get(sessionId).queue.size());
+  }
+
+  @Test
   void uploadsBeyondThePrincipalsBoundAre429AndBeyondTheServicesAre503BeforeTheirBodyIsRead() {
     var server =
         harness.server(
@@ -90,14 +134,14 @@ final class AgentHttpServiceRequestAdmissionTest {
             harness.upload(server, messages(alice), "alice", new HeldBody(aliceReading, release)),
             harness.upload(server, interrupt(alice), "alice", new HeldBody(aliceReading, release)));
     Await.latch("alice's two uploads to be read", aliceReading);
+    var bobHeld = harness.upload(server, messages(bob), "bob", new HeldBody(bobReading, release));
+    Await.latch("bob's upload to be read", bobReading);
 
     var aliceUnread = new HeldBody(new CountDownLatch(1), release);
     var aliceRefused =
         Await.value(
             "alice's third upload to be refused",
             harness.upload(server, messages(alice), "alice", aliceUnread));
-    var bobHeld = harness.upload(server, messages(bob), "bob", new HeldBody(bobReading, release));
-    Await.latch("bob's upload to be read", bobReading);
     var bobUnread = new HeldBody(new CountDownLatch(1), release);
     var bobRefused =
         Await.value(
@@ -119,6 +163,80 @@ final class AgentHttpServiceRequestAdmissionTest {
     assertEquals(2, harness.sessions.get(alice).queue.size());
     assertEquals(202, harness.sendAdmitted(server, "POST", messages(bob), "bob").statusCode());
     assertEquals(new AdmissionCounts(4, 2), server.counters().messages());
+  }
+
+  @Test
+  void aChunkedBodyIsRefused413AsSoonAsOneBytePastTheBoundArrives() throws IOException {
+    var max = 32;
+    var server =
+        harness.server(
+            harness.registry(), RequestLimits.newBuilder().withMaxRequestBytes(max).build());
+    var sessionId = harness.create(server, "alice");
+
+    try (var socket = new Socket("127.0.0.1", server.port())) {
+      var out = socket.getOutputStream();
+      out.write(
+          ("POST /v1"
+                  + messages(sessionId)
+                  + " HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer alice\r\n"
+                  + "Content-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"
+                  + Integer.toHexString(max + 1)
+                  + "\r\n")
+              .getBytes(StandardCharsets.US_ASCII));
+      out.write(textBody(max + 1));
+      out.write("\r\n".getBytes(StandardCharsets.US_ASCII));
+      out.flush();
+      var reader =
+          new BufferedReader(
+              new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+
+      var status =
+          Await.value(
+              "the unfinished body to be refused",
+              CompletableFuture.supplyAsync(() -> readLine(reader)));
+
+      assertEquals("HTTP/1.1 413 Request Entity Too Large", status);
+    }
+    assertEquals(0, harness.sessions.get(sessionId).queue.size());
+  }
+
+  @Test
+  void aResultPollThatFailsGivesItsAdmissionBack() {
+    var failing =
+        JsonMapper.builder()
+            .addModule(
+                new SimpleModule()
+                    .addSerializer(
+                        ResultMessage.Success.class,
+                        new StdSerializer<>(ResultMessage.Success.class) {
+                          @Override
+                          public void serialize(
+                              ResultMessage.Success value,
+                              JsonGenerator gen,
+                              SerializationContext ctxt) {
+                            throw new IllegalStateException("serializer failed");
+                          }
+                        }))
+            .build();
+    var server =
+        harness.server(
+            harness.registry(),
+            RequestLimits.newBuilder()
+                .withMaxResultPollsPerSession(1)
+                .withMaxResultPollsPerPrincipal(1)
+                .withMaxResultPolls(1)
+                .build(),
+            failing);
+    var sessionId = harness.create(server, "alice");
+    harness.sessions.get(sessionId).terminate();
+
+    var statuses =
+        List.of(
+            harness.send(server, "GET", result(sessionId), "alice").statusCode(),
+            harness.send(server, "GET", result(sessionId), "alice").statusCode());
+
+    assertEquals(List.of(500, 500), statuses);
+    assertEquals(new AdmissionCounts(2, 0), server.counters().resultPolls());
   }
 
   @Test
@@ -243,6 +361,14 @@ final class AgentHttpServiceRequestAdmissionTest {
     }
     assertEquals(2, answered);
     assertEquals(200, harness.sendAdmitted(server, "GET", result(sessionId), "alice").statusCode());
+  }
+
+  private static String readLine(BufferedReader reader) {
+    try {
+      return reader.readLine();
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   private int post(RuntimeServer server, String path, byte[] body) {
