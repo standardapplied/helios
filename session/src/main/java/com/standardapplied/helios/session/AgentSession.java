@@ -62,8 +62,8 @@ public interface AgentSession extends AutoCloseable {
    *
    * @param message the message; non-null
    * @throws NullPointerException if {@code message} is null
-   * @throws IllegalStateException if the session is already closed, or if the steering queue is
-   *     full
+   * @throws IllegalStateException if the session is closed or terminal
+   * @throws SteeringQueueFullException if the steering queue is full; the message is not queued
    */
   void send(UserMessage message);
 
@@ -83,7 +83,8 @@ public interface AgentSession extends AutoCloseable {
    * @param reason a human-readable description; non-null, non-blank
    * @throws NullPointerException if {@code reason} is null
    * @throws IllegalArgumentException if {@code reason} is blank
-   * @throws IllegalStateException if the session is closed
+   * @throws IllegalStateException if the session is closed or terminal
+   * @throws SteeringQueueFullException if the steering queue is full; the interrupt is not queued
    */
   void interrupt(String reason);
 
@@ -120,9 +121,24 @@ public interface AgentSession extends AutoCloseable {
   long currentTurnIndex();
 
   /**
+   * Whether the agent loop has started: {@code true} from the first accepted {@link
+   * #send(UserMessage)} or {@link #interrupt(String)} on, and once the session is closed, since a
+   * closed session can never start. A host uses it to tell a session nobody ever used from one at
+   * work.
+   *
+   * @return {@code true} once the loop started or the session closed
+   */
+  boolean isStarted();
+
+  /**
    * Release session resources. Cancels the agent loop, closes the event publisher, and releases the
    * underlying virtual thread. Idempotent — safe to call multiple times, and safe to call after
-   * natural termination.
+   * natural termination. A loop at work stops cooperatively: {@link #result()} completes once it
+   * has stopped, which may be after this returns; for a session never started, before it returns.
+   * Either way it completes only after the session's runtime has ended, its {@link
+   * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd} included, unless
+   * the provider refused the session at start: its result completed then, and the provider holds
+   * nothing to end.
    */
   @Override
   void close();

@@ -151,7 +151,7 @@ public final class AgentSessionImpl implements AgentSession {
       throw new IllegalStateException("session is terminal");
     }
     if (!steeringQueue.offer(message)) {
-      throw new IllegalStateException(
+      throw new SteeringQueueFullException(
           "steering queue full at capacity " + steeringQueue.capacity());
     }
     lifecycle.startIfNeeded(loop, limits);
@@ -171,7 +171,7 @@ public final class AgentSessionImpl implements AgentSession {
     }
     var synthetic = UserMessage.text("[interrupted by user: " + reason + "]");
     if (!steeringQueue.offer(synthetic)) {
-      throw new IllegalStateException(
+      throw new SteeringQueueFullException(
           "steering queue full at capacity "
               + steeringQueue.capacity()
               + " — cannot enqueue interrupt");
@@ -197,6 +197,11 @@ public final class AgentSessionImpl implements AgentSession {
   @Override
   public long currentTurnIndex() {
     return state.currentTurnIndex();
+  }
+
+  @Override
+  public boolean isStarted() {
+    return lifecycle.isStarted();
   }
 
   @Override

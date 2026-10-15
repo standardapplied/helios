@@ -4,13 +4,10 @@
  */
 package com.standardapplied.helios.runtime;
 
-import com.standardapplied.helios.core.common.Ids;
-import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.runtime.AuthenticationGate.Caller;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionOptions;
-import com.standardapplied.helios.session.UserMessage;
 import io.helidon.http.HttpException;
 import io.helidon.http.Status;
 import io.helidon.webserver.http.Handler;
@@ -18,10 +15,8 @@ import io.helidon.webserver.http.HttpRules;
 import io.helidon.webserver.http.HttpService;
 import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -37,7 +32,8 @@ import tools.jackson.databind.ObjectMapper;
  *   <li>{@code POST /sessions} — create a fresh session; returns {@code {sessionId, eventsUrl}}
  *       with {@code 201 Created}.
  *   <li>{@code POST /sessions/{sessionId}/messages} — body {@code {text: "..."}}; queues the
- *       message and returns {@code 202 Accepted}.
+ *       message and returns {@code 202 Accepted}; {@code 429} when the session's steering queue is
+ *       full.
  *   <li>{@code POST /sessions/{sessionId}/interrupt} — body {@code {reason: "..."}}; queues a
  *       synthetic interrupt message and returns {@code 202 Accepted}.
  *   <li>{@code GET /sessions/{sessionId}/events} — opens an SSE stream of {@link QueryEvent}s. The
@@ -64,11 +60,26 @@ import tools.jackson.databind.ObjectMapper;
  * expires or is revoked (see {@link Authentication}). A route added to this service is registered
  * through the same wrapper, never a second check.
  *
+ * <h2>Admission</h2>
+ *
+ * Every request that would hold memory is admitted against a bound before the work starts, and a
+ * refused one is answered at once, never queued. {@code POST /sessions} reserves capacity in the
+ * {@link SessionRegistry} before the {@code optionsFactory} runs: a full cap of the caller's own is
+ * {@code 429}, the registry's {@code 503}. A message or interrupt body over {@link
+ * RequestLimits#maxRequestBytes()} is {@code 413}; a message or interrupt beyond the caller's own
+ * concurrent uploads in {@link RequestLimits} is {@code 429}, beyond the service's {@code 503}; one
+ * refused by a full steering queue is {@code 429}; an event stream or result poll beyond the
+ * session's or the caller's own limit in {@link RequestLimits} is {@code 429}, beyond the service's
+ * {@code 503}, and holds its admission until it is answered even if its session is deleted. Each
+ * {@code 429} and {@code 503} has a fixed body and a {@code Retry-After} header; {@link
+ * #counters()} reports what was admitted and refused.
+ *
  * <p>The {@code optionsFactory} is the seam through which deployments choose how a new session is
  * configured: the runtime takes the generated session id and produces a fully-populated {@link
  * SessionOptions} for exactly that id; options for any other id are refused, so a factory can never
  * attach a request to another session. A {@code 500} body carries a fixed message, never an
- * exception's; a {@code 409} tells the owner why its own session refused a message or interrupt.
+ * exception's; a {@code 409} tells the owner why its own session, closed or terminal, refused a
+ * message or interrupt.
  *
  * <h2>Thread-safety</h2>
  *
@@ -81,17 +92,16 @@ public final class AgentHttpService implements HttpService {
 
   private static final Map<String, String> NOT_FOUND = Map.of("error", "session not found");
 
-  private static final Map<String, String> FACTORY_FAILED =
-      Map.of("error", "session options factory failed");
-
   private static final Map<String, String> INTERNAL_ERROR =
       Map.of("error", "internal server error");
 
   private final SessionRegistry registry;
-  private final Function<String, SessionOptions> optionsFactory;
+  private final SessionCreation creation;
   private final AuthenticationGate gate;
   private final ObjectMapper objectMapper;
-  private final String eventsPathPrefix;
+  private final SteeringInput steering;
+  private final SessionSlots eventStreams;
+  private final SessionSlots resultPolls;
 
   /**
    * Build a service.
@@ -104,6 +114,7 @@ public final class AgentHttpService implements HttpService {
    *     also writes {@link com.standardapplied.helios.core.tool.ToolOutcome}
    * @param eventsPathPrefix prefix used to build the {@code eventsUrl} returned by {@code POST
    *     /sessions} (e.g. {@code "/v1"}); non-null
+   * @param limits bounds on each request; non-null
    * @throws NullPointerException if any argument is null
    */
   public AgentHttpService(
@@ -111,40 +122,57 @@ public final class AgentHttpService implements HttpService {
       Function<String, SessionOptions> optionsFactory,
       Authenticator authenticator,
       ObjectMapper objectMapper,
-      String eventsPathPrefix) {
+      String eventsPathPrefix,
+      RequestLimits limits) {
     this.registry = Objects.requireNonNull(registry, "registry must not be null");
-    this.optionsFactory = Objects.requireNonNull(optionsFactory, "optionsFactory must not be null");
+    this.creation =
+        new SessionCreation(
+            registry,
+            Objects.requireNonNull(optionsFactory, "optionsFactory must not be null"),
+            Objects.requireNonNull(eventsPathPrefix, "eventsPathPrefix must not be null"));
     this.gate = new AuthenticationGate(authenticator);
     this.objectMapper =
         ToolOutcomeSerializer.addTo(
             Objects.requireNonNull(objectMapper, "objectMapper must not be null"));
-    this.eventsPathPrefix =
-        Objects.requireNonNull(eventsPathPrefix, "eventsPathPrefix must not be null");
+    Objects.requireNonNull(limits, "limits must not be null");
+    this.steering = new SteeringInput(limits, this.objectMapper);
+    this.eventStreams = SessionSlots.eventStreams(limits);
+    this.resultPolls = SessionSlots.resultPolls(limits);
+  }
+
+  /**
+   * What the service admitted and refused since it was built.
+   *
+   * @return a snapshot of the counters
+   */
+  public RuntimeCounters counters() {
+    return new RuntimeCounters(
+        creation.counts(), steering.counts(), eventStreams.counts(), resultPolls.counts());
   }
 
   @Override
   public void routing(HttpRules rules) {
-    rules.post("/sessions", authenticated(this::create));
-    rules.post(
-        "/sessions/{sessionId}/messages",
-        authenticated(
-            owned(queueText("text", (session, text) -> session.send(UserMessage.text(text))))));
-    rules.post(
-        "/sessions/{sessionId}/interrupt",
-        authenticated(owned(queueText("reason", AgentSession::interrupt))));
+    rules.post("/sessions", authenticated((caller, req, resp) -> creation.respond(caller, resp)));
+    rules.post("/sessions/{sessionId}/messages", authenticated(owned(steering::send)));
+    rules.post("/sessions/{sessionId}/interrupt", authenticated(owned(steering::interrupt)));
     rules.get(
         "/sessions/{sessionId}/events",
         authenticated(
             owned(
-                (session, caller, req, resp) ->
-                    SessionEventStream.stream(session, resp, objectMapper, caller.ended()))));
+                limited(
+                    eventStreams,
+                    (session, caller, req, resp) ->
+                        SessionEventStream.stream(session, resp, objectMapper, caller.ended())))));
     rules.get(
         "/sessions/{sessionId}/result",
         authenticated(
             owned(
-                (session, caller, req, resp) ->
-                    ResultLongPoll.respond(session, req, resp, objectMapper, caller.ended()))));
-    rules.delete("/sessions/{sessionId}", authenticated(this::delete));
+                limited(
+                    resultPolls,
+                    (session, caller, req, resp) ->
+                        ResultLongPoll.respond(
+                            session, req, resp, objectMapper, caller.ended())))));
+    rules.delete("/sessions/{sessionId}", authenticated(owned(this::delete)));
   }
 
   private Handler authenticated(CallerHandler handler) {
@@ -179,7 +207,7 @@ public final class AgentHttpService implements HttpService {
 
   private CallerHandler owned(SessionHandler handler) {
     return (caller, req, resp) -> {
-      var session = registry.find(sessionId(req), caller.principal());
+      var session = registry.find(req.path().pathParameters().get("sessionId"), caller.principal());
       if (session.isEmpty()) {
         resp.status(Status.NOT_FOUND_404).send(NOT_FOUND);
         return;
@@ -188,90 +216,27 @@ public final class AgentHttpService implements HttpService {
     };
   }
 
-  private void create(Caller caller, ServerRequest req, ServerResponse resp) {
-    var sessionId = "sess-" + Ids.newId();
-    SessionOptions options;
-    try {
-      options = optionsFactory.apply(sessionId);
-    } catch (RuntimeException e) {
-      LOGGER.log(Level.WARNING, "optionsFactory failed for session " + sessionId, e);
-      resp.status(Status.INTERNAL_SERVER_ERROR_500).send(FACTORY_FAILED);
-      return;
-    }
-    if (options == null || !options.sessionId().equals(sessionId)) {
-      LOGGER.warning("optionsFactory did not return options for session " + sessionId);
-      resp.status(Status.INTERNAL_SERVER_ERROR_500).send(FACTORY_FAILED);
-      return;
-    }
-    if (identityEnded(caller, resp)) {
-      return;
-    }
-    registry.create(options, caller.principal());
-    var created = new LinkedHashMap<String, String>();
-    created.put("sessionId", sessionId);
-    created.put("eventsUrl", eventsPathPrefix + "/sessions/" + sessionId + "/events");
-    resp.status(Status.CREATED_201).send(created);
-  }
-
-  private SessionHandler queueText(String field, BiConsumer<AgentSession, String> action) {
+  /**
+   * Answer the refusal without running {@code handler} when {@code slots} refuses the request;
+   * otherwise hold its admission for as long as {@code handler} runs, even past the session's
+   * removal.
+   */
+  private static SessionHandler limited(SessionSlots slots, SessionHandler handler) {
     return (session, caller, req, resp) -> {
-      Map<String, Object> body;
-      try {
-        body = readJsonBody(req);
-      } catch (JacksonRuntimeException e) {
-        resp.status(Status.BAD_REQUEST_400).send(Map.of("error", "invalid JSON body"));
-        return;
-      }
-      if (!(body.get(field) instanceof String text) || Strings.isBlank(text)) {
-        resp.status(Status.BAD_REQUEST_400)
-            .send(Map.of("error", "'" + field + "' field must be a non-blank string"));
-        return;
-      }
-      if (identityEnded(caller, resp)) {
+      if (!slots.admit(session.sessionId(), caller.principal(), resp)) {
         return;
       }
       try {
-        action.accept(session, text);
-      } catch (IllegalStateException e) {
-        resp.status(Status.CONFLICT_409).send(Map.of("error", e.getMessage()));
-        return;
+        handler.handle(session, caller, req, resp);
+      } finally {
+        slots.release(session.sessionId(), caller.principal());
       }
-      resp.status(Status.ACCEPTED_202).send();
     };
   }
 
-  private void delete(Caller caller, ServerRequest req, ServerResponse resp) {
-    if (!registry.close(sessionId(req), caller.principal())) {
-      resp.status(Status.NOT_FOUND_404).send(NOT_FOUND);
-      return;
-    }
+  private void delete(AgentSession session, Caller caller, ServerRequest req, ServerResponse resp) {
+    registry.close(session.sessionId(), caller.principal());
     resp.status(Status.NO_CONTENT_204).send();
-  }
-
-  /**
-   * Answer {@code 401} if the caller's identity ended while the request waited, on a slow body or
-   * options factory, so no work is queued for an expired or revoked identity.
-   */
-  private static boolean identityEnded(Caller caller, ServerResponse resp) {
-    if (caller.valid()) {
-      return false;
-    }
-    resp.status(Status.UNAUTHORIZED_401).send(AuthenticationGate.UNAUTHENTICATED);
-    return true;
-  }
-
-  private static String sessionId(ServerRequest req) {
-    return req.path().pathParameters().get("sessionId");
-  }
-
-  @SuppressWarnings("unchecked")
-  private Map<String, Object> readJsonBody(ServerRequest req) {
-    try {
-      return (Map<String, Object>)
-          Objects.requireNonNull(req.content().as(Map.class), "body is JSON null");
-    } catch (RuntimeException e) {
-      throw new JacksonRuntimeException("failed to parse request body", e);
-    }
   }
 
   /** A route's work once its caller is admitted. */
