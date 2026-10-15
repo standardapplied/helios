@@ -4,19 +4,29 @@ package com.standardapplied.helios.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionOptions;
+import io.helidon.http.HeaderNames;
 import io.helidon.http.sse.SseEvent;
 import io.helidon.webserver.CloseConnectionException;
 import io.helidon.webserver.sse.SseSink;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpResponse.BodyHandlers;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Function;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -28,7 +38,8 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * Characterizes what the HTTP surface logs: every warning goes to {@link AgentHttpService}'s
- * logger, whichever type does the work, so one logging configuration covers every route.
+ * logger, whichever type does the work, so one logging configuration covers every route, and an
+ * authenticator's failure is logged by type only, since its message may quote the credential.
  */
 final class AgentHttpServiceLoggingTest {
 
@@ -37,6 +48,7 @@ final class AgentHttpServiceLoggingTest {
   private static final QueryEvent EVENT =
       new QueryEvent.AssistantText(SESSION_ID, 0L, Instant.EPOCH, "hello");
 
+  private final HttpClient http = HttpClient.newBuilder().connectTimeout(Await.HANG_GUARD).build();
   private final List<LogRecord> records = new CopyOnWriteArrayList<>();
   private final Handler handler =
       new Handler() {
@@ -65,6 +77,7 @@ final class AgentHttpServiceLoggingTest {
   void releaseTheLog() {
     LOGGER.removeHandler(handler);
     LOGGER.setLevel(previousLevel);
+    http.shutdownNow();
   }
 
   @Test
@@ -119,6 +132,97 @@ final class AgentHttpServiceLoggingTest {
     assertEquals(
         "session " + SESSION_ID + " result future failed exceptionally", logged.getMessage());
     assertSame(failure, assertInstanceOf(CompletionException.class, logged.getThrown()).getCause());
+  }
+
+  @Test
+  void anAuthenticatorThatCannotDecideIsAnswered503AndLoggedByTypeOnly() throws Exception {
+    var secret = "s3cr3t-credential";
+    var unavailable = "{\"error\":\"authentication unavailable\"}";
+    try (var server =
+        serverWithFactory(
+                sessionId -> {
+                  throw new AssertionError("no session may be created");
+                })
+            .withAuthenticator(
+                request -> {
+                  if (request.headers().contains(HeaderNames.AUTHORIZATION)) {
+                    throw new IllegalStateException("cannot verify " + secret);
+                  }
+                  return null;
+                })
+            .build()) {
+      var throwing = createSession(server, "Bearer " + secret);
+      var answeringNull = createSession(server, null);
+
+      assertEquals(503, throwing.statusCode());
+      assertEquals(unavailable, throwing.body());
+      assertEquals(503, answeringNull.statusCode());
+      assertEquals(unavailable, answeringNull.body());
+      assertEquals(0, server.registry().size());
+    }
+    var failures = recordsStartingWith("authenticator");
+    assertEquals(
+        List.of(
+            "authenticator failed with java.lang.IllegalStateException",
+            "authenticator failed with java.lang.NullPointerException"),
+        failures.stream().map(LogRecord::getMessage).toList());
+    failures.forEach(r -> assertNull(r.getThrown()));
+    assertTrue(records.stream().noneMatch(r -> String.valueOf(r.getMessage()).contains(secret)));
+  }
+
+  @Test
+  void aFailedOptionsFactoryIsLoggedAsAWarningWithItsException() throws Exception {
+    var failure = new IllegalStateException("factory broke");
+    try (var server =
+        serverWithFactory(
+                sessionId -> {
+                  throw failure;
+                })
+            .withoutAuthentication()
+            .build()) {
+      assertEquals(500, createSession(server, null).statusCode());
+    }
+    var logged = onlyRecordStartingWith("optionsFactory failed for session sess-");
+    assertEquals(Level.WARNING, logged.getLevel());
+    assertSame(failure, logged.getThrown());
+  }
+
+  @Test
+  void anOptionsFactoryReturningNoOptionsForTheSessionIsLoggedAsAWarning() throws Exception {
+    try (var server = serverWithFactory(sessionId -> null).withoutAuthentication().build()) {
+      assertEquals(500, createSession(server, null).statusCode());
+    }
+    var logged = onlyRecordStartingWith("optionsFactory did not return options for session sess-");
+    assertEquals(Level.WARNING, logged.getLevel());
+  }
+
+  private static RuntimeServer.Builder serverWithFactory(
+      Function<String, SessionOptions> optionsFactory) {
+    return RuntimeServer.builder()
+        .withRegistry(SessionRegistry.inMemory())
+        .withOptionsFactory(optionsFactory);
+  }
+
+  private HttpResponse<String> createSession(RuntimeServer server, String authorization)
+      throws Exception {
+    var request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/sessions"))
+            .timeout(Await.HANG_GUARD)
+            .POST(HttpRequest.BodyPublishers.noBody());
+    if (authorization != null) {
+      request.header("Authorization", authorization);
+    }
+    return http.send(request.build(), BodyHandlers.ofString());
+  }
+
+  private List<LogRecord> recordsStartingWith(String prefix) {
+    return records.stream().filter(r -> r.getMessage().startsWith(prefix)).toList();
+  }
+
+  private LogRecord onlyRecordStartingWith(String prefix) {
+    var matching = recordsStartingWith(prefix);
+    assertEquals(1, matching.size(), () -> "logged: " + matching);
+    return matching.getFirst();
   }
 
   private LogRecord onlyRecordForTheSession() {
