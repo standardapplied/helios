@@ -4,19 +4,17 @@ package com.standardapplied.helios.runtime;
 
 import static com.standardapplied.helios.runtime.AdmissionHarness.assertRefused;
 import static com.standardapplied.helios.runtime.AdmissionHarness.result;
+import static com.standardapplied.helios.runtime.ResponseBodies.afterReady;
+import static com.standardapplied.helios.runtime.ResponseBodies.rest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.UncheckedIOException;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -62,7 +60,7 @@ final class AgentHttpServiceChurnAdmissionTest {
                 .withMaxEventStreamsPerPrincipal(1)
                 .build());
     var deleted = harness.create(server, "alice");
-    var held = open(server, deleted, "alice");
+    var held = afterReady(open(server, deleted, "alice"));
     assertEquals(204, harness.send(server, "DELETE", path(deleted), "alice").statusCode());
     var replacement = harness.create(server, "alice");
 
@@ -75,7 +73,7 @@ final class AgentHttpServiceChurnAdmissionTest {
     assertEquals(new AdmissionCounts(2, 2), server.counters().eventStreams());
 
     harness.sessions.get(deleted).completeEvents();
-    drain(held);
+    assertEquals(List.of(), rest(held));
     harness.openEventsAdmitted(server, replacement, "alice").body().close();
     bobs.body().close();
   }
@@ -128,15 +126,13 @@ final class AgentHttpServiceChurnAdmissionTest {
         Await.value(
             "the event stream to be answered",
             harness.openEventsOnOwnConnection(server, sessionId, "alice"));
-    var afterReady = afterReady(revoked);
+    var events = afterReady(revoked);
     var session = harness.sessions.get(sessionId);
     var delivery = CompletableFuture.runAsync(() -> session.subscribers.getFirst().onNext(EVENT));
     Await.latch("the event to be serialized", serializing);
 
     harness.tokens.revoke("alice");
-    var streamed =
-        Await.value(
-            "the stream to end", CompletableFuture.supplyAsync(() -> afterReady.lines().toList()));
+    var streamed = rest(events);
     var refused = open(server, sessionId, "alice");
 
     assertEquals(List.of(), streamed);
@@ -183,28 +179,6 @@ final class AgentHttpServiceChurnAdmissionTest {
     assertEquals(
         Optional.of(Overload.RETRY_AFTER_SECONDS), resp.headers().firstValue("Retry-After"));
     assertEquals(body, ResponseBodies.text(resp.body()));
-  }
-
-  /** Read {@code resp}'s {@code Ready} event, so its subscription is live, and return the rest. */
-  private static BufferedReader afterReady(HttpResponse<InputStream> resp) {
-    var reader = new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
-    var ready =
-        CompletableFuture.supplyAsync(() -> List.of(line(reader), line(reader), line(reader)));
-    assertEquals(List.of("event:Ready", "data:{}", ""), Await.value("the Ready event", ready));
-    return reader;
-  }
-
-  private static String line(BufferedReader reader) {
-    try {
-      return reader.readLine();
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    }
-  }
-
-  private static void drain(HttpResponse<InputStream> resp) {
-    Await.value(
-        "the stream to end", CompletableFuture.supplyAsync(() -> ResponseBodies.text(resp.body())));
   }
 
   private final class HeldSerializer<T> extends StdSerializer<T> {

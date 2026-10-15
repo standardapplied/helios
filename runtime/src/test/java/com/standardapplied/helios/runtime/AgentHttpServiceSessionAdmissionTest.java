@@ -33,13 +33,13 @@ final class AgentHttpServiceSessionAdmissionTest {
 
   @Test
   void concurrentCreatesBeyondTheCapAreRefusedBeforeTheOptionsFactoryRuns() {
-    var server = harness.server(harness.registry().withMaxSessions(2), RequestLimits.defaults());
+    var server = harness.server(harness.registry().withMaxSessions(2));
     var entered = new CountDownLatch(2);
     var release = new CountDownLatch(1);
     harness.duringFactory.set(
         () -> {
           entered.countDown();
-          awaitRelease(release);
+          Await.latch("the test to release the factory", release);
         });
     var refused = new CountDownLatch(BURST - 2);
 
@@ -76,8 +76,7 @@ final class AgentHttpServiceSessionAdmissionTest {
 
   @Test
   void aPrincipalAtItsOwnCapIsAnswered429AndLeavesTheRestToOthers() {
-    var server =
-        harness.server(harness.registry().withMaxSessionsPerPrincipal(1), RequestLimits.defaults());
+    var server = harness.server(harness.registry().withMaxSessionsPerPrincipal(1));
     harness.create(server, "alice");
 
     var refused = harness.send(server, "POST", "/sessions", "alice");
@@ -91,9 +90,7 @@ final class AgentHttpServiceSessionAdmissionTest {
   @Test
   void aPrincipalAtItsCapIsAnsweredTheSameWhenAnotherFillsTheServersActiveCap() {
     var server =
-        harness.server(
-            harness.registry().withMaxSessionsPerPrincipal(1).withMaxActiveSessions(2),
-            RequestLimits.defaults());
+        harness.server(harness.registry().withMaxSessionsPerPrincipal(1).withMaxActiveSessions(2));
     harness.create(server, "alice");
 
     var alone = harness.send(server, "POST", "/sessions", "alice");
@@ -112,12 +109,12 @@ final class AgentHttpServiceSessionAdmissionTest {
 
   @Test
   void aCreateRefusedAmongAnotherTenantsSessionsIsAnsweredAsIfTheyHeldNone() {
-    var crowded = harness.server(harness.registry().withMaxSessions(2), RequestLimits.defaults());
+    var crowded = harness.server(harness.registry().withMaxSessions(2));
     var oldest = harness.sessions.get(harness.create(crowded, "alice"));
     oldest.terminate();
     var younger = harness.sessions.get(harness.create(crowded, "alice"));
     younger.terminate();
-    var ownOnly = harness.server(harness.registry().withMaxSessions(2), RequestLimits.defaults());
+    var ownOnly = harness.server(harness.registry().withMaxSessions(2));
     harness.create(ownOnly, "eve");
     harness.create(ownOnly, "eve");
 
@@ -140,7 +137,7 @@ final class AgentHttpServiceSessionAdmissionTest {
 
   @Test
   void aFailedCreateAndARepeatedDeleteLeaveTheCapacityAsItWas() {
-    var server = harness.server(harness.registry().withMaxSessions(1), RequestLimits.defaults());
+    var server = harness.server(harness.registry().withMaxSessions(1));
     harness.duringFactory.set(
         () -> {
           throw new IllegalStateException("options store down");
@@ -157,14 +154,5 @@ final class AgentHttpServiceSessionAdmissionTest {
 
     harness.create(server, "alice");
     assertEquals(503, harness.send(server, "POST", "/sessions", "alice").statusCode());
-  }
-
-  private static void awaitRelease(CountDownLatch release) {
-    try {
-      release.await();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new IllegalStateException(e);
-    }
   }
 }

@@ -8,6 +8,8 @@ import static com.standardapplied.helios.runtime.AdmissionHarness.interrupt;
 import static com.standardapplied.helios.runtime.AdmissionHarness.messages;
 import static com.standardapplied.helios.runtime.AdmissionHarness.result;
 import static com.standardapplied.helios.runtime.AdmissionHarness.textBody;
+import static com.standardapplied.helios.runtime.ResponseBodies.afterReady;
+import static com.standardapplied.helios.runtime.ResponseBodies.rest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.standardapplied.helios.core.test.Await;
@@ -82,13 +84,11 @@ final class AgentHttpServiceRequestAdmissionTest {
   }
 
   @Test
-  void aBodyDeclaredOverTheBoundIsRefusedUnreadAndOneDeclaredAtTheBoundIsQueued() {
-    var max = AdmissionHarness.BODY.length - 1;
-    var server =
-        harness.server(
-            harness.registry(), RequestLimits.newBuilder().withMaxRequestBytes(max).build());
+  void aBodyDeclaredOverTheDefaultBoundIsRefusedUnreadAndOneDeclaredAtItIsQueued() {
+    var max = RequestLimits.defaults().maxRequestBytes();
+    var server = harness.server(harness.registry());
     var sessionId = harness.create(server, "alice");
-    var overBound = new HeldBody(new CountDownLatch(1), new CountDownLatch(0));
+    var overBound = new HeldBody(textBody(max + 1), new CountDownLatch(1), new CountDownLatch(0));
 
     var refused =
         Await.value(
@@ -267,7 +267,7 @@ final class AgentHttpServiceRequestAdmissionTest {
 
   @Test
   void aBurstOfMessagesFillsTheSteeringQueueAndIsRefused429Beyond() {
-    var server = harness.server(harness.registry(), RequestLimits.defaults());
+    var server = harness.server(harness.registry());
     var sessionId = harness.create(server, "alice");
 
     var sent = new ArrayList<CompletableFuture<HttpResponse<String>>>();
@@ -295,11 +295,11 @@ final class AgentHttpServiceRequestAdmissionTest {
     for (var i = 0; i < BURST; i++) {
       streams.add(harness.openEvents(server, sessionId, "alice"));
     }
-    var open = new ArrayList<HttpResponse<InputStream>>();
+    var open = new ArrayList<BufferedReader>();
     for (var stream : streams) {
       var resp = Await.value("an event stream to be answered", stream);
       if (resp.statusCode() == 200) {
-        open.add(resp);
+        open.add(afterReady(resp));
       } else {
         assertEquals(429, resp.statusCode());
         assertEquals(
@@ -315,10 +315,8 @@ final class AgentHttpServiceRequestAdmissionTest {
     assertEquals(new AdmissionCounts(2, BURST - 2), server.counters().eventStreams());
 
     session.completeEvents();
-    for (var resp : open) {
-      Await.value(
-          "the stream to end",
-          CompletableFuture.supplyAsync(() -> ResponseBodies.text(resp.body())));
+    for (var events : open) {
+      assertEquals(List.of(), rest(events));
     }
     harness.openEventsAdmitted(server, sessionId, "alice").body().close();
   }
@@ -393,9 +391,14 @@ final class AgentHttpServiceRequestAdmissionTest {
 
     private final CountDownLatch reading;
     private final CountDownLatch release;
-    private final InputStream bytes = new ByteArrayInputStream(AdmissionHarness.BODY);
+    private final InputStream bytes;
 
     private HeldBody(CountDownLatch reading, CountDownLatch release) {
+      this(AdmissionHarness.BODY, reading, release);
+    }
+
+    private HeldBody(byte[] bytes, CountDownLatch reading, CountDownLatch release) {
+      this.bytes = new ByteArrayInputStream(bytes);
       this.reading = reading;
       this.release = release;
     }
