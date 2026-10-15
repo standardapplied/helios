@@ -9,6 +9,11 @@ package com.standardapplied.helios.runtime;
  *   <li>{@code maxRequestBytes}: 256 KiB. A message or interrupt body larger than this is answered
  *       {@code 413} unread when its {@code Content-Length} says so, and otherwise once one byte
  *       past the bound has been read.
+ *   <li>{@code maxMessageUploads}: 256. Message and interrupt requests being read and queued at a
+ *       time across the service; one more is answered {@code 503}. With {@code maxRequestBytes}
+ *       this bounds the bodies buffered at once (64 MiB at the defaults).
+ *   <li>{@code maxMessageUploadsPerPrincipal}: 16. The same, per principal; one more is answered
+ *       {@code 429}, so one principal cannot take the whole service-wide bound.
  *   <li>{@code maxEventStreamsPerSession}: 4. Further {@code GET .../events} on the session are
  *       answered {@code 429} until one of its streams ends.
  *   <li>{@code maxResultPollsPerSession}: 4. Further {@code GET .../result} on the session are
@@ -21,16 +26,24 @@ package com.standardapplied.helios.runtime;
  *
  * @param maxRequestBytes largest accepted request body in bytes; positive, at most {@link
  *     #MAX_REQUEST_BYTES_CEILING}
+ * @param maxMessageUploads most message and interrupt requests read and queued at a time across the
+ *     service; positive
+ * @param maxMessageUploadsPerPrincipal most message and interrupt requests one principal has read
+ *     and queued at a time; positive
  * @param maxEventStreamsPerSession most event streams open on one session at a time; positive
  * @param maxResultPollsPerSession most result polls waiting on one session at a time; positive
  */
 public record RequestLimits(
-    int maxRequestBytes, int maxEventStreamsPerSession, int maxResultPollsPerSession) {
+    int maxRequestBytes,
+    int maxMessageUploads,
+    int maxMessageUploadsPerPrincipal,
+    int maxEventStreamsPerSession,
+    int maxResultPollsPerSession) {
 
   /** Largest {@code maxRequestBytes} accepted: a bigger input belongs in a file, not a message. */
   public static final int MAX_REQUEST_BYTES_CEILING = 64 * 1024 * 1024;
 
-  private static final RequestLimits DEFAULTS = new RequestLimits(256 * 1024, 4, 4);
+  private static final RequestLimits DEFAULTS = new RequestLimits(256 * 1024, 256, 16, 4, 4);
 
   /**
    * Validate every bound.
@@ -47,6 +60,8 @@ public record RequestLimits(
               + ", got "
               + maxRequestBytes);
     }
+    requirePositive("maxMessageUploads", maxMessageUploads);
+    requirePositive("maxMessageUploadsPerPrincipal", maxMessageUploadsPerPrincipal);
     requirePositive("maxEventStreamsPerSession", maxEventStreamsPerSession);
     requirePositive("maxResultPollsPerSession", maxResultPollsPerSession);
   }
@@ -79,6 +94,8 @@ public record RequestLimits(
   public static final class Builder {
 
     private int maxRequestBytes = DEFAULTS.maxRequestBytes();
+    private int maxMessageUploads = DEFAULTS.maxMessageUploads();
+    private int maxMessageUploadsPerPrincipal = DEFAULTS.maxMessageUploadsPerPrincipal();
     private int maxEventStreamsPerSession = DEFAULTS.maxEventStreamsPerSession();
     private int maxResultPollsPerSession = DEFAULTS.maxResultPollsPerSession();
 
@@ -92,6 +109,28 @@ public record RequestLimits(
      */
     public Builder withMaxRequestBytes(int maxRequestBytes) {
       this.maxRequestBytes = maxRequestBytes;
+      return this;
+    }
+
+    /**
+     * Set the most message and interrupt requests read and queued at a time across the service.
+     *
+     * @param maxMessageUploads positive count
+     * @return this builder
+     */
+    public Builder withMaxMessageUploads(int maxMessageUploads) {
+      this.maxMessageUploads = maxMessageUploads;
+      return this;
+    }
+
+    /**
+     * Set the most message and interrupt requests one principal has read and queued at a time.
+     *
+     * @param maxMessageUploadsPerPrincipal positive count
+     * @return this builder
+     */
+    public Builder withMaxMessageUploadsPerPrincipal(int maxMessageUploadsPerPrincipal) {
+      this.maxMessageUploadsPerPrincipal = maxMessageUploadsPerPrincipal;
       return this;
     }
 
@@ -125,7 +164,11 @@ public record RequestLimits(
      */
     public RequestLimits build() {
       return new RequestLimits(
-          maxRequestBytes, maxEventStreamsPerSession, maxResultPollsPerSession);
+          maxRequestBytes,
+          maxMessageUploads,
+          maxMessageUploadsPerPrincipal,
+          maxEventStreamsPerSession,
+          maxResultPollsPerSession);
     }
   }
 }

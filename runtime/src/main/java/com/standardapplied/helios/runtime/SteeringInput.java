@@ -6,6 +6,7 @@ import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.runtime.AuthenticationGate.Caller;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.SteeringQueueFullException;
+import com.standardapplied.helios.session.UserMessage;
 import io.helidon.http.Status;
 import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
@@ -14,35 +15,67 @@ import java.util.function.BiConsumer;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * The work behind {@code POST .../messages} and {@code POST .../interrupt}: reads the bounded JSON
- * body, takes one non-blank string field from it and hands it to the session's steering queue.
- * Answers {@code 202} once queued, {@code 413} or {@code 400} for the body, {@code 401} if the
- * identity ended while the body uploaded, {@code 429} when the queue is full and {@code 409} when
- * the session can take no more messages.
+ * The work behind {@code POST .../messages} and {@code POST .../interrupt}: admits the upload
+ * against the {@link MessageUploads} both routes share, reads the bounded JSON body, takes one
+ * non-blank string field from it and hands it to the session's steering queue. Answers {@code 202}
+ * once queued, {@code 429} or {@code 503} when the upload is refused, {@code 413} or {@code 400}
+ * for the body, {@code 401} if the identity ended while the body uploaded, {@code 429} when the
+ * queue is full and {@code 409} when the session can take no more messages.
  */
 final class SteeringInput {
 
-  private final String field;
-  private final BiConsumer<AgentSession, String> action;
-  private final AdmissionCounter counter;
+  private final AdmissionCounter counter = new AdmissionCounter();
+  private final MessageUploads uploads;
   private final int maxRequestBytes;
   private final ObjectMapper objectMapper;
 
-  SteeringInput(
-      String field,
-      BiConsumer<AgentSession, String> action,
-      AdmissionCounter counter,
-      int maxRequestBytes,
-      ObjectMapper objectMapper) {
-    this.field = field;
-    this.action = action;
-    this.counter = counter;
-    this.maxRequestBytes = maxRequestBytes;
+  SteeringInput(RequestLimits limits, ObjectMapper objectMapper) {
+    this.uploads =
+        new MessageUploads(limits.maxMessageUploads(), limits.maxMessageUploadsPerPrincipal());
+    this.maxRequestBytes = limits.maxRequestBytes();
     this.objectMapper = objectMapper;
   }
 
-  /** Queue the request's text into {@code session}, or answer why not. */
-  void respond(AgentSession session, Caller caller, ServerRequest req, ServerResponse resp) {
+  /** Queue the body's {@code text} into {@code session} as a user message, or answer why not. */
+  void send(AgentSession session, Caller caller, ServerRequest req, ServerResponse resp) {
+    respond(
+        "text", (target, text) -> target.send(UserMessage.text(text)), session, caller, req, resp);
+  }
+
+  /** Queue the body's {@code reason} into {@code session} as an interrupt, or answer why not. */
+  void interrupt(AgentSession session, Caller caller, ServerRequest req, ServerResponse resp) {
+    respond("reason", AgentSession::interrupt, session, caller, req, resp);
+  }
+
+  AdmissionCounts counts() {
+    return counter.counts();
+  }
+
+  private void respond(
+      String field,
+      BiConsumer<AgentSession, String> action,
+      AgentSession session,
+      Caller caller,
+      ServerRequest req,
+      ServerResponse resp) {
+    if (!uploads.admit(caller.principal(), resp)) {
+      counter.reject();
+      return;
+    }
+    try {
+      readAndQueue(field, action, session, caller, req, resp);
+    } finally {
+      uploads.release(caller.principal());
+    }
+  }
+
+  private void readAndQueue(
+      String field,
+      BiConsumer<AgentSession, String> action,
+      AgentSession session,
+      Caller caller,
+      ServerRequest req,
+      ServerResponse resp) {
     var body = JsonBody.read(req, resp, maxRequestBytes, objectMapper);
     if (body.isEmpty()) {
       return;

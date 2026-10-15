@@ -74,6 +74,82 @@ final class AgentHttpServiceRequestAdmissionTest {
   }
 
   @Test
+  void uploadsBeyondThePrincipalsBoundAre429AndBeyondTheServicesAre503BeforeTheirBodyIsRead() {
+    var server =
+        harness.server(
+            harness.registry(),
+            RequestLimits.newBuilder()
+                .withMaxMessageUploads(3)
+                .withMaxMessageUploadsPerPrincipal(2)
+                .build());
+    var alice = harness.create(server, "alice");
+    var bob = harness.create(server, "bob");
+    var release = new CountDownLatch(1);
+    var aliceReading = new CountDownLatch(2);
+    var bobReading = new CountDownLatch(1);
+    var held =
+        List.of(
+            harness.upload(server, messages(alice), "alice", new HeldBody(aliceReading, release)),
+            harness.upload(server, interrupt(alice), "alice", new HeldBody(aliceReading, release)));
+    Await.latch("alice's two uploads to be read", aliceReading);
+
+    var aliceUnread = new HeldBody(new CountDownLatch(1), release);
+    var aliceRefused =
+        Await.value(
+            "alice's third upload to be refused",
+            harness.upload(server, messages(alice), "alice", aliceUnread));
+    var bobHeld = harness.upload(server, messages(bob), "bob", new HeldBody(bobReading, release));
+    Await.latch("bob's upload to be read", bobReading);
+    var bobUnread = new HeldBody(new CountDownLatch(1), release);
+    var bobRefused =
+        Await.value(
+            "bob's second upload to be refused",
+            harness.upload(server, messages(bob), "bob", bobUnread));
+
+    assertEquals(429, aliceRefused.statusCode());
+    assertRefused(aliceRefused, "{\"error\":\"too many message uploads in progress\"}");
+    assertEquals(503, bobRefused.statusCode());
+    assertRefused(bobRefused, "{\"error\":\"server at message upload capacity\"}");
+    assertEquals(1, aliceUnread.reading.getCount());
+    assertEquals(1, bobUnread.reading.getCount());
+    assertEquals(0, harness.sessions.get(alice).queue.size());
+
+    release.countDown();
+    for (var upload : List.of(held.get(0), held.get(1), bobHeld)) {
+      assertEquals(202, Await.value("a held upload to be queued", upload).statusCode());
+    }
+    assertEquals(2, harness.sessions.get(alice).queue.size());
+    assertEquals(202, harness.send(server, "POST", messages(bob), "bob").statusCode());
+    assertEquals(new AdmissionCounts(4, 2), server.counters().messages());
+  }
+
+  @Test
+  void anUploadGivesItsAdmissionBackWhateverItIsAnswered() {
+    var server =
+        harness.server(
+            harness.registry(),
+            RequestLimits.newBuilder()
+                .withMaxRequestBytes(64)
+                .withMaxMessageUploads(1)
+                .withMaxMessageUploadsPerPrincipal(1)
+                .build());
+    var sessionId = harness.create(server, "alice");
+    var path = messages(sessionId);
+
+    var statuses =
+        List.of(
+            post(server, path, textBody(65)),
+            post(server, path, "not json".getBytes(StandardCharsets.UTF_8)),
+            post(server, path, "{\"text\":\" \"}".getBytes(StandardCharsets.UTF_8)),
+            post(server, path, AdmissionHarness.BODY),
+            post(server, path, AdmissionHarness.BODY),
+            post(server, path, AdmissionHarness.BODY),
+            post(server, messages(harness.create(server, "alice")), AdmissionHarness.BODY));
+
+    assertEquals(List.of(413, 400, 400, 202, 202, 429, 202), statuses);
+  }
+
+  @Test
   void aBurstOfMessagesFillsTheSteeringQueueAndIsRefused429Beyond() {
     var server = harness.server(harness.registry(), RequestLimits.defaults());
     var sessionId = harness.create(server, "alice");
@@ -173,6 +249,12 @@ final class AgentHttpServiceRequestAdmissionTest {
     assertEquals(200, harness.send(server, "GET", result(sessionId), "alice").statusCode());
   }
 
+  private int post(RuntimeServer server, String path, byte[] body) {
+    return harness
+        .send(server, "POST", path, "alice", BodyPublishers.ofByteArray(body))
+        .statusCode();
+  }
+
   private static RequestLimits limits() {
     return RequestLimits.newBuilder()
         .withMaxEventStreamsPerSession(2)
@@ -182,6 +264,41 @@ final class AgentHttpServiceRequestAdmissionTest {
 
   private static BodyPublisher chunked(byte[] body) {
     return BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(body));
+  }
+
+  /** A request body that marks its first read, then serves its bytes once released. */
+  private static final class HeldBody extends InputStream {
+
+    private final CountDownLatch reading;
+    private final CountDownLatch release;
+    private final InputStream bytes = new ByteArrayInputStream(AdmissionHarness.BODY);
+
+    private HeldBody(CountDownLatch reading, CountDownLatch release) {
+      this.reading = reading;
+      this.release = release;
+    }
+
+    @Override
+    public int read() throws IOException {
+      hold();
+      return bytes.read();
+    }
+
+    @Override
+    public int read(byte[] buffer, int offset, int length) throws IOException {
+      hold();
+      return bytes.read(buffer, offset, length);
+    }
+
+    private void hold() throws IOException {
+      reading.countDown();
+      try {
+        release.await();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IOException(e);
+      }
+    }
   }
 
   private static long drain(InputStream body) {

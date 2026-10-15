@@ -8,7 +8,6 @@ import com.standardapplied.helios.runtime.AuthenticationGate.Caller;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionOptions;
-import com.standardapplied.helios.session.UserMessage;
 import io.helidon.http.HttpException;
 import io.helidon.http.Status;
 import io.helidon.webserver.http.Handler;
@@ -67,10 +66,12 @@ import tools.jackson.databind.ObjectMapper;
  * refused one is answered at once, never queued. {@code POST /sessions} reserves capacity in the
  * {@link SessionRegistry} before the {@code optionsFactory} runs: a full cap of the caller's own is
  * {@code 429}, the registry's {@code 503}. A message or interrupt body over {@link
- * RequestLimits#maxRequestBytes()} is {@code 413}, and one refused by a full steering queue is
- * {@code 429}; an event stream or result poll beyond the session's limit in {@link RequestLimits}
- * is {@code 429}. Each {@code 429} and {@code 503} has a fixed body and a {@code Retry-After}
- * header; {@link #counters()} reports what was admitted and refused.
+ * RequestLimits#maxRequestBytes()} is {@code 413}; a message or interrupt beyond the caller's own
+ * concurrent uploads in {@link RequestLimits} is {@code 429}, beyond the service's {@code 503}; one
+ * refused by a full steering queue is {@code 429}; an event stream or result poll beyond the
+ * session's limit in {@link RequestLimits} is {@code 429}. Each {@code 429} and {@code 503} has a
+ * fixed body and a {@code Retry-After} header; {@link #counters()} reports what was admitted and
+ * refused.
  *
  * <p>The {@code optionsFactory} is the seam through which deployments choose how a new session is
  * configured: the runtime takes the generated session id and produces a fully-populated {@link
@@ -97,8 +98,7 @@ public final class AgentHttpService implements HttpService {
   private final SessionCreation creation;
   private final AuthenticationGate gate;
   private final ObjectMapper objectMapper;
-  private final int maxRequestBytes;
-  private final AdmissionCounter messages = new AdmissionCounter();
+  private final SteeringInput steering;
   private final SessionSlots eventStreams;
   private final SessionSlots resultPolls;
 
@@ -134,7 +134,7 @@ public final class AgentHttpService implements HttpService {
         ToolOutcomeSerializer.addTo(
             Objects.requireNonNull(objectMapper, "objectMapper must not be null"));
     Objects.requireNonNull(limits, "limits must not be null");
-    this.maxRequestBytes = limits.maxRequestBytes();
+    this.steering = new SteeringInput(limits, this.objectMapper);
     this.eventStreams = new SessionSlots(limits.maxEventStreamsPerSession());
     this.resultPolls = new SessionSlots(limits.maxResultPollsPerSession());
   }
@@ -146,30 +146,14 @@ public final class AgentHttpService implements HttpService {
    */
   public RuntimeCounters counters() {
     return new RuntimeCounters(
-        creation.counts(), messages.counts(), eventStreams.counts(), resultPolls.counts());
+        creation.counts(), steering.counts(), eventStreams.counts(), resultPolls.counts());
   }
 
   @Override
   public void routing(HttpRules rules) {
     rules.post("/sessions", authenticated((caller, req, resp) -> creation.respond(caller, resp)));
-    rules.post(
-        "/sessions/{sessionId}/messages",
-        authenticated(
-            owned(
-                new SteeringInput(
-                        "text",
-                        (session, text) -> session.send(UserMessage.text(text)),
-                        messages,
-                        maxRequestBytes,
-                        objectMapper)
-                    ::respond)));
-    rules.post(
-        "/sessions/{sessionId}/interrupt",
-        authenticated(
-            owned(
-                new SteeringInput(
-                        "reason", AgentSession::interrupt, messages, maxRequestBytes, objectMapper)
-                    ::respond)));
+    rules.post("/sessions/{sessionId}/messages", authenticated(owned(steering::send)));
+    rules.post("/sessions/{sessionId}/interrupt", authenticated(owned(steering::interrupt)));
     rules.get(
         "/sessions/{sessionId}/events",
         authenticated(

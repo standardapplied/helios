@@ -94,6 +94,21 @@ final class AdmissionHarness implements AutoCloseable {
     return http.sendAsync(request(server, method, path, token, body), BodyHandlers.ofString());
   }
 
+  /**
+   * POST {@code body} with {@code Expect: 100-continue}: the server sends {@code 100} only once its
+   * handler starts reading the body, so the client reads {@code body} only after the upload was
+   * admitted, and never for a request refused before its body.
+   */
+  CompletableFuture<HttpResponse<String>> upload(
+      RuntimeServer server, String path, String token, InputStream body) {
+    var request =
+        builder(server, "POST", path, token, BodyPublishers.ofInputStream(() -> body))
+            .version(HttpClient.Version.HTTP_1_1)
+            .expectContinue(true)
+            .build();
+    return http.sendAsync(request, BodyHandlers.ofString());
+  }
+
   /** Open {@code sessionId}'s event stream; the future completes when its headers arrive. */
   CompletableFuture<HttpResponse<InputStream>> openEvents(
       RuntimeServer server, String sessionId, String token) {
@@ -161,11 +176,15 @@ final class AdmissionHarness implements AutoCloseable {
 
   private static HttpRequest request(
       RuntimeServer server, String method, String path, String token, BodyPublisher body) {
+    return builder(server, method, path, token, body).build();
+  }
+
+  private static HttpRequest.Builder builder(
+      RuntimeServer server, String method, String path, String token, BodyPublisher body) {
     return HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1" + path))
         .timeout(Await.HANG_GUARD)
         .header("Authorization", "Bearer " + token)
         .header("Content-Type", "application/json")
-        .method(method, body)
-        .build();
+        .method(method, body);
   }
 }

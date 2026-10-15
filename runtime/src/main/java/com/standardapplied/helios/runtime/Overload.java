@@ -9,8 +9,8 @@ import java.util.Map;
 
 /**
  * The answers to a request refused for a limit: {@code 429} when the caller's own use reached it,
- * {@code 503} when the server's session capacity did. Each has a fixed body that names the limit
- * and nothing else, and a {@code Retry-After} of {@value #RETRY_AFTER_SECONDS} seconds, so a client
+ * {@code 503} when the server's capacity did. Each has a fixed body that names the limit and
+ * nothing else, and a {@code Retry-After} of {@value #RETRY_AFTER_SECONDS} seconds, so a client
  * backs off instead of retrying at once.
  */
 final class Overload {
@@ -24,6 +24,12 @@ final class Overload {
       Map.of("error", "server at session capacity");
 
   static final Map<String, String> QUEUE_FULL = Map.of("error", "session message queue full");
+
+  static final Map<String, String> TOO_MANY_UPLOADS =
+      Map.of("error", "too many message uploads in progress");
+
+  static final Map<String, String> SERVER_AT_UPLOAD_CAPACITY =
+      Map.of("error", "server at message upload capacity");
 
   static final Map<String, String> TOO_MANY_EVENT_STREAMS =
       Map.of("error", "too many event streams on this session");

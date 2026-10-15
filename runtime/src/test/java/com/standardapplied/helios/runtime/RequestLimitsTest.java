@@ -11,7 +11,7 @@ final class RequestLimitsTest {
 
   @Test
   void theDefaultsAreTheDocumentedProductionValues() {
-    assertEquals(new RequestLimits(262_144, 4, 4), RequestLimits.defaults());
+    assertEquals(new RequestLimits(262_144, 256, 16, 4, 4), RequestLimits.defaults());
     assertEquals(RequestLimits.defaults(), RequestLimits.newBuilder().build());
   }
 
@@ -20,11 +20,13 @@ final class RequestLimitsTest {
     var limits =
         RequestLimits.newBuilder()
             .withMaxRequestBytes(1024)
+            .withMaxMessageUploads(5)
+            .withMaxMessageUploadsPerPrincipal(4)
             .withMaxEventStreamsPerSession(2)
             .withMaxResultPollsPerSession(3)
             .build();
 
-    assertEquals(new RequestLimits(1024, 2, 3), limits);
+    assertEquals(new RequestLimits(1024, 5, 4, 2, 3), limits);
   }
 
   @Test
@@ -32,6 +34,12 @@ final class RequestLimitsTest {
     assertRejected(
         "maxRequestBytes must be positive, got 0",
         RequestLimits.newBuilder().withMaxRequestBytes(0));
+    assertRejected(
+        "maxMessageUploads must be positive, got 0",
+        RequestLimits.newBuilder().withMaxMessageUploads(0));
+    assertRejected(
+        "maxMessageUploadsPerPrincipal must be positive, got -2",
+        RequestLimits.newBuilder().withMaxMessageUploadsPerPrincipal(-2));
     assertRejected(
         "maxEventStreamsPerSession must be positive, got -1",
         RequestLimits.newBuilder().withMaxEventStreamsPerSession(-1));

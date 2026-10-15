@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.runtime.SessionCapacityException.Scope;
 import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.time.Instant;
@@ -167,6 +168,21 @@ final class SessionRegistryAdmissionTest {
     assertEquals("active sessions of the principal at cap 1", refused.getMessage());
     assertEquals(0, terminal.closes.get());
     assertEquals(2, registry.size());
+  }
+
+  @Test
+  void aPrincipalAtItsSessionCapIsRefusedTheSameWhateverOthersHoldActive() {
+    var registry = stubs().withMaxSessionsPerPrincipal(1).withMaxActiveSessions(2).build();
+    create(registry, ALICE);
+
+    var alone = assertThrows(SessionCapacityException.class, () -> create(registry, ALICE));
+    create(registry, EVE);
+    var crowded = assertThrows(SessionCapacityException.class, () -> create(registry, ALICE));
+
+    assertEquals(Scope.PRINCIPAL, alone.scope());
+    assertEquals("sessions of the principal at cap 1", alone.getMessage());
+    assertEquals(alone.scope(), crowded.scope());
+    assertEquals(alone.getMessage(), crowded.getMessage());
   }
 
   @Test
@@ -396,6 +412,42 @@ final class SessionRegistryAdmissionTest {
     create(registry, EVE);
     assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
     assertEquals(1, session.closes.get());
+  }
+
+  @Test
+  void aSessionClosedAtWorkKeepsItsCapacityUntilItsResultCompletes() {
+    var registry = stubs().withMaxSessions(1).withMaxActiveSessions(1).build();
+    var working = create(registry, ALICE);
+    working.send(UserMessage.text("go"));
+
+    assertTrue(registry.close(working.sessionId(), ALICE));
+
+    assertEquals(0, registry.size());
+    assertTrue(registry.find(working.sessionId(), ALICE).isEmpty());
+    var refused = assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
+    assertEquals("active sessions at cap 1", refused.getMessage());
+
+    working.terminate();
+
+    create(registry, EVE);
+    assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
+  }
+
+  @Test
+  void aSessionClosedAtWorkReleasesOnlyItsOwnChargeWhenItsIdIsRegisteredAgain() {
+    var registry = stubs().withMaxSessions(3).withMaxActiveSessions(2).build();
+    var options = options();
+    var working = (StubSession) registry.create(options, ALICE);
+    working.send(UserMessage.text("go"));
+    registry.close(working.sessionId(), ALICE);
+    var successor = (StubSession) registry.create(options, ALICE);
+
+    working.terminate();
+
+    assertSame(successor, registry.find(options.sessionId(), ALICE).orElseThrow());
+    create(registry, EVE);
+    var refused = assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
+    assertEquals("active sessions at cap 2", refused.getMessage());
   }
 
   @Test
