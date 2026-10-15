@@ -459,6 +459,24 @@ final class SessionRegistryAdmissionTest {
   }
 
   @Test
+  void aSessionClosedAtWorkAndItsSuccessorUnderTheSameIdGiveEverythingBackOnceBothEnd() {
+    var registry = stubs().withMaxSessions(2).withMaxActiveSessions(2).build();
+    var options = options();
+    var working = (StubSession) registry.create(options, ALICE);
+    working.send(UserMessage.text("go"));
+    registry.close(working.sessionId(), ALICE);
+    registry.create(options, ALICE);
+
+    working.terminate();
+    assertTrue(registry.close(options.sessionId(), ALICE));
+
+    create(registry, EVE);
+    create(registry, EVE);
+    var refused = assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
+    assertEquals("active sessions at cap 2", refused.getMessage());
+  }
+
+  @Test
   void anUnstartedSessionKeepsItsCapacityUntilItsProviderHasEndedIt() throws Exception {
     var provider = new HeldEndProvider();
     var registry =
