@@ -459,7 +459,7 @@ There is no unauthenticated external bind.
 | An SSE stream and a result long poll outlived the client's credential | an identity holds for `Authentication.lifetime()` or until `Authentication.revoked()` completes; then an open SSE stream closes without a further event, a pending long poll, or one whose result is still serializing, answers `401`, and a message or interrupt whose body upload, or a create whose options factory, outlived the identity answers `401` and does nothing. `revoked` is a `CompletableFuture<Void>` that a verifier shares across every authentication of one credential; a request watches it only while it runs |
 | `SessionRegistry.create(options)`, `get(id)`, `close(id)` | `create(options, owner)`, `find(id, requester)`, `close(id, requester)`; `find` and `close` act only for the owner |
 | An options factory returning options for another session id was logged and its id used | `500 {"error":"session options factory failed"}` and no session is created, so a factory cannot attach a caller to another user's session; a factory returning `null` gets the same answer |
-| The `500` bodies for a failed options factory and a session that terminated abnormally quoted the exception message | fixed messages, `session options factory failed` and `session terminated abnormally`; the exception is logged |
+| The `500` bodies for a failed options factory and a session that terminated abnormally quoted the exception message, and any other exception escaping a route reached the client as Helidon's default `500` body, its message | fixed messages, `session options factory failed`, `session terminated abnormally` and, for any other failure in a route, `internal server error`; the exception is logged |
 
 ### Added
 
