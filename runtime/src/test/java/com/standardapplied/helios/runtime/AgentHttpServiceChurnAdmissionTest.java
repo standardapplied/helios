@@ -5,12 +5,15 @@ package com.standardapplied.helios.runtime;
 import static com.standardapplied.helios.runtime.AdmissionHarness.assertRefused;
 import static com.standardapplied.helios.runtime.AdmissionHarness.result;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.http.HttpResponse;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -25,9 +28,13 @@ import tools.jackson.databind.ser.std.StdSerializer;
 /**
  * An event stream or result poll holds its principal's and the service's admission until it ends,
  * even after its session is deleted and its session capacity reused, so creating and deleting
- * sessions never lifts the bounds.
+ * sessions never lifts the bounds. A revoked event stream holds its admission until the event it is
+ * still serializing is done, so revoking credentials never lifts them either.
  */
 final class AgentHttpServiceChurnAdmissionTest {
+
+  private static final QueryEvent.AssistantText EVENT =
+      new QueryEvent.AssistantText("held", 0L, Instant.EPOCH, "held");
 
   private final AdmissionHarness harness = new AdmissionHarness();
   private final CountDownLatch serializing = new CountDownLatch(1);
@@ -77,7 +84,7 @@ final class AgentHttpServiceChurnAdmissionTest {
                 .withMaxResultPolls(2)
                 .withMaxResultPollsPerPrincipal(1)
                 .build(),
-            heldCancellations());
+            held(ResultMessage.Cancelled.class));
     var deleted = harness.create(server, "alice");
     var held = waitingPoll(server, deleted, "alice");
     assertEquals(204, harness.send(server, "DELETE", path(deleted), "alice").statusCode());
@@ -104,6 +111,35 @@ final class AgentHttpServiceChurnAdmissionTest {
     assertEquals(200, Await.value("bob's poll to be answered", bobs).statusCode());
   }
 
+  @Test
+  void aRevokedEventStreamKeepsItsAdmissionUntilTheEventItIsSerializingIsDone() throws IOException {
+    var server =
+        harness.server(
+            harness.registry(),
+            RequestLimits.newBuilder().withMaxEventStreamsPerSession(1).build(),
+            held(QueryEvent.AssistantText.class));
+    var sessionId = harness.create(server, "alice");
+    var revoked =
+        Await.value(
+            "the event stream to be answered",
+            harness.openEventsOnOwnConnection(server, sessionId, "alice"));
+    var session = harness.sessions.get(sessionId);
+    Await.until("the stream to subscribe", () -> !session.subscribers.isEmpty());
+    var delivery = CompletableFuture.runAsync(() -> session.subscribers.getFirst().onNext(EVENT));
+    Await.latch("the event to be serialized", serializing);
+
+    harness.tokens.revoke("alice");
+    var streamed = drain(revoked);
+    var refused = open(server, sessionId, "alice");
+
+    assertEquals("event:Ready\ndata:{}", streamed.strip());
+    assertStreamRefused(refused, 429, "{\"error\":\"too many event streams on this session\"}");
+    assertFalse(delivery.isDone());
+    release.countDown();
+    Await.value("the held delivery to end", delivery);
+    harness.openEventsAdmitted(server, sessionId, "alice").body().close();
+  }
+
   private HttpResponse<InputStream> open(RuntimeServer server, String sessionId, String token) {
     return Await.value(
         "the event stream to be answered", harness.openEvents(server, sessionId, token));
@@ -124,12 +160,10 @@ final class AgentHttpServiceChurnAdmissionTest {
     return harness.registry().withMaxSessionsPerPrincipal(1);
   }
 
-  /** A mapper that holds the serialization of a cancelled result until {@link #release}. */
-  private JsonMapper heldCancellations() {
+  /** A mapper that holds the serialization of every {@code type} until {@link #release}. */
+  private <T> JsonMapper held(Class<T> type) {
     return JsonMapper.builder()
-        .addModule(
-            new SimpleModule("hold-cancelled-result")
-                .addSerializer(ResultMessage.Cancelled.class, new HeldSerializer()))
+        .addModule(new SimpleModule("held").addSerializer(type, new HeldSerializer<>(type)))
         .build();
   }
 
@@ -144,23 +178,22 @@ final class AgentHttpServiceChurnAdmissionTest {
     assertEquals(body, ResponseBodies.text(resp.body()));
   }
 
-  private static void drain(HttpResponse<InputStream> resp) {
-    Await.value(
+  private static String drain(HttpResponse<InputStream> resp) {
+    return Await.value(
         "the stream to end", CompletableFuture.supplyAsync(() -> ResponseBodies.text(resp.body())));
   }
 
-  private final class HeldSerializer extends StdSerializer<ResultMessage.Cancelled> {
+  private final class HeldSerializer<T> extends StdSerializer<T> {
 
-    private HeldSerializer() {
-      super(ResultMessage.Cancelled.class);
+    private HeldSerializer(Class<T> type) {
+      super(type);
     }
 
     @Override
-    public void serialize(
-        ResultMessage.Cancelled value, JsonGenerator gen, SerializationContext ctxt) {
+    public void serialize(T value, JsonGenerator gen, SerializationContext ctxt) {
       serializing.countDown();
       Await.latch("the test to release the serialization", release);
-      gen.writeString(value.sessionId());
+      gen.writeString("held");
     }
   }
 }
