@@ -18,8 +18,14 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.SessionOptions;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 import org.junit.jupiter.api.Test;
 
 final class SessionRegistryTest {
@@ -55,7 +61,6 @@ final class SessionRegistryTest {
   void inMemoryFactoryProducesEmptyRegistry() {
     var registry = SessionRegistry.inMemory();
     assertEquals(0, registry.size());
-    assertTrue(registry.sessionIds().isEmpty());
   }
 
   @Test
@@ -99,6 +104,7 @@ final class SessionRegistryTest {
         assertThrows(
             NullPointerException.class, () -> registry.create(optionsFor("ignored"), OWNER));
     assertEquals("factory returned null session", ex.getMessage());
+    assertEquals(0, registry.size());
   }
 
   @Test
@@ -186,15 +192,14 @@ final class SessionRegistryTest {
 
   @Test
   void anotherPrincipalCannotCloseTheSession() {
-    var closeCount = new AtomicInteger();
-    var registry =
-        SessionRegistry.withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount));
+    var closes = new AtomicInteger();
+    var registry = SessionRegistry.withFactory(opts -> stub(opts, closes));
     registry.create(optionsFor("s1"), OWNER);
 
     assertFalse(registry.close("s1", SAME_TENANT));
     assertFalse(registry.close("s1", OTHER_TENANT));
 
-    assertEquals(0, closeCount.get());
+    assertEquals(0, closes.get());
     assertTrue(registry.find("s1", OWNER).isPresent());
     registry.closeAll();
   }
@@ -231,29 +236,16 @@ final class SessionRegistryTest {
   }
 
   @Test
-  void sessionIdsSnapshotIsImmutable() {
-    var registry = SessionRegistry.inMemory();
-    registry.create(optionsFor("s1"), OWNER);
-    var snapshot = registry.sessionIds();
-    assertEquals(1, snapshot.size());
-    registry.create(optionsFor("s2"), OWNER);
-    assertEquals(1, snapshot.size(), "snapshot is point-in-time");
-    assertEquals(2, registry.size());
-    registry.closeAll();
-  }
-
-  @Test
   void duplicateIdClosesTheRejectedSession() {
-    var closeCount = new AtomicInteger();
-    var registry =
-        SessionRegistry.withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount));
+    var closes = new AtomicInteger();
+    var registry = SessionRegistry.withFactory(opts -> stub(opts, closes));
     registry.create(optionsFor("s1"), OWNER);
     assertThrows(IllegalStateException.class, () -> registry.create(optionsFor("s1"), OWNER));
     // The freshly-built tracking session for the rejected duplicate should be closed once;
     // the original remains open until we tear down.
-    assertEquals(1, closeCount.get(), "rejected duplicate must close its freshly-built session");
+    assertEquals(1, closes.get(), "rejected duplicate must close its freshly-built session");
     registry.closeAll();
-    assertEquals(2, closeCount.get(), "original closes during closeAll");
+    assertEquals(2, closes.get(), "original closes during closeAll");
   }
 
   @Test
@@ -266,43 +258,6 @@ final class SessionRegistryTest {
   }
 
   // ── Builder ──────────────────────────────────────────────────────────────
-
-  @Test
-  void newBuilderProducesDefaults() {
-    var registry = SessionRegistry.newBuilder().build();
-    assertEquals(0, registry.size());
-  }
-
-  @Test
-  void builderWithAllOptionsAppliesEverySetter() {
-    // Exercise every Builder setter in one go so a missed default propagation surfaces here.
-    var closeCount = new AtomicInteger();
-    java.util.function.Function<com.standardapplied.helios.session.SessionOptions, AgentSession>
-        customFactory = opts -> new TrackingSession(opts.sessionId(), closeCount);
-    var clock =
-        java.time.Clock.fixed(
-            java.time.Instant.parse("2026-05-16T20:00:00Z"), java.time.ZoneOffset.UTC);
-    var registry =
-        SessionRegistry.newBuilder()
-            .withFactory(customFactory)
-            .withClock(clock)
-            .withMaxSessions(7)
-            .build();
-    // Factory: passes through to create().
-    var session = (TrackingSession) registry.create(optionsFor("s1"), OWNER);
-    assertEquals("s1", session.sessionId());
-    // Clock: drives terminatedAt timestamping; close session and confirm purge with age 0 evicts.
-    session.future.complete(stubTerminal("s1"));
-    assertEquals(1, registry.purgeTerminalOlderThan(java.time.Duration.ZERO));
-    // MaxSessions: now empty; create up to cap.
-    for (int i = 0; i < 7; i++) {
-      registry.create(optionsFor("c" + i), OWNER);
-    }
-    assertEquals(7, registry.size());
-    // Eighth create with no terminal to evict → reject.
-    assertThrows(IllegalStateException.class, () -> registry.create(optionsFor("overflow"), OWNER));
-    registry.closeAll();
-  }
 
   @Test
   void builderRejectsNullFactory() {
@@ -319,273 +274,135 @@ final class SessionRegistryTest {
   }
 
   @Test
-  void builderRejectsZeroMaxSessions() {
+  void builderRejectsEveryCapThatIsNotPositive() {
     var b = SessionRegistry.newBuilder();
-    var ex = assertThrows(IllegalArgumentException.class, () -> b.withMaxSessions(0));
-    assertEquals("maxSessions must be positive, got 0", ex.getMessage());
+    Map<String, IntConsumer> caps =
+        Map.of(
+            "maxSessions", b::withMaxSessions,
+            "maxActiveSessions", b::withMaxActiveSessions,
+            "maxSessionsPerPrincipal", b::withMaxSessionsPerPrincipal,
+            "maxActiveSessionsPerPrincipal", b::withMaxActiveSessionsPerPrincipal);
+    caps.forEach(
+        (name, setter) -> {
+          for (var value : new int[] {0, -5}) {
+            var ex = assertThrows(IllegalArgumentException.class, () -> setter.accept(value));
+            assertEquals(name + " must be positive, got " + value, ex.getMessage());
+          }
+        });
   }
 
   @Test
-  void builderRejectsNegativeMaxSessions() {
+  void builderRejectsEveryDurationThatIsNullOrNotPositive() {
     var b = SessionRegistry.newBuilder();
-    var ex = assertThrows(IllegalArgumentException.class, () -> b.withMaxSessions(-5));
-    assertEquals("maxSessions must be positive, got -5", ex.getMessage());
+    Map<String, Consumer<Duration>> durations =
+        Map.of("terminalRetention", b::withTerminalRetention, "idleTimeout", b::withIdleTimeout);
+    durations.forEach(
+        (name, setter) -> {
+          var missing = assertThrows(NullPointerException.class, () -> setter.accept(null));
+          assertEquals(name + " must not be null", missing.getMessage());
+          for (var value : List.of(Duration.ZERO, Duration.ofSeconds(-1))) {
+            var ex = assertThrows(IllegalArgumentException.class, () -> setter.accept(value));
+            assertEquals(name + " must be positive, got " + value, ex.getMessage());
+          }
+        });
   }
 
-  // ── purgeTerminalOlderThan ───────────────────────────────────────────────
+  // ── Defaults ─────────────────────────────────────────────────────────────
 
   @Test
-  void purgeRejectsNullAge() {
-    var registry = SessionRegistry.inMemory();
-    var ex = assertThrows(NullPointerException.class, () -> registry.purgeTerminalOlderThan(null));
-    assertEquals("age must not be null", ex.getMessage());
-  }
+  void byDefaultAPrincipalHoldsSixteenActiveSessions() {
+    var registry = SessionRegistry.withFactory(opts -> new StubSession(opts.sessionId()));
+    createAll(registry, OWNER, 16);
 
-  @Test
-  void purgeRejectsNegativeAge() {
-    var registry = SessionRegistry.inMemory();
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> registry.purgeTerminalOlderThan(java.time.Duration.ofSeconds(-1)));
-    assertTrue(ex.getMessage().startsWith("age must be non-negative"));
-  }
+    var ex = assertThrows(SessionCapacityException.class, () -> create(registry, OWNER));
 
-  @Test
-  void purgeEmptyRegistryReturnsZero() {
-    var registry = SessionRegistry.inMemory();
-    assertEquals(0, registry.purgeTerminalOlderThan(java.time.Duration.ofSeconds(1)));
+    assertEquals(SessionCapacityException.Scope.PRINCIPAL, ex.scope());
+    assertEquals("active sessions of the principal at cap 16", ex.getMessage());
   }
 
   @Test
-  void purgeLeavesLiveSessionsAlone() {
-    var closeCount = new AtomicInteger();
-    var clock =
-        java.time.Clock.fixed(
-            java.time.Instant.parse("2026-05-16T12:00:00Z"), java.time.ZoneOffset.UTC);
+  void byDefaultTheRegistryHoldsTwoHundredFiftySixActiveSessions() {
+    var registry = SessionRegistry.withFactory(opts -> new StubSession(opts.sessionId()));
+    for (var i = 0; i < 16; i++) {
+      createAll(registry, new Principal("tenant-" + i, "user"), 16);
+    }
+
+    var ex = assertThrows(SessionCapacityException.class, () -> create(registry, OWNER));
+
+    assertEquals(SessionCapacityException.Scope.SERVER, ex.scope());
+    assertEquals("active sessions at cap 256", ex.getMessage());
+  }
+
+  @Test
+  void byDefaultAPrincipalHoldsSixtyFourSessionsBeforeItsOldestTerminalIsEvicted() {
+    var registry = SessionRegistry.withFactory(opts -> new StubSession(opts.sessionId()));
+    var first = (StubSession) create(registry, OWNER);
+    first.terminate();
+    for (var i = 1; i < 64; i++) {
+      ((StubSession) create(registry, OWNER)).terminate();
+    }
+
+    create(registry, OWNER);
+
+    assertEquals(64, registry.size());
+    assertEquals(1, first.closes.get());
+  }
+
+  @Test
+  void byDefaultTheRegistryHoldsOneThousandTwentyFourSessions() {
+    var registry = SessionRegistry.withFactory(opts -> new StubSession(opts.sessionId()));
+    for (var i = 0; i < 16; i++) {
+      var tenant = new Principal("tenant-" + i, "user");
+      for (var j = 0; j < 64; j++) {
+        ((StubSession) create(registry, tenant)).terminate();
+      }
+    }
+
+    var ex = assertThrows(SessionCapacityException.class, () -> create(registry, OWNER));
+
+    assertEquals(SessionCapacityException.Scope.SERVER, ex.scope());
+    assertEquals("sessions at cap 1024", ex.getMessage());
+    assertEquals(1024, registry.size());
+  }
+
+  @Test
+  void byDefaultATerminalSessionIsRetainedFifteenMinutesAndAnUnstartedOneFive() {
+    var now = new AtomicReference<>(Instant.parse("2026-10-15T12:00:00Z"));
     var registry =
         SessionRegistry.newBuilder()
-            .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
-            .withClock(clock)
+            .withFactory(opts -> new StubSession(opts.sessionId()))
+            .withClock(now::get)
             .build();
-    registry.create(optionsFor("live"), OWNER);
-    // Live → terminatedAt remains null → not purged regardless of age.
-    assertEquals(0, registry.purgeTerminalOlderThan(java.time.Duration.ZERO));
-    assertEquals(1, registry.size());
-    registry.closeAll();
-  }
+    var terminal = (StubSession) create(registry, OWNER);
+    terminal.terminate();
+    create(registry, OWNER);
 
-  @Test
-  void purgeRemovesTerminalSessionsOlderThanCutoff() {
-    var closeCount = new AtomicInteger();
-    var clock = new MutableClock(java.time.Instant.parse("2026-05-16T12:00:00Z"));
-    var registry =
-        SessionRegistry.newBuilder()
-            .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
-            .withClock(clock)
-            .build();
-    var old = (TrackingSession) registry.create(optionsFor("old"), OWNER);
-    old.future.complete(stubTerminal(old.sessionId()));
-    // Advance clock 10 s.
-    clock.advance(java.time.Duration.ofSeconds(10));
-    var fresh = (TrackingSession) registry.create(optionsFor("fresh"), OWNER);
-    fresh.future.complete(stubTerminal(fresh.sessionId()));
-    // Now: old was terminated at T+0, fresh at T+10, now is T+10. Purge anything ≥5 s old.
-    var purged = registry.purgeTerminalOlderThan(java.time.Duration.ofSeconds(5));
-    assertEquals(1, purged);
-    assertTrue(registry.find("fresh", OWNER).isPresent());
-    assertFalse(registry.find("old", OWNER).isPresent());
-    registry.closeAll();
-  }
-
-  @Test
-  void purgeAgeZeroEvictsEveryTerminal() {
-    var closeCount = new AtomicInteger();
-    var clock = new MutableClock(java.time.Instant.parse("2026-05-16T12:00:00Z"));
-    var registry =
-        SessionRegistry.newBuilder()
-            .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
-            .withClock(clock)
-            .build();
-    var a = (TrackingSession) registry.create(optionsFor("a"), OWNER);
-    var b = (TrackingSession) registry.create(optionsFor("b"), OTHER_TENANT);
-    a.future.complete(stubTerminal(a.sessionId()));
-    b.future.complete(stubTerminal(b.sessionId()));
-    assertEquals(2, registry.purgeTerminalOlderThan(java.time.Duration.ZERO));
+    now.set(now.get().plus(Duration.ofMinutes(5)).minusMillis(1));
+    assertEquals(0, registry.sweep());
+    now.set(now.get().plusMillis(1));
+    assertEquals(1, registry.sweep());
+    now.set(now.get().plus(Duration.ofMinutes(10)).minusMillis(1));
+    assertEquals(0, registry.sweep());
+    now.set(now.get().plusMillis(1));
+    assertEquals(1, registry.sweep());
     assertEquals(0, registry.size());
   }
 
-  @Test
-  void aSessionClosedByItsOwnerDuringASweepIsNotCountedAsPurged() {
-    var closeCount = new AtomicInteger();
-    var registry =
-        SessionRegistry.newBuilder()
-            .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
-            .withClock(new MutableClock(java.time.Instant.parse("2026-05-16T12:00:00Z")))
-            .build();
-    var a = (TrackingSession) registry.create(optionsFor("a"), OWNER);
-    var b = (TrackingSession) registry.create(optionsFor("b"), OWNER);
-    a.onClose = () -> registry.close("b", OWNER);
-    b.onClose = () -> registry.close("a", OWNER);
-    a.future.complete(stubTerminal(a.sessionId()));
-    b.future.complete(stubTerminal(b.sessionId()));
+  private static final AtomicInteger IDS = new AtomicInteger();
 
-    assertEquals(1, registry.purgeTerminalOlderThan(java.time.Duration.ZERO));
-    assertEquals(0, registry.size());
-    assertEquals(2, closeCount.get());
+  private static AgentSession create(SessionRegistry registry, Principal owner) {
+    return registry.create(optionsFor("s" + IDS.incrementAndGet()), owner);
   }
 
-  // ── withMaxSessions cap ──────────────────────────────────────────────────
-
-  @Test
-  void capRejectsWhenAllSessionsAreLive() {
-    var closeCount = new AtomicInteger();
-    var registry =
-        SessionRegistry.newBuilder()
-            .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
-            .withMaxSessions(2)
-            .build();
-    registry.create(optionsFor("s1"), OWNER);
-    registry.create(optionsFor("s2"), OWNER);
-    var ex =
-        assertThrows(IllegalStateException.class, () -> registry.create(optionsFor("s3"), OWNER));
-    assertTrue(ex.getMessage().contains("registry at capacity"));
-    assertEquals(2, registry.size());
-    registry.closeAll();
-  }
-
-  @Test
-  void capEvictsOldestTerminalWhenAtLimit() {
-    var closeCount = new AtomicInteger();
-    var clock = new MutableClock(java.time.Instant.parse("2026-05-16T12:00:00Z"));
-    var registry =
-        SessionRegistry.newBuilder()
-            .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
-            .withClock(clock)
-            .withMaxSessions(2)
-            .build();
-    var a = (TrackingSession) registry.create(optionsFor("a"), OWNER);
-    a.future.complete(stubTerminal(a.sessionId()));
-    clock.advance(java.time.Duration.ofSeconds(1));
-    var b = (TrackingSession) registry.create(optionsFor("b"), OWNER);
-    b.future.complete(stubTerminal(b.sessionId()));
-    clock.advance(java.time.Duration.ofSeconds(1));
-    // Now at cap with two terminals. Creating "c" should evict "a" (oldest terminal).
-    registry.create(optionsFor("c"), OWNER);
-    assertEquals(2, registry.size());
-    assertFalse(registry.find("a", OWNER).isPresent());
-    assertTrue(registry.find("b", OWNER).isPresent());
-    assertTrue(registry.find("c", OWNER).isPresent());
-    registry.closeAll();
-  }
-
-  @Test
-  void capDoesNotEvictWhenUnderLimit() {
-    var closeCount = new AtomicInteger();
-    var registry =
-        SessionRegistry.newBuilder()
-            .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
-            .withMaxSessions(10)
-            .build();
-    var a = (TrackingSession) registry.create(optionsFor("a"), OWNER);
-    a.future.complete(stubTerminal(a.sessionId()));
-    registry.create(optionsFor("b"), OWNER);
-    assertEquals(2, registry.size());
-    assertTrue(registry.find("a", OWNER).isPresent());
-    registry.closeAll();
-  }
-
-  /** Synthesize a terminal ResultMessage so the registry timestamps termination. */
-  private static com.standardapplied.helios.session.ResultMessage stubTerminal(String sessionId) {
-    return new com.standardapplied.helios.session.ResultMessage.Success(
-        sessionId,
-        "ok",
-        com.standardapplied.helios.core.model.Response.Usage.of(0, 0),
-        com.standardapplied.helios.core.common.CostEstimate.zero(),
-        java.time.Duration.ZERO,
-        java.util.List.of());
-  }
-
-  /** Test clock that lets us advance time by hand. */
-  private static final class MutableClock extends java.time.Clock {
-    private final java.util.concurrent.atomic.AtomicReference<java.time.Instant> now;
-
-    MutableClock(java.time.Instant initial) {
-      this.now = new java.util.concurrent.atomic.AtomicReference<>(initial);
-    }
-
-    void advance(java.time.Duration by) {
-      now.updateAndGet(i -> i.plus(by));
-    }
-
-    @Override
-    public java.time.ZoneId getZone() {
-      return java.time.ZoneOffset.UTC;
-    }
-
-    @Override
-    public java.time.Clock withZone(java.time.ZoneId zone) {
-      return this;
-    }
-
-    @Override
-    public java.time.Instant instant() {
-      return now.get();
+  private static void createAll(SessionRegistry registry, Principal owner, int count) {
+    for (var i = 0; i < count; i++) {
+      create(registry, owner);
     }
   }
 
-  /** Minimal AgentSession used by the duplicate-id test to assert close() is called. */
-  private static final class TrackingSession implements AgentSession {
-
-    private final String sessionId;
-    private final AtomicInteger closeCount;
-    private volatile Runnable onClose = () -> {};
-    private final java.util.concurrent.CompletableFuture<
-            com.standardapplied.helios.session.ResultMessage>
-        future = new java.util.concurrent.CompletableFuture<>();
-
-    TrackingSession(String sessionId, AtomicInteger closeCount) {
-      this.sessionId = sessionId;
-      this.closeCount = closeCount;
-    }
-
-    @Override
-    public void send(com.standardapplied.helios.session.UserMessage message) {}
-
-    @Override
-    public void interrupt(String reason) {}
-
-    @Override
-    public java.util.concurrent.Flow.Publisher<com.standardapplied.helios.session.QueryEvent>
-        events() {
-      return s -> {};
-    }
-
-    @Override
-    public java.util.concurrent.CompletableFuture<com.standardapplied.helios.session.ResultMessage>
-        result() {
-      return future;
-    }
-
-    @Override
-    public String sessionId() {
-      return sessionId;
-    }
-
-    @Override
-    public long currentTurnIndex() {
-      return 0;
-    }
-
-    @Override
-    public void close() {
-      closeCount.incrementAndGet();
-      onClose.run();
-    }
-
-    @Override
-    public void answer(
-        String questionId,
-        com.standardapplied.helios.session.ask.AskUserQuestionResponse response) {}
+  private static StubSession stub(SessionOptions options, AtomicInteger closes) {
+    var session = new StubSession(options.sessionId());
+    session.onClose = closes::incrementAndGet;
+    return session;
   }
 }

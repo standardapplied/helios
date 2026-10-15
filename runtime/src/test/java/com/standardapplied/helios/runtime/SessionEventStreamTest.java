@@ -197,6 +197,28 @@ final class SessionEventStreamTest {
   }
 
   @Test
+  void anEventArrivingAfterTheEndIsNeitherSerializedNorWritten() {
+    var sink = new RecordingSink(null);
+    var serialized = new AtomicBoolean();
+    var recording =
+        new ObjectMapper() {
+          @Override
+          public String writeValueAsString(Object value) {
+            serialized.set(true);
+            return super.writeValueAsString(value);
+          }
+        };
+    var stream = new SessionEventStream("sess-1", sink, recording);
+    stream.end();
+
+    stream.onNext(EVENT);
+
+    assertFalse(serialized.get());
+    assertTrue(sink.emitted.isEmpty());
+    awaitEnd(stream);
+  }
+
+  @Test
   void aSubscriptionArrivingAfterTheEndIsCancelledAndNothingIsRequested() {
     var sink = new RecordingSink(null);
     var subscription = new RecordingSubscription();
@@ -267,15 +289,20 @@ final class SessionEventStreamTest {
   }
 
   @Test
-  void anInterruptedWaitClosesTheSinkAndKeepsTheInterrupt() {
+  void anInterruptedWaitEndsTheStreamClosesTheSinkAndKeepsTheInterrupt() {
     var sink = new RecordingSink(null);
+    var subscription = new RecordingSubscription();
     var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
+    stream.onSubscribe(subscription);
 
     Thread.currentThread().interrupt();
     stream.awaitEndThenClose();
 
     assertTrue(Thread.interrupted());
     assertTrue(sink.closed.get());
+    assertTrue(subscription.cancelled.get());
+    stream.onNext(EVENT);
+    assertEquals(List.of("Ready:{}"), sink.emitted);
   }
 
   private static void awaitEnd(SessionEventStream stream) {
