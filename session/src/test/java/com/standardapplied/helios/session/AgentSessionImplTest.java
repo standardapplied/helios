@@ -719,6 +719,49 @@ final class AgentSessionImplTest {
   }
 
   @Test
+  void aSessionClosedBeforeItStartsSettlesItsResultWhenTheProviderEndThrowsAnError() {
+    var provider = new LifecycleProvider();
+    provider.onEnd =
+        () -> {
+          throw new AssertionError("provider end failed");
+        };
+    var session =
+        AgentSession.create(
+            SessionOptions.newBuilder()
+                .withModel(textOnceModel("unused", FinishReason.STOP))
+                .withSessionId(SID)
+                .withClock(CLOCK)
+                .withExecutionProvider(provider)
+                .build());
+
+    var thrown = assertThrows(AssertionError.class, session::close);
+
+    assertEquals("provider end failed", thrown.getMessage());
+    assertInstanceOf(ResultMessage.Cancelled.class, session.result().getNow(null));
+  }
+
+  @Test
+  void aSessionThatRanSettlesItsResultWhenTheProviderEndThrowsAnError() {
+    var provider = new LifecycleProvider();
+    provider.onEnd =
+        () -> {
+          throw new AssertionError("provider end failed");
+        };
+    try (var s =
+        AgentSession.create(
+            SessionOptions.newBuilder()
+                .withModel(textOnceModel("done", FinishReason.STOP))
+                .withSessionId(SID)
+                .withClock(CLOCK)
+                .withExecutionProvider(provider)
+                .build())) {
+      s.send(UserMessage.text("hi"));
+
+      assertInstanceOf(ResultMessage.Success.class, terminalOf(s));
+    }
+  }
+
+  @Test
   void providerOnSessionEndThrowingRuntimeExceptionIsSwallowed() throws Exception {
     var provider = new LifecycleProvider();
     provider.throwOnEnd = new RuntimeException("end-cleanup-boom");

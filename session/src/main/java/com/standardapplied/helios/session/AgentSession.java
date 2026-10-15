@@ -136,7 +136,9 @@ public interface AgentSession extends AutoCloseable {
    * natural termination. A loop at work stops cooperatively: {@link #result()} completes once it
    * has stopped, which may be after this returns; for a session never started, before it returns.
    * Either way it completes only after the session's runtime has ended, its {@link
-   * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd} included.
+   * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd} included, unless
+   * the provider refused the session at start: its result completed then, and the provider holds
+   * nothing to end.
    */
   @Override
   void close();
