@@ -289,15 +289,20 @@ final class SessionEventStreamTest {
   }
 
   @Test
-  void anInterruptedWaitClosesTheSinkAndKeepsTheInterrupt() {
+  void anInterruptedWaitEndsTheStreamClosesTheSinkAndKeepsTheInterrupt() {
     var sink = new RecordingSink(null);
+    var subscription = new RecordingSubscription();
     var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
+    stream.onSubscribe(subscription);
 
     Thread.currentThread().interrupt();
     stream.awaitEndThenClose();
 
     assertTrue(Thread.interrupted());
     assertTrue(sink.closed.get());
+    assertTrue(subscription.cancelled.get());
+    stream.onNext(EVENT);
+    assertEquals(List.of("Ready:{}"), sink.emitted);
   }
 
   private static void awaitEnd(SessionEventStream stream) {
