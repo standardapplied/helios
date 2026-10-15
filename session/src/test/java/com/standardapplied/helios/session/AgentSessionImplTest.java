@@ -145,6 +145,34 @@ final class AgentSessionImplTest {
   }
 
   @Test
+  void aSessionIsNotStartedUntilItsFirstMessage() throws Exception {
+    var s = buildSession(textOnceModel("done", FinishReason.STOP));
+    try {
+      assertFalse(s.isStarted());
+      s.send(UserMessage.text("hi"));
+      assertTrue(s.isStarted());
+      terminalOf(s);
+    } finally {
+      s.close();
+    }
+  }
+
+  @Test
+  void anInterruptStartsTheSession() {
+    try (var s = buildSession(textOnceModel("done", FinishReason.STOP))) {
+      s.interrupt("now");
+      assertTrue(s.isStarted());
+    }
+  }
+
+  @Test
+  void aSessionClosedBeforeItsFirstMessageCountsAsStarted() {
+    var s = buildSession(textOnceModel("x", FinishReason.STOP));
+    s.close();
+    assertTrue(s.isStarted());
+  }
+
+  @Test
   void eventsAccessorReturnsPublisher() {
     try (var s = buildSession(textOnceModel("x", FinishReason.STOP))) {
       assertNotNull(s.events());
@@ -191,8 +219,9 @@ final class AgentSessionImplTest {
       Await.latch("the loop to reach chat()", entered);
       s.send(UserMessage.text("second"));
       s.send(UserMessage.text("third"));
-      var ex = assertThrows(IllegalStateException.class, () -> s.send(UserMessage.text("fourth")));
-      assertTrue(ex.getMessage().startsWith("steering queue full"));
+      var ex =
+          assertThrows(SteeringQueueFullException.class, () -> s.send(UserMessage.text("fourth")));
+      assertEquals("steering queue full at capacity 2", ex.getMessage());
     } finally {
       release.countDown();
       s.close();
@@ -210,8 +239,8 @@ final class AgentSessionImplTest {
       s.send(UserMessage.text("first"));
       Await.latch("the loop to reach chat()", entered);
       s.send(UserMessage.text("second"));
-      var ex = assertThrows(IllegalStateException.class, () -> s.interrupt("nope"));
-      assertTrue(ex.getMessage().contains("cannot enqueue interrupt"));
+      var ex = assertThrows(SteeringQueueFullException.class, () -> s.interrupt("nope"));
+      assertEquals("steering queue full at capacity 1 — cannot enqueue interrupt", ex.getMessage());
     } finally {
       release.countDown();
       s.close();

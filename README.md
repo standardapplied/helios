@@ -697,6 +697,8 @@ var server = RuntimeServer.builder()
 
 The proxy must strip client-supplied copies of both headers. Any other verifier (a JWT library, mutual TLS) plugs in as an `Authenticator` returning an `Authentication` with the principal, the credential's remaining lifetime and a stage that completes on revocation. `withoutAuthentication()` serves a loopback bind as one local principal; on any other host `build()` refuses it, as it refuses a non-loopback host with no authenticator. `RuntimeServer` installs no Helidon feature discovered on the classpath; mount `AgentHttpService` on your own `WebServer` to combine it with features.
 
+Every request that would hold memory is admitted against a finite bound before any work, and a refused one is answered at once with a fixed body and `Retry-After: 5`. `SessionRegistry` reserves capacity before the options factory runs: by default 1024 sessions and 256 active sessions per registry, 64 and 16 per principal. A create over the caller's own cap is `429`, over the registry's `503`. Room is made only by evicting the caller's own oldest terminal session, never another principal's. Terminal sessions are kept 15 minutes and sessions never started 5 minutes; `RuntimeServer` sweeps every 30 seconds. `RequestLimits` bounds a message or interrupt body to 256 KiB (`413`), and each session to 4 event streams and 4 result polls (`429`). A full steering queue is `429`. `RuntimeServer.counters()` reports what was admitted and refused per kind.
+
 ## Design Principles
 
 - **No magic** — explicit wiring, no annotation-driven DI.

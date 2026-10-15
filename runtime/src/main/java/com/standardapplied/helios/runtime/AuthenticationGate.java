@@ -83,6 +83,20 @@ final class AuthenticationGate {
       return !ended.isDone();
     }
 
+    /**
+     * Answer {@code 401} if the identity ended while the request waited, on a slow body or options
+     * factory, so no work is queued for an expired or revoked identity.
+     *
+     * @return {@code true} when the identity ended and the request has been answered
+     */
+    boolean answeredAsEnded(ServerResponse resp) {
+      if (valid()) {
+        return false;
+      }
+      resp.status(Status.UNAUTHORIZED_401).send(UNAUTHENTICATED);
+      return true;
+    }
+
     /** End the identity's watch once the request is answered, cancelling its expiry timer. */
     void release() {
       ended.complete(null);

@@ -462,6 +462,23 @@ There is no unauthenticated external bind.
 | An options factory returning options for another session id was logged and its id used | `500 {"error":"session options factory failed"}` and no session is created, so a factory cannot attach a caller to another user's session; a factory returning `null` gets the same answer |
 | The `500` bodies for a failed options factory and a session that terminated abnormally quoted the exception message, and any other exception escaping a route reached the client as Helidon's default `500` body, its message | fixed messages, `session options factory failed`, `session terminated abnormally` and, for any other failure in a route, `internal server error`; the exception is logged |
 
+**The runtime admits sessions and requests against finite bounds.** `SessionRegistry` reserves
+capacity atomically before the options factory runs, under four hard caps that count open
+reservations: sessions held and active sessions, across the registry and per `Principal`. Room for
+a create comes only from evicting the same principal's oldest terminal session, never another
+principal's. Terminal and never-started sessions are swept on the registry's clock, and
+`RuntimeServer` runs the sweep itself. Every refusal is immediate, with a fixed body and
+`Retry-After: 5`.
+
+| 2.x | 3.0 |
+|---|---|
+| No session, body, stream or poll limit by default; a full registry, an evicted session of another owner or a full steering queue answered `500` or `409` | Defaults: 1024 sessions and 256 active sessions per registry, 64 and 16 per principal (`SessionRegistry.Builder.withMaxSessions`, `withMaxActiveSessions`, `withMaxSessionsPerPrincipal`, `withMaxActiveSessionsPerPrincipal`); terminal sessions kept 15 minutes (`withTerminalRetention`) and sessions never started 5 minutes (`withIdleTimeout`); request bodies up to 256 KiB, and 4 event streams and 4 result polls per session (`RequestLimits`, through `RuntimeServer.Builder.withRequestLimits` or the new last `AgentHttpService` constructor argument); the sweep runs every 30 seconds (`RuntimeServer.Builder.withSweepInterval`). A create over a principal's cap answers `429 {"error":"session quota reached"}`, over the registry's `503 {"error":"server at session capacity"}`, whatever other principals hold; a full steering queue `429 {"error":"session message queue full"}`, where it was `409`; a stream or poll beyond the session's limit `429`; a body over the bound `413 {"error":"request body too large"}` |
+| `SessionRegistry.create` checked `withMaxSessions` outside any lock, so concurrent creates passed it, and evicted the oldest terminal session of any owner | `reserve(owner)` returns a `SessionReservation` taken atomically; `register(options)` spends it and `close()` gives it back, as does a failing factory or a duplicate id. `create(options, owner)` is both. A refusal throws `SessionCapacityException`, whose `scope()` is `PRINCIPAL` or `SERVER` |
+| `SessionRegistry.purgeTerminalOlderThan(Duration)` | `sweep()`, using the registry's retention and idle timeout |
+| `SessionRegistry.sessionIds()` | removed; `size()` remains |
+| A full steering queue threw `IllegalStateException` from `AgentSession.send` and `interrupt` | `SteeringQueueFullException`, a subclass, so a host tells backpressure from a closed or terminal session |
+| `AgentSession` had no way to tell an unused session from a working one | `AgentSession.isStarted()`; an implementation outside Helios adds it |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`

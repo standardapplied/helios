@@ -8,25 +8,21 @@ import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.SessionOptions;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.InstantSource;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
- * In-memory registry of live sessions. The HTTP service holds one per process; route handlers look
- * sessions up by id to dispatch send / interrupt / events / close.
+ * In-memory registry of the sessions one process serves. The HTTP service holds one per process;
+ * route handlers look sessions up by id to dispatch send / interrupt / events / close.
  *
- * <p>Sessions are created via {@link #create(SessionOptions, Principal)} — a {@link Function}
- * factory wired at construction (typically {@code AgentSession::create}) builds the impl. The
- * factory is injectable so tests can substitute a stub session.
+ * <p>A session is admitted in two steps: {@link #reserve(Principal)} takes capacity for it before
+ * anything of the session exists, and {@link SessionReservation#register(SessionOptions)} builds it
+ * through the factory wired at construction (typically {@code AgentSession::create}) and registers
+ * it. {@link #create(SessionOptions, Principal)} does both at once.
  *
  * <h2>Ownership</h2>
  *
@@ -35,43 +31,47 @@ import java.util.function.Function;
  * only for an equal principal; for anyone else they answer exactly as for an id that was never
  * registered, so a caller cannot learn whether another owner's id exists.
  *
- * <p>Sessions remain in the registry until {@link #close(String, Principal)} is called, even after
- * they reach a terminal {@link com.standardapplied.helios.session.ResultMessage ResultMessage} —
- * keeping them around lets late SSE subscribers fetch the final {@code LoopEnded} event after
- * termination, and lets the {@code DELETE /sessions/{id}} route be the explicit cleanup boundary.
+ * <h2>Admission</h2>
+ *
+ * Four caps are hard limits, checked and taken atomically with every other create, and count open
+ * reservations as well as registered sessions: sessions held and active sessions, each across the
+ * registry and per principal. A session is active until its {@link AgentSession#result()}
+ * completes; after that it is terminal, and it is held until it is closed or swept. When only a cap
+ * on sessions held refuses a reservation, the oldest terminal session of the same principal is
+ * closed to make room. A session of another principal is never evicted, so a refusal is the same
+ * whatever other principals hold. Otherwise the reservation is refused with a {@link
+ * SessionCapacityException} naming whose cap was reached. Active sessions are never evicted; {@link
+ * com.standardapplied.helios.session.SessionLimits#maxWallClock()} bounds how long one runs.
+ *
+ * <p>Defaults, all configurable through {@link #newBuilder()}: 1024 sessions and 256 active
+ * sessions across the registry; 64 sessions and 16 active sessions per principal. The active cap
+ * also bounds concurrent model calls, since a session waits for each of its own.
  *
  * <h2>Retention</h2>
  *
- * The registry can keep terminal sessions indefinitely; for long-running services that creates a
- * slow leak. Two opt-in eviction surfaces address this:
- *
- * <ul>
- *   <li>{@link #purgeTerminalOlderThan(Duration)} — sweep terminal sessions older than the supplied
- *       age. Live sessions are never touched. Best called periodically (every minute or so) from
- *       the deployer's scheduler.
- *   <li>{@code SessionRegistry.newBuilder().withMaxSessions(int)} — cap on registered sessions.
- *       When {@link #create(SessionOptions, Principal)} would push the count over the cap, the
- *       registry evicts the oldest terminal session first; if none is available, the create call
- *       throws {@link IllegalStateException}. Live sessions are never evicted.
- * </ul>
+ * A terminal session stays registered so a late subscriber still sees its {@code LoopEnded} event
+ * and its result, until its owner closes it or {@link #sweep()} finds it held past the terminal
+ * retention (default 15 minutes). The sweep also closes a session never started (see {@link
+ * AgentSession#isStarted()}) within the idle timeout of its registration (default 5 minutes). Both
+ * are measured on the registry's {@link InstantSource}. {@link RuntimeServer} sweeps on a schedule;
+ * a deployer embedding the registry otherwise calls {@link #sweep()} from its own scheduler.
  *
  * <h2>Thread-safety</h2>
  *
- * Thread-safe. All routes share one registry; concurrent create / find / close are common. Backed
- * by {@link ConcurrentHashMap}; {@link #create(SessionOptions, Principal)} rejects duplicate ids.
- * The cap check is best-effort under contention — under a flood of concurrent creates the count may
- * briefly exceed the cap before evictions catch up; the cap is an SLA hint, not a hard barrier.
+ * Thread-safe. All routes share one registry; concurrent create / find / close are common. A
+ * session the registry unregisters is closed outside its lock, and a failure to close it is logged,
+ * never thrown, since the session no longer holds capacity either way.
  */
 public final class SessionRegistry {
 
-  private final ConcurrentHashMap<String, SessionEntry> sessions = new ConcurrentHashMap<>();
+  private static final Logger LOGGER = Logger.getLogger(SessionRegistry.class.getName());
+
   private final Function<SessionOptions, AgentSession> factory;
-  private final InstantSource clock;
-  private final int maxSessions;
+  private final SessionTable table;
 
   /**
-   * Registry that constructs sessions via {@link AgentSession#create(SessionOptions)} with system
-   * clock and no cap.
+   * Registry that constructs sessions via {@link AgentSession#create(SessionOptions)} with the
+   * system clock and the default caps and retention.
    *
    * @return a fresh registry
    */
@@ -80,8 +80,9 @@ public final class SessionRegistry {
   }
 
   /**
-   * Registry that constructs sessions via a custom factory, system clock, no cap. Intended for
-   * tests; production sessions use {@link #inMemory()} or {@link #newBuilder()}.
+   * Registry that constructs sessions via a custom factory, with the system clock and the default
+   * caps and retention. Intended for tests; production sessions use {@link #inMemory()} or {@link
+   * #newBuilder()}.
    *
    * @param factory non-null function mapping options to a fresh session
    * @return a fresh registry
@@ -92,57 +93,64 @@ public final class SessionRegistry {
   }
 
   /**
-   * Start building a registry. Set any of factory / clock / maxSessions; defaults are {@code
-   * AgentSession::create}, {@link Clock#systemUTC()}, and no cap.
+   * Start building a registry.
    *
-   * @return a fresh builder
+   * @return a fresh builder holding the defaults
    */
   public static Builder newBuilder() {
     return new Builder();
   }
 
-  private SessionRegistry(
-      Function<SessionOptions, AgentSession> factory, InstantSource clock, int maxSessions) {
-    this.factory = Objects.requireNonNull(factory, "factory must not be null");
-    this.clock = Objects.requireNonNull(clock, "clock must not be null");
-    if (maxSessions <= 0) {
-      throw new IllegalArgumentException("maxSessions must be positive, got " + maxSessions);
-    }
-    this.maxSessions = maxSessions;
+  private SessionRegistry(Builder builder) {
+    this.factory = builder.factory;
+    this.table =
+        new SessionTable(
+            new SessionQuota(
+                builder.maxSessions,
+                builder.maxActiveSessions,
+                builder.maxSessionsPerPrincipal,
+                builder.maxActiveSessionsPerPrincipal),
+            builder.clock,
+            builder.terminalRetention,
+            builder.idleTimeout);
   }
 
   /**
-   * Create a new session from the given options and register it under its session id, owned by
-   * {@code owner}. A duplicate id is rejected before anything is registered, so an existing
-   * session's owner is never replaced.
+   * Take capacity for one session of {@code owner}, closing the owner's oldest terminal session if
+   * only a cap on sessions held is full. Nothing of the session exists yet; spend the reservation
+   * with {@link SessionReservation#register(SessionOptions)} or give it back with {@link
+   * SessionReservation#close()}.
+   *
+   * @param owner the principal the session will belong to; non-null
+   * @return the reservation
+   * @throws NullPointerException if {@code owner} is null
+   * @throws SessionCapacityException if a cap is reached and no terminal session of {@code owner}
+   *     can make room
+   */
+  public SessionReservation reserve(Principal owner) {
+    Objects.requireNonNull(owner, "owner must not be null");
+    table.reserve(owner).ifPresent(SessionRegistry::closeUnregistered);
+    return new SessionReservation(table, factory, owner);
+  }
+
+  /**
+   * Reserve, build and register a session owned by {@code owner} under its session id. A duplicate
+   * id is rejected before anything is registered, so an existing session's owner is never replaced.
    *
    * @param options the composition record; non-null
    * @param owner the principal the session belongs to; non-null
    * @return the freshly-created, unstarted session
-   * @throws NullPointerException if {@code options} or {@code owner} is null
-   * @throws IllegalStateException if a session with the same id is already registered, or if the
-   *     registry is at its configured {@code maxSessions} cap and no terminal session is available
-   *     to evict
+   * @throws NullPointerException if {@code options} or {@code owner} is null, or the factory
+   *     returned null
+   * @throws SessionCapacityException if a cap is reached and no terminal session of {@code owner}
+   *     can make room
+   * @throws IllegalStateException if a session with the same id is already registered
    */
   public AgentSession create(SessionOptions options, Principal owner) {
     Objects.requireNonNull(options, "options must not be null");
-    Objects.requireNonNull(owner, "owner must not be null");
-    if (sessions.size() >= maxSessions && !tryEvictOldestTerminal()) {
-      throw new IllegalStateException(
-          "registry at capacity "
-              + maxSessions
-              + " and no terminal sessions are available to evict");
+    try (var reservation = reserve(owner)) {
+      return reservation.register(options);
     }
-    var session = factory.apply(options);
-    Objects.requireNonNull(session, "factory returned null session");
-    var entry = new SessionEntry(session, owner, new AtomicReference<>());
-    var prev = sessions.putIfAbsent(options.sessionId(), entry);
-    if (prev != null) {
-      session.close();
-      throw new IllegalStateException("session id already registered: " + options.sessionId());
-    }
-    session.result().whenComplete((r, t) -> entry.terminatedAt().set(clock.instant()));
-    return session;
   }
 
   /**
@@ -156,116 +164,59 @@ public final class SessionRegistry {
   public Optional<AgentSession> find(String sessionId, Principal requester) {
     Objects.requireNonNull(sessionId, "sessionId must not be null");
     Objects.requireNonNull(requester, "requester must not be null");
-    return Optional.ofNullable(sessions.get(sessionId))
-        .filter(entry -> entry.isOwnedBy(requester))
-        .map(SessionEntry::session);
+    return table.find(sessionId, requester);
   }
 
   /**
-   * Close and unregister a session {@code requester} owns. A session that is not registered, or
-   * belongs to another principal, is left untouched.
+   * Unregister and close a session {@code requester} owns, giving back the capacity it held. A
+   * session that is not registered, or belongs to another principal, is left untouched.
    *
    * @param sessionId non-null id
    * @param requester the principal asking; non-null
-   * @return {@code true} if the session was found, owned by {@code requester} and closed
+   * @return {@code true} if the session was found, owned by {@code requester} and unregistered
    * @throws NullPointerException if either argument is null
    */
   public boolean close(String sessionId, Principal requester) {
     Objects.requireNonNull(sessionId, "sessionId must not be null");
     Objects.requireNonNull(requester, "requester must not be null");
-    return Optional.ofNullable(sessions.get(sessionId))
-        .filter(entry -> entry.isOwnedBy(requester))
-        .filter(entry -> sessions.remove(sessionId, entry))
-        .map(SessionEntry::close)
-        .orElse(false);
+    var removed = table.remove(sessionId, requester);
+    removed.ifPresent(SessionRegistry::closeUnregistered);
+    return removed.isPresent();
   }
 
   /**
-   * Snapshot of currently-registered session ids. Stable point-in-time view; mutations after this
-   * call are not reflected.
-   *
-   * @return defensive snapshot
-   */
-  public Collection<String> sessionIds() {
-    return Set.copyOf(sessions.keySet());
-  }
-
-  /**
-   * Number of registered sessions.
+   * Number of registered sessions, terminal ones included; open reservations are not counted.
    *
    * @return non-negative count
    */
   public int size() {
-    return sessions.size();
+    return table.size();
   }
 
-  /** Close and unregister every session. Idempotent. */
+  /** Unregister and close every session. Idempotent. */
   public void closeAll() {
-    for (var entry : Map.copyOf(sessions).entrySet()) {
-      close(entry.getKey(), entry.getValue().owner());
-    }
+    table.removeAll().forEach(SessionRegistry::closeUnregistered);
   }
 
   /**
-   * Sweep every terminal session whose termination instant is older than {@code age} relative to
-   * the registry's {@link Clock}. Live sessions are not touched, even if the registry has held them
-   * far longer than {@code age}. Returns the count of sessions closed + unregistered.
+   * Unregister and close every terminal session held past the terminal retention and every session
+   * never started within the idle timeout of its registration, as of the registry's clock. A
+   * started session that has not ended is never swept.
    *
-   * <p>A session is "terminal" once its {@link AgentSession#result()} future has completed — the
-   * registry captures the wall-clock instant of completion when the future settles, and this method
-   * compares that instant against {@code now - age}.
-   *
-   * @param age non-null, non-negative; sessions terminated at-or-before {@code now - age} are
-   *     purged
-   * @return number of sessions purged
-   * @throws NullPointerException if {@code age} is null
-   * @throws IllegalArgumentException if {@code age} is negative
+   * @return the number of sessions swept
    */
-  public int purgeTerminalOlderThan(Duration age) {
-    Objects.requireNonNull(age, "age must not be null");
-    if (age.isNegative()) {
-      throw new IllegalArgumentException("age must be non-negative, got " + age);
-    }
-    var cutoff = clock.instant().minus(age);
-    int purged = 0;
-    for (var entry : sessions.entrySet()) {
-      var terminated = entry.getValue().terminatedAt().get();
-      if (terminated != null && !terminated.isAfter(cutoff)) {
-        if (close(entry.getKey(), entry.getValue().owner())) {
-          purged++;
-        }
-      }
-    }
-    return purged;
+  public int sweep() {
+    var expired = table.removeExpired();
+    expired.forEach(SessionRegistry::closeUnregistered);
+    return expired.size();
   }
 
-  /**
-   * Evict the single oldest terminal session, if any. Returns {@code true} when an entry was
-   * removed and closed; {@code false} when no terminal session was available.
-   */
-  private boolean tryEvictOldestTerminal() {
-    return sessions.entrySet().stream()
-        .filter(e -> e.getValue().terminatedAt().get() != null)
-        .min(
-            Comparator.comparing(e -> e.getValue().terminatedAt().get(), Comparator.naturalOrder()))
-        .map(e -> close(e.getKey(), e.getValue().owner()))
-        .orElse(false);
-  }
-
-  /**
-   * Per-session bookkeeping: the session, its immutable owner, and the instant its result-future
-   * completed.
-   */
-  private record SessionEntry(
-      AgentSession session, Principal owner, AtomicReference<Instant> terminatedAt) {
-
-    private boolean isOwnedBy(Principal requester) {
-      return owner.equals(requester);
-    }
-
-    private boolean close() {
+  private static void closeUnregistered(AgentSession session) {
+    try {
       session.close();
-      return true;
+    } catch (RuntimeException e) {
+      LOGGER.log(
+          Level.WARNING, "closing unregistered session " + session.sessionId() + " failed", e);
     }
   }
 
@@ -274,7 +225,12 @@ public final class SessionRegistry {
 
     private Function<SessionOptions, AgentSession> factory = AgentSession::create;
     private InstantSource clock = Clock.systemUTC();
-    private int maxSessions = Integer.MAX_VALUE;
+    private int maxSessions = 1024;
+    private int maxActiveSessions = 256;
+    private int maxSessionsPerPrincipal = 64;
+    private int maxActiveSessionsPerPrincipal = 16;
+    private Duration terminalRetention = Duration.ofMinutes(15);
+    private Duration idleTimeout = Duration.ofMinutes(5);
 
     private Builder() {}
 
@@ -291,10 +247,10 @@ public final class SessionRegistry {
     }
 
     /**
-     * Override the clock used to stamp terminal sessions. Tests use a fixed clock for deterministic
-     * eviction; production keeps {@link Clock#systemUTC()}.
+     * Override the time source that stamps registration and termination and measures retention and
+     * idleness. Tests advance one by hand; production keeps {@link Clock#systemUTC()}.
      *
-     * @param clock non-null clock
+     * @param clock non-null time source
      * @return this builder
      * @throws NullPointerException if {@code clock} is null
      */
@@ -304,29 +260,106 @@ public final class SessionRegistry {
     }
 
     /**
-     * Cap registered sessions. When {@link #create(SessionOptions, Principal)} would push the count
-     * over this number, the registry evicts the oldest terminal session first; if no terminal
-     * session is available, the create call throws.
+     * Cap sessions held across the registry, terminal ones and open reservations included. Default
+     * 1024.
      *
      * @param maxSessions positive cap
      * @return this builder
      * @throws IllegalArgumentException if {@code maxSessions} is not positive
      */
     public Builder withMaxSessions(int maxSessions) {
-      if (maxSessions <= 0) {
-        throw new IllegalArgumentException("maxSessions must be positive, got " + maxSessions);
-      }
-      this.maxSessions = maxSessions;
+      this.maxSessions = positive("maxSessions", maxSessions);
       return this;
     }
 
     /**
-     * Build the immutable registry.
+     * Cap active sessions across the registry: open reservations and sessions that have not reached
+     * their terminal result. Default 256.
      *
-     * @return a fresh registry
+     * @param maxActiveSessions positive cap
+     * @return this builder
+     * @throws IllegalArgumentException if {@code maxActiveSessions} is not positive
+     */
+    public Builder withMaxActiveSessions(int maxActiveSessions) {
+      this.maxActiveSessions = positive("maxActiveSessions", maxActiveSessions);
+      return this;
+    }
+
+    /**
+     * Cap sessions one principal holds, terminal ones and open reservations included. Default 64.
+     *
+     * @param maxSessionsPerPrincipal positive cap
+     * @return this builder
+     * @throws IllegalArgumentException if {@code maxSessionsPerPrincipal} is not positive
+     */
+    public Builder withMaxSessionsPerPrincipal(int maxSessionsPerPrincipal) {
+      this.maxSessionsPerPrincipal = positive("maxSessionsPerPrincipal", maxSessionsPerPrincipal);
+      return this;
+    }
+
+    /**
+     * Cap active sessions one principal holds. Default 16.
+     *
+     * @param maxActiveSessionsPerPrincipal positive cap
+     * @return this builder
+     * @throws IllegalArgumentException if {@code maxActiveSessionsPerPrincipal} is not positive
+     */
+    public Builder withMaxActiveSessionsPerPrincipal(int maxActiveSessionsPerPrincipal) {
+      this.maxActiveSessionsPerPrincipal =
+          positive("maxActiveSessionsPerPrincipal", maxActiveSessionsPerPrincipal);
+      return this;
+    }
+
+    /**
+     * How long a terminal session stays registered before {@link #sweep()} closes it. Default 15
+     * minutes.
+     *
+     * @param terminalRetention positive duration
+     * @return this builder
+     * @throws NullPointerException if {@code terminalRetention} is null
+     * @throws IllegalArgumentException if {@code terminalRetention} is not positive
+     */
+    public Builder withTerminalRetention(Duration terminalRetention) {
+      this.terminalRetention = positive("terminalRetention", terminalRetention);
+      return this;
+    }
+
+    /**
+     * How long a registered session may go unstarted before {@link #sweep()} closes it. Default 5
+     * minutes.
+     *
+     * @param idleTimeout positive duration
+     * @return this builder
+     * @throws NullPointerException if {@code idleTimeout} is null
+     * @throws IllegalArgumentException if {@code idleTimeout} is not positive
+     */
+    public Builder withIdleTimeout(Duration idleTimeout) {
+      this.idleTimeout = positive("idleTimeout", idleTimeout);
+      return this;
+    }
+
+    /**
+     * Build the registry.
+     *
+     * @return a fresh, empty registry
      */
     public SessionRegistry build() {
-      return new SessionRegistry(factory, clock, maxSessions);
+      return new SessionRegistry(this);
+    }
+
+    private static int positive(String name, int value) {
+      if (value <= 0) {
+        throw new IllegalArgumentException(name + " must be positive, got " + value);
+      }
+      return value;
+    }
+
+    private static Duration positive(String name, Duration value) {
+      Objects.requireNonNull(value, name + " must not be null");
+      if (!value.isPositive()) {
+        throw new IllegalArgumentException(name + " must be positive, got " + value);
+      }
+      return value;
     }
   }
 }

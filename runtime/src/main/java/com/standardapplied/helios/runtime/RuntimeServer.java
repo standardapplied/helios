@@ -11,9 +11,15 @@ import io.helidon.webserver.WebServerConfig;
 import io.helidon.webserver.http.HttpRouting;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -44,6 +50,12 @@ import tools.jackson.databind.json.JsonMapper;
  * has no unauthenticated mode; a deployer behind an authenticating proxy configures {@link
  * TrustedProxyAuthenticator}.
  *
+ * <p>Requests are bounded by the {@link RequestLimits} set through {@link
+ * Builder#withRequestLimits(RequestLimits)} (default {@link RequestLimits#defaults()}), sessions by
+ * the registry's caps. The server calls {@link SessionRegistry#sweep()} every sweep interval
+ * (default 30 seconds) on a virtual thread of its own, so terminal sessions past their retention
+ * and sessions left unstarted are closed without a deployer's scheduler.
+ *
  * <p>The server installs no Helidon feature discovered on the classpath, since a discovered feature
  * could mount routes the {@link Authenticator} never sees. To combine the runtime with Helidon
  * features, mount {@link AgentHttpService} on a {@link WebServer} of your own.
@@ -54,12 +66,22 @@ import tools.jackson.databind.json.JsonMapper;
  */
 public final class RuntimeServer implements AutoCloseable {
 
+  private static final Logger LOGGER = Logger.getLogger(RuntimeServer.class.getName());
+
   private final WebServer webServer;
   private final SessionRegistry registry;
+  private final AgentHttpService service;
+  private final ScheduledExecutorService sweeper;
 
-  private RuntimeServer(WebServer webServer, SessionRegistry registry) {
+  private RuntimeServer(
+      WebServer webServer,
+      SessionRegistry registry,
+      AgentHttpService service,
+      ScheduledExecutorService sweeper) {
     this.webServer = webServer;
     this.registry = registry;
+    this.service = service;
+    this.sweeper = sweeper;
   }
 
   /**
@@ -89,16 +111,35 @@ public final class RuntimeServer implements AutoCloseable {
     return registry;
   }
 
+  /**
+   * What the server admitted and refused since it started.
+   *
+   * @return a snapshot of the counters
+   */
+  public RuntimeCounters counters() {
+    return service.counters();
+  }
+
   /** The configuration the server started with. Visible for tests. */
   WebServerConfig configForTests() {
     return webServer.prototype();
   }
 
-  /** Stop the server and close every registered session. Idempotent. */
+  /** Stop the sweep and the server, and close every registered session. Idempotent. */
   @Override
   public void close() {
+    sweeper.shutdownNow();
     webServer.stop();
     registry.closeAll();
+  }
+
+  /** Sweep {@code registry}, logging a failure so the next scheduled sweep still runs. */
+  static void sweep(SessionRegistry registry) {
+    try {
+      registry.sweep();
+    } catch (RuntimeException e) {
+      LOGGER.log(Level.WARNING, "session sweep failed", e);
+    }
   }
 
   /** Mutable builder for {@link RuntimeServer}. */
@@ -128,6 +169,8 @@ public final class RuntimeServer implements AutoCloseable {
     private String host = DEFAULT_HOST;
     private Authenticator authenticator;
     private HostResolver resolver = InetAddress::getByName;
+    private RequestLimits requestLimits = RequestLimits.defaults();
+    private Duration sweepInterval = Duration.ofSeconds(30);
 
     private Builder() {}
 
@@ -213,6 +256,36 @@ public final class RuntimeServer implements AutoCloseable {
     }
 
     /**
+     * Bound every request with {@code requestLimits}. Default {@link RequestLimits#defaults()}.
+     *
+     * @param requestLimits non-null limits
+     * @return this builder
+     * @throws NullPointerException if {@code requestLimits} is null
+     */
+    public Builder withRequestLimits(RequestLimits requestLimits) {
+      this.requestLimits = Objects.requireNonNull(requestLimits, "requestLimits must not be null");
+      return this;
+    }
+
+    /**
+     * Sweep the registry every {@code sweepInterval}. Default 30 seconds.
+     *
+     * @param sweepInterval at least one millisecond
+     * @return this builder
+     * @throws NullPointerException if {@code sweepInterval} is null
+     * @throws IllegalArgumentException if {@code sweepInterval} is shorter than one millisecond
+     */
+    public Builder withSweepInterval(Duration sweepInterval) {
+      Objects.requireNonNull(sweepInterval, "sweepInterval must not be null");
+      if (sweepInterval.toMillis() < 1) {
+        throw new IllegalArgumentException(
+            "sweepInterval must be at least 1 ms, got " + sweepInterval);
+      }
+      this.sweepInterval = sweepInterval;
+      return this;
+    }
+
+    /**
      * Bind the HTTP listen port. Default {@code 0} (kernel-assigned). Tests should leave this at
      * the default; production deployments typically pass an explicit port via configuration.
      *
@@ -265,7 +338,8 @@ public final class RuntimeServer implements AutoCloseable {
       requireAuthenticationFits(bindAddress);
       var mapper = objectMapper != null ? objectMapper : JsonMapper.builder().build();
       var service =
-          new AgentHttpService(registry, optionsFactory, authenticator, mapper, routePrefix);
+          new AgentHttpService(
+              registry, optionsFactory, authenticator, mapper, routePrefix, requestLimits);
       var jacksonSupport = JacksonSupport.create(mapper);
       var server =
           WebServer.builder()
@@ -277,7 +351,16 @@ public final class RuntimeServer implements AutoCloseable {
               .routing((HttpRouting.Builder routing) -> routing.register(routePrefix, service))
               .build()
               .start();
-      return new RuntimeServer(server, registry);
+      return new RuntimeServer(server, registry, service, startSweeper());
+    }
+
+    private ScheduledExecutorService startSweeper() {
+      var sweeper =
+          Executors.newSingleThreadScheduledExecutor(
+              Thread.ofVirtual().name("helios-session-sweep").factory());
+      var period = sweepInterval.toMillis();
+      sweeper.scheduleWithFixedDelay(() -> sweep(registry), period, period, TimeUnit.MILLISECONDS);
+      return sweeper;
     }
 
     private void requireAuthenticationFits(InetAddress bindAddress) {

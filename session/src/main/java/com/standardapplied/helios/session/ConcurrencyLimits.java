@@ -25,8 +25,9 @@ package com.standardapplied.helios.session;
  *       HTTP 429 at the runtime layer rather than silently dropping.
  * </ul>
  *
- * <p>Process-level caps ({@code maxConcurrentSessions}, {@code maxConcurrentModelCalls}) live on
- * {@code helios-runtime}, not here — they are deployment policy, not session policy.
+ * <p>Process-level caps (sessions and active sessions, per registry and per principal, which also
+ * bound concurrent model calls) live on {@code helios-runtime}'s {@code SessionRegistry}, not here
+ * — they are deployment policy, not session policy.
  *
  * @param maxConcurrentToolCalls semaphore cap for tool dispatch; must be positive
  * @param maxConcurrentFileWrites semaphore cap for write-category tool dispatch; must be positive
