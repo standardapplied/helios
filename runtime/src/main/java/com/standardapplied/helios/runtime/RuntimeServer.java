@@ -127,11 +127,12 @@ public final class RuntimeServer implements AutoCloseable {
 
   /**
    * Stop sweeping, stop the server, and close every registered session. Idempotent. A sweep under
-   * way is not interrupted, so the sessions it is closing finish closing.
+   * way is not interrupted: this waits for it to finish closing its sessions, so no sweep runs once
+   * this returns.
    */
   @Override
   public void close() {
-    sweeper.shutdown();
+    sweeper.close();
     webServer.stop();
     registry.closeAll();
   }

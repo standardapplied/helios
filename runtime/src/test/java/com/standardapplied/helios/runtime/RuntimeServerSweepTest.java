@@ -11,6 +11,7 @@ import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -102,7 +103,7 @@ final class RuntimeServerSweepTest {
   }
 
   @Test
-  void closingTheServerLetsASweepUnderWayFinishClosingItsSession() {
+  void closingTheServerWaitsForASweepUnderWayToFinishClosingItsSession() {
     var closing = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     var closed = new CountDownLatch(1);
@@ -122,10 +123,12 @@ final class RuntimeServerSweepTest {
     now.set(now.get().plus(RETENTION));
     Await.latch("the sweep to start closing the session", closing);
 
-    server.close();
+    var serverClosed = CompletableFuture.runAsync(server::close);
+    assertFalse(serverClosed.isDone());
     release.countDown();
 
-    Await.latch("the sweep to finish closing the session", closed);
+    Await.value("the server to close", serverClosed);
+    assertEquals(0, closed.getCount());
     assertFalse(interrupted.get());
   }
 
