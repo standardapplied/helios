@@ -216,8 +216,8 @@ final class SessionRegistryTest {
   void closeAllUnregistersAllSessions() {
     var registry = SessionRegistry.inMemory();
     registry.create(optionsFor("s1"), OWNER);
-    registry.create(optionsFor("s2"), OWNER);
-    registry.create(optionsFor("s3"), OWNER);
+    registry.create(optionsFor("s2"), SAME_TENANT);
+    registry.create(optionsFor("s3"), OTHER_TENANT);
     assertEquals(3, registry.size());
     registry.closeAll();
     assertEquals(0, registry.size());
@@ -408,11 +408,31 @@ final class SessionRegistryTest {
             .withClock(clock)
             .build();
     var a = (TrackingSession) registry.create(optionsFor("a"), OWNER);
-    var b = (TrackingSession) registry.create(optionsFor("b"), OWNER);
+    var b = (TrackingSession) registry.create(optionsFor("b"), OTHER_TENANT);
     a.future.complete(stubTerminal(a.sessionId()));
     b.future.complete(stubTerminal(b.sessionId()));
     assertEquals(2, registry.purgeTerminalOlderThan(java.time.Duration.ZERO));
     assertEquals(0, registry.size());
+  }
+
+  @Test
+  void aSessionClosedByItsOwnerDuringASweepIsNotCountedAsPurged() {
+    var closeCount = new AtomicInteger();
+    var registry =
+        SessionRegistry.newBuilder()
+            .withFactory(opts -> new TrackingSession(opts.sessionId(), closeCount))
+            .withClock(new MutableClock(java.time.Instant.parse("2026-05-16T12:00:00Z")))
+            .build();
+    var a = (TrackingSession) registry.create(optionsFor("a"), OWNER);
+    var b = (TrackingSession) registry.create(optionsFor("b"), OWNER);
+    a.onClose = () -> registry.close("b", OWNER);
+    b.onClose = () -> registry.close("a", OWNER);
+    a.future.complete(stubTerminal(a.sessionId()));
+    b.future.complete(stubTerminal(b.sessionId()));
+
+    assertEquals(1, registry.purgeTerminalOlderThan(java.time.Duration.ZERO));
+    assertEquals(0, registry.size());
+    assertEquals(2, closeCount.get());
   }
 
   // ── withMaxSessions cap ──────────────────────────────────────────────────
@@ -519,6 +539,7 @@ final class SessionRegistryTest {
 
     private final String sessionId;
     private final AtomicInteger closeCount;
+    private volatile Runnable onClose = () -> {};
     private final java.util.concurrent.CompletableFuture<
             com.standardapplied.helios.session.ResultMessage>
         future = new java.util.concurrent.CompletableFuture<>();
@@ -559,6 +580,7 @@ final class SessionRegistryTest {
     @Override
     public void close() {
       closeCount.incrementAndGet();
+      onClose.run();
     }
 
     @Override

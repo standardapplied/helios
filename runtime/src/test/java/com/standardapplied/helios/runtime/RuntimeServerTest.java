@@ -261,17 +261,17 @@ final class RuntimeServerTest {
   }
 
   @Test
-  void aNameResolvingToAnExternalAddressIsRefusedNamingTheHostAndTheAddress() {
+  void aLoopbackNameResolvingToAnExternalAddressIsRefusedNamingTheHostAndTheAddress() {
     var builder =
         RuntimeServer.builder()
             .withRegistry(SessionRegistry.inMemory())
             .withOptionsFactory(factory())
-            .withHost("external.test")
+            .withHost("localhost")
             .withResolverForTests(
                 host -> InetAddress.getByAddress(host, new byte[] {(byte) 192, 0, 2, 1}))
             .withoutAuthentication();
     var ex = assertThrows(IllegalStateException.class, builder::build);
-    assertEquals(nonLoopbackRefusal("external.test", "192.0.2.1"), ex.getMessage());
+    assertEquals(nonLoopbackRefusal("localhost", "192.0.2.1"), ex.getMessage());
   }
 
   private static String nonLoopbackRefusal(String host) {
