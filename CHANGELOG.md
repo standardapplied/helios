@@ -480,6 +480,18 @@ principal's. Terminal and never-started sessions are swept on the registry's clo
 | `AgentSession.close()` on a session never started completed `result()` before `ExecutionProvider.onSessionEnd` ran | `result()` completes after `onSessionEnd` returns, as after a run, so a registry that frees capacity on the result never frees it while the provider still holds the session |
 | `AgentSession` had no way to tell an unused session from a working one | `AgentSession.isStarted()`; an implementation outside Helios adds it |
 
+**A request answered with its body unread ends its connection.** On a kept-alive HTTP/1.1
+connection Helidon either drained a body the route had refused, outside every bound, or, when the
+client sent `Expect: 100-continue` and no `100 Continue` went out, parsed the bytes the client sent
+next as a new request: a request smuggled in a refused one's body ran with identity headers of the
+client's choosing, which a `TrustedProxyAuthenticator` behind a streaming proxy would trust. The new
+`runtime.UnreadBodyGuard` closes the connection after any such answer, once the response is written
+and flushed, and reads nothing further.
+
+| 2.x | 3.0 |
+|---|---|
+| A `401`, `404`, `413`, `429` or `503` answered before the body was read, a `201` for a create that sent a body, Helidon's own answer to an unmatched path or to an exception escaping a route, all kept the connection alive and drained or re-parsed the unread body | each is written whole with `Connection: close` and then the connection ends; a client sends its next request on a new connection. A request whose body was read to its end, or that has none, keeps its connection. `RuntimeServer` installs the guard and `AgentHttpService` applies it to its own routes; a `WebServer` of your own adds `routing.addFeature(new UnreadBodyGuard())` for Helidon's own answers. An exception escaping a route is answered by the guard through Helidon's `DirectHandlers`, with the same status, headers and message; one that is not an `HttpException` is `500 Internal Server Error` |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`

@@ -56,6 +56,11 @@ import tools.jackson.databind.json.JsonMapper;
  * (default 30 seconds) on a virtual thread of its own, so terminal sessions past their retention
  * and sessions left unstarted are closed without a deployer's scheduler.
  *
+ * <p>The server installs the {@link UnreadBodyGuard}: any answer, the service's or Helidon's own,
+ * sent while the request's body is unread is written whole and then ends the connection, without
+ * reading further, so no byte sent after it is drained or parsed as a request. A request whose body
+ * was read to its end, or that has none, keeps its connection.
+ *
  * <p>The server installs no Helidon feature discovered on the classpath, since a discovered feature
  * could mount routes the {@link Authenticator} never sees. To combine the runtime with Helidon
  * features, mount {@link AgentHttpService} on a {@link WebServer} of your own.
@@ -352,7 +357,9 @@ public final class RuntimeServer implements AutoCloseable {
               .featuresDiscoverServices(false)
               .mediaContext(
                   mc -> mc.mediaSupportsDiscoverServices(false).addMediaSupport(jacksonSupport))
-              .routing((HttpRouting.Builder routing) -> routing.register(routePrefix, service))
+              .routing(
+                  (HttpRouting.Builder routing) ->
+                      routing.addFeature(new UnreadBodyGuard()).register(routePrefix, service))
               .build()
               .start();
       return new RuntimeServer(server, registry, service, startSweeper(registry, sweepInterval));
