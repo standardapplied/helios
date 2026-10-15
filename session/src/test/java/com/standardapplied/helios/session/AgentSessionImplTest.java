@@ -506,6 +506,7 @@ final class AgentSessionImplTest {
     SessionStartOutcome startOutcome = SessionStartOutcome.accept();
     RuntimeException throwOnStart;
     RuntimeException throwOnEnd;
+    Runnable onEnd = () -> {};
 
     @Override
     public ExecutionCapabilities capabilities() {
@@ -524,6 +525,7 @@ final class AgentSessionImplTest {
     @Override
     public void onSessionEnd(SessionContext ctx) {
       endSeen.set(true);
+      onEnd.run();
       if (throwOnEnd != null) {
         throw throwOnEnd;
       }
@@ -693,6 +695,27 @@ final class AgentSessionImplTest {
       var _unused = s;
     }
     assertTrue(provider.endSeen.get(), "onSessionEnd must fire on pre-start close");
+  }
+
+  @Test
+  void aSessionClosedBeforeItStartsSettlesItsResultOnlyAfterTheProviderEnded() {
+    var provider = new LifecycleProvider();
+    var session =
+        AgentSession.create(
+            SessionOptions.newBuilder()
+                .withModel(textOnceModel("unused", FinishReason.STOP))
+                .withSessionId(SID)
+                .withClock(CLOCK)
+                .withExecutionProvider(provider)
+                .build());
+    var settledDuringEnd = new AtomicBoolean(true);
+    provider.onEnd = () -> settledDuringEnd.set(session.result().isDone());
+
+    session.close();
+
+    assertTrue(provider.endSeen.get());
+    assertFalse(settledDuringEnd.get(), "the result settled while the provider still held it");
+    assertInstanceOf(ResultMessage.Cancelled.class, session.result().join());
   }
 
   @Test

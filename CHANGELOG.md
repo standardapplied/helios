@@ -477,6 +477,7 @@ principal's. Terminal and never-started sessions are swept on the registry's clo
 | `SessionRegistry.purgeTerminalOlderThan(Duration)` | `sweep()`, using the registry's retention and idle timeout |
 | `SessionRegistry.sessionIds()` | removed; `size()` remains |
 | A full steering queue threw `IllegalStateException` from `AgentSession.send` and `interrupt` | `SteeringQueueFullException`, a subclass, so a host tells backpressure from a closed or terminal session |
+| `AgentSession.close()` on a session never started completed `result()` before `ExecutionProvider.onSessionEnd` ran | `result()` completes after `onSessionEnd` returns, as after a run, so a registry that frees capacity on the result never frees it while the provider still holds the session |
 | `AgentSession` had no way to tell an unused session from a working one | `AgentSession.isStarted()`; an implementation outside Helios adds it |
 
 ### Added
