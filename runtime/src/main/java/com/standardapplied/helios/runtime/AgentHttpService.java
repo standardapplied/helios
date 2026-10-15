@@ -82,6 +82,9 @@ public final class AgentHttpService implements HttpService {
   private static final Map<String, String> FACTORY_FAILED =
       Map.of("error", "session options factory failed");
 
+  private static final Map<String, String> INTERNAL_ERROR =
+      Map.of("error", "internal server error");
+
   private final SessionRegistry registry;
   private final Function<String, SessionOptions> optionsFactory;
   private final AuthenticationGate gate;
@@ -150,10 +153,21 @@ public final class AgentHttpService implements HttpService {
       }
       try {
         handler.handle(caller.get(), req, resp);
+      } catch (RuntimeException e) {
+        answerFailure(resp, e);
       } finally {
         caller.get().release();
       }
     };
+  }
+
+  /**
+   * Answer a route that failed with a fixed {@code 500}; Helidon's default error handling would
+   * send the exception's message to the client.
+   */
+  private static void answerFailure(ServerResponse resp, RuntimeException e) {
+    LOGGER.log(Level.WARNING, "request failed", e);
+    resp.status(Status.INTERNAL_SERVER_ERROR_500).send(INTERNAL_ERROR);
   }
 
   private CallerHandler owned(SessionHandler handler) {
