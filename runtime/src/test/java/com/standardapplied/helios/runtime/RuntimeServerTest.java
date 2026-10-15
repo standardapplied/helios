@@ -287,6 +287,19 @@ final class RuntimeServerTest {
         + " hosts requires withAuthenticator(...), for example a TrustedProxyAuthenticator";
   }
 
+  @Test
+  void noHelidonFeatureFoundOnTheClasspathIsInstalled() {
+    var server =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory())
+            .withoutAuthentication()
+            .build();
+    try (server) {
+      assertEquals(List.of(), server.configForTests().features());
+    }
+  }
+
   // ── lifecycle ────────────────────────────────────────────────────────────
 
   @Test

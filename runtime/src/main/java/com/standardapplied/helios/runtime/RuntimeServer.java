@@ -7,6 +7,7 @@ package com.standardapplied.helios.runtime;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.session.SessionOptions;
 import io.helidon.webserver.WebServer;
+import io.helidon.webserver.WebServerConfig;
 import io.helidon.webserver.http.HttpRouting;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -42,6 +43,10 @@ import tools.jackson.databind.json.JsonMapper;
  * and tests: every request then acts as one local principal. A server bound to any other address
  * has no unauthenticated mode; a deployer behind an authenticating proxy configures {@link
  * TrustedProxyAuthenticator}.
+ *
+ * <p>The server installs no Helidon feature discovered on the classpath, since a discovered feature
+ * could mount routes the {@link Authenticator} never sees. To combine the runtime with Helidon
+ * features, mount {@link AgentHttpService} on a {@link WebServer} of your own.
  *
  * <h2>Thread-safety</h2>
  *
@@ -82,6 +87,11 @@ public final class RuntimeServer implements AutoCloseable {
    */
   public SessionRegistry registry() {
     return registry;
+  }
+
+  /** The configuration the server started with. Visible for tests. */
+  WebServerConfig configForTests() {
+    return webServer.prototype();
   }
 
   /** Stop the server and close every registered session. Idempotent. */
@@ -261,6 +271,7 @@ public final class RuntimeServer implements AutoCloseable {
           WebServer.builder()
               .address(bindAddress)
               .port(port)
+              .featuresDiscoverServices(false)
               .mediaContext(
                   mc -> mc.mediaSupportsDiscoverServices(false).addMediaSupport(jacksonSupport))
               .routing((HttpRouting.Builder routing) -> routing.register(routePrefix, service))

@@ -67,7 +67,8 @@ import tools.jackson.databind.ObjectMapper;
  * <p>The {@code optionsFactory} is the seam through which deployments choose how a new session is
  * configured: the runtime takes the generated session id and produces a fully-populated {@link
  * SessionOptions} for exactly that id; options for any other id are refused, so a factory can never
- * attach a request to another session. Error bodies carry a fixed message and never an exception's.
+ * attach a request to another session. A {@code 500} body carries a fixed message, never an
+ * exception's; a {@code 409} tells the owner why its own session refused a message or interrupt.
  *
  * <h2>Thread-safety</h2>
  *
