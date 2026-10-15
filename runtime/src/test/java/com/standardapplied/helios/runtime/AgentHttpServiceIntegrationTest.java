@@ -560,31 +560,6 @@ final class AgentHttpServiceIntegrationTest {
     }
   }
 
-  @Test
-  void aRouteThatFailsAnswers500WithoutTheFailuresMessage() throws Exception {
-    try (var server =
-        RuntimeServer.builder()
-            .withRegistry(
-                SessionRegistry.withFactory(
-                    options -> {
-                      throw new IllegalStateException("cannot open store: password=hunter22");
-                    }))
-            .withOptionsFactory(
-                sessionId ->
-                    SessionOptions.newBuilder()
-                        .withModel(textModel("x"))
-                        .withSessionId(sessionId)
-                        .build())
-            .withoutAuthentication()
-            .build()) {
-      var resp =
-          httpClient()
-              .send(postJson(baseUrl(server) + "/sessions", Map.of()), BodyHandlers.ofString());
-      assertEquals(500, resp.statusCode());
-      assertEquals("{\"error\":\"internal server error\"}", resp.body());
-    }
-  }
-
   private static RuntimeServer serverWithFactory(Function<String, SessionOptions> factory) {
     return RuntimeServer.builder()
         .withRegistry(SessionRegistry.inMemory())

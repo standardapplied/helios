@@ -11,6 +11,7 @@ import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
+import io.helidon.http.HttpException;
 import io.helidon.http.Status;
 import io.helidon.webserver.http.Handler;
 import io.helidon.webserver.http.HttpRules;
@@ -163,9 +164,14 @@ public final class AgentHttpService implements HttpService {
 
   /**
    * Answer a route that failed with a fixed {@code 500}; Helidon's default error handling would
-   * send the exception's message to the client.
+   * send the exception's message to the client. Two failures stay Helidon's: an {@link
+   * HttpException} Helidon raised carries its own status and message, and a response already under
+   * way (an opened SSE sink, or a send the client disconnected from) can only be closed.
    */
   private static void answerFailure(ServerResponse resp, RuntimeException e) {
+    if (resp.isSent() || e instanceof HttpException) {
+      throw e;
+    }
     LOGGER.log(Level.WARNING, "request failed", e);
     resp.status(Status.INTERNAL_SERVER_ERROR_500).send(INTERNAL_ERROR);
   }
