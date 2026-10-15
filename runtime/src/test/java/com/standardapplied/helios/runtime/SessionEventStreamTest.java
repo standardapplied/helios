@@ -212,6 +212,28 @@ final class SessionEventStreamTest {
   }
 
   @Test
+  void aStreamEndingAsItSubscribesWritesNoReady() {
+    var sink = new RecordingSink(null);
+    var stream = new AtomicReference<SessionEventStream>();
+    var endingOnRequest =
+        new Flow.Subscription() {
+          @Override
+          public void request(long n) {
+            stream.get().end();
+          }
+
+          @Override
+          public void cancel() {}
+        };
+    stream.set(new SessionEventStream("sess-1", sink, new ObjectMapper()));
+
+    stream.get().onSubscribe(endingOnRequest);
+
+    assertTrue(sink.emitted.isEmpty());
+    awaitEnd(stream.get());
+  }
+
+  @Test
   void aPublisherErrorEndsTheStream() {
     var sink = new RecordingSink(null);
     var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());

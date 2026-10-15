@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.runtime.AuthenticationGate.Caller;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SerializedError;
 import java.time.Duration;
@@ -61,11 +60,9 @@ final class ResultLongPollAwaitResultTest {
     var future = new CompletableFuture<ResultMessage>();
 
     for (var i = 0; i < 1_000; i++) {
-      var caller = Caller.start(Authentication.of(new Principal("acme", "alice")));
       assertEquals(
           io.helidon.http.Status.NO_CONTENT_204,
-          ResultLongPoll.awaitResult(future, caller.ended(), 0L, "sess-1").status());
-      caller.release();
+          ResultLongPoll.awaitResult(future, new CompletableFuture<>(), 0L, "sess-1").status());
     }
 
     assertEquals(0, future.getNumberOfDependents());
