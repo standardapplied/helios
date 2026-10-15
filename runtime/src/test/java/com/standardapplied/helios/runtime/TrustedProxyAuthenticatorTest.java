@@ -183,6 +183,7 @@ final class TrustedProxyAuthenticatorTest {
       var unasserted =
           http.send(
               HttpRequest.newBuilder(URI.create(base))
+                  .timeout(Await.HANG_GUARD)
                   .POST(HttpRequest.BodyPublishers.noBody())
                   .build(),
               BodyHandlers.ofString());
