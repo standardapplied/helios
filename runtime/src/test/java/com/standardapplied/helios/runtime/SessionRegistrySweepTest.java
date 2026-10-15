@@ -119,6 +119,30 @@ final class SessionRegistrySweepTest {
     assertEquals(1, b.closes.get());
   }
 
+  @Test
+  void aSweepClosesEverySessionItUnregisteredEvenWhenAClosingOneThrowsAnError() {
+    var first = create(ALICE);
+    var second = create(ALICE);
+    Runnable failing =
+        () -> {
+          throw new AssertionError("close failed");
+        };
+    first.onClose = failing;
+    second.onClose = failing;
+    advance(IDLE);
+
+    try (var log = LogCapture.of(SessionRegistry.class)) {
+      assertEquals(2, registry.sweep());
+
+      assertEquals(2, log.records().size());
+    }
+    assertEquals(1, first.closes.get());
+    assertEquals(1, second.closes.get());
+    create(EVE);
+    create(EVE);
+    create(EVE);
+  }
+
   private StubSession startedSession() {
     var session = create(ALICE);
     session.send(UserMessage.text("go"));

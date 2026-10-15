@@ -298,7 +298,7 @@ final class SessionRegistryAdmissionTest {
     var broken = create(registry, ALICE);
     broken.onClose =
         () -> {
-          throw new IllegalStateException("close failed");
+          throw new AssertionError("close failed");
         };
     broken.terminate();
 
