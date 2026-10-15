@@ -695,7 +695,7 @@ var server = RuntimeServer.builder()
     .build();
 ```
 
-The proxy must strip client-supplied copies of both headers. Any other verifier (a JWT library, mutual TLS) plugs in as an `Authenticator` returning an `Authentication` with the principal, the credential's remaining lifetime and a stage that completes on revocation. `withoutAuthentication()` serves a loopback bind as one local principal; on any other host `build()` refuses it, as it refuses a non-loopback host with no authenticator.
+The proxy must strip client-supplied copies of both headers. Any other verifier (a JWT library, mutual TLS) plugs in as an `Authenticator` returning an `Authentication` with the principal, the credential's remaining lifetime and a stage that completes on revocation. `withoutAuthentication()` serves a loopback bind as one local principal; on any other host `build()` refuses it, as it refuses a non-loopback host with no authenticator. `RuntimeServer` installs no Helidon feature discovered on the classpath; mount `AgentHttpService` on your own `WebServer` to combine it with features.
 
 ## Design Principles
 
