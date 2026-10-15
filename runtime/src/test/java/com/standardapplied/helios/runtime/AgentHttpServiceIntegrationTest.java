@@ -448,6 +448,25 @@ final class AgentHttpServiceIntegrationTest {
   }
 
   @Test
+  void sendWithAJsonNullBodyReturns400() throws Exception {
+    try (var server = startServer(textModel("x"))) {
+      var http = httpClient();
+      var base = baseUrl(server);
+      var sessionId = createSession(http, base);
+      var resp =
+          http.send(
+              HttpRequest.newBuilder(URI.create(base + "/sessions/" + sessionId + "/messages"))
+                  .timeout(HTTP_TIMEOUT)
+                  .header("Content-Type", "application/json")
+                  .POST(HttpRequest.BodyPublishers.ofString("null"))
+                  .build(),
+              BodyHandlers.ofString());
+      assertEquals(400, resp.statusCode());
+      assertEquals("{\"error\":\"invalid JSON body\"}", resp.body());
+    }
+  }
+
+  @Test
   void interruptWithoutReasonReturns400() throws Exception {
     try (var server = startServer(textModel("x"))) {
       var http = httpClient();
