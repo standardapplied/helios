@@ -55,6 +55,13 @@ final class AuthenticationGateTest {
   }
 
   @Test
+  void anIdentityWithAZeroLifetimeHasEndedAtStart() {
+    var caller = Caller.start(new Authentication(ALICE, Duration.ZERO, new CompletableFuture<>()));
+
+    assertTrue(caller.ended().isDone());
+  }
+
+  @Test
   void theIdentityEndsWhenItsCredentialIsRevoked() {
     var revoked = new CompletableFuture<Void>();
     var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked));
@@ -97,7 +104,9 @@ final class AuthenticationGateTest {
     }
     Await.value("the identity's lifetime to elapse", Caller.start(expiring).ended());
 
-    assertEquals(0, revoked.getNumberOfDependents());
+    Await.until(
+        "the elapsed identity to stop watching the revocation stage",
+        () -> revoked.getNumberOfDependents() == 0);
   }
 
   @Test
