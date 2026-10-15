@@ -62,6 +62,11 @@ final class AgentSessionTest {
     }
 
     @Override
+    public boolean isStarted() {
+      return !sent.isEmpty();
+    }
+
+    @Override
     public void close() {
       closes++;
     }

@@ -137,6 +137,11 @@ final class SessionLifecycle {
     }
   }
 
+  /** Whether the loop was started, or can no longer start because the session closed first. */
+  boolean isStarted() {
+    return started.get();
+  }
+
   /**
    * End the runtime of a session whose loop never started, writing a {@link
    * ResultMessage.Cancelled} terminal unless one is already recorded (a refused session set {@link
