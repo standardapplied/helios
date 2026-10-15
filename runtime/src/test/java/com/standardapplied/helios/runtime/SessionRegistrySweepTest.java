@@ -62,6 +62,20 @@ final class SessionRegistrySweepTest {
   }
 
   @Test
+  void aTerminalSessionIsRetainedFromItsEndNotItsRegistration() {
+    var working = startedSession();
+    advance(RETENTION);
+    working.terminate();
+    advance(RETENTION.minusMillis(1));
+
+    assertEquals(0, registry.sweep());
+    advance(Duration.ofMillis(1));
+    assertEquals(1, registry.sweep());
+
+    assertEquals(1, working.closes.get());
+  }
+
+  @Test
   void aSweepClosesSessionsLeftUnstartedPastTheIdleTimeout() {
     var unstarted = create(ALICE);
     advance(Duration.ofMinutes(1));
