@@ -14,7 +14,6 @@ import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 /** How long an admitted caller's identity lasts: until its lifetime, revocation or release. */
@@ -102,34 +101,41 @@ final class AuthenticationGateTest {
   }
 
   @Test
-  void aStageThatIsNotACompletableFutureIsConvertedOnceHoweverManyRequestsShareIt() {
-    var conversions = new AtomicInteger();
-    var revoked =
-        new CompletableFuture<Void>() {
-          @Override
-          public CompletableFuture<Void> toCompletableFuture() {
-            conversions.incrementAndGet();
-            return thenApply(ignored -> null);
-          }
-        };
-    var authentication = new Authentication(ALICE, Duration.ofDays(1), revoked);
+  void freshAuthenticationsSharingOneRevocationFutureLeaveNothingWatchingIt() {
+    var revoked = new CompletableFuture<Void>();
+
+    for (var i = 0; i < 1_000; i++) {
+      Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked)).release();
+    }
+
+    assertEquals(0, revoked.getNumberOfDependents());
+  }
+
+  @Test
+  void aMinimalStageConvertedOnceByTheVerifierKeepsOneCallbackHoweverManyRequestsUseIt() {
+    var source = new CompletableFuture<Void>();
+    var revoked = source.minimalCompletionStage().toCompletableFuture();
     var callers = new ArrayList<Caller>();
 
-    for (var i = 0; i < 100; i++) {
-      callers.add(Caller.start(authentication));
+    for (var i = 0; i < 1_000; i++) {
+      var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked));
+      callers.add(caller);
+      if (i % 2 == 0) {
+        caller.release();
+      }
     }
-    assertEquals(1, revoked.getNumberOfDependents());
-    revoked.complete(null);
+    assertEquals(1, source.getNumberOfDependents());
+    source.complete(null);
 
-    assertEquals(1, conversions.get());
     assertTrue(callers.stream().allMatch(caller -> caller.ended().isDone()));
+    assertEquals(0, revoked.getNumberOfDependents());
   }
 
   @Test
   void anAuthenticationOfAPrincipalNeitherExpiresNorIsRevoked() {
     var authentication = Authentication.of(new Principal("acme", "alice"));
     assertEquals(ChronoUnit.FOREVER.getDuration(), authentication.lifetime());
-    assertFalse(authentication.revoked().toCompletableFuture().isDone());
+    assertFalse(authentication.revoked().isDone());
   }
 
   @Test

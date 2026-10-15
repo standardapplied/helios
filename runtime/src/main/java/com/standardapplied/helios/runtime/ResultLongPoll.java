@@ -88,7 +88,8 @@ final class ResultLongPoll {
       CompletableFuture<Void> identityEnded,
       long timeoutSeconds,
       String sessionIdForLog) {
-    var first = CompletableFuture.anyOf(future, identityEnded);
+    var answered = new CompletableFuture<Void>();
+    var first = CompletableFuture.anyOf(future, identityEnded, answered);
     try {
       first.get(timeoutSeconds, TimeUnit.SECONDS);
     } catch (TimeoutException e) {
@@ -101,7 +102,7 @@ final class ResultLongPoll {
     } catch (ExecutionException e) {
       return settled(future, identityEnded, sessionIdForLog);
     } finally {
-      first.complete(null);
+      answered.complete(null);
     }
     return settled(future, identityEnded, sessionIdForLog);
   }
