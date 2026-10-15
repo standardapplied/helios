@@ -16,22 +16,21 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * The work behind {@code POST .../messages} and {@code POST .../interrupt}: admits the upload
- * against the {@link MessageUploads} both routes share, reads the bounded JSON body, takes one
- * non-blank string field from it and hands it to the session's steering queue. Answers {@code 202}
- * once queued, {@code 429} or {@code 503} when the upload is refused, {@code 413} or {@code 400}
- * for the body, {@code 401} if the identity ended while the body uploaded, {@code 429} when the
- * queue is full and {@code 409} when the session can take no more messages.
+ * against the message-upload {@link ConcurrencyLimit} both routes share, reads the bounded JSON
+ * body, takes one non-blank string field from it and hands it to the session's steering queue.
+ * Answers {@code 202} once queued, {@code 429} or {@code 503} when the upload is refused, {@code
+ * 413} or {@code 400} for the body, {@code 401} if the identity ended while the body uploaded,
+ * {@code 429} when the queue is full and {@code 409} when the session can take no more messages.
  */
 final class SteeringInput {
 
   private final AdmissionCounter counter = new AdmissionCounter();
-  private final MessageUploads uploads;
+  private final ConcurrencyLimit uploads;
   private final int maxRequestBytes;
   private final ObjectMapper objectMapper;
 
   SteeringInput(RequestLimits limits, ObjectMapper objectMapper) {
-    this.uploads =
-        new MessageUploads(limits.maxMessageUploads(), limits.maxMessageUploadsPerPrincipal());
+    this.uploads = ConcurrencyLimit.messageUploads(limits);
     this.maxRequestBytes = limits.maxRequestBytes();
     this.objectMapper = objectMapper;
   }

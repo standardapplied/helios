@@ -10,9 +10,9 @@ package com.standardapplied.helios.runtime;
  * @param messages messages and interrupts: admitted when queued, rejected when an upload bound in
  *     {@link RequestLimits} or the session's full steering queue refused it
  * @param eventStreams {@code GET .../events}: admitted when the stream opened, rejected when the
- *     session already had its maximum of streams
+ *     session, the principal or the service already had its maximum of streams
  * @param resultPolls {@code GET .../result}: admitted when the poll began waiting, rejected when
- *     the session already had its maximum of polls
+ *     the session, the principal or the service already had its maximum of polls
  */
 public record RuntimeCounters(
     AdmissionCounts sessions,
