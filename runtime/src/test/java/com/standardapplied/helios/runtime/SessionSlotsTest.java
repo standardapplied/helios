@@ -2,13 +2,13 @@
 
 package com.standardapplied.helios.runtime;
 
+import static com.standardapplied.helios.runtime.ServerStubs.disconnectedResponse;
+import static com.standardapplied.helios.runtime.ServerStubs.untouchedResponse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.helidon.webserver.CloseConnectionException;
-import io.helidon.webserver.http.ServerResponse;
-import java.lang.reflect.Proxy;
 import java.util.function.Function;
 import java.util.stream.Stream;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -33,11 +33,12 @@ final class SessionSlotsTest {
       Function<RequestLimits, SessionSlots> kind) {
     var slots = kind.apply(limits(1, 2));
 
-    assertTrue(slots.admit("a", ALICE, untouched()));
-    assertThrows(CloseConnectionException.class, () -> slots.admit("b", ALICE, disconnected()));
+    assertTrue(slots.admit("a", ALICE, untouchedResponse()));
+    assertThrows(
+        CloseConnectionException.class, () -> slots.admit("b", ALICE, disconnectedResponse()));
     slots.release("a", ALICE);
 
-    assertTrue(slots.admit("b", ALICE, untouched()));
+    assertTrue(slots.admit("b", ALICE, untouchedResponse()));
     assertEquals(new AdmissionCounts(2, 1), slots.counts());
   }
 
@@ -47,11 +48,12 @@ final class SessionSlotsTest {
       Function<RequestLimits, SessionSlots> kind) {
     var slots = kind.apply(limits(1, 1));
 
-    assertTrue(slots.admit("a", ALICE, untouched()));
-    assertThrows(CloseConnectionException.class, () -> slots.admit("b", BOB, disconnected()));
+    assertTrue(slots.admit("a", ALICE, untouchedResponse()));
+    assertThrows(
+        CloseConnectionException.class, () -> slots.admit("b", BOB, disconnectedResponse()));
     slots.release("a", ALICE);
 
-    assertTrue(slots.admit("b", BOB, untouched()));
+    assertTrue(slots.admit("b", BOB, untouchedResponse()));
     assertEquals(new AdmissionCounts(2, 1), slots.counts());
   }
 
@@ -64,35 +66,5 @@ final class SessionSlotsTest {
         .withMaxResultPollsPerPrincipal(perPrincipal)
         .withMaxResultPolls(total)
         .build();
-  }
-
-  /** A response an admitted request never writes to before its handler runs. */
-  private static ServerResponse untouched() {
-    return response(
-        name -> {
-          throw new AssertionError("an admitted request was answered: " + name);
-        });
-  }
-
-  /** A response whose client went away: the refusal's headers are set, sending it fails. */
-  private static ServerResponse disconnected() {
-    return response(
-        name -> {
-          if ("send".equals(name)) {
-            throw new CloseConnectionException("peer closed");
-          }
-          return null;
-        });
-  }
-
-  private static ServerResponse response(Function<String, Object> calls) {
-    return (ServerResponse)
-        Proxy.newProxyInstance(
-            ServerResponse.class.getClassLoader(),
-            new Class<?>[] {ServerResponse.class},
-            (proxy, method, args) -> {
-              var answer = calls.apply(method.getName());
-              return method.getReturnType().isInstance(proxy) ? proxy : answer;
-            });
   }
 }

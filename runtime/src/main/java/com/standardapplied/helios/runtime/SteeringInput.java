@@ -57,14 +57,23 @@ final class SteeringInput {
       Caller caller,
       ServerRequest req,
       ServerResponse resp) {
-    if (!uploads.admit(caller.principal(), resp)) {
-      counter.reject();
-      return;
-    }
+    var admitted = false;
     try {
-      readAndQueue(field, action, session, caller, req, resp);
+      admitted = uploads.admit(caller.principal(), resp);
+      if (admitted) {
+        readAndQueue(field, action, session, caller, req, resp);
+      }
     } finally {
-      uploads.release(caller.principal());
+      settle(caller.principal(), admitted);
+    }
+  }
+
+  /** Give back an admitted upload; count a refused one, even if refusing threw. */
+  private void settle(Principal principal, boolean admitted) {
+    if (admitted) {
+      uploads.release(principal);
+    } else {
+      counter.reject();
     }
   }
 
