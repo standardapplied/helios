@@ -114,6 +114,8 @@ final class AgentHttpServiceAuthorizationTest {
 
     assertTrue(streamed.contains("event:LoopEnded"), () -> "streamed: " + streamed);
     assertEquals(200, result.statusCode());
+    assertEquals(Optional.of("application/json"), result.headers().firstValue("Content-Type"));
+    assertTrue(result.body().contains("\"result\":\"done\""), result::body);
     assertEquals(409, interrupt.statusCode());
     assertEquals(204, delete.statusCode());
     assertEquals(1, toolRuns.get());

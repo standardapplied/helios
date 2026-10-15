@@ -138,7 +138,7 @@ public final class AgentHttpService implements HttpService {
         authenticated(
             owned(
                 (session, caller, req, resp) ->
-                    ResultLongPoll.respond(session, req, resp, caller.ended()))));
+                    ResultLongPoll.respond(session, req, resp, objectMapper, caller.ended()))));
     rules.delete("/sessions/{sessionId}", authenticated(this::delete));
   }
 
