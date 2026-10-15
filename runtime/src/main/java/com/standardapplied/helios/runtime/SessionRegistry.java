@@ -222,7 +222,7 @@ public final class SessionRegistry {
   private static void closeUnregistered(AgentSession session) {
     try {
       session.close();
-    } catch (RuntimeException e) {
+    } catch (Throwable e) {
       LOGGER.log(
           Level.WARNING, "closing unregistered session " + session.sessionId() + " failed", e);
     }
