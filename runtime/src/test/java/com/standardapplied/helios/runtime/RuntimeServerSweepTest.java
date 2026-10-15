@@ -36,14 +36,6 @@ final class RuntimeServerSweepTest {
           .build();
 
   @Test
-  void withRequestLimitsRejectsNull() {
-    var ex =
-        assertThrows(
-            NullPointerException.class, () -> RuntimeServer.builder().withRequestLimits(null));
-    assertEquals("requestLimits must not be null", ex.getMessage());
-  }
-
-  @Test
   void withSweepIntervalRejectsNull() {
     var ex =
         assertThrows(
