@@ -156,8 +156,10 @@ public final class ToolDispatch {
   /**
    * Dispatch one tool call and wait for its answer. The call gets its own cancellation token,
    * linked to {@code cancellation}, and one deadline, {@code timeout} from now, that covers both
-   * the wait for a permit and the tool's run. Returns the tool's result, a not-found result for an
-   * unknown tool, or, when the deadline passes:
+   * the wait for a permit and the tool's run, and this method waits no longer than that deadline
+   * even when the scheduler is late. A tool queued for a permit never starts once {@code
+   * cancellation} is cancelled. Returns the tool's result, a not-found result for an unknown tool,
+   * or, when the deadline passes:
    *
    * <ul>
    *   <li>{@link ToolOutcome.TimedOut} if the tool never started (it never will) or if, once the
@@ -204,10 +206,11 @@ public final class ToolDispatch {
             binding.orElseThrow().tool(),
             call,
             sessionContext,
+            cancellation,
             timeout,
             permitsFor(binding.orElseThrow().category()),
             liveCalls);
-    dispatched.start(cancellation, scheduler);
+    dispatched.start(scheduler);
     return dispatched.await(stopGrace);
   }
 

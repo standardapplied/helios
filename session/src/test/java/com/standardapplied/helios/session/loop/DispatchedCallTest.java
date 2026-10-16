@@ -12,6 +12,7 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RunnableScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -19,10 +20,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The interleaving {@link ToolDispatchTest} cannot force through the dispatcher, whose caller
- * always waits: the deadline fires before the worker is admitted, and no caller has yet cancelled
+ * The interleavings {@link ToolDispatchTest} cannot force through the dispatcher, whose caller
+ * always waits: the deadline passes before the worker is admitted, and no caller has yet cancelled
  * the call. A scheduler on which every deadline is overdue fires it as it is armed, before the
- * worker starts.
+ * worker starts; a scheduler whose only thread is busy never fires it.
  */
 final class DispatchedCallTest {
 
@@ -31,22 +32,29 @@ final class DispatchedCallTest {
   private final Overdue scheduler = new Overdue();
   private final AtomicInteger runs = new AtomicInteger();
   private final AtomicInteger live = new AtomicInteger();
-  private final DispatchedCall dispatched =
-      new DispatchedCall(
-          Tool.newBuilder()
-              .withName("t")
-              .withDescription("t")
-              .withExecutor((args, ctx) -> ToolResult.success("run " + runs.incrementAndGet()))
-              .build(),
-          new ToolCall("c", "t", Map.of()),
-          SessionContext.forTesting("dispatched-call"),
-          NEVER,
-          new CategoryPermits(1),
-          live);
+  private final ScheduledThreadPoolExecutor busy = new ScheduledThreadPoolExecutor(1);
+  private final CountDownLatch busyRelease = new CountDownLatch(1);
 
   @AfterEach
-  void stopTheScheduler() {
+  void stopTheSchedulers() {
+    busyRelease.countDown();
     scheduler.shutdownNow();
+    busy.shutdownNow();
+  }
+
+  private DispatchedCall dispatched(Duration timeout) {
+    return new DispatchedCall(
+        Tool.newBuilder()
+            .withName("t")
+            .withDescription("t")
+            .withExecutor((args, ctx) -> ToolResult.success("run " + runs.incrementAndGet()))
+            .build(),
+        new ToolCall("c", "t", Map.of()),
+        SessionContext.forTesting("dispatched-call"),
+        new CancellationToken(),
+        timeout,
+        new CategoryPermits(1),
+        live);
   }
 
   /** Runs each deadline as it is armed, as if its delay had already passed. */
@@ -67,7 +75,17 @@ final class DispatchedCallTest {
 
   @Test
   void aDeadlineThatFiredBeforeTheWorkerWasAdmittedKeepsTheToolFromStarting() {
-    dispatched.start(new CancellationToken(), scheduler);
+    dispatched(NEVER).start(scheduler);
+
+    Await.until("the worker to end", () -> live.get() == 0);
+    assertEquals(0, runs.get(), "the tool never ran");
+  }
+
+  @Test
+  void aWorkerReachingAdmissionPastItsDeadlineKeepsTheToolFromStarting() {
+    busy.execute(() -> ToolDispatchTest.awaitThroughInterrupts(busyRelease));
+
+    dispatched(Duration.ofNanos(1)).start(busy);
 
     Await.until("the worker to end", () -> live.get() == 0);
     assertEquals(0, runs.get(), "the tool never ran");
