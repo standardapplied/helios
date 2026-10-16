@@ -3,6 +3,7 @@
 package com.standardapplied.helios.runtime;
 
 import io.helidon.common.Weighted;
+import io.helidon.http.BadRequestException;
 import io.helidon.http.DirectHandler.EventType;
 import io.helidon.http.HeaderValues;
 import io.helidon.http.HttpException;
@@ -31,8 +32,10 @@ import io.helidon.webserver.http.ServerResponse;
  * route lets escape. It answers such an exception itself, with the status, headers and message
  * Helidon's direct handlers give it, because Helidon's own error handling drains an unread body
  * before it answers; an exception that is not an {@link HttpException} is a {@code 500} with a
- * fixed message. {@link RuntimeServer} installs it; {@link AgentHttpService} also applies it to
- * each of its own routes, so they are covered on a server that does not install it.
+ * fixed message. A {@link BadRequestException} it leaves to Helidon, which answers it on the
+ * connection itself and ends it without reading further. {@link RuntimeServer} installs it; {@link
+ * AgentHttpService} also applies it to each of its own routes, so they are covered on a server that
+ * does not install it.
  */
 public final class UnreadBodyGuard implements HttpFeature, Weighted {
 
@@ -72,6 +75,9 @@ public final class UnreadBodyGuard implements HttpFeature, Weighted {
   }
 
   private static void answer(ServerRequest req, ServerResponse resp, Throwable thrown) {
+    if (thrown instanceof BadRequestException e) {
+      throw e;
+    }
     var failure = failure(req, thrown);
     req.listenerContext().directHandlers().handle(failure, resp, failure.keepAlive());
   }

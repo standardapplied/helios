@@ -124,6 +124,11 @@ final class UnreadBodyGuardTest {
                         "/v1/sessions/" + t.sessions.get("alice") + "/events",
                         identity("alice") + "Accept: application/json\r\n")),
             refusal(
+                "400 without a body for an Accept header Helidon cannot parse",
+                "HTTP/1.1 400 Bad Request",
+                "",
+                t -> Upload.declared("POST", "/v1/sessions", "Accept: a;b;c\r\n")),
+            refusal(
                 "500 for an Error a route lets escape",
                 "HTTP/1.1 500 Internal Server Error",
                 "Internal Server Error",
