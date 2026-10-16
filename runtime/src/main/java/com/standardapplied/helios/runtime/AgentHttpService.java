@@ -209,10 +209,11 @@ public final class AgentHttpService implements HttpService {
   }
 
   /**
-   * Answer a route that failed with a fixed {@code 500}; Helidon's default error handling would
-   * send the exception's message to the client. Two failures stay Helidon's: an {@link
-   * HttpException} Helidon raised carries its own status and message, and a response already under
-   * way (an opened SSE sink, or a send the client disconnected from) can only be closed.
+   * Answer a route that failed with a fixed {@code 500} and log the failure here, whatever error
+   * handling the deployer's routing has, which may quote the exception's message (Helidon's {@code
+   * include-entity}). Two failures stay Helidon's: an {@link HttpException} Helidon raised carries
+   * its own status and message, and a response already under way (an opened SSE sink, or a send the
+   * client disconnected from) can only be closed.
    */
   private static void answerFailure(ServerResponse resp, RuntimeException e) {
     if (resp.isSent() || e instanceof HttpException) {
