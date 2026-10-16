@@ -92,7 +92,8 @@ final class SteeringInputTest {
   }
 
   private static Caller caller(Principal principal) {
-    return new Caller(principal, new CompletableFuture<>(), TestAuthenticator.CHALLENGE);
+    return new Caller(
+        principal, new CompletableFuture<>(), new Challenge(TestAuthenticator.CHALLENGE));
   }
 
   /** A request a refused upload never reads. */

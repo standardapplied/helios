@@ -65,47 +65,61 @@ final class UnreadBodyGuardTest {
   }
 
   @Test
-  void anExceptionARouteLetsEscapeIsAnsweredThroughTheListenersDirectHandlersThenEndsTheConnection()
+  void anHttpExceptionARouteLetsEscapeKeepsItsStatusHeadersAndMessageThenEndsTheConnection()
       throws IOException {
     var teapot =
         new HttpException("brewing", Status.create(418, "I'm a teapot"), true)
             .header(HeaderValues.create("X-Brew", "tea"));
+    startEchoing(
+        routing ->
+            routing.post(
+                "/teapot",
+                (req, resp) -> {
+                  throw teapot;
+                }));
+    try (var connection = RawConnection.open(server.port())) {
+      var brewing = postSmuggling(connection, "/teapot");
+
+      assertEquals("HTTP/1.1 418 I'm a teapot", brewing.statusLine());
+      assertEquals("tea", brewing.headers().get("x-brew"));
+      assertEquals("OTHER brewing caused by " + teapot, brewing.body());
+      assertTrue(brewing.closesConnection());
+      assertEquals(-1, connection.next());
+    }
+    assertEquals(0, smuggledRuns.get());
+  }
+
+  @Test
+  void anErrorARouteLetsEscapeIsAFixed500ThenEndsTheConnection() throws IOException {
+    startEchoing(
+        routing ->
+            routing.post(
+                "/crash",
+                (req, resp) -> {
+                  throw new AssertionError("crash");
+                }));
+    try (var connection = RawConnection.open(server.port())) {
+      var crashed = postSmuggling(connection, "/crash");
+
+      assertEquals("HTTP/1.1 500 Internal Server Error", crashed.statusLine());
+      assertEquals(
+          "INTERNAL_ERROR Internal Server Error caused by java.lang.AssertionError: crash",
+          crashed.body());
+      assertTrue(crashed.closesConnection());
+      assertEquals(-1, connection.next());
+    }
+    assertEquals(0, smuggledRuns.get());
+  }
+
+  /** Start a guarded server whose direct handlers echo what the guard hands them. */
+  private void startEchoing(Consumer<HttpRouting.Builder> routes) {
     var echo = new EchoingDirectHandler();
     start(
         DirectHandlers.builder()
             .addHandler(EventType.OTHER, echo)
             .addHandler(EventType.INTERNAL_ERROR, echo)
             .build(),
-        routing ->
-            routing
-                .post(
-                    "/teapot",
-                    (req, resp) -> {
-                      throw teapot;
-                    })
-                .post(
-                    "/crash",
-                    (req, resp) -> {
-                      throw new AssertionError("crash");
-                    }));
-    try (var teapotConnection = RawConnection.open(server.port());
-        var crashConnection = RawConnection.open(server.port())) {
-      var brewing = postSmuggling(teapotConnection, "/teapot");
-      var crashed = postSmuggling(crashConnection, "/crash");
-
-      assertEquals("HTTP/1.1 418 I'm a teapot", brewing.statusLine());
-      assertEquals("tea", brewing.headers().get("x-brew"));
-      assertEquals("OTHER brewing caused by " + teapot, brewing.body());
-      assertTrue(brewing.closesConnection());
-      assertEquals(-1, teapotConnection.next());
-      assertEquals("HTTP/1.1 500 Internal Server Error", crashed.statusLine());
-      assertEquals(
-          "INTERNAL_ERROR Internal Server Error caused by java.lang.AssertionError: crash",
-          crashed.body());
-      assertTrue(crashed.closesConnection());
-      assertEquals(-1, crashConnection.next());
-    }
-    assertEquals(0, smuggledRuns.get());
+        routes);
   }
 
   /** Start a server whose routing has the guard, the counting route and {@code routes}. */
@@ -173,7 +187,10 @@ final class UnreadBodyGuardTest {
     }
   }
 
-  /** A feature weighted as Helidon's CORS whose filter refuses, unread, a request so marked. */
+  /**
+   * A feature weighted as Helidon's CORS (850), above the default, so it sets up its filter before
+   * a default-weighted feature's; the filter refuses, unread, a request so marked.
+   */
   private static final class RefusingFeature implements HttpFeature, Weighted {
 
     @Override

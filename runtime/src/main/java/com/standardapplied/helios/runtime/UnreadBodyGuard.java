@@ -23,8 +23,9 @@ import io.helidon.webserver.http.ServerResponse;
  * bound or, after {@code Expect: 100-continue} with no {@code 100 Continue} sent, parses the next
  * bytes as a new request, smuggled past whatever checked the first one's headers. The guard sets
  * {@code Connection: close} on any response sent while the body is unread; Helidon then flushes the
- * whole response and ends the connection (Helidon 4.5.4 or later). A request whose body was read to
- * its end, or that has none, keeps its connection.
+ * whole response and ends the connection (Helidon 4.5.4 or later; earlier releases ignore {@code
+ * Connection: close} here). A request whose body was read to its end, or that has none, keeps its
+ * connection.
  *
  * <p>Install it with {@code routing.addFeature(new UnreadBodyGuard())}; {@link RuntimeServer} does.
  * It then covers:
@@ -44,16 +45,13 @@ import io.helidon.webserver.http.ServerResponse;
  * on a server without the feature; there Helidon still drains the body when a route lets an
  * exception escape.
  *
- * <p>Out of its reach:
+ * <p>Out of its reach is a route, or a routing's own error handler, that sends no response: Helidon
+ * drains the body without bound first. Every route and error handler on a guarded routing must send
+ * its response; each of {@link AgentHttpService}'s does.
  *
- * <ul>
- *   <li>a route or a routing's own error handler that sends no response: Helidon drains the body
- *       without bound first. Every route and error handler on a guarded routing must send its
- *       response; each of {@link AgentHttpService}'s does;
- *   <li>the operating system resets a connection closed with its body unread, discarding response
- *       bytes not yet sent and ending retransmission, so a large response, or one whose packet is
- *       lost, can arrive cut short. Each of Helios's refusals fits in one packet.
- * </ul>
+ * <p>Closing a connection whose body is unread makes the operating system reset it, discarding
+ * response bytes not yet sent and ending retransmission, so a large response, or one whose packet
+ * is lost, can arrive cut short. Each of Helios's refusals fits in one packet.
  */
 public final class UnreadBodyGuard implements HttpFeature, Weighted {
 

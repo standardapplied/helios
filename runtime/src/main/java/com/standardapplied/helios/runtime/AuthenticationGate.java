@@ -29,7 +29,7 @@ final class AuthenticationGate {
   private static final Map<String, String> UNAUTHENTICATED = Map.of("error", "unauthenticated");
 
   private final Authenticator authenticator;
-  private final String challenge;
+  private final Challenge challenge;
 
   /**
    * Build the gate for {@code authenticator}, reading its challenge once.
@@ -39,7 +39,7 @@ final class AuthenticationGate {
    */
   AuthenticationGate(Authenticator authenticator) {
     this.authenticator = Objects.requireNonNull(authenticator, "authenticator must not be null");
-    this.challenge = Challenge.requireValid(authenticator.challenge());
+    this.challenge = new Challenge(authenticator.challenge());
   }
 
   /**
@@ -72,8 +72,8 @@ final class AuthenticationGate {
    * Answer {@code resp} {@code 401}: {@code challenge} in {@code WWW-Authenticate} and a body that
    * says nothing about why.
    */
-  private static void unauthenticated(ServerResponse resp, String challenge) {
-    resp.header(HeaderNames.WWW_AUTHENTICATE, challenge)
+  private static void unauthenticated(ServerResponse resp, Challenge challenge) {
+    resp.header(HeaderNames.WWW_AUTHENTICATE, challenge.value())
         .status(Status.UNAUTHORIZED_401)
         .send(UNAUTHENTICATED);
   }
@@ -87,9 +87,9 @@ final class AuthenticationGate {
    * @param challenge the authenticator's challenge, which the {@code 401} for an ended identity
    *     carries
    */
-  record Caller(Principal principal, CompletableFuture<Void> ended, String challenge) {
+  record Caller(Principal principal, CompletableFuture<Void> ended, Challenge challenge) {
 
-    static Caller start(Authentication authentication, String challenge) {
+    static Caller start(Authentication authentication, Challenge challenge) {
       var ended = new CompletableFuture<Void>();
       if (authentication.lifetime().isPositive()) {
         ended.completeOnTimeout(
