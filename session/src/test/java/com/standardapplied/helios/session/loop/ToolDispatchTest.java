@@ -19,6 +19,7 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolExecutor;
+import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.tools.ToolBinding;
@@ -432,6 +433,32 @@ final class ToolDispatchTest {
     var thrown = assertThrows(AssertionError.class, () -> d.dispatch(c, token, NEVER, NEVER));
 
     assertSame(sentinel, thrown);
+  }
+
+  @Test
+  void aToolWhoseFailureCannotBeReportedIsThrewWithoutWaitingForTheDeadline() {
+    var d =
+        dispatcher(
+            binding(
+                "garbled",
+                ToolCategory.READ,
+                (args, ctx) -> {
+                  throw new IllegalStateException() {
+                    @Override
+                    public String getMessage() {
+                      throw new UnsupportedOperationException("message unavailable");
+                    }
+                  };
+                }));
+
+    var ending = start(d, "garbled").ending("the dispatch");
+
+    assertEquals(
+        new ToolResult(
+            new ToolOutcome.Threw("java.lang.UnsupportedOperationException"),
+            "tool 'garbled' threw: message unavailable",
+            List.of()),
+        ending.result());
   }
 
   // ── per-category permits ──────────────────────────────────────────────────
