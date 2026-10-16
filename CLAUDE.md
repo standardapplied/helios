@@ -102,7 +102,7 @@ follow a redirect except the unauthenticated download client `createForDownloads
 the `onnx` module may call; `java.lang.ProcessBuilder` is used only by `core.process` (whose
 `BoundedProcess` every other child process goes through) and `repl.sandbox.SandboxLauncher`;
 `jdk.jshell` is used only in `repl.sandbox` and its sub-packages, the bootstrap side of the process
-boundary; `System.setOut` and `System.setErr` are called only by `repl.sandbox.SnippetEvaluator`; `runtime.Authenticator.authenticate` is called only by `runtime.AuthenticationGate`, and `io.helidon.http.Status.UNAUTHORIZED_401` is accessed only by it, so every `401` carries the authenticator's challenge; a public
+boundary; `System.setOut` and `System.setErr` are called only by `repl.sandbox.SnippetEvaluator`; `runtime.Authenticator.authenticate` is called only by `runtime.AuthenticationGate`, and only it accesses `io.helidon.http.Status.UNAUTHORIZED_401`, so every `401` carries the authenticator's challenge (no other runtime class names a status by number through `Status.create` or `ServerResponse.status(int)`, or throws Helidon's `UnauthorizedException`); a public
 instance method on a `*Builder` type that returns that builder is named `with...`; no top-level type is
 named `*Util`, `*Utils`, `*Helper`, `*Helpers` or `*Manager`; `System.out`, `System.err` and
 `printStackTrace` are used only in `repl.sandbox` and the example modules; nothing in main code
