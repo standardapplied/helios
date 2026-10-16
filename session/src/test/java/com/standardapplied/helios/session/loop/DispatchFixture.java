@@ -11,6 +11,7 @@ import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolExecutor;
+import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.tools.ToolBinding;
@@ -171,6 +172,28 @@ final class DispatchFixture implements AutoCloseable {
 
     release.countDown();
     assertEquals(ToolResult.success("done"), next.ending("the next dispatch").result());
+    assertEquals(2, starts.get());
+  }
+
+  /**
+   * The next call of {@code d}'s {@code write} tool is refused at once because the earlier writer
+   * did not stop, and its tool never starts; once {@link #release} opens and that writer ends, the
+   * next one runs.
+   */
+  void assertTheNextWriterIsRefusedUntilTheStuckOneEnds(ToolDispatch d, AtomicInteger starts) {
+    assertEquals(
+        new ToolResult(
+            new ToolOutcome.Rejected(
+                "ToolDispatch", "tool 'write' did not stop; no tool runs until it ends"),
+            "blocked by ToolDispatch: tool 'write' did not stop; no tool runs until it ends",
+            List.of()),
+        start(d, "write").ending("the refused dispatch").result());
+    assertEquals(1, starts.get(), "the refused writer's tool never started");
+
+    release.countDown();
+    awaitIdle(d);
+    assertEquals(
+        ToolResult.success("done"), start(d, "write").ending("the next dispatch").result());
     assertEquals(2, starts.get());
   }
 

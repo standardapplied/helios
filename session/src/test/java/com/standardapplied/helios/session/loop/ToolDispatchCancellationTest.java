@@ -212,7 +212,7 @@ final class ToolDispatchCancellationTest {
   }
 
   @Test
-  void cancellingTheSessionWhileAStuckWriterRunsAdmitsNoOtherWriterUntilItEnds() {
+  void cancellingTheSessionWhileAStuckWriterRunsRefusesEveryCallUntilItEnds() {
     var starts = new AtomicInteger();
     var d = fixture.dispatcher(binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
     var session = new CancellationToken();
@@ -221,11 +221,11 @@ final class ToolDispatchCancellationTest {
     session.cancel("user-stop");
     assertCancelled("user-stop", first);
 
-    fixture.assertTheNextWriterWaitsForRelease(d, starts);
+    fixture.assertTheNextWriterIsRefusedUntilTheStuckOneEnds(d, starts);
   }
 
   @Test
-  void cancellingTheSessionDuringTheStopGraceAdmitsNoOtherWriterUntilItEnds() {
+  void cancellingTheSessionDuringTheStopGraceRefusesEveryCallUntilItEnds() {
     var starts = new AtomicInteger();
     var cancelled = new CountDownLatch(1);
     var stuck = fixture.stuck(starts);
@@ -246,11 +246,11 @@ final class ToolDispatchCancellationTest {
     session.cancel("user-stop");
     assertCancelled("user-stop", first);
 
-    fixture.assertTheNextWriterWaitsForRelease(d, starts);
+    fixture.assertTheNextWriterIsRefusedUntilTheStuckOneEnds(d, starts);
   }
 
   @Test
-  void interruptingTheCallerWhileAStuckWriterRunsAdmitsNoOtherWriterUntilItEnds() {
+  void interruptingTheCallerWhileAStuckWriterRunsRefusesEveryCallUntilItEnds() {
     var starts = new AtomicInteger();
     var d = fixture.dispatcher(binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
     var first = start(d, "write");
@@ -258,7 +258,7 @@ final class ToolDispatchCancellationTest {
     first.thread().interrupt();
     assertCancelled("interrupted waiting for tool write", first);
 
-    fixture.assertTheNextWriterWaitsForRelease(d, starts);
+    fixture.assertTheNextWriterIsRefusedUntilTheStuckOneEnds(d, starts);
   }
 
   // ── the call's cancellation callbacks ─────────────────────────────────────
@@ -297,7 +297,7 @@ final class ToolDispatchCancellationTest {
   }
 
   @Test
-  void aCallWhoseCancellationCallbackStillRunsIsUnknownAndAdmitsNoOtherWriter() {
+  void aCallWhoseCancellationCallbackStillRunsIsUnknownAndRefusesEveryCall() {
     var starts = new AtomicInteger();
     ToolExecutor writer =
         (args, ctx) -> {
@@ -310,7 +310,7 @@ final class ToolDispatchCancellationTest {
     fixture.scheduler.fireLatest();
     assertEquals(ToolResult.unknown("write", NEVER), first.ending("the first dispatch").result());
 
-    fixture.assertTheNextWriterWaitsForRelease(d, starts);
+    fixture.assertTheNextWriterIsRefusedUntilTheStuckOneEnds(d, starts);
   }
 
   @Test

@@ -133,10 +133,10 @@ public record ToolResult(ToolOutcome outcome, String output, List<InlineFile> at
   }
 
   /**
-   * A hook refused or replaced the call before it ran.
+   * The call was rejected before it ran, by a hook or by the session's dispatcher.
    *
-   * @param by the rejecting hook's name; non-blank
-   * @param reason the hook's reason; non-blank
+   * @param by the rejecting hook's name, or {@code ToolDispatch}; non-blank
+   * @param reason why; non-blank
    * @return a {@link ToolOutcome.Rejected} result
    */
   public static ToolResult rejected(String by, String reason) {
