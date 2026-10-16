@@ -10,10 +10,15 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.testing.ScriptedModel;
 import io.helidon.common.Weighted;
+import io.helidon.http.DirectHandler.EventType;
+import io.helidon.http.DirectHandler;
 import io.helidon.http.Header;
 import io.helidon.http.HeaderValues;
+import io.helidon.http.HttpException;
+import io.helidon.http.ServerResponseHeaders;
 import io.helidon.http.Status;
 import io.helidon.webserver.WebServer;
+import io.helidon.webserver.http.DirectHandlers;
 import io.helidon.webserver.http.HttpFeature;
 import io.helidon.webserver.http.HttpRouting;
 import java.io.IOException;
@@ -194,6 +199,60 @@ final class UnreadBodyGuardTest {
             .start();
     try {
       assertARequestSmuggledInARefusedBodyNeverRuns(deployed.port());
+    } finally {
+      deployed.stop();
+    }
+  }
+
+  @Test
+  void anExceptionARouteLetsEscapeIsAnsweredThroughTheListenersDirectHandlersThenEndsTheConnection()
+      throws IOException {
+    var teapot =
+        new HttpException("brewing", Status.create(418, "I'm a teapot"), true)
+            .header(HeaderValues.create("X-Brew", "tea"));
+    var echo = new EchoingDirectHandler();
+    var deployed =
+        WebServer.builder()
+            .host("127.0.0.1")
+            .port(0)
+            .featuresDiscoverServices(false)
+            .directHandlers(
+                DirectHandlers.builder()
+                    .addHandler(EventType.OTHER, echo)
+                    .addHandler(EventType.INTERNAL_ERROR, echo)
+                    .build())
+            .routing(
+                (HttpRouting.Builder routing) ->
+                    routing
+                        .addFeature(new UnreadBodyGuard())
+                        .post(
+                            "/teapot",
+                            (req, resp) -> {
+                              throw teapot;
+                            })
+                        .post(
+                            "/crash",
+                            (req, resp) -> {
+                              throw new AssertionError("crash");
+                            }))
+            .build()
+            .start();
+    try (var teapotConnection = RawConnection.open(deployed.port());
+        var crashConnection = RawConnection.open(deployed.port())) {
+      var brewing = send(teapotConnection, Upload.declared("POST", "/teapot", ""), false);
+      var crashed = send(crashConnection, Upload.declared("POST", "/crash", ""), false);
+
+      assertEquals("HTTP/1.1 418 I'm a teapot", brewing.statusLine());
+      assertEquals("tea", brewing.headers().get("x-brew"));
+      assertEquals("OTHER brewing caused by " + teapot, brewing.body());
+      assertTrue(brewing.closesConnection());
+      assertEquals(-1, teapotConnection.next());
+      assertEquals("HTTP/1.1 500 Internal Server Error", crashed.statusLine());
+      assertEquals(
+          "INTERNAL_ERROR Internal Server Error caused by java.lang.AssertionError: crash",
+          crashed.body());
+      assertTrue(crashed.closesConnection());
+      assertEquals(-1, crashConnection.next());
     } finally {
       deployed.stop();
     }
@@ -487,6 +546,35 @@ final class UnreadBodyGuardTest {
 
   private static String messages(String sessionId) {
     return "/v1/sessions/" + sessionId + "/messages";
+  }
+
+  /** Answers with the event type, the message and the cause of the exception it is handed. */
+  private static final class EchoingDirectHandler implements DirectHandler {
+
+    @Override
+    public TransportResponse handle(
+        TransportRequest request,
+        EventType eventType,
+        Status status,
+        ServerResponseHeaders headers,
+        Throwable thrown) {
+      return handle(
+          request,
+          eventType,
+          status,
+          headers,
+          eventType + " " + thrown.getMessage() + " caused by " + thrown.getCause());
+    }
+
+    @Override
+    public TransportResponse handle(
+        TransportRequest request,
+        EventType eventType,
+        Status status,
+        ServerResponseHeaders headers,
+        String message) {
+      return TransportResponse.builder().status(status).headers(headers).entity(message).build();
+    }
   }
 
   /**
