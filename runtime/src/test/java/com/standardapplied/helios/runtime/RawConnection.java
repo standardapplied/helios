@@ -8,7 +8,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
-import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -39,12 +38,8 @@ final class RawConnection implements AutoCloseable {
     return new RawConnection(new Socket("127.0.0.1", port));
   }
 
-  /** Connect with a send buffer of {@code sendBufferBytes}, set before the connection opens. */
-  static RawConnection open(int port, int sendBufferBytes) throws IOException {
-    var socket = new Socket();
-    socket.setSendBufferSize(sendBufferBytes);
-    socket.connect(new InetSocketAddress("127.0.0.1", port));
-    return new RawConnection(socket);
+  int localPort() {
+    return socket.getLocalPort();
   }
 
   void write(String ascii) throws IOException {

@@ -23,11 +23,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import jdk.jfr.consumer.RecordingStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -45,6 +46,11 @@ import tools.jackson.databind.json.JsonMapper;
 final class UnreadBodyGuardTest {
 
   private static final int MAX_BODY = 64;
+
+  /** The most one read of Helidon's {@code PlainSocket} takes off the connection. */
+  private static final int SERVER_READ_BUFFER = 8 * 1024;
+
+  private static final String SOCKET_READ = "jdk.SocketRead";
 
   /** A complete request, sent as the body of another, from an identity no client may claim. */
   private static final String SMUGGLED =
@@ -289,48 +295,60 @@ final class UnreadBodyGuardTest {
   }
 
   /**
-   * The server reads no more of a body than the client gets onto the connection, and the client
-   * gets onto it only what the socket buffers between the two hold plus what the server read before
-   * it answered: the client's 16 KiB send buffer and Helidon's 32 KiB receive buffer, each doubled
-   * by Linux, and one 8 KiB read, about 120 KiB in all. A server that drained would take all 64
-   * MiB.
+   * The server's end of the connection reads the head and, in the same read, at most one 8 KiB
+   * socket buffer of the body, counted from the JDK's {@code jdk.SocketRead} events for the socket
+   * whose peer is the client; a server that drained would read all 64 MiB.
    */
   @Test
   void aRefusedBodyLargerThanTheSocketBuffersIsNotRead() throws IOException {
-    var declared = 64L * 1024 * 1024;
-    var sendBuffer = 16 * 1024;
-    var written = new AtomicLong();
-    try (var connection = RawConnection.open(server.port(), sendBuffer)) {
-      connection.write(
-          "POST "
-              + messages(sessions.get("alice"))
-              + " HTTP/1.1\r\nHost: 127.0.0.1\r\n"
-              + identity("alice")
-              + "Content-Type: application/json\r\nContent-Length: "
-              + declared
-              + "\r\n\r\n");
-      var writing = CompletableFuture.runAsync(() -> writeUntilRefused(connection, written));
+    var head =
+        "POST "
+            + messages(sessions.get("alice"))
+            + " HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            + identity("alice")
+            + "Content-Type: application/json\r\nContent-Length: "
+            + 64L * 1024 * 1024
+            + "\r\n\r\n";
+    var reads = new ConcurrentLinkedQueue<SocketRead>();
+    int clientPort;
+    try (var recording = new RecordingStream()) {
+      recording.enable(SOCKET_READ).withoutThreshold();
+      recording.onEvent(
+          SOCKET_READ,
+          event -> reads.add(new SocketRead(event.getInt("port"), event.getLong("bytesRead"))));
+      recording.startAsync();
+      try (var connection = RawConnection.open(server.port())) {
+        clientPort = connection.localPort();
+        connection.write(head);
+        var writing = CompletableFuture.runAsync(() -> writeUntilRefused(connection));
 
-      var refused = connection.response();
+        var refused = connection.response();
 
-      assertEquals("HTTP/1.1 413 Request Entity Too Large", refused.statusLine());
-      assertTrue(refused.closesConnection());
-      assertEquals(-1, connection.next());
-      assertInstanceOf(
-          UncheckedIOException.class, Await.failure("the body's writer to be refused", writing));
+        assertEquals("HTTP/1.1 413 Request Entity Too Large", refused.statusLine());
+        assertTrue(refused.closesConnection());
+        assertEquals(-1, connection.next());
+        assertInstanceOf(
+            UncheckedIOException.class, Await.failure("the body's writer to be refused", writing));
+      }
+      recording.stop();
     }
-    assertTrue(written.get() <= 256 * 1024, () -> written.get() + " bytes were accepted");
+    var serverRead =
+        reads.stream()
+            .filter(read -> read.peerPort() == clientPort)
+            .mapToLong(SocketRead::bytes)
+            .sum();
+    assertTrue(
+        serverRead <= head.length() + SERVER_READ_BUFFER, () -> serverRead + " bytes were read");
   }
 
-  private static void writeUntilRefused(RawConnection connection, AtomicLong written) {
-    var chunk = new byte[8 * 1024];
+  private static void writeUntilRefused(RawConnection connection) {
+    var chunk = new byte[SERVER_READ_BUFFER];
     while (true) {
       try {
         connection.write(chunk);
       } catch (IOException e) {
         throw new UncheckedIOException(e);
       }
-      written.addAndGet(chunk.length);
     }
   }
 
@@ -425,6 +443,14 @@ final class UnreadBodyGuardTest {
   private static String messages(String sessionId) {
     return "/v1/sessions/" + sessionId + "/messages";
   }
+
+  /**
+   * One socket read, as the JDK records it.
+   *
+   * @param peerPort the port of the socket's peer
+   * @param bytes the bytes the read returned
+   */
+  record SocketRead(int peerPort, long bytes) {}
 
   private static Exchange refusal(
       String name, String statusLine, String body, Function<UnreadBodyGuardTest, Upload> upload) {
