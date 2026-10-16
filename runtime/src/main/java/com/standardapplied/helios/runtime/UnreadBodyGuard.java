@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.runtime;
 
+import io.helidon.common.Weighted;
 import io.helidon.http.DirectHandler.EventType;
 import io.helidon.http.HeaderValues;
 import io.helidon.http.HttpException;
@@ -33,7 +34,7 @@ import io.helidon.webserver.http.ServerResponse;
  * fixed message. {@link RuntimeServer} installs it; {@link AgentHttpService} also applies it to
  * each of its own routes, so they are covered on a server that does not install it.
  */
-public final class UnreadBodyGuard implements HttpFeature {
+public final class UnreadBodyGuard implements HttpFeature, Weighted {
 
   private static final String INTERNAL_ERROR = "Internal Server Error";
 
@@ -49,6 +50,15 @@ public final class UnreadBodyGuard implements HttpFeature {
               chain.proceed();
             })
         .error(Throwable.class, UnreadBodyGuard::answer);
+  }
+
+  /**
+   * Set up before every other feature, so that an answer another feature's filter sends without
+   * proceeding is covered too; a feature sets up its filters in weight order, highest first.
+   */
+  @Override
+  public double weight() {
+    return Double.MAX_VALUE;
   }
 
   /** Close the connection after {@code resp} if, when it is sent, {@code req}'s body is unread. */
