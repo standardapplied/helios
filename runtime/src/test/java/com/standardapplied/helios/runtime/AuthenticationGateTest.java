@@ -46,6 +46,7 @@ final class AuthenticationGateTest {
         "challenge's auth-scheme must be followed by one space and a token68 or a"
             + " comma-separated list of auth-params, got ";
     var repeatedName = "challenge's auth-param names must be unique, ignoring case, but ";
+    var unquotedRealm = "challenge's realm must be a quoted-string, got ";
     return Stream.of(
         Arguments.of("", "challenge must be non-blank"),
         Arguments.of(" \t", "challenge must be non-blank"),
@@ -68,12 +69,18 @@ final class AuthenticationGateTest {
             repeatedName + "'realm' repeats in 'Bearer realm=\"one\", realm=\"two\"'"),
         Arguments.of(
             "Bearer realm=\"one\", scope=read, REALM=\"two\"",
-            repeatedName + "'REALM' repeats in 'Bearer realm=\"one\", scope=read, REALM=\"two\"'"));
+            repeatedName + "'REALM' repeats in 'Bearer realm=\"one\", scope=read, REALM=\"two\"'"),
+        Arguments.of("Basic realm=helios", unquotedRealm + "'Basic realm=helios'"),
+        Arguments.of("Basic REALM = helios", unquotedRealm + "'Basic REALM = helios'"),
+        Arguments.of(
+            "Bearer scope=\"realm=x\", Realm=helios",
+            unquotedRealm + "'Bearer scope=\"realm=x\", Realm=helios'"));
   }
 
   /**
    * Challenges a gate accepts: a bare scheme, a token68 and lists of auth-params, one of them with
-   * a quoted value that looks like a second, repeated parameter.
+   * a quoted value that looks like a second, repeated parameter and one with a token value that is
+   * not a realm.
    */
   static Stream<String> validChallenges() {
     return Stream.of(
@@ -82,6 +89,7 @@ final class AuthenticationGateTest {
         "Bearer realm=\"helios\", error=\"invalid_token\", scope=read",
         "Bearer realm = \"a \\\"quoted\\\" realm\"",
         "Bearer realm=\"one, realm=two\", scope=read",
+        "Bearer scope=realm, realms=read",
         "Bearer " + "a".repeat(AuthenticationGate.MAX_CHALLENGE_LENGTH - 7));
   }
 

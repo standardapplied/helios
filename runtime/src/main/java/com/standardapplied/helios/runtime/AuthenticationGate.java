@@ -38,11 +38,11 @@ final class AuthenticationGate {
   private static final String QUOTED_STRING = "\"(?:[ !#-\\[\\]-~]|\\\\[ -~])*\"";
 
   private static final String AUTH_PARAM =
-      "(" + TOKEN + ") *= *(?:" + TOKEN + "|" + QUOTED_STRING + ")";
+      "(" + TOKEN + ") *= *(" + TOKEN + "|" + QUOTED_STRING + ")";
 
   private static final Pattern AUTH_SCHEME = Pattern.compile(TOKEN);
 
-  private static final Pattern AUTH_PARAM_NAME = Pattern.compile(AUTH_PARAM);
+  private static final Pattern AUTH_PARAM_PATTERN = Pattern.compile(AUTH_PARAM);
 
   private static final Pattern TOKEN68_OR_AUTH_PARAMS =
       Pattern.compile("[0-9A-Za-z._~+/-]+=*|" + AUTH_PARAM + "(?: *, *" + AUTH_PARAM + ")*");
@@ -64,8 +64,8 @@ final class AuthenticationGate {
   /**
    * Return {@code challenge} if it is a valid RFC 9110 {@code challenge}: an auth-scheme token,
    * optionally followed by one space and a token68 or a comma-separated list of auth-params whose
-   * names are unique ignoring case, in printable ASCII, non-blank and at most {@value
-   * #MAX_CHALLENGE_LENGTH} characters.
+   * names are unique ignoring case and whose realm, if any, is a quoted-string, in printable ASCII,
+   * non-blank and at most {@value #MAX_CHALLENGE_LENGTH} characters.
    *
    * @param challenge the candidate {@code WWW-Authenticate} value
    * @return {@code challenge}
@@ -119,20 +119,26 @@ final class AuthenticationGate {
               + challenge
               + "'");
     }
-    requireUniqueParameterNames(challenge, credentials);
+    requireValidParameters(challenge, credentials);
   }
 
   /**
-   * RFC 9110 §11.2: each auth-param name occurs once per challenge, compared case-insensitively.
+   * RFC 9110 §11.2: each auth-param name occurs once per challenge, compared case-insensitively;
+   * §11.5: a sender generates {@code realm} only as a quoted-string.
    */
-  private static void requireUniqueParameterNames(String challenge, String credentials) {
+  private static void requireValidParameters(String challenge, String credentials) {
     var names = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
-    var parameters = AUTH_PARAM_NAME.matcher(credentials);
+    var parameters = AUTH_PARAM_PATTERN.matcher(credentials);
     while (parameters.find()) {
-      if (!names.add(parameters.group(1))) {
+      var name = parameters.group(1);
+      if (name.equalsIgnoreCase("realm") && !parameters.group(2).startsWith("\"")) {
+        throw new IllegalArgumentException(
+            "challenge's realm must be a quoted-string, got '" + challenge + "'");
+      }
+      if (!names.add(name)) {
         throw new IllegalArgumentException(
             "challenge's auth-param names must be unique, ignoring case, but '"
-                + parameters.group(1)
+                + name
                 + "' repeats in '"
                 + challenge
                 + "'");
