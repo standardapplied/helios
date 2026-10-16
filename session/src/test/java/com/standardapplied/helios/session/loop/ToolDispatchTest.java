@@ -147,6 +147,19 @@ final class ToolDispatchTest {
     };
   }
 
+  /**
+   * Counts {@code cancelled} down when its token is cancelled, signals {@link #entered}, then waits
+   * for {@link #release} through every interruption.
+   */
+  private ToolExecutor stuckSignalling(CountDownLatch cancelled) {
+    return (args, ctx) -> {
+      ctx.cancellation().onCancel(cancelled::countDown);
+      entered.countDown();
+      awaitThroughInterrupts(release);
+      return ToolResult.success("late");
+    };
+  }
+
   static void awaitThroughInterrupts(CountDownLatch latch) {
     var interrupted = false;
     while (latch.getCount() > 0) {
@@ -199,6 +212,19 @@ final class ToolDispatchTest {
       ctx.cancellation().onCancel(() -> awaitThroughInterrupts(release));
       return interruptible(interrupted).execute(args, ctx);
     };
+  }
+
+  /**
+   * Registers on {@code session} a first callback that signals {@code entered}, then waits for
+   * {@code release} through every interruption.
+   */
+  private static void blockFirstCallback(
+      CancellationToken session, CountDownLatch entered, CountDownLatch release) {
+    session.onCancel(
+        () -> {
+          entered.countDown();
+          awaitThroughInterrupts(release);
+        });
   }
 
   private static void awaitIdle(ToolDispatch d) {
@@ -552,6 +578,35 @@ final class ToolDispatchTest {
   }
 
   @Test
+  void aStuckWriterAdmitsNoExecutionCallUntilItEnds() {
+    var writes = new AtomicInteger();
+    var executions = new AtomicInteger();
+    var d =
+        dispatcher(
+            binding("write", ToolCategory.WRITE, stuckWriter(writes)),
+            binding(
+                "exec",
+                ToolCategory.EXECUTION,
+                (args, ctx) -> {
+                  executions.incrementAndGet();
+                  return ToolResult.success("executed");
+                }));
+    var first = start(d, "write", new CancellationToken(), SHORT);
+    Await.latch("the writer to start", entered);
+    scheduler.fireLatest();
+    assertEquals(ToolResult.unknown("write", NEVER), first.ending("the write dispatch").result());
+
+    var next = start(d, "exec");
+    Await.until(
+        "the execution call to queue", () -> d.queuedDispatches(ToolCategory.EXECUTION) == 1);
+    assertEquals(0, executions.get(), "the execution call has not started");
+
+    release.countDown();
+    assertEquals(ToolResult.success("executed"), next.ending("the exec dispatch").result());
+    assertEquals(1, executions.get());
+  }
+
+  @Test
   void aCallWhoseDeadlinePassesWhileTheSchedulerIsBusyTimesOutWithoutStartingTheTool() {
     var schedulerFree = new CountDownLatch(1);
     scheduler.execute(() -> awaitThroughInterrupts(schedulerFree));
@@ -579,11 +634,7 @@ final class ToolDispatchTest {
     var session = new CancellationToken();
     var callbackEntered = new CountDownLatch(1);
     var callbackRelease = new CountDownLatch(1);
-    session.onCancel(
-        () -> {
-          callbackEntered.countDown();
-          awaitThroughInterrupts(callbackRelease);
-        });
+    blockFirstCallback(session, callbackEntered, callbackRelease);
     var starts = new AtomicInteger();
     var d =
         dispatcher(
@@ -670,13 +721,7 @@ final class ToolDispatchTest {
   @Test
   void aResultArrivingAfterTheTimeoutDoesNotReplaceIt() {
     var cancelled = new CountDownLatch(1);
-    ToolExecutor late =
-        (args, ctx) -> {
-          ctx.cancellation().onCancel(cancelled::countDown);
-          entered.countDown();
-          awaitThroughInterrupts(release);
-          return ToolResult.success("late");
-        };
+    var late = stuckSignalling(cancelled);
     var d = dispatcher(binding("late", ToolCategory.READ, late));
 
     var running = start(d, "late");
@@ -820,13 +865,7 @@ final class ToolDispatchTest {
   @Test
   void interruptingTheCallerDuringTheStopGraceEndsTheCallAndKeepsTheInterrupt() {
     var cancelled = new CountDownLatch(1);
-    ToolExecutor stuck =
-        (args, ctx) -> {
-          ctx.cancellation().onCancel(cancelled::countDown);
-          entered.countDown();
-          awaitThroughInterrupts(release);
-          return ToolResult.success("late");
-        };
+    var stuck = stuckSignalling(cancelled);
     var d = dispatcher(binding("stuck", ToolCategory.READ, stuck));
 
     var running = start(d, "stuck");
@@ -844,13 +883,7 @@ final class ToolDispatchTest {
   @Test
   void cancellingTheSessionDuringTheStopGraceEndsTheCall() {
     var cancelled = new CountDownLatch(1);
-    ToolExecutor stuck =
-        (args, ctx) -> {
-          ctx.cancellation().onCancel(cancelled::countDown);
-          entered.countDown();
-          awaitThroughInterrupts(release);
-          return ToolResult.success("late");
-        };
+    var stuck = stuckSignalling(cancelled);
     var d = dispatcher(binding("stuck", ToolCategory.READ, stuck));
     var session = new CancellationToken();
 
@@ -863,6 +896,51 @@ final class ToolDispatchTest {
     var thrown = running.ending("the cancelled dispatch").thrown();
     assertInstanceOf(CancellationException.class, thrown);
     assertEquals("session closed", thrown.getMessage());
+  }
+
+  @Test
+  void cancellingTheSessionWhileAnEarlierCallbackBlocksEndsARunningCall() {
+    var session = new CancellationToken();
+    var callbackEntered = new CountDownLatch(1);
+    var callbackRelease = new CountDownLatch(1);
+    blockFirstCallback(session, callbackEntered, callbackRelease);
+    var cancelled = new CountDownLatch(1);
+    var stuck = stuckSignalling(cancelled);
+    var d = dispatcher(binding("stuck", ToolCategory.READ, stuck));
+    var running = start(d, "stuck", session, NEVER);
+    Await.latch("the tool to start", entered);
+
+    Thread.ofVirtual().start(() -> session.cancel("session closed"));
+    Await.latch("the session's first callback to block", callbackEntered);
+
+    var thrown = running.ending("the cancelled dispatch").thrown();
+    assertInstanceOf(CancellationException.class, thrown);
+    assertEquals("session closed", thrown.getMessage());
+    Await.latch("the call's own token to be cancelled", cancelled);
+    callbackRelease.countDown();
+  }
+
+  @Test
+  void cancellingTheSessionDuringTheStopGraceWhileAnEarlierCallbackBlocksEndsTheCall() {
+    var session = new CancellationToken();
+    var callbackEntered = new CountDownLatch(1);
+    var callbackRelease = new CountDownLatch(1);
+    blockFirstCallback(session, callbackEntered, callbackRelease);
+    var cancelled = new CountDownLatch(1);
+    var stuck = stuckSignalling(cancelled);
+    var d = dispatcher(binding("stuck", ToolCategory.READ, stuck));
+    var running = start(d, "stuck", session, NEVER);
+    Await.latch("the tool to start", entered);
+    scheduler.fireLatest();
+    Await.latch("the call to be timed out", cancelled);
+
+    Thread.ofVirtual().start(() -> session.cancel("session closed"));
+    Await.latch("the session's first callback to block", callbackEntered);
+
+    var thrown = running.ending("the cancelled dispatch").thrown();
+    assertInstanceOf(CancellationException.class, thrown);
+    assertEquals("session closed", thrown.getMessage());
+    callbackRelease.countDown();
   }
 
   @Test

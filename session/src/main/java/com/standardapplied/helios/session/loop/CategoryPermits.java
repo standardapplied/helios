@@ -9,72 +9,90 @@ import java.util.function.BooleanSupplier;
 
 /**
  * The permits of one tool category: at most {@code capacity} calls run at once, admitted in arrival
- * order. A call {@link #quarantine quarantined} while it still runs, because its caller stopped
- * waiting for it, closes the category: no call is admitted until every quarantined call has been
- * {@link #release released}. Admission, quarantine and release share one lock, so a quarantine
- * never outlives the call it names.
+ * order. The categories of one dispatcher share a {@link Scope}: a call {@link #quarantine
+ * quarantined} while it still runs, because its caller stopped waiting for it, closes every
+ * category of the scope, since a tool's category does not say which resources it touches. No call
+ * is admitted until every quarantined call has been {@link #release released}. Admission,
+ * quarantine and release share the scope's lock, so a quarantine never outlives the call it names.
  */
 final class CategoryPermits {
 
+  /** The quarantine, and the lock, shared by the categories of one dispatcher. */
+  static final class Scope {
+    private final Set<DispatchedCall> quarantined = new HashSet<>();
+  }
+
   private final int capacity;
+  private final Scope scope;
   private final ArrayDeque<DispatchedCall> queued = new ArrayDeque<>();
   private final Set<DispatchedCall> running = new HashSet<>();
-  private final Set<DispatchedCall> quarantined = new HashSet<>();
 
-  CategoryPermits(int capacity) {
+  CategoryPermits(int capacity, Scope scope) {
     this.capacity = capacity;
+    this.scope = scope;
   }
 
   /**
-   * Wait until {@code call} is first in line, the category has room and nothing is quarantined,
-   * then admit it if {@code start} says it may start.
+   * Wait until {@code call} is first in line, the category has room and nothing in the scope is
+   * quarantined, then admit it if {@code start} says it may start.
    *
    * @return {@code true} if the call now holds a permit; {@code false} if {@code start} refused
    * @throws InterruptedException if the waiting thread is interrupted; the call holds no permit
    */
-  synchronized boolean admit(DispatchedCall call, BooleanSupplier start)
-      throws InterruptedException {
-    queued.addLast(call);
-    try {
-      while (queued.peekFirst() != call || running.size() >= capacity || !quarantined.isEmpty()) {
-        wait();
+  boolean admit(DispatchedCall call, BooleanSupplier start) throws InterruptedException {
+    synchronized (scope) {
+      queued.addLast(call);
+      try {
+        while (queued.peekFirst() != call
+            || running.size() >= capacity
+            || !scope.quarantined.isEmpty()) {
+          scope.wait();
+        }
+      } finally {
+        queued.remove(call);
+        scope.notifyAll();
       }
-    } finally {
-      queued.remove(call);
-      notifyAll();
+      if (!start.getAsBoolean()) {
+        return false;
+      }
+      running.add(call);
+      return true;
     }
-    if (!start.getAsBoolean()) {
-      return false;
-    }
-    running.add(call);
-    return true;
   }
 
   /**
-   * Close the category until {@code call} is released, if it still holds a permit.
+   * Close every category of the scope until {@code call} is released, if it still holds a permit.
    *
    * @return {@code true} if the call still holds a permit and is now quarantined
    */
-  synchronized boolean quarantine(DispatchedCall call) {
-    var stillRunning = running.contains(call);
-    if (stillRunning) {
-      quarantined.add(call);
+  boolean quarantine(DispatchedCall call) {
+    synchronized (scope) {
+      var stillRunning = running.contains(call);
+      if (stillRunning) {
+        scope.quarantined.add(call);
+      }
+      return stillRunning;
     }
-    return stillRunning;
   }
 
   /** Give back {@code call}'s permit, and its quarantine, if it holds them. */
-  synchronized void release(DispatchedCall call) {
-    running.remove(call);
-    quarantined.remove(call);
-    notifyAll();
+  void release(DispatchedCall call) {
+    synchronized (scope) {
+      running.remove(call);
+      scope.quarantined.remove(call);
+      scope.notifyAll();
+    }
   }
 
-  synchronized int available() {
-    return capacity - running.size();
+  int available() {
+    synchronized (scope) {
+      return capacity - running.size();
+    }
   }
 
-  synchronized int queued() {
-    return queued.size();
+  int queued() {
+    synchronized (scope) {
+      return queued.size();
+    }
   }
 }
