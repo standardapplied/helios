@@ -19,35 +19,39 @@ import io.helidon.webserver.http.ServerResponse;
  * Ends the connection after every answer that leaves its request body unread, so no byte a client
  * sends after that answer is read, drained or parsed as a request.
  *
- * <p>On a kept-alive HTTP/1.1 connection Helidon follows such an answer by draining the rest of the
- * body, outside every bound, or, when the client sent {@code Expect: 100-continue} and no {@code
- * 100 Continue} went out, by parsing the bytes the client sends next as a new request: one smuggled
- * past whatever checked the first request's headers. This guard sets {@code Connection: close} on
- * any response sent while the request's body is not read to its end; Helidon then writes and
- * flushes the complete response, half-closes the socket and ends the connection without reading
- * further. A request whose body was read to its end, or that has none, keeps its connection.
+ * <p>Helidon would otherwise keep the connection: it drains the rest of the body outside every
+ * bound or, after {@code Expect: 100-continue} with no {@code 100 Continue} sent, parses the next
+ * bytes as a new request, smuggled past whatever checked the first one's headers. The guard sets
+ * {@code Connection: close} on any response sent while the body is unread; Helidon then flushes the
+ * whole response and ends the connection (Helidon 4.5.4 or later; earlier releases ignore {@code
+ * Connection: close} here). A request whose body was read to its end, or that has none, keeps its
+ * connection.
  *
- * <p>Installed on a routing with {@code routing.addFeature(new UnreadBodyGuard())}, it covers every
- * route and filter of that routing, another feature's included, and Helidon's own answers on it: no
- * matching route, and any exception a route lets escape. It answers such an exception itself, with
- * the status, headers and message Helidon's direct handlers give it, because Helidon's own error
- * handling drains an unread body before it answers; an exception that is not an {@link
- * HttpException} is a {@code 500} with a fixed message. A {@link BadRequestException} it leaves to
- * Helidon, which answers it on the connection itself and ends it without reading further. Its
- * handler for {@link Throwable} takes the place of one the routing registers for {@code Throwable}
- * itself; a handler for a narrower type, such as {@link Exception}, still answers that type, and
- * its answer is covered too. {@link RuntimeServer} installs the guard; {@link AgentHttpService}
- * also applies it to the answers its own routes send, so those are covered on a server that does
- * not install it, where Helidon still drains the unread body of a request whose route lets an
+ * <p>Install it with {@code routing.addFeature(new UnreadBodyGuard())}; {@link RuntimeServer} does.
+ * It then covers:
+ *
+ * <ul>
+ *   <li>every route and filter of the routing, another feature's included, since it sets up first;
+ *   <li>Helidon's answer to an unmatched path;
+ *   <li>an exception a route lets escape, which it answers itself through Helidon's direct handlers
+ *       with the same status, headers and message (a fixed {@code 500} for one that is not an
+ *       {@link HttpException}), because Helidon's error handling drains before it answers. A {@link
+ *       BadRequestException} is left to Helidon, which answers and closes. Its {@link Throwable}
+ *       handler replaces one the routing registers for {@code Throwable}; a handler for a narrower
+ *       type still answers, and is covered.
+ * </ul>
+ *
+ * <p>{@link AgentHttpService} also applies it to each answer its routes send, so those are covered
+ * on a server without the feature; there Helidon still drains the body when a route lets an
  * exception escape.
  *
- * <p>Two answers are out of the guard's reach, and Helidon drains the unread body without bound
- * before sending them: the one for a route that returns without sending a response, and the one for
- * an error handler of the routing's own that sends none. Every route and error handler on a guarded
- * routing must send its response; each of {@link AgentHttpService}'s does. Closing a connection
- * whose body is unread makes the operating system reset it, which discards response bytes not yet
- * sent and ends retransmission of any lost: a large response, or one whose packet is lost, can
- * reach the client cut short. Each of Helios's refusals fits in one packet.
+ * <p>Out of its reach is a route, or a routing's own error handler, that sends no response: Helidon
+ * drains the body without bound first. Every route and error handler on a guarded routing must send
+ * its response; each of {@link AgentHttpService}'s does.
+ *
+ * <p>Closing a connection whose body is unread makes the operating system reset it, discarding
+ * response bytes not yet sent and ending retransmission, so a large response, or one whose packet
+ * is lost, can arrive cut short. Each of Helios's refusals fits in one packet.
  */
 public final class UnreadBodyGuard implements HttpFeature, Weighted {
 
