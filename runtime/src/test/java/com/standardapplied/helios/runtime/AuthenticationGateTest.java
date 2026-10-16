@@ -45,6 +45,7 @@ final class AuthenticationGateTest {
     var notFollowedByParameters =
         "challenge's auth-scheme must be followed by one space and a token68 or a"
             + " comma-separated list of auth-params, got ";
+    var repeatedName = "challenge's auth-param names must be unique, ignoring case, but ";
     return Stream.of(
         Arguments.of("", "challenge must be non-blank"),
         Arguments.of(" \t", "challenge must be non-blank"),
@@ -61,16 +62,26 @@ final class AuthenticationGateTest {
         Arguments.of("Bearer  realm=\"a\"", notFollowedByParameters + "'Bearer  realm=\"a\"'"),
         Arguments.of("Bearer realm=\"a\",", notFollowedByParameters + "'Bearer realm=\"a\",'"),
         Arguments.of("Bearer realm=\"a", notFollowedByParameters + "'Bearer realm=\"a'"),
-        Arguments.of("Bearer realm=a b", notFollowedByParameters + "'Bearer realm=a b'"));
+        Arguments.of("Bearer realm=a b", notFollowedByParameters + "'Bearer realm=a b'"),
+        Arguments.of(
+            "Bearer realm=\"one\", realm=\"two\"",
+            repeatedName + "'realm' repeats in 'Bearer realm=\"one\", realm=\"two\"'"),
+        Arguments.of(
+            "Bearer realm=\"one\", scope=read, REALM=\"two\"",
+            repeatedName + "'REALM' repeats in 'Bearer realm=\"one\", scope=read, REALM=\"two\"'"));
   }
 
-  /** Challenges a gate accepts: a bare scheme, a token68 and a list of auth-params. */
+  /**
+   * Challenges a gate accepts: a bare scheme, a token68 and lists of auth-params, one of them with
+   * a quoted value that looks like a second, repeated parameter.
+   */
   static Stream<String> validChallenges() {
     return Stream.of(
         "Negotiate",
         "Bearer dG9rZW4=",
         "Bearer realm=\"helios\", error=\"invalid_token\", scope=read",
         "Bearer realm = \"a \\\"quoted\\\" realm\"",
+        "Bearer realm=\"one, realm=two\", scope=read",
         "Bearer " + "a".repeat(AuthenticationGate.MAX_CHALLENGE_LENGTH - 7));
   }
 
