@@ -509,10 +509,10 @@ final class UnreadBodyGuardTest {
     return SessionRegistry.withFactory(options -> new StubSession(options.sessionId(), 8));
   }
 
-  private static SessionOptions options(String sessionId) {
+  private static SessionOptions options(SessionRequest request) {
     return SessionOptions.newBuilder()
         .withModel(ScriptedModel.newBuilder().withTextTurn("x").build())
-        .withSessionId(sessionId)
+        .withSessionId(request.sessionId())
         .build();
   }
 
@@ -522,15 +522,16 @@ final class UnreadBodyGuardTest {
         TrustedProxyAuthenticator.newBuilder()
             .withTrustedProxy(InetAddress.getLoopbackAddress())
             .build();
-    return request -> {
-      if (request.headers().contains(SMUGGLER)) {
-        smuggledSeen.incrementAndGet();
-      }
-      if (request.headers().contains(CRASH)) {
-        throw new AssertionError("an Error escaping a route");
-      }
-      return trusted.authenticate(request);
-    };
+    return new TestAuthenticator(
+        request -> {
+          if (request.headers().contains(SMUGGLER)) {
+            smuggledSeen.incrementAndGet();
+          }
+          if (request.headers().contains(CRASH)) {
+            throw new AssertionError("an Error escaping a route");
+          }
+          return trusted.authenticate(request);
+        });
   }
 
   private String create(String principal) {

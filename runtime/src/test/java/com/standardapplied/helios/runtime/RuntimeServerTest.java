@@ -46,9 +46,12 @@ final class RuntimeServerTest {
     };
   }
 
-  private static java.util.function.Function<String, SessionOptions> factory() {
-    return sessionId ->
-        SessionOptions.newBuilder().withModel(stubModel()).withSessionId(sessionId).build();
+  private static java.util.function.Function<SessionRequest, SessionOptions> factory() {
+    return request ->
+        SessionOptions.newBuilder()
+            .withModel(stubModel())
+            .withSessionId(request.sessionId())
+            .build();
   }
 
   // ── builder validation ────────────────────────────────────────────────────
@@ -208,7 +211,7 @@ final class RuntimeServerTest {
             .withOptionsFactory(factory())
             .withHost("0.0.0.0")
             .withoutAuthentication()
-            .withAuthenticator(request -> Optional.empty())
+            .withAuthenticator(new TestAuthenticator(request -> Optional.empty()))
             .build();
     try (server) {
       assertTrue(server.port() > 0);

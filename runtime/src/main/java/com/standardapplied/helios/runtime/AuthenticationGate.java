@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.runtime;
 
+import io.helidon.http.HeaderNames;
 import io.helidon.http.Status;
 import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
@@ -11,12 +12,14 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 /**
  * The one place a request's identity is decided: runs the deployer's {@link Authenticator} and
  * either admits the request as a {@link Caller} or answers it, {@code 401} for no valid identity
  * and {@code 503} when the authenticator fails. Neither answer says why, so a denial discloses
- * nothing about the credential.
+ * nothing about the credential. Every {@code 401} the runtime sends is built here, with the
+ * authenticator's challenge in {@code WWW-Authenticate}.
  */
 final class AuthenticationGate {
 
@@ -24,12 +27,89 @@ final class AuthenticationGate {
   private static final Logger LOGGER = Logger.getLogger(AgentHttpService.class.getName());
 
   /** The body of every {@code 401}, whatever the reason, so a denial says nothing about it. */
-  static final Map<String, String> UNAUTHENTICATED = Map.of("error", "unauthenticated");
+  private static final Map<String, String> UNAUTHENTICATED = Map.of("error", "unauthenticated");
+
+  /** Longest accepted challenge, in characters. */
+  static final int MAX_CHALLENGE_LENGTH = 1024;
+
+  private static final String TOKEN = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
+
+  private static final String QUOTED_STRING = "\"(?:[ !#-\\[\\]-~]|\\\\[ -~])*\"";
+
+  private static final String AUTH_PARAM = TOKEN + " *= *(?:" + TOKEN + "|" + QUOTED_STRING + ")";
+
+  private static final Pattern AUTH_SCHEME = Pattern.compile(TOKEN);
+
+  private static final Pattern TOKEN68_OR_AUTH_PARAMS =
+      Pattern.compile("[0-9A-Za-z._~+/-]+=*|" + AUTH_PARAM + "(?: *, *" + AUTH_PARAM + ")*");
 
   private final Authenticator authenticator;
+  private final String challenge;
 
+  /**
+   * Build the gate for {@code authenticator}, reading its challenge once.
+   *
+   * @throws NullPointerException if {@code authenticator} or its challenge is null
+   * @throws IllegalArgumentException if its challenge is not a valid RFC 9110 challenge
+   */
   AuthenticationGate(Authenticator authenticator) {
     this.authenticator = Objects.requireNonNull(authenticator, "authenticator must not be null");
+    this.challenge = requireValidChallenge(authenticator.challenge());
+  }
+
+  /**
+   * Return {@code challenge} if it is a valid RFC 9110 {@code challenge}: an auth-scheme token,
+   * optionally followed by one space and a token68 or a comma-separated list of auth-params, in
+   * printable ASCII, non-blank and at most {@value #MAX_CHALLENGE_LENGTH} characters.
+   *
+   * @param challenge the candidate {@code WWW-Authenticate} value
+   * @return {@code challenge}
+   * @throws NullPointerException if {@code challenge} is null
+   * @throws IllegalArgumentException naming the rule {@code challenge} breaks
+   */
+  static String requireValidChallenge(String challenge) {
+    Objects.requireNonNull(challenge, "challenge must not be null");
+    if (challenge.isBlank()) {
+      throw new IllegalArgumentException("challenge must be non-blank");
+    }
+    if (challenge.length() > MAX_CHALLENGE_LENGTH) {
+      throw new IllegalArgumentException(
+          "challenge must be at most "
+              + MAX_CHALLENGE_LENGTH
+              + " characters, got "
+              + challenge.length());
+    }
+    requirePrintableAscii(challenge);
+    requireChallengeSyntax(challenge);
+    return challenge;
+  }
+
+  private static void requirePrintableAscii(String challenge) {
+    for (var i = 0; i < challenge.length(); i++) {
+      var c = challenge.charAt(i);
+      if (c < 0x20 || c > 0x7E) {
+        throw new IllegalArgumentException(
+            String.format(
+                "challenge must be printable ASCII (0x20-0x7E), got 0x%04X at index %d",
+                (int) c, i));
+      }
+    }
+  }
+
+  private static void requireChallengeSyntax(String challenge) {
+    var space = challenge.indexOf(' ');
+    var scheme = space < 0 ? challenge : challenge.substring(0, space);
+    if (!AUTH_SCHEME.matcher(scheme).matches()) {
+      throw new IllegalArgumentException(
+          "challenge must begin with an auth-scheme token, got '" + challenge + "'");
+    }
+    if (space >= 0 && !TOKEN68_OR_AUTH_PARAMS.matcher(challenge.substring(space + 1)).matches()) {
+      throw new IllegalArgumentException(
+          "challenge's auth-scheme must be followed by one space and a token68 or a"
+              + " comma-separated list of auth-params, got '"
+              + challenge
+              + "'");
+    }
   }
 
   /**
@@ -50,11 +130,23 @@ final class AuthenticationGate {
           .send(Map.of("error", "authentication unavailable"));
       return Optional.empty();
     }
-    var caller = authentication.map(Caller::start).filter(Caller::valid);
+    var caller = authentication.map(verified -> Caller.start(verified, this)).filter(Caller::valid);
     if (caller.isEmpty()) {
-      resp.status(Status.UNAUTHORIZED_401).send(UNAUTHENTICATED);
+      unauthenticated(resp);
     }
     return caller;
+  }
+
+  /**
+   * Answer {@code resp} {@code 401}: the authenticator's challenge in {@code WWW-Authenticate} and
+   * a body that says nothing about why.
+   *
+   * @param resp the response to answer
+   */
+  void unauthenticated(ServerResponse resp) {
+    resp.header(HeaderNames.WWW_AUTHENTICATE, challenge)
+        .status(Status.UNAUTHORIZED_401)
+        .send(UNAUTHENTICATED);
   }
 
   /**
@@ -63,10 +155,11 @@ final class AuthenticationGate {
    * @param principal who the request acts as
    * @param ended completes when the identity's lifetime elapses, its credential is revoked, or the
    *     request ends ({@link #release()})
+   * @param gate the gate that admitted the request, which answers it once the identity has ended
    */
-  record Caller(Principal principal, CompletableFuture<Void> ended) {
+  record Caller(Principal principal, CompletableFuture<Void> ended, AuthenticationGate gate) {
 
-    static Caller start(Authentication authentication) {
+    static Caller start(Authentication authentication, AuthenticationGate gate) {
       var ended = new CompletableFuture<Void>();
       if (authentication.lifetime().isPositive()) {
         ended.completeOnTimeout(
@@ -76,7 +169,7 @@ final class AuthenticationGate {
       }
       CompletableFuture.anyOf(authentication.revoked(), ended)
           .whenComplete((ignored, failure) -> ended.complete(null));
-      return new Caller(authentication.principal(), ended);
+      return new Caller(authentication.principal(), ended, gate);
     }
 
     boolean valid() {
@@ -84,8 +177,9 @@ final class AuthenticationGate {
     }
 
     /**
-     * Answer {@code 401} if the identity ended while the request waited, on a slow body or options
-     * factory, so no work is queued for an expired or revoked identity.
+     * Answer {@code 401} if the identity ended while the request waited, on a slow body, the
+     * options factory or a result long poll, so no work is queued and no result disclosed for an
+     * expired or revoked identity.
      *
      * @return {@code true} when the identity ended and the request has been answered
      */
@@ -93,7 +187,7 @@ final class AuthenticationGate {
       if (valid()) {
         return false;
       }
-      resp.status(Status.UNAUTHORIZED_401).send(UNAUTHENTICATED);
+      gate.unauthenticated(resp);
       return true;
     }
 

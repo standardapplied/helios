@@ -3,6 +3,7 @@
 package com.standardapplied.helios.runtime;
 
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.runtime.AuthenticationGate.Caller;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.ResultMessage;
 import io.helidon.http.HeaderValues;
@@ -11,6 +12,7 @@ import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -41,9 +43,6 @@ final class ResultLongPoll {
   /** Hard cap on the long-poll timeout so one request cannot pin a server thread indefinitely. */
   static final long MAX_RESULT_TIMEOUT_SECONDS = 300L;
 
-  private static final Outcome IDENTITY_ENDED =
-      new Outcome(Status.UNAUTHORIZED_401, AuthenticationGate.UNAUTHENTICATED);
-
   private ResultLongPoll() {}
 
   /**
@@ -53,23 +52,27 @@ final class ResultLongPoll {
    * @param req the request carrying the optional {@code timeout} query parameter; non-null
    * @param resp the response the outcome is sent on; non-null
    * @param objectMapper serializes the outcome's body; non-null
-   * @param identityEnded completes when the caller's identity expires or is revoked; non-null
+   * @param caller the admitted caller, whose identity may end while the poll waits; non-null
    */
   static void respond(
       AgentSession session,
       ServerRequest req,
       ServerResponse resp,
       ObjectMapper objectMapper,
-      CompletableFuture<Void> identityEnded) {
+      Caller caller) {
     var timeoutSeconds = parseResultTimeoutSeconds(req.query().first("timeout").orElse(null));
-    var outcome = awaitResult(session.result(), identityEnded, timeoutSeconds, session.sessionId());
+    var awaited =
+        awaitResult(session.result(), caller.ended(), timeoutSeconds, session.sessionId());
+    if (caller.answeredAsEnded(resp)) {
+      return;
+    }
+    var outcome = awaited.orElseThrow();
     if (outcome.body() == null) {
       resp.status(outcome.status()).send();
       return;
     }
     var body = objectMapper.writeValueAsBytes(outcome.body());
-    if (identityEnded.isDone()) {
-      resp.status(Status.UNAUTHORIZED_401).send(AuthenticationGate.UNAUTHENTICATED);
+    if (caller.answeredAsEnded(resp)) {
       return;
     }
     resp.headers().setIfAbsent(HeaderValues.CONTENT_TYPE_JSON);
@@ -93,9 +96,10 @@ final class ResultLongPoll {
    * @param identityEnded completes when the caller's identity ends; non-null
    * @param timeoutSeconds non-negative wait budget
    * @param sessionIdForLog session id used only for the WARNING log on execution failure
-   * @return outcome to translate to the HTTP response
+   * @return outcome to translate to the HTTP response; empty once the identity has ended, whatever
+   *     the result
    */
-  static Outcome awaitResult(
+  static Optional<Outcome> awaitResult(
       CompletableFuture<ResultMessage> future,
       CompletableFuture<Void> identityEnded,
       long timeoutSeconds,
@@ -105,12 +109,13 @@ final class ResultLongPoll {
     try {
       first.get(timeoutSeconds, TimeUnit.SECONDS);
     } catch (TimeoutException e) {
-      return new Outcome(Status.NO_CONTENT_204, null);
+      return Optional.of(new Outcome(Status.NO_CONTENT_204, null));
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return new Outcome(
-          Status.SERVICE_UNAVAILABLE_503,
-          Map.of("error", "request interrupted while waiting for session result"));
+      return Optional.of(
+          new Outcome(
+              Status.SERVICE_UNAVAILABLE_503,
+              Map.of("error", "request interrupted while waiting for session result")));
     } catch (ExecutionException e) {
       return settled(future, identityEnded, sessionIdForLog);
     } finally {
@@ -119,20 +124,21 @@ final class ResultLongPoll {
     return settled(future, identityEnded, sessionIdForLog);
   }
 
-  private static Outcome settled(
+  private static Optional<Outcome> settled(
       CompletableFuture<ResultMessage> future,
       CompletableFuture<Void> identityEnded,
       String sessionIdForLog) {
     if (identityEnded.isDone()) {
-      return IDENTITY_ENDED;
+      return Optional.empty();
     }
     try {
-      return success(future.join());
+      return Optional.of(success(future.join()));
     } catch (CompletionException | CancellationException e) {
       LOGGER.log(
           Level.WARNING, "session " + sessionIdForLog + " result future failed exceptionally", e);
-      return new Outcome(
-          Status.INTERNAL_SERVER_ERROR_500, Map.of("error", "session terminated abnormally"));
+      return Optional.of(
+          new Outcome(
+              Status.INTERNAL_SERVER_ERROR_500, Map.of("error", "session terminated abnormally")));
     }
   }
 

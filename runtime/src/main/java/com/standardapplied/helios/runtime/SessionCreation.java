@@ -17,10 +17,10 @@ import java.util.logging.Logger;
 /**
  * The route behind {@code POST /sessions}: reserves capacity for the caller in the {@link
  * SessionRegistry} before anything else, asks the options factory for the options of a freshly
- * generated session id, and registers the session. A refused reservation is answered {@code 429} or
- * {@code 503} before the factory runs; a factory that fails, or returns options for another id, is
- * answered {@code 500}; an identity that ended meanwhile, {@code 401}. On every answer but {@code
- * 201} the reservation is given back.
+ * generated session id owned by the caller ({@link SessionRequest}), and registers the session. A
+ * refused reservation is answered {@code 429} or {@code 503} before the factory runs; a factory
+ * that fails, or returns options for another id, is answered {@code 500}; an identity that ended
+ * meanwhile, {@code 401}. On every answer but {@code 201} the reservation is given back.
  */
 final class SessionCreation {
 
@@ -31,13 +31,13 @@ final class SessionCreation {
       Map.of("error", "session options factory failed");
 
   private final SessionRegistry registry;
-  private final Function<String, SessionOptions> optionsFactory;
+  private final Function<SessionRequest, SessionOptions> optionsFactory;
   private final String eventsPathPrefix;
   private final AdmissionCounter counter = new AdmissionCounter();
 
   SessionCreation(
       SessionRegistry registry,
-      Function<String, SessionOptions> optionsFactory,
+      Function<SessionRequest, SessionOptions> optionsFactory,
       String eventsPathPrefix) {
     this.registry = registry;
     this.optionsFactory = optionsFactory;
@@ -64,7 +64,7 @@ final class SessionCreation {
 
   private void register(SessionReservation reservation, Caller caller, ServerResponse resp) {
     var sessionId = "sess-" + Ids.newId();
-    var options = options(sessionId);
+    var options = options(new SessionRequest(sessionId, caller.principal()));
     if (options.isEmpty()) {
       resp.status(Status.INTERNAL_SERVER_ERROR_500).send(FACTORY_FAILED);
       return;
@@ -83,11 +83,12 @@ final class SessionCreation {
     return counter.counts();
   }
 
-  /** The options factory's options for {@code sessionId}; empty, and logged, if it failed. */
-  private Optional<SessionOptions> options(String sessionId) {
+  /** The options factory's options for {@code request}; empty, and logged, if it failed. */
+  private Optional<SessionOptions> options(SessionRequest request) {
+    var sessionId = request.sessionId();
     SessionOptions options;
     try {
-      options = optionsFactory.apply(sessionId);
+      options = optionsFactory.apply(request);
     } catch (RuntimeException e) {
       LOGGER.log(Level.WARNING, "optionsFactory failed for session " + sessionId, e);
       return Optional.empty();

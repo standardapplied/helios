@@ -256,12 +256,12 @@ final class AdmissionHarness implements AutoCloseable {
                 RuntimeServer.builder()
                     .withRegistry(registry.build())
                     .withOptionsFactory(
-                        sessionId -> {
+                        request -> {
                           factoryRuns.incrementAndGet();
                           duringFactory.get().run();
                           return SessionOptions.newBuilder()
                               .withModel(ScriptedModel.newBuilder().withTextTurn("x").build())
-                              .withSessionId(sessionId)
+                              .withSessionId(request.sessionId())
                               .build();
                         })
                     .withAuthenticator(tokens))
