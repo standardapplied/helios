@@ -12,6 +12,7 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +34,7 @@ final class SessionRequestTest {
 
   private final List<SessionRequest> requests = new CopyOnWriteArrayList<>();
   private final Map<String, ScriptedModel> models = new ConcurrentHashMap<>();
+  private final JsonMapper mapper = JsonMapper.builder().build();
   private final HttpClient http = HttpClient.newBuilder().connectTimeout(Await.HANG_GUARD).build();
   private RuntimeServer server;
 
@@ -88,18 +90,20 @@ final class SessionRequestTest {
 
   private String create(Principal owner) throws Exception {
     var created = post("/sessions", owner, "{}");
-    return (String) JsonMapper.builder().build().readValue(created, Map.class).get("sessionId");
+    assertEquals(201, created.statusCode(), created::body);
+    return (String) mapper.readValue(created.body(), Map.class).get("sessionId");
   }
 
   /** Run one turn of {@code owner}'s session and return the first message its model was sent. */
   private Message firstModelMessage(String sessionId, Principal owner) throws Exception {
-    post("/sessions/" + sessionId + "/messages", owner, "{\"text\":\"go\"}");
+    assertEquals(
+        202, post("/sessions/" + sessionId + "/messages", owner, "{\"text\":\"go\"}").statusCode());
     Await.value(
         "the session's result", server.registry().find(sessionId, owner).orElseThrow().result());
     return models.get(sessionId).calls().getFirst().getFirst();
   }
 
-  private String post(String path, Principal owner, String body) throws Exception {
+  private HttpResponse<String> post(String path, Principal owner, String body) throws Exception {
     var request =
         HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1" + path))
             .timeout(Await.HANG_GUARD)
@@ -107,8 +111,6 @@ final class SessionRequestTest {
             .header("Authorization", "Bearer " + owner.subject())
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build();
-    var resp = http.send(request, BodyHandlers.ofString());
-    assertEquals(path.endsWith("/messages") ? 202 : 201, resp.statusCode(), resp::body);
-    return resp.body();
+    return http.send(request, BodyHandlers.ofString());
   }
 }
