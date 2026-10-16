@@ -167,8 +167,7 @@ public final class TrustedProxyAuthenticator implements Authenticator {
         throw new IllegalStateException(
             "subject and tenant must come from different headers; both are " + subjectHeader);
       }
-      return new TrustedProxyAuthenticator(
-          this, AuthenticationGate.requireValidChallenge(challenge));
+      return new TrustedProxyAuthenticator(this, Challenge.requireValid(challenge));
     }
 
     private static String requireHeader(String part, String header) {

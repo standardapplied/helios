@@ -239,7 +239,7 @@ final class TrustedProxyAuthenticatorTest {
   }
 
   @ParameterizedTest
-  @MethodSource("com.standardapplied.helios.runtime.AuthenticationGateTest#invalidChallenges")
+  @MethodSource("com.standardapplied.helios.runtime.ChallengeTest#invalidChallenges")
   void anInvalidChallengeFailsTheBuild(String challenge, String message) {
     var builder =
         TrustedProxyAuthenticator.newBuilder().withTrustedProxy(PROXY).withChallenge(challenge);
@@ -248,7 +248,7 @@ final class TrustedProxyAuthenticatorTest {
   }
 
   @ParameterizedTest
-  @MethodSource("com.standardapplied.helios.runtime.AuthenticationGateTest#validChallenges")
+  @MethodSource("com.standardapplied.helios.runtime.ChallengeTest#validChallenges")
   void aValidChallengeIsTheAuthenticatorsChallenge(String challenge) {
     var built =
         TrustedProxyAuthenticator.newBuilder()
