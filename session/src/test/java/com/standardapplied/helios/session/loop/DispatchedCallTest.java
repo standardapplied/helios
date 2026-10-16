@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
@@ -12,6 +13,7 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RunnableScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -22,8 +24,9 @@ import org.junit.jupiter.api.Test;
 /**
  * The interleavings {@link ToolDispatchTest} cannot force through the dispatcher, whose caller
  * always waits: the deadline passes before the worker is admitted, and no caller has yet cancelled
- * the call. A scheduler on which every deadline is overdue fires it as it is armed, before the
- * worker starts; a scheduler whose only thread is busy never fires it.
+ * the call, and the session's token is cancelled, its callbacks held up by an earlier one, before
+ * the caller reads the call's result. A scheduler on which every deadline is overdue fires it as it
+ * is armed, before the worker starts; a scheduler whose only thread is busy never fires it.
  */
 final class DispatchedCallTest {
 
@@ -43,6 +46,10 @@ final class DispatchedCallTest {
   }
 
   private DispatchedCall dispatched(Duration timeout) {
+    return dispatched(timeout, new CancellationToken());
+  }
+
+  private DispatchedCall dispatched(Duration timeout, CancellationToken session) {
     return new DispatchedCall(
         Tool.newBuilder()
             .withName("t")
@@ -51,9 +58,9 @@ final class DispatchedCallTest {
             .build(),
         new ToolCall("c", "t", Map.of()),
         SessionContext.forTesting("dispatched-call"),
-        new CancellationToken(),
+        session,
         timeout,
-        new CategoryPermits(1),
+        new CategoryPermits(1, new CategoryPermits.Scope()),
         live);
   }
 
@@ -89,5 +96,28 @@ final class DispatchedCallTest {
 
     Await.until("the worker to end", () -> live.get() == 0);
     assertEquals(0, runs.get(), "the tool never ran");
+  }
+
+  @Test
+  void aResultReadAfterTheSessionWasCancelledIsNotReturned() {
+    var session = new CancellationToken();
+    var callbackEntered = new CountDownLatch(1);
+    var callbackRelease = new CountDownLatch(1);
+    session.onCancel(
+        () -> {
+          callbackEntered.countDown();
+          ToolDispatchTest.awaitThroughInterrupts(callbackRelease);
+        });
+    var dispatched = dispatched(NEVER, session);
+    dispatched.start(busy);
+    Await.until("the worker to end", () -> live.get() == 0);
+    assertEquals(1, runs.get(), "the tool ran and answered");
+
+    Thread.ofVirtual().start(() -> session.cancel("session closed"));
+    Await.latch("the session's first callback to block", callbackEntered);
+
+    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    assertEquals("session closed", thrown.getMessage());
+    callbackRelease.countDown();
   }
 }

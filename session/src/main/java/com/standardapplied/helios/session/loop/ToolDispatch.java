@@ -41,8 +41,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <h2>Thread-safety</h2>
  *
- * Safe to share across the agent loop's threads: each permit pool guards itself with one lock and
- * the count of live calls is atomic.
+ * Safe to share across the agent loop's threads: the permit pools share one lock and the count of
+ * live calls is atomic.
  */
 public final class ToolDispatch {
 
@@ -73,9 +73,10 @@ public final class ToolDispatch {
     this.sessionContext = Objects.requireNonNull(sessionContext, "sessionContext must not be null");
     this.registry = Objects.requireNonNull(registry, "registry must not be null");
     this.limits = Objects.requireNonNull(limits, "limits must not be null");
-    this.toolCallPermits = new CategoryPermits(limits.maxConcurrentToolCalls());
-    this.fileWritePermits = new CategoryPermits(limits.maxConcurrentFileWrites());
-    this.executionPermits = new CategoryPermits(limits.maxConcurrentExecutions());
+    var scope = new CategoryPermits.Scope();
+    this.toolCallPermits = new CategoryPermits(limits.maxConcurrentToolCalls(), scope);
+    this.fileWritePermits = new CategoryPermits(limits.maxConcurrentFileWrites(), scope);
+    this.executionPermits = new CategoryPermits(limits.maxConcurrentExecutions(), scope);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
   }
 
@@ -166,15 +167,16 @@ public final class ToolDispatch {
    *       call's worker is interrupted and its token cancelled, the tool and the token's callbacks
    *       end within {@code stopGrace};
    *   <li>{@link ToolOutcome.Unknown} if they are still running after {@code stopGrace}. Java
-   *       offers no safe way to stop arbitrary code, so it runs on; its permit stays taken and its
-   *       category admits no other call until it ends, and its result, if it ever returns, is
-   *       discarded.
+   *       offers no safe way to stop arbitrary code, so it runs on; its permit stays taken and the
+   *       dispatcher admits no other call, of any category, until it ends, and its result, if it
+   *       ever returns, is discarded.
    * </ul>
    *
    * <p>The call's token is cancelled on a thread of its own, so a callback a tool registered on it
    * that blocks or throws holds up neither this method, nor the session's cancellation, nor the
    * interrupt. A call this method stops waiting for because the session cancelled it or the calling
-   * thread was interrupted also closes its category until its work ends.
+   * thread was interrupted also closes every category until its work ends. The session's
+   * cancellation reaches the call even while an earlier callback on {@code cancellation} blocks.
    *
    * <p>A tool that throws an {@link Error} makes this method throw that same error.
    *
@@ -186,8 +188,7 @@ public final class ToolDispatch {
    * @throws NullPointerException if any argument is null
    * @throws IllegalArgumentException if {@code timeout} or {@code stopGrace} is not positive
    * @throws CancellationException if {@code cancellation} fires or the calling thread is
-   *     interrupted (its interrupt status is kept) before the call is answered or while a timed-out
-   *     tool is given {@code stopGrace} to stop
+   *     interrupted (its interrupt status is kept) before this method returns a result
    */
   public ToolResult dispatch(
       ToolCall call, CancellationToken cancellation, Duration timeout, Duration stopGrace) {

@@ -33,14 +33,17 @@ import java.util.logging.Logger;
  * interrupts the worker and cancels that token on a thread of its own, so a cancellation callback
  * that blocks or throws holds up neither the canceller nor the interrupt. A call cancelled, or past
  * its deadline, before its tool started never starts it, nor does one whose session token is
- * cancelled before the session's callbacks reach it. The call's work is its worker and, once
- * started, that token's cancellation; {@code liveCalls} counts the call until both have ended, when
- * the permit is given back and the link removed.
+ * cancelled before the session's callbacks reach it. A caller waiting for the call also reads the
+ * session's token itself, so an earlier session callback that blocks cannot keep the call from
+ * being cancelled. The call's work is its worker and, once started, that token's cancellation;
+ * {@code liveCalls} counts the call until both have ended, when the permit is given back and the
+ * link removed.
  *
  * <p>The call's answer settles once, with the tool's result, an {@link Error} the tool threw, a
  * {@link CancellationException}, or a {@link TimeoutException} at the deadline, whichever comes
  * first; a later completion changes nothing, and a later {@link Error} is logged. A caller that
- * stops waiting while the work still runs quarantines the category until it ends.
+ * stops waiting while the work still runs quarantines the dispatcher's every category until it
+ * ends.
  */
 final class DispatchedCall {
 
@@ -52,15 +55,22 @@ final class DispatchedCall {
 
   private static final Logger LOGGER = Logger.getLogger(DispatchedCall.class.getName());
 
+  /**
+   * How often a caller's wait also reads the session's token itself. The token runs its callbacks
+   * one after another on the cancelling thread, so an earlier callback that blocks would otherwise
+   * keep this call's link from ever running.
+   */
+  private static final long SESSION_CHECK_NANOS = TimeUnit.MILLISECONDS.toNanos(10);
+
   private final CancellationToken token = new CancellationToken();
   private final AtomicReference<Phase> phase = new AtomicReference<>(Phase.WAITING);
   private final CompletableFuture<ToolResult> answer = new CompletableFuture<>();
+  private final CountDownLatch answered = new CountDownLatch(1);
   private final AtomicReference<CancellationException> cancellation = new AtomicReference<>();
-  private final AtomicReference<String> sessionReason = new AtomicReference<>();
   private final AtomicBoolean tokenClaimed = new AtomicBoolean();
   private final CompletableFuture<Void> tokenSettled = new CompletableFuture<>();
   private final CompletableFuture<Void> workerEnded = new CompletableFuture<>();
-  private final CountDownLatch endedOrSessionCancelled = new CountDownLatch(1);
+  private final CountDownLatch ended = new CountDownLatch(1);
   private final Tool tool;
   private final ToolCall call;
   private final ToolContext context;
@@ -89,7 +99,15 @@ final class DispatchedCall {
     this.permits = permits;
     this.liveCalls = liveCalls;
     this.worker = Thread.ofVirtual().name("helios-tool-" + call.name()).unstarted(this::work);
-    CompletableFuture.allOf(workerEnded, tokenSettled).thenRun(this::release);
+    answer.whenComplete((result, failure) -> answered.countDown());
+    CompletableFuture.allOf(workerEnded, tokenSettled)
+        .thenRun(
+            () -> {
+              permits.release(this);
+              parentLink.remove();
+              liveCalls.decrementAndGet();
+              ended.countDown();
+            });
   }
 
   /**
@@ -102,14 +120,7 @@ final class DispatchedCall {
         scheduler.schedule(
             this::expire, TimeUnit.NANOSECONDS.convert(timeout), TimeUnit.NANOSECONDS);
     answer.whenComplete((result, failure) -> timer.cancel(false));
-    parentLink =
-        parent.onCancel(
-            () -> {
-              var reason = parent.reason().orElseThrow();
-              sessionReason.set(reason);
-              endedOrSessionCancelled.countDown();
-              cancel(reason);
-            });
+    parentLink = parent.onCancel(() -> cancel(parent.reason().orElseThrow()));
     liveCalls.incrementAndGet();
     worker.start();
   }
@@ -118,20 +129,21 @@ final class DispatchedCall {
    * Wait for the call's answer. At the deadline, cancel the call and give its work up to {@code
    * stopGrace} to end: a tool that never started, or whose work ended in time, is {@link
    * ToolResult#timedOut timed out}; one whose work still runs is {@link ToolResult#unknown unknown}
-   * and quarantines its category until it ends.
+   * and quarantines every category until it ends.
    *
    * @return the tool's result, or the timed-out or unknown result
    * @throws Error the error the tool threw, as itself
-   * @throws CancellationException if the session cancels the call, or the calling thread is
-   *     interrupted (its interrupt status is kept), before the call is answered or while its work
-   *     is given time to end
+   * @throws CancellationException if the session's token is cancelled, or the calling thread is
+   *     interrupted (its interrupt status is kept), before this method returns
    */
   ToolResult await(Duration stopGrace) {
     try {
-      return answer.get(Math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
-    } catch (TimeoutException e) {
-      expire();
-      return await(stopGrace);
+      if (!settlesBy(answered, deadline)) {
+        expire();
+      }
+      var result = answer.get();
+      throwIfSessionCancelled();
+      return result;
     } catch (ExecutionException e) {
       return expired(e.getCause(), stopGrace);
     } catch (CancellationException e) {
@@ -166,6 +178,24 @@ final class DispatchedCall {
     return neverStarted;
   }
 
+  /**
+   * Wait until {@code latch} opens or {@code until} passes, reading the session's token as it
+   * waits.
+   *
+   * @return {@code true} if {@code latch} opened
+   * @throws CancellationException if the session's token is cancelled first
+   */
+  private boolean settlesBy(CountDownLatch latch, long until) throws InterruptedException {
+    while (!latch.await(
+        Math.clamp(until - System.nanoTime(), 0L, SESSION_CHECK_NANOS), TimeUnit.NANOSECONDS)) {
+      if (System.nanoTime() - until >= 0) {
+        return false;
+      }
+      throwIfSessionCancelled();
+    }
+    return true;
+  }
+
   private void expire() {
     phase.compareAndSet(Phase.WAITING, Phase.ABANDONED);
     answer.completeExceptionally(new TimeoutException());
@@ -175,22 +205,27 @@ final class DispatchedCall {
     if (!(cause instanceof TimeoutException)) {
       throw (Error) cause;
     }
-    if (cancel("tool '" + call.name() + "' timed out after " + timeout)) {
-      return ToolResult.timedOut(call.name(), timeout);
-    }
     try {
-      endedOrSessionCancelled.await(TimeUnit.NANOSECONDS.convert(stopGrace), TimeUnit.NANOSECONDS);
+      if (!cancel("tool '" + call.name() + "' timed out after " + timeout)) {
+        settlesBy(ended, System.nanoTime() + TimeUnit.NANOSECONDS.convert(stopGrace));
+      }
     } catch (InterruptedException e) {
       throw interrupted();
     }
     var stillRunning = permits.quarantine(this);
-    var reason = sessionReason.get();
-    if (reason != null) {
-      throw new CancellationException(reason);
-    }
+    throwIfSessionCancelled();
     return stillRunning
         ? ToolResult.unknown(call.name(), timeout)
         : ToolResult.timedOut(call.name(), timeout);
+  }
+
+  private void throwIfSessionCancelled() {
+    if (parent.isCancelled()) {
+      var reason = parent.reason().orElseThrow();
+      cancel(reason);
+      permits.quarantine(this);
+      throw new CancellationException(reason);
+    }
   }
 
   private CancellationException interrupted() {
@@ -211,27 +246,19 @@ final class DispatchedCall {
                       && System.nanoTime() - deadline < 0
                       && phase.compareAndSet(Phase.WAITING, Phase.RUNNING));
       if (admitted) {
-        run();
-      } else if (parent.isCancelled()) {
-        cancel(parent.reason().orElseThrow());
+        answer.complete(tool.execute(call.arguments(), context));
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+    } catch (Error e) {
+      if (!answer.completeExceptionally(e)) {
+        LOGGER.log(Level.SEVERE, "tool '" + call.name() + "' threw after its call was answered", e);
+      }
     } finally {
       if (tokenClaimed.compareAndSet(false, true)) {
         tokenSettled.complete(null);
       }
       workerEnded.complete(null);
-    }
-  }
-
-  private void run() {
-    try {
-      answer.complete(tool.execute(call.arguments(), context));
-    } catch (Error e) {
-      if (!answer.completeExceptionally(e)) {
-        LOGGER.log(Level.SEVERE, "tool '" + call.name() + "' threw after its call was answered", e);
-      }
     }
   }
 
@@ -243,12 +270,5 @@ final class DispatchedCall {
     } finally {
       tokenSettled.complete(null);
     }
-  }
-
-  private void release() {
-    permits.release(this);
-    parentLink.remove();
-    liveCalls.decrementAndGet();
-    endedOrSessionCancelled.countDown();
   }
 }
