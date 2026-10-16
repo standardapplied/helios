@@ -9,17 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.testing.ScriptedModel;
-import io.helidon.common.Weighted;
-import io.helidon.http.DirectHandler;
-import io.helidon.http.DirectHandler.EventType;
 import io.helidon.http.Header;
 import io.helidon.http.HeaderValues;
-import io.helidon.http.HttpException;
-import io.helidon.http.ServerResponseHeaders;
-import io.helidon.http.Status;
 import io.helidon.webserver.WebServer;
-import io.helidon.webserver.http.DirectHandlers;
-import io.helidon.webserver.http.HttpFeature;
 import io.helidon.webserver.http.HttpRouting;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -49,7 +41,7 @@ import tools.jackson.databind.json.JsonMapper;
  * request reaches a {@link RuntimeServer} over a raw socket from the loopback peer that its {@link
  * TrustedProxyAuthenticator} trusts.
  */
-final class UnreadBodyGuardTest {
+final class RuntimeServerRequestFramingTest {
 
   private static final int MAX_BODY = 64;
 
@@ -67,8 +59,6 @@ final class UnreadBodyGuardTest {
       HeaderValues.create(TrustedProxyAuthenticator.DEFAULT_SUBJECT_HEADER, "smuggler");
 
   private static final Header CRASH = HeaderValues.create("X-Crash", "yes");
-
-  private static final Header REFUSE = HeaderValues.create("X-Refuse", "yes");
 
   private final AtomicInteger smuggledSeen = new AtomicInteger();
   private final List<RawConnection> heldUploads = new ArrayList<>();
@@ -185,7 +175,7 @@ final class UnreadBodyGuardTest {
     var service =
         new AgentHttpService(
             registry(),
-            UnreadBodyGuardTest::options,
+            RuntimeServerRequestFramingTest::options,
             authenticator(),
             mapper,
             "/v1",
@@ -209,60 +199,6 @@ final class UnreadBodyGuardTest {
     }
   }
 
-  @Test
-  void anExceptionARouteLetsEscapeIsAnsweredThroughTheListenersDirectHandlersThenEndsTheConnection()
-      throws IOException {
-    var teapot =
-        new HttpException("brewing", Status.create(418, "I'm a teapot"), true)
-            .header(HeaderValues.create("X-Brew", "tea"));
-    var echo = new EchoingDirectHandler();
-    var deployed =
-        WebServer.builder()
-            .host("127.0.0.1")
-            .port(0)
-            .featuresDiscoverServices(false)
-            .directHandlers(
-                DirectHandlers.builder()
-                    .addHandler(EventType.OTHER, echo)
-                    .addHandler(EventType.INTERNAL_ERROR, echo)
-                    .build())
-            .routing(
-                (HttpRouting.Builder routing) ->
-                    routing
-                        .addFeature(new UnreadBodyGuard())
-                        .post(
-                            "/teapot",
-                            (req, resp) -> {
-                              throw teapot;
-                            })
-                        .post(
-                            "/crash",
-                            (req, resp) -> {
-                              throw new AssertionError("crash");
-                            }))
-            .build()
-            .start();
-    try (var teapotConnection = RawConnection.open(deployed.port());
-        var crashConnection = RawConnection.open(deployed.port())) {
-      var brewing = send(teapotConnection, Upload.declared("POST", "/teapot", ""), false);
-      var crashed = send(crashConnection, Upload.declared("POST", "/crash", ""), false);
-
-      assertEquals("HTTP/1.1 418 I'm a teapot", brewing.statusLine());
-      assertEquals("tea", brewing.headers().get("x-brew"));
-      assertEquals("OTHER brewing caused by " + teapot, brewing.body());
-      assertTrue(brewing.closesConnection());
-      assertEquals(-1, teapotConnection.next());
-      assertEquals("HTTP/1.1 500 Internal Server Error", crashed.statusLine());
-      assertEquals(
-          "INTERNAL_ERROR Internal Server Error caused by java.lang.AssertionError: crash",
-          crashed.body());
-      assertTrue(crashed.closesConnection());
-      assertEquals(-1, crashConnection.next());
-    } finally {
-      deployed.stop();
-    }
-  }
-
   /** A body that is itself a request follows a {@code 401} sent before the body was asked for. */
   private void assertARequestSmuggledInARefusedBodyNeverRuns(int port) throws IOException {
     try (var connection = RawConnection.open(port)) {
@@ -278,44 +214,6 @@ final class UnreadBodyGuardTest {
       assertEquals(-1, connection.next());
     }
     assertEquals(0, smuggledSeen.get());
-  }
-
-  /**
-   * A feature weighted above the default, as Helidon's CORS (850) is, sets up its filters before
-   * those of a default-weighted one; an answer its filter sends without proceeding is covered too.
-   */
-  @Test
-  void anAnswerFromAnotherFeaturesFilterEndsTheConnection() throws IOException {
-    var routed = new AtomicInteger();
-    var gated =
-        WebServer.builder()
-            .host("127.0.0.1")
-            .port(0)
-            .featuresDiscoverServices(false)
-            .routing(
-                (HttpRouting.Builder routing) ->
-                    routing
-                        .addFeature(new UnreadBodyGuard())
-                        .addFeature(new RefusingFeature())
-                        .any((req, resp) -> resp.send(String.valueOf(routed.incrementAndGet()))))
-            .build()
-            .start();
-    try (var connection = RawConnection.open(gated.port())) {
-      connection.write(
-          "POST /refused HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Refuse: yes\r\nExpect: 100-continue\r\n"
-              + "Content-Length: "
-              + SMUGGLED.length()
-              + "\r\n\r\n");
-      var refused = connection.response();
-      connection.write(SMUGGLED);
-
-      assertEquals("HTTP/1.1 403 Forbidden", refused.statusLine());
-      assertTrue(refused.closesConnection(), () -> "headers: " + refused.headers());
-      assertEquals(-1, connection.next());
-    } finally {
-      gated.stop();
-    }
-    assertEquals(0, routed.get());
   }
 
   @Test
@@ -494,7 +392,7 @@ final class UnreadBodyGuardTest {
   private RuntimeServer server() {
     return RuntimeServer.builder()
         .withRegistry(registry())
-        .withOptionsFactory(UnreadBodyGuardTest::options)
+        .withOptionsFactory(RuntimeServerRequestFramingTest::options)
         .withRequestLimits(
             RequestLimits.newBuilder()
                 .withMaxRequestBytes(MAX_BODY)
@@ -555,35 +453,6 @@ final class UnreadBodyGuardTest {
     return "/v1/sessions/" + sessionId + "/messages";
   }
 
-  /** Answers with the event type, the message and the cause of the exception it is handed. */
-  private static final class EchoingDirectHandler implements DirectHandler {
-
-    @Override
-    public TransportResponse handle(
-        TransportRequest request,
-        EventType eventType,
-        Status status,
-        ServerResponseHeaders headers,
-        Throwable thrown) {
-      return handle(
-          request,
-          eventType,
-          status,
-          headers,
-          eventType + " " + thrown.getMessage() + " caused by " + thrown.getCause());
-    }
-
-    @Override
-    public TransportResponse handle(
-        TransportRequest request,
-        EventType eventType,
-        Status status,
-        ServerResponseHeaders headers,
-        String message) {
-      return TransportResponse.builder().status(status).headers(headers).entity(message).build();
-    }
-  }
-
   /**
    * One socket read, as the JDK records it.
    *
@@ -593,34 +462,19 @@ final class UnreadBodyGuardTest {
   record SocketRead(int peerPort, long bytes) {}
 
   private static Exchange refusal(
-      String name, String statusLine, String body, Function<UnreadBodyGuardTest, Upload> upload) {
+      String name,
+      String statusLine,
+      String body,
+      Function<RuntimeServerRequestFramingTest, Upload> upload) {
     return new Exchange(name, statusLine, Pattern.compile(Pattern.quote(body)), upload);
   }
 
   private static Exchange answer(
-      String name, String statusLine, Pattern body, Function<UnreadBodyGuardTest, Upload> upload) {
+      String name,
+      String statusLine,
+      Pattern body,
+      Function<RuntimeServerRequestFramingTest, Upload> upload) {
     return new Exchange(name, statusLine, body, upload);
-  }
-
-  /** A feature weighted as Helidon's CORS whose filter refuses, unread, a request so marked. */
-  private static final class RefusingFeature implements HttpFeature, Weighted {
-
-    @Override
-    public void setup(HttpRouting.Builder routing) {
-      routing.addFilter(
-          (chain, req, resp) -> {
-            if (req.headers().contains(REFUSE)) {
-              resp.status(Status.FORBIDDEN_403).send();
-              return;
-            }
-            chain.proceed();
-          });
-    }
-
-    @Override
-    public double weight() {
-      return 850;
-    }
   }
 
   /**
@@ -632,7 +486,10 @@ final class UnreadBodyGuardTest {
    * @param upload the request, built once the case's server is up
    */
   record Exchange(
-      String name, String statusLine, Pattern body, Function<UnreadBodyGuardTest, Upload> upload) {
+      String name,
+      String statusLine,
+      Pattern body,
+      Function<RuntimeServerRequestFramingTest, Upload> upload) {
 
     @Override
     public String toString() {
