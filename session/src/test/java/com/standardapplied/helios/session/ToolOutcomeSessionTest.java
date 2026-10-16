@@ -303,17 +303,18 @@ final class ToolOutcomeSessionTest {
   }
 
   @Test
-  void aRunningCallsDeadlineIsArmedOnTheSessionsScheduler() {
+  void aRunningCallsDeadlineIsOnTheSessionsSchedulerAndAFinishedCallsIsGone() {
     var entered = new CountDownLatch(1);
     var options =
         withTools(
+            tool("quick", (args, ctx) -> ToolResult.success("done")),
             tool(
                 "holds",
                 (args, ctx) -> {
                   entered.countDown();
                   return blockUntilInterrupted();
                 }));
-    var model = ScriptedModel.newBuilder().withToolCallsTurn(call("holds")).build();
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(call("quick"), call("holds")).build();
     try (var session = (AgentSessionImpl) AgentSession.create(options.withModel(model).build())) {
       session.send(UserMessage.text("go"));
       Await.latch("the call to start", entered);
@@ -321,7 +322,9 @@ final class ToolOutcomeSessionTest {
       var scheduler = (ScheduledThreadPoolExecutor) session.lifecycleForTests().scheduler();
 
       assertEquals(
-          2, scheduler.getQueue().size(), "the session's wall-clock deadline and the call's");
+          2,
+          scheduler.getQueue().size(),
+          "the session's wall-clock deadline and the running call's, not the finished call's");
     }
   }
 
