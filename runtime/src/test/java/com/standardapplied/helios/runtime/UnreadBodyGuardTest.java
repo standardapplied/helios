@@ -9,8 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.testing.ScriptedModel;
+import io.helidon.common.Weighted;
 import io.helidon.http.Header;
 import io.helidon.http.HeaderValues;
+import io.helidon.http.Status;
+import io.helidon.webserver.WebServer;
+import io.helidon.webserver.http.HttpFeature;
+import io.helidon.webserver.http.HttpRouting;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetAddress;
@@ -50,6 +55,8 @@ final class UnreadBodyGuardTest {
       HeaderValues.create(TrustedProxyAuthenticator.DEFAULT_SUBJECT_HEADER, "smuggler");
 
   private static final Header CRASH = HeaderValues.create("X-Crash", "yes");
+
+  private static final Header REFUSE = HeaderValues.create("X-Refuse", "yes");
 
   private final AtomicInteger smuggledSeen = new AtomicInteger();
   private final List<RawConnection> heldUploads = new ArrayList<>();
@@ -160,6 +167,44 @@ final class UnreadBodyGuardTest {
     }
     assertEquals(0, smuggledSeen.get());
     assertEquals(3, server.registry().size());
+  }
+
+  /**
+   * A feature weighted above the default, as Helidon's CORS (850) is, sets up its filters before
+   * those of a default-weighted one; an answer its filter sends without proceeding is covered too.
+   */
+  @Test
+  void anAnswerFromAnotherFeaturesFilterEndsTheConnection() throws IOException {
+    var routed = new AtomicInteger();
+    var gated =
+        WebServer.builder()
+            .host("127.0.0.1")
+            .port(0)
+            .featuresDiscoverServices(false)
+            .routing(
+                (HttpRouting.Builder routing) ->
+                    routing
+                        .addFeature(new UnreadBodyGuard())
+                        .addFeature(new RefusingFeature())
+                        .any((req, resp) -> resp.send(String.valueOf(routed.incrementAndGet()))))
+            .build()
+            .start();
+    try (var connection = RawConnection.open(gated.port())) {
+      connection.write(
+          "POST /refused HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Refuse: yes\r\nExpect: 100-continue\r\n"
+              + "Content-Length: "
+              + SMUGGLED.length()
+              + "\r\n\r\n");
+      var refused = connection.response();
+      connection.write(SMUGGLED);
+
+      assertEquals("HTTP/1.1 403 Forbidden", refused.statusLine());
+      assertTrue(refused.closesConnection(), () -> "headers: " + refused.headers());
+      assertEquals(-1, connection.next());
+    } finally {
+      gated.stop();
+    }
+    assertEquals(0, routed.get());
   }
 
   @Test
@@ -384,6 +429,27 @@ final class UnreadBodyGuardTest {
   private static Exchange answer(
       String name, String statusLine, Pattern body, Function<UnreadBodyGuardTest, Upload> upload) {
     return new Exchange(name, statusLine, body, upload);
+  }
+
+  /** A feature weighted as Helidon's CORS whose filter refuses, unread, a request so marked. */
+  private static final class RefusingFeature implements HttpFeature, Weighted {
+
+    @Override
+    public void setup(HttpRouting.Builder routing) {
+      routing.addFilter(
+          (chain, req, resp) -> {
+            if (req.headers().contains(REFUSE)) {
+              resp.status(Status.FORBIDDEN_403).send();
+              return;
+            }
+            chain.proceed();
+          });
+    }
+
+    @Override
+    public double weight() {
+      return 850;
+    }
   }
 
   /**
