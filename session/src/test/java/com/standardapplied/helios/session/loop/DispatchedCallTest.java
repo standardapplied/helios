@@ -14,6 +14,8 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
@@ -73,7 +75,10 @@ final class DispatchedCallTest {
   private DispatchedCall dispatched(
       Duration timeout, CancellationToken session, CategoryPermits permits, ToolExecutor executor) {
     return new DispatchedCall(
-        Tool.newBuilder().withName("t").withDescription("t").withExecutor(executor).build(),
+        ToolBinding.newBuilder(
+                Tool.newBuilder().withName("t").withDescription("t").withExecutor(executor).build())
+            .withCategory(ToolCategory.WRITE)
+            .build(),
         new ToolCall("c", "t", Map.of()),
         SessionContext.forTesting("dispatched-call"),
         session,
@@ -108,6 +113,10 @@ final class DispatchedCallTest {
   private void cancelBehindTheBlockedCallback(CancellationToken session) {
     Thread.ofVirtual().start(() -> session.cancel("session closed"));
     Await.latch("the session's first callback to block", callbackEntered);
+  }
+
+  private static void neverRefused(String reason) {
+    throw new AssertionError("refused: " + reason);
   }
 
   /** Runs each deadline as it is armed, as if its delay had already passed. */
@@ -150,7 +159,7 @@ final class DispatchedCallTest {
     var session = blockedSession();
     var permits = new CategoryPermits(1, new CategoryPermits.Scope());
     var holder = dispatched(NEVER, session, permits);
-    permits.admit(holder, () -> true);
+    permits.admit(holder, () -> true, DispatchedCallTest::neverRefused);
     dispatched(NEVER, session, permits).start(busy);
     Await.until("the worker to queue for the permit", () -> permits.queued() == 1);
     cancelBehindTheBlockedCallback(session);
@@ -167,14 +176,14 @@ final class DispatchedCallTest {
     var permits = new CategoryPermits(1, scope);
     var holder = dispatched(NEVER, new CancellationToken(), permits);
     var later = dispatched(NEVER, new CancellationToken(), permits);
-    permits.admit(holder, () -> true);
+    permits.admit(holder, () -> true, DispatchedCallTest::neverRefused);
     dispatched(NEVER, new CancellationToken(), permits).start(busy);
     Await.until("the earlier call to queue for the permit", () -> permits.queued() == 1);
 
     int runsBeforeTheLaterCall;
     synchronized (scope) {
       permits.release(holder);
-      permits.admit(later, () -> true);
+      permits.admit(later, () -> true, DispatchedCallTest::neverRefused);
       runsBeforeTheLaterCall = runs.get();
     }
     permits.release(later);
@@ -194,7 +203,7 @@ final class DispatchedCallTest {
             .limit(3)
             .toList();
     for (var holder : holders) {
-      permits.admit(holder, () -> true);
+      permits.admit(holder, () -> true, DispatchedCallTest::neverRefused);
     }
     var next = dispatched(NEVER, new CancellationToken(), permits);
     dispatched(NEVER, new CancellationToken(), permits, this::blocking).start(busy);
@@ -205,7 +214,7 @@ final class DispatchedCallTest {
               synchronized (scope) {
                 permits.release(holders.get(0));
                 permits.release(holders.get(1));
-                return permits.admit(next, () -> true);
+                return permits.admit(next, () -> true, DispatchedCallTest::neverRefused);
               }
             });
     Thread.ofVirtual().start(admission);

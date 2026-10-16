@@ -47,6 +47,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
@@ -431,7 +432,21 @@ final class ToolDispatchTest {
   }
 
   @Test
-  void aStuckWriterAdmitsNoOtherWriterUntilItEndsThoughPermitsAreFree() {
+  void aSecondWriterUnderCapacityOneQueuesUntilTheFirstEnds() {
+    var starts = new AtomicInteger();
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(8, 1, 1, 8),
+            binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
+    var first = start(d, "write");
+    Await.latch("the first writer to start", fixture.entered);
+
+    fixture.assertTheNextWriterWaitsForRelease(d, starts);
+    assertEquals(ToolResult.success("done"), first.ending("the first dispatch").result());
+  }
+
+  @Test
+  void aStuckWriterRefusesEveryCallUntilItEndsThoughPermitsAreFree() {
     var starts = new AtomicInteger();
     var d = fixture.dispatcher(binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
     var first = start(d, "write", new CancellationToken(), SHORT);
@@ -439,36 +454,103 @@ final class ToolDispatchTest {
     fixture.scheduler.fireLatest();
     assertEquals(ToolResult.unknown("write", NEVER), first.ending("the first dispatch").result());
 
-    fixture.assertTheNextWriterWaitsForRelease(d, starts);
+    fixture.assertTheNextWriterIsRefusedUntilTheStuckOneEnds(d, starts);
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = ToolCategory.class,
+      names = {"WRITE", "EXECUTION", "NETWORK", "DELEGATION", "CONTROL"})
+  void anUnresolvedCallWithSideEffectsRefusesACallOfAnyCategory(ToolCategory category) {
+    var runs = new AtomicInteger();
+    var d =
+        fixture.dispatcher(
+            binding("stuck", category, fixture.stuck(new AtomicInteger())),
+            binding(
+                "read",
+                ToolCategory.READ,
+                (args, ctx) -> ToolResult.success("read " + runs.incrementAndGet())));
+    var stuck = start(d, "stuck", new CancellationToken(), SHORT);
+    Await.latch("the stuck tool to start", fixture.entered);
+    fixture.scheduler.fireLatest();
+    assertEquals(ToolResult.unknown("stuck", NEVER), stuck.ending("the stuck dispatch").result());
+
+    var refused = start(d, "read").ending("the refused dispatch").result();
+
+    assertEquals(
+        ToolResult.rejected(
+            "ToolDispatch", "tool 'stuck' did not stop; no tool runs until it ends"),
+        refused);
+    assertEquals(0, runs.get(), "the refused tool never started");
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = ToolCategory.class,
+      names = {"READ", "SEARCH"})
+  void anUnresolvedCallWithoutSideEffectsRefusesNothing(ToolCategory category) {
+    var d =
+        fixture.dispatcher(
+            binding("stuck", category, fixture.stuck(new AtomicInteger())),
+            binding("write", ToolCategory.WRITE, (args, ctx) -> ToolResult.success("written")));
+    var stuck = start(d, "stuck", new CancellationToken(), SHORT);
+    Await.latch("the stuck tool to start", fixture.entered);
+    fixture.scheduler.fireLatest();
+    assertEquals(ToolResult.unknown("stuck", NEVER), stuck.ending("the stuck dispatch").result());
+
+    var next = start(d, "write").ending("the next dispatch").result();
+
+    assertEquals(ToolResult.success("written"), next);
+    assertEquals(1, d.liveCalls(), "the stuck tool still runs");
   }
 
   @Test
-  void aStuckWriterAdmitsNoExecutionCallUntilItEnds() {
-    var writes = new AtomicInteger();
-    var executions = new AtomicInteger();
+  void aWriterTimedOutBeforeItStartedRefusesNoLaterCall() {
+    var starts = new AtomicInteger();
     var d =
         fixture.dispatcher(
-            binding("write", ToolCategory.WRITE, fixture.stuck(writes)),
-            binding(
-                "exec",
-                ToolCategory.EXECUTION,
-                (args, ctx) -> {
-                  executions.incrementAndGet();
-                  return ToolResult.success("executed");
-                }));
-    var first = start(d, "write", new CancellationToken(), SHORT);
-    Await.latch("the writer to start", fixture.entered);
-    fixture.scheduler.fireLatest();
-    assertEquals(ToolResult.unknown("write", NEVER), first.ending("the write dispatch").result());
-
-    var next = start(d, "exec");
+            new ConcurrencyLimits(8, 1, 1, 8),
+            binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
+    var holder = start(d, "write");
+    Await.latch("the first writer to take the only permit", fixture.entered);
+    var queued = start(d, "write");
     Await.until(
-        "the execution call to queue", () -> d.queuedDispatches(ToolCategory.EXECUTION) == 1);
-    assertEquals(0, executions.get(), "the execution call has not started");
-
+        "the second writer to queue for the permit",
+        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+    fixture.scheduler.fireLatest();
+    assertEquals(
+        ToolResult.timedOut("write", NEVER), queued.ending("the queued dispatch").result());
     fixture.release.countDown();
-    assertEquals(ToolResult.success("executed"), next.ending("the exec dispatch").result());
-    assertEquals(1, executions.get());
+    assertEquals(ToolResult.success("done"), holder.ending("the first dispatch").result());
+    awaitIdle(d);
+
+    var next = start(d, "write").ending("the next dispatch").result();
+
+    assertEquals(ToolResult.success("done"), next);
+  }
+
+  @Test
+  void aCallQueuedForCapacityIsRefusedOnceAQuarantineStarts() {
+    var starts = new AtomicInteger();
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(8, 1, 1, 8),
+            binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
+    var first = start(d, "write");
+    Await.latch("the first writer to start", fixture.entered);
+    var queued = start(d, "write");
+    Await.until(
+        "the second writer to queue for the permit",
+        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+
+    first.thread().interrupt();
+
+    assertEquals(
+        ToolResult.rejected(
+            "ToolDispatch", "tool 'write' did not stop; no tool runs until it ends"),
+        queued.ending("the queued dispatch").result());
+    assertCancelled("interrupted waiting for tool write", first);
+    assertEquals(1, starts.get(), "the queued writer's tool never started");
   }
 
   @Test

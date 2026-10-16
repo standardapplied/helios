@@ -2,24 +2,29 @@
 
 package com.standardapplied.helios.session.loop;
 
+import com.standardapplied.helios.session.tools.ToolBinding;
 import java.util.ArrayDeque;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /**
  * The permits of one tool category: at most {@code capacity} calls run at once, admitted in arrival
- * order. The categories of one dispatcher share a {@link Scope}: a call {@link #quarantine
- * quarantined} while it still runs, because its caller stopped waiting for it, closes every
- * category of the scope, since a tool's category does not say which resources it touches. No call
- * is admitted until every quarantined call has been {@link #release released}. Admission,
- * quarantine and release share the scope's lock, so a quarantine never outlives the call it names.
+ * order. The categories of one dispatcher share a {@link Scope}: a call with side effects {@link
+ * #quarantine quarantined} while it still runs, because its caller stopped waiting for it, closes
+ * every category of the scope, since a tool's category does not say which resources it touches.
+ * Until every quarantined call has been {@link #release released}, a call is refused rather than
+ * admitted, and so is every call already queued. Admission, quarantine and release share the
+ * scope's lock, so a quarantine never outlives the call it names.
  */
 final class CategoryPermits {
 
-  /** The quarantine, and the lock, shared by the categories of one dispatcher. */
+  /** The quarantine, each call with its tool's name, and the lock, of one dispatcher. */
   static final class Scope {
-    private final Set<DispatchedCall> quarantined = new HashSet<>();
+    private final Map<DispatchedCall, String> quarantined = new LinkedHashMap<>();
   }
 
   private final int capacity;
@@ -33,43 +38,52 @@ final class CategoryPermits {
   }
 
   /**
-   * Wait until {@code call} is first in line, the category has room and nothing in the scope is
-   * quarantined, then admit it if {@code start} says it may start.
+   * Wait until {@code call} is first in line and the category has room, then admit it if {@code
+   * start} says it may start. While the scope is quarantined, refuse it instead: {@code refuse}
+   * gets the reason, outside the lock.
    *
-   * @return {@code true} if the call now holds a permit; {@code false} if {@code start} refused
+   * @return {@code true} if the call now holds a permit; {@code false} if it was refused
    * @throws InterruptedException if the waiting thread is interrupted; the call holds no permit
    */
-  boolean admit(DispatchedCall call, BooleanSupplier start) throws InterruptedException {
+  boolean admit(DispatchedCall call, BooleanSupplier start, Consumer<String> refuse)
+      throws InterruptedException {
+    String stuck;
     synchronized (scope) {
       queued.addLast(call);
       try {
-        while (queued.peekFirst() != call
-            || running.size() >= capacity
-            || !scope.quarantined.isEmpty()) {
+        while (scope.quarantined.isEmpty()
+            && (queued.peekFirst() != call || running.size() >= capacity)) {
           scope.wait();
         }
       } finally {
         queued.remove(call);
         scope.notifyAll();
       }
-      if (!start.getAsBoolean()) {
-        return false;
+      if (scope.quarantined.isEmpty()) {
+        var admitted = start.getAsBoolean();
+        if (admitted) {
+          running.add(call);
+        }
+        return admitted;
       }
-      running.add(call);
-      return true;
+      stuck = scope.quarantined.values().iterator().next();
     }
+    refuse.accept("tool '" + stuck + "' did not stop; no tool runs until it ends");
+    return false;
   }
 
   /**
-   * Close every category of the scope until {@code call} is released, if it still holds a permit.
+   * Close every category of the scope until {@code call} is released, if it still holds a permit
+   * and {@code binding}'s category has side effects.
    *
-   * @return {@code true} if the call still holds a permit and is now quarantined
+   * @return {@code true} if the call still holds a permit
    */
-  boolean quarantine(DispatchedCall call) {
+  boolean quarantine(DispatchedCall call, ToolBinding binding) {
     synchronized (scope) {
       var stillRunning = running.contains(call);
-      if (stillRunning) {
-        scope.quarantined.add(call);
+      if (stillRunning && binding.category().hasSideEffects()) {
+        scope.quarantined.put(call, binding.tool().name());
+        scope.notifyAll();
       }
       return stillRunning;
     }

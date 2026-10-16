@@ -165,12 +165,15 @@ public final class ToolDispatch {
    *   <li>{@link ToolOutcome.TimedOut} if the tool never started or stopped within {@code
    *       stopGrace};
    *   <li>{@link ToolOutcome.Unknown} if it still runs. Java cannot safely stop arbitrary code, so
-   *       it runs on, keeps its permit, and the dispatcher admits no other call, of any category,
-   *       until it ends.
+   *       it runs on and keeps its permit until it ends.
    * </ul>
    *
-   * <p>A call this method stops waiting for while its tool runs, because {@code cancellation} fired
-   * or the calling thread was interrupted, is held the same way. The call's token is cancelled on a
+   * <p>While a call whose category {@link ToolCategory#hasSideEffects has side effects} still runs
+   * after this method stopped waiting for it, at its deadline, on {@code cancellation} or on the
+   * calling thread's interrupt, every other call, of any category and including one already queued,
+   * is {@link ToolOutcome.Rejected rejected} by {@code ToolDispatch} at once, its tool never
+   * started, with the reason {@code tool '<name>' did not stop; no tool runs until it ends}. A call
+   * that only waits for room in its category still queues. The call's token is cancelled on a
    * thread of its own, so a callback that blocks or throws holds up neither this method, the
    * session's cancellation nor the interrupt. A tool's {@link Error} is rethrown as itself.
    *
@@ -198,7 +201,7 @@ public final class ToolDispatch {
     }
     var dispatched =
         new DispatchedCall(
-            binding.orElseThrow().tool(),
+            binding.orElseThrow(),
             call,
             sessionContext,
             cancellation,

@@ -9,7 +9,7 @@ import java.util.Objects;
 
 /**
  * What happened to one tool call: it ran and succeeded or failed, it threw, it timed out, it timed
- * out and did not stop, a hook rejected it before it ran, or no tool by its name exists. A consumer
+ * out and did not stop, it was rejected before it ran, or no tool by its name exists. A consumer
  * counts or routes on this type, never on the model-facing text in {@link ToolResult#output()}.
  */
 public sealed interface ToolOutcome {
@@ -47,7 +47,8 @@ public sealed interface ToolOutcome {
   /**
    * The call exceeded its time limit while its tool was running, and the tool did not stop when
    * cancelled and interrupted. It may still be running, and its effects may still land; the
-   * dispatcher keeps the call's category capacity charged until it ends.
+   * dispatcher keeps the call's category capacity charged until it ends and, if the call may have
+   * side effects, rejects every other call until then.
    *
    * @param limit the limit in force for the call; positive
    */
@@ -59,10 +60,11 @@ public sealed interface ToolOutcome {
   }
 
   /**
-   * A hook refused or replaced the call before it ran.
+   * The call was rejected before it ran: by a hook, or by the session's dispatcher while an earlier
+   * call that may have side effects still runs after its caller stopped waiting.
    *
-   * @param by the name of the hook that rejected the call; non-blank
-   * @param reason the hook's reason; non-blank
+   * @param by the name of the hook that rejected the call, or {@code ToolDispatch}; non-blank
+   * @param reason why; non-blank
    */
   record Rejected(String by, String reason) implements ToolOutcome {
 
