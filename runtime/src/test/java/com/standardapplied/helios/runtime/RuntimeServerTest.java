@@ -219,16 +219,18 @@ final class RuntimeServerTest {
   }
 
   @Test
-  void anAuthenticatorWhoseChallengeIsInvalidIsRefused() {
+  void anAuthenticatorWithAnInvalidChallengeIsRefused() {
     var builder =
         RuntimeServer.builder()
             .withRegistry(SessionRegistry.inMemory())
             .withOptionsFactory(factory())
             .withAuthenticator(
-                new TestAuthenticator(request -> Optional.empty(), "Basic realm=helios"));
+                new TestAuthenticator(request -> Optional.empty(), "Bearer realm=\"a\"\r\n"));
+
     var ex = assertThrows(IllegalArgumentException.class, builder::build);
+
     assertEquals(
-        "challenge's realm must be a quoted-string, got 'Basic realm=helios'", ex.getMessage());
+        "challenge must be printable ASCII (0x20-0x7E), got 0x000D at index 16", ex.getMessage());
   }
 
   @Test
