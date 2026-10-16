@@ -25,12 +25,13 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * A gate refuses an authenticator whose challenge is invalid and sends the one it validated, and an
- * admitted caller's identity lasts an admitted caller's identity lasts: until its lifetime,
- * revocation or release.
+ * admitted caller's identity lasts until its lifetime, revocation or release.
  */
 final class AuthenticationGateTest {
 
   private static final Principal ALICE = new Principal("acme", "alice");
+
+  private static final Challenge CHALLENGE = new Challenge(TestAuthenticator.CHALLENGE);
 
   @Test
   void aGateRefusesANullAuthenticator() {
@@ -110,7 +111,7 @@ final class AuthenticationGateTest {
 
   @Test
   void aLiveIdentityStaysLiveUntilTheRequestReleasesIt() {
-    var caller = Caller.start(Authentication.of(ALICE), TestAuthenticator.CHALLENGE);
+    var caller = Caller.start(Authentication.of(ALICE), CHALLENGE);
     assertEquals(ALICE, caller.principal());
     assertFalse(caller.ended().isDone());
 
@@ -123,8 +124,7 @@ final class AuthenticationGateTest {
   void theIdentityEndsWhenItsLifetimeElapses() {
     var caller =
         Caller.start(
-            new Authentication(ALICE, Duration.ofMillis(1), new CompletableFuture<>()),
-            TestAuthenticator.CHALLENGE);
+            new Authentication(ALICE, Duration.ofMillis(1), new CompletableFuture<>()), CHALLENGE);
 
     assertNull(Await.value("the identity's lifetime to elapse", caller.ended()));
   }
@@ -134,7 +134,7 @@ final class AuthenticationGateTest {
     var caller =
         Caller.start(
             new Authentication(ALICE, Duration.ofSeconds(-1), new CompletableFuture<>()),
-            TestAuthenticator.CHALLENGE);
+            CHALLENGE);
 
     assertTrue(caller.ended().isDone());
   }
@@ -143,8 +143,7 @@ final class AuthenticationGateTest {
   void anIdentityWithAZeroLifetimeHasEndedAtStart() {
     var caller =
         Caller.start(
-            new Authentication(ALICE, Duration.ZERO, new CompletableFuture<>()),
-            TestAuthenticator.CHALLENGE);
+            new Authentication(ALICE, Duration.ZERO, new CompletableFuture<>()), CHALLENGE);
 
     assertTrue(caller.ended().isDone());
   }
@@ -152,9 +151,7 @@ final class AuthenticationGateTest {
   @Test
   void theIdentityEndsWhenItsCredentialIsRevoked() {
     var revoked = new CompletableFuture<Void>();
-    var caller =
-        Caller.start(
-            new Authentication(ALICE, Duration.ofDays(1), revoked), TestAuthenticator.CHALLENGE);
+    var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked), CHALLENGE);
 
     revoked.complete(null);
 
@@ -165,9 +162,7 @@ final class AuthenticationGateTest {
   @Test
   void aRevocationThatFailsAlsoEndsTheIdentity() {
     var revoked = new CompletableFuture<Void>();
-    var caller =
-        Caller.start(
-            new Authentication(ALICE, Duration.ofDays(1), revoked), TestAuthenticator.CHALLENGE);
+    var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked), CHALLENGE);
 
     revoked.completeExceptionally(new IllegalStateException("revocation feed lost"));
 
@@ -178,9 +173,7 @@ final class AuthenticationGateTest {
   @Test
   void releasingTheCallerLeavesTheVerifiersStageUntouched() {
     var revoked = new CompletableFuture<Void>();
-    var caller =
-        Caller.start(
-            new Authentication(ALICE, Duration.ofDays(1), revoked), TestAuthenticator.CHALLENGE);
+    var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked), CHALLENGE);
 
     caller.release();
 
@@ -194,11 +187,9 @@ final class AuthenticationGateTest {
     var expiring = new Authentication(ALICE, Duration.ofMillis(1), revoked);
 
     for (var i = 0; i < 1_000; i++) {
-      Caller.start(authentication, TestAuthenticator.CHALLENGE).release();
+      Caller.start(authentication, CHALLENGE).release();
     }
-    Await.value(
-        "the identity's lifetime to elapse",
-        Caller.start(expiring, TestAuthenticator.CHALLENGE).ended());
+    Await.value("the identity's lifetime to elapse", Caller.start(expiring, CHALLENGE).ended());
 
     Await.until(
         "the elapsed identity to stop watching the revocation stage",
@@ -210,9 +201,7 @@ final class AuthenticationGateTest {
     var revoked = new CompletableFuture<Void>();
 
     for (var i = 0; i < 1_000; i++) {
-      Caller.start(
-              new Authentication(ALICE, Duration.ofDays(1), revoked), TestAuthenticator.CHALLENGE)
-          .release();
+      Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked), CHALLENGE).release();
     }
 
     assertEquals(0, revoked.getNumberOfDependents());
@@ -225,9 +214,7 @@ final class AuthenticationGateTest {
     var callers = new ArrayList<Caller>();
 
     for (var i = 0; i < 1_000; i++) {
-      var caller =
-          Caller.start(
-              new Authentication(ALICE, Duration.ofDays(1), revoked), TestAuthenticator.CHALLENGE);
+      var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked), CHALLENGE);
       callers.add(caller);
       if (i % 2 == 0) {
         caller.release();

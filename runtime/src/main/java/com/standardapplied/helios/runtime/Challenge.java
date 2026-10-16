@@ -7,12 +7,14 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
- * The syntax of a {@code WWW-Authenticate} value: one RFC 9110 §11 challenge, an auth-scheme token
- * optionally followed by one space and a token68 or a comma-separated list of auth-params whose
- * names are unique ignoring case and whose realm, if any, is a quoted-string, in printable ASCII,
- * non-blank and at most {@value #MAX_LENGTH} characters.
+ * A validated {@code WWW-Authenticate} value: printable ASCII, non-blank, at most {@value
+ * #MAX_LENGTH} characters, and one RFC 9110 §11 challenge, an auth-scheme token optionally followed
+ * by one space and a token68 or a comma-separated list of auth-params whose names are unique
+ * ignoring case and whose realm, if any, is a quoted-string.
+ *
+ * @param value the challenge as sent
  */
-final class Challenge {
+record Challenge(String value) {
 
   /** Longest accepted challenge, in characters. */
   static final int MAX_LENGTH = 1024;
@@ -38,28 +40,23 @@ final class Challenge {
   private static final Pattern TOKEN68_OR_AUTH_PARAMS =
       Pattern.compile("[0-9A-Za-z._~+/-]+=*|" + AUTH_PARAM + "(?: *, *" + AUTH_PARAM + ")*+");
 
-  private Challenge() {}
-
   /**
-   * Return {@code challenge} if it is a valid challenge.
+   * Validate {@code value}.
    *
-   * @param challenge the candidate {@code WWW-Authenticate} value
-   * @return {@code challenge}
-   * @throws NullPointerException if {@code challenge} is null
-   * @throws IllegalArgumentException naming the rule {@code challenge} breaks
+   * @throws NullPointerException if {@code value} is null
+   * @throws IllegalArgumentException naming the rule {@code value} breaks
    */
-  static String requireValid(String challenge) {
-    Objects.requireNonNull(challenge, "challenge must not be null");
-    if (challenge.isBlank()) {
+  Challenge {
+    Objects.requireNonNull(value, "challenge must not be null");
+    if (value.isBlank()) {
       throw new IllegalArgumentException("challenge must be non-blank");
     }
-    if (challenge.length() > MAX_LENGTH) {
+    if (value.length() > MAX_LENGTH) {
       throw new IllegalArgumentException(
-          "challenge must be at most " + MAX_LENGTH + " characters, got " + challenge.length());
+          "challenge must be at most " + MAX_LENGTH + " characters, got " + value.length());
     }
-    requirePrintableAscii(challenge);
-    requireSyntax(challenge);
-    return challenge;
+    requirePrintableAscii(value);
+    requireSyntax(value);
   }
 
   private static void requirePrintableAscii(String challenge) {

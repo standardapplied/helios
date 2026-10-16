@@ -38,8 +38,9 @@ import tools.jackson.databind.json.JsonMapper;
  * Every answer, Helios's or Helidon's own, that leaves a request body unread is delivered complete
  * and then ends the connection, so nothing the client sends after it is drained or run as a
  * request; a request whose body was read to its end, or that has none, keeps its connection. Each
- * request reaches a {@link RuntimeServer} over a raw socket from the loopback peer that its {@link
- * TrustedProxyAuthenticator} trusts.
+ * request reaches a {@link RuntimeServer}, or an {@link AgentHttpService} on a plain server without
+ * the feature, over a raw socket from the loopback peer that its {@link TrustedProxyAuthenticator}
+ * trusts.
  */
 final class RuntimeServerRequestFramingTest {
 

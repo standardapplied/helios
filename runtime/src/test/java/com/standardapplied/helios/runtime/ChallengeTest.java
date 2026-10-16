@@ -14,8 +14,8 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * Which {@code WWW-Authenticate} values are a valid challenge. The cases are shared: a service and
- * {@link TrustedProxyAuthenticator.Builder#build()} refuse and accept exactly these.
+ * Which {@code WWW-Authenticate} values are a valid {@link Challenge}. The cases are shared: a
+ * service and {@link TrustedProxyAuthenticator.Builder#build()} refuse and accept exactly these.
  */
 final class ChallengeTest {
 
@@ -103,15 +103,28 @@ final class ChallengeTest {
   @ParameterizedTest
   @MethodSource("longestRepetitiveChallenges")
   void aLongestChallengeIsAcceptedOnAThreadWithASmallStack(String challenge) {
-    var validation = new FutureTask<>(() -> Challenge.requireValid(challenge));
+    var validation = new FutureTask<>(() -> new Challenge(challenge).value());
     Thread.ofPlatform().stackSize(SMALL_STACK_BYTES).start(validation);
 
     assertEquals(challenge, Await.value("the challenge's validation", validation));
   }
 
+  @ParameterizedTest
+  @MethodSource("invalidChallenges")
+  void anInvalidChallengeIsRefusedNamingTheRuleItBreaks(String challenge, String message) {
+    var ex = assertThrows(IllegalArgumentException.class, () -> new Challenge(challenge));
+    assertEquals(message, ex.getMessage());
+  }
+
+  @ParameterizedTest
+  @MethodSource("validChallenges")
+  void aValidChallengeIsKeptAsSent(String challenge) {
+    assertEquals(challenge, new Challenge(challenge).value());
+  }
+
   @Test
   void aNullChallengeIsRefused() {
-    var ex = assertThrows(NullPointerException.class, () -> Challenge.requireValid(null));
+    var ex = assertThrows(NullPointerException.class, () -> new Challenge(null));
     assertEquals("challenge must not be null", ex.getMessage());
   }
 }
