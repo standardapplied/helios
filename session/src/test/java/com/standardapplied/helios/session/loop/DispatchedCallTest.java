@@ -3,7 +3,6 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
@@ -13,77 +12,64 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.time.Duration;
 import java.util.Map;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.RunnableScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The interleaving {@link ToolDispatchTest} cannot force through the dispatcher: the call is
- * cancelled after its worker was granted the permit and before the tool starts. A permit pool that
- * cancels the call as it grants the permit puts the cancellation exactly there.
+ * The interleaving {@link ToolDispatchTest} cannot force through the dispatcher, whose caller
+ * always waits: the deadline fires before the worker is admitted, and no caller has yet cancelled
+ * the call. A scheduler on which every deadline is overdue fires it as it is armed, before the
+ * worker starts.
  */
 final class DispatchedCallTest {
 
   private static final Duration NEVER = Duration.ofMinutes(10);
 
-  private final ManualScheduler scheduler = new ManualScheduler();
+  private final Overdue scheduler = new Overdue();
+  private final AtomicInteger runs = new AtomicInteger();
+  private final AtomicInteger live = new AtomicInteger();
+  private final DispatchedCall dispatched =
+      new DispatchedCall(
+          Tool.newBuilder()
+              .withName("t")
+              .withDescription("t")
+              .withExecutor((args, ctx) -> ToolResult.success("run " + runs.incrementAndGet()))
+              .build(),
+          new ToolCall("c", "t", Map.of()),
+          SessionContext.forTesting("dispatched-call"),
+          NEVER,
+          new CategoryPermits(1),
+          live);
 
   @AfterEach
   void stopTheScheduler() {
     scheduler.shutdownNow();
   }
 
-  /** Grants the permit, then cancels {@link #call} before handing control back to the worker. */
-  private static final class CancellingOnGrant extends Semaphore {
+  /** Runs each deadline as it is armed, as if its delay had already passed. */
+  private static final class Overdue extends ScheduledThreadPoolExecutor {
 
-    private final AtomicReference<DispatchedCall> call = new AtomicReference<>();
-
-    CancellingOnGrant() {
+    Overdue() {
       super(1);
+      setRemoveOnCancelPolicy(true);
     }
 
     @Override
-    public void acquire() throws InterruptedException {
-      super.acquire();
-      call.get().cancel("cancelled as the permit was granted");
+    protected <V> RunnableScheduledFuture<V> decorateTask(
+        Runnable runnable, RunnableScheduledFuture<V> task) {
+      runnable.run();
+      return task;
     }
   }
 
   @Test
-  void aCallCancelledAfterItsPermitIsGrantedNeverStartsItsTool() {
-    var runs = new AtomicInteger();
-    var tool =
-        Tool.newBuilder()
-            .withName("t")
-            .withDescription("t")
-            .withExecutor((args, ctx) -> ToolResult.success("run " + runs.incrementAndGet()))
-            .build();
-    var permits = new CancellingOnGrant();
-    var live = new AtomicInteger();
-    var dispatched =
-        new DispatchedCall(
-            tool,
-            new ToolCall("c", "t", Map.of()),
-            SessionContext.forTesting("dispatched-call"),
-            NEVER,
-            permits,
-            live);
-    permits.call.set(dispatched);
-
+  void aDeadlineThatFiredBeforeTheWorkerWasAdmittedKeepsTheToolFromStarting() {
     dispatched.start(new CancellationToken(), scheduler);
 
-    var awaited = new FutureTask<>(() -> dispatched.await(NEVER));
-    Thread.ofVirtual().start(awaited);
-
-    var failure = Await.failure("the cancelled call's answer", awaited);
-    assertInstanceOf(CancellationException.class, failure);
-    assertEquals("cancelled as the permit was granted", failure.getMessage());
     Await.until("the worker to end", () -> live.get() == 0);
     assertEquals(0, runs.get(), "the tool never ran");
-    assertEquals(1, permits.availablePermits(), "the permit is back");
   }
 }
