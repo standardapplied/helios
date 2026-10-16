@@ -37,7 +37,8 @@ public interface Authenticator {
    * once, when it is built, and refuses a value that is not a challenge; it is not a secret.
    *
    * @return the challenge; an auth-scheme token, optionally followed by one space and a token68 or
-   *     a comma-separated list of auth-params, in printable ASCII and at most 1,024 characters
+   *     a comma-separated list of auth-params whose names are unique ignoring case and whose realm,
+   *     if any, is a quoted-string, in printable ASCII and at most 1,024 characters
    */
   String challenge();
 }
