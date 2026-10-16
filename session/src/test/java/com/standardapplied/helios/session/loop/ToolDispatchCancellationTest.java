@@ -4,9 +4,9 @@ package com.standardapplied.helios.session.loop;
 
 import static com.standardapplied.helios.session.loop.DispatchFixture.NEVER;
 import static com.standardapplied.helios.session.loop.DispatchFixture.SHORT;
+import static com.standardapplied.helios.session.loop.DispatchFixture.assertCancelled;
 import static com.standardapplied.helios.session.loop.DispatchFixture.awaitIdle;
 import static com.standardapplied.helios.session.loop.DispatchFixture.binding;
-import static com.standardapplied.helios.session.loop.DispatchFixture.blockFirstCallback;
 import static com.standardapplied.helios.session.loop.DispatchFixture.start;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -62,9 +62,7 @@ final class ToolDispatchCancellationTest {
         () -> d.queuedDispatches(ToolCategory.READ) == 1);
     session.cancel("user-stop");
 
-    var thrown = queued.ending("the cancelled dispatch").thrown();
-    assertInstanceOf(CancellationException.class, thrown);
-    assertEquals("user-stop", thrown.getMessage());
+    assertCancelled("user-stop", queued);
     fixture.release.countDown();
     assertEquals(ToolResult.success("done"), holder.ending("the first dispatch").result());
     awaitIdle(d);
@@ -84,9 +82,7 @@ final class ToolDispatchCancellationTest {
     Await.latch("the tool to start", fixture.entered);
     session.cancel("session closed");
 
-    var thrown = running.ending("the cancelled dispatch").thrown();
-    assertInstanceOf(CancellationException.class, thrown);
-    assertEquals("session closed", thrown.getMessage());
+    assertCancelled("session closed", running);
     Await.latch("the tool to be interrupted", interrupted);
     awaitIdle(d);
     assertEquals(0, session.activeCallbackCountForTests(), "no link to the session is left");
@@ -175,17 +171,14 @@ final class ToolDispatchCancellationTest {
     Await.latch("the call to be timed out", cancelled);
     session.cancel("session closed");
 
-    var thrown = running.ending("the cancelled dispatch").thrown();
-    assertInstanceOf(CancellationException.class, thrown);
-    assertEquals("session closed", thrown.getMessage());
+    assertCancelled("session closed", running);
   }
 
   @Test
   void cancellingTheSessionWhileAnEarlierCallbackBlocksEndsARunningCall() {
     var session = new CancellationToken();
     var callbackEntered = new CountDownLatch(1);
-    var callbackRelease = new CountDownLatch(1);
-    blockFirstCallback(session, callbackEntered, callbackRelease);
+    fixture.blockFirstCallback(session, callbackEntered);
     var cancelled = new CountDownLatch(1);
     var stuck = fixture.stuckSignalling(cancelled);
     var d = fixture.dispatcher(binding("stuck", ToolCategory.READ, stuck));
@@ -195,19 +188,15 @@ final class ToolDispatchCancellationTest {
     Thread.ofVirtual().start(() -> session.cancel("session closed"));
     Await.latch("the session's first callback to block", callbackEntered);
 
-    var thrown = running.ending("the cancelled dispatch").thrown();
-    assertInstanceOf(CancellationException.class, thrown);
-    assertEquals("session closed", thrown.getMessage());
+    assertCancelled("session closed", running);
     Await.latch("the call's own token to be cancelled", cancelled);
-    callbackRelease.countDown();
   }
 
   @Test
   void cancellingTheSessionDuringTheStopGraceWhileAnEarlierCallbackBlocksEndsTheCall() {
     var session = new CancellationToken();
     var callbackEntered = new CountDownLatch(1);
-    var callbackRelease = new CountDownLatch(1);
-    blockFirstCallback(session, callbackEntered, callbackRelease);
+    fixture.blockFirstCallback(session, callbackEntered);
     var cancelled = new CountDownLatch(1);
     var stuck = fixture.stuckSignalling(cancelled);
     var d = fixture.dispatcher(binding("stuck", ToolCategory.READ, stuck));
@@ -219,10 +208,7 @@ final class ToolDispatchCancellationTest {
     Thread.ofVirtual().start(() -> session.cancel("session closed"));
     Await.latch("the session's first callback to block", callbackEntered);
 
-    var thrown = running.ending("the cancelled dispatch").thrown();
-    assertInstanceOf(CancellationException.class, thrown);
-    assertEquals("session closed", thrown.getMessage());
-    callbackRelease.countDown();
+    assertCancelled("session closed", running);
   }
 
   @Test
@@ -233,7 +219,32 @@ final class ToolDispatchCancellationTest {
     var first = start(d, "write", session, NEVER);
     Await.latch("the first writer to start", fixture.entered);
     session.cancel("user-stop");
-    assertInstanceOf(CancellationException.class, first.ending("the first dispatch").thrown());
+    assertCancelled("user-stop", first);
+
+    fixture.assertTheNextWriterWaitsForRelease(d, starts);
+  }
+
+  @Test
+  void cancellingTheSessionDuringTheStopGraceAdmitsNoOtherWriterUntilItEnds() {
+    var starts = new AtomicInteger();
+    var cancelled = new CountDownLatch(1);
+    var stuck = fixture.stuck(starts);
+    var d =
+        fixture.dispatcher(
+            binding(
+                "write",
+                ToolCategory.WRITE,
+                (args, ctx) -> {
+                  ctx.cancellation().onCancel(cancelled::countDown);
+                  return stuck.execute(args, ctx);
+                }));
+    var session = new CancellationToken();
+    var first = start(d, "write", session, NEVER);
+    Await.latch("the first writer to start", fixture.entered);
+    fixture.scheduler.fireLatest();
+    Await.latch("the first writer to be timed out", cancelled);
+    session.cancel("user-stop");
+    assertCancelled("user-stop", first);
 
     fixture.assertTheNextWriterWaitsForRelease(d, starts);
   }
@@ -245,7 +256,7 @@ final class ToolDispatchCancellationTest {
     var first = start(d, "write");
     Await.latch("the first writer to start", fixture.entered);
     first.thread().interrupt();
-    assertInstanceOf(CancellationException.class, first.ending("the first dispatch").thrown());
+    assertCancelled("interrupted waiting for tool write", first);
 
     fixture.assertTheNextWriterWaitsForRelease(d, starts);
   }
@@ -282,7 +293,7 @@ final class ToolDispatchCancellationTest {
     Thread.ofVirtual().start(cancelling);
 
     assertTrue(Await.value("the session's cancellation to return", cancelling));
-    assertInstanceOf(CancellationException.class, running.ending("the dispatch").thrown());
+    assertCancelled("session closed", running);
   }
 
   @Test
@@ -324,7 +335,7 @@ final class ToolDispatchCancellationTest {
       Await.latch("the tool to start", fixture.entered);
       session.cancel("session closed");
       Await.latch("the tool to be interrupted", interrupted);
-      assertInstanceOf(CancellationException.class, running.ending("the dispatch").thrown());
+      assertCancelled("session closed", running);
       awaitIdle(d);
     }
 

@@ -8,8 +8,8 @@ import java.util.concurrent.RunnableScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 /**
- * A scheduler whose deadlines the test brings due: it runs the latest one on its own thread, as if
- * its delay had passed. A deadline still comes due on its own when its delay passes, so a test
+ * A scheduler whose deadlines the test brings due: it runs the latest one on the calling thread, as
+ * if its delay had passed. A deadline still comes due on its own when its delay passes, so a test
  * gives every deadline it fires by hand a delay beyond the hang guard. A cancelled deadline leaves
  * the queue at once, as on the session's scheduler.
  */

@@ -7,15 +7,14 @@ package com.standardapplied.helios.session.loop;
 import static com.standardapplied.helios.session.loop.DispatchFixture.CTX;
 import static com.standardapplied.helios.session.loop.DispatchFixture.NEVER;
 import static com.standardapplied.helios.session.loop.DispatchFixture.SHORT;
+import static com.standardapplied.helios.session.loop.DispatchFixture.assertCancelled;
 import static com.standardapplied.helios.session.loop.DispatchFixture.awaitIdle;
 import static com.standardapplied.helios.session.loop.DispatchFixture.awaitThroughInterrupts;
 import static com.standardapplied.helios.session.loop.DispatchFixture.binding;
-import static com.standardapplied.helios.session.loop.DispatchFixture.blockFirstCallback;
 import static com.standardapplied.helios.session.loop.DispatchFixture.call;
 import static com.standardapplied.helios.session.loop.DispatchFixture.start;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -474,8 +473,7 @@ final class ToolDispatchTest {
 
   @Test
   void aCallWhoseDeadlinePassesWhileTheSchedulerIsBusyTimesOutWithoutStartingTheTool() {
-    var schedulerFree = new CountDownLatch(1);
-    fixture.scheduler.execute(() -> awaitThroughInterrupts(schedulerFree));
+    fixture.scheduler.execute(() -> awaitThroughInterrupts(fixture.schedulerFree));
     var starts = new AtomicInteger();
     var d =
         fixture.dispatcher(
@@ -492,15 +490,13 @@ final class ToolDispatchTest {
     assertEquals(ToolResult.success("done"), holder.ending("the first dispatch").result());
     awaitIdle(d);
     assertEquals(1, starts.get(), "the late writer's tool never ran");
-    schedulerFree.countDown();
   }
 
   @Test
   void aQueuedCallWhoseSessionIsCancelledNeverStartsWhileAnEarlierCallbackBlocks() {
     var session = new CancellationToken();
     var callbackEntered = new CountDownLatch(1);
-    var callbackRelease = new CountDownLatch(1);
-    blockFirstCallback(session, callbackEntered, callbackRelease);
+    fixture.blockFirstCallback(session, callbackEntered);
     var starts = new AtomicInteger();
     var d =
         fixture.dispatcher(
@@ -517,13 +513,10 @@ final class ToolDispatchTest {
 
     fixture.release.countDown();
 
-    var thrown = queued.ending("the queued dispatch").thrown();
-    assertInstanceOf(CancellationException.class, thrown);
-    assertEquals("session closed", thrown.getMessage());
-    assertEquals(1, starts.get(), "the queued writer's tool never ran");
-    callbackRelease.countDown();
+    assertCancelled("session closed", queued);
     holder.ending("the first dispatch");
     awaitIdle(d);
+    assertEquals(1, starts.get(), "the queued writer's tool never ran");
   }
 
   @Test
@@ -648,11 +641,20 @@ final class ToolDispatchTest {
               tasks.add(task);
             });
 
-    for (var task : tasks) {
-      Await.value("a repeated dispatch", task);
+    var expected =
+        Map.of(
+            "read", ToolResult.success("r"),
+            "write", ToolResult.failure("w"),
+            "exec", ToolResult.threw("exec", new IllegalStateException("x")));
+    for (var i = 0; i < tasks.size(); i++) {
+      assertEquals(
+          expected.get(names.get(i % 3)), Await.value("a repeated dispatch", tasks.get(i)));
     }
     awaitIdle(d);
 
+    assertEquals(0, d.queuedDispatches(ToolCategory.READ), "no dispatch is left queued");
+    assertEquals(0, d.queuedDispatches(ToolCategory.WRITE));
+    assertEquals(0, d.queuedDispatches(ToolCategory.EXECUTION));
     assertEquals(4, d.availableToolCallPermits());
     assertEquals(2, d.availableFileWritePermits());
     assertEquals(1, d.availableExecutionPermits());
