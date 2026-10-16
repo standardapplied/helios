@@ -11,12 +11,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.runtime.AuthenticationGate.Caller;
+import io.helidon.webserver.http.ServerRequest;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -148,6 +150,45 @@ final class AuthenticationGateTest {
   void aServiceWhoseAuthenticatorHasNoChallengeIsRefused() {
     var ex = assertThrows(NullPointerException.class, () -> service(null));
     assertEquals("challenge must not be null", ex.getMessage());
+  }
+
+  @Test
+  void aDenialCarriesTheChallengeTheGateValidatedWhateverTheAuthenticatorReturnsLater()
+      throws Exception {
+    var reads = new AtomicInteger();
+    var changing =
+        new Authenticator() {
+          @Override
+          public Optional<Authentication> authenticate(ServerRequest request) {
+            return Optional.empty();
+          }
+
+          @Override
+          public String challenge() {
+            return reads.getAndIncrement() == 0
+                ? TestAuthenticator.CHALLENGE
+                : "Bearer realm=\"unvalidated\"";
+          }
+        };
+    try (var server =
+            RuntimeServer.builder()
+                .withRegistry(SessionRegistry.inMemory())
+                .withOptionsFactory(
+                    request -> {
+                      throw new AssertionError("no session is created");
+                    })
+                .withAuthenticator(changing)
+                .build();
+        var connection = RawConnection.open(server.port())) {
+      connection.write(
+          "POST /v1/sessions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n");
+
+      var denial = connection.response();
+
+      assertEquals("HTTP/1.1 401 Unauthorized", denial.statusLine());
+      assertEquals(TestAuthenticator.CHALLENGE, denial.headers().get("www-authenticate"));
+      assertEquals(1, reads.get());
+    }
   }
 
   private static AgentHttpService service(String challenge) {
