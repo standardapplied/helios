@@ -8,16 +8,21 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
-/** Collects what one class's logger logs, at every level, until closed. */
+/**
+ * Collects what one class's logger logs, at every level, until closed, and keeps it from the parent
+ * handlers, so a record the test expects is not printed to the build output.
+ */
 final class LogCapture implements AutoCloseable {
 
   private final Logger logger;
   private final Level level;
+  private final boolean useParentHandlers;
   private final Handler handler;
 
   private LogCapture(Logger logger, List<LogRecord> records) {
     this.logger = logger;
     this.level = logger.getLevel();
+    this.useParentHandlers = logger.getUseParentHandlers();
     this.handler =
         new Handler() {
           @Override
@@ -33,6 +38,7 @@ final class LogCapture implements AutoCloseable {
         };
     handler.setLevel(Level.ALL);
     logger.setLevel(Level.ALL);
+    logger.setUseParentHandlers(false);
     logger.addHandler(handler);
   }
 
@@ -44,5 +50,6 @@ final class LogCapture implements AutoCloseable {
   public void close() {
     logger.removeHandler(handler);
     logger.setLevel(level);
+    logger.setUseParentHandlers(useParentHandlers);
   }
 }

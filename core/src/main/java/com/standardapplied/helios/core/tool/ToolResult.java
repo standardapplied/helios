@@ -103,6 +103,25 @@ public record ToolResult(ToolOutcome outcome, String output, List<InlineFile> at
   }
 
   /**
+   * The call exceeded {@code limit} while its tool was running, and the tool did not stop.
+   *
+   * @param toolName the called tool's name; non-null
+   * @param limit the limit in force for the call; positive
+   * @return a {@link ToolOutcome.Unknown} result
+   */
+  public static ToolResult unknown(String toolName, Duration limit) {
+    Objects.requireNonNull(toolName, "toolName must not be null");
+    return new ToolResult(
+        new ToolOutcome.Unknown(limit),
+        "tool '"
+            + toolName
+            + "' timed out after "
+            + limit
+            + " and did not stop; it may still be running and its effects may still land",
+        List.of());
+  }
+
+  /**
    * No tool named {@code toolName} is registered.
    *
    * @param toolName the name the model called; non-null
@@ -114,10 +133,10 @@ public record ToolResult(ToolOutcome outcome, String output, List<InlineFile> at
   }
 
   /**
-   * A hook refused or replaced the call before it ran.
+   * The call was rejected before it ran, by a hook or by the session's dispatcher.
    *
-   * @param by the rejecting hook's name; non-blank
-   * @param reason the hook's reason; non-blank
+   * @param by the rejecting hook's name, or {@code ToolDispatch}; non-blank
+   * @param reason why; non-blank
    * @return a {@link ToolOutcome.Rejected} result
    */
   public static ToolResult rejected(String by, String reason) {

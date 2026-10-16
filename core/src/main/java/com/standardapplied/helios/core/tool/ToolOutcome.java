@@ -3,13 +3,14 @@
 package com.standardapplied.helios.core.tool;
 
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.common.Validate;
 import java.time.Duration;
 import java.util.Objects;
 
 /**
- * What happened to one tool call: it ran and succeeded or failed, it threw, it timed out, a hook
- * rejected it before it ran, or no tool by its name exists. A consumer counts or routes on this
- * type, never on the model-facing text in {@link ToolResult#output()}.
+ * What happened to one tool call: it ran and succeeded or failed, it threw, it timed out, it timed
+ * out and did not stop, it was rejected before it ran, or no tool by its name exists. A consumer
+ * counts or routes on this type, never on the model-facing text in {@link ToolResult#output()}.
  */
 public sealed interface ToolOutcome {
 
@@ -39,18 +40,31 @@ public sealed interface ToolOutcome {
   record TimedOut(Duration limit) implements ToolOutcome {
 
     public TimedOut {
-      Objects.requireNonNull(limit, "limit must not be null");
-      if (limit.isNegative() || limit.isZero()) {
-        throw new IllegalArgumentException("limit must be positive, got " + limit);
-      }
+      Validate.positiveDuration("limit", limit);
     }
   }
 
   /**
-   * A hook refused or replaced the call before it ran.
+   * The call exceeded its time limit while its tool was running, and the tool did not stop when
+   * cancelled and interrupted. It may still be running, and its effects may still land; the
+   * dispatcher keeps the call's category capacity charged until it ends and, if the call may have
+   * side effects, rejects every other call until then.
    *
-   * @param by the name of the hook that rejected the call; non-blank
-   * @param reason the hook's reason; non-blank
+   * @param limit the limit in force for the call; positive
+   */
+  record Unknown(Duration limit) implements ToolOutcome {
+
+    public Unknown {
+      Validate.positiveDuration("limit", limit);
+    }
+  }
+
+  /**
+   * The call was rejected before it ran: by a hook, or by the session's dispatcher while an earlier
+   * call that may have side effects still runs after its caller stopped waiting.
+   *
+   * @param by the name of the hook that rejected the call, or {@code ToolDispatch}; non-blank
+   * @param reason why; non-blank
    */
   record Rejected(String by, String reason) implements ToolOutcome {
 

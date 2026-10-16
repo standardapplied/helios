@@ -12,10 +12,10 @@ import java.util.OptionalLong;
 /**
  * Per-session ceilings the agent loop enforces.
  *
- * <p>Seven orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, context tokens,
- * stream-idle timeout, stream-retry policy — each mapping to a distinct termination path or
- * recovery behaviour in {@link ResultMessage}. Limits are immutable for the lifetime of a session;
- * runtime mutation would let a long-running session escape the contract its caller saw at
+ * <p>Eight orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, tool stop grace,
+ * context tokens, stream-idle timeout, stream-retry policy — each mapping to a distinct termination
+ * path or recovery behaviour in {@link ResultMessage}. Limits are immutable for the lifetime of a
+ * session; runtime mutation would let a long-running session escape the contract its caller saw at
  * construction.
  *
  * <p>Defaults track Helios production values:
@@ -29,6 +29,11 @@ import java.util.OptionalLong;
  *       this window.
  *   <li>{@code toolTimeoutDefault}: 2 minutes — slow enough for compile-and-run flows, fast enough
  *       that a wedged tool doesn't burn the wall-clock budget.
+ *   <li>{@code toolStopGrace}: 5 seconds — how long the loop waits, once a tool call has timed out
+ *       and been cancelled and interrupted, for the tool to stop. A tool that stops in time is
+ *       reported as {@link com.standardapplied.helios.core.tool.ToolOutcome.TimedOut}; one that
+ *       does not as {@link com.standardapplied.helios.core.tool.ToolOutcome.Unknown}, and it keeps
+ *       its category's capacity until it ends.
  *   <li>{@code maxContextTokens}: {@code 0} — sentinel meaning "auto, resolve from {@code
  *       Model.contextWindow()}". The agent loop picks an effective ceiling by reading the
  *       provider's documented window and subtracting a small output-token reservation; library
@@ -71,6 +76,9 @@ import java.util.OptionalLong;
  *     strictly positive
  * @param toolTimeoutDefault default per-tool execution timeout; must be non-null and strictly
  *     positive
+ * @param toolStopGrace how long a timed-out tool call is given to stop before it is reported as
+ *     {@link com.standardapplied.helios.core.tool.ToolOutcome.Unknown}; must be non-null and
+ *     strictly positive
  * @param maxContextTokens soft trigger for context compaction, measured as the {@link
  *     com.standardapplied.helios.core.context.TokenCounter}'s estimate of the <em>total tokens
  *     across every message in the conversation history so far</em> — cumulative, never per-turn.
@@ -87,6 +95,7 @@ public record SessionLimits(
     OptionalLong maxBudgetMicroUsd,
     Duration maxWallClock,
     Duration toolTimeoutDefault,
+    Duration toolStopGrace,
     long maxContextTokens,
     Duration streamIdleTimeout,
     StreamRetryPolicy streamRetryPolicy) {
@@ -97,6 +106,7 @@ public record SessionLimits(
           OptionalLong.empty(),
           Duration.ofHours(1),
           Duration.ofMinutes(2),
+          Duration.ofSeconds(5),
           0L,
           Duration.ofSeconds(60),
           StreamRetryPolicy.defaults());
@@ -125,6 +135,11 @@ public record SessionLimits(
     if (toolTimeoutDefault.isZero() || toolTimeoutDefault.isNegative()) {
       throw new IllegalArgumentException(
           "toolTimeoutDefault must be strictly positive, got " + toolTimeoutDefault);
+    }
+    Objects.requireNonNull(toolStopGrace, "toolStopGrace must not be null");
+    if (toolStopGrace.isZero() || toolStopGrace.isNegative()) {
+      throw new IllegalArgumentException(
+          "toolStopGrace must be strictly positive, got " + toolStopGrace);
     }
     if (maxContextTokens < 0) {
       throw new IllegalArgumentException(
@@ -169,6 +184,7 @@ public record SessionLimits(
         .withMaxBudgetMicroUsd(maxBudgetMicroUsd)
         .withMaxWallClock(maxWallClock)
         .withToolTimeoutDefault(toolTimeoutDefault)
+        .withToolStopGrace(toolStopGrace)
         .withMaxContextTokens(maxContextTokens)
         .withStreamIdleTimeout(streamIdleTimeout)
         .withStreamRetryPolicy(streamRetryPolicy);
@@ -181,6 +197,7 @@ public record SessionLimits(
     private OptionalLong maxBudgetMicroUsd = DEFAULTS.maxBudgetMicroUsd;
     private Duration maxWallClock = DEFAULTS.maxWallClock;
     private Duration toolTimeoutDefault = DEFAULTS.toolTimeoutDefault;
+    private Duration toolStopGrace = DEFAULTS.toolStopGrace;
     private long maxContextTokens = DEFAULTS.maxContextTokens;
     private Duration streamIdleTimeout = DEFAULTS.streamIdleTimeout;
     private StreamRetryPolicy streamRetryPolicy = DEFAULTS.streamRetryPolicy;
@@ -243,6 +260,18 @@ public record SessionLimits(
     }
 
     /**
+     * Set how long a timed-out tool call is given to stop before it is reported as {@link
+     * com.standardapplied.helios.core.tool.ToolOutcome.Unknown}.
+     *
+     * @param toolStopGrace strictly positive
+     * @return this builder
+     */
+    public Builder withToolStopGrace(Duration toolStopGrace) {
+      this.toolStopGrace = toolStopGrace;
+      return this;
+    }
+
+    /**
      * Set the soft context-compaction trigger in tokens.
      *
      * <p>{@code 0} signals "auto" — the agent loop derives an effective ceiling from {@link
@@ -294,6 +323,7 @@ public record SessionLimits(
           maxBudgetMicroUsd,
           maxWallClock,
           toolTimeoutDefault,
+          toolStopGrace,
           maxContextTokens,
           streamIdleTimeout,
           streamRetryPolicy);

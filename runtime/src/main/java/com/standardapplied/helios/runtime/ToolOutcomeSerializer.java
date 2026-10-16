@@ -44,6 +44,8 @@ final class ToolOutcomeSerializer extends StdSerializer<ToolOutcome> {
           gen.writeStringProperty("exceptionType", threw.exceptionType());
       case ToolOutcome.TimedOut timedOut ->
           gen.writeStringProperty("limit", timedOut.limit().toString());
+      case ToolOutcome.Unknown unknown ->
+          gen.writeStringProperty("limit", unknown.limit().toString());
       case ToolOutcome.Rejected rejected -> {
         gen.writeStringProperty("by", rejected.by());
         gen.writeStringProperty("reason", rejected.reason());

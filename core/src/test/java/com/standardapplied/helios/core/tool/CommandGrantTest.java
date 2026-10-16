@@ -75,8 +75,9 @@ class CommandGrantTest {
 
   /** A tool context for a session whose registry is {@code secrets}. */
   private static ToolContext sessionWith(SecretRegistry secrets) {
-    return ToolContext.of(
+    return new ToolContext(
         new SessionContext("grant-session", new CancellationToken(), Clock.systemUTC(), secrets),
+        new CancellationToken(),
         NEVER_REACHED);
   }
 

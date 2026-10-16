@@ -4,10 +4,12 @@
  */
 package com.standardapplied.helios.session.loop;
 
+import com.standardapplied.helios.core.common.Validate;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
+import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.tools.ToolCategory;
@@ -15,18 +17,15 @@ import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Synchronous tool dispatch surface. The agent loop calls {@link #dispatch(ToolCall,
- * CancellationToken, Duration)} once per tool call the model emits; the dispatcher looks the call
- * up in its {@link ToolRegistry}, acquires the per-{@link ToolCategory category} semaphore
- * (blocking the calling virtual thread when the cap is full), runs the tool, and returns its {@link
- * ToolResult}.
+ * CancellationToken, Duration, Duration)} once per tool call the model emits; the dispatcher looks
+ * the call up in its {@link ToolRegistry} and runs it as a {@link DispatchedCall}: a virtual thread
+ * admitted by the per-{@link ToolCategory category} {@link CategoryPermits}, which runs the tool,
+ * and the permit is given back when the call's work has ended.
  *
  * <p>{@link ToolCategory#WRITE} tool calls acquire from the {@code fileWritePermits} pool; {@link
  * ToolCategory#EXECUTION} calls acquire from the {@code executionPermits} pool; every other
@@ -36,18 +35,25 @@ import java.util.concurrent.TimeoutException;
  * <p>Unknown tool names return a {@link ToolResult#notFound(String) not-found} result; the agent
  * loop feeds that result back to the model so it can self-correct rather than crash.
  *
+ * <p>Each call stays linked to the session's cancellation token until its worker ends, so closing
+ * the session cancels and interrupts every call still running, including one already answered as
+ * {@link ToolOutcome.Unknown}. {@link #liveCalls()} counts them.
+ *
  * <h2>Thread-safety</h2>
  *
- * Immutable apart from the semaphore counters. Safe to share across the agent loop's threads.
+ * Safe to share across the agent loop's threads: the permit pools share one lock and the count of
+ * live calls is atomic.
  */
 public final class ToolDispatch {
 
   private final SessionContext sessionContext;
   private final ToolRegistry registry;
   private final ConcurrencyLimits limits;
-  private final Semaphore toolCallPermits;
-  private final Semaphore fileWritePermits;
-  private final Semaphore executionPermits;
+  private final CategoryPermits toolCallPermits;
+  private final CategoryPermits fileWritePermits;
+  private final CategoryPermits executionPermits;
+  private final ScheduledExecutorService scheduler;
+  private final AtomicInteger liveCalls = new AtomicInteger();
 
   /**
    * Build a dispatcher.
@@ -56,16 +62,22 @@ public final class ToolDispatch {
    *     dispatcher; non-null
    * @param registry the bindings the dispatcher will look calls up against; non-null
    * @param limits concurrency caps; non-null
+   * @param scheduler the session's scheduler, on which each call's deadline runs; non-null
    * @throws NullPointerException if any argument is null
    */
   public ToolDispatch(
-      SessionContext sessionContext, ToolRegistry registry, ConcurrencyLimits limits) {
+      SessionContext sessionContext,
+      ToolRegistry registry,
+      ConcurrencyLimits limits,
+      ScheduledExecutorService scheduler) {
     this.sessionContext = Objects.requireNonNull(sessionContext, "sessionContext must not be null");
     this.registry = Objects.requireNonNull(registry, "registry must not be null");
     this.limits = Objects.requireNonNull(limits, "limits must not be null");
-    this.toolCallPermits = new Semaphore(limits.maxConcurrentToolCalls(), true);
-    this.fileWritePermits = new Semaphore(limits.maxConcurrentFileWrites(), true);
-    this.executionPermits = new Semaphore(limits.maxConcurrentExecutions(), true);
+    var scope = new CategoryPermits.Scope();
+    this.toolCallPermits = new CategoryPermits(limits.maxConcurrentToolCalls(), scope);
+    this.fileWritePermits = new CategoryPermits(limits.maxConcurrentFileWrites(), scope);
+    this.executionPermits = new CategoryPermits(limits.maxConcurrentExecutions(), scope);
+    this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
   }
 
   /**
@@ -96,114 +108,111 @@ public final class ToolDispatch {
   }
 
   /**
-   * Available permits for general tool calls.
+   * Permits of the general pool not held by a call whose work is still running.
    *
    * @return non-negative count
    */
   public int availableToolCallPermits() {
-    return toolCallPermits.availablePermits();
+    return toolCallPermits.available();
   }
 
   /**
-   * Available permits for file writes.
+   * Permits of the file-write pool not held by a call whose work is still running.
    *
    * @return non-negative count
    */
   public int availableFileWritePermits() {
-    return fileWritePermits.availablePermits();
+    return fileWritePermits.available();
   }
 
   /**
-   * Available permits for code executions.
+   * Permits of the execution pool not held by a call whose work is still running.
    *
    * @return non-negative count
    */
   public int availableExecutionPermits() {
-    return executionPermits.availablePermits();
+    return executionPermits.available();
   }
 
   /**
-   * Dispatches blocked waiting for a general tool-call permit. Lets a test wait until a dispatch
-   * has queued behind a saturated pool before it acts.
+   * Dispatches blocked waiting for a permit of {@code category}'s pool. Lets a test wait until a
+   * dispatch has queued behind a saturated pool before it acts.
    *
    * @return non-negative count
    */
-  int queuedToolCallDispatches() {
-    return toolCallPermits.getQueueLength();
+  int queuedDispatches(ToolCategory category) {
+    return permitsFor(category).queued();
   }
 
   /**
-   * Dispatch one tool call. Blocks the calling thread until the appropriate semaphore is available,
-   * then runs the tool on a fresh virtual thread bounded by {@code timeout}. Returns the tool's
-   * result, a not-found result for unknown tools, or a timed-out result when the timeout fires.
-   * Cancellation is observed before acquire and re-thrown if signalled during the acquire wait;
-   * after dispatch, cancellation flows through the {@link ToolContext} so tool implementations can
-   * poll {@code ctx.cancellation()} at safe points.
+   * Calls whose work, the worker and any cancellation of the call's token, has not ended yet,
+   * including calls already answered as {@link ToolOutcome.Unknown}.
    *
-   * <p>On timeout the virtual thread carrying the tool keeps running but its result is discarded.
-   * The dispatcher cancels the per-call view of the cancellation token first, so cooperative tools
-   * stop promptly; misbehaving tools eventually finish on their own without blocking the loop.
-   *
-   * @param call the call; non-null
-   * @param cancellation cooperative cancellation token; non-null
-   * @param timeout per-call wall-clock budget; non-null, positive
-   * @return the tool's result, or a framework result on unknown tool / timeout / thrown error
-   * @throws NullPointerException if any argument is null
-   * @throws CancellationException if cancellation fires before or during the permit wait
+   * @return non-negative count
    */
-  public ToolResult dispatch(ToolCall call, CancellationToken cancellation, Duration timeout) {
-    Objects.requireNonNull(call, "call must not be null");
-    Objects.requireNonNull(cancellation, "cancellation must not be null");
-    Objects.requireNonNull(timeout, "timeout must not be null");
-    if (timeout.isNegative() || timeout.isZero()) {
-      throw new IllegalArgumentException("timeout must be positive, got " + timeout);
-    }
-    cancellation.throwIfCancelled();
-
-    var bindingOpt = registry.get(call.name());
-    if (bindingOpt.isEmpty()) {
-      return ToolResult.notFound(call.name());
-    }
-    var binding = bindingOpt.orElseThrow();
-    var permits = permitsFor(binding.category());
-    try {
-      permits.acquire();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new CancellationException("interrupted while acquiring permit for " + call.name());
-    }
-    try {
-      var ctx = ToolContext.of(sessionContext, timeout);
-      var future = new CompletableFuture<ToolResult>();
-      var worker =
-          Thread.ofVirtual()
-              .name("helios-tool-" + call.name())
-              .start(
-                  () -> {
-                    try {
-                      future.complete(binding.tool().execute(call.arguments(), ctx));
-                    } catch (Throwable t) {
-                      future.completeExceptionally(t);
-                    }
-                  });
-      try {
-        return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-      } catch (TimeoutException e) {
-        worker.interrupt();
-        return ToolResult.timedOut(call.name(), timeout);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        worker.interrupt();
-        throw new CancellationException("interrupted waiting for tool " + call.name());
-      } catch (ExecutionException e) {
-        return ToolResult.threw(call.name(), e.getCause());
-      }
-    } finally {
-      permits.release();
-    }
+  int liveCalls() {
+    return liveCalls.get();
   }
 
-  private Semaphore permitsFor(ToolCategory category) {
+  /**
+   * Dispatch one tool call and wait for its answer. The call runs on its own cancellation token,
+   * linked to {@code cancellation}, under one deadline, {@code timeout} from now, that covers the
+   * wait for a permit and the tool's run; past it, this method waits at most {@code stopGrace}. A
+   * tool not started by the deadline, or before {@code cancellation} fires, never starts. At the
+   * deadline the call's token is cancelled and its worker interrupted, and the call is:
+   *
+   * <ul>
+   *   <li>{@link ToolOutcome.TimedOut} if the tool never started or stopped within {@code
+   *       stopGrace};
+   *   <li>{@link ToolOutcome.Unknown} if it still runs. Java cannot safely stop arbitrary code, so
+   *       it runs on and keeps its permit until it ends.
+   * </ul>
+   *
+   * <p>While a call whose category {@link ToolCategory#hasSideEffects has side effects} still runs
+   * after this method stopped waiting for it, at its deadline, on {@code cancellation} or on the
+   * calling thread's interrupt, every other call, of any category and including one already queued,
+   * is {@link ToolOutcome.Rejected rejected} by {@code ToolDispatch} at once, its tool never
+   * started, with the reason {@code tool '<name>' did not stop; no tool runs until it ends}. A call
+   * that only waits for room in its category still queues. The call's token is cancelled on a
+   * thread of its own, so a callback that blocks or throws holds up neither this method, the
+   * session's cancellation nor the interrupt. A tool's {@link Error} is rethrown as itself.
+   *
+   * @param call the call; non-null
+   * @param cancellation the session's cancellation token; non-null
+   * @param timeout per-call budget, from now; non-null, positive
+   * @param stopGrace how long to wait for a timed-out tool to stop; non-null, positive
+   * @return the tool's result, or a framework result on unknown tool or timeout
+   * @throws NullPointerException if any argument is null
+   * @throws IllegalArgumentException if {@code timeout} or {@code stopGrace} is not positive
+   * @throws CancellationException if {@code cancellation} fires or the calling thread is
+   *     interrupted (its interrupt status is kept) before this method returns a result
+   */
+  public ToolResult dispatch(
+      ToolCall call, CancellationToken cancellation, Duration timeout, Duration stopGrace) {
+    Objects.requireNonNull(call, "call must not be null");
+    Objects.requireNonNull(cancellation, "cancellation must not be null");
+    Validate.positiveDuration("timeout", timeout);
+    Validate.positiveDuration("stopGrace", stopGrace);
+    cancellation.throwIfCancelled();
+
+    var binding = registry.get(call.name());
+    if (binding.isEmpty()) {
+      return ToolResult.notFound(call.name());
+    }
+    var dispatched =
+        new DispatchedCall(
+            binding.orElseThrow(),
+            call,
+            sessionContext,
+            cancellation,
+            timeout,
+            permitsFor(binding.orElseThrow().category()),
+            liveCalls);
+    dispatched.start(scheduler);
+    return dispatched.await(stopGrace);
+  }
+
+  private CategoryPermits permitsFor(ToolCategory category) {
     return switch (category) {
       case WRITE -> fileWritePermits;
       case EXECUTION -> executionPermits;
