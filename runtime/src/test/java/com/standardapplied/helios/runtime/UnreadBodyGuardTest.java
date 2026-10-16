@@ -35,6 +35,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import jdk.jfr.consumer.RecordingStream;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -72,8 +73,12 @@ final class UnreadBodyGuardTest {
   private final AtomicInteger smuggledSeen = new AtomicInteger();
   private final List<RawConnection> heldUploads = new ArrayList<>();
   private final RuntimeServer server = server();
-  private final Map<String, String> sessions =
-      Map.of("alice", create("alice"), "bob", create("bob"), "carol", create("carol"));
+  private Map<String, String> sessions;
+
+  @BeforeEach
+  void createSessions() {
+    sessions = Map.of("alice", create("alice"), "bob", create("bob"), "carol", create("carol"));
+  }
 
   @AfterEach
   void close() throws IOException {
