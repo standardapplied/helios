@@ -139,15 +139,6 @@ final class ToolDispatchTest {
     };
   }
 
-  /** Signals {@link #entered}, then waits for {@link #release} through every interruption. */
-  private ToolExecutor stubborn(ToolResult result) {
-    return (args, ctx) -> {
-      entered.countDown();
-      awaitThroughInterrupts(release);
-      return result;
-    };
-  }
-
   /**
    * Counts {@code cancelled} down when its token is cancelled, signals {@link #entered}, then waits
    * for {@link #release} through every interruption.
@@ -179,12 +170,12 @@ final class ToolDispatchTest {
    * Counts its starts, signals {@link #entered}, then waits for {@link #release} through every
    * interruption.
    */
-  private ToolExecutor stuckWriter(AtomicInteger starts) {
+  private ToolExecutor stuck(AtomicInteger starts) {
     return (args, ctx) -> {
       starts.incrementAndGet();
       entered.countDown();
       awaitThroughInterrupts(release);
-      return ToolResult.success("written");
+      return ToolResult.success("done");
     };
   }
 
@@ -200,7 +191,7 @@ final class ToolDispatchTest {
     assertEquals(1, starts.get(), "the next writer has not started");
 
     release.countDown();
-    assertEquals(ToolResult.success("written"), next.ending("the next dispatch").result());
+    assertEquals(ToolResult.success("done"), next.ending("the next dispatch").result());
     assertEquals(2, starts.get());
   }
 
@@ -467,8 +458,7 @@ final class ToolDispatchTest {
       ToolCategory category, int toolCalls, int fileWrites, int executions) {
     var d =
         dispatcher(
-            new ConcurrencyLimits(8, 4, 2, 8),
-            binding("t", category, stubborn(ToolResult.success("done"))));
+            new ConcurrencyLimits(8, 4, 2, 8), binding("t", category, stuck(new AtomicInteger())));
 
     var running = start(d, "t");
     Await.latch("the tool to start", entered);
@@ -581,7 +571,7 @@ final class ToolDispatchTest {
     var d =
         dispatcher(
             new ConcurrencyLimits(8, 1, 1, 8),
-            binding("write", ToolCategory.WRITE, stubborn(ToolResult.success("late"))));
+            binding("write", ToolCategory.WRITE, stuck(new AtomicInteger())));
 
     var running = start(d, "write", new CancellationToken(), SHORT);
     Await.latch("the tool to start", entered);
@@ -595,7 +585,7 @@ final class ToolDispatchTest {
   @Test
   void aStuckWriterAdmitsNoOtherWriterUntilItEndsThoughPermitsAreFree() {
     var starts = new AtomicInteger();
-    var d = dispatcher(binding("write", ToolCategory.WRITE, stuckWriter(starts)));
+    var d = dispatcher(binding("write", ToolCategory.WRITE, stuck(starts)));
     var first = start(d, "write", new CancellationToken(), SHORT);
     Await.latch("the first writer to start", entered);
     scheduler.fireLatest();
@@ -610,7 +600,7 @@ final class ToolDispatchTest {
     var executions = new AtomicInteger();
     var d =
         dispatcher(
-            binding("write", ToolCategory.WRITE, stuckWriter(writes)),
+            binding("write", ToolCategory.WRITE, stuck(writes)),
             binding(
                 "exec",
                 ToolCategory.EXECUTION,
@@ -640,8 +630,7 @@ final class ToolDispatchTest {
     var starts = new AtomicInteger();
     var d =
         dispatcher(
-            new ConcurrencyLimits(8, 1, 1, 8),
-            binding("write", ToolCategory.WRITE, stuckWriter(starts)));
+            new ConcurrencyLimits(8, 1, 1, 8), binding("write", ToolCategory.WRITE, stuck(starts)));
     var holder = start(d, "write");
     Await.latch("the first writer to take the only permit", entered);
     var instant = Duration.ofNanos(1);
@@ -650,7 +639,7 @@ final class ToolDispatchTest {
 
     assertEquals(ToolResult.timedOut("write", instant), late.ending("the late dispatch").result());
     release.countDown();
-    assertEquals(ToolResult.success("written"), holder.ending("the first dispatch").result());
+    assertEquals(ToolResult.success("done"), holder.ending("the first dispatch").result());
     awaitIdle(d);
     assertEquals(1, starts.get(), "the late writer's tool never ran");
     schedulerFree.countDown();
@@ -665,8 +654,7 @@ final class ToolDispatchTest {
     var starts = new AtomicInteger();
     var d =
         dispatcher(
-            new ConcurrencyLimits(8, 1, 1, 8),
-            binding("write", ToolCategory.WRITE, stuckWriter(starts)));
+            new ConcurrencyLimits(8, 1, 1, 8), binding("write", ToolCategory.WRITE, stuck(starts)));
     var holder = start(d, "write", session, NEVER);
     Await.latch("the first writer to take the only permit", entered);
     var queued = start(d, "write", session, NEVER);
@@ -719,16 +707,10 @@ final class ToolDispatchTest {
 
   @Test
   void aCallWhoseDeadlinePassesWhileItQueuesIsTimedOutAndNeverStarts() {
-    var starts = new CountDownLatch(2);
-    ToolExecutor counted =
-        (args, ctx) -> {
-          starts.countDown();
-          entered.countDown();
-          awaitThroughInterrupts(release);
-          return ToolResult.success("done");
-        };
+    var starts = new AtomicInteger();
     var d =
-        dispatcher(new ConcurrencyLimits(1, 1, 1, 1), binding("slow", ToolCategory.READ, counted));
+        dispatcher(
+            new ConcurrencyLimits(1, 1, 1, 1), binding("slow", ToolCategory.READ, stuck(starts)));
     var holder = start(d, "slow");
     Await.latch("the first call to take the only permit", entered);
 
@@ -742,7 +724,7 @@ final class ToolDispatchTest {
     release.countDown();
     assertEquals(ToolResult.success("done"), holder.ending("the first dispatch").result());
     awaitIdle(d);
-    assertEquals(1, starts.getCount(), "only the first call's tool ran");
+    assertEquals(1, starts.get(), "only the first call's tool ran");
   }
 
   @Test
@@ -791,16 +773,10 @@ final class ToolDispatchTest {
 
   @Test
   void cancellingTheSessionWhileTheCallQueuesEndsItAndNeverStartsTheTool() {
-    var starts = new CountDownLatch(2);
-    ToolExecutor counted =
-        (args, ctx) -> {
-          starts.countDown();
-          entered.countDown();
-          awaitThroughInterrupts(release);
-          return ToolResult.success("done");
-        };
+    var starts = new AtomicInteger();
     var d =
-        dispatcher(new ConcurrencyLimits(1, 1, 1, 1), binding("slow", ToolCategory.READ, counted));
+        dispatcher(
+            new ConcurrencyLimits(1, 1, 1, 1), binding("slow", ToolCategory.READ, stuck(starts)));
     var holder = start(d, "slow");
     Await.latch("the first call to take the only permit", entered);
     var session = new CancellationToken();
@@ -817,7 +793,7 @@ final class ToolDispatchTest {
     release.countDown();
     assertEquals(ToolResult.success("done"), holder.ending("the first dispatch").result());
     awaitIdle(d);
-    assertEquals(1, starts.getCount(), "the cancelled call's tool never ran");
+    assertEquals(1, starts.get(), "the cancelled call's tool never ran");
     assertEquals(0, session.activeCallbackCountForTests(), "no link to the session is left");
   }
 
@@ -973,7 +949,7 @@ final class ToolDispatchTest {
   @Test
   void cancellingTheSessionWhileAStuckWriterRunsAdmitsNoOtherWriterUntilItEnds() {
     var starts = new AtomicInteger();
-    var d = dispatcher(binding("write", ToolCategory.WRITE, stuckWriter(starts)));
+    var d = dispatcher(binding("write", ToolCategory.WRITE, stuck(starts)));
     var session = new CancellationToken();
     var first = start(d, "write", session, NEVER);
     Await.latch("the first writer to start", entered);
@@ -986,7 +962,7 @@ final class ToolDispatchTest {
   @Test
   void interruptingTheCallerWhileAStuckWriterRunsAdmitsNoOtherWriterUntilItEnds() {
     var starts = new AtomicInteger();
-    var d = dispatcher(binding("write", ToolCategory.WRITE, stuckWriter(starts)));
+    var d = dispatcher(binding("write", ToolCategory.WRITE, stuck(starts)));
     var first = start(d, "write");
     Await.latch("the first writer to start", entered);
     first.thread().interrupt();
@@ -1031,15 +1007,8 @@ final class ToolDispatchTest {
     var starts = new AtomicInteger();
     ToolExecutor writer =
         (args, ctx) -> {
-          ctx.cancellation().onCancel(() -> awaitThroughInterrupts(release));
           starts.incrementAndGet();
-          entered.countDown();
-          try {
-            release.await();
-            return ToolResult.success("written");
-          } catch (InterruptedException e) {
-            return ToolResult.failure("interrupted");
-          }
+          return blockingCallback(new CountDownLatch(1)).execute(args, ctx);
         };
     var d = dispatcher(binding("write", ToolCategory.WRITE, writer));
     var first = start(d, "write", new CancellationToken(), SHORT);
