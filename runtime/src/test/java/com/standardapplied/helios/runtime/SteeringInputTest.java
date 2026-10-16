@@ -15,7 +15,6 @@ import io.helidon.webserver.CloseConnectionException;
 import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -94,9 +93,7 @@ final class SteeringInputTest {
 
   private static Caller caller(Principal principal) {
     return new Caller(
-        principal,
-        new CompletableFuture<>(),
-        new AuthenticationGate(new TestAuthenticator(request -> Optional.empty())));
+        principal, new CompletableFuture<>(), new Challenge(TestAuthenticator.CHALLENGE));
   }
 
   /** A request a refused upload never reads. */

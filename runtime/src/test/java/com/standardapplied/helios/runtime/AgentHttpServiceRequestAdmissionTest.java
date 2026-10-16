@@ -18,9 +18,7 @@ import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
-import java.net.Socket;
 import java.net.http.HttpRequest.BodyPublisher;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
@@ -173,29 +171,21 @@ final class AgentHttpServiceRequestAdmissionTest {
             harness.registry(), RequestLimits.newBuilder().withMaxRequestBytes(max).build());
     var sessionId = harness.create(server, "alice");
 
-    try (var socket = new Socket("127.0.0.1", server.port())) {
-      var out = socket.getOutputStream();
-      out.write(
-          ("POST /v1"
-                  + messages(sessionId)
-                  + " HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer alice\r\n"
-                  + "Content-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"
-                  + Integer.toHexString(max + 1)
-                  + "\r\n")
-              .getBytes(StandardCharsets.US_ASCII));
-      out.write(textBody(max + 1));
-      out.write("\r\n".getBytes(StandardCharsets.US_ASCII));
-      out.flush();
-      var reader =
-          new BufferedReader(
-              new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+    try (var connection = RawConnection.open(server.port())) {
+      connection.write(
+          "POST /v1"
+              + messages(sessionId)
+              + " HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer alice\r\n"
+              + "Content-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"
+              + Integer.toHexString(max + 1)
+              + "\r\n");
+      connection.write(textBody(max + 1));
+      connection.write("\r\n");
 
-      var status =
-          Await.value(
-              "the unfinished body to be refused",
-              CompletableFuture.supplyAsync(() -> readLine(reader)));
+      var refused = connection.response();
 
-      assertEquals("HTTP/1.1 413 Request Entity Too Large", status);
+      assertEquals("HTTP/1.1 413 Request Entity Too Large", refused.statusLine());
+      assertEquals("{\"error\":\"request body too large\"}", refused.body());
     }
     assertEquals(0, harness.sessions.get(sessionId).queue.size());
   }
