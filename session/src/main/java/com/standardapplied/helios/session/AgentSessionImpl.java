@@ -93,10 +93,11 @@ public final class AgentSessionImpl implements AgentSession {
     this.events = new SessionEventPublisher(sessionId);
     this.pendingQuestions = new PendingQuestions(state, events, clock);
     var combinedTools = withBuiltins(options.tools(), options, pendingQuestions);
-    var toolDispatch = new ToolDispatch(sessionContext, combinedTools, concurrency);
     this.lifecycle =
         new SessionLifecycle(
             state, sessionContext, options.executionProvider(), events, resultFuture);
+    var toolDispatch =
+        new ToolDispatch(sessionContext, combinedTools, concurrency, lifecycle.scheduler());
     var combinedHooks = new ArrayList<Hook>(options.hooks().size() + 1);
     options
         .permission()

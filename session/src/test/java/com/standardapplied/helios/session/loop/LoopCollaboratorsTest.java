@@ -21,6 +21,7 @@ import java.time.Instant;
 import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
@@ -36,7 +37,8 @@ final class LoopCollaboratorsTest {
       new ToolDispatch(
           SessionContext.forTesting("loop-collaborators-test"),
           ToolRegistry.empty(),
-          ConcurrencyLimits.defaults());
+          ConcurrencyLimits.defaults(),
+          new ScheduledThreadPoolExecutor(1));
   private final Function<SessionState, HookContext> contextFactory =
       s ->
           new DefaultHookContext(

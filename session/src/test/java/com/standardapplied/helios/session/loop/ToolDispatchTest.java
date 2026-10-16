@@ -4,88 +4,65 @@
  */
 package com.standardapplied.helios.session.loop;
 
+import static com.standardapplied.helios.session.loop.DispatchFixture.CTX;
+import static com.standardapplied.helios.session.loop.DispatchFixture.NEVER;
+import static com.standardapplied.helios.session.loop.DispatchFixture.SHORT;
+import static com.standardapplied.helios.session.loop.DispatchFixture.assertCancelled;
+import static com.standardapplied.helios.session.loop.DispatchFixture.awaitIdle;
+import static com.standardapplied.helios.session.loop.DispatchFixture.awaitThroughInterrupts;
+import static com.standardapplied.helios.session.loop.DispatchFixture.binding;
+import static com.standardapplied.helios.session.loop.DispatchFixture.call;
+import static com.standardapplied.helios.session.loop.DispatchFixture.start;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolContext;
+import com.standardapplied.helios.core.tool.ToolExecutor;
+import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.ConcurrencyLimits;
-import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+/**
+ * {@link ToolDispatch}'s contract for a call that runs to an answer: construction and argument
+ * checks, results, per-category permits, timeouts and what a call leaves behind. The fixture's
+ * {@link ManualScheduler} fires each deadline only when a test does; a stop grace under test is a
+ * millisecond against a tool that cannot stop, and otherwise beyond the hang guard.
+ */
 final class ToolDispatchTest {
 
-  private static final SessionContext CTX = SessionContext.forTesting("dispatch-test");
-  private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(2);
+  private final DispatchFixture fixture = new DispatchFixture();
 
-  private static Tool echoTool(String name) {
-    return Tool.newBuilder()
-        .withName(name)
-        .withDescription("echo")
-        .withExecutor((args, ctx) -> ToolResult.success("echoed: " + args.get("v")))
-        .build();
-  }
-
-  private static Tool failingTool(String name, String error) {
-    return Tool.newBuilder()
-        .withName(name)
-        .withDescription("fails")
-        .withExecutor((args, ctx) -> ToolResult.failure(error))
-        .build();
-  }
-
-  private static Tool blockingTool(String name, CountDownLatch entered, CountDownLatch release) {
-    return Tool.newBuilder()
-        .withName(name)
-        .withDescription("blocks")
-        .withExecutor(
-            (args, ctx) -> {
-              entered.countDown();
-              try {
-                release.await();
-              } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-              }
-              return ToolResult.success("done");
-            })
-        .build();
-  }
-
-  private static ToolBinding binding(Tool tool, ToolCategory cat) {
-    return ToolBinding.newBuilder(tool).withCategory(cat).build();
-  }
-
-  private static FutureTask<ToolResult> dispatchTask(ToolDispatch d, String tool) {
-    return new FutureTask<>(
-        () ->
-            d.dispatch(
-                new ToolCall("c", tool, Map.of()), new CancellationToken(), DEFAULT_TIMEOUT));
-  }
-
-  private static FutureTask<ToolResult> startDispatch(ToolDispatch d, String tool) {
-    var task = dispatchTask(d, tool);
-    Thread.ofVirtual().start(task);
-    return task;
+  @AfterEach
+  void closeTheFixture() {
+    fixture.close();
   }
 
   // ── construction ──────────────────────────────────────────────────────────
@@ -95,7 +72,9 @@ final class ToolDispatchTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ToolDispatch(null, ToolRegistry.empty(), ConcurrencyLimits.defaults()));
+            () ->
+                new ToolDispatch(
+                    null, ToolRegistry.empty(), ConcurrencyLimits.defaults(), fixture.scheduler));
     assertEquals("sessionContext must not be null", ex.getMessage());
   }
 
@@ -104,7 +83,7 @@ final class ToolDispatchTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ToolDispatch(CTX, null, ConcurrencyLimits.defaults()));
+            () -> new ToolDispatch(CTX, null, ConcurrencyLimits.defaults(), fixture.scheduler));
     assertEquals("registry must not be null", ex.getMessage());
   }
 
@@ -112,28 +91,33 @@ final class ToolDispatchTest {
   void constructorRejectsNullLimits() {
     var ex =
         assertThrows(
-            NullPointerException.class, () -> new ToolDispatch(CTX, ToolRegistry.empty(), null));
+            NullPointerException.class,
+            () -> new ToolDispatch(CTX, ToolRegistry.empty(), null, fixture.scheduler));
     assertEquals("limits must not be null", ex.getMessage());
   }
 
   @Test
-  void registryAccessorReturnsConstructorValue() {
-    var registry = ToolRegistry.empty();
-    var d = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
-    assertSame(registry, d.registry());
+  void constructorRejectsNullScheduler() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new ToolDispatch(CTX, ToolRegistry.empty(), ConcurrencyLimits.defaults(), null));
+    assertEquals("scheduler must not be null", ex.getMessage());
   }
 
   @Test
-  void limitsAccessorReturnsConstructorValue() {
+  void accessorsReturnTheConstructorValues() {
+    var registry = ToolRegistry.empty();
     var limits = new ConcurrencyLimits(8, 2, 1, 32);
-    var d = new ToolDispatch(CTX, ToolRegistry.empty(), limits);
+    var d = new ToolDispatch(CTX, registry, limits, fixture.scheduler);
+    assertSame(CTX, d.sessionContext());
+    assertSame(registry, d.registry());
     assertSame(limits, d.limits());
   }
 
   @Test
   void permitCountsTrackLimits() {
-    var limits = new ConcurrencyLimits(8, 2, 1, 32);
-    var d = new ToolDispatch(CTX, ToolRegistry.empty(), limits);
+    var d = fixture.dispatcher(new ConcurrencyLimits(8, 2, 1, 32));
     assertEquals(8, d.availableToolCallPermits());
     assertEquals(2, d.availableFileWritePermits());
     assertEquals(1, d.availableExecutionPermits());
@@ -143,219 +127,623 @@ final class ToolDispatchTest {
 
   @Test
   void dispatchRejectsNullCall() {
-    var d = new ToolDispatch(CTX, ToolRegistry.empty(), ConcurrencyLimits.defaults());
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> d.dispatch(null, new CancellationToken(), DEFAULT_TIMEOUT));
+    var d = fixture.dispatcher();
+    var token = new CancellationToken();
+    var ex = assertThrows(NullPointerException.class, () -> d.dispatch(null, token, NEVER, NEVER));
     assertEquals("call must not be null", ex.getMessage());
   }
 
   @Test
   void dispatchRejectsNullCancellation() {
-    var d = new ToolDispatch(CTX, ToolRegistry.empty(), ConcurrencyLimits.defaults());
-    var call = new ToolCall("c", "read", Map.of());
-    var ex =
-        assertThrows(NullPointerException.class, () -> d.dispatch(call, null, DEFAULT_TIMEOUT));
+    var d = fixture.dispatcher();
+    var c = call("read");
+    var ex = assertThrows(NullPointerException.class, () -> d.dispatch(c, null, NEVER, NEVER));
     assertEquals("cancellation must not be null", ex.getMessage());
+  }
+
+  @Test
+  void dispatchRejectsNullTimeoutAndStopGrace() {
+    var d = fixture.dispatcher();
+    var c = call("read");
+    var token = new CancellationToken();
+    var timeout = assertThrows(NullPointerException.class, () -> d.dispatch(c, token, null, NEVER));
+    var grace = assertThrows(NullPointerException.class, () -> d.dispatch(c, token, NEVER, null));
+    assertEquals("timeout must not be null", timeout.getMessage());
+    assertEquals("stopGrace must not be null", grace.getMessage());
   }
 
   @ParameterizedTest
   @ValueSource(longs = {0, -1})
   void dispatchRejectsANonPositiveTimeout(long millis) {
-    var d = new ToolDispatch(CTX, ToolRegistry.empty(), ConcurrencyLimits.defaults());
-    var call = new ToolCall("c", "read", Map.of());
+    var d = fixture.dispatcher();
+    var c = call("read");
+    var token = new CancellationToken();
     var timeout = Duration.ofMillis(millis);
     var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> d.dispatch(call, new CancellationToken(), timeout));
-    assertEquals("timeout must be positive, got " + timeout, ex.getMessage());
+        assertThrows(IllegalArgumentException.class, () -> d.dispatch(c, token, timeout, NEVER));
+    assertEquals("timeout must be strictly positive, got " + timeout, ex.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(longs = {0, -1})
+  void dispatchRejectsANonPositiveStopGrace(long millis) {
+    var d = fixture.dispatcher();
+    var c = call("read");
+    var token = new CancellationToken();
+    var grace = Duration.ofMillis(millis);
+    var ex = assertThrows(IllegalArgumentException.class, () -> d.dispatch(c, token, NEVER, grace));
+    assertEquals("stopGrace must be strictly positive, got " + grace, ex.getMessage());
   }
 
   @Test
   void unknownToolReturnsNotFound() {
-    var d = new ToolDispatch(CTX, ToolRegistry.empty(), ConcurrencyLimits.defaults());
-    var call = new ToolCall("c", "nope", Map.of());
-    var result = d.dispatch(call, new CancellationToken(), DEFAULT_TIMEOUT);
+    var result = fixture.dispatcher().dispatch(call("nope"), new CancellationToken(), NEVER, NEVER);
     assertEquals(ToolResult.notFound("nope"), result);
   }
 
   @Test
-  void preCancelledTokenThrows() {
-    var registry = new ToolRegistry(List.of(binding(echoTool("echo"), ToolCategory.READ)));
-    var d = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
+  void aCancelledSessionDispatchesNothing() {
+    var runs = new AtomicInteger();
+    var d =
+        fixture.dispatcher(
+            binding(
+                "echo",
+                ToolCategory.READ,
+                (args, ctx) -> ToolResult.success("run " + runs.incrementAndGet())));
     var token = new CancellationToken();
     token.cancel("user-stop");
-    var call = new ToolCall("c", "echo", Map.of("v", "hi"));
-    var ex =
-        assertThrows(CancellationException.class, () -> d.dispatch(call, token, DEFAULT_TIMEOUT));
+    var c = call("echo");
+
+    var ex = assertThrows(CancellationException.class, () -> d.dispatch(c, token, NEVER, NEVER));
+
     assertEquals("user-stop", ex.getMessage());
+    assertEquals(0, runs.get());
+    assertEquals(0, d.liveCalls());
   }
 
-  // ── happy path ────────────────────────────────────────────────────────────
+  // ── a call that completes ─────────────────────────────────────────────────
 
   @Test
-  void dispatchInvokesRegisteredTool() {
-    var registry = new ToolRegistry(List.of(binding(echoTool("echo"), ToolCategory.READ)));
-    var d = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
+  void dispatchReturnsTheToolsResult() {
+    var d =
+        fixture.dispatcher(
+            binding(
+                "echo",
+                ToolCategory.READ,
+                (args, ctx) -> ToolResult.success("echoed: " + args.get("v"))));
     var result =
         d.dispatch(
-            new ToolCall("c", "echo", Map.of("v", "hello")),
-            new CancellationToken(),
-            DEFAULT_TIMEOUT);
-    assertTrue(result.succeeded());
-    assertEquals("echoed: hello", result.output());
+            new ToolCall("c", "echo", Map.of("v", "hello")), new CancellationToken(), NEVER, NEVER);
+    assertEquals(ToolResult.success("echoed: hello"), result);
   }
 
   @Test
-  void dispatchSurfacesToolFailures() {
-    var registry =
-        new ToolRegistry(List.of(binding(failingTool("bad", "intentional"), ToolCategory.READ)));
-    var d = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
-    var result =
-        d.dispatch(new ToolCall("c", "bad", Map.of()), new CancellationToken(), DEFAULT_TIMEOUT);
-    assertFalse(result.succeeded());
-    assertEquals("intentional", result.output());
+  void dispatchReturnsAReportedFailure() {
+    var d =
+        fixture.dispatcher(
+            binding("bad", ToolCategory.READ, (args, ctx) -> ToolResult.failure("intentional")));
+    var result = d.dispatch(call("bad"), new CancellationToken(), NEVER, NEVER);
+    assertEquals(ToolResult.failure("intentional"), result);
   }
 
-  // ── per-category semaphore selection ──────────────────────────────────────
+  @Test
+  void theToolSeesTheSessionItsOwnTokenAndItsTimeout() {
+    var seen = new AtomicReference<ToolContext>();
+    var d =
+        fixture.dispatcher(
+            binding(
+                "look",
+                ToolCategory.READ,
+                (args, ctx) -> {
+                  seen.set(ctx);
+                  return ToolResult.success("seen");
+                }));
+    var token = new CancellationToken();
+
+    d.dispatch(call("look"), token, NEVER, NEVER);
+
+    var ctx = seen.get();
+    assertSame(CTX, ctx.sessionContext());
+    assertNotSame(token, ctx.cancellation());
+    assertNotSame(CTX.cancellation(), ctx.cancellation());
+    assertEquals(NEVER, ctx.deadline());
+  }
+
+  @Test
+  void aToolErrorIsRethrownAsItself() {
+    var sentinel = new AssertionError("broken tool");
+    var d =
+        fixture.dispatcher(
+            binding(
+                "boom",
+                ToolCategory.READ,
+                (args, ctx) -> {
+                  throw sentinel;
+                }));
+    var c = call("boom");
+    var token = new CancellationToken();
+
+    var thrown = assertThrows(AssertionError.class, () -> d.dispatch(c, token, NEVER, NEVER));
+
+    assertSame(sentinel, thrown);
+  }
+
+  @Test
+  void aToolWhoseFailureCannotBeReportedIsThrewWithoutWaitingForTheDeadline() {
+    var d =
+        fixture.dispatcher(
+            binding(
+                "garbled",
+                ToolCategory.READ,
+                (args, ctx) -> {
+                  throw new IllegalStateException() {
+                    @Override
+                    public String getMessage() {
+                      throw new UnsupportedOperationException("message unavailable");
+                    }
+                  };
+                }));
+
+    var ending = start(d, "garbled").ending("the dispatch");
+
+    assertEquals(
+        new ToolResult(
+            new ToolOutcome.Threw("java.lang.UnsupportedOperationException"),
+            "tool 'garbled' threw: message unavailable",
+            List.of()),
+        ending.result());
+  }
+
+  // ── per-category permits ──────────────────────────────────────────────────
+
+  private void assertHeldPermits(
+      ToolCategory category, int toolCalls, int fileWrites, int executions) {
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(8, 4, 2, 8),
+            binding("t", category, fixture.stuck(new AtomicInteger())));
+
+    var running = start(d, "t");
+    Await.latch("the tool to start", fixture.entered);
+
+    assertEquals(toolCalls, d.availableToolCallPermits(), "general pool");
+    assertEquals(fileWrites, d.availableFileWritePermits(), "file-write pool");
+    assertEquals(executions, d.availableExecutionPermits(), "execution pool");
+    fixture.release.countDown();
+    assertEquals(ToolResult.success("done"), running.ending("the dispatch").result());
+  }
 
   @Test
   void writeCategoryAcquiresFileWritePermits() {
-    var release = new CountDownLatch(1);
-    var entered = new CountDownLatch(1);
-    var registry =
-        new ToolRegistry(
-            List.of(binding(blockingTool("write", entered, release), ToolCategory.WRITE)));
-    var d = new ToolDispatch(CTX, registry, new ConcurrencyLimits(8, 1, 1, 8));
-
-    var dispatched = startDispatch(d, "write");
-    Await.latch("the write tool to start", entered);
-
-    assertEquals(0, d.availableFileWritePermits(), "WRITE took the file-write permit");
-    assertEquals(8, d.availableToolCallPermits(), "tool-call pool unchanged");
-    assertEquals(1, d.availableExecutionPermits(), "execution pool unchanged");
-    release.countDown();
-    assertEquals("done", Await.value("the write dispatch to return", dispatched).output());
+    assertHeldPermits(ToolCategory.WRITE, 8, 3, 2);
   }
 
   @Test
   void executionCategoryAcquiresExecutionPermits() {
-    var release = new CountDownLatch(1);
-    var entered = new CountDownLatch(1);
-    var registry =
-        new ToolRegistry(
-            List.of(binding(blockingTool("exec", entered, release), ToolCategory.EXECUTION)));
-    var d = new ToolDispatch(CTX, registry, new ConcurrencyLimits(8, 4, 1, 8));
-
-    var dispatched = startDispatch(d, "exec");
-    Await.latch("the execution tool to start", entered);
-
-    assertEquals(0, d.availableExecutionPermits(), "EXECUTION took the execution permit");
-    assertEquals(8, d.availableToolCallPermits(), "tool-call pool unchanged");
-    assertEquals(4, d.availableFileWritePermits(), "file-write pool unchanged");
-    release.countDown();
-    assertEquals("done", Await.value("the execution dispatch to return", dispatched).output());
+    assertHeldPermits(ToolCategory.EXECUTION, 8, 4, 1);
   }
 
   @Test
   void readCategoryAcquiresGeneralToolCallPermits() {
-    var release = new CountDownLatch(1);
-    var entered = new CountDownLatch(1);
-    var registry =
-        new ToolRegistry(
-            List.of(binding(blockingTool("read", entered, release), ToolCategory.READ)));
-    var d = new ToolDispatch(CTX, registry, new ConcurrencyLimits(2, 4, 1, 8));
-
-    var dispatched = startDispatch(d, "read");
-    Await.latch("the read tool to start", entered);
-
-    assertEquals(1, d.availableToolCallPermits(), "READ took a general permit");
-    assertEquals(4, d.availableFileWritePermits(), "file-write pool unchanged");
-    assertEquals(1, d.availableExecutionPermits(), "execution pool unchanged");
-    release.countDown();
-    assertEquals("done", Await.value("the read dispatch to return", dispatched).output());
+    assertHeldPermits(ToolCategory.READ, 7, 4, 2);
   }
 
   @Test
-  void semaphoreReleasesAfterDispatch() {
-    var registry = new ToolRegistry(List.of(binding(echoTool("echo"), ToolCategory.READ)));
-    var d = new ToolDispatch(CTX, registry, ConcurrencyLimits.defaults());
-    d.dispatch(
-        new ToolCall("c", "echo", Map.of("v", "x")), new CancellationToken(), DEFAULT_TIMEOUT);
+  void thePermitIsBackOnceTheWorkerEnds() {
+    var d =
+        fixture.dispatcher(
+            binding("echo", ToolCategory.READ, (args, ctx) -> ToolResult.success("x")));
+    d.dispatch(call("echo"), new CancellationToken(), NEVER, NEVER);
+    awaitIdle(d);
     assertEquals(
         ConcurrencyLimits.defaults().maxConcurrentToolCalls(), d.availableToolCallPermits());
   }
 
-  // ── concurrency cap enforcement ──────────────────────────────────────────
+  @Test
+  void capExactlyBoundsConcurrentDispatch() {
+    var started = new CountDownLatch(2);
+    var inFlight = new AtomicInteger();
+    var peak = new AtomicInteger();
+    ToolExecutor slow =
+        (args, ctx) -> {
+          var current = inFlight.incrementAndGet();
+          peak.updateAndGet(p -> Math.max(p, current));
+          started.countDown();
+          awaitThroughInterrupts(fixture.release);
+          inFlight.decrementAndGet();
+          return ToolResult.success("ok");
+        };
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(2, 4, 1, 8), binding("slow", ToolCategory.READ, slow));
+
+    var dispatches = Stream.generate(() -> start(d, "slow")).limit(6).toList();
+    Await.latch("two tools to start", started);
+    Await.until(
+        "the other four calls to queue for a permit",
+        () -> d.queuedDispatches(ToolCategory.READ) == 4);
+
+    assertEquals(2, inFlight.get(), "exactly the cap is running while the rest wait");
+    fixture.release.countDown();
+    for (var dispatch : dispatches) {
+      assertEquals(ToolResult.success("ok"), dispatch.ending("a capped dispatch").result());
+    }
+    awaitIdle(d);
+    assertEquals(2, peak.get(), "peak in-flight equals the cap");
+    assertEquals(2, d.availableToolCallPermits(), "every permit is back in the pool");
+  }
+
+  // ── timeouts ──────────────────────────────────────────────────────────────
 
   @Test
-  void interruptedAcquireThrowsCancellationException() {
-    var release = new CountDownLatch(1);
-    var entered = new CountDownLatch(1);
-    var registry =
-        new ToolRegistry(
-            List.of(binding(blockingTool("slow", entered, release), ToolCategory.READ)));
-    var d = new ToolDispatch(CTX, registry, new ConcurrencyLimits(1, 1, 1, 1));
-    var holder = startDispatch(d, "slow");
-    Await.latch("the first dispatch to take the only permit", entered);
+  void aToolThatHonoursItsTokenStopsAtTheDeadlineAndIsTimedOut() {
+    var stopped = new CountDownLatch(1);
+    ToolExecutor tokenOnly =
+        (args, ctx) -> {
+          var cancelled = new CountDownLatch(1);
+          ctx.cancellation().onCancel(cancelled::countDown);
+          fixture.entered.countDown();
+          awaitThroughInterrupts(cancelled);
+          stopped.countDown();
+          return ToolResult.success("stopped");
+        };
+    var d = fixture.dispatcher(binding("coop", ToolCategory.READ, tokenOnly));
+    var session = new CancellationToken();
 
-    var waiter = dispatchTask(d, "slow");
-    var waiterThread = Thread.ofVirtual().start(waiter);
-    Await.until(
-        "the second dispatch to queue for the permit", () -> d.queuedToolCallDispatches() == 1);
-    waiterThread.interrupt();
+    var running = start(d, "coop", session, NEVER);
+    Await.latch("the tool to start", fixture.entered);
+    fixture.scheduler.fireLatest();
 
-    var thrown =
-        assertInstanceOf(
-            CancellationException.class, Await.failure("the interrupted dispatch", waiter));
-    assertEquals("interrupted while acquiring permit for slow", thrown.getMessage());
-    release.countDown();
-    assertEquals("done", Await.value("the first dispatch to return", holder).output());
-    assertEquals(1, d.availableToolCallPermits(), "the only permit is back in the pool");
+    assertEquals(ToolResult.timedOut("coop", NEVER), running.ending("the dispatch").result());
+    Await.latch("the tool to stop", stopped);
+    assertFalse(session.isCancelled(), "the call's timeout does not cancel the session");
+    assertFalse(CTX.cancellation().isCancelled(), "nor the session context's token");
   }
 
   @Test
-  void capExactlyBoundsConcurrentDispatch() {
-    var release = new CountDownLatch(1);
-    var entered = new CountDownLatch(2);
-    var inFlight = new AtomicInteger();
-    var peak = new AtomicInteger();
-    Tool blocking =
-        Tool.newBuilder()
-            .withName("slow")
-            .withDescription("blocks")
-            .withExecutor(
-                (args, ctx) -> {
-                  var current = inFlight.incrementAndGet();
-                  peak.updateAndGet(p -> Math.max(p, current));
-                  entered.countDown();
-                  try {
-                    release.await();
-                  } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                  }
-                  inFlight.decrementAndGet();
-                  return ToolResult.success("ok");
-                })
-            .build();
-    var registry = new ToolRegistry(List.of(binding(blocking, ToolCategory.READ)));
-    var d = new ToolDispatch(CTX, registry, new ConcurrencyLimits(2, 4, 1, 8));
+  void aToolThatHonoursInterruptionIsInterruptedAtTheDeadlineAndIsTimedOut() {
+    var interrupted = new CountDownLatch(1);
+    var d =
+        fixture.dispatcher(
+            binding("blocking", ToolCategory.READ, fixture.interruptible(interrupted)));
 
-    var dispatches = Stream.generate(() -> startDispatch(d, "slow")).limit(6).toList();
-    Await.latch("two tools to start", entered);
+    var running = start(d, "blocking");
+    Await.latch("the tool to start", fixture.entered);
+    fixture.scheduler.fireLatest();
+
+    assertEquals(ToolResult.timedOut("blocking", NEVER), running.ending("the dispatch").result());
+    Await.latch("the tool to be interrupted", interrupted);
+  }
+
+  @Test
+  void aToolStillRunningAfterTheStopGraceIsUnknownAndKeepsItsPermit() {
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(8, 1, 1, 8),
+            binding("write", ToolCategory.WRITE, fixture.stuck(new AtomicInteger())));
+
+    var running = start(d, "write", new CancellationToken(), SHORT);
+    Await.latch("the tool to start", fixture.entered);
+    fixture.scheduler.fireLatest();
+
+    assertEquals(ToolResult.unknown("write", NEVER), running.ending("the dispatch").result());
+    assertEquals(1, d.liveCalls(), "the worker is still running");
+    assertEquals(0, d.availableFileWritePermits(), "and still holds the write permit");
+  }
+
+  @Test
+  void aSecondWriterUnderCapacityOneQueuesUntilTheFirstEnds() {
+    var starts = new AtomicInteger();
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(8, 1, 1, 8),
+            binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
+    var first = start(d, "write");
+    Await.latch("the first writer to start", fixture.entered);
+
+    fixture.assertTheNextWriterWaitsForRelease(d, starts);
+    assertEquals(ToolResult.success("done"), first.ending("the first dispatch").result());
+  }
+
+  @Test
+  void aStuckWriterRefusesEveryCallUntilItEndsThoughPermitsAreFree() {
+    var starts = new AtomicInteger();
+    var d = fixture.dispatcher(binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
+    var first = start(d, "write", new CancellationToken(), SHORT);
+    Await.latch("the first writer to start", fixture.entered);
+    fixture.scheduler.fireLatest();
+    assertEquals(ToolResult.unknown("write", NEVER), first.ending("the first dispatch").result());
+
+    fixture.assertTheNextWriterIsRefusedUntilTheStuckOneEnds(d, starts);
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = ToolCategory.class,
+      names = {"WRITE", "EXECUTION", "NETWORK", "DELEGATION", "CONTROL"})
+  void anUnresolvedCallWithSideEffectsRefusesACallOfAnyCategory(ToolCategory category) {
+    var runs = new AtomicInteger();
+    var d =
+        fixture.dispatcher(
+            binding("stuck", category, fixture.stuck(new AtomicInteger())),
+            binding(
+                "read",
+                ToolCategory.READ,
+                (args, ctx) -> ToolResult.success("read " + runs.incrementAndGet())));
+    var stuck = start(d, "stuck", new CancellationToken(), SHORT);
+    Await.latch("the stuck tool to start", fixture.entered);
+    fixture.scheduler.fireLatest();
+    assertEquals(ToolResult.unknown("stuck", NEVER), stuck.ending("the stuck dispatch").result());
+
+    var refused = start(d, "read").ending("the refused dispatch").result();
+
+    assertEquals(
+        ToolResult.rejected(
+            "ToolDispatch", "tool 'stuck' did not stop; no tool runs until it ends"),
+        refused);
+    assertEquals(0, runs.get(), "the refused tool never started");
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = ToolCategory.class,
+      names = {"READ", "SEARCH"})
+  void anUnresolvedCallWithoutSideEffectsRefusesNothing(ToolCategory category) {
+    var d =
+        fixture.dispatcher(
+            binding("stuck", category, fixture.stuck(new AtomicInteger())),
+            binding("write", ToolCategory.WRITE, (args, ctx) -> ToolResult.success("written")));
+    var stuck = start(d, "stuck", new CancellationToken(), SHORT);
+    Await.latch("the stuck tool to start", fixture.entered);
+    fixture.scheduler.fireLatest();
+    assertEquals(ToolResult.unknown("stuck", NEVER), stuck.ending("the stuck dispatch").result());
+
+    var next = start(d, "write").ending("the next dispatch").result();
+
+    assertEquals(ToolResult.success("written"), next);
+    assertEquals(
+        ConcurrencyLimits.defaults().maxConcurrentToolCalls() - 1,
+        d.availableToolCallPermits(),
+        "the stuck tool still holds its permit");
+  }
+
+  @Test
+  void aWriterTimedOutBeforeItStartedRefusesNoLaterCall() {
+    var starts = new AtomicInteger();
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(8, 1, 1, 8),
+            binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
+    var holder = start(d, "write");
+    Await.latch("the first writer to take the only permit", fixture.entered);
+    var queued = start(d, "write");
     Await.until(
-        "the other four dispatches to queue for a permit", () -> d.queuedToolCallDispatches() == 4);
+        "the second writer to queue for the permit",
+        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+    fixture.scheduler.fireLatest();
+    assertEquals(
+        ToolResult.timedOut("write", NEVER), queued.ending("the queued dispatch").result());
+    fixture.release.countDown();
+    assertEquals(ToolResult.success("done"), holder.ending("the first dispatch").result());
+    awaitIdle(d);
 
-    assertEquals(2, inFlight.get(), "exactly the cap is running while the rest wait");
-    assertEquals(0, d.availableToolCallPermits(), "both permits are held");
-    release.countDown();
-    for (var dispatch : dispatches) {
-      assertEquals("ok", Await.value("a capped dispatch to return", dispatch).output());
+    var next = start(d, "write").ending("the next dispatch").result();
+
+    assertEquals(ToolResult.success("done"), next);
+  }
+
+  @Test
+  void aCallQueuedForCapacityIsRefusedOnceAQuarantineStarts() {
+    var starts = new AtomicInteger();
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(8, 1, 1, 8),
+            binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
+    var first = start(d, "write");
+    Await.latch("the first writer to start", fixture.entered);
+    var queued = start(d, "write");
+    Await.until(
+        "the second writer to queue for the permit",
+        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+
+    first.thread().interrupt();
+
+    assertEquals(
+        ToolResult.rejected(
+            "ToolDispatch", "tool 'write' did not stop; no tool runs until it ends"),
+        queued.ending("the queued dispatch").result());
+    assertCancelled("interrupted waiting for tool write", first);
+    assertEquals(1, starts.get(), "the queued writer's tool never started");
+  }
+
+  @Test
+  void aCallWhoseDeadlinePassesWhileTheSchedulerIsBusyTimesOutWithoutStartingTheTool() {
+    fixture.scheduler.execute(() -> awaitThroughInterrupts(fixture.schedulerFree));
+    var starts = new AtomicInteger();
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(8, 1, 1, 8),
+            binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
+    var holder = start(d, "write");
+    Await.latch("the first writer to take the only permit", fixture.entered);
+    var instant = Duration.ofNanos(1);
+
+    var late = start(d, call("write"), new CancellationToken(), instant, NEVER);
+
+    assertEquals(ToolResult.timedOut("write", instant), late.ending("the late dispatch").result());
+    fixture.release.countDown();
+    assertEquals(ToolResult.success("done"), holder.ending("the first dispatch").result());
+    awaitIdle(d);
+    assertEquals(1, starts.get(), "the late writer's tool never ran");
+  }
+
+  @Test
+  void aQueuedCallWhoseSessionIsCancelledNeverStartsWhileAnEarlierCallbackBlocks() {
+    var session = new CancellationToken();
+    var callbackEntered = new CountDownLatch(1);
+    fixture.blockFirstCallback(session, callbackEntered);
+    var starts = new AtomicInteger();
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(8, 1, 1, 8),
+            binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
+    var holder = start(d, "write", session, NEVER);
+    Await.latch("the first writer to take the only permit", fixture.entered);
+    var queued = start(d, "write", session, NEVER);
+    Await.until(
+        "the second writer to queue for the permit",
+        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+    Thread.ofVirtual().start(() -> session.cancel("session closed"));
+    Await.latch("the session's first callback to block", callbackEntered);
+
+    fixture.release.countDown();
+
+    assertCancelled("session closed", queued);
+    holder.ending("the first dispatch");
+    awaitIdle(d);
+    assertEquals(1, starts.get(), "the queued writer's tool never ran");
+  }
+
+  @Test
+  void queuedCallsAreAdmittedInTheOrderTheyArrived() {
+    var order = new CopyOnWriteArrayList<Object>();
+    ToolExecutor recording =
+        (args, ctx) -> {
+          order.add(args.get("n"));
+          fixture.entered.countDown();
+          awaitThroughInterrupts(fixture.release);
+          return ToolResult.success("done");
+        };
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(1, 1, 1, 1), binding("slow", ToolCategory.READ, recording));
+    var token = new CancellationToken();
+    var dispatches = new ArrayList<DispatchFixture.Running>();
+    dispatches.add(start(d, new ToolCall("c", "slow", Map.of("n", 0)), token, NEVER, NEVER));
+    Await.latch("the first call to take the only permit", fixture.entered);
+    for (var n = 1; n <= 2; n++) {
+      var queued = n;
+      dispatches.add(start(d, new ToolCall("c", "slow", Map.of("n", n)), token, NEVER, NEVER));
+      Await.until("call " + n + " to queue", () -> d.queuedDispatches(ToolCategory.READ) == queued);
     }
-    assertEquals(2, peak.get(), "peak in-flight equals the cap");
-    assertEquals(0, inFlight.get());
-    assertEquals(2, d.availableToolCallPermits(), "every permit is back in the pool");
+
+    fixture.release.countDown();
+    for (var dispatch : dispatches) {
+      assertEquals(ToolResult.success("done"), dispatch.ending("a queued dispatch").result());
+    }
+    assertEquals(List.of(0, 1, 2), order);
+  }
+
+  @Test
+  void aCallWhoseDeadlinePassesWhileItQueuesIsTimedOutAndNeverStarts() {
+    var starts = new AtomicInteger();
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(1, 1, 1, 1),
+            binding("slow", ToolCategory.READ, fixture.stuck(starts)));
+    var holder = start(d, "slow");
+    Await.latch("the first call to take the only permit", fixture.entered);
+
+    var queued = start(d, "slow");
+    Await.until(
+        "the second call to queue for the permit",
+        () -> d.queuedDispatches(ToolCategory.READ) == 1);
+    fixture.scheduler.fireLatest();
+
+    assertEquals(ToolResult.timedOut("slow", NEVER), queued.ending("the queued dispatch").result());
+    fixture.release.countDown();
+    assertEquals(ToolResult.success("done"), holder.ending("the first dispatch").result());
+    awaitIdle(d);
+    assertEquals(1, starts.get(), "only the first call's tool ran");
+  }
+
+  @Test
+  void aResultArrivingAfterTheTimeoutDoesNotReplaceIt() {
+    var cancelled = new CountDownLatch(1);
+    var late = fixture.stuckSignalling(cancelled);
+    var d = fixture.dispatcher(binding("late", ToolCategory.READ, late));
+
+    var running = start(d, "late");
+    Await.latch("the tool to start", fixture.entered);
+    fixture.scheduler.fireLatest();
+    Await.latch("the call to be timed out", cancelled);
+    fixture.release.countDown();
+
+    assertEquals(ToolResult.timedOut("late", NEVER), running.ending("the dispatch").result());
+  }
+
+  @Test
+  void anErrorThrownAfterTheCallWasAnsweredIsLogged() {
+    var sentinel = new AssertionError("late failure");
+    ToolExecutor failsLate =
+        (args, ctx) -> {
+          fixture.entered.countDown();
+          awaitThroughInterrupts(fixture.release);
+          throw sentinel;
+        };
+    var d = fixture.dispatcher(binding("late", ToolCategory.READ, failsLate));
+    var records = new CopyOnWriteArrayList<LogRecord>();
+
+    try (var capture = LogCapture.of(DispatchedCall.class, records)) {
+      var running = start(d, "late", new CancellationToken(), SHORT);
+      Await.latch("the tool to start", fixture.entered);
+      fixture.scheduler.fireLatest();
+      assertEquals(ToolResult.unknown("late", NEVER), running.ending("the dispatch").result());
+      fixture.release.countDown();
+      awaitIdle(d);
+    }
+
+    var logged = records.getFirst();
+    assertEquals(Level.SEVERE, logged.getLevel());
+    assertEquals("tool 'late' threw after its call was answered", logged.getMessage());
+    assertSame(sentinel, logged.getThrown());
+  }
+
+  // ── nothing left behind ───────────────────────────────────────────────────
+
+  @Test
+  void repeatedCallsLeaveNoPermitRegistrationWorkerOrDeadlineBehind() {
+    var d =
+        fixture.dispatcher(
+            new ConcurrencyLimits(4, 2, 1, 8),
+            binding("read", ToolCategory.READ, (args, ctx) -> ToolResult.success("r")),
+            binding("write", ToolCategory.WRITE, (args, ctx) -> ToolResult.failure("w")),
+            binding(
+                "exec",
+                ToolCategory.EXECUTION,
+                (args, ctx) -> {
+                  throw new IllegalStateException("x");
+                }));
+    var session = new CancellationToken();
+    var names = List.of("read", "write", "exec");
+    var tasks = new ArrayList<FutureTask<ToolResult>>();
+    IntStream.range(0, 300)
+        .forEach(
+            i -> {
+              var task =
+                  new FutureTask<>(() -> d.dispatch(call(names.get(i % 3)), session, NEVER, NEVER));
+              Thread.ofVirtual().start(task);
+              tasks.add(task);
+            });
+
+    var expected =
+        Map.of(
+            "read", ToolResult.success("r"),
+            "write", ToolResult.failure("w"),
+            "exec", ToolResult.threw("exec", new IllegalStateException("x")));
+    for (var i = 0; i < tasks.size(); i++) {
+      assertEquals(
+          expected.get(names.get(i % 3)), Await.value("a repeated dispatch", tasks.get(i)));
+    }
+    awaitIdle(d);
+
+    assertEquals(0, d.queuedDispatches(ToolCategory.READ), "no dispatch is left queued");
+    assertEquals(0, d.queuedDispatches(ToolCategory.WRITE));
+    assertEquals(0, d.queuedDispatches(ToolCategory.EXECUTION));
+    assertEquals(4, d.availableToolCallPermits());
+    assertEquals(2, d.availableFileWritePermits());
+    assertEquals(1, d.availableExecutionPermits());
+    assertEquals(0, session.activeCallbackCountForTests(), "no link to the session is left");
+    assertTrue(fixture.scheduler.getQueue().isEmpty(), "no deadline is left on the scheduler");
   }
 }

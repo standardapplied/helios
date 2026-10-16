@@ -31,6 +31,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -53,7 +54,7 @@ final class ToolOutcomeSessionTest {
     }
   }
 
-  private record Run(CollectingSubscriber events, ScriptedModel model) {
+  private record Run(CollectingSubscriber events, ScriptedModel model, ResultMessage terminal) {
 
     List<QueryEvent.ToolResult> toolResults() {
       return events.eventsOf(QueryEvent.ToolResult.class);
@@ -93,9 +94,10 @@ final class ToolOutcomeSessionTest {
     var events = new CollectingSubscriber();
     try (var session = AgentSession.create(options.withModel(model).build())) {
       session.events().subscribe(events);
-      session.runBlocking(UserMessage.text("go"));
+      session.send(UserMessage.text("go"));
+      var terminal = Await.value("the session to end", session.result());
       events.awaitDone();
-      return new Run(events, model);
+      return new Run(events, model, terminal);
     }
   }
 
@@ -143,11 +145,27 @@ final class ToolOutcomeSessionTest {
   }
 
   @Test
+  void anExecutorReturningNullIsThrewAndTheSessionGoesOn() {
+    var run = run(withTools(tool("t", (args, ctx) -> null)), call("t"));
+
+    var reported = "tool 't' threw: executor returned null";
+    assertEquals(
+        expected(new ToolOutcome.Threw("java.lang.NullPointerException"), reported),
+        run.onlyResult());
+    assertEquals(List.of(reported), run.toolMessages(1));
+    assertInstanceOf(ResultMessage.Success.class, run.terminal());
+  }
+
+  @Test
   void aTimeoutIsTimedOutWithTheLimitInForceForTheCall() {
     var limit = Duration.ofMillis(50);
     var options =
         withTools(tool("hangs", (args, ctx) -> blockUntilInterrupted()))
-            .withLimits(SessionLimits.newBuilder().withToolTimeoutDefault(limit).build());
+            .withLimits(
+                SessionLimits.newBuilder()
+                    .withToolTimeoutDefault(limit)
+                    .withToolStopGrace(Duration.ofMinutes(10))
+                    .build());
 
     assertEquals(
         expected(new ToolOutcome.TimedOut(limit), "tool 'hangs' timed out after PT0.05S"),
@@ -243,16 +261,15 @@ final class ToolOutcomeSessionTest {
   }
 
   @Test
-  void aCallPendingWhenTheSessionClosesIsThrewCancellation() {
+  void closingTheSessionCancelsTheRunningCallAndRefusesTheNext() {
     var entered = new CountDownLatch(1);
-    var release = new CountDownLatch(1);
     var options =
         withTools(
             tool(
                 "holds",
                 (args, ctx) -> {
                   entered.countDown();
-                  return awaiting(release, ToolResult.success("held"));
+                  return blockUntilInterrupted();
                 }),
             tool("next", (args, ctx) -> ToolResult.success("ran")));
     var model =
@@ -264,10 +281,9 @@ final class ToolOutcomeSessionTest {
     try (var session = AgentSession.create(options.withModel(model).build())) {
       session.events().subscribe(events);
       session.send(UserMessage.text("go"));
-      Await.latch("the first call to hold its permit", entered);
+      Await.latch("the first call to start", entered);
 
       session.close();
-      release.countDown();
 
       assertInstanceOf(
           ResultMessage.Cancelled.class, Await.value("the session to end", session.result()));
@@ -275,13 +291,40 @@ final class ToolOutcomeSessionTest {
     }
     assertEquals(
         List.of(
-            expected(new ToolOutcome.Succeeded(), "held"),
+            expected(
+                new ToolOutcome.Threw("java.util.concurrent.CancellationException"),
+                "tool 'holds' threw: session closed"),
             expected(
                 new ToolOutcome.Threw("java.util.concurrent.CancellationException"),
                 "tool 'next' threw: session closed")),
         events.eventsOf(QueryEvent.ToolResult.class).stream()
             .map(QueryEvent.ToolResult::result)
             .toList());
+  }
+
+  @Test
+  void aRunningCallsDeadlineIsOnTheSessionsSchedulerAndAFinishedCallsIsGone() {
+    var entered = new CountDownLatch(1);
+    var options =
+        withTools(
+            tool("quick", (args, ctx) -> ToolResult.success("done")),
+            tool(
+                "holds",
+                (args, ctx) -> {
+                  entered.countDown();
+                  return blockUntilInterrupted();
+                }));
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(call("quick"), call("holds")).build();
+    try (var session = (AgentSessionImpl) AgentSession.create(options.withModel(model).build())) {
+      session.send(UserMessage.text("go"));
+      Await.latch("the call to start", entered);
+
+      var scheduler = (ScheduledThreadPoolExecutor) session.lifecycleForTests().scheduler();
+
+      Await.until(
+          "only the session's wall-clock deadline and the running call's, not the finished call's",
+          () -> scheduler.getQueue().size() == 2);
+    }
   }
 
   private static ToolResult blockUntilInterrupted() {

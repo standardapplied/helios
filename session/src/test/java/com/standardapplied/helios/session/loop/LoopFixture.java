@@ -53,7 +53,8 @@ final class LoopFixture implements AutoCloseable {
     return new ToolDispatch(
         new SessionContext(sessionId, new CancellationToken(), clock, secrets),
         tools,
-        ConcurrencyLimits.defaults());
+        ConcurrencyLimits.defaults(),
+        scheduler);
   }
 
   /** The hook context of {@code state}'s current turn. */

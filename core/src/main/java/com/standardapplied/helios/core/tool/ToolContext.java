@@ -12,12 +12,16 @@ import java.util.Objects;
 /**
  * Per-invocation context handed to a {@link ToolExecutor}. Carries the {@link SessionContext} for
  * the in-flight session (session id, the session's {@link CancellationToken}, the session's clock),
- * plus the per-call {@code deadline} the dispatcher will enforce as a wall-clock timeout.
+ * the call's own cancellation token, and the per-call {@code deadline} the dispatcher enforces.
  *
- * <p>The dispatcher is responsible for the hard timeout (it runs the executor on a virtual thread
- * and abandons it after {@code deadline}). Tools that observe {@link #deadline()} can shape their
- * work — e.g. stop a tree walk early — but they do not need to enforce it; missing the deadline is
- * not a correctness bug, only an efficiency one.
+ * <p>{@link #cancellation()} is the call's token, not the session's: the session dispatcher cancels
+ * it when the call times out, and the session's cancellation reaches it too. A tool polls it at
+ * safe points and hands it to whatever it waits on. Session-scoped cleanup registers against {@code
+ * sessionContext().cancellation()} instead, which one call's timeout never cancels.
+ *
+ * <p>The dispatcher is responsible for the hard timeout. Tools that observe {@link #deadline()} can
+ * shape their work — e.g. stop a tree walk early — but they do not need to enforce it; missing the
+ * deadline is not a correctness bug, only an efficiency one.
  *
  * <p>Use {@link #noop()} for call sites that don't have a real session (tests, direct library use).
  * The noop session id is the fixed string {@code "noop-session"} so providers that key by session
@@ -25,26 +29,30 @@ import java.util.Objects;
  *
  * <h2>Thread-safety</h2>
  *
- * Immutable. The wrapped {@link SessionContext} is itself immutable; its {@link CancellationToken}
- * is thread-safe.
+ * Immutable. The wrapped {@link SessionContext} is itself immutable; both {@link
+ * CancellationToken}s are thread-safe.
  *
  * @param sessionContext per-session metadata; non-null
- * @param deadline the wall-clock window the dispatcher will allow before abandoning the executor;
- *     non-null and non-negative
+ * @param cancellation the call's cancellation token; non-null
+ * @param deadline the window the dispatcher allows the call before cancelling it; non-null and
+ *     non-negative
  */
-public record ToolContext(SessionContext sessionContext, Duration deadline) {
+public record ToolContext(
+    SessionContext sessionContext, CancellationToken cancellation, Duration deadline) {
 
+  private static final SessionContext NOOP_SESSION = SessionContext.forTesting("noop-session");
   private static final ToolContext NOOP =
-      new ToolContext(SessionContext.forTesting("noop-session"), Duration.ofDays(1));
+      new ToolContext(NOOP_SESSION, NOOP_SESSION.cancellation(), Duration.ofDays(1));
 
   /**
    * Canonical constructor.
    *
-   * @throws NullPointerException if {@code sessionContext} or {@code deadline} is null
+   * @throws NullPointerException if any argument is null
    * @throws IllegalArgumentException if {@code deadline} is negative
    */
   public ToolContext {
     Objects.requireNonNull(sessionContext, "sessionContext must not be null");
+    Objects.requireNonNull(cancellation, "cancellation must not be null");
     Objects.requireNonNull(deadline, "deadline must not be null");
     if (deadline.isNegative()) {
       throw new IllegalArgumentException("deadline must not be negative, got " + deadline);
@@ -59,26 +67,5 @@ public record ToolContext(SessionContext sessionContext, Duration deadline) {
    */
   public static ToolContext noop() {
     return NOOP;
-  }
-
-  /**
-   * Build a context with the given session context and deadline.
-   *
-   * @param sessionContext non-null session metadata
-   * @param deadline non-null non-negative deadline
-   * @return a fresh context
-   */
-  public static ToolContext of(SessionContext sessionContext, Duration deadline) {
-    return new ToolContext(sessionContext, deadline);
-  }
-
-  /**
-   * The session's cancellation token. Convenience accessor — equivalent to {@code
-   * sessionContext().cancellation()}.
-   *
-   * @return the session's cancellation token
-   */
-  public CancellationToken cancellation() {
-    return sessionContext.cancellation();
   }
 }

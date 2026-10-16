@@ -607,8 +607,9 @@ final class ReadToolTest {
     Files.writeString(
         tmp.resolve("long.txt"), kept + secret + " tail\nshort sk-test-\n", StandardCharsets.UTF_8);
     var ctx =
-        ToolContext.of(
+        new ToolContext(
             new SessionContext("read-cut", new CancellationToken(), Clock.systemUTC(), registry),
+            new CancellationToken(),
             Duration.ofDays(1));
 
     var result =

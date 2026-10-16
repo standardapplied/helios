@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Duration;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
@@ -20,15 +21,12 @@ class ToolOutcomeTest {
 
   @Test
   void timedOutRejectsAMissingOrNonPositiveLimit() {
-    assertRejects(NullPointerException.class, "limit must not be null", () -> timedOut(null));
-    assertRejects(
-        IllegalArgumentException.class,
-        "limit must be positive, got PT0S",
-        () -> timedOut(Duration.ZERO));
-    assertRejects(
-        IllegalArgumentException.class,
-        "limit must be positive, got PT-1S",
-        () -> timedOut(Duration.ofSeconds(-1)));
+    assertRejectsAMissingOrNonPositiveLimit(ToolOutcomeTest::timedOut);
+  }
+
+  @Test
+  void unknownRejectsAMissingOrNonPositiveLimit() {
+    assertRejectsAMissingOrNonPositiveLimit(ToolOutcomeTest::unknown);
   }
 
   @Test
@@ -45,6 +43,7 @@ class ToolOutcomeTest {
   void validComponentsAreKept() {
     assertEquals("java.lang.Error", new ToolOutcome.Threw("java.lang.Error").exceptionType());
     assertEquals(Duration.ofMillis(1), new ToolOutcome.TimedOut(Duration.ofMillis(1)).limit());
+    assertEquals(Duration.ofMillis(2), new ToolOutcome.Unknown(Duration.ofMillis(2)).limit());
     var rejected = new ToolOutcome.Rejected("Hook", "no");
     assertEquals("Hook", rejected.by());
     assertEquals("no", rejected.reason());
@@ -58,8 +57,25 @@ class ToolOutcomeTest {
     new ToolOutcome.TimedOut(limit);
   }
 
+  private static void unknown(Duration limit) {
+    new ToolOutcome.Unknown(limit);
+  }
+
   private static void rejected(String by, String reason) {
     new ToolOutcome.Rejected(by, reason);
+  }
+
+  private static void assertRejectsAMissingOrNonPositiveLimit(Consumer<Duration> construction) {
+    assertRejects(
+        NullPointerException.class, "limit must not be null", () -> construction.accept(null));
+    assertRejects(
+        IllegalArgumentException.class,
+        "limit must be strictly positive, got PT0S",
+        () -> construction.accept(Duration.ZERO));
+    assertRejects(
+        IllegalArgumentException.class,
+        "limit must be strictly positive, got PT-1S",
+        () -> construction.accept(Duration.ofSeconds(-1)));
   }
 
   private static void assertRejects(

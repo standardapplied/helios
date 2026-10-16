@@ -9,13 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.nio.file.Path;
-import java.time.Clock;
 import java.time.Duration;
 import java.util.EnumSet;
 import java.util.List;
@@ -66,7 +64,8 @@ final class ExecuteToolTest {
   }
 
   private static ToolContext ctx() {
-    return ToolContext.of(SessionContext.forTesting("execute-tool-test"), Duration.ofSeconds(5));
+    var session = SessionContext.forTesting("execute-tool-test");
+    return new ToolContext(session, session.cancellation(), Duration.ofSeconds(5));
   }
 
   // ── binding shape ────────────────────────────────────────────────────────
@@ -408,9 +407,7 @@ final class ExecuteToolTest {
     var token = new CancellationToken();
     token.cancel("test");
     var toolCtx =
-        ToolContext.of(
-            new SessionContext("cancel-test", token, Clock.systemUTC(), new SecretRegistry()),
-            Duration.ofSeconds(1));
+        new ToolContext(SessionContext.forTesting("cancel-test"), token, Duration.ofSeconds(1));
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), toolCtx);
     assertFalse(result.succeeded());
     assertTrue(result.output().contains("test"));

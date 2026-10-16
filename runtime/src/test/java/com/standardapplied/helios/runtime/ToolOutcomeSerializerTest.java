@@ -27,6 +27,9 @@ final class ToolOutcomeSerializerTest {
             new ToolOutcome.TimedOut(Duration.ofMinutes(1)),
             "{\"kind\":\"TimedOut\",\"limit\":\"PT1M\"}"),
         Arguments.of(
+            new ToolOutcome.Unknown(Duration.ofSeconds(30)),
+            "{\"kind\":\"Unknown\",\"limit\":\"PT30S\"}"),
+        Arguments.of(
             new ToolOutcome.Rejected("Gate", "not allowed"),
             "{\"kind\":\"Rejected\",\"by\":\"Gate\",\"reason\":\"not allowed\"}"));
   }

@@ -23,5 +23,19 @@ public enum ToolCategory {
   /** Outbound network access — HTTP fetch, external API calls. */
   NETWORK,
   /** Sub-agent delegation tools (an Agent exposed via {@code asTool}). */
-  DELEGATION
+  DELEGATION;
+
+  /**
+   * Whether a call of this category may change state outside the call: every category but {@link
+   * #READ} and {@link #SEARCH}. A call with side effects that still runs after its caller stopped
+   * waiting keeps the dispatcher from running any other call until it ends.
+   *
+   * @return {@code true} if a call of this category may have side effects
+   */
+  public boolean hasSideEffects() {
+    return switch (this) {
+      case READ, SEARCH -> false;
+      case WRITE, EXECUTION, CONTROL, NETWORK, DELEGATION -> true;
+    };
+  }
 }
