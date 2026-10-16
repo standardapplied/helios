@@ -51,13 +51,14 @@ final class ResultLongPollRevocationTest {
         RuntimeServer.builder()
             .withRegistry(SessionRegistry.inMemory())
             .withOptionsFactory(
-                sessionId ->
+                request ->
                     SessionOptions.newBuilder()
                         .withModel(ScriptedModel.newBuilder().withTextTurn("confidential").build())
-                        .withSessionId(sessionId)
+                        .withSessionId(request.sessionId())
                         .build())
             .withAuthenticator(
-                request -> Optional.of(new Authentication(CAROL, Duration.ofDays(1), revoked)))
+                new TestAuthenticator(
+                    request -> Optional.of(new Authentication(CAROL, Duration.ofDays(1), revoked))))
             .withObjectMapper(mapper)
             .build();
   }
@@ -84,6 +85,8 @@ final class ResultLongPollRevocationTest {
     assertTrue(revoked.isDone());
     assertEquals(401, resp.statusCode());
     assertEquals("{\"error\":\"unauthenticated\"}", resp.body());
+    assertEquals(
+        Optional.of(TestAuthenticator.CHALLENGE), resp.headers().firstValue("WWW-Authenticate"));
   }
 
   private HttpResponse<String> send(String method, String path, String body) throws Exception {

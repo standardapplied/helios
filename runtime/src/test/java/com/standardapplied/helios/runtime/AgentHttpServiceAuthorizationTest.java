@@ -17,15 +17,11 @@ import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import io.helidon.http.HeaderNames;
 import io.helidon.webserver.http.ServerRequest;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -89,7 +85,7 @@ final class AgentHttpServiceAuthorizationTest {
         RuntimeServer.builder()
             .withRegistry(SessionRegistry.inMemory())
             .withOptionsFactory(this::options)
-            .withAuthenticator(this::authenticate)
+            .withAuthenticator(new TestAuthenticator(this::authenticate))
             .build();
   }
 
@@ -159,9 +155,7 @@ final class AgentHttpServiceAuthorizationTest {
 
     for (var credential : credentials) {
       for (var route : routes) {
-        var resp = sendAuthorization(route, credential);
-        assertEquals(401, resp.statusCode(), () -> credential + " " + route);
-        assertEquals(UNAUTHENTICATED, resp.body(), () -> credential + " " + route);
+        assertUnauthenticated(sendAuthorization(route, credential), credential + " " + route);
       }
     }
 
@@ -197,9 +191,7 @@ final class AgentHttpServiceAuthorizationTest {
 
     carolRevoked.complete(null);
 
-    var resp = Await.value("the long poll to be answered", poll);
-    assertEquals(401, resp.statusCode());
-    assertEquals(UNAUTHENTICATED, resp.body());
+    assertUnauthenticated(Await.value("the long poll to be answered", poll), "pending long poll");
   }
 
   @Test
@@ -233,32 +225,27 @@ final class AgentHttpServiceAuthorizationTest {
   @Test
   void revokingTheIdentityWhileAMessageBodyUploadsQueuesNoWork() throws Exception {
     var sessionId = create("carol");
-    var body = "{\"text\":\"go\"}".getBytes(StandardCharsets.UTF_8);
-    try (var socket = new Socket("127.0.0.1", server.port())) {
-      var out = socket.getOutputStream();
-      out.write(
-          ("POST /v1/sessions/"
-                  + sessionId
-                  + "/messages HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer carol-upload\r\n"
-                  + "Content-Type: application/json\r\nContent-Length: "
-                  + body.length
-                  + "\r\n\r\n")
-              .getBytes(StandardCharsets.US_ASCII));
-      out.write(body, 0, 1);
-      out.flush();
+    var body = "{\"text\":\"go\"}";
+    try (var connection = RawConnection.open(server.port())) {
+      connection.write(
+          "POST /v1/sessions/"
+              + sessionId
+              + "/messages HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer carol-upload\r\n"
+              + "Content-Type: application/json\r\nContent-Length: "
+              + body.length()
+              + "\r\n\r\n");
+      connection.write(body.substring(0, 1));
       Await.until(
           "the request to watch carol's revocation",
           () -> uploadRevoked.getNumberOfDependents() > 0);
 
       uploadRevoked.complete(null);
-      out.write(body, 1, body.length - 1);
-      out.flush();
+      connection.write(body.substring(1));
 
-      var status =
-          new BufferedReader(
-                  new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII))
-              .readLine();
-      assertEquals("HTTP/1.1 401 Unauthorized", status);
+      var response = connection.response();
+      assertEquals("HTTP/1.1 401 Unauthorized", response.statusLine());
+      assertEquals(UNAUTHENTICATED, response.body());
+      assertEquals(TestAuthenticator.CHALLENGE, response.headers().get("www-authenticate"));
     }
     assertTrue(model.calls().isEmpty());
     assertEquals(0, toolRuns.get());
@@ -270,10 +257,18 @@ final class AgentHttpServiceAuthorizationTest {
 
     var resp = send("POST", "/sessions", "carol");
 
-    assertEquals(401, resp.statusCode());
-    assertEquals(UNAUTHENTICATED, resp.body());
+    assertUnauthenticated(resp, "create");
     assertTrue(carolRevoked.isDone());
     assertEquals(0, server.registry().size());
+  }
+
+  private static void assertUnauthenticated(HttpResponse<String> resp, String context) {
+    assertEquals(401, resp.statusCode(), context);
+    assertEquals(UNAUTHENTICATED, resp.body(), context);
+    assertEquals(
+        List.of(TestAuthenticator.CHALLENGE),
+        resp.headers().allValues("WWW-Authenticate"),
+        context);
   }
 
   private Optional<Authentication> authenticate(ServerRequest request) {
@@ -284,7 +279,7 @@ final class AgentHttpServiceAuthorizationTest {
         .map(header -> identities.get(header.substring("Bearer ".length())));
   }
 
-  private SessionOptions options(String sessionId) {
+  private SessionOptions options(SessionRequest request) {
     duringFactory.get().run();
     var probe =
         Tool.newBuilder()
@@ -297,7 +292,7 @@ final class AgentHttpServiceAuthorizationTest {
             .build();
     return SessionOptions.newBuilder()
         .withModel(model)
-        .withSessionId(Optional.ofNullable(hijackedId.get()).orElse(sessionId))
+        .withSessionId(Optional.ofNullable(hijackedId.get()).orElse(request.sessionId()))
         .withTools(
             new ToolRegistry(
                 List.of(ToolBinding.newBuilder(probe).withCategory(ToolCategory.READ).build())))

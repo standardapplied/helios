@@ -76,8 +76,11 @@ final class AgentHttpServiceIntegrationTest {
     return RuntimeServer.builder()
         .withRegistry(SessionRegistry.inMemory())
         .withOptionsFactory(
-            sessionId ->
-                SessionOptions.newBuilder().withModel(model).withSessionId(sessionId).build())
+            request ->
+                SessionOptions.newBuilder()
+                    .withModel(model)
+                    .withSessionId(request.sessionId())
+                    .build())
         .withPort(0)
         .withoutAuthentication()
         .withHost("127.0.0.1")
@@ -134,7 +137,7 @@ final class AgentHttpServiceIntegrationTest {
             .withRegistry(SessionRegistry.inMemory())
             .withObjectMapper(new ObjectMapper())
             .withOptionsFactory(
-                sessionId ->
+                request ->
                     SessionOptions.newBuilder()
                         .withModel(callingOnce(new ToolCall("c1", "slow", Map.of())))
                         .withTools(
@@ -143,7 +146,7 @@ final class AgentHttpServiceIntegrationTest {
                                     ToolBinding.newBuilder(slow)
                                         .withCategory(ToolCategory.READ)
                                         .build())))
-                        .withSessionId(sessionId)
+                        .withSessionId(request.sessionId())
                         .build())
             .withPort(0)
             .withoutAuthentication()
@@ -240,10 +243,10 @@ final class AgentHttpServiceIntegrationTest {
         RuntimeServer.builder()
             .withRegistry(SessionRegistry.inMemory())
             .withOptionsFactory(
-                sessionId ->
+                request ->
                     SessionOptions.newBuilder()
                         .withModel(adaptive)
-                        .withSessionId(sessionId)
+                        .withSessionId(request.sessionId())
                         .build())
             .withPort(0)
             .withoutAuthentication()
@@ -518,7 +521,7 @@ final class AgentHttpServiceIntegrationTest {
   void factoryThatThrowsReturns500WithoutItsMessage() throws Exception {
     try (var server =
         serverWithFactory(
-            sessionId -> {
+            request -> {
               throw new RuntimeException("nope: password=hunter22");
             })) {
       var resp =
@@ -534,10 +537,10 @@ final class AgentHttpServiceIntegrationTest {
   void factoryReturningOptionsForAnotherSessionIdIsRefused() throws Exception {
     try (var server =
         serverWithFactory(
-            sessionId ->
+            request ->
                 SessionOptions.newBuilder()
                     .withModel(textModel("x"))
-                    .withSessionId("override-" + sessionId)
+                    .withSessionId("override-" + request.sessionId())
                     .build())) {
       var resp =
           httpClient()
@@ -550,7 +553,7 @@ final class AgentHttpServiceIntegrationTest {
 
   @Test
   void factoryReturningNullIsRefused() throws Exception {
-    try (var server = serverWithFactory(sessionId -> null)) {
+    try (var server = serverWithFactory(request -> null)) {
       var resp =
           httpClient()
               .send(postJson(baseUrl(server) + "/sessions", Map.of()), BodyHandlers.ofString());
@@ -560,7 +563,7 @@ final class AgentHttpServiceIntegrationTest {
     }
   }
 
-  private static RuntimeServer serverWithFactory(Function<String, SessionOptions> factory) {
+  private static RuntimeServer serverWithFactory(Function<SessionRequest, SessionOptions> factory) {
     return RuntimeServer.builder()
         .withRegistry(SessionRegistry.inMemory())
         .withOptionsFactory(factory)

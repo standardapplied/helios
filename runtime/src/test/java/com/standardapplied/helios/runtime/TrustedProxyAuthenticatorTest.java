@@ -28,7 +28,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.json.JsonMapper;
 
 final class TrustedProxyAuthenticatorTest {
@@ -166,10 +169,10 @@ final class TrustedProxyAuthenticatorTest {
             RuntimeServer.builder()
                 .withRegistry(SessionRegistry.inMemory())
                 .withOptionsFactory(
-                    sessionId ->
+                    request ->
                         SessionOptions.newBuilder()
                             .withModel(idleModel())
-                            .withSessionId(sessionId)
+                            .withSessionId(request.sessionId())
                             .build())
                 .withHost("0.0.0.0")
                 .withAuthenticator(authenticator)
@@ -194,9 +197,72 @@ final class TrustedProxyAuthenticatorTest {
 
       assertEquals(201, created.statusCode());
       assertEquals(401, unasserted.statusCode());
+      assertEquals(
+          Optional.of("TrustedProxy realm=\"helios\""),
+          unasserted.headers().firstValue("WWW-Authenticate"));
       assertEquals(404, foreign.statusCode());
       assertEquals(204, owner.statusCode());
     }
+  }
+
+  @Test
+  void aConfiguredChallengeIsWhatEvery401Carries() throws Exception {
+    var challenging =
+        TrustedProxyAuthenticator.newBuilder()
+            .withTrustedProxy(PROXY)
+            .withChallenge("Proxy realm=\"corp\"")
+            .build();
+    var http = HttpClient.newBuilder().connectTimeout(Await.HANG_GUARD).build();
+    try (http;
+        var server =
+            RuntimeServer.builder()
+                .withRegistry(SessionRegistry.inMemory())
+                .withOptionsFactory(
+                    request -> {
+                      throw new AssertionError("no session is created");
+                    })
+                .withAuthenticator(challenging)
+                .build()) {
+      var unasserted =
+          http.send(
+              HttpRequest.newBuilder(
+                      URI.create("http://127.0.0.1:" + server.port() + "/v1/sessions"))
+                  .timeout(Await.HANG_GUARD)
+                  .POST(HttpRequest.BodyPublishers.noBody())
+                  .build(),
+              BodyHandlers.ofString());
+
+      assertEquals(401, unasserted.statusCode());
+      assertEquals(
+          Optional.of("Proxy realm=\"corp\""), unasserted.headers().firstValue("WWW-Authenticate"));
+    }
+  }
+
+  @ParameterizedTest
+  @MethodSource("com.standardapplied.helios.runtime.AuthenticationGateTest#invalidChallenges")
+  void anInvalidChallengeFailsTheBuild(String challenge, String message) {
+    var builder =
+        TrustedProxyAuthenticator.newBuilder().withTrustedProxy(PROXY).withChallenge(challenge);
+    var ex = assertThrows(IllegalArgumentException.class, builder::build);
+    assertEquals(message, ex.getMessage());
+  }
+
+  @ParameterizedTest
+  @MethodSource("com.standardapplied.helios.runtime.AuthenticationGateTest#validChallenges")
+  void aValidChallengeIsTheAuthenticatorsChallenge(String challenge) {
+    var built =
+        TrustedProxyAuthenticator.newBuilder()
+            .withTrustedProxy(PROXY)
+            .withChallenge(challenge)
+            .build();
+    assertEquals(challenge, built.challenge());
+  }
+
+  @Test
+  void aNullChallengeIsRefused() {
+    var builder = TrustedProxyAuthenticator.newBuilder();
+    var ex = assertThrows(NullPointerException.class, () -> builder.withChallenge(null));
+    assertEquals("challenge must not be null", ex.getMessage());
   }
 
   private static HttpRequest post(String uri, String tenant, String subject) {
