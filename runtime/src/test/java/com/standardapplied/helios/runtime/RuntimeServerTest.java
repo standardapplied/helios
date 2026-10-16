@@ -219,6 +219,19 @@ final class RuntimeServerTest {
   }
 
   @Test
+  void anAuthenticatorWhoseChallengeIsInvalidIsRefused() {
+    var builder =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory())
+            .withAuthenticator(
+                new TestAuthenticator(request -> Optional.empty(), "Basic realm=helios"));
+    var ex = assertThrows(IllegalArgumentException.class, builder::build);
+    assertEquals(
+        "challenge's realm must be a quoted-string, got 'Basic realm=helios'", ex.getMessage());
+  }
+
+  @Test
   void withoutAuthenticationIsAcceptedForTheLoopbackHostName() {
     var server =
         RuntimeServer.builder()

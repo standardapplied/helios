@@ -352,7 +352,9 @@ public final class RuntimeServer implements AutoCloseable {
      * @throws IllegalStateException if {@code registry} or {@code optionsFactory} was never set,
      *     neither an authenticator nor {@link #withoutAuthentication()} was chosen, or the host is
      *     not a loopback address and no authenticator was set
-     * @throws IllegalArgumentException if the host cannot be resolved
+     * @throws IllegalArgumentException if the host cannot be resolved, or the authenticator's
+     *     {@link Authenticator#challenge()} is not a valid RFC 9110 challenge
+     * @throws NullPointerException if the authenticator's challenge is null
      */
     public RuntimeServer build() {
       if (registry == null) {
