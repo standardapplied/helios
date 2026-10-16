@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
@@ -18,6 +19,7 @@ import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -36,6 +38,8 @@ final class DispatchFixture implements AutoCloseable {
   final ManualScheduler scheduler = new ManualScheduler();
   final CountDownLatch release = new CountDownLatch(1);
   final CountDownLatch entered = new CountDownLatch(1);
+  final CountDownLatch callbackRelease = new CountDownLatch(1);
+  final CountDownLatch schedulerFree = new CountDownLatch(1);
 
   /** What a dispatch on its own thread ended with, and whether that thread was left interrupted. */
   record Ending(ToolResult result, RuntimeException thrown, boolean interrupted) {}
@@ -51,6 +55,8 @@ final class DispatchFixture implements AutoCloseable {
   @Override
   public void close() {
     release.countDown();
+    callbackRelease.countDown();
+    schedulerFree.countDown();
     scheduler.shutdownNow();
   }
 
@@ -183,13 +189,18 @@ final class DispatchFixture implements AutoCloseable {
    * Registers on {@code session} a first callback that signals {@code entered}, then waits for
    * {@code release} through every interruption.
    */
-  static void blockFirstCallback(
-      CancellationToken session, CountDownLatch entered, CountDownLatch release) {
+  void blockFirstCallback(CancellationToken session, CountDownLatch entered) {
     session.onCancel(
         () -> {
           entered.countDown();
-          awaitThroughInterrupts(release);
+          awaitThroughInterrupts(callbackRelease);
         });
+  }
+
+  static void assertCancelled(String reason, Running running) {
+    var thrown = running.ending("the cancelled dispatch").thrown();
+    assertInstanceOf(CancellationException.class, thrown);
+    assertEquals(reason, thrown.getMessage());
   }
 
   static void awaitIdle(ToolDispatch d) {

@@ -31,6 +31,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -93,7 +94,8 @@ final class ToolOutcomeSessionTest {
     var events = new CollectingSubscriber();
     try (var session = AgentSession.create(options.withModel(model).build())) {
       session.events().subscribe(events);
-      var terminal = session.runBlocking(UserMessage.text("go"));
+      session.send(UserMessage.text("go"));
+      var terminal = Await.value("the session to end", session.result());
       events.awaitDone();
       return new Run(events, model, terminal);
     }
@@ -261,14 +263,13 @@ final class ToolOutcomeSessionTest {
   @Test
   void closingTheSessionCancelsTheRunningCallAndRefusesTheNext() {
     var entered = new CountDownLatch(1);
-    var release = new CountDownLatch(1);
     var options =
         withTools(
             tool(
                 "holds",
                 (args, ctx) -> {
                   entered.countDown();
-                  return awaiting(release, ToolResult.success("held"));
+                  return blockUntilInterrupted();
                 }),
             tool("next", (args, ctx) -> ToolResult.success("ran")));
     var model =
@@ -299,6 +300,29 @@ final class ToolOutcomeSessionTest {
         events.eventsOf(QueryEvent.ToolResult.class).stream()
             .map(QueryEvent.ToolResult::result)
             .toList());
+  }
+
+  @Test
+  void aRunningCallsDeadlineIsArmedOnTheSessionsScheduler() {
+    var entered = new CountDownLatch(1);
+    var options =
+        withTools(
+            tool(
+                "holds",
+                (args, ctx) -> {
+                  entered.countDown();
+                  return blockUntilInterrupted();
+                }));
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(call("holds")).build();
+    try (var session = (AgentSessionImpl) AgentSession.create(options.withModel(model).build())) {
+      session.send(UserMessage.text("go"));
+      Await.latch("the call to start", entered);
+
+      var scheduler = (ScheduledThreadPoolExecutor) session.lifecycleForTests().scheduler();
+
+      assertEquals(
+          2, scheduler.getQueue().size(), "the session's wall-clock deadline and the call's");
+    }
   }
 
   private static ToolResult blockUntilInterrupted() {
