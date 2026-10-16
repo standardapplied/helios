@@ -13,6 +13,7 @@ import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyP
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.simpleName;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.simpleNameEndingWith;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.type;
+import static com.tngtech.archunit.core.domain.properties.HasName.AndFullName.Predicates.fullNameMatching;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameStartingWith;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
@@ -337,6 +338,30 @@ class ArchitectureRulesTest {
             "every runtime route is admitted by runtime.AuthenticationGate, which runs the"
                 + " deployer's Authenticator before any session lookup, body read or work; a route"
                 + " never checks identity a second way")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void theRuntimeSendsA401OnlyThroughTheAuthenticationGate() {
+    noClasses()
+        .that()
+        .resideInAPackage(HELIOS + ".runtime..")
+        .and()
+        .doNotHaveFullyQualifiedName(AUTHENTICATION_GATE)
+        .should()
+        .accessTargetWhere(
+            targetOwner(name("io.helidon.http.Status"))
+                .and(target(name("UNAUTHORIZED_401").or(name("create"))))
+                .or(
+                    targetOwner(assignableTo("io.helidon.webserver.http.ServerResponse"))
+                        .and(target(fullNameMatching(".*\\.status\\(int\\)"))))
+                .or(targetOwner(assignableTo("io.helidon.http.UnauthorizedException"))))
+        .because(
+            "every runtime 401 is sent by runtime.AuthenticationGate.unauthenticated, which sets"
+                + " WWW-Authenticate to the authenticator's challenge; a route that ends a request"
+                + " for an ended identity calls it, never builds the 401 itself, names a status"
+                + " by its number (Status.create, ServerResponse.status(int)) or throws Helidon's"
+                + " UnauthorizedException, whose 401 carries no challenge")
         .check(LIBRARY);
   }
 

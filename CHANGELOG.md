@@ -448,14 +448,18 @@ gets the same `404` as an unknown id. To keep an externally bound runtime workin
 `TrustedProxyAuthenticator.newBuilder().withTrustedProxy(proxyAddress).build()`, which reads
 `X-Authenticated-Tenant` and `X-Authenticated-Subject` only from that proxy's connections (the
 proxy must strip client-supplied copies); otherwise an `Authenticator` over the deployer's token
-or certificate verifier. A loopback-bound runtime may instead call `withoutAuthentication()`.
-There is no unauthenticated external bind.
+or certificate verifier. An `Authenticator` declares its challenge (`challenge()`, such as
+`Bearer realm="helios"`), which every `401` carries in `WWW-Authenticate`; `TrustedProxyAuthenticator`
+challenges with `TrustedProxy realm="helios"` unless `Builder.withChallenge(...)` names another,
+and a value that is not an RFC 9110 challenge fails construction. A loopback-bound runtime may
+instead call `withoutAuthentication()`. There is no unauthenticated external bind.
 
 | 2.x | 3.0 |
 |---|---|
 | `RuntimeServer.Builder.build()` served unauthenticated on any host | `build()` throws `IllegalStateException` unless `withAuthenticator(...)` or, for a loopback host only, `withoutAuthentication()` was called; a non-loopback host without an authenticator is refused with a message naming the host and the address it resolved to. The host is resolved once and the server binds that address. An unresolvable host throws `IllegalArgumentException` |
-| `new AgentHttpService(registry, optionsFactory, objectMapper, eventsPathPrefix)` | `new AgentHttpService(registry, optionsFactory, authenticator, objectMapper, eventsPathPrefix)`; there is no unauthenticated `AgentHttpService` |
-| Any request reached any session by id | `401 {"error":"unauthenticated"}` for a missing, malformed, expired, revoked or forged credential, `503 {"error":"authentication unavailable"}` when the authenticator throws (logged by exception type only), `404 {"error":"session not found"}` for another principal's session |
+| `new AgentHttpService(registry, optionsFactory, objectMapper, eventsPathPrefix)` | `new AgentHttpService(registry, optionsFactory, authenticator, objectMapper, eventsPathPrefix)`, whose `optionsFactory` is a `Function<SessionRequest, SessionOptions>` given the generated session id and the creating `Principal`; there is no unauthenticated `AgentHttpService` |
+| `RuntimeServer.Builder.withOptionsFactory(Function<String, SessionOptions>)` | `withOptionsFactory(Function<SessionRequest, SessionOptions>)`; `SessionRequest(sessionId, owner)` gives the factory the principal that will own the session, so it can configure a session per tenant or subject |
+| Any request reached any session by id | `401 {"error":"unauthenticated"}`, every one with `WWW-Authenticate` set to `Authenticator.challenge()`, for a missing, malformed, expired, revoked or forged credential, `503 {"error":"authentication unavailable"}` when the authenticator throws (logged by exception type only), `404 {"error":"session not found"}` for another principal's session |
 | An SSE stream and a result long poll outlived the client's credential | an identity holds for `Authentication.lifetime()` or until `Authentication.revoked()` completes; then an open SSE stream closes without a further event, a pending long poll, or one whose result is still serializing, answers `401`, and a message or interrupt whose body upload, or a create whose options factory, outlived the identity answers `401` and does nothing. `revoked` is a `CompletableFuture<Void>` that a verifier shares across every authentication of one credential; a request watches it only while it runs |
 | `RuntimeServer` installed every Helidon `ServerFeature` found on the classpath through service discovery | no discovered feature is installed, so none can mount a route the `Authenticator` does not see; mount `AgentHttpService` on your own `WebServer` to combine it with Helidon features |
 | `SessionRegistry.create(options)`, `get(id)`, `close(id)` | `create(options, owner)`, `find(id, requester)`, `close(id, requester)`; `find` and `close` act only for the owner |

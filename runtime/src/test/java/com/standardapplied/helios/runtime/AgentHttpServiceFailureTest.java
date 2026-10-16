@@ -133,10 +133,10 @@ final class AgentHttpServiceFailureTest {
     return RuntimeServer.builder()
         .withRegistry(SessionRegistry.withFactory(sessions))
         .withOptionsFactory(
-            sessionId ->
+            request ->
                 SessionOptions.newBuilder()
                     .withModel(ScriptedModel.newBuilder().withTextTurn("done").build())
-                    .withSessionId(sessionId)
+                    .withSessionId(request.sessionId())
                     .build())
         .withoutAuthentication()
         .build();

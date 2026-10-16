@@ -9,6 +9,7 @@ import com.standardapplied.helios.session.SessionOptions;
 import io.helidon.webserver.WebServer;
 import io.helidon.webserver.WebServerConfig;
 import io.helidon.webserver.http.HttpRouting;
+import io.helidon.webserver.http.ServerRequest;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.time.Duration;
@@ -32,8 +33,11 @@ import tools.jackson.databind.json.JsonMapper;
  * <pre>{@code
  * try (var server = RuntimeServer.builder()
  *     .withRegistry(SessionRegistry.inMemory())
- *     .withOptionsFactory(sessionId -> SessionOptions.newBuilder()
- *         .withModel(myModel).withSessionId(sessionId).build())
+ *     .withOptionsFactory(request -> SessionOptions.newBuilder()
+ *         .withModel(myModel)
+ *         .withSessionId(request.sessionId())
+ *         .withSystemPrompt(promptFor(request.owner().tenant()))
+ *         .build())
  *     .withHost("0.0.0.0")
  *     .withPort(8080)
  *     .withAuthenticator(TrustedProxyAuthenticator.newBuilder()
@@ -156,8 +160,21 @@ public final class RuntimeServer implements AutoCloseable {
 
     private static final Principal LOCAL_PRINCIPAL = new Principal("local", "local");
 
+    /**
+     * Never denies, so its challenge is never sent; it exists because every authenticator has one.
+     */
     private static final Authenticator LOCAL =
-        request -> Optional.of(Authentication.of(LOCAL_PRINCIPAL));
+        new Authenticator() {
+          @Override
+          public Optional<Authentication> authenticate(ServerRequest request) {
+            return Optional.of(Authentication.of(LOCAL_PRINCIPAL));
+          }
+
+          @Override
+          public String challenge() {
+            return "Local realm=\"helios\"";
+          }
+        };
 
     /**
      * Fail-secure default: loopback only, so a server is reachable from other hosts only when the
@@ -171,7 +188,7 @@ public final class RuntimeServer implements AutoCloseable {
     }
 
     private SessionRegistry registry;
-    private Function<String, SessionOptions> optionsFactory;
+    private Function<SessionRequest, SessionOptions> optionsFactory;
     private ObjectMapper objectMapper;
     private String routePrefix = "/v1";
     private int port = 0;
@@ -225,13 +242,15 @@ public final class RuntimeServer implements AutoCloseable {
     }
 
     /**
-     * Bind the options factory the service calls for every {@code POST /sessions} request.
+     * Bind the options factory the service calls for every {@code POST /sessions} request, with the
+     * generated session id and the principal that will own the session.
      *
-     * @param optionsFactory non-null function from session id to options
+     * @param optionsFactory non-null function from a {@link SessionRequest} to options for its
+     *     session id
      * @return this builder
      * @throws NullPointerException if {@code optionsFactory} is null
      */
-    public Builder withOptionsFactory(Function<String, SessionOptions> optionsFactory) {
+    public Builder withOptionsFactory(Function<SessionRequest, SessionOptions> optionsFactory) {
       this.optionsFactory =
           Objects.requireNonNull(optionsFactory, "optionsFactory must not be null");
       return this;
@@ -333,7 +352,9 @@ public final class RuntimeServer implements AutoCloseable {
      * @throws IllegalStateException if {@code registry} or {@code optionsFactory} was never set,
      *     neither an authenticator nor {@link #withoutAuthentication()} was chosen, or the host is
      *     not a loopback address and no authenticator was set
-     * @throws IllegalArgumentException if the host cannot be resolved
+     * @throws IllegalArgumentException if the host cannot be resolved, or the authenticator's
+     *     {@link Authenticator#challenge()} is not a valid RFC 9110 challenge
+     * @throws NullPointerException if the authenticator's challenge is null
      */
     public RuntimeServer build() {
       if (registry == null) {

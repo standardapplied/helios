@@ -46,9 +46,12 @@ final class RuntimeServerTest {
     };
   }
 
-  private static java.util.function.Function<String, SessionOptions> factory() {
-    return sessionId ->
-        SessionOptions.newBuilder().withModel(stubModel()).withSessionId(sessionId).build();
+  private static java.util.function.Function<SessionRequest, SessionOptions> factory() {
+    return request ->
+        SessionOptions.newBuilder()
+            .withModel(stubModel())
+            .withSessionId(request.sessionId())
+            .build();
   }
 
   // ── builder validation ────────────────────────────────────────────────────
@@ -208,11 +211,26 @@ final class RuntimeServerTest {
             .withOptionsFactory(factory())
             .withHost("0.0.0.0")
             .withoutAuthentication()
-            .withAuthenticator(request -> Optional.empty())
+            .withAuthenticator(new TestAuthenticator(request -> Optional.empty()))
             .build();
     try (server) {
       assertTrue(server.port() > 0);
     }
+  }
+
+  @Test
+  void anAuthenticatorWithAnInvalidChallengeIsRefused() {
+    var builder =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory())
+            .withAuthenticator(
+                new TestAuthenticator(request -> Optional.empty(), "Bearer realm=\"a\"\r\n"));
+
+    var ex = assertThrows(IllegalArgumentException.class, builder::build);
+
+    assertEquals(
+        "challenge must be printable ASCII (0x20-0x7E), got 0x000D at index 16", ex.getMessage());
   }
 
   @Test

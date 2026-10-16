@@ -680,14 +680,18 @@ Descriptor confinement prevents symlink substitution from redirecting an operati
 
 ### HTTP surface defaults
 
-`RuntimeServer.Builder` binds **`127.0.0.1` by default** (loopback only). Every route authenticates the request through one `Authenticator` before it reads the body or looks up a session, and a session is reachable only by the `Principal` (tenant and subject) that created it; another principal's session answers the same `404` as an unknown id. A missing, malformed, expired, revoked or forged credential is `401`. When an identity expires or is revoked, an open SSE stream closes, a pending result long poll, or one whose result is still serializing, answers `401`, and a message or interrupt still uploading its body, or a create whose options factory is still running, answers `401` and does nothing.
+`RuntimeServer.Builder` binds **`127.0.0.1` by default** (loopback only). Every route authenticates the request through one `Authenticator` before it reads the body or looks up a session, and a session is reachable only by the `Principal` (tenant and subject) that created it; another principal's session answers the same `404` as an unknown id. A missing, malformed, expired, revoked or forged credential is `401`, and every `401` carries the authenticator's `challenge()` in `WWW-Authenticate`. When an identity expires or is revoked, an open SSE stream closes, a pending result long poll, or one whose result is still serializing, answers `401`, and a message or interrupt still uploading its body, or a create whose options factory is still running, answers `401` and does nothing.
 
 Behind an authenticating reverse proxy, trust the identity it asserts only on its connections:
 
 ```java
 var server = RuntimeServer.builder()
     .withRegistry(SessionRegistry.inMemory())
-    .withOptionsFactory(sessionId -> ...)
+    .withOptionsFactory(request -> SessionOptions.newBuilder()
+        .withModel(model)
+        .withSessionId(request.sessionId())
+        .withSystemPrompt(promptFor(request.owner().tenant()))
+        .build())
     .withHost("0.0.0.0")
     .withAuthenticator(TrustedProxyAuthenticator.newBuilder()
         .withTrustedProxy(InetAddress.getByName("10.0.0.5"))  // reads X-Authenticated-Tenant / -Subject
@@ -695,7 +699,7 @@ var server = RuntimeServer.builder()
     .build();
 ```
 
-The proxy must strip client-supplied copies of both headers. Any other verifier (a JWT library, mutual TLS) plugs in as an `Authenticator` returning an `Authentication` with the principal, the credential's remaining lifetime and a stage that completes on revocation. `withoutAuthentication()` serves a loopback bind as one local principal; on any other host `build()` refuses it, as it refuses a non-loopback host with no authenticator. `RuntimeServer` installs no Helidon feature discovered on the classpath; mount `AgentHttpService` on your own `WebServer` to combine it with features.
+The proxy must strip client-supplied copies of both headers. Its `401` challenges with `TrustedProxy realm="helios"` unless `withChallenge(...)` sets another. Any other verifier (a JWT library, mutual TLS) plugs in as an `Authenticator` returning an `Authentication` with the principal, the credential's remaining lifetime and a stage that completes on revocation, and declaring its scheme's challenge, such as `Bearer realm="helios"`. The options factory receives a `SessionRequest`: the generated session id, for which it must return options, and the `Principal` that will own the session. `withoutAuthentication()` serves a loopback bind as one local principal; on any other host `build()` refuses it, as it refuses a non-loopback host with no authenticator. `RuntimeServer` installs no Helidon feature discovered on the classpath; mount `AgentHttpService` on your own `WebServer` to combine it with features.
 
 Every request that would hold memory is admitted against a finite bound before any work, and a refused one is answered at once with a fixed body, a `429` or `503` also with `Retry-After: 5`. `SessionRegistry` reserves capacity before the options factory runs: by default 1024 sessions and 256 active sessions per registry, 64 and 16 per principal. A create over the caller's own cap is `429`, over the registry's `503`. Room is made only by evicting the caller's own oldest terminal session, never another principal's. Terminal sessions are kept 15 minutes and sessions never started 5 minutes; `RuntimeServer` sweeps every 30 seconds. A deleted session still at work keeps its capacity until its loop stops. `RequestLimits` bounds a message or interrupt body to 256 KiB (`413`), the message and interrupt uploads in progress to 16 per principal (`429`) and 256 per service (`503`), and the event streams and result polls in progress to 4 each per session and 16 per principal (`429`) and 256 per service (`503`); a stream or poll keeps its admission until it ends, even if its session is deleted, and a stream whose caller's identity ends keeps it until the event it is delivering is done. A full steering queue is `429`. `RuntimeServer.counters()` reports what was admitted and refused per kind.
 
