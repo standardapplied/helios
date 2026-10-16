@@ -50,6 +50,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Handler;
@@ -422,6 +423,15 @@ final class AgentSessionImplTest {
     s.close();
     assertTrue(executor.isShutdown(), "executor shut down by close()");
     assertTrue(executor.isTerminated(), "executor terminated by close()");
+  }
+
+  @Test
+  void aCancelledDeadlineLeavesTheSessionSchedulerAtOnce() {
+    try (var s = (AgentSessionImpl) buildSession(textOnceModel("x", FinishReason.STOP))) {
+      var scheduler = (ScheduledThreadPoolExecutor) s.lifecycleForTests().scheduler();
+
+      assertTrue(scheduler.getRemoveOnCancelPolicy(), "a cancelled deadline is not kept until due");
+    }
   }
 
   @Test

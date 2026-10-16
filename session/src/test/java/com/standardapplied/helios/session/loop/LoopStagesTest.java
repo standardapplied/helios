@@ -77,7 +77,8 @@ final class LoopStagesTest {
         new ToolDispatch(
             SessionContext.forTesting("sess-loop"),
             ToolRegistry.empty(),
-            ConcurrencyLimits.defaults());
+            ConcurrencyLimits.defaults(),
+            scheduler);
     var collaborators =
         new LoopCollaborators(
             new HookRegistry(List.of(hooks)),

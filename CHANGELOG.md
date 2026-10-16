@@ -411,6 +411,22 @@ drift.
 | JSONL `ToolCallCompleted`: `success` | `success` plus `"outcome":"<kind>"` |
 | `ConsoleEventPrinter`: `[result] <tool> FAILED: <output>` | `[result] <tool> <kind>: <output>` |
 
+**The dispatcher owns a tool call until its work actually ends.** Each call gets its own
+cancellation token, linked to the session's, and one deadline that covers the wait for its category
+permit and the tool's run. A worker takes the permit, starts the tool only if the call is still
+wanted, and gives the permit back only when the tool has returned. Java offers no safe way to stop
+arbitrary code, so a tool that ignores both its token and interruption runs on after its call is
+answered. Its permit stays taken, so the next call of that category waits for it and never runs
+alongside it. Once the session closes, every such call is cancelled and interrupted again.
+
+| 2.x | 3.0 |
+|---|---|
+| A timed-out call was interrupted and reported `TimedOut` at once, and its category permit was given back while the tool could still be running. The tool's `ctx.cancellation()` was the session's token, which the timeout never cancelled; permit wait and result wait ended only on interruption | At the deadline the call's token is cancelled and its worker interrupted. A tool that never started is `TimedOut`, and so is one that stops within the new `SessionLimits.toolStopGrace` (default 5 s, `Builder.withToolStopGrace`). One still running after it is the new `ToolOutcome.Unknown(limit)`, text `tool '<name>' timed out after <limit> and did not stop; it may still be running and its effects may still land` (`ToolResult.unknown(toolName, limit)`; SSE `{"kind":"Unknown","limit":"PT2M"}`). Session cancellation during either wait ends the call at once, and a call cancelled before its tool started never starts it |
+| `ToolContext(sessionContext, deadline)`, `ToolContext.of(sessionContext, deadline)`; `ctx.cancellation()` was `sessionContext().cancellation()` | `ToolContext(sessionContext, cancellation, deadline)`; `ctx.cancellation()` is the call's own token. Session-scoped cleanup registers on `ctx.sessionContext().cancellation()`, which one call's timeout never cancels. `ToolContext.of` is removed |
+| `ToolDispatch(sessionContext, registry, limits)`, `dispatch(call, cancellation, timeout)`; an `Error` thrown by a tool came back as a `Threw` result | `ToolDispatch(sessionContext, registry, limits, scheduler)`, where the session's scheduler runs each call's deadline; `dispatch(call, cancellation, timeout, stopGrace)`. A tool's `Error` is rethrown from `dispatch` as the same instance |
+| A tool executor that returned `null` ended the session with `ErrorDuringExecution` (`NullPointerException` in the tool round) | `Threw("java.lang.NullPointerException")`, text `tool '<name>' threw: executor returned null`, and the session goes on. `ToolExecutor.execute` documents its result as non-null |
+| A `ScheduledExecutorService` deadline cancelled by the session (a stream-idle re-arm, a finished call) stayed queued until its delay passed | the session's scheduler removes a cancelled deadline at once |
+
 **A provider stream succeeds only at its provider's terminal event.** A stream that ended without
 one used to complete with finish reason `STOP`: a dropped connection after some text was a
 finished answer. Now every stream ends in exactly one `Done` or `Error`. `Done` comes only from

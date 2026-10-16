@@ -7,9 +7,9 @@ import java.time.Duration;
 import java.util.Objects;
 
 /**
- * What happened to one tool call: it ran and succeeded or failed, it threw, it timed out, a hook
- * rejected it before it ran, or no tool by its name exists. A consumer counts or routes on this
- * type, never on the model-facing text in {@link ToolResult#output()}.
+ * What happened to one tool call: it ran and succeeded or failed, it threw, it timed out, it timed
+ * out and did not stop, a hook rejected it before it ran, or no tool by its name exists. A consumer
+ * counts or routes on this type, never on the model-facing text in {@link ToolResult#output()}.
  */
 public sealed interface ToolOutcome {
 
@@ -39,10 +39,21 @@ public sealed interface ToolOutcome {
   record TimedOut(Duration limit) implements ToolOutcome {
 
     public TimedOut {
-      Objects.requireNonNull(limit, "limit must not be null");
-      if (limit.isNegative() || limit.isZero()) {
-        throw new IllegalArgumentException("limit must be positive, got " + limit);
-      }
+      requirePositive(limit);
+    }
+  }
+
+  /**
+   * The call exceeded its time limit while its tool was running, and the tool did not stop when
+   * cancelled and interrupted. It may still be running, and its effects may still land; the
+   * dispatcher keeps the call's category capacity charged until it ends.
+   *
+   * @param limit the limit in force for the call; positive
+   */
+  record Unknown(Duration limit) implements ToolOutcome {
+
+    public Unknown {
+      requirePositive(limit);
     }
   }
 
@@ -62,6 +73,13 @@ public sealed interface ToolOutcome {
 
   /** No tool with that name is registered. */
   record NotFound() implements ToolOutcome {}
+
+  private static void requirePositive(Duration limit) {
+    Objects.requireNonNull(limit, "limit must not be null");
+    if (limit.isNegative() || limit.isZero()) {
+      throw new IllegalArgumentException("limit must be positive, got " + limit);
+    }
+  }
 
   private static void requireNonBlank(String value, String name) {
     Objects.requireNonNull(value, name + " must not be null");

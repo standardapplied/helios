@@ -67,6 +67,18 @@ class ToolResultTest {
   }
 
   @Test
+  void unknownCarriesTheLimitAndSaysTheEffectsMayStillLand() {
+    var result = ToolResult.unknown("write", Duration.ofMinutes(1));
+
+    assertEquals(new ToolOutcome.Unknown(Duration.ofMinutes(1)), result.outcome());
+    assertFalse(result.succeeded());
+    assertEquals(
+        "tool 'write' timed out after PT1M and did not stop; it may still be running and its"
+            + " effects may still land",
+        result.output());
+  }
+
+  @Test
   void notFoundNamesTheTool() {
     var result = ToolResult.notFound("serch");
 
@@ -91,6 +103,8 @@ class ToolResultTest {
     assertRejectsNull("cause must not be null", () -> ToolResult.threw("search", null));
     assertRejectsNull(
         "toolName must not be null", () -> ToolResult.timedOut(null, Duration.ofSeconds(1)));
+    assertRejectsNull(
+        "toolName must not be null", () -> ToolResult.unknown(null, Duration.ofSeconds(1)));
     assertRejectsNull("toolName must not be null", () -> ToolResult.notFound(null));
   }
 

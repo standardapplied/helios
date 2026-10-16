@@ -11,6 +11,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Definition of a tool that can be called by the model.
@@ -44,11 +45,12 @@ public record Tool(
    *
    * @param arguments the arguments from the model; non-null
    * @param context per-call cancellation + deadline; non-null
-   * @return the executor's result, or a {@link ToolOutcome.Threw} result when it throws
+   * @return the executor's result, or a {@link ToolOutcome.Threw} result when it throws or returns
+   *     {@code null}
    */
   public ToolResult execute(Map<String, Object> arguments, ToolContext context) {
     try {
-      return executor.execute(arguments, context);
+      return Objects.requireNonNull(executor.execute(arguments, context), "executor returned null");
     } catch (Exception e) {
       if (hasInterruptedCause(e)) {
         Thread.currentThread().interrupt();
