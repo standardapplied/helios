@@ -10,8 +10,8 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.testing.ScriptedModel;
 import io.helidon.common.Weighted;
-import io.helidon.http.DirectHandler.EventType;
 import io.helidon.http.DirectHandler;
+import io.helidon.http.DirectHandler.EventType;
 import io.helidon.http.Header;
 import io.helidon.http.HeaderValues;
 import io.helidon.http.HttpException;
@@ -438,7 +438,8 @@ final class UnreadBodyGuardTest {
             .mapToLong(SocketRead::bytes)
             .sum();
     assertTrue(
-        serverRead <= head.length() + SERVER_READ_BUFFER, () -> serverRead + " bytes were read");
+        serverRead >= head.length() && serverRead <= head.length() + SERVER_READ_BUFFER,
+        () -> serverRead + " bytes were read");
   }
 
   private static void writeUntilRefused(RawConnection connection) {
