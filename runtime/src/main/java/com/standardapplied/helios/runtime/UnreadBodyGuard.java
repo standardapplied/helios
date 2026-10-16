@@ -28,14 +28,18 @@ import io.helidon.webserver.http.ServerResponse;
  * further. A request whose body was read to its end, or that has none, keeps its connection.
  *
  * <p>Installed on a routing with {@code routing.addFeature(new UnreadBodyGuard())}, it covers every
- * route of that routing and Helidon's own answers on it: no matching route, and any exception a
- * route lets escape. It answers such an exception itself, with the status, headers and message
- * Helidon's direct handlers give it, because Helidon's own error handling drains an unread body
- * before it answers; an exception that is not an {@link HttpException} is a {@code 500} with a
- * fixed message. A {@link BadRequestException} it leaves to Helidon, which answers it on the
- * connection itself and ends it without reading further. {@link RuntimeServer} installs it; {@link
- * AgentHttpService} also applies it to each of its own routes, so they are covered on a server that
- * does not install it.
+ * route and filter of that routing, another feature's included, and Helidon's own answers on it: no
+ * matching route, and any exception a route lets escape. It answers such an exception itself, with
+ * the status, headers and message Helidon's direct handlers give it, because Helidon's own error
+ * handling drains an unread body before it answers; an exception that is not an {@link
+ * HttpException} is a {@code 500} with a fixed message. A {@link BadRequestException} it leaves to
+ * Helidon, which answers it on the connection itself and ends it without reading further. Its
+ * handler for {@link Throwable} takes the place of one the routing registers for {@code Throwable}
+ * itself; a handler for a narrower type, such as {@link Exception}, still answers that type, and
+ * its answer is covered too. {@link RuntimeServer} installs the guard; {@link AgentHttpService}
+ * also applies it to the answers its own routes send, so those are covered on a server that does
+ * not install it, where Helidon still drains the unread body of a request whose route lets an
+ * exception escape.
  */
 public final class UnreadBodyGuard implements HttpFeature, Weighted {
 
