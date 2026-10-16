@@ -9,11 +9,9 @@ import io.helidon.webserver.http.ServerResponse;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
-import java.util.regex.Pattern;
 
 /**
  * The one place a request's identity is decided: runs the deployer's {@link Authenticator} and
@@ -30,30 +28,6 @@ final class AuthenticationGate {
   /** The body of every {@code 401}, whatever the reason, so a denial says nothing about it. */
   private static final Map<String, String> UNAUTHENTICATED = Map.of("error", "unauthenticated");
 
-  /** Longest accepted challenge, in characters. */
-  static final int MAX_CHALLENGE_LENGTH = 1024;
-
-  private static final String TOKEN = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
-
-  /**
-   * Group repetitions are possessive: a backtracking one recurses once per repetition and overflows
-   * a small thread stack on a {@value #MAX_CHALLENGE_LENGTH}-character challenge. No repetition
-   * consumes anything the rest of the pattern could match, so the pattern accepts the same
-   * challenges as a backtracking one.
-   */
-  private static final String QUOTED_STRING = "\"(?:[ !#-\\[\\]-~]|\\\\[ -~])*+\"";
-
-  private static final String AUTH_PARAM =
-      "(" + TOKEN + ") *= *(" + TOKEN + "|" + QUOTED_STRING + ")";
-
-  private static final Pattern AUTH_SCHEME = Pattern.compile(TOKEN);
-
-  private static final Pattern AUTH_PARAM_PATTERN = Pattern.compile(AUTH_PARAM);
-
-  /** Repeats its auth-params possessively, for the reason {@link #QUOTED_STRING} gives. */
-  private static final Pattern TOKEN68_OR_AUTH_PARAMS =
-      Pattern.compile("[0-9A-Za-z._~+/-]+=*|" + AUTH_PARAM + "(?: *, *" + AUTH_PARAM + ")*+");
-
   private final Authenticator authenticator;
   private final String challenge;
 
@@ -61,96 +35,11 @@ final class AuthenticationGate {
    * Build the gate for {@code authenticator}, reading its challenge once.
    *
    * @throws NullPointerException if {@code authenticator} or its challenge is null
-   * @throws IllegalArgumentException if its challenge is not a valid RFC 9110 challenge
+   * @throws IllegalArgumentException if its challenge is not a valid {@link Challenge}
    */
   AuthenticationGate(Authenticator authenticator) {
     this.authenticator = Objects.requireNonNull(authenticator, "authenticator must not be null");
-    this.challenge = requireValidChallenge(authenticator.challenge());
-  }
-
-  /**
-   * Return {@code challenge} if it is a valid RFC 9110 {@code challenge}: an auth-scheme token,
-   * optionally followed by one space and a token68 or a comma-separated list of auth-params whose
-   * names are unique ignoring case and whose realm, if any, is a quoted-string, in printable ASCII,
-   * non-blank and at most {@value #MAX_CHALLENGE_LENGTH} characters.
-   *
-   * @param challenge the candidate {@code WWW-Authenticate} value
-   * @return {@code challenge}
-   * @throws NullPointerException if {@code challenge} is null
-   * @throws IllegalArgumentException naming the rule {@code challenge} breaks
-   */
-  static String requireValidChallenge(String challenge) {
-    Objects.requireNonNull(challenge, "challenge must not be null");
-    if (challenge.isBlank()) {
-      throw new IllegalArgumentException("challenge must be non-blank");
-    }
-    if (challenge.length() > MAX_CHALLENGE_LENGTH) {
-      throw new IllegalArgumentException(
-          "challenge must be at most "
-              + MAX_CHALLENGE_LENGTH
-              + " characters, got "
-              + challenge.length());
-    }
-    requirePrintableAscii(challenge);
-    requireChallengeSyntax(challenge);
-    return challenge;
-  }
-
-  private static void requirePrintableAscii(String challenge) {
-    for (var i = 0; i < challenge.length(); i++) {
-      var c = challenge.charAt(i);
-      if (c < 0x20 || c > 0x7E) {
-        throw new IllegalArgumentException(
-            String.format(
-                "challenge must be printable ASCII (0x20-0x7E), got 0x%04X at index %d",
-                (int) c, i));
-      }
-    }
-  }
-
-  private static void requireChallengeSyntax(String challenge) {
-    var space = challenge.indexOf(' ');
-    var scheme = space < 0 ? challenge : challenge.substring(0, space);
-    if (!AUTH_SCHEME.matcher(scheme).matches()) {
-      throw new IllegalArgumentException(
-          "challenge must begin with an auth-scheme token, got '" + challenge + "'");
-    }
-    if (space < 0) {
-      return;
-    }
-    var credentials = challenge.substring(space + 1);
-    if (!TOKEN68_OR_AUTH_PARAMS.matcher(credentials).matches()) {
-      throw new IllegalArgumentException(
-          "challenge's auth-scheme must be followed by one space and a token68 or a"
-              + " comma-separated list of auth-params, got '"
-              + challenge
-              + "'");
-    }
-    requireValidParameters(challenge, credentials);
-  }
-
-  /**
-   * RFC 9110 §11.2: each auth-param name occurs once per challenge, compared case-insensitively;
-   * §11.5: a sender generates {@code realm} only as a quoted-string.
-   */
-  private static void requireValidParameters(String challenge, String credentials) {
-    var names = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
-    var parameters = AUTH_PARAM_PATTERN.matcher(credentials);
-    while (parameters.find()) {
-      var name = parameters.group(1);
-      if (name.equalsIgnoreCase("realm") && !parameters.group(2).startsWith("\"")) {
-        throw new IllegalArgumentException(
-            "challenge's realm must be a quoted-string, got '" + challenge + "'");
-      }
-      if (!names.add(name)) {
-        throw new IllegalArgumentException(
-            "challenge's auth-param names must be unique, ignoring case, but '"
-                + name
-                + "' repeats in '"
-                + challenge
-                + "'");
-      }
-    }
+    this.challenge = Challenge.requireValid(authenticator.challenge());
   }
 
   /**
@@ -171,20 +60,19 @@ final class AuthenticationGate {
           .send(Map.of("error", "authentication unavailable"));
       return Optional.empty();
     }
-    var caller = authentication.map(verified -> Caller.start(verified, this)).filter(Caller::valid);
+    var caller =
+        authentication.map(verified -> Caller.start(verified, challenge)).filter(Caller::valid);
     if (caller.isEmpty()) {
-      unauthenticated(resp);
+      unauthenticated(resp, challenge);
     }
     return caller;
   }
 
   /**
-   * Answer {@code resp} {@code 401}: the authenticator's challenge in {@code WWW-Authenticate} and
-   * a body that says nothing about why.
-   *
-   * @param resp the response to answer
+   * Answer {@code resp} {@code 401}: {@code challenge} in {@code WWW-Authenticate} and a body that
+   * says nothing about why.
    */
-  void unauthenticated(ServerResponse resp) {
+  private static void unauthenticated(ServerResponse resp, String challenge) {
     resp.header(HeaderNames.WWW_AUTHENTICATE, challenge)
         .status(Status.UNAUTHORIZED_401)
         .send(UNAUTHENTICATED);
@@ -196,11 +84,12 @@ final class AuthenticationGate {
    * @param principal who the request acts as
    * @param ended completes when the identity's lifetime elapses, its credential is revoked, or the
    *     request ends ({@link #release()})
-   * @param gate the gate that admitted the request, which answers it once the identity has ended
+   * @param challenge the authenticator's challenge, which the {@code 401} for an ended identity
+   *     carries
    */
-  record Caller(Principal principal, CompletableFuture<Void> ended, AuthenticationGate gate) {
+  record Caller(Principal principal, CompletableFuture<Void> ended, String challenge) {
 
-    static Caller start(Authentication authentication, AuthenticationGate gate) {
+    static Caller start(Authentication authentication, String challenge) {
       var ended = new CompletableFuture<Void>();
       if (authentication.lifetime().isPositive()) {
         ended.completeOnTimeout(
@@ -210,7 +99,7 @@ final class AuthenticationGate {
       }
       CompletableFuture.anyOf(authentication.revoked(), ended)
           .whenComplete((ignored, failure) -> ended.complete(null));
-      return new Caller(authentication.principal(), ended, gate);
+      return new Caller(authentication.principal(), ended, challenge);
     }
 
     boolean valid() {
@@ -228,7 +117,7 @@ final class AuthenticationGate {
       if (valid()) {
         return false;
       }
-      gate.unauthenticated(resp);
+      unauthenticated(resp, challenge);
       return true;
     }
 
