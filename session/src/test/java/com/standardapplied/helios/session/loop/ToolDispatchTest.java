@@ -98,17 +98,26 @@ final class ToolDispatchTest {
   }
 
   private static Running start(
-      ToolDispatch d, String name, CancellationToken token, Duration stopGrace) {
+      ToolDispatch d,
+      ToolCall call,
+      CancellationToken token,
+      Duration timeout,
+      Duration stopGrace) {
     var task =
         new FutureTask<>(
             () -> {
               try {
-                return new Ending(d.dispatch(call(name), token, NEVER, stopGrace), null, false);
+                return new Ending(d.dispatch(call, token, timeout, stopGrace), null, false);
               } catch (RuntimeException e) {
                 return new Ending(null, e, Thread.currentThread().isInterrupted());
               }
             });
     return new Running(task, Thread.ofVirtual().start(task));
+  }
+
+  private static Running start(
+      ToolDispatch d, String name, CancellationToken token, Duration stopGrace) {
+    return start(d, call(name), token, NEVER, stopGrace);
   }
 
   private static Running start(ToolDispatch d, String name) {
@@ -150,6 +159,46 @@ final class ToolDispatchTest {
     if (interrupted) {
       Thread.currentThread().interrupt();
     }
+  }
+
+  /**
+   * Counts its starts, signals {@link #entered}, then waits for {@link #release} through every
+   * interruption.
+   */
+  private ToolExecutor stuckWriter(AtomicInteger starts) {
+    return (args, ctx) -> {
+      starts.incrementAndGet();
+      entered.countDown();
+      awaitThroughInterrupts(release);
+      return ToolResult.success("written");
+    };
+  }
+
+  /**
+   * The next call of {@code d}'s {@code write} tool queues and starts only once {@link #release}
+   * opens.
+   */
+  private void assertTheNextWriterWaitsForRelease(ToolDispatch d, AtomicInteger starts) {
+    var next = start(d, "write");
+    Await.until(
+        "the next writer to queue for the write permit",
+        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+    assertEquals(1, starts.get(), "the next writer has not started");
+
+    release.countDown();
+    assertEquals(ToolResult.success("written"), next.ending("the next dispatch").result());
+    assertEquals(2, starts.get());
+  }
+
+  /**
+   * Registers a cancellation callback that waits for {@link #release}, signals {@link #entered},
+   * then waits for {@link #release}, ending early on interruption.
+   */
+  private ToolExecutor blockingCallback(CountDownLatch interrupted) {
+    return (args, ctx) -> {
+      ctx.cancellation().onCancel(() -> awaitThroughInterrupts(release));
+      return interruptible(interrupted).execute(args, ctx);
+    };
   }
 
   private static void awaitIdle(ToolDispatch d) {
@@ -491,31 +540,77 @@ final class ToolDispatchTest {
   }
 
   @Test
-  void aStuckWriterAdmitsNoSecondWriterUntilItEnds() {
+  void aStuckWriterAdmitsNoOtherWriterUntilItEndsThoughPermitsAreFree() {
     var starts = new AtomicInteger();
-    ToolExecutor stuck =
-        (args, ctx) -> {
-          starts.incrementAndGet();
-          entered.countDown();
-          awaitThroughInterrupts(release);
-          return ToolResult.success("written");
-        };
-    var d =
-        dispatcher(new ConcurrencyLimits(8, 1, 1, 8), binding("write", ToolCategory.WRITE, stuck));
+    var d = dispatcher(binding("write", ToolCategory.WRITE, stuckWriter(starts)));
     var first = start(d, "write", new CancellationToken(), SHORT);
     Await.latch("the first writer to start", entered);
     scheduler.fireLatest();
     assertEquals(ToolResult.unknown("write", NEVER), first.ending("the first dispatch").result());
 
-    var second = start(d, "write");
+    assertTheNextWriterWaitsForRelease(d, starts);
+  }
+
+  @Test
+  void aCallWhoseDeadlinePassedBeforeTheSchedulerRanItNeverStartsTheTool() {
+    var schedulerFree = new CountDownLatch(1);
+    scheduler.execute(
+        () -> {
+          try {
+            schedulerFree.await();
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+        });
+    var starts = new AtomicInteger();
+    var d =
+        dispatcher(
+            new ConcurrencyLimits(8, 1, 1, 8),
+            binding("write", ToolCategory.WRITE, stuckWriter(starts)));
+    var holder = start(d, "write");
+    Await.latch("the first writer to take the only permit", entered);
+    var instant = Duration.ofNanos(1);
+    var late = start(d, call("write"), new CancellationToken(), instant, NEVER);
     Await.until(
-        "the second writer to queue for the write permit",
+        "the second writer to queue for the permit",
         () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
-    assertEquals(1, starts.get(), "the second writer has not started");
 
     release.countDown();
-    assertEquals(ToolResult.success("written"), second.ending("the second dispatch").result());
-    assertEquals(2, starts.get());
+    assertEquals(ToolResult.success("written"), holder.ending("the first dispatch").result());
+    awaitIdle(d);
+    assertEquals(1, starts.get(), "the second writer's tool never ran");
+    schedulerFree.countDown();
+    assertEquals(ToolResult.timedOut("write", instant), late.ending("the late dispatch").result());
+  }
+
+  @Test
+  void queuedCallsAreAdmittedInTheOrderTheyArrived() {
+    var order = new CopyOnWriteArrayList<Object>();
+    ToolExecutor recording =
+        (args, ctx) -> {
+          order.add(args.get("n"));
+          entered.countDown();
+          awaitThroughInterrupts(release);
+          return ToolResult.success("done");
+        };
+    var d =
+        dispatcher(
+            new ConcurrencyLimits(1, 1, 1, 1), binding("slow", ToolCategory.READ, recording));
+    var token = new CancellationToken();
+    var dispatches = new ArrayList<Running>();
+    dispatches.add(start(d, new ToolCall("c", "slow", Map.of("n", 0)), token, NEVER, NEVER));
+    Await.latch("the first call to take the only permit", entered);
+    for (var n = 1; n <= 2; n++) {
+      var queued = n;
+      dispatches.add(start(d, new ToolCall("c", "slow", Map.of("n", n)), token, NEVER, NEVER));
+      Await.until("call " + n + " to queue", () -> d.queuedDispatches(ToolCategory.READ) == queued);
+    }
+
+    release.countDown();
+    for (var dispatch : dispatches) {
+      assertEquals(ToolResult.success("done"), dispatch.ending("a queued dispatch").result());
+    }
+    assertEquals(List.of(0, 1, 2), order);
   }
 
   @Test
@@ -718,6 +813,142 @@ final class ToolDispatchTest {
     assertInstanceOf(CancellationException.class, ending.thrown());
     assertEquals("interrupted waiting for tool stuck", ending.thrown().getMessage());
     assertTrue(ending.interrupted(), "the caller's interrupt status is kept");
+  }
+
+  @Test
+  void cancellingTheSessionDuringTheStopGraceEndsTheCall() {
+    var cancelled = new CountDownLatch(1);
+    ToolExecutor stuck =
+        (args, ctx) -> {
+          ctx.cancellation().onCancel(cancelled::countDown);
+          entered.countDown();
+          awaitThroughInterrupts(release);
+          return ToolResult.success("late");
+        };
+    var d = dispatcher(binding("stuck", ToolCategory.READ, stuck));
+    var session = new CancellationToken();
+
+    var running = start(d, "stuck", session, NEVER);
+    Await.latch("the tool to start", entered);
+    scheduler.fireLatest();
+    Await.latch("the call to be timed out", cancelled);
+    session.cancel("session closed");
+
+    var thrown = running.ending("the cancelled dispatch").thrown();
+    assertInstanceOf(CancellationException.class, thrown);
+    assertEquals("session closed", thrown.getMessage());
+  }
+
+  @Test
+  void cancellingTheSessionWhileAStuckWriterRunsAdmitsNoOtherWriterUntilItEnds() {
+    var starts = new AtomicInteger();
+    var d = dispatcher(binding("write", ToolCategory.WRITE, stuckWriter(starts)));
+    var session = new CancellationToken();
+    var first = start(d, "write", session, NEVER);
+    Await.latch("the first writer to start", entered);
+    session.cancel("user-stop");
+    assertInstanceOf(CancellationException.class, first.ending("the first dispatch").thrown());
+
+    assertTheNextWriterWaitsForRelease(d, starts);
+  }
+
+  @Test
+  void interruptingTheCallerWhileAStuckWriterRunsAdmitsNoOtherWriterUntilItEnds() {
+    var starts = new AtomicInteger();
+    var d = dispatcher(binding("write", ToolCategory.WRITE, stuckWriter(starts)));
+    var first = start(d, "write");
+    Await.latch("the first writer to start", entered);
+    first.thread().interrupt();
+    assertInstanceOf(CancellationException.class, first.ending("the first dispatch").thrown());
+
+    assertTheNextWriterWaitsForRelease(d, starts);
+  }
+
+  // ── the call's cancellation callbacks ─────────────────────────────────────
+
+  @Test
+  void aBlockingCancellationCallbackDoesNotHoldBackTheInterrupt() {
+    var interrupted = new CountDownLatch(1);
+    var d = dispatcher(binding("blocking", ToolCategory.READ, blockingCallback(interrupted)));
+
+    var running = start(d, "blocking");
+    Await.latch("the tool to start", entered);
+    scheduler.fireLatest();
+
+    Await.latch("the tool to be interrupted", interrupted);
+    release.countDown();
+    assertEquals(ToolResult.timedOut("blocking", NEVER), running.ending("the dispatch").result());
+  }
+
+  @Test
+  void aBlockingCancellationCallbackDoesNotHoldUpTheSessionsCancellation() {
+    var d =
+        dispatcher(binding("blocking", ToolCategory.READ, blockingCallback(new CountDownLatch(1))));
+    var session = new CancellationToken();
+    var running = start(d, "blocking", session, NEVER);
+    Await.latch("the tool to start", entered);
+
+    var cancelling = new FutureTask<>(() -> session.cancel("session closed"));
+    Thread.ofVirtual().start(cancelling);
+
+    assertTrue(Await.value("the session's cancellation to return", cancelling));
+    assertInstanceOf(CancellationException.class, running.ending("the dispatch").thrown());
+  }
+
+  @Test
+  void aCallWhoseCancellationCallbackStillRunsIsUnknownAndAdmitsNoOtherWriter() {
+    var starts = new AtomicInteger();
+    ToolExecutor writer =
+        (args, ctx) -> {
+          ctx.cancellation().onCancel(() -> awaitThroughInterrupts(release));
+          starts.incrementAndGet();
+          entered.countDown();
+          try {
+            release.await();
+            return ToolResult.success("written");
+          } catch (InterruptedException e) {
+            return ToolResult.failure("interrupted");
+          }
+        };
+    var d = dispatcher(binding("write", ToolCategory.WRITE, writer));
+    var first = start(d, "write", new CancellationToken(), SHORT);
+    Await.latch("the first writer to start", entered);
+    scheduler.fireLatest();
+    assertEquals(ToolResult.unknown("write", NEVER), first.ending("the first dispatch").result());
+
+    assertTheNextWriterWaitsForRelease(d, starts);
+  }
+
+  @Test
+  void aCancellationCallbackErrorIsLoggedAsItselfAndTheToolIsStillInterrupted() {
+    var sentinel = new AssertionError("broken callback");
+    var interrupted = new CountDownLatch(1);
+    ToolExecutor throwing =
+        (args, ctx) -> {
+          ctx.cancellation()
+              .onCancel(
+                  () -> {
+                    throw sentinel;
+                  });
+          return interruptible(interrupted).execute(args, ctx);
+        };
+    var d = dispatcher(binding("throwing", ToolCategory.READ, throwing));
+    var session = new CancellationToken();
+    var records = new CopyOnWriteArrayList<LogRecord>();
+
+    try (var capture = LogCapture.of(DispatchedCall.class, records)) {
+      var running = start(d, "throwing", session, NEVER);
+      Await.latch("the tool to start", entered);
+      session.cancel("session closed");
+      Await.latch("the tool to be interrupted", interrupted);
+      assertInstanceOf(CancellationException.class, running.ending("the dispatch").thrown());
+      awaitIdle(d);
+    }
+
+    var logged = records.getFirst();
+    assertEquals(Level.SEVERE, logged.getLevel());
+    assertEquals("a cancellation callback of tool 'throwing' threw", logged.getMessage());
+    assertSame(sentinel, logged.getThrown());
   }
 
   // ── nothing left behind ───────────────────────────────────────────────────
