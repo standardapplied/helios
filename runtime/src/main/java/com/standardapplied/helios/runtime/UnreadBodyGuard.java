@@ -40,6 +40,14 @@ import io.helidon.webserver.http.ServerResponse;
  * also applies it to the answers its own routes send, so those are covered on a server that does
  * not install it, where Helidon still drains the unread body of a request whose route lets an
  * exception escape.
+ *
+ * <p>Two answers are out of the guard's reach, and Helidon drains the unread body without bound
+ * before sending them: the one for a route that returns without sending a response, and the one for
+ * an error handler of the routing's own that sends none. Every route and error handler on a guarded
+ * routing must send its response; each of {@link AgentHttpService}'s does. Closing a connection
+ * whose body is unread makes the operating system reset it, which discards response bytes not yet
+ * sent and ends retransmission of any lost: a large response, or one whose packet is lost, can
+ * reach the client cut short. Each of Helios's refusals fits in one packet.
  */
 public final class UnreadBodyGuard implements HttpFeature, Weighted {
 
