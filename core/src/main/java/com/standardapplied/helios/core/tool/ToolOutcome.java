@@ -3,6 +3,7 @@
 package com.standardapplied.helios.core.tool;
 
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.common.Validate;
 import java.time.Duration;
 import java.util.Objects;
 
@@ -39,7 +40,7 @@ public sealed interface ToolOutcome {
   record TimedOut(Duration limit) implements ToolOutcome {
 
     public TimedOut {
-      requirePositive(limit);
+      Validate.positiveDuration("limit", limit);
     }
   }
 
@@ -53,7 +54,7 @@ public sealed interface ToolOutcome {
   record Unknown(Duration limit) implements ToolOutcome {
 
     public Unknown {
-      requirePositive(limit);
+      Validate.positiveDuration("limit", limit);
     }
   }
 
@@ -73,13 +74,6 @@ public sealed interface ToolOutcome {
 
   /** No tool with that name is registered. */
   record NotFound() implements ToolOutcome {}
-
-  private static void requirePositive(Duration limit) {
-    Objects.requireNonNull(limit, "limit must not be null");
-    if (limit.isNegative() || limit.isZero()) {
-      throw new IllegalArgumentException("limit must be positive, got " + limit);
-    }
-  }
 
   private static void requireNonBlank(String value, String name) {
     Objects.requireNonNull(value, name + " must not be null");

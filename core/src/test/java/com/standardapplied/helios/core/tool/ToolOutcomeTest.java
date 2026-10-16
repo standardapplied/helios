@@ -70,11 +70,11 @@ class ToolOutcomeTest {
         NullPointerException.class, "limit must not be null", () -> construction.accept(null));
     assertRejects(
         IllegalArgumentException.class,
-        "limit must be positive, got PT0S",
+        "limit must be strictly positive, got PT0S",
         () -> construction.accept(Duration.ZERO));
     assertRejects(
         IllegalArgumentException.class,
-        "limit must be positive, got PT-1S",
+        "limit must be strictly positive, got PT-1S",
         () -> construction.accept(Duration.ofSeconds(-1)));
   }
 
