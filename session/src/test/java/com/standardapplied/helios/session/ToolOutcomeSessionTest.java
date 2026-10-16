@@ -321,10 +321,9 @@ final class ToolOutcomeSessionTest {
 
       var scheduler = (ScheduledThreadPoolExecutor) session.lifecycleForTests().scheduler();
 
-      assertEquals(
-          2,
-          scheduler.getQueue().size(),
-          "the session's wall-clock deadline and the running call's, not the finished call's");
+      Await.until(
+          "only the session's wall-clock deadline and the running call's, not the finished call's",
+          () -> scheduler.getQueue().size() == 2);
     }
   }
 

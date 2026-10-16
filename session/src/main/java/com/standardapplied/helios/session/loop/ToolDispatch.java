@@ -157,9 +157,9 @@ public final class ToolDispatch {
   /**
    * Dispatch one tool call and wait for its answer. The call runs on its own cancellation token,
    * linked to {@code cancellation}, under one deadline, {@code timeout} from now, that covers the
-   * wait for a permit and the tool's run; this method never waits past it. A tool not started by
-   * the deadline, or before {@code cancellation} fires, never starts. At the deadline the call's
-   * token is cancelled and its worker interrupted, and the call is:
+   * wait for a permit and the tool's run; past it, this method waits at most {@code stopGrace}. A
+   * tool not started by the deadline, or before {@code cancellation} fires, never starts. At the
+   * deadline the call's token is cancelled and its worker interrupted, and the call is:
    *
    * <ul>
    *   <li>{@link ToolOutcome.TimedOut} if the tool never started or stopped within {@code

@@ -413,17 +413,17 @@ drift.
 
 **The dispatcher owns a tool call until its work actually ends.** Each call gets its own
 cancellation token, linked to the session's, and one deadline that covers the wait for its category
-permit and the tool's run; the caller never waits past it. A tool not started by the deadline, or
-before the session is cancelled, never starts. The call's token is cancelled on a thread of its own,
-so a callback that blocks or throws holds up neither the loop, the session's cancellation nor the
-worker's interrupt (a callback's `Error` is logged at `SEVERE`). Java offers no safe way to stop
-arbitrary code, so a tool that ignores both its token and interruption runs on after its call is
-answered, and keeps its permit until it ends. While a call of a category with side effects (every
-one but `READ` and `SEARCH`, `ToolCategory.hasSideEffects()`) runs on after its caller stopped
-waiting, at its deadline, on session cancellation or on the caller's interrupt, every other call,
-of any category and including one already queued, is refused at once and its tool never starts,
-since a tool's category does not say which resources it touches. Closing the session cancels and
-interrupts every call still running.
+permit and the tool's run; past it, the caller waits only for the stop grace below. A tool not
+started by the deadline, or before the session is cancelled, never starts. The call's token is
+cancelled on a thread of its own, so a callback that blocks or throws holds up neither the loop, the
+session's cancellation nor the worker's interrupt (a callback's `Error` is logged at `SEVERE`). Java
+offers no safe way to stop arbitrary code, so a tool that ignores both its token and interruption
+runs on after its call is answered, and keeps its permit until it ends. While a call of a category
+with side effects (every one but `READ` and `SEARCH`, `ToolCategory.hasSideEffects()`) runs on after
+its caller stopped waiting, at its deadline, on session cancellation or on the caller's interrupt,
+every other call, of any category and including one already queued, is refused at once and its tool
+never starts, since a tool's category does not say which resources it touches. Closing the session
+cancels and interrupts every call still running.
 
 | 2.x | 3.0 |
 |---|---|
