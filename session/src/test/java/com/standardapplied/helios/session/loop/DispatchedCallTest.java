@@ -90,7 +90,7 @@ final class DispatchedCallTest {
 
   @Test
   void aWorkerReachingAdmissionPastItsDeadlineKeepsTheToolFromStarting() {
-    busy.execute(() -> ToolDispatchTest.awaitThroughInterrupts(busyRelease));
+    busy.execute(() -> DispatchFixture.awaitThroughInterrupts(busyRelease));
 
     dispatched(Duration.ofNanos(1)).start(busy);
 
@@ -106,7 +106,7 @@ final class DispatchedCallTest {
     session.onCancel(
         () -> {
           callbackEntered.countDown();
-          ToolDispatchTest.awaitThroughInterrupts(callbackRelease);
+          DispatchFixture.awaitThroughInterrupts(callbackRelease);
         });
     var dispatched = dispatched(NEVER, session);
     dispatched.start(busy);
