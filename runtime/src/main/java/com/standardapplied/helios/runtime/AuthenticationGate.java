@@ -35,7 +35,13 @@ final class AuthenticationGate {
 
   private static final String TOKEN = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
 
-  private static final String QUOTED_STRING = "\"(?:[ !#-\\[\\]-~]|\\\\[ -~])*\"";
+  /**
+   * Group repetitions are possessive: a backtracking one recurses once per repetition and overflows
+   * a small thread stack on a {@value #MAX_CHALLENGE_LENGTH}-character challenge. No repetition
+   * consumes anything the rest of the pattern could match, so the pattern accepts the same
+   * challenges as a backtracking one.
+   */
+  private static final String QUOTED_STRING = "\"(?:[ !#-\\[\\]-~]|\\\\[ -~])*+\"";
 
   private static final String AUTH_PARAM =
       "(" + TOKEN + ") *= *(" + TOKEN + "|" + QUOTED_STRING + ")";
@@ -44,8 +50,9 @@ final class AuthenticationGate {
 
   private static final Pattern AUTH_PARAM_PATTERN = Pattern.compile(AUTH_PARAM);
 
+  /** Repeats its auth-params possessively, for the reason {@link #QUOTED_STRING} gives. */
   private static final Pattern TOKEN68_OR_AUTH_PARAMS =
-      Pattern.compile("[0-9A-Za-z._~+/-]+=*|" + AUTH_PARAM + "(?: *, *" + AUTH_PARAM + ")*");
+      Pattern.compile("[0-9A-Za-z._~+/-]+=*|" + AUTH_PARAM + "(?: *, *" + AUTH_PARAM + ")*+");
 
   private final Authenticator authenticator;
   private final String challenge;

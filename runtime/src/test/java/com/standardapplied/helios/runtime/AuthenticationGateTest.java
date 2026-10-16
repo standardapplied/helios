@@ -16,6 +16,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.FutureTask;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -30,6 +31,13 @@ import tools.jackson.databind.json.JsonMapper;
 final class AuthenticationGateTest {
 
   private static final Principal ALICE = new Principal("acme", "alice");
+
+  /**
+   * A thread stack a quarter of the JVM's default, too small for a regex that recurses per
+   * character.
+   */
+  private static final long SMALL_STACK_BYTES = 256 * 1024;
+
   private static final AuthenticationGate GATE =
       new AuthenticationGate(new TestAuthenticator(request -> Optional.empty()));
 
@@ -104,6 +112,31 @@ final class AuthenticationGateTest {
   @MethodSource("validChallenges")
   void aServiceAcceptsAValidChallenge(String challenge) {
     assertDoesNotThrow(() -> service(challenge));
+  }
+
+  /**
+   * Longest challenges whose every character is a repetition of a quoted-string's content or of the
+   * auth-param list: a realm of quoted-pairs and as many parameters as fit.
+   */
+  static Stream<String> longestRepetitiveChallenges() {
+    var quotedPairs = new StringBuilder("Bearer realm=\"");
+    while (quotedPairs.length() + 3 <= AuthenticationGate.MAX_CHALLENGE_LENGTH) {
+      quotedPairs.append("\\\"");
+    }
+    var parameters = new StringBuilder("Bearer realm=\"\"");
+    for (var i = 0; parameters.length() + 8 <= AuthenticationGate.MAX_CHALLENGE_LENGTH; i++) {
+      parameters.append(String.format(",p%03d=\"\"", i));
+    }
+    return Stream.of(quotedPairs.append('"').toString(), parameters.toString());
+  }
+
+  @ParameterizedTest
+  @MethodSource("longestRepetitiveChallenges")
+  void aLongestChallengeIsAcceptedOnAThreadWithASmallStack(String challenge) {
+    var validation = new FutureTask<>(() -> AuthenticationGate.requireValidChallenge(challenge));
+    Thread.ofPlatform().stackSize(SMALL_STACK_BYTES).start(validation);
+
+    assertEquals(challenge, Await.value("the challenge's validation", validation));
   }
 
   @Test
