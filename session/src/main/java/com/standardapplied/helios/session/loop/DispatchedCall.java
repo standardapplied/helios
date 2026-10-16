@@ -23,13 +23,14 @@ import java.util.logging.Logger;
 
 /**
  * One tool call, from admission until its work ends. The call's answer settles once: with the
- * tool's result, an {@link Error} the tool threw, a {@link CancellationException}, or a {@link
- * TimeoutException} at the deadline. Its worker virtual thread, once admitted by the category's
- * {@link CategoryPermits}, starts the tool only while the answer is unsettled, the session's token
- * is not cancelled and the deadline has not passed. The call's own token is linked to the session's
- * and is cancelled on a thread of its own, so a callback that blocks or throws holds up neither the
- * canceller nor the worker's interrupt. The work is the worker and that cancellation; when both
- * have ended, the worker gives the permit back and removes the link.
+ * tool's result, whatever the tool threw past {@link Tool#execute}, a {@link
+ * CancellationException}, or a {@link TimeoutException} at the deadline. Its worker virtual thread,
+ * once admitted by the category's {@link CategoryPermits}, starts the tool only while the answer is
+ * unsettled, the session's token is not cancelled and the deadline has not passed. The call's own
+ * token is linked to the session's and is cancelled on a thread of its own, so a callback that
+ * blocks or throws holds up neither the canceller nor the worker's interrupt. The work is the
+ * worker and that cancellation; when both have ended, the worker gives the permit back and removes
+ * the link.
  */
 final class DispatchedCall {
 
@@ -99,7 +100,8 @@ final class DispatchedCall {
    * ToolResult#unknown unknown}. A call this method stops waiting for while its tool runs is
    * quarantined until its work ends.
    *
-   * @return the tool's result, or the timed-out or unknown result
+   * @return the tool's result, a {@link ToolResult#threw threw} result for a non-{@link Error}
+   *     throwable that escaped {@link Tool#execute}, or the timed-out or unknown result
    * @throws Error the error the tool threw, as itself
    * @throws CancellationException if the session's token is cancelled, or the calling thread is
    *     interrupted (its interrupt status is kept), before this method returns
@@ -141,8 +143,11 @@ final class DispatchedCall {
   }
 
   private ToolResult expired(Throwable cause, Duration stopGrace) {
+    if (cause instanceof Error error) {
+      throw error;
+    }
     if (!(cause instanceof TimeoutException)) {
-      throw (Error) cause;
+      return ToolResult.threw(call.name(), cause);
     }
     cancel("tool '" + call.name() + "' timed out after " + timeout);
     try {
@@ -200,7 +205,7 @@ final class DispatchedCall {
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-    } catch (Error e) {
+    } catch (Throwable e) {
       if (!answer.completeExceptionally(e)) {
         LOGGER.log(Level.SEVERE, "tool '" + call.name() + "' threw after its call was answered", e);
       }
