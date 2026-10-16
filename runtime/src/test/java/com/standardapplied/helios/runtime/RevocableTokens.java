@@ -33,6 +33,11 @@ final class RevocableTokens implements Authenticator {
                     credentials.computeIfAbsent(name, token -> new CompletableFuture<>())));
   }
 
+  @Override
+  public String challenge() {
+    return TestAuthenticator.CHALLENGE;
+  }
+
   /** Revoke the identity every request so far authenticated with {@code token} acts as. */
   void revoke(String token) {
     credentials.remove(token).complete(null);

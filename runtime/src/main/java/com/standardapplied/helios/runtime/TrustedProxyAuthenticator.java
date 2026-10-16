@@ -24,7 +24,8 @@ import java.util.Set;
  * set each exactly once. A missing, repeated or invalid ({@link Principal}) header is
  * unauthenticated. The identity is re-asserted on every request, so it carries no lifetime of its
  * own ({@link Authentication#of(Principal)}); a long-lived stream lasts until the proxy closes the
- * connection.
+ * connection. Its {@code 401} challenges with {@value #DEFAULT_CHALLENGE} unless {@link
+ * Builder#withChallenge(String)} names the proxy's own scheme.
  *
  * <pre>{@code
  * var authenticator = TrustedProxyAuthenticator.newBuilder()
@@ -40,14 +41,19 @@ public final class TrustedProxyAuthenticator implements Authenticator {
   /** Default header carrying the subject's tenant. */
   public static final String DEFAULT_TENANT_HEADER = "X-Authenticated-Tenant";
 
+  /** Default {@code WWW-Authenticate} challenge of a {@code 401}. */
+  public static final String DEFAULT_CHALLENGE = "TrustedProxy realm=\"helios\"";
+
   private final Set<InetAddress> trustedProxies;
   private final HeaderName subjectHeader;
   private final HeaderName tenantHeader;
+  private final String challenge;
 
-  private TrustedProxyAuthenticator(Builder builder) {
+  private TrustedProxyAuthenticator(Builder builder, String challenge) {
     this.trustedProxies = Set.copyOf(builder.trustedProxies);
     this.subjectHeader = HeaderNames.create(builder.subjectHeader);
     this.tenantHeader = HeaderNames.create(builder.tenantHeader);
+    this.challenge = challenge;
   }
 
   /**
@@ -73,6 +79,11 @@ public final class TrustedProxyAuthenticator implements Authenticator {
     return Optional.of(Authentication.of(new Principal(tenant.get(), subject.get())));
   }
 
+  @Override
+  public String challenge() {
+    return challenge;
+  }
+
   private static Optional<String> single(ServerRequest request, HeaderName name) {
     var values = request.headers().all(name, List::of);
     return values.size() == 1 && Principal.isValidPart(values.getFirst())
@@ -86,6 +97,7 @@ public final class TrustedProxyAuthenticator implements Authenticator {
     private final Set<InetAddress> trustedProxies = new HashSet<>();
     private String subjectHeader = DEFAULT_SUBJECT_HEADER;
     private String tenantHeader = DEFAULT_TENANT_HEADER;
+    private String challenge = DEFAULT_CHALLENGE;
 
     private Builder() {}
 
@@ -126,11 +138,25 @@ public final class TrustedProxyAuthenticator implements Authenticator {
     }
 
     /**
+     * Challenge with {@code challenge} instead of {@value #DEFAULT_CHALLENGE}; {@link #build()}
+     * checks it is a valid RFC 9110 challenge, as {@link Authenticator#challenge()} describes.
+     *
+     * @param challenge the {@code WWW-Authenticate} value of every {@code 401}; non-null
+     * @return this builder
+     * @throws NullPointerException if {@code challenge} is null
+     */
+    public Builder withChallenge(String challenge) {
+      this.challenge = Objects.requireNonNull(challenge, "challenge must not be null");
+      return this;
+    }
+
+    /**
      * Build the authenticator.
      *
      * @return the authenticator
      * @throws IllegalStateException if no trusted proxy was added, or both parts are read from the
      *     same header
+     * @throws IllegalArgumentException if the challenge is not a valid RFC 9110 challenge
      */
     public TrustedProxyAuthenticator build() {
       if (trustedProxies.isEmpty()) {
@@ -141,7 +167,8 @@ public final class TrustedProxyAuthenticator implements Authenticator {
         throw new IllegalStateException(
             "subject and tenant must come from different headers; both are " + subjectHeader);
       }
-      return new TrustedProxyAuthenticator(this);
+      return new TrustedProxyAuthenticator(
+          this, AuthenticationGate.requireValidChallenge(challenge));
     }
 
     private static String requireHeader(String part, String header) {

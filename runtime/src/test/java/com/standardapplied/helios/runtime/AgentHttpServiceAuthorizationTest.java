@@ -89,7 +89,7 @@ final class AgentHttpServiceAuthorizationTest {
         RuntimeServer.builder()
             .withRegistry(SessionRegistry.inMemory())
             .withOptionsFactory(this::options)
-            .withAuthenticator(this::authenticate)
+            .withAuthenticator(new TestAuthenticator(this::authenticate))
             .build();
   }
 
@@ -159,9 +159,7 @@ final class AgentHttpServiceAuthorizationTest {
 
     for (var credential : credentials) {
       for (var route : routes) {
-        var resp = sendAuthorization(route, credential);
-        assertEquals(401, resp.statusCode(), () -> credential + " " + route);
-        assertEquals(UNAUTHENTICATED, resp.body(), () -> credential + " " + route);
+        assertUnauthenticated(sendAuthorization(route, credential), credential + " " + route);
       }
     }
 
@@ -197,9 +195,7 @@ final class AgentHttpServiceAuthorizationTest {
 
     carolRevoked.complete(null);
 
-    var resp = Await.value("the long poll to be answered", poll);
-    assertEquals(401, resp.statusCode());
-    assertEquals(UNAUTHENTICATED, resp.body());
+    assertUnauthenticated(Await.value("the long poll to be answered", poll), "pending long poll");
   }
 
   @Test
@@ -254,11 +250,15 @@ final class AgentHttpServiceAuthorizationTest {
       out.write(body, 1, body.length - 1);
       out.flush();
 
-      var status =
+      var response =
           new BufferedReader(
-                  new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII))
-              .readLine();
-      assertEquals("HTTP/1.1 401 Unauthorized", status);
+              new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+      assertEquals("HTTP/1.1 401 Unauthorized", response.readLine());
+      var head = new ArrayList<String>();
+      for (var line = response.readLine(); !line.isEmpty(); line = response.readLine()) {
+        head.add(line);
+      }
+      assertTrue(head.contains("WWW-Authenticate: " + TestAuthenticator.CHALLENGE), head::toString);
     }
     assertTrue(model.calls().isEmpty());
     assertEquals(0, toolRuns.get());
@@ -270,10 +270,18 @@ final class AgentHttpServiceAuthorizationTest {
 
     var resp = send("POST", "/sessions", "carol");
 
-    assertEquals(401, resp.statusCode());
-    assertEquals(UNAUTHENTICATED, resp.body());
+    assertUnauthenticated(resp, "create");
     assertTrue(carolRevoked.isDone());
     assertEquals(0, server.registry().size());
+  }
+
+  private static void assertUnauthenticated(HttpResponse<String> resp, String context) {
+    assertEquals(401, resp.statusCode(), context);
+    assertEquals(UNAUTHENTICATED, resp.body(), context);
+    assertEquals(
+        List.of(TestAuthenticator.CHALLENGE),
+        resp.headers().allValues("WWW-Authenticate"),
+        context);
   }
 
   private Optional<Authentication> authenticate(ServerRequest request) {
@@ -284,7 +292,7 @@ final class AgentHttpServiceAuthorizationTest {
         .map(header -> identities.get(header.substring("Bearer ".length())));
   }
 
-  private SessionOptions options(String sessionId) {
+  private SessionOptions options(SessionRequest request) {
     duringFactory.get().run();
     var probe =
         Tool.newBuilder()
@@ -297,7 +305,7 @@ final class AgentHttpServiceAuthorizationTest {
             .build();
     return SessionOptions.newBuilder()
         .withModel(model)
-        .withSessionId(Optional.ofNullable(hijackedId.get()).orElse(sessionId))
+        .withSessionId(Optional.ofNullable(hijackedId.get()).orElse(request.sessionId()))
         .withTools(
             new ToolRegistry(
                 List.of(ToolBinding.newBuilder(probe).withCategory(ToolCategory.READ).build())))

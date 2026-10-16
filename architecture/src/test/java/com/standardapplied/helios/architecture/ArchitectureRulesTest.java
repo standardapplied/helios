@@ -341,6 +341,23 @@ class ArchitectureRulesTest {
   }
 
   @Test
+  void theRuntimeSendsA401OnlyThroughTheAuthenticationGate() {
+    noClasses()
+        .that()
+        .resideInAPackage(HELIOS + ".runtime..")
+        .and()
+        .doNotHaveFullyQualifiedName(AUTHENTICATION_GATE)
+        .should()
+        .accessTargetWhere(
+            targetOwner(name("io.helidon.http.Status")).and(target(name("UNAUTHORIZED_401"))))
+        .because(
+            "every runtime 401 is sent by runtime.AuthenticationGate.unauthenticated, which sets"
+                + " WWW-Authenticate to the authenticator's challenge; a route that ends a request"
+                + " for an ended identity calls it, never builds the 401 itself")
+        .check(LIBRARY);
+  }
+
+  @Test
   void onlyTheOnnxModuleBuildsARedirectFollowingClient() {
     noClasses()
         .that()

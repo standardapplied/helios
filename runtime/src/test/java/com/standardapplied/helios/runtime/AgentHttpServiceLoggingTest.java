@@ -112,16 +112,17 @@ final class AgentHttpServiceLoggingTest {
     var unavailable = "{\"error\":\"authentication unavailable\"}";
     try (var server =
         serverWithFactory(
-                sessionId -> {
+                request -> {
                   throw new AssertionError("no session may be created");
                 })
             .withAuthenticator(
-                request -> {
-                  if (request.headers().contains(HeaderNames.AUTHORIZATION)) {
-                    throw new IllegalStateException("cannot verify " + secret);
-                  }
-                  return null;
-                })
+                new TestAuthenticator(
+                    request -> {
+                      if (request.headers().contains(HeaderNames.AUTHORIZATION)) {
+                        throw new IllegalStateException("cannot verify " + secret);
+                      }
+                      return null;
+                    }))
             .build()) {
       var throwing = createSession(server, "Bearer " + secret);
       var answeringNull = createSession(server, null);
@@ -148,7 +149,7 @@ final class AgentHttpServiceLoggingTest {
     var failure = new IllegalStateException("factory broke");
     try (var server =
         serverWithFactory(
-                sessionId -> {
+                request -> {
                   throw failure;
                 })
             .withoutAuthentication()
@@ -162,7 +163,7 @@ final class AgentHttpServiceLoggingTest {
 
   @Test
   void anOptionsFactoryReturningNoOptionsForTheSessionIsLoggedAsAWarning() throws Exception {
-    try (var server = serverWithFactory(sessionId -> null).withoutAuthentication().build()) {
+    try (var server = serverWithFactory(request -> null).withoutAuthentication().build()) {
       assertEquals(500, createSession(server, null).statusCode());
     }
     var logged = onlyRecordStartingWith("optionsFactory did not return options for session sess-");
@@ -170,7 +171,7 @@ final class AgentHttpServiceLoggingTest {
   }
 
   private static RuntimeServer.Builder serverWithFactory(
-      Function<String, SessionOptions> optionsFactory) {
+      Function<SessionRequest, SessionOptions> optionsFactory) {
     return RuntimeServer.builder()
         .withRegistry(SessionRegistry.inMemory())
         .withOptionsFactory(optionsFactory);

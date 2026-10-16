@@ -53,9 +53,10 @@ import tools.jackson.databind.ObjectMapper;
  *
  * Every route runs behind the one {@link Authenticator} before it reads the body, looks up a
  * session, subscribes or queues work: a request without a valid identity is answered {@code 401}
- * (the authenticator failing, {@code 503}) and nothing else happens. A session is owned by the
- * {@link Principal} that created it. A request for another principal's session is answered with the
- * same {@code 404} as an unknown id, so ids of other users and tenants are never disclosed. An SSE
+ * with the authenticator's {@link Authenticator#challenge()} in {@code WWW-Authenticate} (the
+ * authenticator failing, {@code 503}) and nothing else happens. A session is owned by the {@link
+ * Principal} that created it. A request for another principal's session is answered with the same
+ * {@code 404} as an unknown id, so ids of other users and tenants are never disclosed. An SSE
  * stream ends, and a pending result long poll answers {@code 401}, as soon as the caller's identity
  * expires or is revoked (see {@link Authentication}). A route added to this service is registered
  * through the same wrapper, never a second check.
@@ -87,11 +88,12 @@ import tools.jackson.databind.ObjectMapper;
  * response.
  *
  * <p>The {@code optionsFactory} is the seam through which deployments choose how a new session is
- * configured: the runtime takes the generated session id and produces a fully-populated {@link
- * SessionOptions} for exactly that id; options for any other id are refused, so a factory can never
- * attach a request to another session. A {@code 500} body carries a fixed message, never an
- * exception's; a {@code 409} tells the owner why its own session, closed or terminal, refused a
- * message or interrupt.
+ * configured: it is given a {@link SessionRequest} of the generated session id and the {@link
+ * Principal} that will own the session, so it can pick a workspace, model, budget or tool set per
+ * tenant or subject, and produces a fully-populated {@link SessionOptions} for exactly that id;
+ * options for any other id are refused, so a factory can never attach a request to another session.
+ * A {@code 500} body carries a fixed message, never an exception's; a {@code 409} tells the owner
+ * why its own session, closed or terminal, refused a message or interrupt.
  *
  * <h2>Thread-safety</h2>
  *
@@ -119,19 +121,22 @@ public final class AgentHttpService implements HttpService {
    * Build a service.
    *
    * @param registry registry of live sessions; non-null
-   * @param optionsFactory function that maps a generated session id to a fully-configured {@link
-   *     SessionOptions} for that id; non-null
-   * @param authenticator verifies every request's identity; non-null
+   * @param optionsFactory function that maps a {@link SessionRequest}, the generated session id and
+   *     the creating principal, to a fully-configured {@link SessionOptions} for that id; non-null
+   * @param authenticator verifies every request's identity; non-null, with a valid {@link
+   *     Authenticator#challenge()}
    * @param objectMapper mapper for request/response bodies; non-null. The service uses a copy that
    *     also writes {@link com.standardapplied.helios.core.tool.ToolOutcome}
    * @param eventsPathPrefix prefix used to build the {@code eventsUrl} returned by {@code POST
    *     /sessions} (e.g. {@code "/v1"}); non-null
    * @param limits bounds on each request; non-null
-   * @throws NullPointerException if any argument is null
+   * @throws NullPointerException if any argument, or the authenticator's challenge, is null
+   * @throws IllegalArgumentException if the authenticator's challenge is not a valid RFC 9110
+   *     challenge
    */
   public AgentHttpService(
       SessionRegistry registry,
-      Function<String, SessionOptions> optionsFactory,
+      Function<SessionRequest, SessionOptions> optionsFactory,
       Authenticator authenticator,
       ObjectMapper objectMapper,
       String eventsPathPrefix,
@@ -182,8 +187,7 @@ public final class AgentHttpService implements HttpService {
                 limited(
                     resultPolls,
                     (session, caller, req, resp) ->
-                        ResultLongPoll.respond(
-                            session, req, resp, objectMapper, caller.ended())))));
+                        ResultLongPoll.respond(session, req, resp, objectMapper, caller)))));
     rules.delete("/sessions/{sessionId}", authenticated(owned(this::delete)));
   }
 

@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.runtime;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -13,13 +14,24 @@ import com.standardapplied.helios.runtime.AuthenticationGate.Caller;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import tools.jackson.databind.json.JsonMapper;
 
-/** How long an admitted caller's identity lasts: until its lifetime, revocation or release. */
+/**
+ * Which challenges a gate accepts, and how long an admitted caller's identity lasts: until its
+ * lifetime, revocation or release.
+ */
 final class AuthenticationGateTest {
 
   private static final Principal ALICE = new Principal("acme", "alice");
+  private static final AuthenticationGate GATE =
+      new AuthenticationGate(new TestAuthenticator(request -> Optional.empty()));
 
   @Test
   void aGateRefusesANullAuthenticator() {
@@ -27,9 +39,75 @@ final class AuthenticationGateTest {
     assertEquals("authenticator must not be null", ex.getMessage());
   }
 
+  /** Each challenge a gate refuses, with the message naming the rule it breaks. */
+  static Stream<Arguments> invalidChallenges() {
+    var notPrintable = "challenge must be printable ASCII (0x20-0x7E), got ";
+    var notFollowedByParameters =
+        "challenge's auth-scheme must be followed by one space and a token68 or a"
+            + " comma-separated list of auth-params, got ";
+    return Stream.of(
+        Arguments.of("", "challenge must be non-blank"),
+        Arguments.of(" \t", "challenge must be non-blank"),
+        Arguments.of("Bearer realm=\"a\"\r\nX-Injected: 1", notPrintable + "0x000D at index 16"),
+        Arguments.of("Bearer realm=\"a\"\nX-Injected: 1", notPrintable + "0x000A at index 16"),
+        Arguments.of("Bearer realm=\"h\u00e9lios\"", notPrintable + "0x00E9 at index 15"),
+        Arguments.of(
+            "Bear/er realm=\"a\"",
+            "challenge must begin with an auth-scheme token, got 'Bear/er realm=\"a\"'"),
+        Arguments.of(" Bearer", "challenge must begin with an auth-scheme token, got ' Bearer'"),
+        Arguments.of(
+            "Bearer " + "a".repeat(AuthenticationGate.MAX_CHALLENGE_LENGTH - 6),
+            "challenge must be at most 1024 characters, got 1025"),
+        Arguments.of("Bearer  realm=\"a\"", notFollowedByParameters + "'Bearer  realm=\"a\"'"),
+        Arguments.of("Bearer realm=\"a\",", notFollowedByParameters + "'Bearer realm=\"a\",'"),
+        Arguments.of("Bearer realm=\"a", notFollowedByParameters + "'Bearer realm=\"a'"),
+        Arguments.of("Bearer realm=a b", notFollowedByParameters + "'Bearer realm=a b'"));
+  }
+
+  /** Challenges a gate accepts: a bare scheme, a token68 and a list of auth-params. */
+  static Stream<String> validChallenges() {
+    return Stream.of(
+        "Negotiate",
+        "Bearer dG9rZW4=",
+        "Bearer realm=\"helios\", error=\"invalid_token\", scope=read",
+        "Bearer realm = \"a \\\"quoted\\\" realm\"",
+        "Bearer " + "a".repeat(AuthenticationGate.MAX_CHALLENGE_LENGTH - 7));
+  }
+
+  @ParameterizedTest
+  @MethodSource("invalidChallenges")
+  void aServiceWhoseAuthenticatorHasAnInvalidChallengeIsRefused(String challenge, String message) {
+    var ex = assertThrows(IllegalArgumentException.class, () -> service(challenge));
+    assertEquals(message, ex.getMessage());
+  }
+
+  @ParameterizedTest
+  @MethodSource("validChallenges")
+  void aServiceAcceptsAValidChallenge(String challenge) {
+    assertDoesNotThrow(() -> service(challenge));
+  }
+
+  @Test
+  void aServiceWhoseAuthenticatorHasNoChallengeIsRefused() {
+    var ex = assertThrows(NullPointerException.class, () -> service(null));
+    assertEquals("challenge must not be null", ex.getMessage());
+  }
+
+  private static AgentHttpService service(String challenge) {
+    return new AgentHttpService(
+        SessionRegistry.inMemory(),
+        request -> {
+          throw new AssertionError("no session is created");
+        },
+        new TestAuthenticator(request -> Optional.empty(), challenge),
+        JsonMapper.builder().build(),
+        "/v1",
+        RequestLimits.defaults());
+  }
+
   @Test
   void aLiveIdentityStaysLiveUntilTheRequestReleasesIt() {
-    var caller = Caller.start(Authentication.of(ALICE));
+    var caller = Caller.start(Authentication.of(ALICE), GATE);
     assertEquals(ALICE, caller.principal());
     assertFalse(caller.ended().isDone());
 
@@ -41,7 +119,8 @@ final class AuthenticationGateTest {
   @Test
   void theIdentityEndsWhenItsLifetimeElapses() {
     var caller =
-        Caller.start(new Authentication(ALICE, Duration.ofMillis(1), new CompletableFuture<>()));
+        Caller.start(
+            new Authentication(ALICE, Duration.ofMillis(1), new CompletableFuture<>()), GATE);
 
     assertNull(Await.value("the identity's lifetime to elapse", caller.ended()));
   }
@@ -49,14 +128,16 @@ final class AuthenticationGateTest {
   @Test
   void anIdentityWithNoLifetimeLeftHasEndedAtStart() {
     var caller =
-        Caller.start(new Authentication(ALICE, Duration.ofSeconds(-1), new CompletableFuture<>()));
+        Caller.start(
+            new Authentication(ALICE, Duration.ofSeconds(-1), new CompletableFuture<>()), GATE);
 
     assertTrue(caller.ended().isDone());
   }
 
   @Test
   void anIdentityWithAZeroLifetimeHasEndedAtStart() {
-    var caller = Caller.start(new Authentication(ALICE, Duration.ZERO, new CompletableFuture<>()));
+    var caller =
+        Caller.start(new Authentication(ALICE, Duration.ZERO, new CompletableFuture<>()), GATE);
 
     assertTrue(caller.ended().isDone());
   }
@@ -64,7 +145,7 @@ final class AuthenticationGateTest {
   @Test
   void theIdentityEndsWhenItsCredentialIsRevoked() {
     var revoked = new CompletableFuture<Void>();
-    var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked));
+    var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked), GATE);
 
     revoked.complete(null);
 
@@ -75,7 +156,7 @@ final class AuthenticationGateTest {
   @Test
   void aRevocationThatFailsAlsoEndsTheIdentity() {
     var revoked = new CompletableFuture<Void>();
-    var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked));
+    var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked), GATE);
 
     revoked.completeExceptionally(new IllegalStateException("revocation feed lost"));
 
@@ -86,7 +167,7 @@ final class AuthenticationGateTest {
   @Test
   void releasingTheCallerLeavesTheVerifiersStageUntouched() {
     var revoked = new CompletableFuture<Void>();
-    var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked));
+    var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked), GATE);
 
     caller.release();
 
@@ -100,9 +181,9 @@ final class AuthenticationGateTest {
     var expiring = new Authentication(ALICE, Duration.ofMillis(1), revoked);
 
     for (var i = 0; i < 1_000; i++) {
-      Caller.start(authentication).release();
+      Caller.start(authentication, GATE).release();
     }
-    Await.value("the identity's lifetime to elapse", Caller.start(expiring).ended());
+    Await.value("the identity's lifetime to elapse", Caller.start(expiring, GATE).ended());
 
     Await.until(
         "the elapsed identity to stop watching the revocation stage",
@@ -114,7 +195,7 @@ final class AuthenticationGateTest {
     var revoked = new CompletableFuture<Void>();
 
     for (var i = 0; i < 1_000; i++) {
-      Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked)).release();
+      Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked), GATE).release();
     }
 
     assertEquals(0, revoked.getNumberOfDependents());
@@ -127,7 +208,7 @@ final class AuthenticationGateTest {
     var callers = new ArrayList<Caller>();
 
     for (var i = 0; i < 1_000; i++) {
-      var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked));
+      var caller = Caller.start(new Authentication(ALICE, Duration.ofDays(1), revoked), GATE);
       callers.add(caller);
       if (i % 2 == 0) {
         caller.release();
