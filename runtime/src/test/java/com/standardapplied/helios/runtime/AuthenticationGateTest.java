@@ -60,6 +60,8 @@ final class AuthenticationGateTest {
         Arguments.of(" \t", "challenge must be non-blank"),
         Arguments.of("Bearer realm=\"a\"\r\nX-Injected: 1", notPrintable + "0x000D at index 16"),
         Arguments.of("Bearer realm=\"a\"\nX-Injected: 1", notPrintable + "0x000A at index 16"),
+        Arguments.of("Bearer realm=\"a\u001F\"", notPrintable + "0x001F at index 15"),
+        Arguments.of("Bearer realm=\"a\u007F\"", notPrintable + "0x007F at index 15"),
         Arguments.of("Bearer realm=\"h\u00e9lios\"", notPrintable + "0x00E9 at index 15"),
         Arguments.of(
             "Bear/er realm=\"a\"",
@@ -86,14 +88,17 @@ final class AuthenticationGateTest {
   }
 
   /**
-   * Challenges a gate accepts: a bare scheme, a token68 and lists of auth-params, one of them with
-   * a quoted value that looks like a second, repeated parameter and one with a token value that is
-   * not a realm.
+   * Challenges a gate accepts: a bare scheme, token68s of every token68 character and padding, and
+   * lists of auth-params, with and without spaces around their separators, one with the highest
+   * printable character, one with a quoted value that looks like a second, repeated parameter and
+   * one with a token value that is not a realm.
    */
   static Stream<String> validChallenges() {
     return Stream.of(
         "Negotiate",
         "Bearer dG9rZW4=",
+        "Bearer AZaz09-._~+/==",
+        "Bearer realm=\"~\",scope=read",
         "Bearer realm=\"helios\", error=\"invalid_token\", scope=read",
         "Bearer realm = \"a \\\"quoted\\\" realm\"",
         "Bearer realm=\"one, realm=two\", scope=read",
