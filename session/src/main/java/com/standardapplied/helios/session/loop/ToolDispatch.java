@@ -155,30 +155,24 @@ public final class ToolDispatch {
   }
 
   /**
-   * Dispatch one tool call and wait for its answer. The call gets its own cancellation token,
-   * linked to {@code cancellation}, and one deadline, {@code timeout} from now, that covers both
-   * the wait for a permit and the tool's run, and this method waits no longer than that deadline
-   * even when the scheduler is late. A tool queued for a permit never starts once {@code
-   * cancellation} is cancelled. Returns the tool's result, a not-found result for an unknown tool,
-   * or, when the deadline passes:
+   * Dispatch one tool call and wait for its answer. The call runs on its own cancellation token,
+   * linked to {@code cancellation}, under one deadline, {@code timeout} from now, that covers the
+   * wait for a permit and the tool's run; this method never waits past it. A tool not started by
+   * the deadline, or before {@code cancellation} fires, never starts. At the deadline the call's
+   * token is cancelled and its worker interrupted, and the call is:
    *
    * <ul>
-   *   <li>{@link ToolOutcome.TimedOut} if the tool never started (it never will) or if, once the
-   *       call's worker is interrupted and its token cancelled, the tool and the token's callbacks
-   *       end within {@code stopGrace};
-   *   <li>{@link ToolOutcome.Unknown} if they are still running after {@code stopGrace}. Java
-   *       offers no safe way to stop arbitrary code, so it runs on; its permit stays taken and the
-   *       dispatcher admits no other call, of any category, until it ends, and its result, if it
-   *       ever returns, is discarded.
+   *   <li>{@link ToolOutcome.TimedOut} if the tool never started or stopped within {@code
+   *       stopGrace};
+   *   <li>{@link ToolOutcome.Unknown} if it still runs. Java cannot safely stop arbitrary code, so
+   *       it runs on, keeps its permit, and the dispatcher admits no other call, of any category,
+   *       until it ends.
    * </ul>
    *
-   * <p>The call's token is cancelled on a thread of its own, so a callback a tool registered on it
-   * that blocks or throws holds up neither this method, nor the session's cancellation, nor the
-   * interrupt. A call this method stops waiting for because the session cancelled it or the calling
-   * thread was interrupted also closes every category until its work ends. The session's
-   * cancellation reaches the call even while an earlier callback on {@code cancellation} blocks.
-   *
-   * <p>A tool that throws an {@link Error} makes this method throw that same error.
+   * <p>A call this method stops waiting for while its tool runs, because {@code cancellation} fired
+   * or the calling thread was interrupted, is held the same way. The call's token is cancelled on a
+   * thread of its own, so a callback that blocks or throws holds up neither this method, the
+   * session's cancellation nor the interrupt. A tool's {@link Error} is rethrown as itself.
    *
    * @param call the call; non-null
    * @param cancellation the session's cancellation token; non-null
