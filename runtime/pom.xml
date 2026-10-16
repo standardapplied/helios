@@ -16,6 +16,11 @@
 
     <properties>
         <helios.test.native-access>ALL-UNNAMED,com.standardapplied.helios.session</helios.test.native-access>
+        <!--
+          UnreadBodyGuardTest counts what the server reads from the JDK's jdk.SocketRead events,
+          through jdk.jfr, which the main module does not require.
+        -->
+        <helios.test.opens>--add-modules jdk.jfr --add-reads com.standardapplied.helios.runtime=jdk.jfr</helios.test.opens>
     </properties>
 
     <dependencies>
@@ -66,6 +71,23 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>default-testCompile</id>
+                        <configuration>
+                            <compilerArgs>
+                                <arg>--add-modules</arg>
+                                <arg>jdk.jfr</arg>
+                                <arg>--add-reads</arg>
+                                <arg>com.standardapplied.helios.runtime=jdk.jfr</arg>
+                            </compilerArgs>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
