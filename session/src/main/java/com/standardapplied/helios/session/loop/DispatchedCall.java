@@ -32,7 +32,8 @@ import java.util.logging.Logger;
  * cancellation reaches the call, the call's cancellation never reaches the session. {@link #cancel}
  * interrupts the worker and cancels that token on a thread of its own, so a cancellation callback
  * that blocks or throws holds up neither the canceller nor the interrupt. A call cancelled, or past
- * its deadline, before its tool started never starts it. The call's work is its worker and, once
+ * its deadline, before its tool started never starts it, nor does one whose session token is
+ * cancelled before the session's callbacks reach it. The call's work is its worker and, once
  * started, that token's cancellation; {@code liveCalls} counts the call until both have ended, when
  * the permit is given back and the link removed.
  *
@@ -63,6 +64,7 @@ final class DispatchedCall {
   private final Tool tool;
   private final ToolCall call;
   private final ToolContext context;
+  private final CancellationToken parent;
   private final Duration timeout;
   private final long deadline;
   private final CategoryPermits permits;
@@ -74,12 +76,14 @@ final class DispatchedCall {
       Tool tool,
       ToolCall call,
       SessionContext session,
+      CancellationToken parent,
       Duration timeout,
       CategoryPermits permits,
       AtomicInteger liveCalls) {
     this.tool = tool;
     this.call = call;
     this.context = new ToolContext(session, token, timeout);
+    this.parent = parent;
     this.timeout = timeout;
     this.deadline = System.nanoTime() + TimeUnit.NANOSECONDS.convert(timeout);
     this.permits = permits;
@@ -89,19 +93,14 @@ final class DispatchedCall {
   }
 
   /**
-   * Arm the deadline on {@code scheduler}, link the call to {@code parent} and start its worker.
-   * When the deadline comes due, a tool not yet started never starts, and the answer settles with a
-   * {@link TimeoutException}.
+   * Arm the deadline on {@code scheduler}, link the call to its parent token and start its worker.
+   * When the deadline comes due, on {@code scheduler} or in {@link #await}, whichever is first, a
+   * tool not yet started never starts, and the answer settles with a {@link TimeoutException}.
    */
-  void start(CancellationToken parent, ScheduledExecutorService scheduler) {
+  void start(ScheduledExecutorService scheduler) {
     var timer =
         scheduler.schedule(
-            () -> {
-              phase.compareAndSet(Phase.WAITING, Phase.ABANDONED);
-              answer.completeExceptionally(new TimeoutException());
-            },
-            TimeUnit.NANOSECONDS.convert(timeout),
-            TimeUnit.NANOSECONDS);
+            this::expire, TimeUnit.NANOSECONDS.convert(timeout), TimeUnit.NANOSECONDS);
     answer.whenComplete((result, failure) -> timer.cancel(false));
     parentLink =
         parent.onCancel(
@@ -129,7 +128,10 @@ final class DispatchedCall {
    */
   ToolResult await(Duration stopGrace) {
     try {
-      return answer.get();
+      return answer.get(Math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+    } catch (TimeoutException e) {
+      expire();
+      return await(stopGrace);
     } catch (ExecutionException e) {
       return expired(e.getCause(), stopGrace);
     } catch (CancellationException e) {
@@ -162,6 +164,11 @@ final class DispatchedCall {
       worker.interrupt();
     }
     return neverStarted;
+  }
+
+  private void expire() {
+    phase.compareAndSet(Phase.WAITING, Phase.ABANDONED);
+    answer.completeExceptionally(new TimeoutException());
   }
 
   private ToolResult expired(Throwable cause, Duration stopGrace) {
@@ -200,10 +207,13 @@ final class DispatchedCall {
           permits.admit(
               this,
               () ->
-                  System.nanoTime() - deadline < 0
+                  !parent.isCancelled()
+                      && System.nanoTime() - deadline < 0
                       && phase.compareAndSet(Phase.WAITING, Phase.RUNNING));
       if (admitted) {
         run();
+      } else if (parent.isCancelled()) {
+        cancel(parent.reason().orElseThrow());
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();

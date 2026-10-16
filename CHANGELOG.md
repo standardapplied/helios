@@ -413,9 +413,11 @@ drift.
 
 **The dispatcher owns a tool call until its work actually ends.** Each call gets its own
 cancellation token, linked to the session's, and one deadline that covers the wait for its category
-permit and the tool's run. A worker is admitted to the category in arrival order, starts the tool
-only if the call is still wanted and its deadline has not passed (even when the scheduler runs the
-deadline late), and the permit is given back only when the call's work has ended: the tool, and the
+permit and the tool's run. The caller waits no longer than that deadline even when the session's
+scheduler, which also runs the deadline, is late or busy. A worker is admitted to the category in
+arrival order, starts the tool only if the session is not cancelled, the call is still wanted and
+its deadline has not passed (even when the session's cancellation callbacks or the scheduler run
+late), and the permit is given back only when the call's work has ended: the tool, and the
 cancellation of its token, which runs on a thread of its own so a callback that blocks or throws
 holds up neither the loop, the session's cancellation nor the interrupt (a callback's `Error` is
 logged at `SEVERE` as itself). Java offers no safe way to stop arbitrary code, so a tool that

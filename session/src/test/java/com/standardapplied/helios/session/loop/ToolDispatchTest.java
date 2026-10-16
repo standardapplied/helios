@@ -552,16 +552,9 @@ final class ToolDispatchTest {
   }
 
   @Test
-  void aCallWhoseDeadlinePassedBeforeTheSchedulerRanItNeverStartsTheTool() {
+  void aCallWhoseDeadlinePassesWhileTheSchedulerIsBusyTimesOutWithoutStartingTheTool() {
     var schedulerFree = new CountDownLatch(1);
-    scheduler.execute(
-        () -> {
-          try {
-            schedulerFree.await();
-          } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-          }
-        });
+    scheduler.execute(() -> awaitThroughInterrupts(schedulerFree));
     var starts = new AtomicInteger();
     var d =
         dispatcher(
@@ -570,17 +563,50 @@ final class ToolDispatchTest {
     var holder = start(d, "write");
     Await.latch("the first writer to take the only permit", entered);
     var instant = Duration.ofNanos(1);
-    var late = start(d, call("write"), new CancellationToken(), instant, NEVER);
-    Await.until(
-        "the second writer to queue for the permit",
-        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
 
+    var late = start(d, call("write"), new CancellationToken(), instant, NEVER);
+
+    assertEquals(ToolResult.timedOut("write", instant), late.ending("the late dispatch").result());
     release.countDown();
     assertEquals(ToolResult.success("written"), holder.ending("the first dispatch").result());
     awaitIdle(d);
-    assertEquals(1, starts.get(), "the second writer's tool never ran");
+    assertEquals(1, starts.get(), "the late writer's tool never ran");
     schedulerFree.countDown();
-    assertEquals(ToolResult.timedOut("write", instant), late.ending("the late dispatch").result());
+  }
+
+  @Test
+  void aQueuedCallWhoseSessionIsCancelledNeverStartsWhileAnEarlierCallbackBlocks() {
+    var session = new CancellationToken();
+    var callbackEntered = new CountDownLatch(1);
+    var callbackRelease = new CountDownLatch(1);
+    session.onCancel(
+        () -> {
+          callbackEntered.countDown();
+          awaitThroughInterrupts(callbackRelease);
+        });
+    var starts = new AtomicInteger();
+    var d =
+        dispatcher(
+            new ConcurrencyLimits(8, 1, 1, 8),
+            binding("write", ToolCategory.WRITE, stuckWriter(starts)));
+    var holder = start(d, "write", session, NEVER);
+    Await.latch("the first writer to take the only permit", entered);
+    var queued = start(d, "write", session, NEVER);
+    Await.until(
+        "the second writer to queue for the permit",
+        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+    Thread.ofVirtual().start(() -> session.cancel("session closed"));
+    Await.latch("the session's first callback to block", callbackEntered);
+
+    release.countDown();
+
+    var thrown = queued.ending("the queued dispatch").thrown();
+    assertInstanceOf(CancellationException.class, thrown);
+    assertEquals("session closed", thrown.getMessage());
+    assertEquals(1, starts.get(), "the queued writer's tool never ran");
+    callbackRelease.countDown();
+    holder.ending("the first dispatch");
+    awaitIdle(d);
   }
 
   @Test
