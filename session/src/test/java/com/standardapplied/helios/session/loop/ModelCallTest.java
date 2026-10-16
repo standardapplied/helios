@@ -69,7 +69,8 @@ final class ModelCallTest {
         new ToolDispatch(
             SessionContext.forTesting("sess-call"),
             ToolRegistry.empty(),
-            ConcurrencyLimits.defaults());
+            ConcurrencyLimits.defaults(),
+            scheduler);
     var collaborators =
         new LoopCollaborators(
             HookRegistry.empty(),

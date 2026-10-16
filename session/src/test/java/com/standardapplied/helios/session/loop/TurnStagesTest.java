@@ -66,7 +66,8 @@ final class TurnStagesTest {
         new ToolDispatch(
             SessionContext.forTesting("sess-stages"),
             ToolRegistry.empty(),
-            ConcurrencyLimits.defaults());
+            ConcurrencyLimits.defaults(),
+            scheduler);
     var collaborators =
         new LoopCollaborators(
             new HookRegistry(List.of(hooks)),

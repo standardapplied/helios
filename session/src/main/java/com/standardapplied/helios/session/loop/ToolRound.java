@@ -149,7 +149,8 @@ final class ToolRound {
     try {
       return collaborators
           .toolDispatch()
-          .dispatch(call, state.cancellation(), limits.toolTimeoutDefault());
+          .dispatch(
+              call, state.cancellation(), limits.toolTimeoutDefault(), limits.toolStopGrace());
     } catch (Throwable t) {
       return ToolResult.threw(call.name(), t);
     }

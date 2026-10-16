@@ -25,6 +25,7 @@ final class SessionLimitsTest {
             OptionalLong.of(12_500_000L),
             Duration.ofMinutes(30),
             Duration.ofSeconds(45),
+            Duration.ofSeconds(3),
             32_000L,
             Duration.ofSeconds(30),
             StreamRetryPolicy.defaults());
@@ -32,6 +33,7 @@ final class SessionLimitsTest {
     assertEquals(OptionalLong.of(12_500_000L), l.maxBudgetMicroUsd());
     assertEquals(Duration.ofMinutes(30), l.maxWallClock());
     assertEquals(Duration.ofSeconds(45), l.toolTimeoutDefault());
+    assertEquals(Duration.ofSeconds(3), l.toolStopGrace());
     assertEquals(32_000L, l.maxContextTokens());
     assertEquals(Duration.ofSeconds(30), l.streamIdleTimeout());
     assertEquals(StreamRetryPolicy.defaults(), l.streamRetryPolicy());
@@ -44,6 +46,7 @@ final class SessionLimitsTest {
     assertTrue(d.maxBudgetMicroUsd().isEmpty());
     assertEquals(Duration.ofHours(1), d.maxWallClock());
     assertEquals(Duration.ofMinutes(2), d.toolTimeoutDefault());
+    assertEquals(Duration.ofSeconds(5), d.toolStopGrace());
     assertEquals(0L, d.maxContextTokens());
     assertEquals(Duration.ofSeconds(60), d.streamIdleTimeout());
     assertEquals(StreamRetryPolicy.defaults(), d.streamRetryPolicy());
@@ -166,6 +169,29 @@ final class SessionLimitsTest {
     assertTrue(ex.getMessage().startsWith("toolTimeoutDefault must be strictly positive"));
   }
 
+  // ── toolStopGrace ─────────────────────────────────────────────────────────
+
+  @Test
+  void toolStopGraceNullRejected() {
+    var b = SessionLimits.newBuilder().withToolStopGrace(null);
+    var ex = assertThrows(NullPointerException.class, b::build);
+    assertEquals("toolStopGrace must not be null", ex.getMessage());
+  }
+
+  @Test
+  void toolStopGraceZeroRejected() {
+    var b = SessionLimits.newBuilder().withToolStopGrace(Duration.ZERO);
+    var ex = assertThrows(IllegalArgumentException.class, b::build);
+    assertEquals("toolStopGrace must be strictly positive, got PT0S", ex.getMessage());
+  }
+
+  @Test
+  void toolStopGraceNegativeRejected() {
+    var b = SessionLimits.newBuilder().withToolStopGrace(Duration.ofMillis(-1));
+    var ex = assertThrows(IllegalArgumentException.class, b::build);
+    assertEquals("toolStopGrace must be strictly positive, got PT-0.001S", ex.getMessage());
+  }
+
   // ── maxContextTokens ──────────────────────────────────────────────────────
 
   @Test
@@ -198,12 +224,14 @@ final class SessionLimitsTest {
             .withMaxBudgetMicroUsd(5 * CostEstimate.MICRO_USD_PER_USD)
             .withMaxWallClock(Duration.ofMinutes(5))
             .withToolTimeoutDefault(Duration.ofSeconds(30))
+            .withToolStopGrace(Duration.ofSeconds(9))
             .withMaxContextTokens(50_000L)
             .build();
     assertEquals(10, l.maxTurns());
     assertEquals(OptionalLong.of(5_000_000L), l.maxBudgetMicroUsd());
     assertEquals(Duration.ofMinutes(5), l.maxWallClock());
     assertEquals(Duration.ofSeconds(30), l.toolTimeoutDefault());
+    assertEquals(Duration.ofSeconds(9), l.toolStopGrace());
     assertEquals(50_000L, l.maxContextTokens());
   }
 
@@ -228,6 +256,7 @@ final class SessionLimitsTest {
             .withMaxBudgetMicroUsd(2_500_000L)
             .withMaxWallClock(Duration.ofMinutes(15))
             .withToolTimeoutDefault(Duration.ofSeconds(20))
+            .withToolStopGrace(Duration.ofSeconds(1))
             .withMaxContextTokens(75_000L)
             .build();
     assertEquals(original, original.toBuilder().build());
@@ -246,6 +275,7 @@ final class SessionLimitsTest {
         maxBudgetMicroUsd,
         maxWallClock,
         toolTimeoutDefault,
+        fiveSec(),
         maxContextTokens,
         Duration.ofSeconds(60),
         StreamRetryPolicy.defaults());
@@ -257,6 +287,10 @@ final class SessionLimitsTest {
 
   private static Duration twoMin() {
     return Duration.ofMinutes(2);
+  }
+
+  private static Duration fiveSec() {
+    return Duration.ofSeconds(5);
   }
 
   // ── streamIdleTimeout ─────────────────────────────────────────────────────
@@ -272,6 +306,7 @@ final class SessionLimitsTest {
                     OptionalLong.empty(),
                     oneHour(),
                     twoMin(),
+                    fiveSec(),
                     1_000L,
                     Duration.ZERO,
                     StreamRetryPolicy.defaults()));
@@ -288,6 +323,7 @@ final class SessionLimitsTest {
                 OptionalLong.empty(),
                 oneHour(),
                 twoMin(),
+                fiveSec(),
                 1_000L,
                 Duration.ofSeconds(-1),
                 StreamRetryPolicy.defaults()));
@@ -303,6 +339,7 @@ final class SessionLimitsTest {
                 OptionalLong.empty(),
                 oneHour(),
                 twoMin(),
+                fiveSec(),
                 1_000L,
                 null,
                 StreamRetryPolicy.defaults()));
@@ -327,6 +364,7 @@ final class SessionLimitsTest {
                     OptionalLong.empty(),
                     oneHour(),
                     twoMin(),
+                    fiveSec(),
                     1_000L,
                     Duration.ofSeconds(60),
                     null));

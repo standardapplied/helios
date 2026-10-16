@@ -96,6 +96,25 @@ class ToolTest {
   }
 
   @Test
+  void anExecutorReturningNullIsReportedAsThrew() {
+    var tool =
+        Tool.newBuilder()
+            .withName("silent")
+            .withDescription("returns nothing")
+            .withExecutor((args, ctx) -> null)
+            .build();
+
+    var result = tool.execute(Map.of(), ToolContext.noop());
+
+    assertEquals(
+        new ToolResult(
+            new ToolOutcome.Threw("java.lang.NullPointerException"),
+            "tool 'silent' threw: executor returned null",
+            List.of()),
+        result);
+  }
+
+  @Test
   void toolWithNoExecutorThrowsAtBuild() {
     assertThrows(
         IllegalStateException.class,

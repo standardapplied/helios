@@ -11,9 +11,9 @@ import com.standardapplied.helios.session.loop.StopClassifier;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
@@ -57,19 +57,23 @@ final class SessionLifecycle {
     this.executionProvider = executionProvider;
     this.events = events;
     this.result = result;
-    this.deadlineScheduler =
-        Executors.newSingleThreadScheduledExecutor(
+    var scheduler =
+        new ScheduledThreadPoolExecutor(
+            1,
             r -> {
               var t = new Thread(r, "helios-deadline-" + state.sessionId());
               t.setDaemon(true);
               return t;
             });
+    scheduler.setRemoveOnCancelPolicy(true);
+    this.deadlineScheduler = scheduler;
     this.providerAccepted = invokeOnSessionStart();
   }
 
   /**
-   * The session-scoped scheduler: the wall-clock deadline and the turn subscribers' stream-idle
-   * timers run on it, and it is shut down with the session.
+   * The session-scoped scheduler: the wall-clock deadline, the turn subscribers' stream-idle timers
+   * and the tool calls' deadlines run on it, and it is shut down with the session. A cancelled
+   * timer leaves its queue at once, so re-arming and finished calls accumulate nothing.
    */
   ScheduledExecutorService scheduler() {
     return deadlineScheduler;
