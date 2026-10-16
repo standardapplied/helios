@@ -164,7 +164,44 @@ final class UnreadBodyGuardTest {
 
   @Test
   void aRequestSmuggledInTheBodyOfARefusedOneIsNeverRun() throws IOException {
-    try (var connection = RawConnection.open(server.port())) {
+    assertARequestSmuggledInARefusedBodyNeverRuns(server.port());
+    assertEquals(3, server.registry().size());
+  }
+
+  @Test
+  void theServiceOnAServerWithoutTheGuardStillEndsTheConnectionsItsRoutesLeaveUnread()
+      throws IOException {
+    var mapper = JsonMapper.builder().build();
+    var service =
+        new AgentHttpService(
+            registry(),
+            UnreadBodyGuardTest::options,
+            authenticator(),
+            mapper,
+            "/v1",
+            RequestLimits.defaults());
+    var deployed =
+        WebServer.builder()
+            .host("127.0.0.1")
+            .port(0)
+            .featuresDiscoverServices(false)
+            .mediaContext(
+                mc ->
+                    mc.mediaSupportsDiscoverServices(false)
+                        .addMediaSupport(JacksonSupport.create(mapper)))
+            .routing((HttpRouting.Builder routing) -> routing.register("/v1", service))
+            .build()
+            .start();
+    try {
+      assertARequestSmuggledInARefusedBodyNeverRuns(deployed.port());
+    } finally {
+      deployed.stop();
+    }
+  }
+
+  /** A body that is itself a request follows a {@code 401} sent before the body was asked for. */
+  private void assertARequestSmuggledInARefusedBodyNeverRuns(int port) throws IOException {
+    try (var connection = RawConnection.open(port)) {
       connection.write(
           "POST /v1/sessions/missing/messages HTTP/1.1\r\nHost: 127.0.0.1\r\n"
               + "Content-Type: application/json\r\nExpect: 100-continue\r\nContent-Length: "
@@ -177,7 +214,6 @@ final class UnreadBodyGuardTest {
       assertEquals(-1, connection.next());
     }
     assertEquals(0, smuggledSeen.get());
-    assertEquals(3, server.registry().size());
   }
 
   /**
@@ -391,36 +427,45 @@ final class UnreadBodyGuardTest {
   }
 
   private RuntimeServer server() {
-    var trusted =
-        TrustedProxyAuthenticator.newBuilder()
-            .withTrustedProxy(InetAddress.getLoopbackAddress())
-            .build();
     return RuntimeServer.builder()
-        .withRegistry(
-            SessionRegistry.withFactory(options -> new StubSession(options.sessionId(), 8)))
-        .withOptionsFactory(
-            sessionId ->
-                SessionOptions.newBuilder()
-                    .withModel(ScriptedModel.newBuilder().withTextTurn("x").build())
-                    .withSessionId(sessionId)
-                    .build())
+        .withRegistry(registry())
+        .withOptionsFactory(UnreadBodyGuardTest::options)
         .withRequestLimits(
             RequestLimits.newBuilder()
                 .withMaxRequestBytes(MAX_BODY)
                 .withMaxMessageUploads(2)
                 .withMaxMessageUploadsPerPrincipal(1)
                 .build())
-        .withAuthenticator(
-            request -> {
-              if (request.headers().contains(SMUGGLER)) {
-                smuggledSeen.incrementAndGet();
-              }
-              if (request.headers().contains(CRASH)) {
-                throw new AssertionError("an Error escaping a route");
-              }
-              return trusted.authenticate(request);
-            })
+        .withAuthenticator(authenticator())
         .build();
+  }
+
+  private static SessionRegistry registry() {
+    return SessionRegistry.withFactory(options -> new StubSession(options.sessionId(), 8));
+  }
+
+  private static SessionOptions options(String sessionId) {
+    return SessionOptions.newBuilder()
+        .withModel(ScriptedModel.newBuilder().withTextTurn("x").build())
+        .withSessionId(sessionId)
+        .build();
+  }
+
+  /** Trusts the loopback peer, counts each request from the smuggler, and crashes on demand. */
+  private Authenticator authenticator() {
+    var trusted =
+        TrustedProxyAuthenticator.newBuilder()
+            .withTrustedProxy(InetAddress.getLoopbackAddress())
+            .build();
+    return request -> {
+      if (request.headers().contains(SMUGGLER)) {
+        smuggledSeen.incrementAndGet();
+      }
+      if (request.headers().contains(CRASH)) {
+        throw new AssertionError("an Error escaping a route");
+      }
+      return trusted.authenticate(request);
+    };
   }
 
   private String create(String principal) {
