@@ -501,7 +501,10 @@ final class ToolDispatchTest {
     var next = start(d, "write").ending("the next dispatch").result();
 
     assertEquals(ToolResult.success("written"), next);
-    assertEquals(1, d.liveCalls(), "the stuck tool still runs");
+    assertEquals(
+        ConcurrencyLimits.defaults().maxConcurrentToolCalls() - 1,
+        d.availableToolCallPermits(),
+        "the stuck tool still holds its permit");
   }
 
   @Test
