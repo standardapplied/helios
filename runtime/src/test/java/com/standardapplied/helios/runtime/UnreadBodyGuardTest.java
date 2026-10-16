@@ -318,8 +318,7 @@ final class UnreadBodyGuardTest {
     var alice = sessions.get("alice");
     try (var connection = RawConnection.open(server.port())) {
       var answers = new ArrayList<RawConnection.Response>();
-      for (var text : List.of("one", "two")) {
-        var body = "{\"text\":\"" + text + "\"}";
+      for (var body : List.of("{\"text\":\"one\"}", "{\"text\":", "{\"text\":\"two\"}")) {
         connection.write(
             "POST "
                 + messages(alice)
@@ -346,6 +345,7 @@ final class UnreadBodyGuardTest {
       assertEquals(
           List.of(
               "HTTP/1.1 202 Accepted",
+              "HTTP/1.1 400 Bad Request",
               "HTTP/1.1 202 Accepted",
               "HTTP/1.1 204 No Content",
               "HTTP/1.1 204 No Content",
