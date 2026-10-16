@@ -111,7 +111,6 @@ final class DispatchedCall {
       if (!settlesBy(answered, deadline)) {
         expire();
       }
-      throwIfSessionCancelled();
       return answer.get();
     } catch (ExecutionException e) {
       return expired(e.getCause(), stopGrace);
@@ -121,20 +120,21 @@ final class DispatchedCall {
   }
 
   /**
-   * Wait until {@code latch} opens or {@code until} passes, reading the session's token as it
-   * waits.
+   * Wait until {@code latch} opens or {@code until} passes, reading the session's token as it waits
+   * and once more before it returns.
    *
    * @return {@code true} if {@code latch} opened
-   * @throws CancellationException if the session's token is cancelled first
+   * @throws CancellationException if the session's token is cancelled before this method returns
    */
   private boolean settlesBy(CountDownLatch latch, long until) throws InterruptedException {
     while (!latch.await(
         Math.clamp(until - System.nanoTime(), 0L, SESSION_CHECK_NANOS), TimeUnit.NANOSECONDS)) {
+      throwIfSessionCancelled();
       if (System.nanoTime() - until >= 0) {
         return false;
       }
-      throwIfSessionCancelled();
     }
+    throwIfSessionCancelled();
     return true;
   }
 
@@ -155,9 +155,7 @@ final class DispatchedCall {
     } catch (InterruptedException e) {
       throw interrupted();
     }
-    var stillRunning = permits.quarantine(this);
-    throwIfSessionCancelled();
-    return stillRunning
+    return permits.quarantine(this)
         ? ToolResult.unknown(call.name(), timeout)
         : ToolResult.timedOut(call.name(), timeout);
   }
