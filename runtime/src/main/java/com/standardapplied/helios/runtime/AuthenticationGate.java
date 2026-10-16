@@ -9,6 +9,7 @@ import io.helidon.webserver.http.ServerResponse;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
@@ -36,9 +37,12 @@ final class AuthenticationGate {
 
   private static final String QUOTED_STRING = "\"(?:[ !#-\\[\\]-~]|\\\\[ -~])*\"";
 
-  private static final String AUTH_PARAM = TOKEN + " *= *(?:" + TOKEN + "|" + QUOTED_STRING + ")";
+  private static final String AUTH_PARAM =
+      "(" + TOKEN + ") *= *(?:" + TOKEN + "|" + QUOTED_STRING + ")";
 
   private static final Pattern AUTH_SCHEME = Pattern.compile(TOKEN);
+
+  private static final Pattern AUTH_PARAM_NAME = Pattern.compile(AUTH_PARAM);
 
   private static final Pattern TOKEN68_OR_AUTH_PARAMS =
       Pattern.compile("[0-9A-Za-z._~+/-]+=*|" + AUTH_PARAM + "(?: *, *" + AUTH_PARAM + ")*");
@@ -59,8 +63,9 @@ final class AuthenticationGate {
 
   /**
    * Return {@code challenge} if it is a valid RFC 9110 {@code challenge}: an auth-scheme token,
-   * optionally followed by one space and a token68 or a comma-separated list of auth-params, in
-   * printable ASCII, non-blank and at most {@value #MAX_CHALLENGE_LENGTH} characters.
+   * optionally followed by one space and a token68 or a comma-separated list of auth-params whose
+   * names are unique ignoring case, in printable ASCII, non-blank and at most {@value
+   * #MAX_CHALLENGE_LENGTH} characters.
    *
    * @param challenge the candidate {@code WWW-Authenticate} value
    * @return {@code challenge}
@@ -103,12 +108,35 @@ final class AuthenticationGate {
       throw new IllegalArgumentException(
           "challenge must begin with an auth-scheme token, got '" + challenge + "'");
     }
-    if (space >= 0 && !TOKEN68_OR_AUTH_PARAMS.matcher(challenge.substring(space + 1)).matches()) {
+    if (space < 0) {
+      return;
+    }
+    var credentials = challenge.substring(space + 1);
+    if (!TOKEN68_OR_AUTH_PARAMS.matcher(credentials).matches()) {
       throw new IllegalArgumentException(
           "challenge's auth-scheme must be followed by one space and a token68 or a"
               + " comma-separated list of auth-params, got '"
               + challenge
               + "'");
+    }
+    requireUniqueParameterNames(challenge, credentials);
+  }
+
+  /**
+   * RFC 9110 §11.2: each auth-param name occurs once per challenge, compared case-insensitively.
+   */
+  private static void requireUniqueParameterNames(String challenge, String credentials) {
+    var names = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
+    var parameters = AUTH_PARAM_NAME.matcher(credentials);
+    while (parameters.find()) {
+      if (!names.add(parameters.group(1))) {
+        throw new IllegalArgumentException(
+            "challenge's auth-param names must be unique, ignoring case, but '"
+                + parameters.group(1)
+                + "' repeats in '"
+                + challenge
+                + "'");
+      }
     }
   }
 
