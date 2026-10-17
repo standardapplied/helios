@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.loop.SessionState;
-import com.standardapplied.helios.session.loop.StrayErrors;
 import com.standardapplied.helios.session.loop.ToolDispatch;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -23,9 +22,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * What the teardown settles the result with when a cancellation callback or {@code onSessionEnd}
- * throws an {@link Error}, the one the cancellation wait collected or one thrown after its wait
- * ended, while a later step ran: an interleaving a session gives a test no way to force, forced
- * here through a scheduler whose shutdown, a later step, blocks.
+ * throws an {@link Error} after its wait ended, while a later step ran: an interleaving a session
+ * gives a test no way to force, forced here through a scheduler whose shutdown, a later step,
+ * blocks. Every {@code Error} recorded before the settlement seals the session's ending counts.
  */
 final class SessionTeardownTest {
 
@@ -33,6 +32,8 @@ final class SessionTeardownTest {
   private static final Duration NOT_REACHED = Duration.ofMinutes(10);
 
   private final SessionContext context = SessionContext.forTesting("sess-teardown");
+  private final SessionState state =
+      new SessionState(context.sessionId(), context.cancellation(), context.clock());
   private final CountDownLatch releasing = new CountDownLatch(1);
   private final CountDownLatch observed = new CountDownLatch(1);
   private final List<LogRecord> logged = new CopyOnWriteArrayList<>();
@@ -65,7 +66,7 @@ final class SessionTeardownTest {
     context.cancellation().onCancel(observed::countDown);
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
-      assertSame(sentinel, newTeardown(SHORT_GRACE).run(tools(), null));
+      assertSame(sentinel, newTeardown(SHORT_GRACE).run(tools()).orElseThrow());
     }
   }
 
@@ -87,12 +88,12 @@ final class SessionTeardownTest {
         };
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
-      assertSame(sentinel, newTeardown(provider, SHORT_GRACE).run(tools(), null));
+      assertSame(sentinel, newTeardown(provider, SHORT_GRACE).run(tools()).orElseThrow());
     }
   }
 
   @Test
-  void anErrorTheCancellationWaitCollectedRidesOnTheLoopsErrorOnce() {
+  void anErrorACancellationCallbackThrowsAfterTheLoopsErrorRidesOnItOnce() {
     var primary = new AssertionError("loop failure");
     var sentinel = new AssertionError("callback failure");
     context
@@ -102,8 +103,11 @@ final class SessionTeardownTest {
               throw sentinel;
             });
     observed.countDown();
+    var teardown = newTeardown(NOT_REACHED);
 
-    assertSame(primary, newTeardown(NOT_REACHED).run(tools(), primary));
+    state.ending().fail(primary);
+
+    assertSame(primary, teardown.run(tools()).orElseThrow());
     assertEquals(List.of(sentinel), List.of(primary.getSuppressed()));
   }
 
@@ -113,16 +117,11 @@ final class SessionTeardownTest {
 
   private SessionTeardown newTeardown(RecordingProvider provider, Duration grace) {
     return new SessionTeardown(
-        new SessionState(context.sessionId(), context.cancellation(), context.clock()),
-        context,
-        provider,
-        new SessionEventPublisher(context.sessionId()),
-        scheduler,
-        grace);
+        state, context, provider, new SessionEventPublisher(context.sessionId()), scheduler, grace);
   }
 
   private ToolDispatch tools() {
     return new ToolDispatch(
-        context, ToolRegistry.empty(), ConcurrencyLimits.defaults(), scheduler, new StrayErrors());
+        context, ToolRegistry.empty(), ConcurrencyLimits.defaults(), scheduler, state.ending());
   }
 }

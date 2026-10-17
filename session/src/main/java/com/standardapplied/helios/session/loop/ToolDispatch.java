@@ -57,7 +57,7 @@ public final class ToolDispatch {
   private final CategoryPermits executionPermits;
   private final ScheduledExecutorService scheduler;
   private final Set<DispatchedCall.Live> liveCalls = ConcurrentHashMap.newKeySet();
-  private final StrayErrors strayErrors;
+  private final SessionEnding ending;
 
   /**
    * Build a dispatcher.
@@ -67,8 +67,8 @@ public final class ToolDispatch {
    * @param registry the bindings the dispatcher will look calls up against; non-null
    * @param limits concurrency caps; non-null
    * @param scheduler the session's scheduler, on which each call's deadline runs; non-null
-   * @param strayErrors the session's stray errors, which every {@link Error} the work of a call
-   *     throws goes to, a callback on a call's own token included; non-null
+   * @param ending the session's ending, which records every {@link Error} the work of a call
+   *     throws, a callback on a call's own token included; non-null
    * @throws NullPointerException if any argument is null
    */
   public ToolDispatch(
@@ -76,7 +76,7 @@ public final class ToolDispatch {
       ToolRegistry registry,
       ConcurrencyLimits limits,
       ScheduledExecutorService scheduler,
-      StrayErrors strayErrors) {
+      SessionEnding ending) {
     this.sessionContext = Objects.requireNonNull(sessionContext, "sessionContext must not be null");
     this.registry = Objects.requireNonNull(registry, "registry must not be null");
     this.limits = Objects.requireNonNull(limits, "limits must not be null");
@@ -85,7 +85,7 @@ public final class ToolDispatch {
     this.fileWritePermits = new CategoryPermits(limits.maxConcurrentFileWrites(), scope);
     this.executionPermits = new CategoryPermits(limits.maxConcurrentExecutions(), scope);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
-    this.strayErrors = Objects.requireNonNull(strayErrors, "strayErrors must not be null");
+    this.ending = Objects.requireNonNull(ending, "ending must not be null");
   }
 
   /**
@@ -183,10 +183,7 @@ public final class ToolDispatch {
    * started, with the reason {@code tool '<name>' did not stop; no tool runs until it ends}. A call
    * that only waits for room in its category still queues. The call's token is cancelled on a
    * thread of its own, so a callback that blocks or throws holds up neither this method, the
-   * session's cancellation nor the interrupt. A tool's {@link Error} is rethrown as itself, and so
-   * is the first of the {@link StrayErrors stray errors} once one was caught, before a call starts
-   * or once its answer is in: a host {@code Error} ends the dispatcher's use, never only the call
-   * it happened in.
+   * session's cancellation nor the interrupt. A tool's {@link Error} is rethrown as itself.
    *
    * @param call the call; non-null
    * @param cancellation the session's cancellation token; non-null
@@ -195,7 +192,7 @@ public final class ToolDispatch {
    * @return the tool's result, or a framework result on unknown tool or timeout
    * @throws NullPointerException if any argument is null
    * @throws IllegalArgumentException if {@code timeout} or {@code stopGrace} is not positive
-   * @throws Error the error the tool threw, or the first stray error
+   * @throws Error the error the tool threw
    * @throws CancellationException if {@code cancellation} fires or the calling thread is
    *     interrupted (its interrupt status is kept) before this method returns a result
    */
@@ -206,7 +203,6 @@ public final class ToolDispatch {
     Validate.positiveDuration("timeout", timeout);
     Validate.positiveDuration("stopGrace", stopGrace);
     cancellation.throwIfCancelled();
-    strayErrors.throwFirst();
 
     var binding = registry.get(call.name());
     if (binding.isEmpty()) {
@@ -221,11 +217,9 @@ public final class ToolDispatch {
             timeout,
             permitsFor(binding.orElseThrow().category()),
             liveCalls,
-            strayErrors::add);
+            ending);
     dispatched.start(scheduler);
-    var result = dispatched.await(stopGrace);
-    strayErrors.throwFirst();
-    return result;
+    return dispatched.await(stopGrace);
   }
 
   /** The permit pool a call of {@code category} acquires from. */

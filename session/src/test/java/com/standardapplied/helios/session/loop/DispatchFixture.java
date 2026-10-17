@@ -37,7 +37,7 @@ final class DispatchFixture implements AutoCloseable {
   static final Duration SHORT = Duration.ofMillis(1);
 
   final ManualScheduler scheduler = new ManualScheduler();
-  final StrayErrors strayErrors = new StrayErrors();
+  final SessionEnding ending = new SessionEnding("dispatch", new CancellationToken());
   final CountDownLatch release = new CountDownLatch(1);
   final CountDownLatch entered = new CountDownLatch(1);
   final CountDownLatch callbackRelease = new CountDownLatch(1);
@@ -63,8 +63,7 @@ final class DispatchFixture implements AutoCloseable {
   }
 
   ToolDispatch dispatcher(ConcurrencyLimits limits, ToolBinding... bindings) {
-    return new ToolDispatch(
-        CTX, new ToolRegistry(List.of(bindings)), limits, scheduler, strayErrors);
+    return new ToolDispatch(CTX, new ToolRegistry(List.of(bindings)), limits, scheduler, ending);
   }
 
   ToolDispatch dispatcher(ToolBinding... bindings) {

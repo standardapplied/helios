@@ -39,7 +39,7 @@ final class LoopCollaboratorsTest {
           ToolRegistry.empty(),
           ConcurrencyLimits.defaults(),
           new ScheduledThreadPoolExecutor(1),
-          new StrayErrors());
+          new SessionEnding("test", new CancellationToken()));
   private final Function<SessionState, HookContext> contextFactory =
       s ->
           new DefaultHookContext(

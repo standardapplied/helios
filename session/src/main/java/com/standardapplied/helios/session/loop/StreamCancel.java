@@ -3,24 +3,17 @@
 package com.standardapplied.helios.session.loop;
 
 import java.time.Duration;
-import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.function.Consumer;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Bounds what a turn waits for from a model stream's {@link Flow.Subscription}, the provider's
- * code, by {@code grace}. A cancel runs on a thread of its own, so a cancel that blocks never
- * strands the thread that cancels; one still running when the grace passes, or when the waiting
- * thread is interrupted, is interrupted and logged as not known to have closed the stream, never
- * taken for done; the waiting thread's interrupt status is kept. A request still running on the
- * thread that delivered the subscription when the turn ended is waited for the same way, and logged
- * when it does not return within the grace.
+ * Cancels a model stream's {@link Flow.Subscription}, the provider's code, on a thread of its own
+ * and waits up to {@code grace} for it, so a cancel that blocks never strands the thread that
+ * cancels. A cancel still running when the grace passes, or when the waiting thread is interrupted,
+ * is interrupted and logged as not known to have closed the stream; the waiting thread's interrupt
+ * status is kept. What the cancel throws is the session's: an {@link Error} goes to its {@link
+ * SessionEnding}, anything else is logged.
  */
 final class StreamCancel {
 
@@ -28,90 +21,40 @@ final class StreamCancel {
 
   private final String sessionId;
   private final Duration grace;
+  private final SessionEnding ending;
 
-  StreamCancel(String sessionId, Duration grace) {
+  StreamCancel(String sessionId, Duration grace, SessionEnding ending) {
     this.sessionId = sessionId;
     this.grace = grace;
+    this.ending = ending;
   }
 
-  /**
-   * The failure to report when {@code later} happened after {@code failure}: {@code failure}, with
-   * {@code later} added to it as suppressed, unless {@code later} is an {@link Error} and {@code
-   * failure} is not, so a host {@code Error} is never hidden behind an ordinary failure; then
-   * {@code later}, carrying {@code failure}. One already carried is not added again. Either may be
-   * {@code null}.
-   */
-  static Throwable fold(Throwable failure, Throwable later) {
-    if (later == null || later == failure) {
-      return failure;
-    }
-    if (failure == null) {
-      return later;
-    }
-    var primary = later instanceof Error && !(failure instanceof Error) ? later : failure;
-    var secondary = primary == failure ? later : failure;
-    if (!List.of(primary.getSuppressed()).contains(secondary)) {
-      primary.addSuppressed(secondary);
-    }
-    return primary;
-  }
-
-  /**
-   * Wait up to the grace for a request of the subscription to return.
-   *
-   * @param returned counted down once the request returned or threw
-   * @return {@code false} if the waiting thread was interrupted, its interrupt status cleared
-   */
-  boolean awaitRequest(CountDownLatch returned) {
+  /** Cancel {@code subscription} within the grace. */
+  void cancel(Flow.Subscription subscription) {
+    var worker =
+        Thread.ofVirtual()
+            .name("helios-stream-cancel-" + sessionId)
+            .start(
+                () -> {
+                  try {
+                    subscription.cancel();
+                  } catch (RuntimeException e) {
+                    LOGGER.log(
+                        Level.WARNING,
+                        "cancelling the model stream of session " + sessionId + " threw",
+                        e);
+                  } catch (Error e) {
+                    ending.fail(e);
+                  }
+                });
     try {
-      if (!returned.await(grace.toNanos(), TimeUnit.NANOSECONDS)) {
-        LOGGER.warning(
-            () ->
-                "requesting from the model stream of session "
-                    + sessionId
-                    + " did not return within "
-                    + grace
-                    + " after the turn ended");
+      if (worker.join(grace)) {
+        return;
       }
-      return true;
     } catch (InterruptedException e) {
-      return false;
-    }
-  }
-
-  /**
-   * Cancel {@code subscription} within the grace.
-   *
-   * @param failure what ended the stream, or {@code null}
-   * @param observedError handed an {@link Error} the cancel throws as it throws it, so one thrown
-   *     after the grace passed is not lost with the abandoned wait
-   * @return {@code failure} folded with what the cancel threw within the grace ({@link #fold})
-   */
-  Throwable cancel(
-      Flow.Subscription subscription, Throwable failure, Consumer<Error> observedError) {
-    var cancelling =
-        new FutureTask<Void>(
-            () -> {
-              try {
-                subscription.cancel();
-              } catch (Error error) {
-                observedError.accept(error);
-                throw error;
-              }
-            },
-            null);
-    var worker = Thread.ofVirtual().name("helios-stream-cancel-" + sessionId).start(cancelling);
-    try {
-      cancelling.get(grace.toNanos(), TimeUnit.NANOSECONDS);
-      return failure;
-    } catch (ExecutionException e) {
-      return fold(failure, e.getCause());
-    } catch (TimeoutException e) {
-      worker.interrupt();
-    } catch (InterruptedException e) {
-      worker.interrupt();
       Thread.currentThread().interrupt();
     }
+    worker.interrupt();
     LOGGER.warning(
         () ->
             "cancelling the model stream of session "
@@ -119,6 +62,5 @@ final class StreamCancel {
                 + " did not return within "
                 + grace
                 + "; the stream is not known to be closed");
-    return failure;
   }
 }

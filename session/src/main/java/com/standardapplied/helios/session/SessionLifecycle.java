@@ -7,6 +7,7 @@ import com.standardapplied.helios.session.execution.ExecutionProvider;
 import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StopClassifier;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -66,15 +67,7 @@ final class SessionLifecycle {
             limits.teardownGrace());
     this.start =
         new SessionStart(
-            state,
-            sessionContext,
-            executionProvider,
-            () -> {
-              var failure = teardown.run(loop.toolDispatch(), null);
-              if (failure != null) {
-                throw failure;
-              }
-            });
+            state, sessionContext, executionProvider, () -> teardown.end(loop.toolDispatch()));
   }
 
   /** The session's event stream, which the shutdown closes. */
@@ -104,25 +97,20 @@ final class SessionLifecycle {
    * Bind the loop and notify the execution provider that the session starts, the last step of the
    * session's construction, waiting for it within {@code startTimeout}. A start the provider does
    * not accept ({@link SessionStart}) ends the session with its {@link
-   * ResultMessage.ErrorProviderUnavailable}; an {@link Error} ends it with that error as the
-   * result's failure. Either way what the lifecycle acquired is released before the result settles,
-   * and {@code onSessionEnd} is called only if the provider accepts after the session stopped
-   * waiting, by the {@link SessionTeardown} that ends that late acceptance.
+   * ResultMessage.ErrorProviderUnavailable}, or with the {@link Error} {@code onSessionStart}
+   * threw, once what the lifecycle acquired is released. {@code onSessionEnd} is called only if the
+   * provider accepts after the session stopped waiting, by the {@link SessionTeardown} that ends
+   * that late acceptance.
    */
   void open(AgentLoop loop) {
     this.loop = loop;
-    try {
-      start.await(limits.startTimeout()).ifPresent(this::refuse);
-    } catch (Error e) {
-      abandon();
-      result.completeExceptionally(e);
-    }
+    start.await(limits.startTimeout()).ifPresent(this::refuse);
   }
 
   private void refuse(ResultMessage refusal) {
     state.setTerminal(refusal);
     abandon();
-    result.complete(refusal);
+    settle(refusal, state.ending().seal());
   }
 
   /** Start the agent loop on its virtual thread and arm the wall-clock deadline, at most once. */
@@ -142,17 +130,17 @@ final class SessionLifecycle {
   }
 
   /**
-   * Close the session: cancel its token, its callbacks on a thread of their own ({@link
-   * SessionTeardown#cancel}), so a callback that blocks or throws holds up neither the caller nor
-   * the result, and end the runtime of a session whose loop never started, writing a {@link
+   * Close the session: cancel it ({@link
+   * com.standardapplied.helios.session.loop.SessionEnding#cancel}), its token's callbacks on a
+   * thread of their own, so a callback that blocks or throws holds up neither the caller nor the
+   * result, and end the runtime of a session whose loop never started, writing a {@link
    * ResultMessage.Cancelled} terminal. The result future settles only once the runtime has ended,
    * as after a run, so a host that frees capacity on the result never frees it while the provider
    * still holds the session. Once the loop started, or the session ended at start-up, only the
-   * token is cancelled: the running loop observes it and ends the runtime itself. A teardown {@link
-   * Error} settles the result with it and is not thrown.
+   * session is cancelled: the running loop observes it and ends the runtime itself. Never throws.
    */
   void close() {
-    teardown.cancel("session closed");
+    state.ending().cancel("session closed");
     if (started.compareAndSet(false, true)) {
       var cancelled =
           new ResultMessage.Cancelled(
@@ -162,7 +150,7 @@ final class SessionLifecycle {
               state.totals().cost(),
               state.elapsed());
       state.setTerminal(cancelled);
-      end(cancelled, null);
+      end(cancelled);
     }
   }
 
@@ -174,14 +162,14 @@ final class SessionLifecycle {
    * onError} (silent socket, hung edge / proxy / load balancer) blocks the loop indefinitely. The
    * wall-clock cancellation flips the token; the turn's subscriber observes it and unblocks; the
    * loop proceeds to its next iteration, where {@link StopClassifier} sees {@code state.elapsed() >
-   * maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}. The token is cancelled
-   * through {@link SessionTeardown#cancel}, so its callbacks never run on the scheduler's one
-   * thread. The scheduler's shutdown drops it.
+   * maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}. The session is cancelled
+   * through {@link com.standardapplied.helios.session.loop.SessionEnding#cancel}, so its token's
+   * callbacks never run on the scheduler's one thread. The scheduler's shutdown drops it.
    */
   private void scheduleWallClockDeadline() {
     var millis = limits.maxWallClock().toMillis();
     deadlineScheduler.schedule(
-        () -> teardown.cancel("maxWallClock exceeded after " + millis + "ms"),
+        () -> state.ending().cancel("maxWallClock exceeded after " + millis + "ms"),
         millis,
         TimeUnit.MILLISECONDS);
   }
@@ -193,31 +181,30 @@ final class SessionLifecycle {
    * result().get()} / {@code runBlocking(...)} unblocks.
    *
    * <p>{@link AgentLoop#run} turns every {@link Exception} into a terminal, so only an {@link
-   * Error} escapes it: the result settles exceptionally with that error, as itself, and this thread
-   * then ends by throwing it to its uncaught-exception handler; so does a teardown {@code Error}
-   * after a run that returned its terminal.
+   * Error} escapes it, which goes to the session's {@link
+   * com.standardapplied.helios.session.loop.SessionEnding}. When the result settles with an {@code
+   * Error}, this thread then ends by throwing it to its uncaught-exception handler.
    */
   private void runLoop() {
     ResultMessage terminal = null;
-    Error failure = null;
     try {
       terminal = loop.run(state, limits);
     } catch (Error e) {
-      failure = e;
+      state.ending().fail(e);
     }
-    var settling = end(terminal, failure);
-    if (settling != null) {
-      throw settling;
+    var settling = end(terminal);
+    if (settling.isPresent()) {
+      throw settling.get();
     }
   }
 
-  private Error end(ResultMessage terminal, Error failure) {
-    var settling = teardown.run(loop.toolDispatch(), failure);
-    if (settling == null) {
-      result.complete(terminal);
-    } else {
-      result.completeExceptionally(settling);
-    }
+  private Optional<Error> end(ResultMessage terminal) {
+    var settling = teardown.run(loop.toolDispatch());
+    settle(terminal, settling);
     return settling;
+  }
+
+  private void settle(ResultMessage terminal, Optional<Error> failure) {
+    failure.ifPresentOrElse(result::completeExceptionally, () -> result.complete(terminal));
   }
 }

@@ -106,8 +106,8 @@ public final class AgentLoop {
    * @return the terminal {@link ResultMessage}; never null, {@link
    *     ResultMessage.ErrorDuringExecution} for any {@link Exception} that reached the loop
    * @throws NullPointerException if {@code state} or {@code limits} is null
-   * @throws Error an {@link Error} from the model, a tool, a hook or anything else the loop runs,
-   *     as itself: a host failure, never a terminal, so no further model or tool call follows it
+   * @throws Error an {@link Error} a tool or a hook threw on the loop thread, as itself: a host
+   *     failure, never a terminal
    */
   public ResultMessage run(SessionState state, SessionLimits limits) {
     Objects.requireNonNull(state, "state must not be null");

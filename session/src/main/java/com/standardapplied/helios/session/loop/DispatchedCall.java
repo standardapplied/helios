@@ -18,7 +18,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -32,9 +31,8 @@ import java.util.logging.Logger;
  * to the session's and is cancelled on a thread of its own, so a callback that blocks or throws
  * holds up neither the canceller nor the worker's interrupt. The work is the worker and that
  * cancellation; when both have ended, the worker gives the permit back and removes the link. Every
- * {@link Error} of the work, one a callback on the call's token throws or one the tool throws, is
- * handed to {@code strayErrors} as it is caught, before the answer settles with it, so it is kept
- * when no caller reads that answer, the session's cancellation having overtaken the caller's wait.
+ * {@link Error} of the work, one a callback on the call's token throws or one the tool throws, goes
+ * to the session's {@link SessionEnding}, the tool's before the answer settles with it.
  */
 final class DispatchedCall {
 
@@ -80,7 +78,7 @@ final class DispatchedCall {
   private final long deadline;
   private final CategoryPermits permits;
   private final Set<Live> liveCalls;
-  private final Consumer<Error> strayErrors;
+  private final SessionEnding ending;
   private final Live live;
   private final Thread worker;
   private volatile CancellationToken.Registration parentLink = CancellationToken.Registration.NOOP;
@@ -93,7 +91,7 @@ final class DispatchedCall {
       Duration timeout,
       CategoryPermits permits,
       Set<Live> liveCalls,
-      Consumer<Error> strayErrors) {
+      SessionEnding ending) {
     this.binding = binding;
     this.call = call;
     this.context = new ToolContext(session, token, timeout);
@@ -102,7 +100,7 @@ final class DispatchedCall {
     this.deadline = System.nanoTime() + TimeUnit.NANOSECONDS.convert(timeout);
     this.permits = permits;
     this.liveCalls = liveCalls;
-    this.strayErrors = strayErrors;
+    this.ending = ending;
     this.live = new Live(call, ended);
     this.worker = Thread.ofVirtual().name("helios-tool-" + call.name()).unstarted(this::work);
     answer.whenComplete((result, failure) -> answered.countDown());
@@ -199,9 +197,7 @@ final class DispatchedCall {
   private void cancel(String reason) {
     answer.completeExceptionally(new CancellationException(reason));
     if (tokenClaimed.compareAndSet(false, true)) {
-      token
-          .cancelAsync(reason, strayErrors)
-          .whenComplete((ignored, failure) -> tokenSettled.complete(null));
+      token.cancelAsync(reason, ending::fail).thenRun(() -> tokenSettled.complete(null));
     }
     worker.interrupt();
   }
@@ -238,7 +234,7 @@ final class DispatchedCall {
       Thread.currentThread().interrupt();
     } catch (Throwable e) {
       if (e instanceof Error error) {
-        strayErrors.accept(error);
+        ending.fail(error);
       }
       if (!answer.completeExceptionally(e)) {
         LOGGER.log(Level.SEVERE, "tool '" + call.name() + "' threw after its call was answered", e);

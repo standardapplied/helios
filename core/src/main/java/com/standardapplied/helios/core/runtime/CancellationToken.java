@@ -101,49 +101,44 @@ public final class CancellationToken {
     if (claimed.isEmpty()) {
       return false;
     }
-    fire(claimed.get(), error -> {});
+    fire(claimed.get());
     return true;
   }
 
   /**
    * Signal cancellation as {@link #cancel(String)} does, but run the claimed callbacks on a virtual
    * thread of their own. The token is cancelled when this returns; a callback that blocks or throws
-   * holds up only the returned future, never the caller.
-   *
-   * <p>{@code observedFailure} is handed each {@link Error} a callback throws as soon as it is
-   * caught, on the callbacks' thread, so a caller that stops waiting for the future while a later
-   * callback still blocks keeps the {@code Error}s thrown before it. What the observer throws is
-   * added to the {@code Error} the future completes with as suppressed; the remaining callbacks
-   * still run.
+   * holds up only the returned future, never the caller. Each {@link Error} a callback throws is
+   * handed to {@code onError} as it is caught, on the callbacks' thread, and the remaining
+   * callbacks still run.
    *
    * @param reason a human-readable reason for the cancellation
-   * @param observedFailure receives each {@link Error} a claimed callback throws, in order
-   * @return a future that completes once every claimed callback has run, exceptionally with the
-   *     first {@link Error} a callback threw (later ones suppressed on it); already complete if the
-   *     token was already cancelled, whose callbacks the earlier call runs
-   * @throws NullPointerException if {@code reason} or {@code observedFailure} is null
+   * @param onError receives each {@link Error} a claimed callback throws, in order; it must not
+   *     throw
+   * @return a future that completes normally once every claimed callback has run; already complete
+   *     if the token was already cancelled, whose callbacks the earlier call runs
+   * @throws NullPointerException if {@code reason} or {@code onError} is null
    * @throws IllegalArgumentException if {@code reason} is blank
    */
-  public CompletableFuture<Void> cancelAsync(String reason, Consumer<Error> observedFailure) {
-    Objects.requireNonNull(observedFailure, "observedFailure must not be null");
+  public CompletableFuture<Void> cancelAsync(String reason, Consumer<Error> onError) {
+    Objects.requireNonNull(onError, "onError must not be null");
     var claimed = claim(reason);
-    var fired = new CompletableFuture<Void>();
     if (claimed.isEmpty()) {
-      fired.complete(null);
-      return fired;
+      return CompletableFuture.completedFuture(null);
     }
-    Thread.ofVirtual()
-        .name("helios-cancellation-callbacks")
-        .start(
-            () -> {
-              try {
-                fire(claimed.get(), observedFailure);
-                fired.complete(null);
-              } catch (Error e) {
-                fired.completeExceptionally(e);
-              }
-            });
-    return fired;
+    return CompletableFuture.runAsync(
+        () ->
+            claimed
+                .get()
+                .forEach(
+                    registration -> {
+                      try {
+                        fire(List.of(registration));
+                      } catch (Error e) {
+                        onError.accept(e);
+                      }
+                    }),
+        task -> Thread.ofVirtual().name("helios-cancellation-callbacks").start(task));
   }
 
   /**
@@ -193,11 +188,11 @@ public final class CancellationToken {
         return registration;
       }
     }
-    fire(List.of(registration), error -> {});
+    fire(List.of(registration));
     return Registration.NOOP;
   }
 
-  private void fire(List<CallbackRegistration> claimed, Consumer<Error> observedFailure) {
+  private void fire(List<CallbackRegistration> claimed) {
     Error hostError = null;
     for (var registration : claimed) {
       try {
@@ -210,26 +205,10 @@ public final class CancellationToken {
         } else if (hostError != err) {
           hostError.addSuppressed(err);
         }
-        observe(observedFailure, err, hostError);
       }
     }
     if (hostError != null) {
       throw hostError;
-    }
-  }
-
-  /**
-   * Hand {@code err} to {@code observedFailure}. What the observer throws is added to {@code
-   * hostError} as suppressed, so it neither replaces the callback's {@code Error} nor keeps the
-   * remaining callbacks from running.
-   */
-  private static void observe(Consumer<Error> observedFailure, Error err, Error hostError) {
-    try {
-      observedFailure.accept(err);
-    } catch (RuntimeException | Error observerFailure) {
-      if (observerFailure != hostError) {
-        hostError.addSuppressed(observerFailure);
-      }
     }
   }
 

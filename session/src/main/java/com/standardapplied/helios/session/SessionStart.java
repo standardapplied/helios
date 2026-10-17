@@ -9,7 +9,6 @@ import com.standardapplied.helios.session.loop.SessionState;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -18,11 +17,12 @@ import java.util.logging.Logger;
 
 /**
  * The execution provider's {@code onSessionStart}, run on a thread of its own and waited for within
- * a bound. A provider that refuses, returns {@code null}, throws a {@link RuntimeException}, or has
- * not returned when the bound passes or the waiting thread is interrupted, refuses the session; one
- * that throws an {@link Error} fails it with that error. A start that settles after the session
- * stopped waiting is logged as a {@code WARNING}, and a late acceptance is then ended by the
- * session's bounded teardown, so the provider is never left holding a session nobody ends.
+ * a bound. A provider that refuses, returns {@code null}, throws, or has not returned when the
+ * bound passes or the waiting thread is interrupted, refuses the session; an {@link Error} it
+ * throws also goes to the session's {@link com.standardapplied.helios.session.loop.SessionEnding}.
+ * A start that settles after the session stopped waiting is logged as a {@code WARNING}, and a late
+ * acceptance is then ended by the session's bounded teardown, so the provider is never left holding
+ * a session nobody ends.
  */
 final class SessionStart {
 
@@ -34,8 +34,7 @@ final class SessionStart {
   private final Runnable lateTeardown;
 
   /**
-   * @param lateTeardown ends a provider that accepted after the session stopped waiting; what it
-   *     throws is logged
+   * @param lateTeardown ends a provider that accepted after the session stopped waiting
    */
   SessionStart(
       SessionState state,
@@ -53,7 +52,6 @@ final class SessionStart {
    *
    * @return the refusal the session ends with, its reason and cause redacted against the session's
    *     secret registry, or empty if the provider accepted
-   * @throws Error the error {@code onSessionStart} threw, as itself
    */
   Optional<ResultMessage.ErrorProviderUnavailable> await(Duration bound) {
     var outcome = new CompletableFuture<SessionStartOutcome>();
@@ -67,11 +65,7 @@ final class SessionStart {
               outcome.complete(SessionStartOutcome.refuse(reason));
               worker.interrupt();
             });
-    try {
-      return judged(outcome.join());
-    } catch (CompletionException e) {
-      return thrown(e.getCause());
-    }
+    return judged(outcome.join());
   }
 
   /**
@@ -83,9 +77,7 @@ final class SessionStart {
       CompletableFuture<SessionStartOutcome> outcome, Duration bound) {
     try {
       outcome.get(bound.toNanos(), TimeUnit.NANOSECONDS);
-    } catch (ExecutionException e) {
-      return Optional.empty();
-    } catch (TimeoutException e) {
+    } catch (ExecutionException | TimeoutException e) {
       return Optional.of("onSessionStart did not return within " + bound);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -95,42 +87,42 @@ final class SessionStart {
   }
 
   /**
-   * Settle {@code outcome} with what {@code onSessionStart} did; if the session stopped waiting
-   * first, report what came too late and end a late acceptance. What it threw fails {@code outcome}
-   * as {@link SessionTeardown#asCompletion}: a {@link java.util.concurrent.CancellationException}
-   * refuses the session instead of cancelling {@code outcome}, and an {@link Error} a {@code join}
-   * carries fails the session as itself.
+   * Settle {@code outcome} with what {@code onSessionStart} did, a throw as a refusal carrying it;
+   * if the session stopped waiting first, report what came too late and end a late acceptance.
    */
   private void run(CompletableFuture<SessionStartOutcome> outcome) {
     SessionStartOutcome started;
     try {
       started = executionProvider.onSessionStart(sessionContext);
     } catch (Throwable t) {
-      if (!outcome.completeExceptionally(SessionTeardown.asCompletion(t))) {
-        LOGGER.log(Level.WARNING, "onSessionStart threw after " + abandonment(), t);
+      if (t instanceof Error error) {
+        state.ending().fail(error);
       }
-      return;
+      started =
+          SessionStartOutcome.refuse(
+              "onSessionStart threw "
+                  + t.getClass().getSimpleName()
+                  + ": "
+                  + (t.getMessage() == null ? "(no message)" : t.getMessage()),
+              t);
     }
     if (!outcome.complete(started)) {
-      lateOutcome(started instanceof SessionStartOutcome.Accept);
+      lateOutcome(started);
     }
   }
 
-  private void lateOutcome(boolean accepted) {
-    LOGGER.warning(
-        () ->
-            "onSessionStart returned after "
-                + abandonment()
-                + (accepted ? "; its acceptance is ended by the session's teardown" : ""));
+  private void lateOutcome(SessionStartOutcome started) {
+    var accepted = started instanceof SessionStartOutcome.Accept;
+    LOGGER.log(
+        Level.WARNING,
+        "onSessionStart settled after "
+            + abandonment()
+            + (accepted ? "; its acceptance is ended by the session's teardown" : ""),
+        started instanceof SessionStartOutcome.Refuse refuse ? refuse.cause() : null);
     if (accepted) {
       // The interrupt that gave up on onSessionStart must not cut the teardown's waits short.
       Thread.interrupted();
-      try {
-        lateTeardown.run();
-      } catch (Throwable t) {
-        LOGGER.log(
-            Level.WARNING, "the teardown of a late acceptance threw after " + abandonment(), t);
-      }
+      lateTeardown.run();
     }
   }
 
@@ -148,19 +140,6 @@ final class SessionStart {
           Optional.of(refusal(refuse.reason(), refuse.cause()));
       case SessionStartOutcome.Accept accept -> Optional.empty();
     };
-  }
-
-  private Optional<ResultMessage.ErrorProviderUnavailable> thrown(Throwable failure) {
-    if (failure instanceof Error error) {
-      throw error;
-    }
-    return Optional.of(
-        refusal(
-            "onSessionStart threw "
-                + failure.getClass().getSimpleName()
-                + ": "
-                + (failure.getMessage() == null ? "(no message)" : failure.getMessage()),
-            failure));
   }
 
   private ResultMessage.ErrorProviderUnavailable refusal(String reason, Throwable cause) {

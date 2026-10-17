@@ -53,20 +53,6 @@ final class SessionStateTest {
   }
 
   @Test
-  void theStrayErrorsKeepWhatIsAddedInOrderAndRejectANullError() {
-    var state = new SessionState(SID, new CancellationToken(), Clock.systemUTC());
-    var first = new AssertionError("first");
-    var second = new StackOverflowError("second");
-
-    state.strayErrors().add(first);
-    state.strayErrors().add(second);
-
-    assertEquals(List.of(first, second), state.strayErrors().all());
-    var ex = assertThrows(NullPointerException.class, () -> state.strayErrors().add(null));
-    assertEquals("error must not be null", ex.getMessage());
-  }
-
-  @Test
   void nullSessionIdRejected() {
     var ex =
         assertThrows(

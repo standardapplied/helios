@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,12 +18,10 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.RunnableScheduledFuture;
@@ -48,7 +47,8 @@ final class DispatchedCallTest {
   private final Overdue scheduler = new Overdue();
   private final AtomicInteger runs = new AtomicInteger();
   private final Set<DispatchedCall.Live> live = ConcurrentHashMap.newKeySet();
-  private final List<Error> strays = new CopyOnWriteArrayList<>();
+  private final SessionEnding ending =
+      new SessionEnding("dispatched-call", new CancellationToken());
   private final ScheduledThreadPoolExecutor busy = new ScheduledThreadPoolExecutor(1);
   private final CountDownLatch busyRelease = new CountDownLatch(1);
   private final CountDownLatch callbackEntered = new CountDownLatch(1);
@@ -90,7 +90,7 @@ final class DispatchedCallTest {
         timeout,
         permits,
         live,
-        strays::add);
+        ending);
   }
 
   private ToolResult counting(Map<String, Object> args, ToolContext ctx) {
@@ -242,7 +242,7 @@ final class DispatchedCallTest {
   }
 
   @Test
-  void anErrorTheToolThrewIsKeptWhenTheSessionWasCancelledBeforeItsAnswerWasRead() {
+  void anErrorTheToolThrewEndsTheSessionWhenTheSessionWasCancelledBeforeItsAnswerWasRead() {
     var sentinel = new AssertionError("tool failure");
     var session = new CancellationToken();
     var dispatched =
@@ -258,7 +258,7 @@ final class DispatchedCallTest {
     session.cancel("session closed");
 
     assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
-    assertEquals(List.of(sentinel), strays);
+    assertSame(sentinel, ending.seal().orElseThrow());
   }
 
   @Test

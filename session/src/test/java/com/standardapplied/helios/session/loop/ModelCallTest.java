@@ -3,8 +3,6 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.fault.Backoff;
@@ -64,7 +62,7 @@ final class ModelCallTest {
           ToolRegistry.empty(),
           ConcurrencyLimits.defaults(),
           scheduler,
-          state.strayErrors());
+          state.ending());
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
   private final SteeringQueue queue = new SteeringQueue(1);
 
@@ -225,23 +223,21 @@ final class ModelCallTest {
   }
 
   @Test
-  void aStrayErrorCaughtBeforeARetryIsThrownInsteadOfTheNextModelCall() {
-    var stray = new AssertionError("late host failure");
+  void aHostErrorRecordedBeforeARetryEndsTheAttemptsWithoutAnotherModelCall() {
     var model = new FailingModel(cancellation -> transientFailure());
-    Consumer<QueryEvent> strayOnRetry =
+    Consumer<QueryEvent> failingOnRetry =
         event -> {
           if (event instanceof QueryEvent.TurnRetried) {
-            state.strayErrors().add(stray);
+            state.ending().fail(new AssertionError("late host failure"));
           }
         };
-    var call = modelCall(model, strayOnRetry);
+    var call = modelCall(model, failingOnRetry);
 
-    var thrown =
-        assertThrows(
-            AssertionError.class,
-            () -> call.stream(state, retrying(2, Duration.ofMillis(1)), List.of()));
+    var attempts =
+        Await.value(
+            "the call", run(() -> call.stream(state, retrying(2, Duration.ofHours(1)), List.of())));
 
-    assertSame(stray, thrown);
+    assertEquals(1, attempts.count());
     assertEquals(1, model.calls.get());
   }
 

@@ -312,7 +312,7 @@ final class ToolDispatchCancellationTest {
   }
 
   @Test
-  void aCancellationCallbackErrorIsKeptAsAStrayErrorAndTheToolIsStillInterrupted() {
+  void aCancellationCallbackErrorEndsTheSessionAndTheToolIsStillInterrupted() {
     var sentinel = new AssertionError("broken callback");
     var interrupted = new CountDownLatch(1);
     var d =
@@ -327,11 +327,11 @@ final class ToolDispatchCancellationTest {
     assertCancelled("session closed", running);
     awaitIdle(d);
 
-    assertEquals(List.of(sentinel), fixture.strayErrors.all());
+    assertSame(sentinel, fixture.ending.seal().orElseThrow());
   }
 
   @Test
-  void aCancellationCallbackErrorOfATimedOutCallIsThrownByItsDispatchAsItself() {
+  void aCancellationCallbackErrorOfATimedOutCallEndsTheSession() {
     var sentinel = new AssertionError("broken callback");
     var d =
         fixture.dispatcher(
@@ -347,7 +347,9 @@ final class ToolDispatchCancellationTest {
 
     fixture.scheduler.fireLatest();
 
-    assertSame(sentinel, Await.failure("the timed-out dispatch", dispatching));
+    assertEquals(
+        ToolResult.timedOut("throwing", NEVER), Await.value("the timed-out dispatch", dispatching));
+    assertSame(sentinel, fixture.ending.seal().orElseThrow());
   }
 
   /**
