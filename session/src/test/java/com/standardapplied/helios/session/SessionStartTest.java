@@ -20,6 +20,7 @@ import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.Supplier;
@@ -94,6 +95,10 @@ final class SessionStartTest {
         () -> {
           throw new IllegalStateException("auth failed");
         };
+    Supplier<SessionStartOutcome> cancelling =
+        () -> {
+          throw new CancellationException("start cancelled");
+        };
     Supplier<SessionStartOutcome> erroring =
         () -> {
           throw new AssertionError("start failure");
@@ -102,6 +107,7 @@ final class SessionStartTest {
         Arguments.of("refusal", refusing),
         Arguments.of("null", returningNull),
         Arguments.of("exception", throwing),
+        Arguments.of("cancellation exception", cancelling),
         Arguments.of("error", erroring));
   }
 
@@ -292,6 +298,23 @@ final class SessionStartTest {
               ResultMessage.ErrorProviderUnavailable.class,
               Await.value("the result", session.result()));
       assertEquals("onSessionStart returned null", refusal.reason());
+    }
+  }
+
+  @Test
+  void aCancellationExceptionAtStartUpIsAProviderRefusal() {
+    var provider = new RecordingProvider(order);
+    provider.start =
+        () -> {
+          throw new CancellationException("start cancelled");
+        };
+
+    try (var session = AgentSession.create(withProvider(provider).build())) {
+      var refusal =
+          assertInstanceOf(
+              ResultMessage.ErrorProviderUnavailable.class,
+              Await.value("the result", session.result()));
+      assertEquals("onSessionStart threw CancellationException: start cancelled", refusal.reason());
     }
   }
 

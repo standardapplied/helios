@@ -3,6 +3,8 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.fault.Backoff;
@@ -55,6 +57,12 @@ final class ModelCallTest {
   record Answer(String answer) {}
 
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+  private final ToolDispatch dispatch =
+      new ToolDispatch(
+          SessionContext.forTesting("sess-call"),
+          ToolRegistry.empty(),
+          ConcurrencyLimits.defaults(),
+          scheduler);
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
   private final SteeringQueue queue = new SteeringQueue(1);
   private final SessionState state = new SessionState("sess-call", new CancellationToken(), CLOCK);
@@ -76,12 +84,6 @@ final class ModelCallTest {
   }
 
   private ModelCall modelCall(FailingModel model, Consumer<QueryEvent> sink) {
-    var dispatch =
-        new ToolDispatch(
-            SessionContext.forTesting("sess-call"),
-            ToolRegistry.empty(),
-            ConcurrencyLimits.defaults(),
-            scheduler);
     var collaborators =
         new LoopCollaborators(
             HookRegistry.empty(),
@@ -218,6 +220,27 @@ final class ModelCallTest {
                 }));
 
     assertTrue(interrupted);
+    assertEquals(1, model.calls.get());
+  }
+
+  @Test
+  void aStrayErrorCaughtBeforeARetryIsThrownInsteadOfTheNextModelCall() {
+    var stray = new AssertionError("late host failure");
+    var model = new FailingModel(cancellation -> transientFailure());
+    Consumer<QueryEvent> strayOnRetry =
+        event -> {
+          if (event instanceof QueryEvent.TurnRetried) {
+            dispatch.strayErrors().add(stray);
+          }
+        };
+    var call = modelCall(model, strayOnRetry);
+
+    var thrown =
+        assertThrows(
+            AssertionError.class,
+            () -> call.stream(state, retrying(2, Duration.ofMillis(1)), List.of()));
+
+    assertSame(stray, thrown);
     assertEquals(1, model.calls.get());
   }
 

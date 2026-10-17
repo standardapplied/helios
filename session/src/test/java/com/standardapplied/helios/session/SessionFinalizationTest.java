@@ -366,7 +366,65 @@ final class SessionFinalizationTest {
     assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
   }
 
+  @Test
+  void anErrorAStreamCancelThrowsAfterTheTurnWasReturnedFailsTheResult() {
+    var sentinel = new AssertionError("late cancel failure");
+    var requested = new CountDownLatch(1);
+    var cancelling = new CompletableFuture<Thread>();
+    var model =
+        model(
+            () ->
+                subscriber ->
+                    subscriber.onSubscribe(
+                        subscription(
+                            requested::countDown,
+                            () -> {
+                              cancelling.complete(Thread.currentThread());
+                              RecordingProvider.blockIgnoringInterrupts(released);
+                              throw sentinel;
+                            })));
+    var session =
+        AgentSession.create(
+            options(model)
+                .withLimits(grace())
+                .withHook(
+                    (OnStreamEventHook)
+                        (event, ctx) -> {
+                          if (event instanceof QueryEvent.LoopEnded) {
+                            released.countDown();
+                            Await.termination(
+                                "the cancel to throw",
+                                Await.value("the cancel to start", cancelling));
+                          }
+                        })
+                .build());
+    session.send("go");
+    Await.latch("the stream requested", requested);
+
+    session.close();
+
+    assertSame(sentinel, Await.failure("the result to fail", session.result()));
+  }
+
   // ── a failing or hanging teardown still settles the result ──────────────────
+
+  @Test
+  void aCancellationExceptionOnSessionEndThrowsIsLoggedAndTheResultStillSettles() {
+    var cleanup = new CancellationException("end cancelled");
+    var provider = new RecordingProvider(order);
+    provider.end =
+        () -> {
+          throw cleanup;
+        };
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
+        var session = AgentSession.create(withProvider(provider).build())) {
+      session.send("go");
+
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
+    }
+    assertSame(cleanup, logged.getFirst().getThrown());
+  }
 
   @Test
   void aTeardownExceptionAfterALoopErrorRidesOnItAsSuppressed() {

@@ -242,6 +242,26 @@ final class DispatchedCallTest {
   }
 
   @Test
+  void anErrorTheToolThrewIsKeptWhenTheSessionWasCancelledBeforeItsAnswerWasRead() {
+    var sentinel = new AssertionError("tool failure");
+    var session = new CancellationToken();
+    var dispatched =
+        dispatched(
+            NEVER,
+            session,
+            new CategoryPermits(1, new CategoryPermits.Scope()),
+            (args, ctx) -> {
+              throw sentinel;
+            });
+    dispatched.start(busy);
+    Await.until("the worker to end", live::isEmpty);
+    session.cancel("session closed");
+
+    assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    assertEquals(List.of(sentinel), strays);
+  }
+
+  @Test
   void aTimeoutReadAfterTheSessionWasCancelledIsNotReturned() {
     busy.execute(() -> DispatchFixture.awaitThroughInterrupts(busyRelease));
     var session = blockedSession();

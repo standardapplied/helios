@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -31,7 +32,7 @@ import java.util.logging.Logger;
  * one, else the first {@code Error} of a step, with every other failure of a step added as
  * suppressed. A step's {@link RuntimeException} is logged and fails nothing on its own. What a step
  * threw after its grace passed but before the result settles counts as well, as does every {@link
- * ToolDispatch#strayErrors() stray Error} of the session's tool calls.
+ * ToolDispatch#strayErrors() stray Error} of the session's work.
  */
 final class SessionTeardown {
 
@@ -108,7 +109,7 @@ final class SessionTeardown {
     if (end.isCompletedExceptionally()) {
       failures.add("onSessionEnd", end.exceptionNow());
     }
-    tools.strayErrors().forEach(error -> failures.add("a tool call", error));
+    tools.strayErrors().all().forEach(error -> failures.add("the session's work", error));
     return failures.settling(observedCallbackError.get());
   }
 
@@ -142,7 +143,11 @@ final class SessionTeardown {
     }
   }
 
-  /** Run {@code step} on a thread of its own, so a step that never returns holds nothing up. */
+  /**
+   * Run {@code step} on a thread of its own, so a step that never returns holds nothing up. What it
+   * throws is wrapped in a {@link CompletionException}, so a {@link
+   * java.util.concurrent.CancellationException} it throws fails the step instead of cancelling it.
+   */
   private CompletableFuture<Void> start(String name, Runnable step) {
     var done = new CompletableFuture<Void>();
     Thread.ofVirtual()
@@ -153,7 +158,7 @@ final class SessionTeardown {
                 step.run();
                 done.complete(null);
               } catch (Throwable t) {
-                done.completeExceptionally(t);
+                done.completeExceptionally(new CompletionException(t));
               }
             });
     return done;
