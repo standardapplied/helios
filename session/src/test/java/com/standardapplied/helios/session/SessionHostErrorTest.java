@@ -107,6 +107,22 @@ final class SessionHostErrorTest {
   }
 
   @Test
+  void anErrorSubscribeThrowsAfterAcceptingASubscriptionCancelsItAndFailsTheResult() {
+    var sentinel = new AssertionError("subscribe failure");
+    var cancels = new AtomicInteger();
+    var model =
+        model(
+            token ->
+                subscriber -> {
+                  subscriber.onSubscribe(subscription(() -> {}, cancels::incrementAndGet));
+                  throw sentinel;
+                });
+
+    assertSame(sentinel, failureOf(model));
+    assertEquals(1, cancels.get());
+  }
+
+  @Test
   void aCancelThatThrowsAnExceptionAfterAnErrorSubscribingIsLogged() {
     var sentinel = new AssertionError("request failure");
     var cleanup = new IllegalStateException("close failed");

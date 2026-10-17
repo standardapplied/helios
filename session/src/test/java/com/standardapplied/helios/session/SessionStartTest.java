@@ -21,6 +21,7 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -212,6 +213,47 @@ final class SessionStartTest {
             + SID
             + " stopped waiting for RecordingProvider; its acceptance is ended by the"
             + " session's teardown");
+  }
+
+  @Test
+  void aLateAcceptanceWaitsForItsOnSessionEndThoughItsStartWasInterrupted() {
+    var accepting = new CountDownLatch(1);
+    var ending = new CountDownLatch(1);
+    var endEntered = new CountDownLatch(1);
+    var starting = new CompletableFuture<Thread>();
+    var provider = new RecordingProvider(order);
+    provider.start =
+        () -> {
+          starting.complete(Thread.currentThread());
+          RecordingProvider.blockIgnoringInterrupts(accepting);
+          return SessionStartOutcome.accept();
+        };
+    provider.end =
+        () -> {
+          endEntered.countDown();
+          RecordingProvider.blockIgnoringInterrupts(ending);
+        };
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
+      var session =
+          AgentSession.create(withProvider(provider).withLimits(shortStartSlowTeardown()).build());
+      Await.value("the refusal", session.result());
+      accepting.countDown();
+      Await.latch("onSessionEnd of the late acceptance", endEntered);
+      ending.countDown();
+      Await.termination("the late acceptance's teardown", Await.value("the start", starting));
+    }
+
+    assertEquals(
+        List.of(
+            "onSessionStart settled after session "
+                + SID
+                + " stopped waiting for RecordingProvider; its acceptance is ended by the"
+                + " session's teardown"),
+        logged.stream()
+            .filter(record -> record.getLevel() == Level.WARNING)
+            .map(LogRecord::getMessage)
+            .toList());
   }
 
   @Test
