@@ -363,22 +363,31 @@ class FaultToleranceTest {
   }
 
   @Test
-  void errorWithTimeoutWrappedInRuntimeException() {
-    var ft = FaultTolerance.newBuilder().withOperationTimeout(NEVER_REACHED).build();
+  void anErrorFromATimedOperationIsRethrownAsItselfAndNeverRetried() {
+    var attempts = new AtomicInteger();
+    var ft =
+        FaultTolerance.newBuilder()
+            .withRetry(
+                RetryPolicy.newBuilder()
+                    .withMaxAttempts(3)
+                    .withBackoff(Backoff.fixed(Duration.ofMillis(1)))
+                    .build())
+            .withOperationTimeout(NEVER_REACHED)
+            .build();
     var error = new AssertionError("broken invariant");
 
-    var exception =
+    var thrown =
         assertThrows(
-            RuntimeException.class,
+            AssertionError.class,
             () ->
                 ft.execute(
                     () -> {
+                      attempts.incrementAndGet();
                       throw error;
                     }));
 
-    assertEquals(RuntimeException.class, exception.getClass());
-    assertSame(error, exception.getCause());
-    assertEquals("java.lang.AssertionError: broken invariant", exception.getMessage());
+    assertSame(error, thrown);
+    assertEquals(1, attempts.get());
   }
 
   @Test

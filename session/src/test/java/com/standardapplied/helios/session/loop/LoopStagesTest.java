@@ -33,6 +33,7 @@ import com.standardapplied.helios.session.hooks.OnUserMessageHook;
 import com.standardapplied.helios.session.hooks.PostCompactHook;
 import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
+import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;

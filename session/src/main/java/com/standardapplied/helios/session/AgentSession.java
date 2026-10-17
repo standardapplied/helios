@@ -98,9 +98,14 @@ public interface AgentSession extends AutoCloseable {
   Flow.Publisher<QueryEvent> events();
 
   /**
-   * Future that completes when the session reaches a terminal {@link ResultMessage}. Completes
-   * normally with the terminal value; exceptional completion indicates a session bug, not an
-   * agent-loop terminal (those are returned via the value, not the exception).
+   * Future that completes when the session reaches a terminal {@link ResultMessage} and its runtime
+   * has been torn down. Completes normally with the terminal value. It completes exceptionally only
+   * with an {@link Error}, as itself, that the model, a tool, a hook, the execution provider or the
+   * session's own teardown threw: a host failure, not an agent-loop terminal, and the session ends
+   * with it, no further model or tool call made. Failures of later teardown steps ride along as
+   * {@linkplain Throwable#getSuppressed() suppressed}. Nothing stops the JVM: the loop's virtual
+   * thread ends by throwing the error to its uncaught-exception handler, and the host decides what
+   * an {@code Error} means for the process.
    *
    * @return the terminal-result future
    */
@@ -122,23 +127,31 @@ public interface AgentSession extends AutoCloseable {
 
   /**
    * Whether the agent loop has started: {@code true} from the first accepted {@link
-   * #send(UserMessage)} or {@link #interrupt(String)} on, and once the session is closed, since a
-   * closed session can never start. A host uses it to tell a session nobody ever used from one at
-   * work.
+   * #send(UserMessage)} or {@link #interrupt(String)} on, and once the session is closed or its
+   * execution provider did not accept it, since such a session can never start. A host uses it to
+   * tell a session nobody ever used from one at work.
    *
-   * @return {@code true} once the loop started or the session closed
+   * @return {@code true} once the loop started, the session closed or it ended at start-up
    */
   boolean isStarted();
 
   /**
    * Release session resources. Cancels the agent loop, closes the event publisher, and releases the
    * underlying virtual thread. Idempotent — safe to call multiple times, and safe to call after
-   * natural termination. A loop at work stops cooperatively: {@link #result()} completes once it
-   * has stopped, which may be after this returns; for a session never started, before it returns.
-   * Either way it completes only after the session's runtime has ended, its {@link
-   * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd} included, unless
-   * the provider refused the session at start: its result completed then, and the provider holds
-   * nothing to end.
+   * natural termination; it never throws. A loop at work stops cooperatively: {@link #result()}
+   * completes once it has stopped, which may be after this returns; for a session never started,
+   * before it returns. Either way it completes only after the session's runtime has been torn down,
+   * unless the provider refused the session at start: its result completed then, and the provider
+   * holds nothing to end.
+   *
+   * <p>The teardown runs on every end, a natural one included: it cancels the session's token,
+   * which cancels and interrupts every tool call still running, and waits {@link
+   * SessionLimits#teardownGrace()} for them to end; then it calls {@link
+   * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd} and waits the same
+   * grace for it to return; then it gives event subscribers the same grace to drain. A tool call or
+   * {@code onSessionEnd} still running when its grace has passed is logged and left running: a tool
+   * that ignores both its token and interruption may still run, and its effects land, after the
+   * result settles.
    */
   @Override
   void close();

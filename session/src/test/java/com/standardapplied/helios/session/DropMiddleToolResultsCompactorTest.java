@@ -170,11 +170,40 @@ final class DropMiddleToolResultsCompactorTest {
 
   @Test
   void summarizerThrowingReturnsOriginalHistory() {
-    Model thrower =
+    var compactor =
+        compactorSummarizingWith(
+            () -> {
+              throw new RuntimeException("boom");
+            });
+    var history = chain(10);
+    var out = compactor.compact(history, freshState());
+    assertSame(history, out.history(), "throwing summarizer must yield no-op");
+    assertEquals(0, out.usage().inputTokens());
+  }
+
+  @Test
+  void anErrorTheSummarizerThrewLeavesTheCompactionAsItself() {
+    var sentinel = new AssertionError("host failure");
+    var compactor =
+        compactorSummarizingWith(
+            () -> {
+              throw sentinel;
+            });
+    var history = chain(10);
+    var state = freshState();
+
+    var thrown = assertThrows(AssertionError.class, () -> compactor.compact(history, state));
+
+    assertSame(sentinel, thrown);
+  }
+
+  private static DropMiddleToolResultsCompactor compactorSummarizingWith(Runnable summary) {
+    Model summarizer =
         new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            throw new RuntimeException("boom");
+            summary.run();
+            return Response.newBuilder().withContent("unreached").build();
           }
 
           @Override
@@ -187,15 +216,10 @@ final class DropMiddleToolResultsCompactorTest {
             return "summary";
           }
         };
-    var compactor =
-        DropMiddleToolResultsCompactor.newBuilder(thrower)
-            .withHeadPreserved(1)
-            .withTailPreserved(1)
-            .build();
-    var history = chain(10);
-    var out = compactor.compact(history, freshState());
-    assertSame(history, out.history(), "throwing summarizer must yield no-op");
-    assertEquals(0, out.usage().inputTokens());
+    return DropMiddleToolResultsCompactor.newBuilder(summarizer)
+        .withHeadPreserved(1)
+        .withTailPreserved(1)
+        .build();
   }
 
   @Test

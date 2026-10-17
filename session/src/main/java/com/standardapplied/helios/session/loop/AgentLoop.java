@@ -103,8 +103,11 @@ public final class AgentLoop {
    *
    * @param state per-session mutable state; non-null
    * @param limits per-session limits; non-null
-   * @return the terminal {@link ResultMessage}; never null
+   * @return the terminal {@link ResultMessage}; never null, {@link
+   *     ResultMessage.ErrorDuringExecution} for any {@link Exception} that reached the loop
    * @throws NullPointerException if {@code state} or {@code limits} is null
+   * @throws Error an {@link Error} from the model, a tool, a hook or anything else the loop runs,
+   *     as itself: a host failure, never a terminal, so no further model or tool call follows it
    */
   public ResultMessage run(SessionState state, SessionLimits limits) {
     Objects.requireNonNull(state, "state must not be null");
@@ -116,8 +119,6 @@ public final class AgentLoop {
       }
       return terminal.orElseThrow();
     } catch (Exception e) {
-      // Restricted to Exception — Error subtypes (OOM, StackOverflow, LinkageError) leave the JVM
-      // in an inconsistent state, so we let them escape and the host process die cleanly.
       return crashTerminate(state, e);
     }
   }

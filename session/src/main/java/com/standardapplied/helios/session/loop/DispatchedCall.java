@@ -9,6 +9,7 @@ import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import java.time.Duration;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -17,7 +18,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -56,7 +56,7 @@ final class DispatchedCall {
   private final Duration timeout;
   private final long deadline;
   private final CategoryPermits permits;
-  private final AtomicInteger liveCalls;
+  private final Set<DispatchedCall> liveCalls;
   private final Thread worker;
   private volatile CancellationToken.Registration parentLink = CancellationToken.Registration.NOOP;
 
@@ -67,7 +67,7 @@ final class DispatchedCall {
       CancellationToken parent,
       Duration timeout,
       CategoryPermits permits,
-      AtomicInteger liveCalls) {
+      Set<DispatchedCall> liveCalls) {
     this.binding = binding;
     this.call = call;
     this.context = new ToolContext(session, token, timeout);
@@ -89,7 +89,7 @@ final class DispatchedCall {
             this::expire, TimeUnit.NANOSECONDS.convert(timeout), TimeUnit.NANOSECONDS);
     answer.whenComplete((result, failure) -> timer.cancel(false));
     parentLink = parent.onCancel(() -> cancel(parent.reason().orElseThrow()));
-    liveCalls.incrementAndGet();
+    liveCalls.add(this);
     worker.start();
   }
 
@@ -137,6 +137,26 @@ final class DispatchedCall {
     }
     throwIfSessionCancelled();
     return true;
+  }
+
+  /** The tool call this dispatch runs. */
+  ToolCall call() {
+    return call;
+  }
+
+  /**
+   * Wait until the call's work has ended or {@code until} passes; an interrupt of the waiting
+   * thread ends the wait, its interrupt status kept.
+   *
+   * @return {@code true} if the work ended
+   */
+  boolean endsBy(long until) {
+    try {
+      return ended.await(Math.max(0L, until - System.nanoTime()), TimeUnit.NANOSECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
   }
 
   private void expire() {
@@ -216,7 +236,7 @@ final class DispatchedCall {
       }
       permits.release(this);
       parentLink.remove();
-      liveCalls.decrementAndGet();
+      liveCalls.remove(this);
       ended.countDown();
     }
   }
