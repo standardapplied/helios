@@ -4,6 +4,7 @@ package com.standardapplied.helios.session.loop;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
@@ -12,11 +13,13 @@ import java.util.concurrent.TimeoutException;
 import java.util.logging.Logger;
 
 /**
- * Cancels a model stream's {@link Flow.Subscription}, the provider's code, on a thread of its own
- * and waits up to {@code grace} for it, so a cancel that blocks never strands the thread that
- * cancels. A cancel still running when the grace passes, or when the waiting thread is interrupted,
- * is interrupted and logged as not known to have closed the stream, never taken for done; the
- * waiting thread's interrupt status is kept.
+ * Bounds what a turn waits for from a model stream's {@link Flow.Subscription}, the provider's
+ * code, by {@code grace}. A cancel runs on a thread of its own, so a cancel that blocks never
+ * strands the thread that cancels; one still running when the grace passes, or when the waiting
+ * thread is interrupted, is interrupted and logged as not known to have closed the stream, never
+ * taken for done; the waiting thread's interrupt status is kept. A request still running on the
+ * thread that delivered the subscription when the turn ended is waited for the same way, and logged
+ * when it does not return within the grace.
  */
 final class StreamCancel {
 
@@ -50,6 +53,29 @@ final class StreamCancel {
       primary.addSuppressed(secondary);
     }
     return primary;
+  }
+
+  /**
+   * Wait up to the grace for a request of the subscription to return.
+   *
+   * @param returned counted down once the request returned or threw
+   * @return {@code false} if the waiting thread was interrupted, its interrupt status cleared
+   */
+  boolean awaitRequest(CountDownLatch returned) {
+    try {
+      if (!returned.await(grace.toNanos(), TimeUnit.NANOSECONDS)) {
+        LOGGER.warning(
+            () ->
+                "requesting from the model stream of session "
+                    + sessionId
+                    + " did not return within "
+                    + grace
+                    + " after the turn ended");
+      }
+      return true;
+    } catch (InterruptedException e) {
+      return false;
+    }
   }
 
   /**
