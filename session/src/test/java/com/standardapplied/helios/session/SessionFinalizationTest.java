@@ -386,6 +386,24 @@ final class SessionFinalizationTest {
   }
 
   @Test
+  void anErrorACancellationCallbackThrewBeforeALaterOneThatNeverReturnsFailsTheResult() {
+    var sentinel = new AssertionError("callback failure");
+    var provider = new RecordingProvider(order);
+    var session = AgentSession.create(withProvider(provider).withLimits(grace()).build());
+    var cancellation = provider.context.cancellation();
+    cancellation.onCancel(
+        () -> {
+          throw sentinel;
+        });
+    cancellation.onCancel(() -> RecordingProvider.blockIgnoringInterrupts(released));
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
+      session.close();
+      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    }
+  }
+
+  @Test
   void aCancellationCallbackThatNeverReturnsCannotKeepAClosedModelStreamOpen() {
     var entered = new CountDownLatch(1);
     var model =

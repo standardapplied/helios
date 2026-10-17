@@ -14,6 +14,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -40,6 +41,7 @@ final class SessionTeardown {
   private final SessionEventPublisher events;
   private final ScheduledExecutorService scheduler;
   private final Duration grace;
+  private final AtomicReference<Error> observedCallbackError = new AtomicReference<>();
   private CompletableFuture<Void> cancellation;
 
   SessionTeardown(
@@ -63,11 +65,15 @@ final class SessionTeardown {
    * when this returns, and its callbacks run on a thread of their own; a later call, the teardown's
    * included, returns the same completion. Neither {@link AgentSession#close()} nor the wall-clock
    * deadline is therefore held up by a cancellation callback that blocks or throws; the teardown
-   * waits for the callbacks within its grace and settles the result with what they threw.
+   * waits for the callbacks within its grace and settles the result with what they threw, an {@link
+   * Error} thrown before a later callback that does not return within the grace included.
    */
   synchronized CompletableFuture<Void> cancel(String reason) {
     if (cancellation == null) {
-      cancellation = state.cancellation().cancelAsync(reason);
+      cancellation =
+          state
+              .cancellation()
+              .cancelAsync(reason, error -> observedCallbackError.compareAndSet(null, error));
     }
     return cancellation;
   }
@@ -107,6 +113,10 @@ final class SessionTeardown {
 
   private void endToolCalls(ToolDispatch tools, Failures failures) {
     if (!settlesWithin("cancellation", cancel("session ended"), failures)) {
+      var observed = observedCallbackError.get();
+      if (observed != null) {
+        failures.add("cancellation", observed);
+      }
       LOGGER.warning(
           () ->
               "a callback of the cancellation of session "

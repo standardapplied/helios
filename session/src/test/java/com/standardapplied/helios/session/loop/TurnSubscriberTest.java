@@ -35,6 +35,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.logging.Level;
@@ -167,7 +168,7 @@ final class TurnSubscriberTest {
     var waiting = CompletableFuture.supplyAsync(() -> subscriber.awaitDone(token));
     Await.until("the subscriber's registration", () -> token.activeCallbackCountForTests() == 2);
 
-    token.cancelAsync("session closed");
+    token.cancelAsync("session closed", error -> {});
 
     assertInstanceOf(CancellationException.class, Await.value("the turn", waiting).error());
   }
@@ -285,6 +286,32 @@ final class TurnSubscriberTest {
     assertTrue(Thread.interrupted());
     assertInstanceOf(InterruptedException.class, turn.error());
     assertEquals(1, subscription.cancels);
+  }
+
+  @Test
+  void anInterruptWhileAnotherThreadCancelsTheStreamWaitsForThatOutcomeAndStaysSet() {
+    var cancelling = new CountDownLatch(1);
+    var cleanup = new AssertionError("close failed");
+    subscriber.onSubscribe(
+        cancelling(
+            () -> {
+              cancelling.countDown();
+              untilInterrupted(new CountDownLatch(1)).run();
+              throw cleanup;
+            }));
+    subscriber.onNext(new ModelChunk.TextDelta("Hel"));
+    var turn =
+        new FutureTask<>(
+            () -> Map.entry(subscriber.awaitDone(new CancellationToken()), Thread.interrupted()));
+    var waiter = Thread.ofVirtual().start(turn);
+    CompletableFuture.runAsync(scheduler::fireLatest);
+    Await.latch("the idle deadline to be cancelling the stream", cancelling);
+
+    waiter.interrupt();
+    Await.until("the waiter to take the interrupt", () -> !waiter.isInterrupted());
+    released.countDown();
+
+    assertEquals(Map.entry(cleanup, true), errorAndInterrupt(Await.value("the turn", turn)));
   }
 
   @Test
@@ -473,6 +500,11 @@ final class TurnSubscriberTest {
                     s.sessionId(), s.currentTurnIndex(), s.cancellation(), model),
             CLOCK);
     return new TurnSubscriber(state, emitter, CLOCK, scheduler, NOT_REACHED, cancelGrace);
+  }
+
+  private static Map.Entry<Throwable, Boolean> errorAndInterrupt(
+      Map.Entry<StreamedTurn, Boolean> ended) {
+    return Map.entry(ended.getKey().error(), ended.getValue());
   }
 
   private Runnable untilInterrupted(CountDownLatch interrupted) {
