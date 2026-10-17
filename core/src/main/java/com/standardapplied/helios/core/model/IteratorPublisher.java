@@ -24,10 +24,12 @@ import java.util.logging.Logger;
  * iterator from the cancelling thread, so a pull blocked on I/O ends whether or not it honours
  * interrupts. A cancelled subscription receives no further signal; a cancelled token ends the
  * stream with {@code onError} carrying a {@link CancellationException} with the token's reason,
- * including when the token was cancelled before any request. Work that ignores both an interrupt
- * and a closed iterator runs until it returns, and what it yields is dropped: Java cannot end a
- * thread by force. An iterator whose {@code close} throws a {@link RuntimeException} has it logged
- * at {@code WARNING}, so {@code cancel} and {@code request} return normally.
+ * including when the token was cancelled before any request. An {@link Error} the work or the
+ * subscriber's {@code onNext} throws is the one exception to both: {@code onError} delivers it as
+ * itself even after a cancel, so a host's fatal failure is never dropped. Work that ignores both an
+ * interrupt and a closed iterator runs until it returns, and what it yields is dropped: Java cannot
+ * end a thread by force. An iterator whose {@code close} throws a {@link RuntimeException} has it
+ * logged at {@code WARNING}, so {@code cancel} and {@code request} return normally.
  *
  * @param <T> the item type
  */
@@ -304,13 +306,15 @@ public final class IteratorPublisher<T> implements Flow.Publisher<T> {
 
     /**
      * Sends the one terminal signal the stream's state calls for, or none once cancelled, clearing
-     * an interrupt a cancel sent the pull.
+     * an interrupt a cancel sent the pull; an {@link Error} is sent whatever the state.
      */
     private void end(Throwable failure) {
       Throwable error;
       synchronized (lock) {
         Thread.interrupted();
-        if (invalidRequest != null && !ended) {
+        if (failure instanceof Error) {
+          error = failure;
+        } else if (invalidRequest != null && !ended) {
           error = invalidRequest;
         } else if (cancelReason != null) {
           error = new CancellationException(cancelReason);

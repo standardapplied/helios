@@ -75,7 +75,11 @@ final class ToolDispatchTest {
             NullPointerException.class,
             () ->
                 new ToolDispatch(
-                    null, ToolRegistry.empty(), ConcurrencyLimits.defaults(), fixture.scheduler));
+                    null,
+                    ToolRegistry.empty(),
+                    ConcurrencyLimits.defaults(),
+                    fixture.scheduler,
+                    fixture.strayErrors));
     assertEquals("sessionContext must not be null", ex.getMessage());
   }
 
@@ -84,7 +88,13 @@ final class ToolDispatchTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ToolDispatch(CTX, null, ConcurrencyLimits.defaults(), fixture.scheduler));
+            () ->
+                new ToolDispatch(
+                    CTX,
+                    null,
+                    ConcurrencyLimits.defaults(),
+                    fixture.scheduler,
+                    fixture.strayErrors));
     assertEquals("registry must not be null", ex.getMessage());
   }
 
@@ -93,7 +103,9 @@ final class ToolDispatchTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ToolDispatch(CTX, ToolRegistry.empty(), null, fixture.scheduler));
+            () ->
+                new ToolDispatch(
+                    CTX, ToolRegistry.empty(), null, fixture.scheduler, fixture.strayErrors));
     assertEquals("limits must not be null", ex.getMessage());
   }
 
@@ -102,15 +114,36 @@ final class ToolDispatchTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ToolDispatch(CTX, ToolRegistry.empty(), ConcurrencyLimits.defaults(), null));
+            () ->
+                new ToolDispatch(
+                    CTX,
+                    ToolRegistry.empty(),
+                    ConcurrencyLimits.defaults(),
+                    null,
+                    fixture.strayErrors));
     assertEquals("scheduler must not be null", ex.getMessage());
+  }
+
+  @Test
+  void constructorRejectsNullStrayErrors() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new ToolDispatch(
+                    CTX,
+                    ToolRegistry.empty(),
+                    ConcurrencyLimits.defaults(),
+                    fixture.scheduler,
+                    null));
+    assertEquals("strayErrors must not be null", ex.getMessage());
   }
 
   @Test
   void accessorsReturnTheConstructorValues() {
     var registry = ToolRegistry.empty();
     var limits = new ConcurrencyLimits(8, 2, 1, 32);
-    var d = new ToolDispatch(CTX, registry, limits, fixture.scheduler);
+    var d = new ToolDispatch(CTX, registry, limits, fixture.scheduler, fixture.strayErrors);
     assertSame(CTX, d.sessionContext());
     assertSame(registry, d.registry());
     assertSame(limits, d.limits());

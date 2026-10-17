@@ -42,6 +42,7 @@ public final class SessionState {
   private final ConversationHistory history = new ConversationHistory();
   private final SessionTotals totals = new SessionTotals();
   private final ContextWatermark contextWatermark = new ContextWatermark();
+  private final StrayErrors strayErrors = new StrayErrors();
   private final AtomicLong turnIndex = new AtomicLong(0);
   private final AtomicReference<Optional<ResultMessage>> terminal =
       new AtomicReference<>(Optional.empty());
@@ -142,6 +143,16 @@ public final class SessionState {
    */
   public Instant startedAt() {
     return startedAt;
+  }
+
+  /**
+   * The session's stray errors: every {@link Error} its work threw where no thread waited for it
+   * any more. The session settles its result with them.
+   *
+   * @return the session's stray errors
+   */
+  public StrayErrors strayErrors() {
+    return strayErrors;
   }
 
   /**

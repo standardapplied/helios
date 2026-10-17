@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
@@ -406,6 +407,36 @@ final class SessionFinalizationTest {
     assertSame(sentinel, Await.failure("the result to fail", session.result()));
   }
 
+  @Test
+  void anErrorABlockingModelThrowsAfterCloseCancelledItsStreamFailsTheResult() {
+    var sentinel = new AssertionError("model failure");
+    var calling = new CompletableFuture<Thread>();
+    var provider = new RecordingProvider(order);
+    provider.end =
+        () -> {
+          released.countDown();
+          Await.termination("the model call to throw", Await.value("the model call", calling));
+        };
+    var session =
+        AgentSession.create(
+            withProvider(
+                    provider,
+                    blockingModel(
+                        () -> {
+                          calling.complete(Thread.currentThread());
+                          RecordingProvider.blockIgnoringInterrupts(released);
+                          throw sentinel;
+                        }))
+                .withLimits(slowGrace())
+                .build());
+    session.send("go");
+    Await.value("the model call to start", calling);
+
+    session.close();
+
+    assertSame(sentinel, Await.failure("the result to fail", session.result()));
+  }
+
   // ── a failing or hanging teardown still settles the result ──────────────────
 
   @Test
@@ -424,6 +455,19 @@ final class SessionFinalizationTest {
       assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
     }
     assertSame(cleanup, logged.getFirst().getThrown());
+  }
+
+  @Test
+  void anErrorOnSessionEndJoinsFromAFailedFutureFailsTheResultAsItself() {
+    var sentinel = new AssertionError("end failure");
+    var provider = new RecordingProvider(order);
+    provider.end = () -> CompletableFuture.failedFuture(sentinel).join();
+
+    try (var session = AgentSession.create(withProvider(provider).build())) {
+      session.send("go");
+
+      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    }
   }
 
   @Test
@@ -946,6 +990,27 @@ final class SessionFinalizationTest {
           calls.incrementAndGet();
           throw failure;
         });
+  }
+
+  /** A blocking model whose every call runs {@code call}, which never returns normally. */
+  private static Model blockingModel(Runnable call) {
+    return new BlockingModel() {
+      @Override
+      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+        call.run();
+        throw new AssertionError("the call returned");
+      }
+
+      @Override
+      public String id() {
+        return "blocking";
+      }
+
+      @Override
+      public String provider() {
+        return "blocking";
+      }
+    };
   }
 
   private static Model model(Supplier<Flow.Publisher<ModelChunk>> stream) {

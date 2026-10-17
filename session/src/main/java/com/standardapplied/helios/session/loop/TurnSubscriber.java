@@ -91,15 +91,14 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       InstantSource clock,
       ScheduledExecutorService scheduler,
       Duration idleTimeout,
-      Duration cancelGrace,
-      StrayErrors strayErrors) {
+      Duration cancelGrace) {
     this.state = state;
     this.emitter = emitter;
     this.clock = clock;
     this.idleWatchdog =
         new IdleWatchdog(scheduler, idleTimeout, this::released, stalled -> end(stalled, true));
     this.streamCancel = new StreamCancel(state.sessionId(), cancelGrace);
-    this.strayErrors = strayErrors;
+    this.strayErrors = state.strayErrors();
   }
 
   /**

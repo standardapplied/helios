@@ -57,7 +57,7 @@ public final class ToolDispatch {
   private final CategoryPermits executionPermits;
   private final ScheduledExecutorService scheduler;
   private final Set<DispatchedCall.Live> liveCalls = ConcurrentHashMap.newKeySet();
-  private final StrayErrors strayErrors = new StrayErrors();
+  private final StrayErrors strayErrors;
 
   /**
    * Build a dispatcher.
@@ -67,13 +67,16 @@ public final class ToolDispatch {
    * @param registry the bindings the dispatcher will look calls up against; non-null
    * @param limits concurrency caps; non-null
    * @param scheduler the session's scheduler, on which each call's deadline runs; non-null
+   * @param strayErrors the session's stray errors, which every {@link Error} the work of a call
+   *     throws goes to, a callback on a call's own token included; non-null
    * @throws NullPointerException if any argument is null
    */
   public ToolDispatch(
       SessionContext sessionContext,
       ToolRegistry registry,
       ConcurrencyLimits limits,
-      ScheduledExecutorService scheduler) {
+      ScheduledExecutorService scheduler,
+      StrayErrors strayErrors) {
     this.sessionContext = Objects.requireNonNull(sessionContext, "sessionContext must not be null");
     this.registry = Objects.requireNonNull(registry, "registry must not be null");
     this.limits = Objects.requireNonNull(limits, "limits must not be null");
@@ -82,6 +85,7 @@ public final class ToolDispatch {
     this.fileWritePermits = new CategoryPermits(limits.maxConcurrentFileWrites(), scope);
     this.executionPermits = new CategoryPermits(limits.maxConcurrentExecutions(), scope);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
+    this.strayErrors = Objects.requireNonNull(strayErrors, "strayErrors must not be null");
   }
 
   /**
@@ -159,17 +163,6 @@ public final class ToolDispatch {
   }
 
   /**
-   * The session's stray errors: every {@link Error} the work of a call threw, a callback on a
-   * call's own token included, and those of the session's model turns. Kept after the work ended,
-   * so the session settles its result with them.
-   *
-   * @return the session's stray errors
-   */
-  public StrayErrors strayErrors() {
-    return strayErrors;
-  }
-
-  /**
    * Dispatch one tool call and wait for its answer. The call runs on its own cancellation token,
    * linked to {@code cancellation}, under one deadline, {@code timeout} from now, that covers the
    * wait for a permit and the tool's run; past it, this method waits at most {@code stopGrace}. A
@@ -191,9 +184,9 @@ public final class ToolDispatch {
    * that only waits for room in its category still queues. The call's token is cancelled on a
    * thread of its own, so a callback that blocks or throws holds up neither this method, the
    * session's cancellation nor the interrupt. A tool's {@link Error} is rethrown as itself, and so
-   * is the first of the {@link #strayErrors() stray errors} once one was caught, before a call
-   * starts or once its answer is in: a host {@code Error} ends the dispatcher's use, never only the
-   * call it happened in.
+   * is the first of the {@link StrayErrors stray errors} once one was caught, before a call starts
+   * or once its answer is in: a host {@code Error} ends the dispatcher's use, never only the call
+   * it happened in.
    *
    * @param call the call; non-null
    * @param cancellation the session's cancellation token; non-null
