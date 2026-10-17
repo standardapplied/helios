@@ -137,15 +137,6 @@ public final class SessionState {
   }
 
   /**
-   * The instant at which the state was constructed.
-   *
-   * @return non-null instant
-   */
-  public Instant startedAt() {
-    return startedAt;
-  }
-
-  /**
    * The session's stray errors: every {@link Error} its work threw where no thread waited for it
    * any more. The session settles its result with them.
    *

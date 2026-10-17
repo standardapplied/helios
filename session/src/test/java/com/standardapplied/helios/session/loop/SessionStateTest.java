@@ -43,7 +43,7 @@ final class SessionStateTest {
     var state = new SessionState(SID, cancellation, Clock.fixed(fixed, ZoneOffset.UTC));
     assertEquals(SID, state.sessionId());
     assertSame(cancellation, state.cancellation());
-    assertEquals(fixed, state.startedAt());
+    assertEquals(Duration.ZERO, state.elapsed());
     assertEquals(0, state.currentTurnIndex());
     assertEquals(Usage.of(0, 0), state.totals().usage());
     assertEquals(CostEstimate.zero(), state.totals().cost());
