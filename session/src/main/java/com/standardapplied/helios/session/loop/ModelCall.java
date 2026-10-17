@@ -72,7 +72,8 @@ final class ModelCall {
    * exception escaping the subscribe call) end the attempts immediately — only the type guard on
    * {@code TransientStreamException} triggers a retry.
    *
-   * @throws Error an {@link Error} the model threw, from the call or through the stream, as itself
+   * @throws Error an {@link Error} the model threw, from the call or through the stream, or one\n *
+   *     cancelling a stream that failed to start, as itself
    */
   Attempts stream(SessionState state, SessionLimits limits, List<Tool> visibleTools) {
     var policy = limits.streamRetryPolicy();
@@ -126,12 +127,19 @@ final class ModelCall {
   /**
    * End the turn with {@code failure}, which opening or subscribing to the stream threw, cancelling
    * the subscription {@code subscriber} may already hold. A failure to cancel rides on {@code
-   * failure} as suppressed.
+   * failure} as suppressed, unless it is an {@link Error} and {@code failure} is not: that host
+   * failure is thrown instead, carrying {@code failure}, so it is never retried as a turn failure.
+   *
+   * @throws Error an {@link Error} the cancellation threw, when {@code failure} is not one
    */
   private static void abort(TurnSubscriber subscriber, Throwable failure) {
     try {
       subscriber.end(failure, true);
     } catch (RuntimeException | Error cleanup) {
+      if (cleanup instanceof Error fatal && !(failure instanceof Error)) {
+        fatal.addSuppressed(failure);
+        throw fatal;
+      }
       if (cleanup != failure) {
         failure.addSuppressed(cleanup);
       }

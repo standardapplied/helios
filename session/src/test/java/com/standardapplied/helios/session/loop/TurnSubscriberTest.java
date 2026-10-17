@@ -55,8 +55,11 @@ final class TurnSubscriberTest {
   private final TurnSubscriber subscriber = newSubscriber();
   private final CountingSubscription subscription = new CountingSubscription();
 
+  private final CountDownLatch released = new CountDownLatch(1);
+
   @AfterEach
   void stopScheduler() {
+    released.countDown();
     scheduler.shutdownNow();
   }
 
@@ -141,6 +144,26 @@ final class TurnSubscriberTest {
     assertInstanceOf(CancellationException.class, turn.error());
     assertEquals(1, subscription.cancels);
     assertEquals(0, token.activeCallbackCountForTests());
+  }
+
+  @Test
+  void anEarlierCancellationCallbackThatBlocksCannotKeepTheStreamOpen() {
+    var token = new CancellationToken();
+    token.onCancel(
+        () -> {
+          try {
+            released.await();
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+        });
+    subscriber.onSubscribe(subscription);
+    var waiting = CompletableFuture.supplyAsync(() -> subscriber.awaitDone(token));
+    Await.until("the subscriber's registration", () -> token.activeCallbackCountForTests() == 2);
+
+    token.cancelAsync("session closed");
+
+    assertInstanceOf(CancellationException.class, Await.value("the turn", waiting).error());
   }
 
   @Test
