@@ -22,6 +22,7 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
 import com.standardapplied.helios.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.test.LogCapture;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -36,6 +37,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -49,9 +52,12 @@ final class TurnSubscriberTest {
 
   private static final Clock CLOCK = Clock.fixed(Instant.EPOCH, ZoneOffset.UTC);
   private static final Response.Usage USAGE = Response.Usage.of(7, 3);
+  private static final Duration NOT_REACHED = Duration.ofHours(1);
+  private static final Duration SHORT_GRACE = Duration.ofMillis(50);
 
   private final ManualScheduler scheduler = new ManualScheduler();
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
+  private final List<LogRecord> logged = new CopyOnWriteArrayList<>();
   private final TurnSubscriber subscriber = newSubscriber();
   private final CountingSubscription subscription = new CountingSubscription();
 
@@ -167,18 +173,106 @@ final class TurnSubscriberTest {
   }
 
   @Test
-  void aCancelThatThrowsStillReleasesTheWaiter() {
-    subscriber.onSubscribe(throwingOnCancel(new IllegalStateException("close failed")));
+  void anExceptionTheCancelThrowsRidesOnTheTurnsFailureAsSuppressed() {
+    var cleanup = new IllegalStateException("close failed");
+    subscriber.onSubscribe(cancelling(throwing(cleanup)));
     subscriber.onNext(new ModelChunk.TextDelta("Hel"));
 
-    var failure = assertThrows(IllegalStateException.class, scheduler::fireLatest);
-    var turn =
-        Await.value(
-            "the turn released",
-            CompletableFuture.supplyAsync(() -> subscriber.awaitDone(new CancellationToken())));
+    scheduler.fireLatest();
+    var turn = subscriber.awaitDone(new CancellationToken());
 
-    assertEquals("close failed", failure.getMessage());
     assertInstanceOf(TimeoutException.class, turn.error());
+    assertEquals(List.of(cleanup), List.of(turn.error().getSuppressed()));
+  }
+
+  @Test
+  void anErrorTheCancelOfAStalledStreamThrowsBecomesTheTurnsFailureCarryingTheTimeout() {
+    var cleanup = new AssertionError("close failed");
+    subscriber.onSubscribe(cancelling(throwing(cleanup)));
+    subscriber.onNext(new ModelChunk.TextDelta("Hel"));
+
+    scheduler.fireLatest();
+    var turn = subscriber.awaitDone(new CancellationToken());
+
+    assertSame(cleanup, turn.error());
+    assertInstanceOf(TimeoutException.class, cleanup.getSuppressed()[0]);
+  }
+
+  @Test
+  void anErrorTheCancelThrowsRidesOnAnErrorTheTurnEndedWith() {
+    var failure = new AssertionError("request failed");
+    var cleanup = new AssertionError("close failed");
+    subscriber.onSubscribe(cancelling(throwing(cleanup)));
+
+    subscriber.end(failure, true);
+    var turn = subscriber.awaitDone(new CancellationToken());
+
+    assertSame(failure, turn.error());
+    assertEquals(List.of(cleanup), List.of(failure.getSuppressed()));
+  }
+
+  @Test
+  void aCancelThatDoesNotReturnWithinItsGraceIsInterruptedAndReportedAndTheTurnStillEnds() {
+    var interrupted = new CountDownLatch(1);
+    var token = new CancellationToken();
+    token.cancel("session closed");
+    var stalled = newSubscriber(events::add, SHORT_GRACE);
+    stalled.onSubscribe(cancelling(untilInterrupted(interrupted)));
+
+    StreamedTurn turn;
+    try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
+      turn =
+          Await.value(
+              "the turn released", CompletableFuture.supplyAsync(() -> stalled.awaitDone(token)));
+    }
+
+    assertInstanceOf(CancellationException.class, turn.error());
+    Await.latch("the cancel interrupted", interrupted);
+    assertEquals(
+        List.of(
+            "cancelling the model stream of session sess did not return within PT0.05S; the"
+                + " stream is not known to be closed"),
+        logged.stream().map(LogRecord::getMessage).toList());
+  }
+
+  @Test
+  void anInterruptWhileWaitingForTheCancelEndsTheWaitInterruptsTheCancelAndStaysSet() {
+    var interrupted = new CountDownLatch(1);
+    subscriber.onSubscribe(cancelling(untilInterrupted(interrupted)));
+    Thread.currentThread().interrupt();
+
+    try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
+      subscriber.end(new IllegalStateException("request failed"), true);
+    }
+
+    assertTrue(Thread.interrupted());
+    Await.latch("the cancel interrupted", interrupted);
+  }
+
+  @Test
+  void anErrorCancellingARefusedSubscriptionIsThrown() {
+    var cleanup = new AssertionError("close failed");
+    subscriber.onSubscribe(subscription);
+
+    var thrown =
+        assertThrows(
+            AssertionError.class, () -> subscriber.onSubscribe(cancelling(throwing(cleanup))));
+
+    assertSame(cleanup, thrown);
+  }
+
+  @Test
+  void anExceptionCancellingARefusedSubscriptionIsLogged() {
+    var cleanup = new IllegalStateException("close failed");
+    subscriber.onSubscribe(subscription);
+
+    try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
+      subscriber.onSubscribe(cancelling(throwing(cleanup)));
+    }
+
+    assertEquals(
+        List.of(Level.WARNING, cleanup),
+        List.of(logged.getFirst().getLevel(), logged.getFirst().getThrown()));
   }
 
   @Test
@@ -348,6 +442,10 @@ final class TurnSubscriberTest {
   }
 
   private TurnSubscriber newSubscriber(Consumer<QueryEvent> sink) {
+    return newSubscriber(sink, NOT_REACHED);
+  }
+
+  private TurnSubscriber newSubscriber(Consumer<QueryEvent> sink, Duration cancelGrace) {
     var state = new SessionState("sess", new CancellationToken(), CLOCK);
     var model =
         new BlockingModel() {
@@ -374,17 +472,39 @@ final class TurnSubscriberTest {
                 new DefaultHookContext(
                     s.sessionId(), s.currentTurnIndex(), s.cancellation(), model),
             CLOCK);
-    return new TurnSubscriber(state, emitter, CLOCK, scheduler, Duration.ofHours(1));
+    return new TurnSubscriber(state, emitter, CLOCK, scheduler, NOT_REACHED, cancelGrace);
   }
 
-  private static Flow.Subscription throwingOnCancel(RuntimeException failure) {
+  private Runnable untilInterrupted(CountDownLatch interrupted) {
+    return () -> {
+      try {
+        released.await();
+      } catch (InterruptedException e) {
+        interrupted.countDown();
+      }
+    };
+  }
+
+  private static Runnable throwing(RuntimeException failure) {
+    return () -> {
+      throw failure;
+    };
+  }
+
+  private static Runnable throwing(Error failure) {
+    return () -> {
+      throw failure;
+    };
+  }
+
+  private static Flow.Subscription cancelling(Runnable cancel) {
     return new Flow.Subscription() {
       @Override
       public void request(long n) {}
 
       @Override
       public void cancel() {
-        throw failure;
+        cancel.run();
       }
     };
   }

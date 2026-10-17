@@ -72,7 +72,8 @@ import java.util.OptionalLong;
  *       the tool calls still running, cancelled first, to end; for the execution provider's {@code
  *       onSessionEnd} to return; for event subscribers to drain. A tool call or {@code
  *       onSessionEnd} still running when its wait ends is logged as such and the teardown moves on,
- *       so the result settles; such a tool's effects may land after it has.
+ *       so the result settles; such a tool's effects may land after it has. A turn gives the model
+ *       stream's subscription the same grace to cancel.
  * </ul>
  *
  * <p>Currency is integer micro-USD (Stripe-style fixed-precision). See {@link CostEstimate} for the

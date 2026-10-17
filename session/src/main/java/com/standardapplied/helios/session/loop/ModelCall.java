@@ -72,8 +72,8 @@ final class ModelCall {
    * exception escaping the subscribe call) end the attempts immediately — only the type guard on
    * {@code TransientStreamException} triggers a retry.
    *
-   * @throws Error an {@link Error} the model threw, from the call or through the stream, or one\n *
-   *     cancelling a stream that failed to start, as itself
+   * @throws Error an {@link Error} the model threw, from the call or through the stream, or one
+   *     cancelling the stream, as itself
    */
   Attempts stream(SessionState state, SessionLimits limits, List<Tool> visibleTools) {
     var policy = limits.streamRetryPolicy();
@@ -103,10 +103,21 @@ final class ModelCall {
     }
   }
 
+  /**
+   * One attempt. An {@link Error} opening or subscribing to the stream threw is thrown whatever the
+   * stream had already ended with, so a stream that reported a transient failure or completed
+   * before it is neither retried nor continued past it.
+   */
   private StreamedTurn streamOnce(SessionState state, SessionLimits limits, List<Tool> tools) {
     var subscriber =
         new TurnSubscriber(
-            state, emitter, collaborators.clock(), scheduler, limits.streamIdleTimeout());
+            state,
+            emitter,
+            collaborators.clock(),
+            scheduler,
+            limits.streamIdleTimeout(),
+            limits.teardownGrace());
+    Error thrown = null;
     try {
       var publisher =
           outputSchema != null
@@ -115,35 +126,14 @@ final class ModelCall {
               : model.chatStream(state.history().snapshot(), tools, state.cancellation());
       publisher.subscribe(subscriber);
     } catch (RuntimeException | Error e) {
-      abort(subscriber, e);
+      subscriber.end(e, true);
+      thrown = e instanceof Error fatal ? fatal : null;
     }
     var turn = subscriber.awaitDone(state.cancellation());
-    if (turn.error() instanceof Error error) {
+    if (StreamCancel.fold(turn.error(), thrown) instanceof Error error) {
       throw error;
     }
     return turn;
-  }
-
-  /**
-   * End the turn with {@code failure}, which opening or subscribing to the stream threw, cancelling
-   * the subscription {@code subscriber} may already hold. A failure to cancel rides on {@code
-   * failure} as suppressed, unless it is an {@link Error} and {@code failure} is not: that host
-   * failure is thrown instead, carrying {@code failure}, so it is never retried as a turn failure.
-   *
-   * @throws Error an {@link Error} the cancellation threw, when {@code failure} is not one
-   */
-  private static void abort(TurnSubscriber subscriber, Throwable failure) {
-    try {
-      subscriber.end(failure, true);
-    } catch (RuntimeException | Error cleanup) {
-      if (cleanup instanceof Error fatal && !(failure instanceof Error)) {
-        fatal.addSuppressed(failure);
-        throw fatal;
-      }
-      if (cleanup != failure) {
-        failure.addSuppressed(cleanup);
-      }
-    }
   }
 
   /**
