@@ -434,6 +434,30 @@ cancels and interrupts every call still running.
 | A tool executor that returned `null` ended the session with `ErrorDuringExecution` (`NullPointerException` in the tool round) | `Threw("java.lang.NullPointerException")`, text `tool '<name>' threw: executor returned null`, and the session goes on. `ToolExecutor.execute` documents its result as non-null |
 | A `ScheduledExecutorService` deadline cancelled by the session (a stream-idle re-arm, a finished call) stayed queued until its delay passed | the session's scheduler removes a cancelled deadline at once |
 
+**A host `Error` ends the session as itself, and the session ends in a bounded teardown.** An
+`Error` thrown by the model (from `chatStream` or through its stream), a tool, a hook, the
+execution provider or the teardown is a host failure, not a terminal: `result()` completes
+exceptionally with that same instance, no further model or tool call is made, and the loop's virtual
+thread ends by throwing it to its uncaught-exception handler. Nothing promises that the JVM stops;
+the host decides. Every end of a session, a natural one included, then runs one teardown in the
+reverse order of what the session acquired: it cancels the session's token, which cancels and
+interrupts every tool call still running, and waits for those calls to end; it calls
+`onSessionEnd` and waits for it to return; it shuts the scheduler down and waits for event
+subscribers to drain. Each wait is bounded by the new `SessionLimits.teardownGrace` (default 5 s,
+`Builder.withTeardownGrace`). A tool call or `onSessionEnd` still running when its wait ends is
+logged as a `WARNING` on the `AgentSessionImpl` logger and left running, never treated as ended: a
+tool that ignores both its token and interruption may still run, and its effects land, after the
+result settles.
+
+| 2.x | 3.0 |
+|---|---|
+| An `Error` thrown by the model became a `FinishReason.ERROR` turn and an `ErrorDuringExecution` terminal; a tool's became a `ToolOutcome.Threw` result and the turn went on; one from a `FaultTolerance` timed operation was wrapped in a `RuntimeException`; one from the compaction summary call was wrapped and the compaction skipped; one the execution provider's future failed with became an `Execute: provider failed` tool result | Each is rethrown as the same instance and fails `result()` with it; `ErrorDuringExecution` and `Threw` come only from an `Exception` |
+| An `Error` from `onSessionEnd` was thrown on the loop thread, or from `close()` for a session never started, while `result()` completed with the terminal; a teardown step that threw skipped the steps after it | `result()` fails with the error, after every step has run; `close()` never throws. A teardown failure after a loop `Error` rides on it as suppressed, and an `onSessionEnd` `RuntimeException` is still only logged |
+| `onSessionEnd` ran on the loop thread with no bound, and nothing waited for tool calls still running; a run that ended on its own left the session's token uncancelled | the teardown above |
+| `onSessionStart` ran before the rest of the session was built; a `null` outcome threw `NullPointerException` from `AgentSession.create`, and so did an `Error`; a refused start kept its event executor and scheduler until `close()` | `onSessionStart` is the last step of construction. A `null` outcome is a refusal (`ErrorProviderUnavailable`, reason `onSessionStart returned null`); an `Error` fails `result()`; either way, and on a refusal, the event executor and scheduler are released before the result settles, `onSessionEnd` is never called and `isStarted()` is `true` |
+| `SessionLimits` had eight components; the event publisher drained for a fixed 5 s | `SessionLimits(..., streamRetryPolicy, teardownGrace)`; the drain waits `teardownGrace` |
+| `send` and `interrupt` were accepted after the loop ended with an `Error` | they throw `IllegalStateException("session is terminal")` once `result()` has completed |
+
 **A provider stream succeeds only at its provider's terminal event.** A stream that ended without
 one used to complete with finish reason `STOP`: a dropped connection after some text was a
 finished answer. Now every stream ends in exactly one `Done` or `Error`. `Done` comes only from
