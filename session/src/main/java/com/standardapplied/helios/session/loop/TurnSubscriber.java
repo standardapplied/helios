@@ -70,7 +70,9 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   private final InstantSource clock;
   private final IdleWatchdog idleWatchdog;
   private final StreamCancel streamCancel;
+  private final Duration requestGrace;
   private final CountDownLatch done = new CountDownLatch(1);
+  private final CountDownLatch requestReturned = new CountDownLatch(1);
   private final Object lock = new Object();
   private final StringBuilder content = new StringBuilder();
   private final List<ToolCall> toolCalls = new ArrayList<>();
@@ -79,7 +81,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   private boolean emitting;
   private boolean ended;
   private StreamedTurn outcome;
-  private Error emissionError;
+  private Error thrownError;
 
   TurnSubscriber(
       SessionState state,
@@ -94,13 +96,16 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     this.idleWatchdog =
         new IdleWatchdog(scheduler, idleTimeout, this::released, stalled -> end(stalled, true));
     this.streamCancel = new StreamCancel(state.sessionId(), cancelGrace);
+    this.requestGrace = cancelGrace;
   }
 
   /**
    * Accept the first subscription and request every chunk, or cancel a subscription that arrives
    * second or after the turn ended. What the request throws ends the turn, on whichever thread
-   * delivers the subscription, and is rethrown. Cancelling a refused subscription is not part of
-   * the turn's outcome: an {@link Error} it throws is thrown, anything else is logged.
+   * delivers the subscription, and is rethrown; an {@link Error} it throws is kept even when
+   * another thread had already ended the turn (see {@link #awaitDone(CancellationToken)}).
+   * Cancelling a refused subscription is not part of the turn's outcome: an {@link Error} it throws
+   * is thrown, anything else is logged.
    *
    * @throws RuntimeException what requesting from the accepted subscription threw
    * @throws Error what requesting from the accepted subscription threw, or an {@link Error}
@@ -119,8 +124,10 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       try {
         subscription.request(Long.MAX_VALUE);
       } catch (RuntimeException | Error failure) {
-        end(failure, true);
+        fail(failure);
         throw failure;
+      } finally {
+        requestReturned.countDown();
       }
       return;
     }
@@ -136,8 +143,8 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   /**
    * Accumulate {@code chunk} and emit its event. An {@link Error} the emission throws, a stream
    * event hook's, is recorded before the runner is released and ends the turn; when another thread
-   * had already ended it, that {@code Error} is still the turn's failure, carrying the other ending
-   * as suppressed (see {@link #awaitDone(CancellationToken)}).
+   * had already ended it, that {@code Error} is still kept (see {@link
+   * #awaitDone(CancellationToken)}).
    *
    * @throws Error what emitting the chunk's event threw
    */
@@ -162,10 +169,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       idleWatchdog.arm();
       emit(chunk);
     } catch (Error error) {
-      synchronized (lock) {
-        emissionError = error;
-      }
-      end(error, true);
+      fail(error);
       throw error;
     } finally {
       boolean release;
@@ -223,6 +227,20 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   }
 
   /**
+   * End the turn with {@code failure}, which this subscriber's own call into a hook or the provider
+   * threw. An {@link Error} is recorded first, so the turn keeps it even when another thread had
+   * already ended the turn.
+   */
+  private void fail(Throwable failure) {
+    if (failure instanceof Error error) {
+      synchronized (lock) {
+        thrownError = (Error) StreamCancel.fold(thrownError, error);
+      }
+    }
+    end(failure, true);
+  }
+
+  /**
    * Block until the stream ends, then return what it produced. The session's {@link
    * CancellationToken} and an interrupt of the calling thread each end the stream and cancel it;
    * without them a provider stream that never delivers {@code onComplete} / {@code onError} (silent
@@ -240,8 +258,13 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * long-lived session token does not accumulate one stale registration per turn (see the {@code
    * CancellationToken.onCancel} cleanup contract).
    *
-   * <p>An {@link Error} a chunk's emission threw is the returned turn's failure even when another
-   * ending was published first; that ending's failure is added to it as suppressed.
+   * <p>An {@link Error} a chunk's emission or the subscription's request threw is kept even when
+   * another ending was published first, folded with that ending's failure ({@link
+   * StreamCancel#fold}): it is the returned turn's failure, carrying that ending's as suppressed,
+   * unless the stream had already ended with an {@code Error} of its own, which then carries it. A
+   * request still running on the thread that delivered the subscription when the stream ended is
+   * given {@code cancelGrace} to return, so an {@code Error} it is about to throw is not lost; one
+   * still running past it is logged.
    */
   StreamedTurn awaitDone(CancellationToken cancellation) {
     var registration = cancellation.onCancel(() -> end(new CancellationException(CANCELLED), true));
@@ -258,6 +281,9 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
           end(e, true);
         }
       }
+      if (!awaitRequestReturned()) {
+        interrupted = true;
+      }
     } finally {
       registration.remove();
       idleWatchdog.cancel();
@@ -266,9 +292,36 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       }
     }
     synchronized (lock) {
-      return emissionError == null
+      return thrownError == null
           ? outcome
-          : snapshot(StreamCancel.fold(emissionError, outcome.error()));
+          : snapshot(StreamCancel.fold(outcome.error(), thrownError));
+    }
+  }
+
+  /**
+   * Wait up to the grace for a request of the accepted subscription to return.
+   *
+   * @return {@code false} if the calling thread was interrupted while it waited
+   */
+  private boolean awaitRequestReturned() {
+    synchronized (lock) {
+      if (subscription == null) {
+        return true;
+      }
+    }
+    try {
+      if (!requestReturned.await(requestGrace.toNanos(), TimeUnit.NANOSECONDS)) {
+        LOGGER.warning(
+            () ->
+                "requesting from the model stream of session "
+                    + state.sessionId()
+                    + " did not return within "
+                    + requestGrace
+                    + " after the turn ended");
+      }
+      return true;
+    } catch (InterruptedException e) {
+      return false;
     }
   }
 
