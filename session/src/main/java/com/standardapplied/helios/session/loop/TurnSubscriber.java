@@ -79,6 +79,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   private boolean emitting;
   private boolean ended;
   private StreamedTurn outcome;
+  private Error emissionError;
 
   TurnSubscriber(
       SessionState state,
@@ -97,10 +98,13 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
   /**
    * Accept the first subscription and request every chunk, or cancel a subscription that arrives
-   * second or after the turn ended. That cancel is not part of the turn's outcome: an {@link Error}
-   * it throws is thrown, anything else is logged.
+   * second or after the turn ended. What the request throws ends the turn, on whichever thread
+   * delivers the subscription, and is rethrown. Cancelling a refused subscription is not part of
+   * the turn's outcome: an {@link Error} it throws is thrown, anything else is logged.
    *
-   * @throws Error an {@link Error} cancelling a refused subscription threw
+   * @throws RuntimeException what requesting from the accepted subscription threw
+   * @throws Error what requesting from the accepted subscription threw, or an {@link Error}
+   *     cancelling a refused subscription threw
    */
   @Override
   public void onSubscribe(Flow.Subscription subscription) {
@@ -112,7 +116,12 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       }
     }
     if (accepted) {
-      subscription.request(Long.MAX_VALUE);
+      try {
+        subscription.request(Long.MAX_VALUE);
+      } catch (RuntimeException | Error failure) {
+        end(failure, true);
+        throw failure;
+      }
       return;
     }
     var failure = streamCancel.cancel(subscription, null);
@@ -124,6 +133,14 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     }
   }
 
+  /**
+   * Accumulate {@code chunk} and emit its event. An {@link Error} the emission throws, a stream
+   * event hook's, is recorded before the runner is released and ends the turn; when another thread
+   * had already ended it, that {@code Error} is still the turn's failure, carrying the other ending
+   * as suppressed (see {@link #awaitDone(CancellationToken)}).
+   *
+   * @throws Error what emitting the chunk's event threw
+   */
   @Override
   public void onNext(ModelChunk chunk) {
     boolean subscribed;
@@ -144,6 +161,12 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     try {
       idleWatchdog.arm();
       emit(chunk);
+    } catch (Error error) {
+      synchronized (lock) {
+        emissionError = error;
+      }
+      end(error, true);
+      throw error;
     } finally {
       boolean release;
       synchronized (lock) {
@@ -216,6 +239,9 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * from ever reaching its teardown. The cancellation callback is removed in {@code finally} so a
    * long-lived session token does not accumulate one stale registration per turn (see the {@code
    * CancellationToken.onCancel} cleanup contract).
+   *
+   * <p>An {@link Error} a chunk's emission threw is the returned turn's failure even when another
+   * ending was published first; that ending's failure is added to it as suppressed.
    */
   StreamedTurn awaitDone(CancellationToken cancellation) {
     var registration = cancellation.onCancel(() -> end(new CancellationException(CANCELLED), true));
@@ -240,7 +266,9 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       }
     }
     synchronized (lock) {
-      return outcome;
+      return emissionError == null
+          ? outcome
+          : snapshot(StreamCancel.fold(emissionError, outcome.error()));
     }
   }
 

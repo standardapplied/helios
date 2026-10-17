@@ -20,6 +20,7 @@ import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.test.LogCapture;
@@ -33,6 +34,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -220,6 +223,62 @@ final class SessionFinalizationTest {
 
     assertSame(streamed, failureOf(model));
     assertEquals(List.of(sentinel), List.of(streamed.getSuppressed()));
+  }
+
+  @Test
+  void anErrorRequestingFromASubscriptionDeliveredOnAnotherThreadFailsTheResult() {
+    var sentinel = new AssertionError("request failure");
+    var calls = new AtomicInteger();
+    var model =
+        model(
+            () -> {
+              calls.incrementAndGet();
+              return subscriber ->
+                  CompletableFuture.runAsync(
+                      () ->
+                          subscriber.onSubscribe(
+                              subscription(
+                                  () -> {
+                                    throw sentinel;
+                                  },
+                                  () -> {})));
+            });
+
+    assertSame(sentinel, failureOf(model));
+    assertEquals(1, calls.get());
+  }
+
+  @Test
+  void anErrorAStreamEventHookThrowsAfterCloseCancelledTheStreamFailsTheResult() {
+    var sentinel = new AssertionError("hook failure");
+    var emitting = new CountDownLatch(1);
+    var cancelled = new CountDownLatch(1);
+    var model =
+        model(
+            () ->
+                subscriber ->
+                    subscriber.onSubscribe(
+                        subscription(
+                            () ->
+                                CompletableFuture.runAsync(
+                                    () -> subscriber.onNext(new ModelChunk.TextDelta("Hel"))),
+                            cancelled::countDown)));
+    OnStreamEventHook failing =
+        (event, ctx) -> {
+          if (event instanceof QueryEvent.AssistantText) {
+            emitting.countDown();
+            Await.latch("the stream cancelled", cancelled);
+            throw sentinel;
+          }
+        };
+    var session = AgentSession.create(options(model).withHook(failing).build());
+    session.send("go");
+    Await.latch("the hook running", emitting);
+
+    session.close();
+
+    assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    assertInstanceOf(CancellationException.class, sentinel.getSuppressed()[0]);
   }
 
   @Test

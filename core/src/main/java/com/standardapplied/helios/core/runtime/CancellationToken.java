@@ -112,7 +112,9 @@ public final class CancellationToken {
    *
    * <p>{@code observedFailure} is handed each {@link Error} a callback throws as soon as it is
    * caught, on the callbacks' thread, so a caller that stops waiting for the future while a later
-   * callback still blocks keeps the {@code Error}s thrown before it.
+   * callback still blocks keeps the {@code Error}s thrown before it. What the observer throws is
+   * added to the {@code Error} the future completes with as suppressed; the remaining callbacks
+   * still run.
    *
    * @param reason a human-readable reason for the cancellation
    * @param observedFailure receives each {@link Error} a claimed callback throws, in order
@@ -203,16 +205,31 @@ public final class CancellationToken {
       } catch (RuntimeException ex) {
         LOGGER.log(Level.WARNING, "cancellation callback threw", ex);
       } catch (Error err) {
-        observedFailure.accept(err);
         if (hostError == null) {
           hostError = err;
         } else if (hostError != err) {
           hostError.addSuppressed(err);
         }
+        observe(observedFailure, err, hostError);
       }
     }
     if (hostError != null) {
       throw hostError;
+    }
+  }
+
+  /**
+   * Hand {@code err} to {@code observedFailure}. What the observer throws is added to {@code
+   * hostError} as suppressed, so it neither replaces the callback's {@code Error} nor keeps the
+   * remaining callbacks from running.
+   */
+  private static void observe(Consumer<Error> observedFailure, Error err, Error hostError) {
+    try {
+      observedFailure.accept(err);
+    } catch (RuntimeException | Error observerFailure) {
+      if (observerFailure != hostError) {
+        hostError.addSuppressed(observerFailure);
+      }
     }
   }
 
