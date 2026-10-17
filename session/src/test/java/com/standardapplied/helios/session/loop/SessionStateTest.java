@@ -43,13 +43,27 @@ final class SessionStateTest {
     var state = new SessionState(SID, cancellation, Clock.fixed(fixed, ZoneOffset.UTC));
     assertEquals(SID, state.sessionId());
     assertSame(cancellation, state.cancellation());
-    assertEquals(fixed, state.startedAt());
+    assertEquals(Duration.ZERO, state.elapsed());
     assertEquals(0, state.currentTurnIndex());
     assertEquals(Usage.of(0, 0), state.totals().usage());
     assertEquals(CostEstimate.zero(), state.totals().cost());
     assertTrue(state.history().snapshot().isEmpty());
     assertFalse(state.isTerminal());
     assertEquals(Optional.empty(), state.terminal());
+  }
+
+  @Test
+  void theStrayErrorsKeepWhatIsAddedInOrderAndRejectANullError() {
+    var state = new SessionState(SID, new CancellationToken(), Clock.systemUTC());
+    var first = new AssertionError("first");
+    var second = new StackOverflowError("second");
+
+    state.strayErrors().add(first);
+    state.strayErrors().add(second);
+
+    assertEquals(List.of(first, second), state.strayErrors().all());
+    var ex = assertThrows(NullPointerException.class, () -> state.strayErrors().add(null));
+    assertEquals("error must not be null", ex.getMessage());
   }
 
   @Test

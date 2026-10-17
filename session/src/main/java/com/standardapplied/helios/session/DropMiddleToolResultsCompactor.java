@@ -222,7 +222,9 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
   /**
    * Run the summary call on a virtual thread under the configured timeout. On timeout the worker
    * thread is interrupted (best effort) and this returns null so the caller falls back to no-op
-   * compaction.
+   * compaction. What the call throws is rethrown as itself, an {@link Error} included; an {@code
+   * Error} is first kept among the session's {@link SessionState#strayErrors() stray errors}, so
+   * one thrown after the timeout still ends the session.
    */
   private Response<Void> invokeSummary(SessionState state, List<Message> request) {
     var future = new CompletableFuture<Response<Void>>();
@@ -233,8 +235,11 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
                 () -> {
                   try {
                     future.complete(summaryModel.chat(List.copyOf(request), List.of()));
-                  } catch (Throwable t) {
-                    future.completeExceptionally(t);
+                  } catch (RuntimeException e) {
+                    future.completeExceptionally(e);
+                  } catch (Error e) {
+                    state.strayErrors().add(e);
+                    future.completeExceptionally(e);
                   }
                 });
     try {
@@ -251,10 +256,10 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
                   + state.currentTurnIndex());
       return null;
     } catch (ExecutionException e) {
-      if (e.getCause() instanceof RuntimeException re) {
-        throw re;
+      if (e.getCause() instanceof Error error) {
+        throw error;
       }
-      throw new RuntimeException(e.getCause());
+      throw (RuntimeException) e.getCause();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       worker.interrupt();

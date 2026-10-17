@@ -192,7 +192,10 @@ public class FaultTolerance {
     }
   }
 
-  /** Re-throws what the timed operation failed with, unwrapping its checked exceptions. */
+  /**
+   * Re-throws what the timed operation failed with: an {@link Error} or unchecked exception as
+   * itself, a checked exception other than the declared ones wrapped in a {@link RuntimeException}.
+   */
   private static RuntimeException rethrow(Throwable cause)
       throws CircuitBreakerOpenException, RetryExhaustedException, InterruptedException {
     switch (cause) {
@@ -203,6 +206,7 @@ public class FaultTolerance {
         throw ie;
       }
       case RuntimeException re -> throw re;
+      case Error error -> throw error;
       case null, default -> throw new RuntimeException(cause);
     }
   }

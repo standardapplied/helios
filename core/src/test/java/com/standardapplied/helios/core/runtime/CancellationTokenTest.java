@@ -15,12 +15,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
 final class CancellationTokenTest {
@@ -456,5 +458,178 @@ final class CancellationTokenTest {
         assertEquals(0, t.activeCallbackCountForTests(), "round " + round + " retained callbacks");
       }
     }
+  }
+
+  // ── cancelAsync ───────────────────────────────────────────────────────────
+
+  @Test
+  void cancelAsyncCancelsTheTokenBeforeItReturnsWhileACallbackStillRuns() {
+    var token = new CancellationToken();
+    var release = new CountDownLatch(1);
+    token.onCancel(() -> Await.latch("the callback released", release));
+
+    var fired = token.cancelAsync("closed", error -> {});
+
+    assertEquals(Optional.of("closed"), token.reason());
+    assertFalse(fired.isDone(), "the callback is still running");
+    release.countDown();
+    Await.value("the callbacks to have run", fired);
+  }
+
+  @Test
+  void cancelAsyncRunsTheCallbacksOffTheCallingThread() {
+    var token = new CancellationToken();
+    var ranOn = new AtomicReference<Thread>();
+    token.onCancel(() -> ranOn.set(Thread.currentThread()));
+
+    Await.value("the callbacks to have run", token.cancelAsync("closed", error -> {}));
+
+    assertTrue(ranOn.get().isVirtual(), "callbacks run on a virtual thread");
+    assertFalse(ranOn.get() == Thread.currentThread(), "not on the caller's thread");
+  }
+
+  @Test
+  void cancelAsyncCompletesExceptionallyWithTheFirstErrorACallbackThrew() {
+    var token = new CancellationToken();
+    var first = new AssertionError("first");
+    var second = new AssertionError("second");
+    token.onCancel(
+        () -> {
+          throw first;
+        });
+    token.onCancel(
+        () -> {
+          throw second;
+        });
+
+    var failure =
+        Await.failure("the callbacks to have run", token.cancelAsync("closed", error -> {}));
+
+    assertSame(first, failure);
+    assertEquals(List.of(second), List.of(first.getSuppressed()));
+  }
+
+  @Test
+  void cancelAsyncHandsTheObserverAnErrorBeforeALaterCallbackReturns() {
+    var token = new CancellationToken();
+    var sentinel = new AssertionError("sentinel");
+    var release = new CountDownLatch(1);
+    var observed = new CompletableFuture<Error>();
+    token.onCancel(
+        () -> {
+          throw sentinel;
+        });
+    token.onCancel(() -> Await.latch("the callback released", release));
+
+    var fired = token.cancelAsync("closed", observed::complete);
+
+    try {
+      assertSame(sentinel, Await.value("the observed error", observed));
+    } finally {
+      release.countDown();
+      Await.failure("the callbacks to have run", fired);
+    }
+  }
+
+  @Test
+  void anExceptionTheObserverThrowsRidesOnTheCallbacksErrorAndLaterCallbacksStillRun() {
+    var observerFailure = new IllegalStateException("observer");
+
+    var outcome =
+        cancelWithObserver(
+            error -> {
+              throw observerFailure;
+            });
+
+    assertSame(outcome.sentinel(), outcome.failure());
+    assertEquals(List.of(observerFailure), List.of(outcome.failure().getSuppressed()));
+    assertEquals(1, outcome.laterCallbacks().get());
+  }
+
+  @Test
+  void anErrorTheObserverThrowsRidesOnTheCallbacksErrorAndLaterCallbacksStillRun() {
+    var observerFailure = new AssertionError("observer");
+
+    var outcome =
+        cancelWithObserver(
+            error -> {
+              throw observerFailure;
+            });
+
+    assertSame(outcome.sentinel(), outcome.failure());
+    assertEquals(List.of(observerFailure), List.of(outcome.failure().getSuppressed()));
+    assertEquals(1, outcome.laterCallbacks().get());
+  }
+
+  @Test
+  void anObserverRethrowingTheCallbacksErrorAddsNothingToIt() {
+    var token = new CancellationToken();
+    var sentinel = new AssertionError("sentinel");
+    token.onCancel(
+        () -> {
+          throw sentinel;
+        });
+
+    var failure =
+        Await.failure(
+            "the callbacks to have run",
+            token.cancelAsync(
+                "closed",
+                error -> {
+                  throw error;
+                }));
+
+    assertSame(sentinel, failure);
+    assertEquals(0, failure.getSuppressed().length);
+  }
+
+  private static ObserverOutcome cancelWithObserver(Consumer<Error> observer) {
+    var token = new CancellationToken();
+    var sentinel = new AssertionError("sentinel");
+    var laterCallbacks = new AtomicInteger();
+    token.onCancel(
+        () -> {
+          throw sentinel;
+        });
+    token.onCancel(laterCallbacks::incrementAndGet);
+
+    var failure = Await.failure("the callbacks to have run", token.cancelAsync("closed", observer));
+    return new ObserverOutcome(sentinel, failure, laterCallbacks);
+  }
+
+  private record ObserverOutcome(Error sentinel, Throwable failure, AtomicInteger laterCallbacks) {}
+
+  @Test
+  void cancelAsyncRejectsANullObserverBeforeCancelling() {
+    var token = new CancellationToken();
+
+    assertThrows(NullPointerException.class, () -> token.cancelAsync("closed", null));
+
+    assertFalse(token.isCancelled());
+  }
+
+  @Test
+  void cancelAsyncOnACancelledTokenKeepsTheFirstReasonAndRunsNothing() {
+    var token = new CancellationToken();
+    token.cancel("first");
+    var fired = new AtomicInteger();
+    token.onCancel(fired::incrementAndGet);
+
+    var done = token.cancelAsync("second", error -> {});
+
+    assertTrue(done.isDone(), "nothing left to run");
+    assertEquals(Optional.of("first"), token.reason());
+    assertEquals(1, fired.get());
+  }
+
+  @Test
+  void cancelAsyncRejectsABlankReason() {
+    var token = new CancellationToken();
+
+    var ex =
+        assertThrows(IllegalArgumentException.class, () -> token.cancelAsync(" ", error -> {}));
+
+    assertEquals("reason must not be blank", ex.getMessage());
+    assertFalse(token.isCancelled());
   }
 }

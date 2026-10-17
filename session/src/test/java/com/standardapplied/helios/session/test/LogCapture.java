@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package com.standardapplied.helios.session.loop;
+package com.standardapplied.helios.session.test;
 
 import java.util.List;
 import java.util.logging.Handler;
@@ -12,7 +12,7 @@ import java.util.logging.Logger;
  * Collects what one class's logger logs, at every level, until closed, and keeps it from the parent
  * handlers, so a record the test expects is not printed to the build output.
  */
-final class LogCapture implements AutoCloseable {
+public final class LogCapture implements AutoCloseable {
 
   private final Logger logger;
   private final Level level;
@@ -42,7 +42,7 @@ final class LogCapture implements AutoCloseable {
     logger.addHandler(handler);
   }
 
-  static LogCapture of(Class<?> owner, List<LogRecord> records) {
+  public static LogCapture of(Class<?> owner, List<LogRecord> records) {
     return new LogCapture(Logger.getLogger(owner.getName()), records);
   }
 

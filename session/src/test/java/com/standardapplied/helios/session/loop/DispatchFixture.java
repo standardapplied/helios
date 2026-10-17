@@ -37,6 +37,7 @@ final class DispatchFixture implements AutoCloseable {
   static final Duration SHORT = Duration.ofMillis(1);
 
   final ManualScheduler scheduler = new ManualScheduler();
+  final StrayErrors strayErrors = new StrayErrors();
   final CountDownLatch release = new CountDownLatch(1);
   final CountDownLatch entered = new CountDownLatch(1);
   final CountDownLatch callbackRelease = new CountDownLatch(1);
@@ -62,7 +63,8 @@ final class DispatchFixture implements AutoCloseable {
   }
 
   ToolDispatch dispatcher(ConcurrencyLimits limits, ToolBinding... bindings) {
-    return new ToolDispatch(CTX, new ToolRegistry(List.of(bindings)), limits, scheduler);
+    return new ToolDispatch(
+        CTX, new ToolRegistry(List.of(bindings)), limits, scheduler, strayErrors);
   }
 
   ToolDispatch dispatcher(ToolBinding... bindings) {
@@ -167,7 +169,7 @@ final class DispatchFixture implements AutoCloseable {
     var next = start(d, "write");
     Await.until(
         "the next writer to queue for the write permit",
-        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+        () -> d.permitsFor(ToolCategory.WRITE).queued() == 1);
     assertEquals(1, starts.get(), "the next writer has not started");
 
     release.countDown();
@@ -227,6 +229,6 @@ final class DispatchFixture implements AutoCloseable {
   }
 
   static void awaitIdle(ToolDispatch d) {
-    Await.until("every worker to end", () -> d.liveCalls() == 0);
+    Await.until("every worker to end", () -> d.awaitLiveCalls(SHORT).isEmpty());
   }
 }

@@ -299,11 +299,8 @@ class RetryPolicyTest {
 
   @Test
   void errorEscapesRetryPolicy() {
-    // OutOfMemoryError / StackOverflowError / LinkageError must escape — RetryPolicy.execute used
-    // to
-    // catch Throwable and wrap Errors in RetryExhaustedException, violating the framework's
-    // documented "Error subtypes escape so OOM/StackOverflow kill the host thread cleanly"
-    // invariant (see CLAUDE.md "Loop crash semantics").
+    // An Error is a host failure: it escapes as itself, never retried or wrapped in
+    // RetryExhaustedException (see CLAUDE.md "Loop crash semantics and teardown").
     var policy =
         RetryPolicy.newBuilder()
             .withMaxAttempts(5)

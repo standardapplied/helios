@@ -35,6 +35,7 @@ import java.util.logging.Logger;
 final class ModelCall {
 
   private static final Logger LOGGER = Logger.getLogger(TurnRunner.class.getName());
+  private static final long CANCELLATION_CHECK_NANOS = TimeUnit.MILLISECONDS.toNanos(10);
 
   /** The final attempt's stream and the total number of attempts made. */
   record Attempts(StreamedTurn turn, int count) {}
@@ -67,10 +68,13 @@ final class ModelCall {
    * com.standardapplied.helios.session.ResultMessage.ErrorTransientStream} via {@link
    * StopClassifier}.
    *
-   * <p>Non-transient throwables ({@link StructuredOutputParseException}, {@code
+   * <p>Non-transient exceptions ({@link StructuredOutputParseException}, {@code
    * java.util.concurrent.TimeoutException} from the stream-idle watchdog, or any other unchecked
    * exception escaping the subscribe call) end the attempts immediately — only the type guard on
    * {@code TransientStreamException} triggers a retry.
+   *
+   * @throws Error an {@link Error} the model threw, from the call or through the stream, or one
+   *     cancelling the stream, as itself
    */
   Attempts stream(SessionState state, SessionLimits limits, List<Tool> visibleTools) {
     var policy = limits.streamRetryPolicy();
@@ -100,10 +104,23 @@ final class ModelCall {
     }
   }
 
+  /**
+   * One attempt, never made once the session caught a {@link StrayErrors stray error}: the first of
+   * them is thrown instead. An {@link Error} opening or subscribing to the stream threw is thrown
+   * whatever the stream had already ended with, so a stream that reported a transient failure or
+   * completed before it is neither retried nor continued past it.
+   */
   private StreamedTurn streamOnce(SessionState state, SessionLimits limits, List<Tool> tools) {
+    state.strayErrors().throwFirst();
     var subscriber =
         new TurnSubscriber(
-            state, emitter, collaborators.clock(), scheduler, limits.streamIdleTimeout());
+            state,
+            emitter,
+            collaborators.clock(),
+            scheduler,
+            limits.streamIdleTimeout(),
+            limits.teardownGrace());
+    Error thrown = null;
     try {
       var publisher =
           outputSchema != null
@@ -111,10 +128,15 @@ final class ModelCall {
                   state.history().snapshot(), tools, outputSchema, state.cancellation())
               : model.chatStream(state.history().snapshot(), tools, state.cancellation());
       publisher.subscribe(subscriber);
-    } catch (Throwable t) {
-      subscriber.onError(t);
+    } catch (RuntimeException | Error e) {
+      subscriber.end(e, true);
+      thrown = e instanceof Error fatal ? fatal : null;
     }
-    return subscriber.awaitDone(state.cancellation());
+    var turn = subscriber.awaitDone(state.cancellation());
+    if (StreamCancel.fold(turn.error(), thrown) instanceof Error error) {
+      throw error;
+    }
+    return turn;
   }
 
   /**
@@ -166,11 +188,11 @@ final class ModelCall {
    * when the full delay elapsed (or {@code delay} was zero); {@code false} when the sleep was cut
    * short by cancellation or thread interruption.
    *
-   * <p>Implementation: a one-shot {@link CountDownLatch} the cancellation callback counts down;
-   * {@code latch.await(timeout)} returns {@code true} when the latch counted down (cancelled) and
-   * {@code false} when the timeout elapsed (slept the full duration). The callback registration is
-   * removed in {@code finally} so a long-lived session token does not accumulate dead callbacks
-   * across many retries.
+   * <p>Implementation: a one-shot {@link CountDownLatch} the cancellation callback counts down, for
+   * a prompt wakeup; the token is also read every few milliseconds as this waits, because it runs
+   * its callbacks one after another and an earlier callback that blocks would otherwise keep the
+   * loop asleep for the whole delay. The callback registration is removed in {@code finally} so a
+   * long-lived session token does not accumulate dead callbacks across many retries.
    *
    * <p>{@code delay} is contractually non-null and non-negative — callers pass {@link
    * com.standardapplied.helios.session.StreamRetryPolicy#nextDelay(int)} which is itself bounded by
@@ -185,11 +207,21 @@ final class ModelCall {
     if (delay.isZero()) {
       return true;
     }
+    var until = System.nanoTime() + TimeUnit.NANOSECONDS.convert(delay);
     var latch = new CountDownLatch(1);
     var registration = token.onCancel(latch::countDown);
     try {
-      boolean cancelledDuringSleep = latch.await(delay.toMillis(), TimeUnit.MILLISECONDS);
-      return !cancelledDuringSleep;
+      while (!latch.await(
+          Math.clamp(until - System.nanoTime(), 0L, CANCELLATION_CHECK_NANOS),
+          TimeUnit.NANOSECONDS)) {
+        if (token.isCancelled()) {
+          return false;
+        }
+        if (System.nanoTime() - until >= 0) {
+          return true;
+        }
+      }
+      return false;
     } catch (InterruptedException ie) {
       Thread.currentThread().interrupt();
       return false;

@@ -40,6 +40,7 @@ import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -66,6 +67,7 @@ final class AgentSessionImplTest {
   private static final String SID = "sess-impl-1";
   private static final Instant FIXED = Instant.parse("2026-05-14T19:00:00Z");
   private static final Clock CLOCK = Clock.fixed(FIXED, ZoneOffset.UTC);
+  private static final Duration NOT_REACHED = Duration.ofMinutes(10);
 
   private static AgentSession buildSession(Model model) {
     return buildSession(model, ConcurrencyLimits.defaults());
@@ -418,7 +420,7 @@ final class AgentSessionImplTest {
   @Test
   void closeBeforeAnySendShutsDownPublisherExecutor() {
     var s = (AgentSessionImpl) buildSession(textOnceModel("x", FinishReason.STOP));
-    var executor = s.lifecycleForTests().publisherExecutor();
+    var executor = s.lifecycleForTests().events().executor();
     assertTrue(!executor.isShutdown(), "executor live before close()");
     s.close();
     assertTrue(executor.isShutdown(), "executor shut down by close()");
@@ -437,11 +439,11 @@ final class AgentSessionImplTest {
   @Test
   void naturalLoopTerminationShutsDownPublisherExecutor() throws Exception {
     var s = (AgentSessionImpl) buildSession(textOnceModel("done", FinishReason.STOP));
-    var executor = s.lifecycleForTests().publisherExecutor();
+    var executor = s.lifecycleForTests().events().executor();
     s.send(UserMessage.text("hi"));
     terminalOf(s);
-    // closeRuntime() runs BEFORE resultFuture settles (hv2-bug2 Issue 2 fix), so the executor is
-    // already terminated by the time the result is available.
+    // The teardown drains the publisher before the result settles (hv2-bug2 Issue 2 fix), so the
+    // executor is already terminated by the time the result is available.
     assertTrue(executor.isShutdown(), "executor shut down after natural termination");
     assertTrue(executor.isTerminated(), "executor terminated after natural termination");
   }
@@ -483,28 +485,26 @@ final class AgentSessionImplTest {
   }
 
   @Test
-  void errorEscapingAgentLoopSettlesFutureExceptionallyInsteadOfHanging() {
-    // AgentLoop.run catches Exception (not Throwable); HookRegistry catches RuntimeException (not
-    // Throwable). So an Error subtype thrown from a hook escapes both defensive catches and lands
-    // in AgentSessionImpl.runLoop's outer catch. Without that catch, resultFuture never completes
-    // and every caller blocked on result().join() hangs indefinitely.
+  void aHooksErrorFailsTheResultWithThatErrorAfterTheOnlyModelCall() {
+    var sentinel = new AssertionError("simulated unrecoverable error");
     PreStopHook erroring =
         (response, ctx) -> {
-          throw new AssertionError("simulated unrecoverable error");
+          throw sentinel;
         };
+    var model = ScriptedModel.newBuilder().withTextTurn("done").withTextTurn("never").build();
     try (var s =
         AgentSession.create(
             SessionOptions.newBuilder()
-                .withModel(textOnceModel("done", FinishReason.STOP))
+                .withModel(model)
                 .withSessionId(SID)
                 .withClock(CLOCK)
                 .withHook(erroring)
                 .build())) {
       s.send(UserMessage.text("hi"));
-      var failure = Await.failure("the result future to settle exceptionally", s.result());
-      assertInstanceOf(AssertionError.class, failure);
-      assertEquals("simulated unrecoverable error", failure.getMessage());
+
+      assertSame(sentinel, Await.failure("the result future to fail", s.result()));
     }
+    assertEquals(1, model.calls().size());
   }
 
   // ── execution-provider lifecycle (onSessionStart / onSessionEnd) ─────────
@@ -729,11 +729,12 @@ final class AgentSessionImplTest {
   }
 
   @Test
-  void aSessionClosedBeforeItStartsSettlesItsResultWhenTheProviderEndThrowsAnError() {
+  void aSessionClosedBeforeItStartsFailsItsResultWithTheErrorTheProviderEndThrew() {
+    var sentinel = new AssertionError("provider end failed");
     var provider = new LifecycleProvider();
     provider.onEnd =
         () -> {
-          throw new AssertionError("provider end failed");
+          throw sentinel;
         };
     var session =
         AgentSession.create(
@@ -742,33 +743,37 @@ final class AgentSessionImplTest {
                 .withSessionId(SID)
                 .withClock(CLOCK)
                 .withExecutionProvider(provider)
+                .withLimits(SessionLimits.newBuilder().withTeardownGrace(NOT_REACHED).build())
                 .build());
 
-    var thrown = assertThrows(AssertionError.class, session::close);
+    session.close();
 
-    assertEquals("provider end failed", thrown.getMessage());
-    assertInstanceOf(ResultMessage.Cancelled.class, session.result().getNow(null));
+    assertSame(sentinel, Await.failure("the result to fail", session.result()));
   }
 
   @Test
-  void aSessionThatRanSettlesItsResultWhenTheProviderEndThrowsAnError() {
+  void aSessionThatRanFailsItsResultWithTheErrorTheProviderEndThrew() {
+    var sentinel = new AssertionError("provider end failed");
     var provider = new LifecycleProvider();
     provider.onEnd =
         () -> {
-          throw new AssertionError("provider end failed");
+          throw sentinel;
         };
+    var model = ScriptedModel.newBuilder().withTextTurn("done").withTextTurn("never").build();
     try (var s =
         AgentSession.create(
             SessionOptions.newBuilder()
-                .withModel(textOnceModel("done", FinishReason.STOP))
+                .withModel(model)
                 .withSessionId(SID)
                 .withClock(CLOCK)
                 .withExecutionProvider(provider)
+                .withLimits(SessionLimits.newBuilder().withTeardownGrace(NOT_REACHED).build())
                 .build())) {
       s.send(UserMessage.text("hi"));
 
-      assertInstanceOf(ResultMessage.Success.class, terminalOf(s));
+      assertSame(sentinel, Await.failure("the result to fail", s.result()));
     }
+    assertEquals(1, model.calls().size());
   }
 
   @Test
@@ -858,7 +863,7 @@ final class AgentSessionImplTest {
       if (event instanceof QueryEvent.LoopEnded ended) {
         Await.until(
             "the session to begin draining its publisher",
-            session.lifecycleForTests().publisherExecutor()::isShutdown);
+            session.lifecycleForTests().events().executor()::isShutdown);
         resultSettledFirst.set(session.result().isDone());
         captured.set(ended.result());
       }

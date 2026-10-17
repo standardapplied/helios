@@ -17,8 +17,12 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.RunnableScheduledFuture;
@@ -43,7 +47,8 @@ final class DispatchedCallTest {
 
   private final Overdue scheduler = new Overdue();
   private final AtomicInteger runs = new AtomicInteger();
-  private final AtomicInteger live = new AtomicInteger();
+  private final Set<DispatchedCall.Live> live = ConcurrentHashMap.newKeySet();
+  private final List<Error> strays = new CopyOnWriteArrayList<>();
   private final ScheduledThreadPoolExecutor busy = new ScheduledThreadPoolExecutor(1);
   private final CountDownLatch busyRelease = new CountDownLatch(1);
   private final CountDownLatch callbackEntered = new CountDownLatch(1);
@@ -84,7 +89,8 @@ final class DispatchedCallTest {
         session,
         timeout,
         permits,
-        live);
+        live,
+        strays::add);
   }
 
   private ToolResult counting(Map<String, Object> args, ToolContext ctx) {
@@ -139,7 +145,7 @@ final class DispatchedCallTest {
   void aDeadlineThatFiredBeforeTheWorkerWasAdmittedKeepsTheToolFromStarting() {
     dispatched(NEVER).start(scheduler);
 
-    Await.until("the worker to end", () -> live.get() == 0);
+    Await.until("the worker to end", live::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
   }
 
@@ -149,7 +155,7 @@ final class DispatchedCallTest {
 
     dispatched(Duration.ofNanos(1)).start(busy);
 
-    Await.until("the worker to end", () -> live.get() == 0);
+    Await.until("the worker to end", live::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
   }
 
@@ -166,7 +172,7 @@ final class DispatchedCallTest {
 
     permits.release(holder);
 
-    Await.until("the worker to end", () -> live.get() == 0);
+    Await.until("the worker to end", live::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
   }
 
@@ -188,7 +194,7 @@ final class DispatchedCallTest {
     }
     permits.release(later);
 
-    Await.until("the earlier call's worker to end", () -> live.get() == 0);
+    Await.until("the earlier call's worker to end", live::isEmpty);
     assertEquals(
         1, runsBeforeTheLaterCall, "the earlier call ran before the later one was admitted");
   }
@@ -227,7 +233,7 @@ final class DispatchedCallTest {
     var session = blockedSession();
     var dispatched = dispatched(NEVER, session);
     dispatched.start(busy);
-    Await.until("the worker to end", () -> live.get() == 0);
+    Await.until("the worker to end", live::isEmpty);
     assertEquals(1, runs.get(), "the tool ran and answered");
     cancelBehindTheBlockedCallback(session);
 
@@ -236,12 +242,32 @@ final class DispatchedCallTest {
   }
 
   @Test
+  void anErrorTheToolThrewIsKeptWhenTheSessionWasCancelledBeforeItsAnswerWasRead() {
+    var sentinel = new AssertionError("tool failure");
+    var session = new CancellationToken();
+    var dispatched =
+        dispatched(
+            NEVER,
+            session,
+            new CategoryPermits(1, new CategoryPermits.Scope()),
+            (args, ctx) -> {
+              throw sentinel;
+            });
+    dispatched.start(busy);
+    Await.until("the worker to end", live::isEmpty);
+    session.cancel("session closed");
+
+    assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    assertEquals(List.of(sentinel), strays);
+  }
+
+  @Test
   void aTimeoutReadAfterTheSessionWasCancelledIsNotReturned() {
     busy.execute(() -> DispatchFixture.awaitThroughInterrupts(busyRelease));
     var session = blockedSession();
     var dispatched = dispatched(Duration.ofNanos(1), session);
     dispatched.start(busy);
-    Await.until("the worker to end", () -> live.get() == 0);
+    Await.until("the worker to end", live::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
     cancelBehindTheBlockedCallback(session);
 
