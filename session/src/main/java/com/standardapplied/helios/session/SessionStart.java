@@ -21,8 +21,8 @@ import java.util.logging.Logger;
  * a bound. A provider that refuses, returns {@code null}, throws a {@link RuntimeException}, or has
  * not returned when the bound passes or the waiting thread is interrupted, refuses the session; one
  * that throws an {@link Error} fails it with that error. A start that settles after the session
- * stopped waiting is logged as a {@code WARNING}, and a late acceptance is ended there with {@code
- * onSessionEnd}, so the provider is never left holding a session nobody ends.
+ * stopped waiting is logged as a {@code WARNING}, and a late acceptance is then ended by the
+ * session's bounded teardown, so the provider is never left holding a session nobody ends.
  */
 final class SessionStart {
 
@@ -31,12 +31,21 @@ final class SessionStart {
   private final SessionState state;
   private final SessionContext sessionContext;
   private final ExecutionProvider executionProvider;
+  private final Runnable lateTeardown;
 
+  /**
+   * @param lateTeardown ends a provider that accepted after the session stopped waiting; what it
+   *     throws is logged
+   */
   SessionStart(
-      SessionState state, SessionContext sessionContext, ExecutionProvider executionProvider) {
+      SessionState state,
+      SessionContext sessionContext,
+      ExecutionProvider executionProvider,
+      Runnable lateTeardown) {
     this.state = state;
     this.sessionContext = sessionContext;
     this.executionProvider = executionProvider;
+    this.lateTeardown = lateTeardown;
   }
 
   /**
@@ -87,7 +96,7 @@ final class SessionStart {
 
   /**
    * Settle {@code outcome} with what {@code onSessionStart} did; if the session stopped waiting
-   * first, end a late acceptance with {@code onSessionEnd} and report what came too late.
+   * first, report what came too late and end a late acceptance.
    */
   private void run(CompletableFuture<SessionStartOutcome> outcome) {
     SessionStartOutcome started;
@@ -105,18 +114,21 @@ final class SessionStart {
   }
 
   private void lateOutcome(boolean accepted) {
-    if (accepted) {
-      try {
-        executionProvider.onSessionEnd(sessionContext);
-      } catch (Throwable t) {
-        LOGGER.log(Level.WARNING, "onSessionEnd threw after " + abandonment(), t);
-      }
-    }
     LOGGER.warning(
         () ->
             "onSessionStart returned after "
                 + abandonment()
-                + (accepted ? "; its acceptance was ended with onSessionEnd" : ""));
+                + (accepted ? "; its acceptance is ended by the session's teardown" : ""));
+    if (accepted) {
+      // The interrupt that gave up on onSessionStart must not cut the teardown's waits short.
+      Thread.interrupted();
+      try {
+        lateTeardown.run();
+      } catch (Throwable t) {
+        LOGGER.log(
+            Level.WARNING, "the teardown of a late acceptance threw after " + abandonment(), t);
+      }
+    }
   }
 
   private String abandonment() {

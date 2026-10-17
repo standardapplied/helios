@@ -36,13 +36,15 @@ import org.junit.jupiter.params.provider.MethodSource;
  * construction, waited for within {@link SessionLimits#startTimeout()}; a start it does not accept
  * releases what the session acquired and never ends the provider, an {@link Error} fails the result
  * as itself, and a start that settles after the session stopped waiting is reported, a late
- * acceptance ended. Every start that hangs blocks on {@link #released}, opened after each test; the
- * start timeout under test is {@link #SHORT_START}.
+ * acceptance ended by the session's bounded teardown. Every start or end that hangs blocks on
+ * {@link #released}, opened after each test; the start timeout and teardown grace under test are
+ * {@link #SHORT_START}.
  */
 final class SessionStartTest {
 
   private static final String SID = "sess-start";
   private static final Duration SHORT_START = Duration.ofMillis(50);
+  private static final Duration NOT_REACHED = Duration.ofMinutes(10);
 
   private final CountDownLatch released = new CountDownLatch(1);
   private final List<String> order = new CopyOnWriteArrayList<>();
@@ -162,10 +164,47 @@ final class SessionStartTest {
   }
 
   @Test
-  void aLateAcceptanceIsEndedWithOnSessionEndAndReported() {
+  void aLateAcceptanceIsEndedWithOnSessionEnd() {
+    var accepting = new CountDownLatch(1);
+    var ended = new CountDownLatch(1);
+    var provider = new RecordingProvider(order);
+    provider.start = acceptingOnceOpened(accepting);
+    provider.end = ended::countDown;
+
+    var session = AgentSession.create(withProvider(provider).withLimits(shortStart()).build());
+    Await.value("the refusal", session.result());
+    accepting.countDown();
+
+    Await.latch("onSessionEnd", ended);
+  }
+
+  @Test
+  void aLateAcceptanceIsReportedBeforeItsOnSessionEndReturns() {
     var accepting = new CountDownLatch(1);
     var provider = new RecordingProvider(order);
     provider.start = acceptingOnceOpened(accepting);
+    provider.end = () -> RecordingProvider.blockIgnoringInterrupts(released);
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
+      var session =
+          AgentSession.create(withProvider(provider).withLimits(shortStartSlowTeardown()).build());
+      Await.value("the refusal", session.result());
+      accepting.countDown();
+
+      awaitReported(
+          "onSessionStart returned after session "
+              + SID
+              + " stopped waiting for RecordingProvider; its acceptance is ended by the"
+              + " session's teardown");
+    }
+  }
+
+  @Test
+  void anOnSessionEndThatNeverReturnsForALateAcceptanceIsReportedAsNotDisposed() {
+    var accepting = new CountDownLatch(1);
+    var provider = new RecordingProvider(order);
+    provider.start = acceptingOnceOpened(accepting);
+    provider.end = () -> RecordingProvider.blockIgnoringInterrupts(released);
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
       var session = AgentSession.create(withProvider(provider).withLimits(shortStart()).build());
@@ -173,12 +212,10 @@ final class SessionStartTest {
       accepting.countDown();
 
       awaitReported(
-          "onSessionStart returned after session "
-              + SID
-              + " stopped waiting for RecordingProvider; its acceptance was ended with"
-              + " onSessionEnd");
+          "onSessionEnd of RecordingProvider did not return within PT0.05S; the session's"
+              + " provider resources are not known to be released, session "
+              + SID);
     }
-    assertEquals(1, provider.ends.get());
   }
 
   @Test
@@ -247,9 +284,32 @@ final class SessionStartTest {
       Await.value("the refusal", session.result());
       accepting.countDown();
 
+      var reported = awaitReported("onSessionEnd threw — continuing shutdown");
+      assertSame(failure, reported.getThrown());
+    }
+  }
+
+  @Test
+  void anErrorOnSessionEndThrowsForALateAcceptanceIsReported() {
+    var failure = new AssertionError("end failure");
+    var accepting = new CountDownLatch(1);
+    var provider = new RecordingProvider(order);
+    provider.start = acceptingOnceOpened(accepting);
+    provider.end =
+        () -> {
+          throw failure;
+        };
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
+      var session = AgentSession.create(withProvider(provider).withLimits(shortStart()).build());
+      Await.value("the refusal", session.result());
+      accepting.countDown();
+
       var reported =
           awaitReported(
-              "onSessionEnd threw after session " + SID + " stopped waiting for RecordingProvider");
+              "the teardown of a late acceptance threw after session "
+                  + SID
+                  + " stopped waiting for RecordingProvider");
       assertSame(failure, reported.getThrown());
     }
   }
@@ -288,7 +348,17 @@ final class SessionStartTest {
   }
 
   private static SessionLimits shortStart() {
-    return SessionLimits.newBuilder().withStartTimeout(SHORT_START).build();
+    return SessionLimits.newBuilder()
+        .withStartTimeout(SHORT_START)
+        .withTeardownGrace(SHORT_START)
+        .build();
+  }
+
+  private static SessionLimits shortStartSlowTeardown() {
+    return SessionLimits.newBuilder()
+        .withStartTimeout(SHORT_START)
+        .withTeardownGrace(NOT_REACHED)
+        .build();
   }
 
   private static Supplier<SessionStartOutcome> acceptingOnceOpened(CountDownLatch latch) {

@@ -11,6 +11,7 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
@@ -141,6 +142,30 @@ final class SessionFinalizationTest {
     assertEquals(0, sentinel.getSuppressed().length);
   }
 
+  @Test
+  void anErrorCancellingASubscriptionThatFailedTransientlyFailsTheResultWithoutARetry() {
+    var sentinel = new AssertionError("cancel failure");
+    var transientFailure = new TransientStreamException("connection reset", null, "test");
+    var calls = new AtomicInteger();
+    var model =
+        model(
+            () -> {
+              calls.incrementAndGet();
+              return subscriber ->
+                  subscriber.onSubscribe(
+                      subscription(
+                          () -> {
+                            throw transientFailure;
+                          },
+                          () -> {
+                            throw sentinel;
+                          }));
+            });
+
+    assertSame(sentinel, failureOf(model));
+    assertEquals(1, calls.get());
+  }
+
   // ── a failing or hanging teardown still settles the result ──────────────────
 
   @Test
@@ -259,6 +284,25 @@ final class SessionFinalizationTest {
 
     assertSame(sentinel, Await.failure("the result to fail", session.result()));
     assertEquals(1, provider.ends.get());
+  }
+
+  @Test
+  void aCancellationCallbackThatNeverReturnsCannotKeepAClosedModelStreamOpen() {
+    var entered = new CountDownLatch(1);
+    var model =
+        ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
+    var provider = new RecordingProvider(order);
+    var session = AgentSession.create(withProvider(provider, model).withLimits(grace()).build());
+    provider
+        .context
+        .cancellation()
+        .onCancel(() -> RecordingProvider.blockIgnoringInterrupts(released));
+    session.send("go");
+    Await.latch("the model call to start", entered);
+
+    session.close();
+
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
   }
 
   @Test
@@ -562,17 +606,25 @@ final class SessionFinalizationTest {
         () ->
             subscriber ->
                 subscriber.onSubscribe(
-                    new Flow.Subscription() {
-                      @Override
-                      public void request(long n) {
-                        throw requestFailure;
-                      }
+                    subscription(
+                        () -> {
+                          throw requestFailure;
+                        },
+                        cancel)));
+  }
 
-                      @Override
-                      public void cancel() {
-                        cancel.run();
-                      }
-                    }));
+  private static Flow.Subscription subscription(Runnable request, Runnable cancel) {
+    return new Flow.Subscription() {
+      @Override
+      public void request(long n) {
+        request.run();
+      }
+
+      @Override
+      public void cancel() {
+        cancel.run();
+      }
+    };
   }
 
   private static Model throwingModel(AtomicInteger calls, Error failure) {

@@ -19,6 +19,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Translates a model's {@link ModelChunk} stream into per-turn {@link QueryEvent}s and accumulates
@@ -49,6 +50,8 @@ import java.util.concurrent.ScheduledExecutorService;
  * runner's next one.
  */
 final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
+
+  private static final long CANCELLATION_CHECK_MILLIS = 10;
 
   private final SessionState state;
   private final EventEmitter emitter;
@@ -175,19 +178,20 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * com.standardapplied.helios.session.SessionLimits#maxWallClock()} which is only re-checked at
    * turn boundaries.
    *
-   * <p>The cancellation callback is removed in {@code finally} so a long-lived session token does
-   * not accumulate one stale registration per turn (see the {@code CancellationToken.onCancel}
-   * cleanup contract).
+   * <p>The token is also read as this waits: it runs its callbacks one after another, so a callback
+   * registered before this one that blocks would otherwise keep the stream open and the session
+   * from ever reaching its teardown. The cancellation callback is removed in {@code finally} so a
+   * long-lived session token does not accumulate one stale registration per turn (see the {@code
+   * CancellationToken.onCancel} cleanup contract).
    */
   StreamedTurn awaitDone(CancellationToken cancellation) {
-    var registration =
-        cancellation.onCancel(
-            () ->
-                end(
-                    new CancellationException("session cancelled while waiting for model stream"),
-                    true));
+    var registration = cancellation.onCancel(this::cancelled);
     try {
-      done.await();
+      while (!done.await(CANCELLATION_CHECK_MILLIS, TimeUnit.MILLISECONDS)) {
+        if (cancellation.isCancelled()) {
+          cancelled();
+        }
+      }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       end(e, true);
@@ -198,6 +202,10 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     synchronized (lock) {
       return outcome;
     }
+  }
+
+  private void cancelled() {
+    end(new CancellationException("session cancelled while waiting for model stream"), true);
   }
 
   /** Whether the stream has ended and the runner has been released. */

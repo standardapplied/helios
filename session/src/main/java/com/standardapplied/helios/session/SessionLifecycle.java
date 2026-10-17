@@ -56,7 +56,6 @@ final class SessionLifecycle {
             });
     scheduler.setRemoveOnCancelPolicy(true);
     this.deadlineScheduler = scheduler;
-    this.start = new SessionStart(state, sessionContext, executionProvider);
     this.teardown =
         new SessionTeardown(
             state,
@@ -65,6 +64,17 @@ final class SessionLifecycle {
             events,
             deadlineScheduler,
             limits.teardownGrace());
+    this.start =
+        new SessionStart(
+            state,
+            sessionContext,
+            executionProvider,
+            () -> {
+              var failure = teardown.run(loop.toolDispatch(), null);
+              if (failure != null) {
+                throw failure;
+              }
+            });
   }
 
   /** The session's event stream, which the shutdown closes. */
@@ -96,7 +106,8 @@ final class SessionLifecycle {
    * not accept ({@link SessionStart}) ends the session with its {@link
    * ResultMessage.ErrorProviderUnavailable}; an {@link Error} ends it with that error as the
    * result's failure. Either way what the lifecycle acquired is released before the result settles,
-   * and {@code onSessionEnd} is never called.
+   * and {@code onSessionEnd} is called only if the provider accepts after the session stopped
+   * waiting, by the {@link SessionTeardown} that ends that late acceptance.
    */
   void open(AgentLoop loop) {
     this.loop = loop;

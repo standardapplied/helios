@@ -73,7 +73,9 @@ final class SessionTeardown {
   }
 
   /**
-   * End the runtime of a session whose provider accepted it.
+   * End the runtime of a session whose provider accepted it, at start-up or after the session
+   * stopped waiting for it; in the latter case the runtime was already released, and releasing it
+   * again changes nothing.
    *
    * @param tools the session's tool dispatch, whose live calls are ended first
    * @param primary the {@link Error} the loop threw, or {@code null}
