@@ -28,6 +28,7 @@ import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.hooks.PostModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
+import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;

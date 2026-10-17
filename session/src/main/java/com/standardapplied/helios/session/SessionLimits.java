@@ -12,9 +12,9 @@ import java.util.OptionalLong;
 /**
  * Per-session ceilings the agent loop enforces.
  *
- * <p>Eight orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, tool stop grace,
- * context tokens, stream-idle timeout, stream-retry policy — each mapping to a distinct termination
- * path or recovery behaviour in {@link ResultMessage}. Limits are immutable for the lifetime of a
+ * <p>Nine orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, tool stop grace, context
+ * tokens, stream-idle timeout, stream-retry policy, teardown grace — each mapping to a distinct
+ * termination path, recovery or shutdown behaviour. Limits are immutable for the lifetime of a
  * session; runtime mutation would let a long-running session escape the contract its caller saw at
  * construction.
  *
@@ -63,6 +63,11 @@ import java.util.OptionalLong;
  *       with {@link com.standardapplied.helios.core.model.TransientStreamException}; on exhaustion
  *       the session terminates as {@link ResultMessage.ErrorTransientStream}. Use {@link
  *       StreamRetryPolicy#disabled()} for fail-fast behaviour.
+ *   <li>{@code teardownGrace}: 5 seconds — how long each wait of the session's teardown lasts: for
+ *       the tool calls still running, cancelled first, to end; for the execution provider's {@code
+ *       onSessionEnd} to return; for event subscribers to drain. A tool call or {@code
+ *       onSessionEnd} still running when its wait ends is logged as such and the teardown moves on,
+ *       so the result settles; such a tool's effects may land after it has.
  * </ul>
  *
  * <p>Currency is integer micro-USD (Stripe-style fixed-precision). See {@link CostEstimate} for the
@@ -89,6 +94,8 @@ import java.util.OptionalLong;
  *     non-null and strictly positive
  * @param streamRetryPolicy how the loop retries a turn that failed with {@link
  *     com.standardapplied.helios.core.model.TransientStreamException}; non-null
+ * @param teardownGrace how long each wait of the session's teardown lasts; must be non-null and
+ *     strictly positive
  */
 public record SessionLimits(
     int maxTurns,
@@ -98,7 +105,8 @@ public record SessionLimits(
     Duration toolStopGrace,
     long maxContextTokens,
     Duration streamIdleTimeout,
-    StreamRetryPolicy streamRetryPolicy) {
+    StreamRetryPolicy streamRetryPolicy,
+    Duration teardownGrace) {
 
   private static final SessionLimits DEFAULTS =
       new SessionLimits(
@@ -109,7 +117,8 @@ public record SessionLimits(
           Duration.ofSeconds(5),
           0L,
           Duration.ofSeconds(60),
-          StreamRetryPolicy.defaults());
+          StreamRetryPolicy.defaults(),
+          Duration.ofSeconds(5));
 
   /**
    * Canonical constructor.
@@ -151,6 +160,11 @@ public record SessionLimits(
           "streamIdleTimeout must be strictly positive, got " + streamIdleTimeout);
     }
     Objects.requireNonNull(streamRetryPolicy, "streamRetryPolicy must not be null");
+    Objects.requireNonNull(teardownGrace, "teardownGrace must not be null");
+    if (teardownGrace.isZero() || teardownGrace.isNegative()) {
+      throw new IllegalArgumentException(
+          "teardownGrace must be strictly positive, got " + teardownGrace);
+    }
   }
 
   /**
@@ -187,7 +201,8 @@ public record SessionLimits(
         .withToolStopGrace(toolStopGrace)
         .withMaxContextTokens(maxContextTokens)
         .withStreamIdleTimeout(streamIdleTimeout)
-        .withStreamRetryPolicy(streamRetryPolicy);
+        .withStreamRetryPolicy(streamRetryPolicy)
+        .withTeardownGrace(teardownGrace);
   }
 
   /** Mutable builder for {@link SessionLimits}. */
@@ -201,6 +216,7 @@ public record SessionLimits(
     private long maxContextTokens = DEFAULTS.maxContextTokens;
     private Duration streamIdleTimeout = DEFAULTS.streamIdleTimeout;
     private StreamRetryPolicy streamRetryPolicy = DEFAULTS.streamRetryPolicy;
+    private Duration teardownGrace = DEFAULTS.teardownGrace;
 
     private Builder() {}
 
@@ -313,6 +329,19 @@ public record SessionLimits(
     }
 
     /**
+     * Set how long each wait of the session's teardown lasts: for the tool calls still running to
+     * end, for the execution provider's {@code onSessionEnd} to return, and for event subscribers
+     * to drain.
+     *
+     * @param teardownGrace strictly positive
+     * @return this builder
+     */
+    public Builder withTeardownGrace(Duration teardownGrace) {
+      this.teardownGrace = teardownGrace;
+      return this;
+    }
+
+    /**
      * Build the immutable record.
      *
      * @return the limits
@@ -326,7 +355,8 @@ public record SessionLimits(
           toolStopGrace,
           maxContextTokens,
           streamIdleTimeout,
-          streamRetryPolicy);
+          streamRetryPolicy,
+          teardownGrace);
     }
   }
 }

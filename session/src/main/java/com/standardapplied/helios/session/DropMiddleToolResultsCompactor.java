@@ -251,10 +251,11 @@ public final class DropMiddleToolResultsCompactor implements ContextCompactor {
                   + state.currentTurnIndex());
       return null;
     } catch (ExecutionException e) {
-      if (e.getCause() instanceof RuntimeException re) {
-        throw re;
+      switch (e.getCause()) {
+        case RuntimeException re -> throw re;
+        case Error error -> throw error;
+        default -> throw new RuntimeException(e.getCause());
       }
-      throw new RuntimeException(e.getCause());
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       worker.interrupt();

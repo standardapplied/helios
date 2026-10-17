@@ -62,7 +62,6 @@ public final class AgentSessionImpl implements AgentSession {
   private final String sessionId;
   private final SessionState state;
   private final SteeringQueue steeringQueue;
-  private final SessionLimits limits;
   private final SessionEventPublisher events;
   private final SessionLifecycle lifecycle;
   private final AgentLoop loop;
@@ -80,24 +79,33 @@ public final class AgentSessionImpl implements AgentSession {
   public AgentSessionImpl(SessionOptions options) {
     Objects.requireNonNull(options, "options must not be null");
     this.sessionId = options.sessionId();
-    this.limits = options.limits();
     this.rawOutputCapturePolicy = options.model().rawOutputCapturePolicy();
     var clock = options.clock();
-    var concurrency = options.concurrency();
     var cancellation = new CancellationToken();
     this.state = new SessionState(sessionId, cancellation, clock);
     options.systemPrompt().ifPresent(prompt -> this.state.history().append(Message.system(prompt)));
     var sessionContext =
         new SessionContext(sessionId, cancellation, clock, options.secretRegistry());
-    this.steeringQueue = new SteeringQueue(concurrency.maxQueuedUserMessages());
-    this.events = new SessionEventPublisher(sessionId);
-    this.pendingQuestions = new PendingQuestions(state, events, clock);
-    var combinedTools = withBuiltins(options.tools(), options, pendingQuestions);
+    this.steeringQueue = new SteeringQueue(options.concurrency().maxQueuedUserMessages());
     this.lifecycle =
         new SessionLifecycle(
-            state, sessionContext, options.executionProvider(), events, resultFuture);
+            state, sessionContext, options.executionProvider(), options.limits(), resultFuture);
+    this.events = lifecycle.events();
+    this.pendingQuestions = new PendingQuestions(state, events, clock);
+    try {
+      this.loop = wire(options, sessionContext);
+    } catch (RuntimeException | Error e) {
+      lifecycle.abandon();
+      throw e;
+    }
+    lifecycle.open(loop);
+  }
+
+  private AgentLoop wire(SessionOptions options, SessionContext sessionContext) {
+    var combinedTools = withBuiltins(options.tools(), options, pendingQuestions);
     var toolDispatch =
-        new ToolDispatch(sessionContext, combinedTools, concurrency, lifecycle.scheduler());
+        new ToolDispatch(
+            sessionContext, combinedTools, options.concurrency(), lifecycle.scheduler());
     var combinedHooks = new ArrayList<Hook>(options.hooks().size() + 1);
     options
         .permission()
@@ -119,7 +127,7 @@ public final class AgentSessionImpl implements AgentSession {
                 s ->
                     new DefaultHookContext(
                         s.sessionId(), s.currentTurnIndex(), s.cancellation(), model))
-            .withClock(clock)
+            .withClock(options.clock())
             .build();
     var turnRunner =
         new TurnRunner(
@@ -128,13 +136,12 @@ public final class AgentSessionImpl implements AgentSession {
             options.costCalculator(),
             options.outputSchema().orElse(null),
             lifecycle.scheduler());
-    this.loop =
-        new AgentLoop(
-            collaborators,
-            turnRunner,
-            new StopClassifier(options.secretRegistry()),
-            options.tokenCounter(),
-            options.contextCompactor());
+    return new AgentLoop(
+        collaborators,
+        turnRunner,
+        new StopClassifier(options.secretRegistry()),
+        options.tokenCounter(),
+        options.contextCompactor());
   }
 
   @Override
@@ -145,17 +152,21 @@ public final class AgentSessionImpl implements AgentSession {
   @Override
   public void send(UserMessage message) {
     Objects.requireNonNull(message, "message must not be null");
-    if (closed.get()) {
-      throw new IllegalStateException("session is closed");
-    }
-    if (state.isTerminal()) {
-      throw new IllegalStateException("session is terminal");
-    }
+    requireOpen();
     if (!steeringQueue.offer(message)) {
       throw new SteeringQueueFullException(
           "steering queue full at capacity " + steeringQueue.capacity());
     }
-    lifecycle.startIfNeeded(loop, limits);
+    lifecycle.startIfNeeded();
+  }
+
+  private void requireOpen() {
+    if (closed.get()) {
+      throw new IllegalStateException("session is closed");
+    }
+    if (state.isTerminal() || resultFuture.isDone()) {
+      throw new IllegalStateException("session is terminal");
+    }
   }
 
   @Override
@@ -164,12 +175,7 @@ public final class AgentSessionImpl implements AgentSession {
     if (Strings.isBlank(reason)) {
       throw new IllegalArgumentException("reason must not be blank");
     }
-    if (closed.get()) {
-      throw new IllegalStateException("session is closed");
-    }
-    if (state.isTerminal()) {
-      throw new IllegalStateException("session is terminal");
-    }
+    requireOpen();
     var synthetic = UserMessage.text("[interrupted by user: " + reason + "]");
     if (!steeringQueue.offer(synthetic)) {
       throw new SteeringQueueFullException(
@@ -177,7 +183,7 @@ public final class AgentSessionImpl implements AgentSession {
               + steeringQueue.capacity()
               + " — cannot enqueue interrupt");
     }
-    lifecycle.startIfNeeded(loop, limits);
+    lifecycle.startIfNeeded();
   }
 
   @Override
@@ -212,9 +218,6 @@ public final class AgentSessionImpl implements AgentSession {
     }
     state.cancellation().cancel("session closed");
     pendingQuestions.cancelAll();
-    // If the loop has never started, the lifecycle completes the future so result().get() doesn't
-    // hang. If the loop is running, it will observe the cancellation on its next iteration and
-    // complete the future itself.
     lifecycle.closeBeforeStart();
   }
 

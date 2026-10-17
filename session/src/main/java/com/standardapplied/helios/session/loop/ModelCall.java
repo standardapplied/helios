@@ -67,10 +67,12 @@ final class ModelCall {
    * com.standardapplied.helios.session.ResultMessage.ErrorTransientStream} via {@link
    * StopClassifier}.
    *
-   * <p>Non-transient throwables ({@link StructuredOutputParseException}, {@code
+   * <p>Non-transient exceptions ({@link StructuredOutputParseException}, {@code
    * java.util.concurrent.TimeoutException} from the stream-idle watchdog, or any other unchecked
    * exception escaping the subscribe call) end the attempts immediately — only the type guard on
    * {@code TransientStreamException} triggers a retry.
+   *
+   * @throws Error an {@link Error} the model threw, from the call or through the stream, as itself
    */
   Attempts stream(SessionState state, SessionLimits limits, List<Tool> visibleTools) {
     var policy = limits.streamRetryPolicy();
@@ -111,10 +113,14 @@ final class ModelCall {
                   state.history().snapshot(), tools, outputSchema, state.cancellation())
               : model.chatStream(state.history().snapshot(), tools, state.cancellation());
       publisher.subscribe(subscriber);
-    } catch (Throwable t) {
-      subscriber.onError(t);
+    } catch (RuntimeException e) {
+      subscriber.onError(e);
     }
-    return subscriber.awaitDone(state.cancellation());
+    var turn = subscriber.awaitDone(state.cancellation());
+    if (turn.error() instanceof Error error) {
+      throw error;
+    }
+    return turn;
   }
 
   /**

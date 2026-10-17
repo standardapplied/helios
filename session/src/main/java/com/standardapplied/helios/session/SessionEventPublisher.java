@@ -33,12 +33,10 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
   private static final int SUBSCRIBER_BUFFER = 256;
   private static final Duration ROUTINE_EMIT_TIMEOUT = Duration.ofSeconds(1);
   private static final Duration CRITICAL_EMIT_TIMEOUT = Duration.ofSeconds(30);
-  private static final Duration DRAIN_GRACE = Duration.ofSeconds(5);
 
   private final String sessionId;
   private final Duration routineEmitTimeout;
   private final Duration criticalEmitTimeout;
-  private final Duration drainGrace;
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
   private final SubmissionPublisher<QueryEvent> live =
       new SubmissionPublisher<>(executor, SUBSCRIBER_BUFFER);
@@ -47,19 +45,15 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
   private boolean closed;
 
   SessionEventPublisher(String sessionId) {
-    this(sessionId, ROUTINE_EMIT_TIMEOUT, CRITICAL_EMIT_TIMEOUT, DRAIN_GRACE);
+    this(sessionId, ROUTINE_EMIT_TIMEOUT, CRITICAL_EMIT_TIMEOUT);
   }
 
-  /** For tests of the drop and drain paths, which the production limits put seconds away. */
+  /** For tests of the drop path, which the production limits put seconds away. */
   SessionEventPublisher(
-      String sessionId,
-      Duration routineEmitTimeout,
-      Duration criticalEmitTimeout,
-      Duration drainGrace) {
+      String sessionId, Duration routineEmitTimeout, Duration criticalEmitTimeout) {
     this.sessionId = sessionId;
     this.routineEmitTimeout = routineEmitTimeout;
     this.criticalEmitTimeout = criticalEmitTimeout;
-    this.drainGrace = drainGrace;
     attachOwnerPlaceholder();
   }
 
@@ -117,11 +111,12 @@ final class SessionEventPublisher implements Flow.Publisher<QueryEvent> {
   }
 
   /**
-   * End the live stream and wait, for a bounded grace period, until every live subscriber has
-   * drained its pending events and its {@code onComplete}. By the time this returns every
-   * responsive subscriber has observed every event emitted to it, including the terminal one.
+   * End the live stream and wait up to {@code drainGrace} until every live subscriber has drained
+   * its pending events and its {@code onComplete}, then interrupt the delivery to any that has not.
+   * By the time this returns every responsive subscriber has observed every event emitted to it,
+   * including the terminal one.
    */
-  void close() {
+  void close(Duration drainGrace) {
     synchronized (admission) {
       closed = true;
     }

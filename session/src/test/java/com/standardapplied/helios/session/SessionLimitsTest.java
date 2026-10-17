@@ -28,7 +28,8 @@ final class SessionLimitsTest {
             Duration.ofSeconds(3),
             32_000L,
             Duration.ofSeconds(30),
-            StreamRetryPolicy.defaults());
+            StreamRetryPolicy.defaults(),
+            Duration.ofSeconds(2));
     assertEquals(50, l.maxTurns());
     assertEquals(OptionalLong.of(12_500_000L), l.maxBudgetMicroUsd());
     assertEquals(Duration.ofMinutes(30), l.maxWallClock());
@@ -37,6 +38,7 @@ final class SessionLimitsTest {
     assertEquals(32_000L, l.maxContextTokens());
     assertEquals(Duration.ofSeconds(30), l.streamIdleTimeout());
     assertEquals(StreamRetryPolicy.defaults(), l.streamRetryPolicy());
+    assertEquals(Duration.ofSeconds(2), l.teardownGrace());
   }
 
   @Test
@@ -50,6 +52,7 @@ final class SessionLimitsTest {
     assertEquals(0L, d.maxContextTokens());
     assertEquals(Duration.ofSeconds(60), d.streamIdleTimeout());
     assertEquals(StreamRetryPolicy.defaults(), d.streamRetryPolicy());
+    assertEquals(Duration.ofSeconds(5), d.teardownGrace());
   }
 
   @Test
@@ -257,6 +260,7 @@ final class SessionLimitsTest {
             .withMaxWallClock(Duration.ofMinutes(15))
             .withToolTimeoutDefault(Duration.ofSeconds(20))
             .withToolStopGrace(Duration.ofSeconds(1))
+            .withTeardownGrace(Duration.ofSeconds(9))
             .withMaxContextTokens(75_000L)
             .build();
     assertEquals(original, original.toBuilder().build());
@@ -278,7 +282,8 @@ final class SessionLimitsTest {
         fiveSec(),
         maxContextTokens,
         Duration.ofSeconds(60),
-        StreamRetryPolicy.defaults());
+        StreamRetryPolicy.defaults(),
+        fiveSec());
   }
 
   private static Duration oneHour() {
@@ -309,7 +314,8 @@ final class SessionLimitsTest {
                     fiveSec(),
                     1_000L,
                     Duration.ZERO,
-                    StreamRetryPolicy.defaults()));
+                    StreamRetryPolicy.defaults(),
+                    fiveSec()));
     assertEquals("streamIdleTimeout must be strictly positive, got PT0S", ex.getMessage());
   }
 
@@ -326,7 +332,8 @@ final class SessionLimitsTest {
                 fiveSec(),
                 1_000L,
                 Duration.ofSeconds(-1),
-                StreamRetryPolicy.defaults()));
+                StreamRetryPolicy.defaults(),
+                fiveSec()));
   }
 
   @Test
@@ -342,7 +349,8 @@ final class SessionLimitsTest {
                 fiveSec(),
                 1_000L,
                 null,
-                StreamRetryPolicy.defaults()));
+                StreamRetryPolicy.defaults(),
+                fiveSec()));
   }
 
   @Test
@@ -367,7 +375,8 @@ final class SessionLimitsTest {
                     fiveSec(),
                     1_000L,
                     Duration.ofSeconds(60),
-                    null));
+                    null,
+                    fiveSec()));
     assertEquals("streamRetryPolicy must not be null", ex.getMessage());
   }
 
@@ -383,5 +392,34 @@ final class SessionLimitsTest {
     var disabled = StreamRetryPolicy.disabled();
     var original = SessionLimits.newBuilder().withStreamRetryPolicy(disabled).build();
     assertEquals(disabled, original.toBuilder().build().streamRetryPolicy());
+  }
+
+  // ── teardownGrace ─────────────────────────────────────────────────────────
+
+  @Test
+  void builderWithTeardownGrace() {
+    var l = SessionLimits.newBuilder().withTeardownGrace(Duration.ofMillis(250)).build();
+    assertEquals(Duration.ofMillis(250), l.teardownGrace());
+  }
+
+  @Test
+  void teardownGraceZeroRejected() {
+    var b = SessionLimits.newBuilder().withTeardownGrace(Duration.ZERO);
+    var ex = assertThrows(IllegalArgumentException.class, b::build);
+    assertEquals("teardownGrace must be strictly positive, got PT0S", ex.getMessage());
+  }
+
+  @Test
+  void teardownGraceNegativeRejected() {
+    var b = SessionLimits.newBuilder().withTeardownGrace(Duration.ofSeconds(-1));
+    var ex = assertThrows(IllegalArgumentException.class, b::build);
+    assertEquals("teardownGrace must be strictly positive, got PT-1S", ex.getMessage());
+  }
+
+  @Test
+  void teardownGraceNullRejected() {
+    var b = SessionLimits.newBuilder().withTeardownGrace(null);
+    var ex = assertThrows(NullPointerException.class, b::build);
+    assertEquals("teardownGrace must not be null", ex.getMessage());
   }
 }

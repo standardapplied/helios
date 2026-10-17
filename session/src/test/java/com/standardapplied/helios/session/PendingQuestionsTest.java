@@ -13,6 +13,7 @@ import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.InstantSource;
 import java.util.List;
@@ -62,6 +63,6 @@ final class PendingQuestionsTest {
             () -> questions.answer("q1", AskUserQuestionResponse.single("q1", "a")));
     assertEquals(
         "no pending question with id 'q1' — already answered or unknown", unknown.getMessage());
-    events.close();
+    events.close(Duration.ofMinutes(10));
   }
 }

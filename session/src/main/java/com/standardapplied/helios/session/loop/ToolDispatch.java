@@ -15,10 +15,13 @@ import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Synchronous tool dispatch surface. The agent loop calls {@link #dispatch(ToolCall,
@@ -37,12 +40,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <p>Each call stays linked to the session's cancellation token until its worker ends, so closing
  * the session cancels and interrupts every call still running, including one already answered as
- * {@link ToolOutcome.Unknown}. {@link #liveCalls()} counts them.
+ * {@link ToolOutcome.Unknown}. {@link #awaitLiveCalls(Duration)} waits for them to end.
  *
  * <h2>Thread-safety</h2>
  *
- * Safe to share across the agent loop's threads: the permit pools share one lock and the count of
- * live calls is atomic.
+ * Safe to share across the agent loop's threads: the permit pools share one lock and the set of
+ * live calls is concurrent.
  */
 public final class ToolDispatch {
 
@@ -53,7 +56,7 @@ public final class ToolDispatch {
   private final CategoryPermits fileWritePermits;
   private final CategoryPermits executionPermits;
   private final ScheduledExecutorService scheduler;
-  private final AtomicInteger liveCalls = new AtomicInteger();
+  private final Set<DispatchedCall> liveCalls = ConcurrentHashMap.newKeySet();
 
   /**
    * Build a dispatcher.
@@ -151,7 +154,27 @@ public final class ToolDispatch {
    * @return non-negative count
    */
   int liveCalls() {
-    return liveCalls.get();
+    return liveCalls.size();
+  }
+
+  /**
+   * Wait up to {@code grace} for the work of every call still running to end: the calls whose
+   * worker or token cancellation has not ended, including calls answered as {@link
+   * ToolOutcome.Unknown}. Waiting cancels nothing; the session ends its calls by cancelling its
+   * token first. An interrupt of the waiting thread ends the wait, its interrupt status kept.
+   *
+   * @param grace how long to wait; non-null, positive
+   * @return the calls whose work had not ended when the wait ended, empty when none
+   * @throws NullPointerException if {@code grace} is null
+   * @throws IllegalArgumentException if {@code grace} is not positive
+   */
+  public List<ToolCall> awaitLiveCalls(Duration grace) {
+    Validate.positiveDuration("grace", grace);
+    var until = System.nanoTime() + TimeUnit.NANOSECONDS.convert(grace);
+    return List.copyOf(liveCalls).stream()
+        .filter(call -> !call.endsBy(until))
+        .map(DispatchedCall::call)
+        .toList();
   }
 
   /**

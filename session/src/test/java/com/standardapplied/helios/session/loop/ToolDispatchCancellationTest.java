@@ -18,7 +18,9 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.ConcurrencyLimits;
+import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -343,5 +345,38 @@ final class ToolDispatchCancellationTest {
     assertEquals(Level.SEVERE, logged.getLevel());
     assertEquals("a cancellation callback of tool 'throwing' threw", logged.getMessage());
     assertSame(sentinel, logged.getThrown());
+  }
+
+  // ── waiting for the calls still running ──────────────────────────────────
+
+  @Test
+  void waitingForLiveCallsReturnsNoneOnceTheCancelledCallsWorkHasEnded() {
+    var d =
+        fixture.dispatcher(binding("slow", ToolCategory.READ, fixture.stuck(new AtomicInteger())));
+    var session = new CancellationToken();
+    var running = start(d, "slow", session, NEVER);
+    Await.latch("the tool to start", fixture.entered);
+    session.cancel("session ended");
+    assertCancelled("session ended", running);
+
+    var waiting = new FutureTask<>(() -> d.awaitLiveCalls(NEVER));
+    Thread.ofVirtual().start(waiting);
+    fixture.release.countDown();
+
+    assertEquals(List.of(), Await.value("the wait for the live calls", waiting));
+  }
+
+  @Test
+  void anInterruptedWaitForLiveCallsReportsTheCallStillRunningAndKeepsTheInterrupt() {
+    var d =
+        fixture.dispatcher(binding("slow", ToolCategory.READ, fixture.stuck(new AtomicInteger())));
+    start(d, "slow", new CancellationToken(), NEVER);
+    Await.latch("the tool to start", fixture.entered);
+
+    Thread.currentThread().interrupt();
+    var live = d.awaitLiveCalls(NEVER);
+
+    assertTrue(Thread.interrupted(), "the wait keeps the caller's interrupt");
+    assertEquals(List.of(DispatchFixture.call("slow")), live);
   }
 }
