@@ -238,6 +238,31 @@ final class TurnSubscriberTest {
   }
 
   @Test
+  void anErrorACancelThrowsAfterItsGraceIsTheTurnsFailureCarryingTheEnding() {
+    var sentinel = new AssertionError("late close failure");
+    var cancelling = new CompletableFuture<Thread>();
+    var stalled = newSubscriber(events::add, SHORT_GRACE);
+    stalled.onSubscribe(
+        cancelling(
+            () -> {
+              cancelling.complete(Thread.currentThread());
+              DispatchFixture.awaitThroughInterrupts(released);
+              throw sentinel;
+            }));
+    var ending = new CancellationException("session closed");
+    try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
+      stalled.end(ending, true);
+    }
+    released.countDown();
+    Await.termination("the cancel to throw", Await.value("the cancel to start", cancelling));
+
+    var turn = stalled.awaitDone(new CancellationToken());
+
+    assertSame(sentinel, turn.error());
+    assertEquals(List.of(ending), List.of(sentinel.getSuppressed()));
+  }
+
+  @Test
   void anInterruptWhileWaitingForTheCancelEndsTheWaitInterruptsTheCancelAndStaysSet() {
     var interrupted = new CountDownLatch(1);
     subscriber.onSubscribe(cancelling(untilInterrupted(interrupted)));

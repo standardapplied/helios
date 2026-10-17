@@ -18,6 +18,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -30,7 +31,9 @@ import java.util.logging.Logger;
  * session's token is not cancelled and the deadline has not passed. The call's own token is linked
  * to the session's and is cancelled on a thread of its own, so a callback that blocks or throws
  * holds up neither the canceller nor the worker's interrupt. The work is the worker and that
- * cancellation; when both have ended, the worker gives the permit back and removes the link.
+ * cancellation; when both have ended, the worker gives the permit back and removes the link. An
+ * {@link Error} no caller waits for, one a callback on the call's token throws or one the tool
+ * throws after the call was answered, is handed to {@code strayErrors} as it is caught.
  */
 final class DispatchedCall {
 
@@ -76,6 +79,7 @@ final class DispatchedCall {
   private final long deadline;
   private final CategoryPermits permits;
   private final Set<Live> liveCalls;
+  private final Consumer<Error> strayErrors;
   private final Live live;
   private final Thread worker;
   private volatile CancellationToken.Registration parentLink = CancellationToken.Registration.NOOP;
@@ -87,7 +91,8 @@ final class DispatchedCall {
       CancellationToken parent,
       Duration timeout,
       CategoryPermits permits,
-      Set<Live> liveCalls) {
+      Set<Live> liveCalls,
+      Consumer<Error> strayErrors) {
     this.binding = binding;
     this.call = call;
     this.context = new ToolContext(session, token, timeout);
@@ -96,6 +101,7 @@ final class DispatchedCall {
     this.deadline = System.nanoTime() + TimeUnit.NANOSECONDS.convert(timeout);
     this.permits = permits;
     this.liveCalls = liveCalls;
+    this.strayErrors = strayErrors;
     this.live = new Live(call, ended);
     this.worker = Thread.ofVirtual().name("helios-tool-" + call.name()).unstarted(this::work);
     answer.whenComplete((result, failure) -> answered.countDown());
@@ -192,7 +198,9 @@ final class DispatchedCall {
   private void cancel(String reason) {
     answer.completeExceptionally(new CancellationException(reason));
     if (tokenClaimed.compareAndSet(false, true)) {
-      Thread.ofVirtual().name("helios-tool-cancel-" + call.name()).start(() -> cancelToken(reason));
+      token
+          .cancelAsync(reason, strayErrors)
+          .whenComplete((ignored, failure) -> tokenSettled.complete(null));
     }
     worker.interrupt();
   }
@@ -230,6 +238,9 @@ final class DispatchedCall {
     } catch (Throwable e) {
       if (!answer.completeExceptionally(e)) {
         LOGGER.log(Level.SEVERE, "tool '" + call.name() + "' threw after its call was answered", e);
+        if (e instanceof Error error) {
+          strayErrors.accept(error);
+        }
       }
     } finally {
       if (!tokenClaimed.compareAndSet(false, true)) {
@@ -239,16 +250,6 @@ final class DispatchedCall {
       parentLink.remove();
       liveCalls.remove(live);
       ended.countDown();
-    }
-  }
-
-  private void cancelToken(String reason) {
-    try {
-      token.cancel(reason);
-    } catch (Error e) {
-      LOGGER.log(Level.SEVERE, "a cancellation callback of tool '" + call.name() + "' threw", e);
-    } finally {
-      tokenSettled.complete(null);
     }
   }
 }

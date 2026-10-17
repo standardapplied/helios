@@ -711,6 +711,37 @@ final class SessionFinalizationTest {
   }
 
   @Test
+  void anErrorACallbackOnAToolsTokenThrowsOnCloseFailsTheResult() {
+    var sentinel = new AssertionError("tool callback failure");
+    var started = new CountDownLatch(1);
+    var tool =
+        binding(
+            "wait",
+            (args, ctx) -> {
+              ctx.cancellation()
+                  .onCancel(
+                      () -> {
+                        throw sentinel;
+                      });
+              started.countDown();
+              try {
+                new CountDownLatch(1).await();
+              } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+              }
+              return ToolResult.failure("interrupted");
+            });
+
+    try (var session = AgentSession.create(callingTool(tool).withLimits(slowGrace()).build())) {
+      session.send("go");
+      Await.latch("the tool to start", started);
+      session.close();
+
+      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    }
+  }
+
+  @Test
   void aToolThatIgnoresItsTokenAndInterruptionIsReportedAndTheResultStillSettles() {
     var started = new CountDownLatch(1);
     var tool =

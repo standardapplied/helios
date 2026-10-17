@@ -21,10 +21,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * What the teardown settles the result with when a cancellation callback throws an {@link Error},
- * the one the cancellation wait collected or one thrown after that wait ended, while a later step
- * ran: an interleaving a session gives a test no way to force, forced here through a scheduler
- * whose shutdown, a later step, blocks.
+ * What the teardown settles the result with when a cancellation callback or {@code onSessionEnd}
+ * throws an {@link Error}, the one the cancellation wait collected or one thrown after its wait
+ * ended, while a later step ran: an interleaving a session gives a test no way to force, forced
+ * here through a scheduler whose shutdown, a later step, blocks.
  */
 final class SessionTeardownTest {
 
@@ -69,6 +69,28 @@ final class SessionTeardownTest {
   }
 
   @Test
+  void anErrorOnSessionEndThrowsAfterItsGraceWhileALaterStepRunsIsWhatTheResultSettlesWith() {
+    var sentinel = new AssertionError("late onSessionEnd failure");
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
+    provider.end =
+        () -> {
+          var ending = Thread.currentThread();
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    Await.termination("onSessionEnd's thread to end", ending);
+                    observed.countDown();
+                  });
+          Await.latch("the teardown releasing the scheduler", releasing);
+          throw sentinel;
+        };
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
+      assertSame(sentinel, newTeardown(provider, SHORT_GRACE).run(tools(), null));
+    }
+  }
+
+  @Test
   void anErrorTheCancellationWaitCollectedRidesOnTheLoopsErrorOnce() {
     var primary = new AssertionError("loop failure");
     var sentinel = new AssertionError("callback failure");
@@ -85,10 +107,14 @@ final class SessionTeardownTest {
   }
 
   private SessionTeardown newTeardown(Duration grace) {
+    return newTeardown(new RecordingProvider(new CopyOnWriteArrayList<>()), grace);
+  }
+
+  private SessionTeardown newTeardown(RecordingProvider provider, Duration grace) {
     return new SessionTeardown(
         new SessionState(context.sessionId(), context.cancellation(), context.clock()),
         context,
-        new RecordingProvider(new CopyOnWriteArrayList<>()),
+        provider,
         new SessionEventPublisher(context.sessionId()),
         scheduler,
         grace);

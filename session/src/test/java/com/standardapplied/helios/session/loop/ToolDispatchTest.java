@@ -676,28 +676,56 @@ final class ToolDispatchTest {
   @Test
   void anErrorThrownAfterTheCallWasAnsweredIsLogged() {
     var sentinel = new AssertionError("late failure");
-    ToolExecutor failsLate =
-        (args, ctx) -> {
-          fixture.entered.countDown();
-          awaitThroughInterrupts(fixture.release);
-          throw sentinel;
-        };
-    var d = fixture.dispatcher(binding("late", ToolCategory.READ, failsLate));
+    var d = fixture.dispatcher(binding("late", ToolCategory.READ, failsLate(sentinel)));
     var records = new CopyOnWriteArrayList<LogRecord>();
 
     try (var capture = LogCapture.of(DispatchedCall.class, records)) {
-      var running = start(d, "late", new CancellationToken(), SHORT);
-      Await.latch("the tool to start", fixture.entered);
-      fixture.scheduler.fireLatest();
-      assertEquals(ToolResult.unknown("late", NEVER), running.ending("the dispatch").result());
-      fixture.release.countDown();
-      awaitIdle(d);
+      answerUnknownThenFail(d);
     }
 
     var logged = records.getFirst();
     assertEquals(Level.SEVERE, logged.getLevel());
     assertEquals("tool 'late' threw after its call was answered", logged.getMessage());
     assertSame(sentinel, logged.getThrown());
+  }
+
+  @Test
+  void anErrorThrownAfterTheCallWasAnsweredIsThrownByTheNextDispatchBeforeItsToolStarts() {
+    var sentinel = new AssertionError("late failure");
+    var starts = new AtomicInteger();
+    var d =
+        fixture.dispatcher(
+            binding("late", ToolCategory.READ, failsLate(sentinel)),
+            binding("next", ToolCategory.READ, fixture.stuck(starts)));
+    try (var capture = LogCapture.of(DispatchedCall.class, new CopyOnWriteArrayList<>())) {
+      answerUnknownThenFail(d);
+    }
+
+    var thrown =
+        assertThrows(
+            AssertionError.class,
+            () -> d.dispatch(call("next"), new CancellationToken(), NEVER, NEVER));
+
+    assertSame(sentinel, thrown);
+    assertEquals(0, starts.get(), "the next call's tool never started");
+  }
+
+  private ToolExecutor failsLate(Error error) {
+    return (args, ctx) -> {
+      fixture.entered.countDown();
+      awaitThroughInterrupts(fixture.release);
+      throw error;
+    };
+  }
+
+  /** Answer a call to {@code late} unknown at its deadline, then let its tool throw and end. */
+  private void answerUnknownThenFail(ToolDispatch d) {
+    var running = start(d, "late", new CancellationToken(), SHORT);
+    Await.latch("the tool to start", fixture.entered);
+    fixture.scheduler.fireLatest();
+    assertEquals(ToolResult.unknown("late", NEVER), running.ending("the dispatch").result());
+    fixture.release.countDown();
+    awaitIdle(d);
   }
 
   // ── nothing left behind ───────────────────────────────────────────────────
