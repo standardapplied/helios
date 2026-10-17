@@ -37,6 +37,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -312,6 +313,75 @@ final class TurnSubscriberTest {
     released.countDown();
 
     assertEquals(Map.entry(cleanup, true), errorAndInterrupt(Await.value("the turn", turn)));
+  }
+
+  @Test
+  void aRequestThatThrowsEndsTheTurnWithItCancelsTheSubscriptionAndIsRethrown() {
+    var failure = new AssertionError("request failed");
+    var cancels = new AtomicInteger();
+    var failing =
+        new Flow.Subscription() {
+          @Override
+          public void request(long n) {
+            throw failure;
+          }
+
+          @Override
+          public void cancel() {
+            cancels.incrementAndGet();
+          }
+        };
+
+    assertSame(failure, assertThrows(AssertionError.class, () -> subscriber.onSubscribe(failing)));
+
+    var turn = CompletableFuture.supplyAsync(() -> subscriber.awaitDone(new CancellationToken()));
+    assertSame(failure, Await.value("the turn", turn).error());
+    assertEquals(1, cancels.get());
+  }
+
+  @Test
+  void anErrorAChunksEventThrowsEndsTheTurnWithItCancelsTheStreamAndIsRethrown() {
+    var failure = new AssertionError("hook failed");
+    var failing =
+        newSubscriber(
+            event -> {
+              throw failure;
+            });
+    failing.onSubscribe(subscription);
+
+    assertSame(
+        failure,
+        assertThrows(AssertionError.class, () -> failing.onNext(new ModelChunk.TextDelta("Hel"))));
+
+    var turn = failing.awaitDone(new CancellationToken());
+    assertSame(failure, turn.error());
+    assertEquals(List.of(), List.of(failure.getSuppressed()));
+    assertEquals(1, subscription.cancels);
+  }
+
+  @Test
+  void anErrorAChunksEventThrowsAfterAnotherEndingIsTheTurnsFailureCarryingThatEnding() {
+    var emitting = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var failure = new AssertionError("hook failed");
+    var stalled =
+        newSubscriber(
+            event -> {
+              emitting.countDown();
+              Await.latch("the sink released", release);
+              throw failure;
+            });
+    stalled.onSubscribe(subscription);
+    var delivery =
+        CompletableFuture.runAsync(() -> stalled.onNext(new ModelChunk.TextDelta("Hel")));
+    Await.latch("the chunk's event being emitted", emitting);
+    Await.value("the idle deadline", CompletableFuture.runAsync(scheduler::fireLatest));
+
+    release.countDown();
+
+    assertSame(failure, Await.failure("the chunk delivered", delivery));
+    assertSame(failure, stalled.awaitDone(new CancellationToken()).error());
+    assertInstanceOf(TimeoutException.class, failure.getSuppressed()[0]);
   }
 
   @Test
