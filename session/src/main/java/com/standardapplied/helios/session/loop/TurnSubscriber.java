@@ -53,14 +53,13 @@ import java.util.concurrent.TimeUnit;
  *
  * The subscription is the provider's code, so it is cancelled through {@link StreamCancel}, within
  * {@code cancelGrace} ({@link com.standardapplied.helios.session.SessionLimits#teardownGrace()}): a
- * cancel that blocks never strands the runner. The turn's outcome is published once the cancel
- * returned or its grace passed, whichever thread ended the turn.
+ * cancel that blocks never strands the runner.
  *
  * <h2>Host errors</h2>
  *
  * Every {@link Error} that reaches the turn, through {@code onError}, a chunk's emission, the
- * subscription's request or its cancel, on whichever thread and whenever it arrives, goes to the
- * session's {@link SessionEnding}, which ends the session.
+ * subscription's request or its cancel, on whichever thread and whenever it arrives, is recorded by
+ * the session's {@link SessionEnding}, which ends the session.
  */
 final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
@@ -80,7 +79,6 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   private ModelChunk.MessageStop stop;
   private Flow.Subscription subscription;
   private boolean emitting;
-  private boolean ended;
   private StreamedTurn outcome;
 
   TurnSubscriber(
@@ -111,7 +109,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   public void onSubscribe(Flow.Subscription subscription) {
     boolean accepted;
     synchronized (lock) {
-      accepted = this.subscription == null && !ended;
+      accepted = this.subscription == null && outcome == null;
       if (accepted) {
         this.subscription = subscription;
       }
@@ -138,7 +136,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   public void onNext(ModelChunk chunk) {
     boolean subscribed;
     synchronized (lock) {
-      if (ended) {
+      if (outcome != null) {
         return;
       }
       subscribed = subscription != null;
@@ -263,10 +261,10 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   }
 
   /**
-   * The one terminal transition: unless the stream already ended, cancel the subscription when
-   * {@code cancelStream} and one is held, snapshot the stream with {@code error} (or none, for a
-   * completion), and release the runner, or leave its release to the chunk whose event is being
-   * emitted. An {@link Error} goes to the session's {@link SessionEnding} first, whether or not the
+   * The one terminal transition: unless the stream already ended, snapshot it with {@code error}
+   * (or none, for a completion), cancel the subscription when {@code cancelStream} and one is held,
+   * and release the runner, or leave its release to the chunk whose event is being emitted. An
+   * {@link Error} is recorded by the session's {@link SessionEnding} first, whether or not the
    * stream already ended.
    */
   void end(Throwable error, boolean cancelStream) {
@@ -274,21 +272,18 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       ending.fail(fatal);
     }
     Flow.Subscription toCancel;
+    boolean release;
     synchronized (lock) {
-      if (ended) {
+      if (outcome != null) {
         return;
       }
-      ended = true;
+      outcome = snapshot(error);
       toCancel = cancelStream ? subscription : null;
+      release = !emitting;
     }
     idleWatchdog.cancel();
     if (toCancel != null) {
       streamCancel.cancel(toCancel);
-    }
-    boolean release;
-    synchronized (lock) {
-      outcome = snapshot(error);
-      release = !emitting;
     }
     if (release) {
       done.countDown();
