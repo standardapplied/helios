@@ -362,7 +362,7 @@ final class ToolDispatchTest {
     Await.latch("two tools to start", started);
     Await.until(
         "the other four calls to queue for a permit",
-        () -> d.queuedDispatches(ToolCategory.READ) == 4);
+        () -> d.permitsFor(ToolCategory.READ).queued() == 4);
 
     assertEquals(2, inFlight.get(), "exactly the cap is running while the rest wait");
     fixture.release.countDown();
@@ -520,7 +520,7 @@ final class ToolDispatchTest {
     var queued = start(d, "write");
     Await.until(
         "the second writer to queue for the permit",
-        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+        () -> d.permitsFor(ToolCategory.WRITE).queued() == 1);
     fixture.scheduler.fireLatest();
     assertEquals(
         ToolResult.timedOut("write", NEVER), queued.ending("the queued dispatch").result());
@@ -545,7 +545,7 @@ final class ToolDispatchTest {
     var queued = start(d, "write");
     Await.until(
         "the second writer to queue for the permit",
-        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+        () -> d.permitsFor(ToolCategory.WRITE).queued() == 1);
 
     first.thread().interrupt();
 
@@ -593,7 +593,7 @@ final class ToolDispatchTest {
     var queued = start(d, "write", session, NEVER);
     Await.until(
         "the second writer to queue for the permit",
-        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+        () -> d.permitsFor(ToolCategory.WRITE).queued() == 1);
     Thread.ofVirtual().start(() -> session.cancel("session closed"));
     Await.latch("the session's first callback to block", callbackEntered);
 
@@ -625,7 +625,8 @@ final class ToolDispatchTest {
     for (var n = 1; n <= 2; n++) {
       var queued = n;
       dispatches.add(start(d, new ToolCall("c", "slow", Map.of("n", n)), token, NEVER, NEVER));
-      Await.until("call " + n + " to queue", () -> d.queuedDispatches(ToolCategory.READ) == queued);
+      Await.until(
+          "call " + n + " to queue", () -> d.permitsFor(ToolCategory.READ).queued() == queued);
     }
 
     fixture.release.countDown();
@@ -648,7 +649,7 @@ final class ToolDispatchTest {
     var queued = start(d, "slow");
     Await.until(
         "the second call to queue for the permit",
-        () -> d.queuedDispatches(ToolCategory.READ) == 1);
+        () -> d.permitsFor(ToolCategory.READ).queued() == 1);
     fixture.scheduler.fireLatest();
 
     assertEquals(ToolResult.timedOut("slow", NEVER), queued.ending("the queued dispatch").result());
@@ -766,9 +767,9 @@ final class ToolDispatchTest {
     }
     awaitIdle(d);
 
-    assertEquals(0, d.queuedDispatches(ToolCategory.READ), "no dispatch is left queued");
-    assertEquals(0, d.queuedDispatches(ToolCategory.WRITE));
-    assertEquals(0, d.queuedDispatches(ToolCategory.EXECUTION));
+    assertEquals(0, d.permitsFor(ToolCategory.READ).queued(), "no dispatch is left queued");
+    assertEquals(0, d.permitsFor(ToolCategory.WRITE).queued());
+    assertEquals(0, d.permitsFor(ToolCategory.EXECUTION).queued());
     assertEquals(4, d.availableToolCallPermits());
     assertEquals(2, d.availableFileWritePermits());
     assertEquals(1, d.availableExecutionPermits());
