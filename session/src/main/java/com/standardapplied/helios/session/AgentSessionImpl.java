@@ -171,9 +171,7 @@ public final class AgentSessionImpl implements AgentSession {
     if (!closed.compareAndSet(false, true)) {
       return;
     }
-    state.cancellation().cancel("session closed");
-    pendingQuestions.cancelAll();
-    lifecycle.closeBeforeStart();
+    lifecycle.close();
   }
 
   /** Package-private accessor for tests that assert the runtime's executors shut down. */

@@ -113,14 +113,29 @@ final class ModelCall {
                   state.history().snapshot(), tools, outputSchema, state.cancellation())
               : model.chatStream(state.history().snapshot(), tools, state.cancellation());
       publisher.subscribe(subscriber);
-    } catch (RuntimeException e) {
-      subscriber.onError(e);
+    } catch (RuntimeException | Error e) {
+      abort(subscriber, e);
     }
     var turn = subscriber.awaitDone(state.cancellation());
     if (turn.error() instanceof Error error) {
       throw error;
     }
     return turn;
+  }
+
+  /**
+   * End the turn with {@code failure}, which opening or subscribing to the stream threw, cancelling
+   * the subscription {@code subscriber} may already hold. A failure to cancel rides on {@code
+   * failure} as suppressed.
+   */
+  private static void abort(TurnSubscriber subscriber, Throwable failure) {
+    try {
+      subscriber.end(failure, true);
+    } catch (RuntimeException | Error cleanup) {
+      if (cleanup != failure) {
+        failure.addSuppressed(cleanup);
+      }
+    }
   }
 
   /**

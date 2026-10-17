@@ -26,13 +26,13 @@ import java.util.concurrent.ScheduledExecutorService;
  *
  * <p>Created once per model turn by {@link TurnRunner}. It owns the turn's {@link
  * Flow.Subscription}: it requests every chunk on subscribe, and cancels the stream when the {@link
- * IdleWatchdog} finds it stalled, when the session's {@link CancellationToken} is cancelled, or
- * when the waiting thread is interrupted. The idle clock starts at the first chunk, so a request
- * still awaiting its headers is bounded by the provider's response timeout, the session's wall
- * clock and its cancellation, never by the idle clock; every chunk re-arms it, a {@link
- * ModelChunk.KeepAlive} included, which adds and emits nothing. The runner blocks in {@link
- * #awaitDone(CancellationToken)} until the stream ends one of those ways or with {@code onComplete}
- * / {@code onError}.
+ * IdleWatchdog} finds it stalled, when the session's {@link CancellationToken} is cancelled, when
+ * the waiting thread is interrupted, or when opening or subscribing to the stream threw. The idle
+ * clock starts at the first chunk, so a request still awaiting its headers is bounded by the
+ * provider's response timeout, the session's wall clock and its cancellation, never by the idle
+ * clock; every chunk re-arms it, a {@link ModelChunk.KeepAlive} included, which adds and emits
+ * nothing. The runner blocks in {@link #awaitDone(CancellationToken)} until the stream ends one of
+ * those ways or with {@code onComplete} / {@code onError}.
  *
  * <h2>One terminal transition</h2>
  *
@@ -210,7 +210,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * (or none, for a completion), cancel the subscription when {@code cancelStream} and one is held,
    * and release the runner, or leave its release to the chunk whose event is being emitted.
    */
-  private void end(Throwable error, boolean cancelStream) {
+  void end(Throwable error, boolean cancelStream) {
     Flow.Subscription toCancel;
     boolean release;
     synchronized (lock) {

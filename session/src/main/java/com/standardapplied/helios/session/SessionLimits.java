@@ -12,11 +12,11 @@ import java.util.OptionalLong;
 /**
  * Per-session ceilings the agent loop enforces.
  *
- * <p>Nine orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, tool stop grace, context
- * tokens, stream-idle timeout, stream-retry policy, teardown grace — each mapping to a distinct
- * termination path, recovery or shutdown behaviour. Limits are immutable for the lifetime of a
- * session; runtime mutation would let a long-running session escape the contract its caller saw at
- * construction.
+ * <p>Ten orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, tool stop grace, context
+ * tokens, stream-idle timeout, stream-retry policy, start timeout, teardown grace — each mapping to
+ * a distinct termination path, recovery or shutdown behaviour. Limits are immutable for the
+ * lifetime of a session; runtime mutation would let a long-running session escape the contract its
+ * caller saw at construction.
  *
  * <p>Defaults track Helios production values:
  *
@@ -63,6 +63,11 @@ import java.util.OptionalLong;
  *       with {@link com.standardapplied.helios.core.model.TransientStreamException}; on exhaustion
  *       the session terminates as {@link ResultMessage.ErrorTransientStream}. Use {@link
  *       StreamRetryPolicy#disabled()} for fail-fast behaviour.
+ *   <li>{@code startTimeout}: 60 seconds — how long {@link AgentSession#create} waits for the
+ *       execution provider's {@code onSessionStart}, which may fork a sandbox. A start that has not
+ *       returned by then, like one the provider refuses, ends the session with {@link
+ *       ResultMessage.ErrorProviderUnavailable}; an acceptance that comes later is ended with
+ *       {@code onSessionEnd}.
  *   <li>{@code teardownGrace}: 5 seconds — how long each wait of the session's teardown lasts: for
  *       the tool calls still running, cancelled first, to end; for the execution provider's {@code
  *       onSessionEnd} to return; for event subscribers to drain. A tool call or {@code
@@ -94,6 +99,8 @@ import java.util.OptionalLong;
  *     non-null and strictly positive
  * @param streamRetryPolicy how the loop retries a turn that failed with {@link
  *     com.standardapplied.helios.core.model.TransientStreamException}; non-null
+ * @param startTimeout how long {@code onSessionStart} is waited for; must be non-null and strictly
+ *     positive
  * @param teardownGrace how long each wait of the session's teardown lasts; must be non-null and
  *     strictly positive
  */
@@ -106,7 +113,10 @@ public record SessionLimits(
     long maxContextTokens,
     Duration streamIdleTimeout,
     StreamRetryPolicy streamRetryPolicy,
+    Duration startTimeout,
     Duration teardownGrace) {
+
+  private static final Duration MAX_DURATION = Duration.ofNanos(Long.MAX_VALUE);
 
   private static final SessionLimits DEFAULTS =
       new SessionLimits(
@@ -118,13 +128,15 @@ public record SessionLimits(
           0L,
           Duration.ofSeconds(60),
           StreamRetryPolicy.defaults(),
+          Duration.ofSeconds(60),
           Duration.ofSeconds(5));
 
   /**
    * Canonical constructor.
    *
    * @throws NullPointerException if any non-numeric argument is null
-   * @throws IllegalArgumentException if any numeric value violates its positivity contract
+   * @throws IllegalArgumentException if any numeric value violates its positivity contract, or a
+   *     duration exceeds {@code Long.MAX_VALUE} nanoseconds (about 292 years)
    */
   public SessionLimits {
     if (maxTurns <= 0) {
@@ -135,35 +147,27 @@ public record SessionLimits(
       throw new IllegalArgumentException(
           "maxBudgetMicroUsd must be positive when present, got " + maxBudgetMicroUsd.getAsLong());
     }
-    Objects.requireNonNull(maxWallClock, "maxWallClock must not be null");
-    if (maxWallClock.isZero() || maxWallClock.isNegative()) {
-      throw new IllegalArgumentException(
-          "maxWallClock must be strictly positive, got " + maxWallClock);
-    }
-    Objects.requireNonNull(toolTimeoutDefault, "toolTimeoutDefault must not be null");
-    if (toolTimeoutDefault.isZero() || toolTimeoutDefault.isNegative()) {
-      throw new IllegalArgumentException(
-          "toolTimeoutDefault must be strictly positive, got " + toolTimeoutDefault);
-    }
-    Objects.requireNonNull(toolStopGrace, "toolStopGrace must not be null");
-    if (toolStopGrace.isZero() || toolStopGrace.isNegative()) {
-      throw new IllegalArgumentException(
-          "toolStopGrace must be strictly positive, got " + toolStopGrace);
-    }
+    requirePositiveNanos("maxWallClock", maxWallClock);
+    requirePositiveNanos("toolTimeoutDefault", toolTimeoutDefault);
+    requirePositiveNanos("toolStopGrace", toolStopGrace);
     if (maxContextTokens < 0) {
       throw new IllegalArgumentException(
           "maxContextTokens must be non-negative, got " + maxContextTokens);
     }
-    Objects.requireNonNull(streamIdleTimeout, "streamIdleTimeout must not be null");
-    if (streamIdleTimeout.isZero() || streamIdleTimeout.isNegative()) {
-      throw new IllegalArgumentException(
-          "streamIdleTimeout must be strictly positive, got " + streamIdleTimeout);
-    }
+    requirePositiveNanos("streamIdleTimeout", streamIdleTimeout);
     Objects.requireNonNull(streamRetryPolicy, "streamRetryPolicy must not be null");
-    Objects.requireNonNull(teardownGrace, "teardownGrace must not be null");
-    if (teardownGrace.isZero() || teardownGrace.isNegative()) {
+    requirePositiveNanos("startTimeout", startTimeout);
+    requirePositiveNanos("teardownGrace", teardownGrace);
+  }
+
+  private static void requirePositiveNanos(String name, Duration value) {
+    Objects.requireNonNull(value, name + " must not be null");
+    if (value.isZero() || value.isNegative()) {
+      throw new IllegalArgumentException(name + " must be strictly positive, got " + value);
+    }
+    if (value.compareTo(MAX_DURATION) > 0) {
       throw new IllegalArgumentException(
-          "teardownGrace must be strictly positive, got " + teardownGrace);
+          name + " must be at most " + MAX_DURATION + " (Long.MAX_VALUE ns), got " + value);
     }
   }
 
@@ -202,6 +206,7 @@ public record SessionLimits(
         .withMaxContextTokens(maxContextTokens)
         .withStreamIdleTimeout(streamIdleTimeout)
         .withStreamRetryPolicy(streamRetryPolicy)
+        .withStartTimeout(startTimeout)
         .withTeardownGrace(teardownGrace);
   }
 
@@ -216,6 +221,7 @@ public record SessionLimits(
     private long maxContextTokens = DEFAULTS.maxContextTokens;
     private Duration streamIdleTimeout = DEFAULTS.streamIdleTimeout;
     private StreamRetryPolicy streamRetryPolicy = DEFAULTS.streamRetryPolicy;
+    private Duration startTimeout = DEFAULTS.startTimeout;
     private Duration teardownGrace = DEFAULTS.teardownGrace;
 
     private Builder() {}
@@ -329,6 +335,19 @@ public record SessionLimits(
     }
 
     /**
+     * Set how long {@link AgentSession#create} waits for the execution provider's {@code
+     * onSessionStart} before it ends the session with {@link
+     * ResultMessage.ErrorProviderUnavailable}.
+     *
+     * @param startTimeout strictly positive
+     * @return this builder
+     */
+    public Builder withStartTimeout(Duration startTimeout) {
+      this.startTimeout = startTimeout;
+      return this;
+    }
+
+    /**
      * Set how long each wait of the session's teardown lasts: for the tool calls still running to
      * end, for the execution provider's {@code onSessionEnd} to return, and for event subscribers
      * to drain.
@@ -356,6 +375,7 @@ public record SessionLimits(
           maxContextTokens,
           streamIdleTimeout,
           streamRetryPolicy,
+          startTimeout,
           teardownGrace);
     }
   }

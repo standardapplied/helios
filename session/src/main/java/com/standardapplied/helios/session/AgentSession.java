@@ -145,8 +145,9 @@ public interface AgentSession extends AutoCloseable {
    * holds nothing to end.
    *
    * <p>The teardown runs on every end, a natural one included: it cancels the session's token,
-   * which cancels and interrupts every tool call still running, and waits {@link
-   * SessionLimits#teardownGrace()} for them to end; then it calls {@link
+   * whose callbacks run on a thread of their own, so a callback that blocks or throws holds up
+   * neither this call nor the result; that cancels and interrupts every tool call still running,
+   * and waits {@link SessionLimits#teardownGrace()} for them to end; then it calls {@link
    * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd} and waits the same
    * grace for it to return; then it gives event subscribers the same grace to drain. A tool call or
    * {@code onSessionEnd} still running when its grace has passed is logged and left running: a tool

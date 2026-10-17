@@ -36,7 +36,7 @@ final class PendingQuestionsTest {
           false);
 
   @Test
-  void cancelAllFailsAPendingQuestionAndForgetsIt() {
+  void cancellingTheSessionFailsAPendingQuestionAndForgetsIt() {
     var state = new SessionState("pending", new CancellationToken(), CLOCK);
     var events = new SessionEventPublisher("pending");
     var asked = new CompletableFuture<AskUserQuestionRequest>();
@@ -52,11 +52,11 @@ final class PendingQuestionsTest {
     Thread.ofVirtual().start(asking);
     Await.value("the question to be asked", asked);
 
-    questions.cancelAll();
+    state.cancellation().cancel("session closed");
 
     var failure = assertInstanceOf(CancellationException.class, Await.failure("ask", asking));
     var cause = assertInstanceOf(CancellationException.class, failure.getCause());
-    assertEquals("session cancelled", cause.getMessage());
+    assertEquals("session closed", cause.getMessage());
     var unknown =
         assertThrows(
             IllegalArgumentException.class,

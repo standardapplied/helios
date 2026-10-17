@@ -19,12 +19,12 @@ import java.util.logging.Logger;
 
 /**
  * The end of one session's runtime, in the reverse order of what the session acquired: the session
- * token is cancelled, which cancels and interrupts every tool call still running, and the calls are
- * given {@link SessionLimits#teardownGrace()} to end; the execution provider's {@code onSessionEnd}
- * is given the same grace to return; the scheduler is shut down; event subscribers are given the
- * same grace to drain. A step that throws does not keep the next from running, and a tool call or
- * {@code onSessionEnd} still running when its grace has passed is logged as such, never taken for
- * ended.
+ * token is cancelled ({@link #cancel}, shared with whoever cancelled it first), which cancels and
+ * interrupts every tool call still running, and the calls are given {@link
+ * SessionLimits#teardownGrace()} to end; the execution provider's {@code onSessionEnd} is given the
+ * same grace to return; the scheduler is shut down; event subscribers are given the same grace to
+ * drain. A step that throws does not keep the next from running, and a tool call or {@code
+ * onSessionEnd} still running when its grace has passed is logged as such, never taken for ended.
  *
  * <p>What the result settles with follows from the failures: the loop's {@link Error}, if it threw
  * one, else the first {@code Error} of a step, with every other failure of a step added as
@@ -40,6 +40,7 @@ final class SessionTeardown {
   private final SessionEventPublisher events;
   private final ScheduledExecutorService scheduler;
   private final Duration grace;
+  private CompletableFuture<Void> cancellation;
 
   SessionTeardown(
       SessionState state,
@@ -57,6 +58,21 @@ final class SessionTeardown {
   }
 
   /**
+   * Cancel the session's token with {@code reason} once ({@link
+   * com.standardapplied.helios.core.runtime.CancellationToken#cancelAsync}): the token is cancelled
+   * when this returns, and its callbacks run on a thread of their own; a later call, the teardown's
+   * included, returns the same completion. Neither {@link AgentSession#close()} nor the wall-clock
+   * deadline is therefore held up by a cancellation callback that blocks or throws; the teardown
+   * waits for the callbacks within its grace and settles the result with what they threw.
+   */
+  synchronized CompletableFuture<Void> cancel(String reason) {
+    if (cancellation == null) {
+      cancellation = state.cancellation().cancelAsync(reason);
+    }
+    return cancellation;
+  }
+
+  /**
    * End the runtime of a session whose provider accepted it.
    *
    * @param tools the session's tool dispatch, whose live calls are ended first
@@ -66,8 +82,8 @@ final class SessionTeardown {
   Error run(ToolDispatch tools, Error primary) {
     var failures = new Failures(primary);
     endToolCalls(tools, failures);
-    if (!returnsWithin(
-        "onSessionEnd", () -> executionProvider.onSessionEnd(sessionContext), failures)) {
+    var end = start("onSessionEnd", () -> executionProvider.onSessionEnd(sessionContext));
+    if (!settlesWithin("onSessionEnd", end, failures)) {
       LOGGER.warning(
           () ->
               "onSessionEnd of "
@@ -88,8 +104,7 @@ final class SessionTeardown {
   }
 
   private void endToolCalls(ToolDispatch tools, Failures failures) {
-    if (!returnsWithin(
-        "cancellation", () -> state.cancellation().cancel("session ended"), failures)) {
+    if (!settlesWithin("cancellation", cancel("session ended"), failures)) {
       LOGGER.warning(
           () ->
               "a callback of the cancellation of session "
@@ -112,14 +127,8 @@ final class SessionTeardown {
     }
   }
 
-  /**
-   * Run {@code step} on a thread of its own and wait up to the grace for it, so a step that never
-   * returns cannot hold up the teardown. What the step throws goes to {@code failures} under {@code
-   * name}; an interrupt of the waiting thread ends the wait, its interrupt status kept.
-   *
-   * @return {@code true} if the step returned or threw within the grace
-   */
-  private boolean returnsWithin(String name, Runnable step, Failures failures) {
+  /** Run {@code step} on a thread of its own, so a step that never returns holds nothing up. */
+  private CompletableFuture<Void> start(String name, Runnable step) {
     var done = new CompletableFuture<Void>();
     Thread.ofVirtual()
         .name("helios-teardown-" + name + "-" + state.sessionId())
@@ -132,8 +141,18 @@ final class SessionTeardown {
                 done.completeExceptionally(t);
               }
             });
+    return done;
+  }
+
+  /**
+   * Wait up to the grace for {@code step}. What it threw goes to {@code failures} under {@code
+   * name}; an interrupt of the waiting thread ends the wait, its interrupt status kept.
+   *
+   * @return {@code true} if the step returned or threw within the grace
+   */
+  private boolean settlesWithin(String name, CompletableFuture<Void> step, Failures failures) {
     try {
-      done.get(grace.toNanos(), TimeUnit.NANOSECONDS);
+      step.get(grace.toNanos(), TimeUnit.NANOSECONDS);
     } catch (ExecutionException e) {
       failures.add(name, e.getCause());
     } catch (TimeoutException e) {

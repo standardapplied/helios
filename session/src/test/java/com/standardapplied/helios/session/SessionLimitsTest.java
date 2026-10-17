@@ -13,7 +13,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.common.CostEstimate;
 import java.time.Duration;
 import java.util.OptionalLong;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 final class SessionLimitsTest {
 
@@ -29,6 +35,7 @@ final class SessionLimitsTest {
             32_000L,
             Duration.ofSeconds(30),
             StreamRetryPolicy.defaults(),
+            Duration.ofSeconds(7),
             Duration.ofSeconds(2));
     assertEquals(50, l.maxTurns());
     assertEquals(OptionalLong.of(12_500_000L), l.maxBudgetMicroUsd());
@@ -38,6 +45,7 @@ final class SessionLimitsTest {
     assertEquals(32_000L, l.maxContextTokens());
     assertEquals(Duration.ofSeconds(30), l.streamIdleTimeout());
     assertEquals(StreamRetryPolicy.defaults(), l.streamRetryPolicy());
+    assertEquals(Duration.ofSeconds(7), l.startTimeout());
     assertEquals(Duration.ofSeconds(2), l.teardownGrace());
   }
 
@@ -52,6 +60,7 @@ final class SessionLimitsTest {
     assertEquals(0L, d.maxContextTokens());
     assertEquals(Duration.ofSeconds(60), d.streamIdleTimeout());
     assertEquals(StreamRetryPolicy.defaults(), d.streamRetryPolicy());
+    assertEquals(Duration.ofSeconds(60), d.startTimeout());
     assertEquals(Duration.ofSeconds(5), d.teardownGrace());
   }
 
@@ -260,6 +269,7 @@ final class SessionLimitsTest {
             .withMaxWallClock(Duration.ofMinutes(15))
             .withToolTimeoutDefault(Duration.ofSeconds(20))
             .withToolStopGrace(Duration.ofSeconds(1))
+            .withStartTimeout(Duration.ofSeconds(4))
             .withTeardownGrace(Duration.ofSeconds(9))
             .withMaxContextTokens(75_000L)
             .build();
@@ -283,6 +293,7 @@ final class SessionLimitsTest {
         maxContextTokens,
         Duration.ofSeconds(60),
         StreamRetryPolicy.defaults(),
+        fiveSec(),
         fiveSec());
   }
 
@@ -315,6 +326,7 @@ final class SessionLimitsTest {
                     1_000L,
                     Duration.ZERO,
                     StreamRetryPolicy.defaults(),
+                    fiveSec(),
                     fiveSec()));
     assertEquals("streamIdleTimeout must be strictly positive, got PT0S", ex.getMessage());
   }
@@ -333,6 +345,7 @@ final class SessionLimitsTest {
                 1_000L,
                 Duration.ofSeconds(-1),
                 StreamRetryPolicy.defaults(),
+                fiveSec(),
                 fiveSec()));
   }
 
@@ -350,6 +363,7 @@ final class SessionLimitsTest {
                 1_000L,
                 null,
                 StreamRetryPolicy.defaults(),
+                fiveSec(),
                 fiveSec()));
   }
 
@@ -376,6 +390,7 @@ final class SessionLimitsTest {
                     1_000L,
                     Duration.ofSeconds(60),
                     null,
+                    fiveSec(),
                     fiveSec()));
     assertEquals("streamRetryPolicy must not be null", ex.getMessage());
   }
@@ -392,6 +407,22 @@ final class SessionLimitsTest {
     var disabled = StreamRetryPolicy.disabled();
     var original = SessionLimits.newBuilder().withStreamRetryPolicy(disabled).build();
     assertEquals(disabled, original.toBuilder().build().streamRetryPolicy());
+  }
+
+  // ── startTimeout ──────────────────────────────────────────────────────────
+
+  @Test
+  void startTimeoutZeroRejected() {
+    var b = SessionLimits.newBuilder().withStartTimeout(Duration.ZERO);
+    var ex = assertThrows(IllegalArgumentException.class, b::build);
+    assertEquals("startTimeout must be strictly positive, got PT0S", ex.getMessage());
+  }
+
+  @Test
+  void startTimeoutNullRejected() {
+    var b = SessionLimits.newBuilder().withStartTimeout(null);
+    var ex = assertThrows(NullPointerException.class, b::build);
+    assertEquals("startTimeout must not be null", ex.getMessage());
   }
 
   // ── teardownGrace ─────────────────────────────────────────────────────────
@@ -421,5 +452,68 @@ final class SessionLimitsTest {
     var b = SessionLimits.newBuilder().withTeardownGrace(null);
     var ex = assertThrows(NullPointerException.class, b::build);
     assertEquals("teardownGrace must not be null", ex.getMessage());
+  }
+
+  // ── duration bound ────────────────────────────────────────────────────────
+
+  private static final Duration LONGEST = Duration.ofNanos(Long.MAX_VALUE);
+
+  static Stream<Arguments> durations() {
+    return Stream.of(
+        duration(
+            "maxWallClock", SessionLimits.Builder::withMaxWallClock, SessionLimits::maxWallClock),
+        duration(
+            "toolTimeoutDefault",
+            SessionLimits.Builder::withToolTimeoutDefault,
+            SessionLimits::toolTimeoutDefault),
+        duration(
+            "toolStopGrace",
+            SessionLimits.Builder::withToolStopGrace,
+            SessionLimits::toolStopGrace),
+        duration(
+            "streamIdleTimeout",
+            SessionLimits.Builder::withStreamIdleTimeout,
+            SessionLimits::streamIdleTimeout),
+        duration(
+            "startTimeout", SessionLimits.Builder::withStartTimeout, SessionLimits::startTimeout),
+        duration(
+            "teardownGrace",
+            SessionLimits.Builder::withTeardownGrace,
+            SessionLimits::teardownGrace));
+  }
+
+  private static Arguments duration(
+      String name,
+      BiFunction<SessionLimits.Builder, Duration, SessionLimits.Builder> setter,
+      Function<SessionLimits, Duration> getter) {
+    return Arguments.of(name, setter, getter);
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("durations")
+  void aDurationOfLongMaxValueNanosecondsIsAccepted(
+      String name,
+      BiFunction<SessionLimits.Builder, Duration, SessionLimits.Builder> setter,
+      Function<SessionLimits, Duration> getter) {
+    var limits = setter.apply(SessionLimits.newBuilder(), LONGEST).build();
+
+    assertEquals(LONGEST, getter.apply(limits));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("durations")
+  void aDurationBeyondLongMaxValueNanosecondsIsRejected(
+      String name,
+      BiFunction<SessionLimits.Builder, Duration, SessionLimits.Builder> setter,
+      Function<SessionLimits, Duration> getter) {
+    var builder = setter.apply(SessionLimits.newBuilder(), LONGEST.plusNanos(1));
+
+    var ex = assertThrows(IllegalArgumentException.class, builder::build);
+
+    assertEquals(
+        name
+            + " must be at most PT2562047H47M16.854775807S (Long.MAX_VALUE ns), got"
+            + " PT2562047H47M16.854775808S",
+        ex.getMessage());
   }
 }
