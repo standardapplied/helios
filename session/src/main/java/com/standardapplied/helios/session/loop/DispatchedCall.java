@@ -36,6 +36,25 @@ final class DispatchedCall {
 
   private static final Logger LOGGER = Logger.getLogger(DispatchedCall.class.getName());
 
+  /** A call whose work has not ended, and the latch that opens when it has. */
+  record Live(ToolCall call, CountDownLatch ended) {
+
+    /**
+     * Wait until the call's work has ended or {@code until} passes; an interrupt of the waiting
+     * thread ends the wait, its interrupt status kept.
+     *
+     * @return {@code true} if the work ended
+     */
+    boolean endsBy(long until) {
+      try {
+        return ended.await(Math.max(0L, until - System.nanoTime()), TimeUnit.NANOSECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return false;
+      }
+    }
+  }
+
   /**
    * How often a caller's wait reads the session's token itself. The token runs its callbacks one
    * after another, so an earlier callback that blocks would otherwise keep this call's link from
@@ -56,7 +75,8 @@ final class DispatchedCall {
   private final Duration timeout;
   private final long deadline;
   private final CategoryPermits permits;
-  private final Set<DispatchedCall> liveCalls;
+  private final Set<Live> liveCalls;
+  private final Live live;
   private final Thread worker;
   private volatile CancellationToken.Registration parentLink = CancellationToken.Registration.NOOP;
 
@@ -67,7 +87,7 @@ final class DispatchedCall {
       CancellationToken parent,
       Duration timeout,
       CategoryPermits permits,
-      Set<DispatchedCall> liveCalls) {
+      Set<Live> liveCalls) {
     this.binding = binding;
     this.call = call;
     this.context = new ToolContext(session, token, timeout);
@@ -76,6 +96,7 @@ final class DispatchedCall {
     this.deadline = System.nanoTime() + TimeUnit.NANOSECONDS.convert(timeout);
     this.permits = permits;
     this.liveCalls = liveCalls;
+    this.live = new Live(call, ended);
     this.worker = Thread.ofVirtual().name("helios-tool-" + call.name()).unstarted(this::work);
     answer.whenComplete((result, failure) -> answered.countDown());
   }
@@ -89,7 +110,7 @@ final class DispatchedCall {
             this::expire, TimeUnit.NANOSECONDS.convert(timeout), TimeUnit.NANOSECONDS);
     answer.whenComplete((result, failure) -> timer.cancel(false));
     parentLink = parent.onCancel(() -> cancel(parent.reason().orElseThrow()));
-    liveCalls.add(this);
+    liveCalls.add(live);
     worker.start();
   }
 
@@ -137,26 +158,6 @@ final class DispatchedCall {
     }
     throwIfSessionCancelled();
     return true;
-  }
-
-  /** The tool call this dispatch runs. */
-  ToolCall call() {
-    return call;
-  }
-
-  /**
-   * Wait until the call's work has ended or {@code until} passes; an interrupt of the waiting
-   * thread ends the wait, its interrupt status kept.
-   *
-   * @return {@code true} if the work ended
-   */
-  boolean endsBy(long until) {
-    try {
-      return ended.await(Math.max(0L, until - System.nanoTime()), TimeUnit.NANOSECONDS);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return false;
-    }
   }
 
   private void expire() {
@@ -236,7 +237,7 @@ final class DispatchedCall {
       }
       permits.release(this);
       parentLink.remove();
-      liveCalls.remove(this);
+      liveCalls.remove(live);
       ended.countDown();
     }
   }

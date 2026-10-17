@@ -45,7 +45,7 @@ final class DispatchedCallTest {
 
   private final Overdue scheduler = new Overdue();
   private final AtomicInteger runs = new AtomicInteger();
-  private final Set<DispatchedCall> live = ConcurrentHashMap.newKeySet();
+  private final Set<DispatchedCall.Live> live = ConcurrentHashMap.newKeySet();
   private final ScheduledThreadPoolExecutor busy = new ScheduledThreadPoolExecutor(1);
   private final CountDownLatch busyRelease = new CountDownLatch(1);
   private final CountDownLatch callbackEntered = new CountDownLatch(1);

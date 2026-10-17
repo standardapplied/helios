@@ -9,7 +9,6 @@ import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StopClassifier;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -84,16 +83,12 @@ final class SessionLifecycle {
     return deadlineScheduler;
   }
 
-  /** The event publisher's executor, which the shutdown closes. */
-  ExecutorService publisherExecutor() {
-    return events.executor();
-  }
-
   /**
    * Release what the lifecycle acquired, for a session whose construction failed before {@link
-   * #open}.
+   * #open} or whose provider did not accept it there; such a session can never start.
    */
   void abandon() {
+    started.set(true);
     teardown.release();
   }
 
@@ -119,7 +114,7 @@ final class SessionLifecycle {
                   + (e.getMessage() == null ? "(no message)" : e.getMessage()),
               e);
     } catch (Error e) {
-      endStartUp();
+      abandon();
       result.completeExceptionally(e);
       return;
     }
@@ -143,13 +138,8 @@ final class SessionLifecycle {
             state.totals().cost(),
             state.elapsed());
     state.setTerminal(refusal);
-    endStartUp();
+    abandon();
     result.complete(refusal);
-  }
-
-  private void endStartUp() {
-    started.set(true);
-    teardown.release();
   }
 
   /** Start the agent loop on its virtual thread and arm the wall-clock deadline, at most once. */
