@@ -370,6 +370,18 @@ final class TurnSubscriberTest {
   }
 
   @Test
+  void anErrorTheStreamEndsWithAfterAnotherEndingIsTheTurnsFailureCarryingThatEnding() {
+    var failure = new AssertionError("stream failed");
+    subscriber.onSubscribe(subscription);
+    subscriber.end(new CancellationException("closed"), true);
+
+    subscriber.onError(failure);
+
+    assertSame(failure, subscriber.awaitDone(new CancellationToken()).error());
+    assertInstanceOf(CancellationException.class, failure.getSuppressed()[0]);
+  }
+
+  @Test
   void aRequestStillRunningPastTheGraceLeavesTheTurnItsEndingAndIsLogged() {
     var requesting = new CountDownLatch(1);
     var blocked = newSubscriber(events::add, SHORT_GRACE);
