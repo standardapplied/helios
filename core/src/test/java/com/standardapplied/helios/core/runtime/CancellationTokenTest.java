@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
@@ -466,7 +467,7 @@ final class CancellationTokenTest {
     var release = new CountDownLatch(1);
     token.onCancel(() -> Await.latch("the callback released", release));
 
-    var fired = token.cancelAsync("closed");
+    var fired = token.cancelAsync("closed", error -> {});
 
     assertEquals(Optional.of("closed"), token.reason());
     assertFalse(fired.isDone(), "the callback is still running");
@@ -480,7 +481,7 @@ final class CancellationTokenTest {
     var ranOn = new AtomicReference<Thread>();
     token.onCancel(() -> ranOn.set(Thread.currentThread()));
 
-    Await.value("the callbacks to have run", token.cancelAsync("closed"));
+    Await.value("the callbacks to have run", token.cancelAsync("closed", error -> {}));
 
     assertTrue(ranOn.get().isVirtual(), "callbacks run on a virtual thread");
     assertFalse(ranOn.get() == Thread.currentThread(), "not on the caller's thread");
@@ -500,10 +501,42 @@ final class CancellationTokenTest {
           throw second;
         });
 
-    var failure = Await.failure("the callbacks to have run", token.cancelAsync("closed"));
+    var failure =
+        Await.failure("the callbacks to have run", token.cancelAsync("closed", error -> {}));
 
     assertSame(first, failure);
     assertEquals(List.of(second), List.of(first.getSuppressed()));
+  }
+
+  @Test
+  void cancelAsyncHandsTheObserverAnErrorBeforeALaterCallbackReturns() {
+    var token = new CancellationToken();
+    var sentinel = new AssertionError("sentinel");
+    var release = new CountDownLatch(1);
+    var observed = new CompletableFuture<Error>();
+    token.onCancel(
+        () -> {
+          throw sentinel;
+        });
+    token.onCancel(() -> Await.latch("the callback released", release));
+
+    var fired = token.cancelAsync("closed", observed::complete);
+
+    try {
+      assertSame(sentinel, Await.value("the observed error", observed));
+    } finally {
+      release.countDown();
+      Await.failure("the callbacks to have run", fired);
+    }
+  }
+
+  @Test
+  void cancelAsyncRejectsANullObserverBeforeCancelling() {
+    var token = new CancellationToken();
+
+    assertThrows(NullPointerException.class, () -> token.cancelAsync("closed", null));
+
+    assertFalse(token.isCancelled());
   }
 
   @Test
@@ -513,7 +546,7 @@ final class CancellationTokenTest {
     var fired = new AtomicInteger();
     token.onCancel(fired::incrementAndGet);
 
-    var done = token.cancelAsync("second");
+    var done = token.cancelAsync("second", error -> {});
 
     assertTrue(done.isDone(), "nothing left to run");
     assertEquals(Optional.of("first"), token.reason());
@@ -524,7 +557,8 @@ final class CancellationTokenTest {
   void cancelAsyncRejectsABlankReason() {
     var token = new CancellationToken();
 
-    var ex = assertThrows(IllegalArgumentException.class, () -> token.cancelAsync(" "));
+    var ex =
+        assertThrows(IllegalArgumentException.class, () -> token.cancelAsync(" ", error -> {}));
 
     assertEquals("reason must not be blank", ex.getMessage());
     assertFalse(token.isCancelled());

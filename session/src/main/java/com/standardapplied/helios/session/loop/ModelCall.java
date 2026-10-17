@@ -35,6 +35,7 @@ import java.util.logging.Logger;
 final class ModelCall {
 
   private static final Logger LOGGER = Logger.getLogger(TurnRunner.class.getName());
+  private static final long CANCELLATION_CHECK_NANOS = TimeUnit.MILLISECONDS.toNanos(10);
 
   /** The final attempt's stream and the total number of attempts made. */
   record Attempts(StreamedTurn turn, int count) {}
@@ -185,11 +186,11 @@ final class ModelCall {
    * when the full delay elapsed (or {@code delay} was zero); {@code false} when the sleep was cut
    * short by cancellation or thread interruption.
    *
-   * <p>Implementation: a one-shot {@link CountDownLatch} the cancellation callback counts down;
-   * {@code latch.await(timeout)} returns {@code true} when the latch counted down (cancelled) and
-   * {@code false} when the timeout elapsed (slept the full duration). The callback registration is
-   * removed in {@code finally} so a long-lived session token does not accumulate dead callbacks
-   * across many retries.
+   * <p>Implementation: a one-shot {@link CountDownLatch} the cancellation callback counts down, for
+   * a prompt wakeup; the token is also read every few milliseconds as this waits, because it runs
+   * its callbacks one after another and an earlier callback that blocks would otherwise keep the
+   * loop asleep for the whole delay. The callback registration is removed in {@code finally} so a
+   * long-lived session token does not accumulate dead callbacks across many retries.
    *
    * <p>{@code delay} is contractually non-null and non-negative — callers pass {@link
    * com.standardapplied.helios.session.StreamRetryPolicy#nextDelay(int)} which is itself bounded by
@@ -204,11 +205,21 @@ final class ModelCall {
     if (delay.isZero()) {
       return true;
     }
+    var until = System.nanoTime() + TimeUnit.NANOSECONDS.convert(delay);
     var latch = new CountDownLatch(1);
     var registration = token.onCancel(latch::countDown);
     try {
-      boolean cancelledDuringSleep = latch.await(delay.toMillis(), TimeUnit.MILLISECONDS);
-      return !cancelledDuringSleep;
+      while (!latch.await(
+          Math.clamp(until - System.nanoTime(), 0L, CANCELLATION_CHECK_NANOS),
+          TimeUnit.NANOSECONDS)) {
+        if (token.isCancelled()) {
+          return false;
+        }
+        if (System.nanoTime() - until >= 0) {
+          return true;
+        }
+      }
+      return false;
     } catch (InterruptedException ie) {
       Thread.currentThread().interrupt();
       return false;

@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -100,7 +101,7 @@ public final class CancellationToken {
     if (claimed.isEmpty()) {
       return false;
     }
-    fire(claimed.get());
+    fire(claimed.get(), error -> {});
     return true;
   }
 
@@ -109,14 +110,20 @@ public final class CancellationToken {
    * thread of their own. The token is cancelled when this returns; a callback that blocks or throws
    * holds up only the returned future, never the caller.
    *
+   * <p>{@code observedFailure} is handed each {@link Error} a callback throws as soon as it is
+   * caught, on the callbacks' thread, so a caller that stops waiting for the future while a later
+   * callback still blocks keeps the {@code Error}s thrown before it.
+   *
    * @param reason a human-readable reason for the cancellation
+   * @param observedFailure receives each {@link Error} a claimed callback throws, in order
    * @return a future that completes once every claimed callback has run, exceptionally with the
    *     first {@link Error} a callback threw (later ones suppressed on it); already complete if the
    *     token was already cancelled, whose callbacks the earlier call runs
-   * @throws NullPointerException if {@code reason} is null
+   * @throws NullPointerException if {@code reason} or {@code observedFailure} is null
    * @throws IllegalArgumentException if {@code reason} is blank
    */
-  public CompletableFuture<Void> cancelAsync(String reason) {
+  public CompletableFuture<Void> cancelAsync(String reason, Consumer<Error> observedFailure) {
+    Objects.requireNonNull(observedFailure, "observedFailure must not be null");
     var claimed = claim(reason);
     var fired = new CompletableFuture<Void>();
     if (claimed.isEmpty()) {
@@ -128,7 +135,7 @@ public final class CancellationToken {
         .start(
             () -> {
               try {
-                fire(claimed.get());
+                fire(claimed.get(), observedFailure);
                 fired.complete(null);
               } catch (Error e) {
                 fired.completeExceptionally(e);
@@ -184,11 +191,11 @@ public final class CancellationToken {
         return registration;
       }
     }
-    fire(List.of(registration));
+    fire(List.of(registration), error -> {});
     return Registration.NOOP;
   }
 
-  private void fire(List<CallbackRegistration> claimed) {
+  private void fire(List<CallbackRegistration> claimed, Consumer<Error> observedFailure) {
     Error hostError = null;
     for (var registration : claimed) {
       try {
@@ -196,6 +203,7 @@ public final class CancellationToken {
       } catch (RuntimeException ex) {
         LOGGER.log(Level.WARNING, "cancellation callback threw", ex);
       } catch (Error err) {
+        observedFailure.accept(err);
         if (hostError == null) {
           hostError = err;
         } else if (hostError != err) {
