@@ -96,14 +96,16 @@ final class SessionStart {
 
   /**
    * Settle {@code outcome} with what {@code onSessionStart} did; if the session stopped waiting
-   * first, report what came too late and end a late acceptance.
+   * first, report what came too late and end a late acceptance. What it threw is wrapped in a
+   * {@link CompletionException}, so a {@link java.util.concurrent.CancellationException} it throws
+   * refuses the session instead of cancelling {@code outcome}.
    */
   private void run(CompletableFuture<SessionStartOutcome> outcome) {
     SessionStartOutcome started;
     try {
       started = executionProvider.onSessionStart(sessionContext);
     } catch (Throwable t) {
-      if (!outcome.completeExceptionally(t)) {
+      if (!outcome.completeExceptionally(new CompletionException(t))) {
         LOGGER.log(Level.WARNING, "onSessionStart threw after " + abandonment(), t);
       }
       return;

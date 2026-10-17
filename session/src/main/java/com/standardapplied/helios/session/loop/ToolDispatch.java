@@ -20,7 +20,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -58,7 +57,7 @@ public final class ToolDispatch {
   private final CategoryPermits executionPermits;
   private final ScheduledExecutorService scheduler;
   private final Set<DispatchedCall.Live> liveCalls = ConcurrentHashMap.newKeySet();
-  private final List<Error> strayErrors = new CopyOnWriteArrayList<>();
+  private final StrayErrors strayErrors = new StrayErrors();
 
   /**
    * Build a dispatcher.
@@ -160,15 +159,14 @@ public final class ToolDispatch {
   }
 
   /**
-   * The {@link Error}s the work of a call threw where no dispatch waited for them, in the order
-   * they were caught: one a callback on a call's own token threw, or one a tool threw after its
-   * call was answered. Kept after the call's work ended, so the session settles its result with
-   * them.
+   * The session's stray errors: every {@link Error} the work of a call threw, a callback on a
+   * call's own token included, and those of the session's model turns. Kept after the work ended,
+   * so the session settles its result with them.
    *
-   * @return the stray errors, empty when none
+   * @return the session's stray errors
    */
-  public List<Error> strayErrors() {
-    return List.copyOf(strayErrors);
+  public StrayErrors strayErrors() {
+    return strayErrors;
   }
 
   /**
@@ -215,9 +213,7 @@ public final class ToolDispatch {
     Validate.positiveDuration("timeout", timeout);
     Validate.positiveDuration("stopGrace", stopGrace);
     cancellation.throwIfCancelled();
-    if (!strayErrors.isEmpty()) {
-      throw strayErrors.getFirst();
-    }
+    strayErrors.throwFirst();
 
     var binding = registry.get(call.name());
     if (binding.isEmpty()) {
@@ -235,9 +231,7 @@ public final class ToolDispatch {
             strayErrors::add);
     dispatched.start(scheduler);
     var result = dispatched.await(stopGrace);
-    if (!strayErrors.isEmpty()) {
-      throw strayErrors.getFirst();
-    }
+    strayErrors.throwFirst();
     return result;
   }
 

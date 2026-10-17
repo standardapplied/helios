@@ -71,6 +71,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   private final InstantSource clock;
   private final IdleWatchdog idleWatchdog;
   private final StreamCancel streamCancel;
+  private final StrayErrors strayErrors;
   private final CountDownLatch done = new CountDownLatch(1);
   private final CountDownLatch requestReturned = new CountDownLatch(1);
   private final Object lock = new Object();
@@ -82,6 +83,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   private boolean ended;
   private StreamedTurn outcome;
   private Error firstError;
+  private boolean returned;
 
   TurnSubscriber(
       SessionState state,
@@ -89,22 +91,25 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       InstantSource clock,
       ScheduledExecutorService scheduler,
       Duration idleTimeout,
-      Duration cancelGrace) {
+      Duration cancelGrace,
+      StrayErrors strayErrors) {
     this.state = state;
     this.emitter = emitter;
     this.clock = clock;
     this.idleWatchdog =
         new IdleWatchdog(scheduler, idleTimeout, this::released, stalled -> end(stalled, true));
     this.streamCancel = new StreamCancel(state.sessionId(), cancelGrace);
+    this.strayErrors = strayErrors;
   }
 
   /**
    * Accept the first subscription and request every chunk, or cancel a subscription that arrives
    * second or after the turn ended. What the request throws ends the turn, on whichever thread
    * delivers the subscription, and is rethrown; an {@link Error} it throws is kept even when
-   * another thread had already ended the turn (see {@link #awaitDone(CancellationToken)}).
-   * Cancelling a refused subscription is not part of the turn's outcome: an {@link Error} it throws
-   * is thrown and kept like every other, anything else is logged.
+   * another thread had already ended the turn (see {@link #awaitDone(CancellationToken)}). What
+   * cancelling a refused subscription throws is not part of the turn's outcome, except an {@link
+   * Error}: that ends the turn, cancelling the accepted subscription, is kept like every other and
+   * is thrown; anything else is logged.
    *
    * @throws RuntimeException what requesting from the accepted subscription threw
    * @throws Error what requesting from the accepted subscription threw, or an {@link Error}
@@ -130,7 +135,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       }
       return;
     }
-    var failure = streamCancel.cancel(subscription, null, fatal -> end(fatal, false));
+    var failure = streamCancel.cancel(subscription, null, fatal -> end(fatal, true));
     if (failure instanceof Error fatal) {
       throw fatal;
     }
@@ -250,7 +255,8 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * returned turn's failure unless that ending was an {@code Error} of its own, which then carries
    * it. A request still running on the thread that delivered the subscription when the stream ended
    * is given {@code cancelGrace} to return, so an {@code Error} it is about to throw is not lost;
-   * one still running past it is logged.
+   * one still running past it is logged. An {@code Error} that reaches the turn after this returned
+   * is handed to the session's {@link StrayErrors}.
    */
   StreamedTurn awaitDone(CancellationToken cancellation) {
     var registration = cancellation.onCancel(() -> end(new CancellationException(CANCELLED), true));
@@ -282,6 +288,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       }
     }
     synchronized (lock) {
+      returned = true;
       return firstError == null
           ? outcome
           : snapshot(StreamCancel.fold(outcome.error(), firstError));
@@ -297,13 +304,16 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * The one terminal transition: unless the stream already ended, cancel the subscription when
    * {@code cancelStream} and one is held, snapshot the stream with {@code error} (or none, for a
    * completion) and what the cancel threw, and release the runner, or leave its release to the
-   * chunk whose event is being emitted. An {@link Error} is kept even when the stream already ended
-   * (see {@link #awaitDone(CancellationToken)}).
+   * chunk whose event is being emitted. An {@link Error} is kept even when the stream already
+   * ended, and once the turn was returned it goes to the session's {@link StrayErrors} (see {@link
+   * #awaitDone(CancellationToken)}).
    */
   void end(Throwable error, boolean cancelStream) {
     Flow.Subscription toCancel;
     synchronized (lock) {
-      if (error instanceof Error fatal) {
+      if (error instanceof Error fatal && returned) {
+        strayErrors.add(fatal);
+      } else if (error instanceof Error fatal) {
         firstError = (Error) StreamCancel.fold(firstError, fatal);
       }
       if (ended) {

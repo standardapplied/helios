@@ -31,9 +31,10 @@ import java.util.logging.Logger;
  * session's token is not cancelled and the deadline has not passed. The call's own token is linked
  * to the session's and is cancelled on a thread of its own, so a callback that blocks or throws
  * holds up neither the canceller nor the worker's interrupt. The work is the worker and that
- * cancellation; when both have ended, the worker gives the permit back and removes the link. An
- * {@link Error} no caller waits for, one a callback on the call's token throws or one the tool
- * throws after the call was answered, is handed to {@code strayErrors} as it is caught.
+ * cancellation; when both have ended, the worker gives the permit back and removes the link. Every
+ * {@link Error} of the work, one a callback on the call's token throws or one the tool throws, is
+ * handed to {@code strayErrors} as it is caught, before the answer settles with it, so it is kept
+ * when no caller reads that answer, the session's cancellation having overtaken the caller's wait.
  */
 final class DispatchedCall {
 
@@ -236,11 +237,11 @@ final class DispatchedCall {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     } catch (Throwable e) {
+      if (e instanceof Error error) {
+        strayErrors.accept(error);
+      }
       if (!answer.completeExceptionally(e)) {
         LOGGER.log(Level.SEVERE, "tool '" + call.name() + "' threw after its call was answered", e);
-        if (e instanceof Error error) {
-          strayErrors.accept(error);
-        }
       }
     } finally {
       if (!tokenClaimed.compareAndSet(false, true)) {

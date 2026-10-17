@@ -105,11 +105,14 @@ final class ModelCall {
   }
 
   /**
-   * One attempt. An {@link Error} opening or subscribing to the stream threw is thrown whatever the
-   * stream had already ended with, so a stream that reported a transient failure or completed
-   * before it is neither retried nor continued past it.
+   * One attempt, never made once the session caught a {@link StrayErrors stray error}: the first of
+   * them is thrown instead. An {@link Error} opening or subscribing to the stream threw is thrown
+   * whatever the stream had already ended with, so a stream that reported a transient failure or
+   * completed before it is neither retried nor continued past it.
    */
   private StreamedTurn streamOnce(SessionState state, SessionLimits limits, List<Tool> tools) {
+    var strayErrors = collaborators.toolDispatch().strayErrors();
+    strayErrors.throwFirst();
     var subscriber =
         new TurnSubscriber(
             state,
@@ -117,7 +120,8 @@ final class ModelCall {
             collaborators.clock(),
             scheduler,
             limits.streamIdleTimeout(),
-            limits.teardownGrace());
+            limits.teardownGrace(),
+            strayErrors);
     Error thrown = null;
     try {
       var publisher =

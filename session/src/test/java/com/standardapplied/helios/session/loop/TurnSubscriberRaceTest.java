@@ -150,7 +150,7 @@ final class TurnSubscriberRaceTest {
                 new DefaultHookContext(
                     s.sessionId(), s.currentTurnIndex(), s.cancellation(), STUB_MODEL),
             CLOCK);
-    return new TurnSubscriber(state, emitter, CLOCK, scheduler, IDLE, IDLE);
+    return new TurnSubscriber(state, emitter, CLOCK, scheduler, IDLE, IDLE, new StrayErrors());
   }
 
   private static CountingScheduler countingScheduler() {

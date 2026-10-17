@@ -58,6 +58,7 @@ final class TurnSubscriberTest {
   private static final Duration SHORT_GRACE = Duration.ofMillis(50);
 
   private final ManualScheduler scheduler = new ManualScheduler();
+  private final StrayErrors strayErrors = new StrayErrors();
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
   private final List<LogRecord> logged = new CopyOnWriteArrayList<>();
   private final TurnSubscriber subscriber = newSubscriber();
@@ -263,6 +264,29 @@ final class TurnSubscriberTest {
   }
 
   @Test
+  void anErrorACancelThrowsAfterTheTurnWasReturnedIsAStrayError() {
+    var sentinel = new AssertionError("close failure after the turn");
+    var cancelling = new CompletableFuture<Thread>();
+    var stalled = newSubscriber(events::add, SHORT_GRACE);
+    stalled.onSubscribe(
+        cancelling(
+            () -> {
+              cancelling.complete(Thread.currentThread());
+              DispatchFixture.awaitThroughInterrupts(released);
+              throw sentinel;
+            }));
+    try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
+      stalled.end(new CancellationException("session closed"), true);
+    }
+    stalled.awaitDone(new CancellationToken());
+
+    released.countDown();
+    Await.termination("the cancel to throw", Await.value("the cancel to start", cancelling));
+
+    assertEquals(List.of(sentinel), strayErrors.all());
+  }
+
+  @Test
   void anInterruptWhileWaitingForTheCancelEndsTheWaitInterruptsTheCancelAndStaysSet() {
     var interrupted = new CountDownLatch(1);
     subscriber.onSubscribe(cancelling(untilInterrupted(interrupted)));
@@ -286,6 +310,17 @@ final class TurnSubscriberTest {
             AssertionError.class, () -> subscriber.onSubscribe(cancelling(throwing(cleanup))));
 
     assertSame(cleanup, thrown);
+  }
+
+  @Test
+  void anErrorCancellingARefusedSubscriptionEndsTheTurnWithItAndCancelsTheAcceptedOne() {
+    var cleanup = new AssertionError("close failed");
+    subscriber.onSubscribe(subscription);
+    assertThrows(AssertionError.class, () -> subscriber.onSubscribe(cancelling(throwing(cleanup))));
+
+    var turn = subscriber.awaitDone(new CancellationToken());
+
+    assertEquals(List.of(cleanup, 1), List.of(turn.error(), subscription.cancels));
   }
 
   @Test
@@ -689,7 +724,8 @@ final class TurnSubscriberTest {
                 new DefaultHookContext(
                     s.sessionId(), s.currentTurnIndex(), s.cancellation(), model),
             CLOCK);
-    return new TurnSubscriber(state, emitter, CLOCK, scheduler, NOT_REACHED, cancelGrace);
+    return new TurnSubscriber(
+        state, emitter, CLOCK, scheduler, NOT_REACHED, cancelGrace, strayErrors);
   }
 
   private static Map.Entry<Throwable, Boolean> errorAndInterrupt(
