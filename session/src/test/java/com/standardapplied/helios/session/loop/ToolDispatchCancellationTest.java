@@ -18,16 +18,12 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.ConcurrencyLimits;
-import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.util.List;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.logging.Level;
-import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -316,35 +312,56 @@ final class ToolDispatchCancellationTest {
   }
 
   @Test
-  void aCancellationCallbackErrorIsLoggedAsItselfAndTheToolIsStillInterrupted() {
+  void aCancellationCallbackErrorIsKeptAsAStrayErrorAndTheToolIsStillInterrupted() {
     var sentinel = new AssertionError("broken callback");
     var interrupted = new CountDownLatch(1);
-    ToolExecutor throwing =
-        (args, ctx) -> {
-          ctx.cancellation()
-              .onCancel(
-                  () -> {
-                    throw sentinel;
-                  });
-          return fixture.interruptible(interrupted).execute(args, ctx);
-        };
-    var d = fixture.dispatcher(binding("throwing", ToolCategory.READ, throwing));
+    var d =
+        fixture.dispatcher(
+            binding("throwing", ToolCategory.READ, throwingCallback(sentinel, interrupted)));
     var session = new CancellationToken();
-    var records = new CopyOnWriteArrayList<LogRecord>();
 
-    try (var capture = LogCapture.of(DispatchedCall.class, records)) {
-      var running = start(d, "throwing", session, NEVER);
-      Await.latch("the tool to start", fixture.entered);
-      session.cancel("session closed");
-      Await.latch("the tool to be interrupted", interrupted);
-      assertCancelled("session closed", running);
-      awaitIdle(d);
-    }
+    var running = start(d, "throwing", session, NEVER);
+    Await.latch("the tool to start", fixture.entered);
+    session.cancel("session closed");
+    Await.latch("the tool to be interrupted", interrupted);
+    assertCancelled("session closed", running);
+    awaitIdle(d);
 
-    var logged = records.getFirst();
-    assertEquals(Level.SEVERE, logged.getLevel());
-    assertEquals("a cancellation callback of tool 'throwing' threw", logged.getMessage());
-    assertSame(sentinel, logged.getThrown());
+    assertEquals(List.of(sentinel), d.strayErrors());
+  }
+
+  @Test
+  void aCancellationCallbackErrorOfATimedOutCallIsThrownByItsDispatchAsItself() {
+    var sentinel = new AssertionError("broken callback");
+    var d =
+        fixture.dispatcher(
+            binding(
+                "throwing", ToolCategory.READ, throwingCallback(sentinel, new CountDownLatch(1))));
+    var dispatching =
+        new FutureTask<>(
+            () ->
+                d.dispatch(
+                    DispatchFixture.call("throwing"), new CancellationToken(), NEVER, NEVER));
+    Thread.ofVirtual().start(dispatching);
+    Await.latch("the tool to start", fixture.entered);
+
+    fixture.scheduler.fireLatest();
+
+    assertSame(sentinel, Await.failure("the timed-out dispatch", dispatching));
+  }
+
+  /**
+   * Registers a callback on the call's token that throws {@code error}, then runs interruptibly.
+   */
+  private ToolExecutor throwingCallback(Error error, CountDownLatch interrupted) {
+    return (args, ctx) -> {
+      ctx.cancellation()
+          .onCancel(
+              () -> {
+                throw error;
+              });
+      return fixture.interruptible(interrupted).execute(args, ctx);
+    };
   }
 
   // ── waiting for the calls still running ──────────────────────────────────

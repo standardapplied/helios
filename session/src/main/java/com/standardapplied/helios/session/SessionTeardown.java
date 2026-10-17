@@ -29,7 +29,9 @@ import java.util.logging.Logger;
  *
  * <p>What the result settles with follows from the failures: the loop's {@link Error}, if it threw
  * one, else the first {@code Error} of a step, with every other failure of a step added as
- * suppressed. A step's {@link RuntimeException} is logged and fails nothing on its own.
+ * suppressed. A step's {@link RuntimeException} is logged and fails nothing on its own. What a step
+ * threw after its grace passed but before the result settles counts as well, as does every {@link
+ * ToolDispatch#strayErrors() stray Error} of the session's tool calls.
  */
 final class SessionTeardown {
 
@@ -103,6 +105,10 @@ final class SessionTeardown {
                   + state.sessionId());
     }
     release();
+    if (end.isCompletedExceptionally()) {
+      failures.add("onSessionEnd", end.exceptionNow());
+    }
+    tools.strayErrors().forEach(error -> failures.add("a tool call", error));
     return failures.settling(observedCallbackError.get());
   }
 
@@ -173,7 +179,10 @@ final class SessionTeardown {
     return true;
   }
 
-  /** The loop's failure and those of the teardown's steps, in the order they happened. */
+  /**
+   * The loop's failure and those of the teardown's steps, in the order they happened, each kept
+   * once: a step's failure may be collected both by its wait and at settlement.
+   */
   private static final class Failures {
 
     private final Error primary;
@@ -184,6 +193,9 @@ final class SessionTeardown {
     }
 
     void add(String step, Throwable failure) {
+      if (steps.stream().anyMatch(seen -> seen == failure)) {
+        return;
+      }
       if (failure instanceof RuntimeException) {
         LOGGER.log(Level.WARNING, step + " threw — continuing shutdown", failure);
       }

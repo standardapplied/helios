@@ -20,6 +20,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -57,6 +58,7 @@ public final class ToolDispatch {
   private final CategoryPermits executionPermits;
   private final ScheduledExecutorService scheduler;
   private final Set<DispatchedCall.Live> liveCalls = ConcurrentHashMap.newKeySet();
+  private final List<Error> strayErrors = new CopyOnWriteArrayList<>();
 
   /**
    * Build a dispatcher.
@@ -168,6 +170,18 @@ public final class ToolDispatch {
   }
 
   /**
+   * The {@link Error}s the work of a call threw where no dispatch waited for them, in the order
+   * they were caught: one a callback on a call's own token threw, or one a tool threw after its
+   * call was answered. Kept after the call's work ended, so the session settles its result with
+   * them.
+   *
+   * @return the stray errors, empty when none
+   */
+  public List<Error> strayErrors() {
+    return List.copyOf(strayErrors);
+  }
+
+  /**
    * Dispatch one tool call and wait for its answer. The call runs on its own cancellation token,
    * linked to {@code cancellation}, under one deadline, {@code timeout} from now, that covers the
    * wait for a permit and the tool's run; past it, this method waits at most {@code stopGrace}. A
@@ -188,7 +202,10 @@ public final class ToolDispatch {
    * started, with the reason {@code tool '<name>' did not stop; no tool runs until it ends}. A call
    * that only waits for room in its category still queues. The call's token is cancelled on a
    * thread of its own, so a callback that blocks or throws holds up neither this method, the
-   * session's cancellation nor the interrupt. A tool's {@link Error} is rethrown as itself.
+   * session's cancellation nor the interrupt. A tool's {@link Error} is rethrown as itself, and so
+   * is the first of the {@link #strayErrors() stray errors} once one was caught, before a call
+   * starts or once its answer is in: a host {@code Error} ends the dispatcher's use, never only the
+   * call it happened in.
    *
    * @param call the call; non-null
    * @param cancellation the session's cancellation token; non-null
@@ -197,6 +214,7 @@ public final class ToolDispatch {
    * @return the tool's result, or a framework result on unknown tool or timeout
    * @throws NullPointerException if any argument is null
    * @throws IllegalArgumentException if {@code timeout} or {@code stopGrace} is not positive
+   * @throws Error the error the tool threw, or the first stray error
    * @throws CancellationException if {@code cancellation} fires or the calling thread is
    *     interrupted (its interrupt status is kept) before this method returns a result
    */
@@ -207,6 +225,7 @@ public final class ToolDispatch {
     Validate.positiveDuration("timeout", timeout);
     Validate.positiveDuration("stopGrace", stopGrace);
     cancellation.throwIfCancelled();
+    throwStrayError();
 
     var binding = registry.get(call.name());
     if (binding.isEmpty()) {
@@ -220,9 +239,18 @@ public final class ToolDispatch {
             cancellation,
             timeout,
             permitsFor(binding.orElseThrow().category()),
-            liveCalls);
+            liveCalls,
+            strayErrors::add);
     dispatched.start(scheduler);
-    return dispatched.await(stopGrace);
+    var result = dispatched.await(stopGrace);
+    throwStrayError();
+    return result;
+  }
+
+  private void throwStrayError() {
+    if (!strayErrors.isEmpty()) {
+      throw strayErrors.getFirst();
+    }
   }
 
   private CategoryPermits permitsFor(ToolCategory category) {

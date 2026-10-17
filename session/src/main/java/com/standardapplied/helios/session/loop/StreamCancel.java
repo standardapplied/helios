@@ -10,6 +10,7 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 /**
@@ -82,10 +83,23 @@ final class StreamCancel {
    * Cancel {@code subscription} within the grace.
    *
    * @param failure what ended the stream, or {@code null}
-   * @return {@code failure} folded with what the cancel threw ({@link #fold})
+   * @param observedError handed an {@link Error} the cancel throws as it throws it, so one thrown
+   *     after the grace passed is not lost with the abandoned wait
+   * @return {@code failure} folded with what the cancel threw within the grace ({@link #fold})
    */
-  Throwable cancel(Flow.Subscription subscription, Throwable failure) {
-    var cancelling = new FutureTask<Void>(subscription::cancel, null);
+  Throwable cancel(
+      Flow.Subscription subscription, Throwable failure, Consumer<Error> observedError) {
+    var cancelling =
+        new FutureTask<Void>(
+            () -> {
+              try {
+                subscription.cancel();
+              } catch (Error error) {
+                observedError.accept(error);
+                throw error;
+              }
+            },
+            null);
     var worker = Thread.ofVirtual().name("helios-stream-cancel-" + sessionId).start(cancelling);
     try {
       cancelling.get(grace.toNanos(), TimeUnit.NANOSECONDS);

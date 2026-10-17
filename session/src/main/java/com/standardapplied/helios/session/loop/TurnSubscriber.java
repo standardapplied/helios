@@ -104,7 +104,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * delivers the subscription, and is rethrown; an {@link Error} it throws is kept even when
    * another thread had already ended the turn (see {@link #awaitDone(CancellationToken)}).
    * Cancelling a refused subscription is not part of the turn's outcome: an {@link Error} it throws
-   * is thrown, anything else is logged.
+   * is thrown and kept like every other, anything else is logged.
    *
    * @throws RuntimeException what requesting from the accepted subscription threw
    * @throws Error what requesting from the accepted subscription threw, or an {@link Error}
@@ -130,7 +130,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       }
       return;
     }
-    var failure = streamCancel.cancel(subscription, null);
+    var failure = streamCancel.cancel(subscription, null, fatal -> end(fatal, false));
     if (failure instanceof Error fatal) {
       throw fatal;
     }
@@ -243,13 +243,14 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * long-lived session token does not accumulate one stale registration per turn (see the {@code
    * CancellationToken.onCancel} cleanup contract).
    *
-   * <p>Every {@link Error} that reaches the turn, through {@code onError}, a chunk's emission or
-   * the subscription's request, is kept even when another ending was published first: the first of
-   * them, carrying the later ones, is folded with the published ending's failure ({@link
-   * StreamCancel#fold}), so it is the returned turn's failure unless that ending was an {@code
-   * Error} of its own, which then carries it. A request still running on the thread that delivered
-   * the subscription when the stream ended is given {@code cancelGrace} to return, so an {@code
-   * Error} it is about to throw is not lost; one still running past it is logged.
+   * <p>Every {@link Error} that reaches the turn, through {@code onError}, a chunk's emission, the
+   * subscription's request or its cancel, the latter even once the cancel's grace has passed, is
+   * kept even when another ending was published first: the first of them, carrying the later ones,
+   * is folded with the published ending's failure ({@link StreamCancel#fold}), so it is the
+   * returned turn's failure unless that ending was an {@code Error} of its own, which then carries
+   * it. A request still running on the thread that delivered the subscription when the stream ended
+   * is given {@code cancelGrace} to return, so an {@code Error} it is about to throw is not lost;
+   * one still running past it is logged.
    */
   StreamedTurn awaitDone(CancellationToken cancellation) {
     var registration = cancellation.onCancel(() -> end(new CancellationException(CANCELLED), true));
@@ -312,7 +313,8 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       toCancel = cancelStream ? subscription : null;
     }
     idleWatchdog.cancel();
-    var failure = toCancel != null ? streamCancel.cancel(toCancel, error) : error;
+    var failure =
+        toCancel != null ? streamCancel.cancel(toCancel, error, fatal -> end(fatal, false)) : error;
     boolean release;
     synchronized (lock) {
       outcome = snapshot(failure);

@@ -17,10 +17,12 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.RunnableScheduledFuture;
@@ -46,6 +48,7 @@ final class DispatchedCallTest {
   private final Overdue scheduler = new Overdue();
   private final AtomicInteger runs = new AtomicInteger();
   private final Set<DispatchedCall.Live> live = ConcurrentHashMap.newKeySet();
+  private final List<Error> strays = new CopyOnWriteArrayList<>();
   private final ScheduledThreadPoolExecutor busy = new ScheduledThreadPoolExecutor(1);
   private final CountDownLatch busyRelease = new CountDownLatch(1);
   private final CountDownLatch callbackEntered = new CountDownLatch(1);
@@ -86,7 +89,8 @@ final class DispatchedCallTest {
         session,
         timeout,
         permits,
-        live);
+        live,
+        strays::add);
   }
 
   private ToolResult counting(Map<String, Object> args, ToolContext ctx) {
