@@ -369,7 +369,7 @@ final class TurnRunnerTest {
     Await.latch("the runner to request the model stream", requested);
     Await.until(
         "the runner to block on the stalled stream",
-        () -> runnerThread.getState() == Thread.State.WAITING);
+        () -> runnerThread.getState() == Thread.State.TIMED_WAITING);
 
     runnerThread.interrupt();
 
