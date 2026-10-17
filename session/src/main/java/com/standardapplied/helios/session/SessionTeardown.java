@@ -66,7 +66,8 @@ final class SessionTeardown {
    * included, returns the same completion. Neither {@link AgentSession#close()} nor the wall-clock
    * deadline is therefore held up by a cancellation callback that blocks or throws; the teardown
    * waits for the callbacks within its grace and settles the result with what they threw, an {@link
-   * Error} thrown before a later callback that does not return within the grace included.
+   * Error} included that a callback throws after that wait ended, while a later teardown step still
+   * runs, or before a later callback that never returns.
    */
   synchronized CompletableFuture<Void> cancel(String reason) {
     if (cancellation == null) {
@@ -102,7 +103,7 @@ final class SessionTeardown {
                   + state.sessionId());
     }
     release();
-    return failures.settling();
+    return failures.settling(observedCallbackError.get());
   }
 
   /** Shut the scheduler down and close the event stream: what the session acquired first. */
@@ -113,10 +114,6 @@ final class SessionTeardown {
 
   private void endToolCalls(ToolDispatch tools, Failures failures) {
     if (!settlesWithin("cancellation", cancel("session ended"), failures)) {
-      var observed = observedCallbackError.get();
-      if (observed != null) {
-        failures.add("cancellation", observed);
-      }
       LOGGER.warning(
           () ->
               "a callback of the cancellation of session "
@@ -193,7 +190,16 @@ final class SessionTeardown {
       steps.add(failure);
     }
 
-    Error settling() {
+    /**
+     * @param observedCancellation the first {@link Error} a cancellation callback threw, read once
+     *     every step has ended or had its grace, so one thrown while a later step still ran counts;
+     *     {@code null} if none
+     */
+    Error settling(Error observedCancellation) {
+      if (observedCancellation != null
+          && steps.stream().noneMatch(failure -> failure == observedCancellation)) {
+        steps.addFirst(observedCancellation);
+      }
       var settling = primary != null ? primary : firstError();
       if (settling != null) {
         steps.stream().filter(failure -> failure != settling).forEach(settling::addSuppressed);

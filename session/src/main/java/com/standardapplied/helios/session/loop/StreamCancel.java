@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session.loop;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
@@ -33,7 +34,8 @@ final class StreamCancel {
    * The failure to report when {@code later} happened after {@code failure}: {@code failure}, with
    * {@code later} added to it as suppressed, unless {@code later} is an {@link Error} and {@code
    * failure} is not, so a host {@code Error} is never hidden behind an ordinary failure; then
-   * {@code later}, carrying {@code failure}. Either may be {@code null}.
+   * {@code later}, carrying {@code failure}. One already carried is not added again. Either may be
+   * {@code null}.
    */
   static Throwable fold(Throwable failure, Throwable later) {
     if (later == null || later == failure) {
@@ -43,7 +45,10 @@ final class StreamCancel {
       return later;
     }
     var primary = later instanceof Error && !(failure instanceof Error) ? later : failure;
-    primary.addSuppressed(primary == failure ? later : failure);
+    var secondary = primary == failure ? later : failure;
+    if (!List.of(primary.getSuppressed()).contains(secondary)) {
+      primary.addSuppressed(secondary);
+    }
     return primary;
   }
 

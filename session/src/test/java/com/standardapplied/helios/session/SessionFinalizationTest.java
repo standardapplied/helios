@@ -249,6 +249,44 @@ final class SessionFinalizationTest {
   }
 
   @Test
+  void anErrorRequestingFromAnotherThreadWhileCloseCancelsTheStreamFailsTheResult() {
+    var sentinel = new AssertionError("request failure");
+    var requesting = new CountDownLatch(1);
+    var cancelling = new CountDownLatch(1);
+    var requestReturned = new CountDownLatch(1);
+    var model =
+        model(
+            () ->
+                subscriber ->
+                    CompletableFuture.runAsync(
+                        () -> {
+                          try {
+                            subscriber.onSubscribe(
+                                subscription(
+                                    () -> {
+                                      requesting.countDown();
+                                      Await.latch("the stream's cancel entered", cancelling);
+                                      throw sentinel;
+                                    },
+                                    () -> {
+                                      cancelling.countDown();
+                                      Await.latch("the request returned", requestReturned);
+                                    }));
+                          } finally {
+                            requestReturned.countDown();
+                          }
+                        }));
+
+    try (var session = AgentSession.create(options(model).withLimits(slowGrace()).build())) {
+      session.send("go");
+      Await.latch("the request running", requesting);
+      session.close();
+
+      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    }
+  }
+
+  @Test
   void anErrorAStreamEventHookThrowsAfterCloseCancelledTheStreamFailsTheResult() {
     var sentinel = new AssertionError("hook failure");
     var emitting = new CountDownLatch(1);
