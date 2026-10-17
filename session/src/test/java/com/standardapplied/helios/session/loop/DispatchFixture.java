@@ -167,7 +167,7 @@ final class DispatchFixture implements AutoCloseable {
     var next = start(d, "write");
     Await.until(
         "the next writer to queue for the write permit",
-        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+        () -> d.permitsFor(ToolCategory.WRITE).queued() == 1);
     assertEquals(1, starts.get(), "the next writer has not started");
 
     release.countDown();

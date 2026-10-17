@@ -57,7 +57,7 @@ final class ToolDispatchCancellationTest {
     var queued = start(d, "slow", session, NEVER);
     Await.until(
         "the second call to queue for the permit",
-        () -> d.queuedDispatches(ToolCategory.READ) == 1);
+        () -> d.permitsFor(ToolCategory.READ).queued() == 1);
     session.cancel("user-stop");
 
     assertCancelled("user-stop", queued);

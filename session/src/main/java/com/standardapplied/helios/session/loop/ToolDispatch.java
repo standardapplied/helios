@@ -140,16 +140,6 @@ public final class ToolDispatch {
   }
 
   /**
-   * Dispatches blocked waiting for a permit of {@code category}'s pool. Lets a test wait until a
-   * dispatch has queued behind a saturated pool before it acts.
-   *
-   * @return non-negative count
-   */
-  int queuedDispatches(ToolCategory category) {
-    return permitsFor(category).queued();
-  }
-
-  /**
    * Wait up to {@code grace} for the work of every call still running to end: the calls whose
    * worker or token cancellation has not ended, including calls answered as {@link
    * ToolOutcome.Unknown}. Waiting cancels nothing; the session ends its calls by cancelling its
@@ -225,7 +215,9 @@ public final class ToolDispatch {
     Validate.positiveDuration("timeout", timeout);
     Validate.positiveDuration("stopGrace", stopGrace);
     cancellation.throwIfCancelled();
-    throwStrayError();
+    if (!strayErrors.isEmpty()) {
+      throw strayErrors.getFirst();
+    }
 
     var binding = registry.get(call.name());
     if (binding.isEmpty()) {
@@ -243,17 +235,14 @@ public final class ToolDispatch {
             strayErrors::add);
     dispatched.start(scheduler);
     var result = dispatched.await(stopGrace);
-    throwStrayError();
-    return result;
-  }
-
-  private void throwStrayError() {
     if (!strayErrors.isEmpty()) {
       throw strayErrors.getFirst();
     }
+    return result;
   }
 
-  private CategoryPermits permitsFor(ToolCategory category) {
+  /** The permit pool a call of {@code category} acquires from. */
+  CategoryPermits permitsFor(ToolCategory category) {
     return switch (category) {
       case WRITE -> fileWritePermits;
       case EXECUTION -> executionPermits;
