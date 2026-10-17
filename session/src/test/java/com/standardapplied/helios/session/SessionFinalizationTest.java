@@ -44,7 +44,7 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
@@ -156,7 +156,7 @@ final class SessionFinalizationTest {
     var calls = new AtomicInteger();
     var model =
         model(
-            () -> {
+            token -> {
               calls.incrementAndGet();
               return subscriber ->
                   subscriber.onSubscribe(
@@ -179,7 +179,7 @@ final class SessionFinalizationTest {
     var calls = new AtomicInteger();
     var model =
         model(
-            () -> {
+            token -> {
               calls.incrementAndGet();
               return requesting(
                   subscriber -> {
@@ -197,7 +197,7 @@ final class SessionFinalizationTest {
     var sentinel = new AssertionError("request failure");
     var model =
         model(
-            () ->
+            token ->
                 requesting(
                     subscriber -> {
                       subscriber.onNext(
@@ -215,7 +215,7 @@ final class SessionFinalizationTest {
     var sentinel = new AssertionError("request failure");
     var model =
         model(
-            () ->
+            token ->
                 requesting(
                     subscriber -> {
                       subscriber.onError(streamed);
@@ -232,7 +232,7 @@ final class SessionFinalizationTest {
     var calls = new AtomicInteger();
     var model =
         model(
-            () -> {
+            token -> {
               calls.incrementAndGet();
               return subscriber ->
                   CompletableFuture.runAsync(
@@ -257,7 +257,7 @@ final class SessionFinalizationTest {
     var requestReturned = new CountDownLatch(1);
     var model =
         model(
-            () ->
+            token ->
                 subscriber ->
                     CompletableFuture.runAsync(
                         () -> {
@@ -294,7 +294,7 @@ final class SessionFinalizationTest {
     var cancelled = new CountDownLatch(1);
     var model =
         model(
-            () ->
+            token ->
                 subscriber ->
                     subscriber.onSubscribe(
                         subscription(
@@ -329,7 +329,7 @@ final class SessionFinalizationTest {
     var sentinel = new AssertionError("cancel failure");
     var model =
         model(
-            () ->
+            token ->
                 subscriber ->
                     subscriber.onSubscribe(
                         subscription(
@@ -352,7 +352,7 @@ final class SessionFinalizationTest {
     var requested = new CountDownLatch(1);
     var model =
         model(
-            () ->
+            token ->
                 subscriber ->
                     subscriber.onSubscribe(
                         subscription(
@@ -374,7 +374,7 @@ final class SessionFinalizationTest {
     var cancelling = new CompletableFuture<Thread>();
     var model =
         model(
-            () ->
+            token ->
                 subscriber ->
                     subscriber.onSubscribe(
                         subscription(
@@ -421,12 +421,15 @@ final class SessionFinalizationTest {
         AgentSession.create(
             withProvider(
                     provider,
-                    blockingModel(
-                        () -> {
-                          calling.complete(Thread.currentThread());
-                          RecordingProvider.blockIgnoringInterrupts(released);
-                          throw sentinel;
-                        }))
+                    model(
+                        token ->
+                            BlockingModel.publisherOf(
+                                () -> {
+                                  calling.complete(Thread.currentThread());
+                                  RecordingProvider.blockIgnoringInterrupts(released);
+                                  throw sentinel;
+                                },
+                                token)))
                 .withLimits(slowGrace())
                 .build());
     session.send("go");
@@ -954,7 +957,7 @@ final class SessionFinalizationTest {
 
   private static Model subscriptionFailing(AssertionError requestFailure, Runnable cancel) {
     return model(
-        () ->
+        token ->
             subscriber ->
                 subscriber.onSubscribe(
                     subscription(
@@ -986,39 +989,18 @@ final class SessionFinalizationTest {
 
   private static Model throwingModel(AtomicInteger calls, Error failure) {
     return model(
-        () -> {
+        token -> {
           calls.incrementAndGet();
           throw failure;
         });
   }
 
-  /** A blocking model whose every call runs {@code call}, which never returns normally. */
-  private static Model blockingModel(Runnable call) {
-    return new BlockingModel() {
-      @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        call.run();
-        throw new AssertionError("the call returned");
-      }
-
-      @Override
-      public String id() {
-        return "blocking";
-      }
-
-      @Override
-      public String provider() {
-        return "blocking";
-      }
-    };
-  }
-
-  private static Model model(Supplier<Flow.Publisher<ModelChunk>> stream) {
+  private static Model model(Function<CancellationToken, Flow.Publisher<ModelChunk>> stream) {
     return new Model() {
       @Override
       public Flow.Publisher<ModelChunk> chatStream(
           List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-        return stream.get();
+        return stream.apply(cancellation);
       }
 
       @Override

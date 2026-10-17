@@ -206,6 +206,7 @@ unchanged.
 | `state.replaceHistory(messages)` | removed from the public API: compaction and a `PreModelTurnHook` returning `MutateHistory` replace the history |
 | `state.accumulateUsage(u)`, `state.accumulateCost(c)`, `state.accumulateCitations(cs)` | removed from the public API: the loop accumulates every model call's totals |
 | `state.tryFireContextWarning()`, `state.resetContextWarningFlag()`, `state.contextWarningFired()` | removed from the public API: the context watermark is the loop's |
+| `state.startedAt()` | removed: nothing read it; `state.elapsed()` is the time since the state was built |
 | `AgentSession.JacksonJsonAdapter` | removed: it had a private constructor and a package-private instance, so no caller could use it; typed `runBlocking` parses through the session module's one Jackson mapper |
 
 **`JShellExecutionProvider.singleSandbox` is removed.** It was a second shortcut for the builder,
