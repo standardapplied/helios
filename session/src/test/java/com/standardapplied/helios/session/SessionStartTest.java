@@ -21,11 +21,11 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.Supplier;
+import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -39,9 +39,9 @@ import org.junit.jupiter.params.provider.MethodSource;
  * construction, waited for within {@link SessionLimits#startTimeout()}; a start it does not accept
  * releases what the session acquired and never ends the provider, an {@link Error} fails the result
  * as itself, and a start that settles after the session stopped waiting is reported, a late
- * acceptance ended by the session's bounded teardown. Every start or end that hangs blocks on
- * {@link #released}, opened after each test; the start timeout and teardown grace under test are
- * {@link #SHORT_START}.
+ * acceptance ended by the session's bounded teardown and a late {@code Error} logged. Every start
+ * or end that hangs blocks on {@link #released}, opened after each test; the start timeout and
+ * teardown grace under test are {@link #SHORT_START}.
  */
 final class SessionStartTest {
 
@@ -73,17 +73,6 @@ final class SessionStartTest {
     var refused = assertThrows(IllegalStateException.class, () -> session.send("go"));
     assertEquals("session is terminal", refused.getMessage());
     assertTrue(session.isStarted(), "a session that ended at start-up can never start");
-  }
-
-  @Test
-  void anErrorOnSessionStartJoinsFromAFailedFutureFailsTheResultAsItself() {
-    var sentinel = new AssertionError("start failure");
-    var provider = new RecordingProvider(order);
-    provider.start = () -> CompletableFuture.<SessionStartOutcome>failedFuture(sentinel).join();
-
-    try (var session = AgentSession.create(withProvider(provider).build())) {
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    }
   }
 
   @Test
@@ -219,7 +208,7 @@ final class SessionStartTest {
     lateAcceptanceReporting(
         () -> RecordingProvider.blockIgnoringInterrupts(released),
         shortStartSlowTeardown(),
-        "onSessionStart returned after session "
+        "onSessionStart settled after session "
             + SID
             + " stopped waiting for RecordingProvider; its acceptance is ended by the"
             + " session's teardown");
@@ -251,9 +240,7 @@ final class SessionStartTest {
       refusing.countDown();
 
       awaitReported(
-          "onSessionStart returned after session "
-              + SID
-              + " stopped waiting for RecordingProvider");
+          "onSessionStart settled after session " + SID + " stopped waiting for RecordingProvider");
     }
     assertEquals(0, provider.ends.get());
   }
@@ -278,10 +265,34 @@ final class SessionStartTest {
 
       var reported =
           awaitReported(
-              "onSessionStart threw after session "
+              "onSessionStart settled after session "
                   + SID
                   + " stopped waiting for RecordingProvider");
       assertSame(failure, reported.getThrown());
+    }
+  }
+
+  @Test
+  void anErrorAtStartUpOnceTheSessionGaveUpOnItIsLoggedAndTheRefusalStands() {
+    var failure = new AssertionError("late start failure");
+    var failing = new CountDownLatch(1);
+    var provider = new RecordingProvider(order);
+    provider.start =
+        () -> {
+          RecordingProvider.blockIgnoringInterrupts(failing);
+          throw failure;
+        };
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
+      var session = AgentSession.create(withProvider(provider).withLimits(shortStart()).build());
+      assertInstanceOf(
+          ResultMessage.ErrorProviderUnavailable.class,
+          Await.value("the refusal", session.result()));
+      failing.countDown();
+
+      var reported = awaitReported("an Error reached session " + SID + " after its result settled");
+      assertEquals(
+          List.of(Level.SEVERE, failure), List.of(reported.getLevel(), reported.getThrown()));
     }
   }
 
@@ -301,7 +312,7 @@ final class SessionStartTest {
   }
 
   @Test
-  void anErrorOnSessionEndThrowsForALateAcceptanceIsReported() {
+  void anErrorOnSessionEndThrowsForALateAcceptanceIsLoggedAsSevere() {
     var failure = new AssertionError("end failure");
 
     var reported =
@@ -310,11 +321,10 @@ final class SessionStartTest {
               throw failure;
             },
             shortStart(),
-            "the teardown of a late acceptance threw after session "
-                + SID
-                + " stopped waiting for RecordingProvider");
+            "an Error reached session " + SID + " after its result settled");
 
-    assertSame(failure, reported.getThrown());
+    assertEquals(
+        List.of(Level.SEVERE, failure), List.of(reported.getLevel(), reported.getThrown()));
   }
 
   @Test

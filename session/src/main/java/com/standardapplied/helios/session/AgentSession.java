@@ -100,12 +100,14 @@ public interface AgentSession extends AutoCloseable {
   /**
    * Future that completes when the session reaches a terminal {@link ResultMessage} and its runtime
    * has been torn down. Completes normally with the terminal value. It completes exceptionally only
-   * with an {@link Error}, as itself, that the model, a tool, a hook, the execution provider or the
-   * session's own teardown threw: a host failure, not an agent-loop terminal, and the session ends
-   * with it, no further model or tool call made. Failures of later teardown steps ride along as
-   * {@linkplain Throwable#getSuppressed() suppressed}. Nothing stops the JVM: the loop's virtual
-   * thread ends by throwing the error to its uncaught-exception handler, and the host decides what
-   * an {@code Error} means for the process.
+   * with an {@link Error}, as itself: the first caught on a thread the session runs work on (the
+   * loop, the model stream, a tool, a hook, a cancellation callback, the execution provider's start
+   * or end). That is a host failure, not an agent-loop terminal: it ends the session, no further
+   * model or tool call is made, and every later {@code Error}, and an exception of {@code
+   * onSessionEnd}, rides along as {@linkplain Throwable#getSuppressed() suppressed}; one caught
+   * after the future completed is logged. Nothing stops the JVM: the loop's virtual thread ends by
+   * throwing the error to its uncaught-exception handler, and the host decides what an {@code
+   * Error} means for the process.
    *
    * @return the terminal-result future
    */
@@ -152,7 +154,7 @@ public interface AgentSession extends AutoCloseable {
    * grace for it to return; then it gives event subscribers the same grace to drain. A tool call or
    * {@code onSessionEnd} still running when its grace has passed is logged and left running: a tool
    * that ignores both its token and interruption may still run, and its effects land, after the
-   * result settles.
+   * result settles. An {@link Error} such a tool throws then is logged; the result does not change.
    */
   @Override
   void close();

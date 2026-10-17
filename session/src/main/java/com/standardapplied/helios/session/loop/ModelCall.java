@@ -68,13 +68,10 @@ final class ModelCall {
    * com.standardapplied.helios.session.ResultMessage.ErrorTransientStream} via {@link
    * StopClassifier}.
    *
-   * <p>Non-transient exceptions ({@link StructuredOutputParseException}, {@code
+   * <p>Non-transient throwables ({@link StructuredOutputParseException}, {@code
    * java.util.concurrent.TimeoutException} from the stream-idle watchdog, or any other unchecked
    * exception escaping the subscribe call) end the attempts immediately — only the type guard on
    * {@code TransientStreamException} triggers a retry.
-   *
-   * @throws Error an {@link Error} the model threw, from the call or through the stream, or one
-   *     cancelling the stream, as itself
    */
   Attempts stream(SessionState state, SessionLimits limits, List<Tool> visibleTools) {
     var policy = limits.streamRetryPolicy();
@@ -105,13 +102,10 @@ final class ModelCall {
   }
 
   /**
-   * One attempt, never made once the session caught a {@link StrayErrors stray error}: the first of
-   * them is thrown instead. An {@link Error} opening or subscribing to the stream threw is thrown
-   * whatever the stream had already ended with, so a stream that reported a transient failure or
-   * completed before it is neither retried nor continued past it.
+   * One attempt. What opening or subscribing to the stream throws ends the turn; an {@link Error}
+   * also ends the session ({@link TurnSubscriber}), so no attempt follows it.
    */
   private StreamedTurn streamOnce(SessionState state, SessionLimits limits, List<Tool> tools) {
-    state.strayErrors().throwFirst();
     var subscriber =
         new TurnSubscriber(
             state,
@@ -120,7 +114,6 @@ final class ModelCall {
             scheduler,
             limits.streamIdleTimeout(),
             limits.teardownGrace());
-    Error thrown = null;
     try {
       var publisher =
           outputSchema != null
@@ -128,15 +121,10 @@ final class ModelCall {
                   state.history().snapshot(), tools, outputSchema, state.cancellation())
               : model.chatStream(state.history().snapshot(), tools, state.cancellation());
       publisher.subscribe(subscriber);
-    } catch (RuntimeException | Error e) {
-      subscriber.end(e, true);
-      thrown = e instanceof Error fatal ? fatal : null;
+    } catch (Throwable t) {
+      subscriber.end(t, true);
     }
-    var turn = subscriber.awaitDone(state.cancellation());
-    if (StreamCancel.fold(turn.error(), thrown) instanceof Error error) {
-      throw error;
-    }
-    return turn;
+    return subscriber.awaitDone(state.cancellation());
   }
 
   /**

@@ -91,7 +91,7 @@ public final class AgentSessionImpl implements AgentSession {
               steeringQueue,
               events,
               lifecycle.scheduler(),
-              state.strayErrors());
+              state.ending());
     } catch (RuntimeException | Error e) {
       lifecycle.abandon();
       throw e;

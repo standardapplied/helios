@@ -42,7 +42,7 @@ public final class SessionState {
   private final ConversationHistory history = new ConversationHistory();
   private final SessionTotals totals = new SessionTotals();
   private final ContextWatermark contextWatermark = new ContextWatermark();
-  private final StrayErrors strayErrors = new StrayErrors();
+  private final SessionEnding ending;
   private final AtomicLong turnIndex = new AtomicLong(0);
   private final AtomicReference<Optional<ResultMessage>> terminal =
       new AtomicReference<>(Optional.empty());
@@ -67,6 +67,7 @@ public final class SessionState {
     this.cancellation = Objects.requireNonNull(cancellation, "cancellation must not be null");
     this.clock = Objects.requireNonNull(clock, "clock must not be null");
     this.startedAt = clock.instant();
+    this.ending = new SessionEnding(sessionId, cancellation);
   }
 
   /**
@@ -137,13 +138,12 @@ public final class SessionState {
   }
 
   /**
-   * The session's stray errors: every {@link Error} its work threw where no thread waited for it
-   * any more. The session settles its result with them.
+   * How the session ends early: its one cancellation path and the sink of its host {@link Error}s.
    *
-   * @return the session's stray errors
+   * @return the session's ending
    */
-  public StrayErrors strayErrors() {
-    return strayErrors;
+  public SessionEnding ending() {
+    return ending;
   }
 
   /**

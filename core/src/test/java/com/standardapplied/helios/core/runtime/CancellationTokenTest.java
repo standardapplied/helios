@@ -16,13 +16,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
 final class CancellationTokenTest {
@@ -489,10 +489,12 @@ final class CancellationTokenTest {
   }
 
   @Test
-  void cancelAsyncCompletesExceptionallyWithTheFirstErrorACallbackThrew() {
+  void cancelAsyncHandsEachCallbackErrorToOnErrorAndCompletesNormallyOnceEveryCallbackRan() {
     var token = new CancellationToken();
     var first = new AssertionError("first");
     var second = new AssertionError("second");
+    var laterCallbacks = new AtomicInteger();
+    var errors = new CopyOnWriteArrayList<Error>();
     token.onCancel(
         () -> {
           throw first;
@@ -501,16 +503,17 @@ final class CancellationTokenTest {
         () -> {
           throw second;
         });
+    token.onCancel(laterCallbacks::incrementAndGet);
 
-    var failure =
-        Await.failure("the callbacks to have run", token.cancelAsync("closed", error -> {}));
+    Await.value("the callbacks to have run", token.cancelAsync("closed", errors::add));
 
-    assertSame(first, failure);
-    assertEquals(List.of(second), List.of(first.getSuppressed()));
+    assertEquals(List.of(first, second), errors);
+    assertEquals(0, first.getSuppressed().length);
+    assertEquals(1, laterCallbacks.get());
   }
 
   @Test
-  void cancelAsyncHandsTheObserverAnErrorBeforeALaterCallbackReturns() {
+  void cancelAsyncHandsOnErrorAnErrorBeforeALaterCallbackReturns() {
     var token = new CancellationToken();
     var sentinel = new AssertionError("sentinel");
     var release = new CountDownLatch(1);
@@ -524,83 +527,15 @@ final class CancellationTokenTest {
     var fired = token.cancelAsync("closed", observed::complete);
 
     try {
-      assertSame(sentinel, Await.value("the observed error", observed));
+      assertSame(sentinel, Await.value("the error handed on", observed));
     } finally {
       release.countDown();
-      Await.failure("the callbacks to have run", fired);
+      Await.value("the callbacks to have run", fired);
     }
   }
 
   @Test
-  void anExceptionTheObserverThrowsRidesOnTheCallbacksErrorAndLaterCallbacksStillRun() {
-    var observerFailure = new IllegalStateException("observer");
-
-    var outcome =
-        cancelWithObserver(
-            error -> {
-              throw observerFailure;
-            });
-
-    assertSame(outcome.sentinel(), outcome.failure());
-    assertEquals(List.of(observerFailure), List.of(outcome.failure().getSuppressed()));
-    assertEquals(1, outcome.laterCallbacks().get());
-  }
-
-  @Test
-  void anErrorTheObserverThrowsRidesOnTheCallbacksErrorAndLaterCallbacksStillRun() {
-    var observerFailure = new AssertionError("observer");
-
-    var outcome =
-        cancelWithObserver(
-            error -> {
-              throw observerFailure;
-            });
-
-    assertSame(outcome.sentinel(), outcome.failure());
-    assertEquals(List.of(observerFailure), List.of(outcome.failure().getSuppressed()));
-    assertEquals(1, outcome.laterCallbacks().get());
-  }
-
-  @Test
-  void anObserverRethrowingTheCallbacksErrorAddsNothingToIt() {
-    var token = new CancellationToken();
-    var sentinel = new AssertionError("sentinel");
-    token.onCancel(
-        () -> {
-          throw sentinel;
-        });
-
-    var failure =
-        Await.failure(
-            "the callbacks to have run",
-            token.cancelAsync(
-                "closed",
-                error -> {
-                  throw error;
-                }));
-
-    assertSame(sentinel, failure);
-    assertEquals(0, failure.getSuppressed().length);
-  }
-
-  private static ObserverOutcome cancelWithObserver(Consumer<Error> observer) {
-    var token = new CancellationToken();
-    var sentinel = new AssertionError("sentinel");
-    var laterCallbacks = new AtomicInteger();
-    token.onCancel(
-        () -> {
-          throw sentinel;
-        });
-    token.onCancel(laterCallbacks::incrementAndGet);
-
-    var failure = Await.failure("the callbacks to have run", token.cancelAsync("closed", observer));
-    return new ObserverOutcome(sentinel, failure, laterCallbacks);
-  }
-
-  private record ObserverOutcome(Error sentinel, Throwable failure, AtomicInteger laterCallbacks) {}
-
-  @Test
-  void cancelAsyncRejectsANullObserverBeforeCancelling() {
+  void cancelAsyncRejectsANullOnErrorBeforeCancelling() {
     var token = new CancellationToken();
 
     assertThrows(NullPointerException.class, () -> token.cancelAsync("closed", null));

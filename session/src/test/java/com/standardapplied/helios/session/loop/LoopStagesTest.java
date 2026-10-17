@@ -80,7 +80,7 @@ final class LoopStagesTest {
             ToolRegistry.empty(),
             ConcurrencyLimits.defaults(),
             scheduler,
-            state.strayErrors());
+            state.ending());
     var collaborators =
         new LoopCollaborators(
             new HookRegistry(List.of(hooks)),

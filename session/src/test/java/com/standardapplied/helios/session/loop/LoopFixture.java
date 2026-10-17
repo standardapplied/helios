@@ -55,7 +55,7 @@ final class LoopFixture implements AutoCloseable {
         tools,
         ConcurrencyLimits.defaults(),
         scheduler,
-        new StrayErrors());
+        new SessionEnding("test", new CancellationToken()));
   }
 
   /** The hook context of {@code state}'s current turn. */

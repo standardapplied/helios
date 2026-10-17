@@ -572,7 +572,7 @@ final class DropMiddleToolResultsCompactorTest {
   }
 
   @Test
-  void anErrorTheSummaryCallThrowsAfterItsTimeoutIsKeptAsAStrayErrorOfTheSession() {
+  void anErrorTheSummaryCallThrowsAfterItsTimeoutEndsTheSession() {
     var sentinel = new AssertionError("summary failure");
     var calling = new CompletableFuture<Thread>();
     var state = freshState();
@@ -583,7 +583,8 @@ final class DropMiddleToolResultsCompactorTest {
     Await.termination("the summary call to throw", Await.value("the summary call", calling));
 
     assertSame(history, out.history(), "timeout must yield no-op");
-    assertEquals(List.of(sentinel), state.strayErrors().all());
+    assertTrue(state.cancellation().isCancelled(), "a host Error ends the session");
+    assertSame(sentinel, state.ending().seal().orElseThrow());
   }
 
   @Test

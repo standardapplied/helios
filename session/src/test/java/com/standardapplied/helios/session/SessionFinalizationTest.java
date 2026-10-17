@@ -2,66 +2,54 @@
 
 package com.standardapplied.helios.session;
 
+import static com.standardapplied.helios.session.EndingSessions.NOT_REACHED;
+import static com.standardapplied.helios.session.EndingSessions.SHORT_GRACE;
+import static com.standardapplied.helios.session.EndingSessions.SID;
+import static com.standardapplied.helios.session.EndingSessions.assertReported;
+import static com.standardapplied.helios.session.EndingSessions.binding;
+import static com.standardapplied.helios.session.EndingSessions.callingTool;
+import static com.standardapplied.helios.session.EndingSessions.grace;
+import static com.standardapplied.helios.session.EndingSessions.model;
+import static com.standardapplied.helios.session.EndingSessions.options;
+import static com.standardapplied.helios.session.EndingSessions.slowGrace;
+import static com.standardapplied.helios.session.EndingSessions.subscription;
+import static com.standardapplied.helios.session.EndingSessions.withProvider;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.BlockingModel;
-import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.ModelChunk;
-import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.model.TransientStreamException;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.Tool;
-import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.HookOutcome;
-import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.test.LogCapture;
-import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * How a session ends: a host {@link Error} keeps its identity on every path and ends the session,
- * the teardown releases what the session acquired in reverse order, and the result settles once,
- * after a bounded teardown that accounts for tool work still running. Every fixture that hangs
- * blocks on {@link #released}, opened after each test; the grace under test is {@link #SHORT_GRACE}
- * and every other limit is beyond the hang guard.
+ * How a session ends: the teardown releases what the session acquired in reverse order, the result
+ * settles once, after a bounded teardown that accounts for tool work still running, and nothing
+ * that hangs, a subscriber included, keeps it from settling. Every fixture that hangs blocks on
+ * {@link #released}, opened after each test; the grace under test is {@link
+ * EndingSessions#SHORT_GRACE} and every other limit is beyond the hang guard.
  */
 final class SessionFinalizationTest {
-
-  private static final String SID = "sess-final";
-  private static final Duration SHORT_GRACE = Duration.ofMillis(50);
-  private static final Duration NOT_REACHED = Duration.ofMinutes(10);
 
   private final CountDownLatch released = new CountDownLatch(1);
   private final List<String> order = new CopyOnWriteArrayList<>();
@@ -70,281 +58,6 @@ final class SessionFinalizationTest {
   @AfterEach
   void releaseHangingFixtures() {
     released.countDown();
-  }
-
-  // ── a host Error keeps its identity and ends the session ────────────────────
-
-  @Test
-  void anErrorTheModelStreamEndsWithFailsTheResultAfterTheOnlyModelCall() {
-    var sentinel = new AssertionError("model failure");
-    var model =
-        ScriptedModel.newBuilder()
-            .withStreamTurn(ModelStreams.failing(sentinel))
-            .withTextTurn("never")
-            .build();
-
-    try (var session = AgentSession.create(options(model).build())) {
-      session.send("go");
-
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    }
-    assertEquals(1, model.calls().size());
-  }
-
-  @Test
-  void anErrorTheModelCallThrowsFailsTheResultAfterTheOnlyModelCall() {
-    var sentinel = new AssertionError("model call failure");
-    var calls = new AtomicInteger();
-    var model = throwingModel(calls, sentinel);
-
-    try (var session = AgentSession.create(options(model).build())) {
-      session.send("go");
-
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    }
-    assertEquals(1, calls.get());
-  }
-
-  @Test
-  void anErrorSubscribingToTheModelStreamCancelsItsSubscriptionAndFailsTheResult() {
-    var sentinel = new AssertionError("request failure");
-    var cancels = new AtomicInteger();
-
-    var failure = failureOf(subscriptionFailing(sentinel, cancels::incrementAndGet));
-
-    assertSame(sentinel, failure);
-    assertEquals(1, cancels.get());
-  }
-
-  @Test
-  void aCancelThatThrowsAfterAnErrorSubscribingRidesOnItAsSuppressed() {
-    var sentinel = new AssertionError("request failure");
-    var cleanup = new IllegalStateException("close failed");
-
-    var failure =
-        failureOf(
-            subscriptionFailing(
-                sentinel,
-                () -> {
-                  throw cleanup;
-                }));
-
-    assertSame(sentinel, failure);
-    assertEquals(List.of(cleanup), List.of(sentinel.getSuppressed()));
-  }
-
-  @Test
-  void aCancelThatRethrowsTheErrorSubscribingAddsNoSuppressed() {
-    var sentinel = new AssertionError("stream failure");
-
-    var failure =
-        failureOf(
-            subscriptionFailing(
-                sentinel,
-                () -> {
-                  throw sentinel;
-                }));
-
-    assertSame(sentinel, failure);
-    assertEquals(0, sentinel.getSuppressed().length);
-  }
-
-  @Test
-  void anErrorCancellingASubscriptionThatFailedTransientlyFailsTheResultWithoutARetry() {
-    var sentinel = new AssertionError("cancel failure");
-    var transientFailure = new TransientStreamException("connection reset", null, "test");
-    var calls = new AtomicInteger();
-    var model =
-        model(
-            token -> {
-              calls.incrementAndGet();
-              return subscriber ->
-                  subscriber.onSubscribe(
-                      subscription(
-                          () -> {
-                            throw transientFailure;
-                          },
-                          () -> {
-                            throw sentinel;
-                          }));
-            });
-
-    assertSame(sentinel, failureOf(model));
-    assertEquals(1, calls.get());
-  }
-
-  @Test
-  void anErrorRequestingAfterTheStreamFailedTransientlyFailsTheResultWithoutARetry() {
-    var sentinel = new AssertionError("request failure");
-    var calls = new AtomicInteger();
-    var model =
-        model(
-            token -> {
-              calls.incrementAndGet();
-              return requesting(
-                  subscriber -> {
-                    subscriber.onError(new TransientStreamException("reset", null, "test"));
-                    throw sentinel;
-                  });
-            });
-
-    assertSame(sentinel, failureOf(model));
-    assertEquals(1, calls.get());
-  }
-
-  @Test
-  void anErrorRequestingAfterTheStreamCompletedFailsTheResult() {
-    var sentinel = new AssertionError("request failure");
-    var model =
-        model(
-            token ->
-                requesting(
-                    subscriber -> {
-                      subscriber.onNext(
-                          new ModelChunk.MessageStop("STOP", Response.Usage.of(1, 1), Map.of()));
-                      subscriber.onComplete();
-                      throw sentinel;
-                    }));
-
-    assertSame(sentinel, failureOf(model));
-  }
-
-  @Test
-  void anErrorRequestingAfterTheStreamEndedWithAnErrorRidesOnThatErrorAsSuppressed() {
-    var streamed = new AssertionError("stream failure");
-    var sentinel = new AssertionError("request failure");
-    var model =
-        model(
-            token ->
-                requesting(
-                    subscriber -> {
-                      subscriber.onError(streamed);
-                      throw sentinel;
-                    }));
-
-    assertSame(streamed, failureOf(model));
-    assertEquals(List.of(sentinel), List.of(streamed.getSuppressed()));
-  }
-
-  @Test
-  void anErrorRequestingFromASubscriptionDeliveredOnAnotherThreadFailsTheResult() {
-    var sentinel = new AssertionError("request failure");
-    var calls = new AtomicInteger();
-    var model =
-        model(
-            token -> {
-              calls.incrementAndGet();
-              return subscriber ->
-                  CompletableFuture.runAsync(
-                      () ->
-                          subscriber.onSubscribe(
-                              subscription(
-                                  () -> {
-                                    throw sentinel;
-                                  },
-                                  () -> {})));
-            });
-
-    assertSame(sentinel, failureOf(model));
-    assertEquals(1, calls.get());
-  }
-
-  @Test
-  void anErrorRequestingFromAnotherThreadWhileCloseCancelsTheStreamFailsTheResult() {
-    var sentinel = new AssertionError("request failure");
-    var requesting = new CountDownLatch(1);
-    var cancelling = new CountDownLatch(1);
-    var requestReturned = new CountDownLatch(1);
-    var model =
-        model(
-            token ->
-                subscriber ->
-                    CompletableFuture.runAsync(
-                        () -> {
-                          try {
-                            subscriber.onSubscribe(
-                                subscription(
-                                    () -> {
-                                      requesting.countDown();
-                                      Await.latch("the stream's cancel entered", cancelling);
-                                      throw sentinel;
-                                    },
-                                    () -> {
-                                      cancelling.countDown();
-                                      Await.latch("the request returned", requestReturned);
-                                    }));
-                          } finally {
-                            requestReturned.countDown();
-                          }
-                        }));
-
-    try (var session = AgentSession.create(options(model).withLimits(slowGrace()).build())) {
-      session.send("go");
-      Await.latch("the request running", requesting);
-      session.close();
-
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    }
-  }
-
-  @Test
-  void anErrorAStreamEventHookThrowsAfterCloseCancelledTheStreamFailsTheResult() {
-    var sentinel = new AssertionError("hook failure");
-    var emitting = new CountDownLatch(1);
-    var cancelled = new CountDownLatch(1);
-    var model =
-        model(
-            token ->
-                subscriber ->
-                    subscriber.onSubscribe(
-                        subscription(
-                            () ->
-                                CompletableFuture.runAsync(
-                                    () -> subscriber.onNext(new ModelChunk.TextDelta("Hel"))),
-                            cancelled::countDown)));
-    var session =
-        AgentSession.create(
-            options(model)
-                .withHook(
-                    (OnStreamEventHook)
-                        (event, ctx) -> {
-                          if (event instanceof QueryEvent.AssistantText) {
-                            emitting.countDown();
-                            Await.latch("the stream cancelled", cancelled);
-                            throw sentinel;
-                          }
-                        })
-                .build());
-    session.send("go");
-    Await.latch("the hook running", emitting);
-
-    session.close();
-
-    assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    assertInstanceOf(CancellationException.class, sentinel.getSuppressed()[0]);
-  }
-
-  @Test
-  void anErrorCancellingAStalledStreamFailsTheResultCarryingTheTimeout() {
-    var sentinel = new AssertionError("cancel failure");
-    var model =
-        model(
-            token ->
-                subscriber ->
-                    subscriber.onSubscribe(
-                        subscription(
-                            () -> subscriber.onNext(new ModelChunk.KeepAlive()),
-                            () -> {
-                              throw sentinel;
-                            })));
-    var limits = SessionLimits.newBuilder().withStreamIdleTimeout(SHORT_GRACE).build();
-
-    try (var session = AgentSession.create(options(model).withLimits(limits).build())) {
-      session.send("go");
-
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    }
-    assertInstanceOf(TimeoutException.class, sentinel.getSuppressed()[0]);
   }
 
   @Test
@@ -368,81 +81,6 @@ final class SessionFinalizationTest {
   }
 
   @Test
-  void anErrorAStreamCancelThrowsAfterTheTurnWasReturnedFailsTheResult() {
-    var sentinel = new AssertionError("late cancel failure");
-    var requested = new CountDownLatch(1);
-    var cancelling = new CompletableFuture<Thread>();
-    var model =
-        model(
-            token ->
-                subscriber ->
-                    subscriber.onSubscribe(
-                        subscription(
-                            requested::countDown,
-                            () -> {
-                              cancelling.complete(Thread.currentThread());
-                              RecordingProvider.blockIgnoringInterrupts(released);
-                              throw sentinel;
-                            })));
-    var session =
-        AgentSession.create(
-            options(model)
-                .withLimits(grace())
-                .withHook(
-                    (OnStreamEventHook)
-                        (event, ctx) -> {
-                          if (event instanceof QueryEvent.LoopEnded) {
-                            released.countDown();
-                            Await.termination(
-                                "the cancel to throw",
-                                Await.value("the cancel to start", cancelling));
-                          }
-                        })
-                .build());
-    session.send("go");
-    Await.latch("the stream requested", requested);
-
-    session.close();
-
-    assertSame(sentinel, Await.failure("the result to fail", session.result()));
-  }
-
-  @Test
-  void anErrorABlockingModelThrowsAfterCloseCancelledItsStreamFailsTheResult() {
-    var sentinel = new AssertionError("model failure");
-    var calling = new CompletableFuture<Thread>();
-    var provider = new RecordingProvider(order);
-    provider.end =
-        () -> {
-          released.countDown();
-          Await.termination("the model call to throw", Await.value("the model call", calling));
-        };
-    var session =
-        AgentSession.create(
-            withProvider(
-                    provider,
-                    model(
-                        token ->
-                            BlockingModel.publisherOf(
-                                () -> {
-                                  calling.complete(Thread.currentThread());
-                                  RecordingProvider.blockIgnoringInterrupts(released);
-                                  throw sentinel;
-                                },
-                                token)))
-                .withLimits(slowGrace())
-                .build());
-    session.send("go");
-    Await.value("the model call to start", calling);
-
-    session.close();
-
-    assertSame(sentinel, Await.failure("the result to fail", session.result()));
-  }
-
-  // ── a failing or hanging teardown still settles the result ──────────────────
-
-  @Test
   void aCancellationExceptionOnSessionEndThrowsIsLoggedAndTheResultStillSettles() {
     var cleanup = new CancellationException("end cancelled");
     var provider = new RecordingProvider(order);
@@ -461,59 +99,6 @@ final class SessionFinalizationTest {
   }
 
   @Test
-  void anErrorOnSessionEndJoinsFromAFailedFutureFailsTheResultAsItself() {
-    var sentinel = new AssertionError("end failure");
-    var provider = new RecordingProvider(order);
-    provider.end = () -> CompletableFuture.failedFuture(sentinel).join();
-
-    try (var session = AgentSession.create(withProvider(provider).build())) {
-      session.send("go");
-
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    }
-  }
-
-  @Test
-  void aTeardownExceptionAfterALoopErrorRidesOnItAsSuppressed() {
-    var primary = new AssertionError("hook failure");
-    var cleanup = new IllegalStateException("end failure");
-    var provider = new RecordingProvider(order);
-    provider.end =
-        () -> {
-          throw cleanup;
-        };
-
-    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
-        var session =
-            AgentSession.create(
-                failingAtStop(withProvider(provider), primary).withLimits(slowGrace()).build())) {
-      session.send("go");
-
-      assertSame(primary, Await.failure("the result to fail", session.result()));
-    }
-    assertEquals(List.of(cleanup), List.of(primary.getSuppressed()));
-  }
-
-  @Test
-  void aTeardownErrorAfterALoopErrorRidesOnItAsSuppressed() {
-    var primary = new AssertionError("hook failure");
-    var cleanup = new AssertionError("end failure");
-    var provider = new RecordingProvider(order);
-    provider.end =
-        () -> {
-          throw cleanup;
-        };
-
-    try (var session =
-        AgentSession.create(failingAtStop(withProvider(provider), primary).build())) {
-      session.send("go");
-
-      assertSame(primary, Await.failure("the result to fail", session.result()));
-    }
-    assertEquals(List.of(cleanup), List.of(primary.getSuppressed()));
-  }
-
-  @Test
   void anOnSessionEndThatNeverReturnsIsReportedAndTheResultStillSettles() {
     var provider = new RecordingProvider(order);
     provider.end = () -> RecordingProvider.blockIgnoringInterrupts(released);
@@ -525,6 +110,7 @@ final class SessionFinalizationTest {
       assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
     }
     assertReported(
+        logged,
         "onSessionEnd of RecordingProvider did not return within PT0.05S; the session's"
             + " provider resources are not known to be released, session "
             + SID);
@@ -550,6 +136,7 @@ final class SessionFinalizationTest {
       assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
     }
     assertReported(
+        logged,
         "a callback of the cancellation of session " + SID + " did not return within PT0.05S");
   }
 
@@ -567,46 +154,10 @@ final class SessionFinalizationTest {
 
     assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
     assertReported(
+        logged,
         "onSessionEnd of RecordingProvider did not return within PT10M; the session's"
             + " provider resources are not known to be released, session "
             + SID);
-  }
-
-  @Test
-  void anErrorACancellationCallbackThrowsOnCloseFailsTheResultAndCloseReturns() {
-    var sentinel = new AssertionError("callback failure");
-    var provider = new RecordingProvider(order);
-    var session = AgentSession.create(withProvider(provider).build());
-    provider
-        .context
-        .cancellation()
-        .onCancel(
-            () -> {
-              throw sentinel;
-            });
-
-    session.close();
-
-    assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    assertEquals(1, provider.ends.get());
-  }
-
-  @Test
-  void anErrorACancellationCallbackThrewBeforeALaterOneThatNeverReturnsFailsTheResult() {
-    var sentinel = new AssertionError("callback failure");
-    var provider = new RecordingProvider(order);
-    var session = AgentSession.create(withProvider(provider).withLimits(grace()).build());
-    var cancellation = provider.context.cancellation();
-    cancellation.onCancel(
-        () -> {
-          throw sentinel;
-        });
-    cancellation.onCancel(() -> RecordingProvider.blockIgnoringInterrupts(released));
-
-    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
-      session.close();
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    }
   }
 
   @Test
@@ -643,10 +194,9 @@ final class SessionFinalizationTest {
 
     assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
     assertReported(
+        logged,
         "a callback of the cancellation of session " + SID + " did not return within PT0.05S");
   }
-
-  // ── one terminal result and one disposal ────────────────────────────────────
 
   @Test
   void closingARunningLoopEndsItOnceWithOneDisposal() {
@@ -720,8 +270,6 @@ final class SessionFinalizationTest {
     assertEquals(1, provider.ends.get());
   }
 
-  // ── subscribers cannot hold the result ──────────────────────────────────────
-
   @Test
   void aSubscriberThatNeverReturnsCannotKeepTheResultFromSettling() {
     var entered = new CountDownLatch(1);
@@ -742,8 +290,6 @@ final class SessionFinalizationTest {
     }
     Await.latch("the subscriber to have been stuck in an event", entered);
   }
-
-  // ── repeated sessions return to baseline ────────────────────────────────────
 
   @Test
   void repeatedSessionsLeaveNoThreadExecutorOrSubscriptionBehind() {
@@ -785,8 +331,6 @@ final class SessionFinalizationTest {
     threads.forEach(thread -> Await.termination("thread " + thread.getName() + " to end", thread));
   }
 
-  // ── tool work at session end ────────────────────────────────────────────────
-
   @Test
   void aToolThatStopsOnInterruptionHasEndedBeforeOnSessionEnd() {
     var started = new CountDownLatch(1);
@@ -805,7 +349,9 @@ final class SessionFinalizationTest {
               return ToolResult.failure("interrupted");
             });
 
-    try (var session = AgentSession.create(callingTool(tool).withLimits(slowGrace()).build())) {
+    try (var session =
+        AgentSession.create(
+            callingTool(new RecordingProvider(order), tool).withLimits(slowGrace()).build())) {
       session.send("go");
       Await.latch("the tool to start", started);
       session.close();
@@ -813,37 +359,6 @@ final class SessionFinalizationTest {
       assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
     }
     assertEquals(List.of("tool ended", "onSessionEnd"), order);
-  }
-
-  @Test
-  void anErrorACallbackOnAToolsTokenThrowsOnCloseFailsTheResult() {
-    var sentinel = new AssertionError("tool callback failure");
-    var started = new CountDownLatch(1);
-    var tool =
-        binding(
-            "wait",
-            (args, ctx) -> {
-              ctx.cancellation()
-                  .onCancel(
-                      () -> {
-                        throw sentinel;
-                      });
-              started.countDown();
-              try {
-                new CountDownLatch(1).await();
-              } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-              }
-              return ToolResult.failure("interrupted");
-            });
-
-    try (var session = AgentSession.create(callingTool(tool).withLimits(slowGrace()).build())) {
-      session.send("go");
-      Await.latch("the tool to start", started);
-      session.close();
-
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    }
   }
 
   @Test
@@ -859,7 +374,9 @@ final class SessionFinalizationTest {
             });
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
-        var session = AgentSession.create(callingTool(tool).withLimits(grace()).build())) {
+        var session =
+            AgentSession.create(
+                callingTool(new RecordingProvider(order), tool).withLimits(grace()).build())) {
       session.send("go");
       Await.latch("the tool to start", started);
       session.close();
@@ -867,6 +384,7 @@ final class SessionFinalizationTest {
       assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
     }
     assertReported(
+        logged,
         "tool 'stuck' (call c-stuck) still runs PT0.05S after session "
             + SID
             + " ended; its effects may land after the result settled");
@@ -892,7 +410,9 @@ final class SessionFinalizationTest {
             .build();
     var events = new CollectingSubscriber();
 
-    try (var session = AgentSession.create(callingTool(tool).withLimits(limits).build())) {
+    try (var session =
+        AgentSession.create(
+            callingTool(new RecordingProvider(order), tool).withLimits(limits).build())) {
       session.events().subscribe(events);
       session.send("go");
 
@@ -901,126 +421,5 @@ final class SessionFinalizationTest {
     var answered = events.eventsOf(QueryEvent.ToolResult.class).getFirst().result();
     assertInstanceOf(ToolOutcome.Unknown.class, answered.outcome());
     assertEquals(List.of("tool ended", "onSessionEnd"), order);
-  }
-
-  // ── fixtures ────────────────────────────────────────────────────────────────
-
-  private static SessionOptions.Builder options(Model model) {
-    return SessionOptions.newBuilder().withModel(model).withSessionId(SID);
-  }
-
-  private static SessionOptions.Builder withProvider(RecordingProvider provider) {
-    return withProvider(provider, ScriptedModel.newBuilder().withTextTurn("done").build());
-  }
-
-  private static SessionOptions.Builder withProvider(RecordingProvider provider, Model model) {
-    return options(model).withExecutionProvider(provider);
-  }
-
-  private SessionOptions.Builder callingTool(ToolBinding tool) {
-    var provider = new RecordingProvider(order);
-    var call = new ToolCall("c-" + tool.name(), tool.name(), Map.of());
-    var model = ScriptedModel.newBuilder().withToolCallsTurn(call).withTextTurn("done").build();
-    return withProvider(provider, model).withTools(new ToolRegistry(List.of(tool)));
-  }
-
-  private static SessionOptions.Builder failingAtStop(
-      SessionOptions.Builder options, AssertionError failure) {
-    PreStopHook failing =
-        (response, ctx) -> {
-          throw failure;
-        };
-    return options.withHook(failing);
-  }
-
-  private static SessionLimits grace() {
-    return SessionLimits.newBuilder().withTeardownGrace(SHORT_GRACE).build();
-  }
-
-  private static SessionLimits slowGrace() {
-    return SessionLimits.newBuilder().withTeardownGrace(NOT_REACHED).build();
-  }
-
-  private static ToolBinding binding(String name, ToolExecutor executor) {
-    return ToolBinding.newBuilder(
-            Tool.newBuilder().withName(name).withDescription(name).withExecutor(executor).build())
-        .withCategory(ToolCategory.READ)
-        .build();
-  }
-
-  private static Throwable failureOf(Model model) {
-    try (var session = AgentSession.create(options(model).build())) {
-      session.send("go");
-      return Await.failure("the result to fail", session.result());
-    }
-  }
-
-  private static Model subscriptionFailing(AssertionError requestFailure, Runnable cancel) {
-    return model(
-        token ->
-            subscriber ->
-                subscriber.onSubscribe(
-                    subscription(
-                        () -> {
-                          throw requestFailure;
-                        },
-                        cancel)));
-  }
-
-  private static Flow.Publisher<ModelChunk> requesting(
-      Consumer<Flow.Subscriber<? super ModelChunk>> request) {
-    return subscriber ->
-        subscriber.onSubscribe(subscription(() -> request.accept(subscriber), () -> {}));
-  }
-
-  private static Flow.Subscription subscription(Runnable request, Runnable cancel) {
-    return new Flow.Subscription() {
-      @Override
-      public void request(long n) {
-        request.run();
-      }
-
-      @Override
-      public void cancel() {
-        cancel.run();
-      }
-    };
-  }
-
-  private static Model throwingModel(AtomicInteger calls, Error failure) {
-    return model(
-        token -> {
-          calls.incrementAndGet();
-          throw failure;
-        });
-  }
-
-  private static Model model(Function<CancellationToken, Flow.Publisher<ModelChunk>> stream) {
-    return new Model() {
-      @Override
-      public Flow.Publisher<ModelChunk> chatStream(
-          List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-        return stream.apply(cancellation);
-      }
-
-      @Override
-      public String id() {
-        return "throwing";
-      }
-
-      @Override
-      public String provider() {
-        return "test";
-      }
-    };
-  }
-
-  private void assertReported(String warning) {
-    var warnings =
-        logged.stream()
-            .filter(record -> record.getLevel() == Level.WARNING)
-            .map(LogRecord::getMessage)
-            .toList();
-    assertTrue(warnings.contains(warning), () -> "logged warnings: " + warnings);
   }
 }
