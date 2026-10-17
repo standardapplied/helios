@@ -11,6 +11,7 @@ import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.LoopCollaborators;
 import com.standardapplied.helios.session.loop.StopClassifier;
+import com.standardapplied.helios.session.loop.StrayErrors;
 import com.standardapplied.helios.session.loop.ToolDispatch;
 import com.standardapplied.helios.session.loop.TurnRunner;
 import com.standardapplied.helios.session.memory.MemoryReadTool;
@@ -36,10 +37,12 @@ final class SessionWiring {
       PendingQuestions pendingQuestions,
       SteeringQueue steeringQueue,
       SessionEventPublisher events,
-      ScheduledExecutorService scheduler) {
+      ScheduledExecutorService scheduler,
+      StrayErrors strayErrors) {
     var combinedTools = withBuiltins(options.tools(), options, pendingQuestions);
     var toolDispatch =
-        new ToolDispatch(sessionContext, combinedTools, options.concurrency(), scheduler);
+        new ToolDispatch(
+            sessionContext, combinedTools, options.concurrency(), scheduler, strayErrors);
     var combinedHooks = new ArrayList<Hook>(options.hooks().size() + 1);
     options
         .permission()

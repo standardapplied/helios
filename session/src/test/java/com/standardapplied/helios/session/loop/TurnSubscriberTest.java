@@ -58,7 +58,7 @@ final class TurnSubscriberTest {
   private static final Duration SHORT_GRACE = Duration.ofMillis(50);
 
   private final ManualScheduler scheduler = new ManualScheduler();
-  private final StrayErrors strayErrors = new StrayErrors();
+  private final SessionState state = new SessionState("sess", new CancellationToken(), CLOCK);
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
   private final List<LogRecord> logged = new CopyOnWriteArrayList<>();
   private final TurnSubscriber subscriber = newSubscriber();
@@ -283,7 +283,7 @@ final class TurnSubscriberTest {
     released.countDown();
     Await.termination("the cancel to throw", Await.value("the cancel to start", cancelling));
 
-    assertEquals(List.of(sentinel), strayErrors.all());
+    assertEquals(List.of(sentinel), state.strayErrors().all());
   }
 
   @Test
@@ -698,7 +698,6 @@ final class TurnSubscriberTest {
   }
 
   private TurnSubscriber newSubscriber(Consumer<QueryEvent> sink, Duration cancelGrace) {
-    var state = new SessionState("sess", new CancellationToken(), CLOCK);
     var model =
         new BlockingModel() {
           @Override
@@ -724,8 +723,7 @@ final class TurnSubscriberTest {
                 new DefaultHookContext(
                     s.sessionId(), s.currentTurnIndex(), s.cancellation(), model),
             CLOCK);
-    return new TurnSubscriber(
-        state, emitter, CLOCK, scheduler, NOT_REACHED, cancelGrace, strayErrors);
+    return new TurnSubscriber(state, emitter, CLOCK, scheduler, NOT_REACHED, cancelGrace);
   }
 
   private static Map.Entry<Throwable, Boolean> errorAndInterrupt(

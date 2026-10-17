@@ -32,7 +32,7 @@ import java.util.logging.Logger;
  * one, else the first {@code Error} of a step, with every other failure of a step added as
  * suppressed. A step's {@link RuntimeException} is logged and fails nothing on its own. What a step
  * threw after its grace passed but before the result settles counts as well, as does every {@link
- * ToolDispatch#strayErrors() stray Error} of the session's work.
+ * SessionState#strayErrors() stray Error} of the session's work.
  */
 final class SessionTeardown {
 
@@ -109,7 +109,7 @@ final class SessionTeardown {
     if (end.isCompletedExceptionally()) {
       failures.add("onSessionEnd", end.exceptionNow());
     }
-    tools.strayErrors().all().forEach(error -> failures.add("the session's work", error));
+    state.strayErrors().all().forEach(error -> failures.add("the session's work", error));
     return failures.settling(observedCallbackError.get());
   }
 
@@ -145,8 +145,7 @@ final class SessionTeardown {
 
   /**
    * Run {@code step} on a thread of its own, so a step that never returns holds nothing up. What it
-   * throws is wrapped in a {@link CompletionException}, so a {@link
-   * java.util.concurrent.CancellationException} it throws fails the step instead of cancelling it.
+   * throws fails the step as {@link #asCompletion}.
    */
   private CompletableFuture<Void> start(String name, Runnable step) {
     var done = new CompletableFuture<Void>();
@@ -158,10 +157,22 @@ final class SessionTeardown {
                 step.run();
                 done.complete(null);
               } catch (Throwable t) {
-                done.completeExceptionally(new CompletionException(t));
+                done.completeExceptionally(asCompletion(t));
               }
             });
     return done;
+  }
+
+  /**
+   * What a step that threw {@code thrown} fails its future with: a {@link
+   * java.util.concurrent.CancellationException} fails it instead of cancelling it, and a {@link
+   * CompletionException} that carries a cause, such as a {@code join} of a failed future throws, is
+   * kept as it is, so a reader of the future recovers that cause, an {@link Error} as itself.
+   */
+  static CompletionException asCompletion(Throwable thrown) {
+    return thrown instanceof CompletionException completion && completion.getCause() != null
+        ? completion
+        : new CompletionException(thrown);
   }
 
   /**

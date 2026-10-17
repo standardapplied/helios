@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.loop.SessionState;
+import com.standardapplied.helios.session.loop.StrayErrors;
 import com.standardapplied.helios.session.loop.ToolDispatch;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -121,6 +122,7 @@ final class SessionTeardownTest {
   }
 
   private ToolDispatch tools() {
-    return new ToolDispatch(context, ToolRegistry.empty(), ConcurrencyLimits.defaults(), scheduler);
+    return new ToolDispatch(
+        context, ToolRegistry.empty(), ConcurrencyLimits.defaults(), scheduler, new StrayErrors());
   }
 }

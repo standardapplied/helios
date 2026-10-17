@@ -57,15 +57,16 @@ final class ModelCallTest {
   record Answer(String answer) {}
 
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+  private final SessionState state = new SessionState("sess-call", new CancellationToken(), CLOCK);
   private final ToolDispatch dispatch =
       new ToolDispatch(
           SessionContext.forTesting("sess-call"),
           ToolRegistry.empty(),
           ConcurrencyLimits.defaults(),
-          scheduler);
+          scheduler,
+          state.strayErrors());
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
   private final SteeringQueue queue = new SteeringQueue(1);
-  private final SessionState state = new SessionState("sess-call", new CancellationToken(), CLOCK);
 
   private final CountDownLatch released = new CountDownLatch(1);
 
@@ -230,7 +231,7 @@ final class ModelCallTest {
     Consumer<QueryEvent> strayOnRetry =
         event -> {
           if (event instanceof QueryEvent.TurnRetried) {
-            dispatch.strayErrors().add(stray);
+            state.strayErrors().add(stray);
           }
         };
     var call = modelCall(model, strayOnRetry);

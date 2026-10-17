@@ -21,6 +21,8 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.Supplier;
@@ -71,6 +73,34 @@ final class SessionStartTest {
     var refused = assertThrows(IllegalStateException.class, () -> session.send("go"));
     assertEquals("session is terminal", refused.getMessage());
     assertTrue(session.isStarted(), "a session that ended at start-up can never start");
+  }
+
+  @Test
+  void anErrorOnSessionStartJoinsFromAFailedFutureFailsTheResultAsItself() {
+    var sentinel = new AssertionError("start failure");
+    var provider = new RecordingProvider(order);
+    provider.start = () -> CompletableFuture.<SessionStartOutcome>failedFuture(sentinel).join();
+
+    try (var session = AgentSession.create(withProvider(provider).build())) {
+      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    }
+  }
+
+  @Test
+  void aCompletionExceptionWithoutACauseAtStartUpIsAProviderRefusal() {
+    var provider = new RecordingProvider(order);
+    provider.start =
+        () -> {
+          throw new CompletionException("start failed", null);
+        };
+
+    try (var session = AgentSession.create(withProvider(provider).build())) {
+      var refusal =
+          assertInstanceOf(
+              ResultMessage.ErrorProviderUnavailable.class,
+              Await.value("the result", session.result()));
+      assertEquals("onSessionStart threw CompletionException: start failed", refusal.reason());
+    }
   }
 
   @Test

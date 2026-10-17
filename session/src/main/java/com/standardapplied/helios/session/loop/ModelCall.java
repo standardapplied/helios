@@ -111,8 +111,7 @@ final class ModelCall {
    * completed before it is neither retried nor continued past it.
    */
   private StreamedTurn streamOnce(SessionState state, SessionLimits limits, List<Tool> tools) {
-    var strayErrors = collaborators.toolDispatch().strayErrors();
-    strayErrors.throwFirst();
+    state.strayErrors().throwFirst();
     var subscriber =
         new TurnSubscriber(
             state,
@@ -120,8 +119,7 @@ final class ModelCall {
             collaborators.clock(),
             scheduler,
             limits.streamIdleTimeout(),
-            limits.teardownGrace(),
-            strayErrors);
+            limits.teardownGrace());
     Error thrown = null;
     try {
       var publisher =

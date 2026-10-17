@@ -327,7 +327,7 @@ final class ToolDispatchCancellationTest {
     assertCancelled("session closed", running);
     awaitIdle(d);
 
-    assertEquals(List.of(sentinel), d.strayErrors().all());
+    assertEquals(List.of(sentinel), fixture.strayErrors.all());
   }
 
   @Test

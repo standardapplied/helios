@@ -20,17 +20,31 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.loop.SessionState;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 final class DropMiddleToolResultsCompactorTest {
+
+  private static final Duration SHORT_SUMMARY_TIMEOUT = Duration.ofMillis(50);
+
+  private final CountDownLatch released = new CountDownLatch(1);
+
+  @AfterEach
+  void releaseHangingFixtures() {
+    released.countDown();
+  }
 
   private static Model summaryModel(String content) {
     return new BlockingModel() {
@@ -555,6 +569,84 @@ final class DropMiddleToolResultsCompactorTest {
     assertSame(history, out.history(), "timeout must yield no-op");
     assertEquals(0, out.usage().inputTokens());
     Await.latch("the timed-out summary call to be interrupted", interrupted);
+  }
+
+  @Test
+  void anErrorTheSummaryCallThrowsAfterItsTimeoutIsKeptAsAStrayErrorOfTheSession() {
+    var sentinel = new AssertionError("summary failure");
+    var calling = new CompletableFuture<Thread>();
+    var state = freshState();
+    var history = chain(10);
+
+    var out = timingOut(throwingOnRelease(sentinel, calling)).compact(history, state);
+    released.countDown();
+    Await.termination("the summary call to throw", Await.value("the summary call", calling));
+
+    assertSame(history, out.history(), "timeout must yield no-op");
+    assertEquals(List.of(sentinel), state.strayErrors().all());
+  }
+
+  @Test
+  void anErrorTheSummaryCallThrowsAfterItsTimeoutFailsTheSessionsResult() {
+    var sentinel = new AssertionError("summary failure");
+    var calling = new CompletableFuture<Thread>();
+    var options =
+        SessionOptions.newBuilder()
+            .withModel(ScriptedModel.newBuilder().withTextTurn("done").build())
+            .withSessionId("sess-1")
+            .withSystemPrompt("system")
+            .withLimits(SessionLimits.newBuilder().withMaxContextTokens(1_000).build())
+            .withTokenCounter(messages -> 1_000_000)
+            .withContextCompactor(timingOut(throwingOnRelease(sentinel, calling)))
+            .withHook(
+                (PreStopHook)
+                    (response, ctx) -> {
+                      released.countDown();
+                      Await.termination(
+                          "the summary call to throw", Await.value("the summary call", calling));
+                      return HookOutcome.cont();
+                    })
+            .build();
+
+    try (var session = AgentSession.create(options)) {
+      session.send("go");
+
+      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    }
+  }
+
+  /** A compactor over {@code summaryModel} that keeps one message at each end. */
+  private static DropMiddleToolResultsCompactor timingOut(Model summaryModel) {
+    return DropMiddleToolResultsCompactor.newBuilder(summaryModel)
+        .withHeadPreserved(1)
+        .withTailPreserved(1)
+        .withSummaryTimeout(SHORT_SUMMARY_TIMEOUT)
+        .build();
+  }
+
+  /**
+   * A summary model whose call reports its thread, blocks until {@link #released} ignoring
+   * interrupts, then throws {@code sentinel}.
+   */
+  private Model throwingOnRelease(AssertionError sentinel, CompletableFuture<Thread> calling) {
+    return new BlockingModel() {
+      @Override
+      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+        calling.complete(Thread.currentThread());
+        RecordingProvider.blockIgnoringInterrupts(released);
+        throw sentinel;
+      }
+
+      @Override
+      public String id() {
+        return "summary";
+      }
+
+      @Override
+      public String provider() {
+        return "summary";
+      }
+    };
   }
 
   @Test

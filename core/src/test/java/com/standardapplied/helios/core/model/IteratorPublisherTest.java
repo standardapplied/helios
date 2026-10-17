@@ -675,6 +675,38 @@ class IteratorPublisherTest {
   }
 
   @Test
+  void anErrorTheWorkThrowsAfterTheTokenWasCancelledEndsTheStreamWithIt() {
+    var broken = new AssertionError("model broke");
+    var subscriber = new RecordingSubscriber<String>();
+
+    new IteratorPublisher<String>(
+            () -> {
+              token.cancel("user stopped");
+              throw broken;
+            },
+            token)
+        .subscribe(subscriber);
+
+    assertSame(broken, subscriber.awaitFailure());
+  }
+
+  @Test
+  void anErrorTheWorkThrowsAfterTheSubscriptionWasCancelledStillReachesTheSubscriber() {
+    var broken = new AssertionError("model broke");
+    var subscriber = new RecordingSubscriber<String>();
+
+    new IteratorPublisher<String>(
+            () -> {
+              subscriber.subscription().cancel();
+              throw broken;
+            },
+            token)
+        .subscribe(subscriber);
+
+    assertSame(broken, subscriber.awaitFailure());
+  }
+
+  @Test
   void anErrorFromTheSourceEndsTheStreamWithItAndClosesTheSource() {
     var overflow = new StackOverflowError("deep");
     var source = new Source(List.of("a"));
