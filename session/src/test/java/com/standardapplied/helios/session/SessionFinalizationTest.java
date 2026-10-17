@@ -5,7 +5,6 @@ package com.standardapplied.helios.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Message;
@@ -13,18 +12,11 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.ask.AskUserQuestionTool;
-import com.standardapplied.helios.session.execution.ExecutionCapabilities;
-import com.standardapplied.helios.session.execution.ExecutionProvider;
-import com.standardapplied.helios.session.execution.ExecutionRequest;
-import com.standardapplied.helios.session.execution.ExecutionResult;
-import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
@@ -39,7 +31,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -48,19 +39,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * How a session ends: a host {@link Error} keeps its identity on every path and ends the session,
- * start-up and teardown release what the session acquired in reverse order, and the result settles
- * once, after a bounded teardown that accounts for tool work still running. Every fixture that
- * hangs blocks on {@link #released}, opened after each test; the grace under test is {@link
- * #SHORT_GRACE} and every other limit is beyond the hang guard.
+ * the teardown releases what the session acquired in reverse order, and the result settles once,
+ * after a bounded teardown that accounts for tool work still running. Every fixture that hangs
+ * blocks on {@link #released}, opened after each test; the grace under test is {@link #SHORT_GRACE}
+ * and every other limit is beyond the hang guard.
  */
 final class SessionFinalizationTest {
 
@@ -111,98 +98,47 @@ final class SessionFinalizationTest {
   }
 
   @Test
-  void anErrorAtStartUpFailsTheResultAndEndsTheSession() {
-    var sentinel = new AssertionError("start failure");
-    var provider = new RecordingProvider();
-    provider.start =
-        () -> {
-          throw sentinel;
-        };
+  void anErrorSubscribingToTheModelStreamCancelsItsSubscriptionAndFailsTheResult() {
+    var sentinel = new AssertionError("request failure");
+    var cancels = new AtomicInteger();
 
-    var session = (AgentSessionImpl) AgentSession.create(withProvider(provider).build());
+    var failure = failureOf(subscriptionFailing(sentinel, cancels::incrementAndGet));
 
-    assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    var refused = assertThrows(IllegalStateException.class, () -> session.send("go"));
-    assertEquals("session is terminal", refused.getMessage());
-    assertTrue(session.isStarted(), "a session that ended at start-up can never start");
+    assertSame(sentinel, failure);
+    assertEquals(1, cancels.get());
   }
 
   @Test
-  void aSessionWhoseResultFailedRefusesAnInterrupt() {
-    var provider = new RecordingProvider();
-    provider.start =
-        () -> {
-          throw new AssertionError("start failure");
-        };
-    var session = AgentSession.create(withProvider(provider).build());
-    Await.failure("the result to fail", session.result());
+  void aCancelThatThrowsAfterAnErrorSubscribingRidesOnItAsSuppressed() {
+    var sentinel = new AssertionError("request failure");
+    var cleanup = new IllegalStateException("close failed");
 
-    var refused = assertThrows(IllegalStateException.class, () -> session.interrupt("stop"));
+    var failure =
+        failureOf(
+            subscriptionFailing(
+                sentinel,
+                () -> {
+                  throw cleanup;
+                }));
 
-    assertEquals("session is terminal", refused.getMessage());
-  }
-
-  // ── start-up unwinds what it acquired ───────────────────────────────────────
-
-  static Stream<Arguments> startUpsNotAccepted() {
-    Supplier<SessionStartOutcome> refusing = () -> SessionStartOutcome.refuse("pool full");
-    Supplier<SessionStartOutcome> returningNull = () -> null;
-    Supplier<SessionStartOutcome> throwing =
-        () -> {
-          throw new IllegalStateException("auth failed");
-        };
-    Supplier<SessionStartOutcome> erroring =
-        () -> {
-          throw new AssertionError("start failure");
-        };
-    return Stream.of(
-        Arguments.of("refusal", refusing),
-        Arguments.of("null", returningNull),
-        Arguments.of("exception", throwing),
-        Arguments.of("error", erroring));
-  }
-
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("startUpsNotAccepted")
-  void aStartUpNotAcceptedReleasesWhatTheSessionAcquiredAndNeverEndsTheProvider(
-      String kind, Supplier<SessionStartOutcome> start) {
-    var provider = new RecordingProvider();
-    provider.start = start;
-
-    var session = (AgentSessionImpl) AgentSession.create(withProvider(provider).build());
-
-    Await.termination(
-        "the publisher executor to end", session.lifecycleForTests().events().executor());
-    Await.termination("the scheduler to end", session.lifecycleForTests().scheduler());
-    assertTrue(session.result().isDone(), kind + " settles the result");
-    session.close();
-    assertEquals(0, provider.ends.get());
+    assertSame(sentinel, failure);
+    assertEquals(List.of(cleanup), List.of(sentinel.getSuppressed()));
   }
 
   @Test
-  void aNullStartUpOutcomeIsAProviderRefusal() {
-    var provider = new RecordingProvider();
-    provider.start = () -> null;
+  void aCancelThatRethrowsTheErrorSubscribingAddsNoSuppressed() {
+    var sentinel = new AssertionError("stream failure");
 
-    try (var session = AgentSession.create(withProvider(provider).build())) {
-      var refusal =
-          assertInstanceOf(
-              ResultMessage.ErrorProviderUnavailable.class,
-              Await.value("the result", session.result()));
-      assertEquals("onSessionStart returned null", refusal.reason());
-    }
-  }
+    var failure =
+        failureOf(
+            subscriptionFailing(
+                sentinel,
+                () -> {
+                  throw sentinel;
+                }));
 
-  @Test
-  void aSessionWhoseWiringFailsNeverStartsTheProvider() {
-    var provider = new RecordingProvider();
-    var clashing = binding(AskUserQuestionTool.NAME, (args, ctx) -> ToolResult.success("x"));
-    var options = withProvider(provider).withTools(new ToolRegistry(List.of(clashing))).build();
-
-    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.create(options));
-
-    assertEquals("duplicate tool name in registry: AskUserQuestion", thrown.getMessage());
-    assertEquals(0, provider.starts.get());
+    assertSame(sentinel, failure);
+    assertEquals(0, sentinel.getSuppressed().length);
   }
 
   // ── a failing or hanging teardown still settles the result ──────────────────
@@ -211,7 +147,7 @@ final class SessionFinalizationTest {
   void aTeardownExceptionAfterALoopErrorRidesOnItAsSuppressed() {
     var primary = new AssertionError("hook failure");
     var cleanup = new IllegalStateException("end failure");
-    var provider = new RecordingProvider();
+    var provider = new RecordingProvider(order);
     provider.end =
         () -> {
           throw cleanup;
@@ -232,7 +168,7 @@ final class SessionFinalizationTest {
   void aTeardownErrorAfterALoopErrorRidesOnItAsSuppressed() {
     var primary = new AssertionError("hook failure");
     var cleanup = new AssertionError("end failure");
-    var provider = new RecordingProvider();
+    var provider = new RecordingProvider(order);
     provider.end =
         () -> {
           throw cleanup;
@@ -249,8 +185,8 @@ final class SessionFinalizationTest {
 
   @Test
   void anOnSessionEndThatNeverReturnsIsReportedAndTheResultStillSettles() {
-    var provider = new RecordingProvider();
-    provider.end = () -> blockIgnoringInterrupts(released);
+    var provider = new RecordingProvider(order);
+    provider.end = () -> RecordingProvider.blockIgnoringInterrupts(released);
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
         var session = AgentSession.create(withProvider(provider).withLimits(grace()).build())) {
@@ -267,11 +203,12 @@ final class SessionFinalizationTest {
   @Test
   void aCancellationCallbackThatNeverReturnsIsReportedAndTheResultStillSettles() {
     var options =
-        withProvider(new RecordingProvider())
+        withProvider(new RecordingProvider(order))
             .withHook(
                 (PreStopHook)
                     (response, ctx) -> {
-                      ctx.cancellation().onCancel(() -> blockIgnoringInterrupts(released));
+                      ctx.cancellation()
+                          .onCancel(() -> RecordingProvider.blockIgnoringInterrupts(released));
                       return HookOutcome.cont();
                     })
             .withLimits(grace());
@@ -288,8 +225,8 @@ final class SessionFinalizationTest {
 
   @Test
   void anInterruptedCloseStopsWaitingForTheTeardownAndKeepsTheInterrupt() {
-    var provider = new RecordingProvider();
-    provider.end = () -> blockIgnoringInterrupts(released);
+    var provider = new RecordingProvider(order);
+    provider.end = () -> RecordingProvider.blockIgnoringInterrupts(released);
     var session = AgentSession.create(withProvider(provider).withLimits(slowGrace()).build());
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
@@ -305,6 +242,43 @@ final class SessionFinalizationTest {
             + SID);
   }
 
+  @Test
+  void anErrorACancellationCallbackThrowsOnCloseFailsTheResultAndCloseReturns() {
+    var sentinel = new AssertionError("callback failure");
+    var provider = new RecordingProvider(order);
+    var session = AgentSession.create(withProvider(provider).build());
+    provider
+        .context
+        .cancellation()
+        .onCancel(
+            () -> {
+              throw sentinel;
+            });
+
+    session.close();
+
+    assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    assertEquals(1, provider.ends.get());
+  }
+
+  @Test
+  void aCancellationCallbackThatNeverReturnsOnCloseIsReportedAndTheResultStillSettles() {
+    var provider = new RecordingProvider(order);
+    var session = AgentSession.create(withProvider(provider).withLimits(grace()).build());
+    provider
+        .context
+        .cancellation()
+        .onCancel(() -> RecordingProvider.blockIgnoringInterrupts(released));
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
+      session.close();
+    }
+
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+    assertReported(
+        "a callback of the cancellation of session " + SID + " did not return within PT0.05S");
+  }
+
   // ── one terminal result and one disposal ────────────────────────────────────
 
   @Test
@@ -312,7 +286,7 @@ final class SessionFinalizationTest {
     var entered = new CountDownLatch(1);
     var model =
         ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
-    var provider = new RecordingProvider();
+    var provider = new RecordingProvider(order);
 
     try (var session = AgentSession.create(withProvider(provider, model).build())) {
       session.send("go");
@@ -327,13 +301,13 @@ final class SessionFinalizationTest {
 
   @Test
   void closingDuringTheTeardownOfANaturalEndKeepsItsResultAndOneDisposal() {
-    var provider = new RecordingProvider();
+    var provider = new RecordingProvider(order);
     var inTeardown = new CountDownLatch(1);
     var proceed = new CountDownLatch(1);
     provider.end =
         () -> {
           inTeardown.countDown();
-          blockIgnoringInterrupts(proceed);
+          RecordingProvider.blockIgnoringInterrupts(proceed);
         };
 
     try (var session =
@@ -351,13 +325,13 @@ final class SessionFinalizationTest {
   @Test
   void closingDuringTheTeardownOfAWallClockEndKeepsItsResultAndOneDisposal() {
     var model = ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(() -> {})).build();
-    var provider = new RecordingProvider();
+    var provider = new RecordingProvider(order);
     var inTeardown = new CountDownLatch(1);
     var proceed = new CountDownLatch(1);
     provider.end =
         () -> {
           inTeardown.countDown();
-          blockIgnoringInterrupts(proceed);
+          RecordingProvider.blockIgnoringInterrupts(proceed);
         };
     var limits =
         SessionLimits.newBuilder()
@@ -393,7 +367,7 @@ final class SessionFinalizationTest {
               new CollectingSubscriber(
                   event -> {
                     entered.countDown();
-                    blockIgnoringInterrupts(released);
+                    RecordingProvider.blockIgnoringInterrupts(released);
                   }));
       session.send("go");
 
@@ -482,7 +456,7 @@ final class SessionFinalizationTest {
             "stuck",
             (args, ctx) -> {
               started.countDown();
-              blockIgnoringInterrupts(released);
+              RecordingProvider.blockIgnoringInterrupts(released);
               return ToolResult.success("too late");
             });
 
@@ -508,7 +482,7 @@ final class SessionFinalizationTest {
             (args, ctx) -> {
               var sessionEnded = new CountDownLatch(1);
               ctx.sessionContext().cancellation().onCancel(sessionEnded::countDown);
-              blockIgnoringInterrupts(sessionEnded);
+              RecordingProvider.blockIgnoringInterrupts(sessionEnded);
               order.add("tool ended");
               return ToolResult.success("late");
             });
@@ -546,7 +520,7 @@ final class SessionFinalizationTest {
   }
 
   private SessionOptions.Builder callingTool(ToolBinding tool) {
-    var provider = new RecordingProvider();
+    var provider = new RecordingProvider(order);
     var call = new ToolCall("c-" + tool.name(), tool.name(), Map.of());
     var model = ScriptedModel.newBuilder().withToolCallsTurn(call).withTextTurn("done").build();
     return withProvider(provider, model).withTools(new ToolRegistry(List.of(tool)));
@@ -576,13 +550,45 @@ final class SessionFinalizationTest {
         .build();
   }
 
+  private static Throwable failureOf(Model model) {
+    try (var session = AgentSession.create(options(model).build())) {
+      session.send("go");
+      return Await.failure("the result to fail", session.result());
+    }
+  }
+
+  private static Model subscriptionFailing(AssertionError requestFailure, Runnable cancel) {
+    return model(
+        () ->
+            subscriber ->
+                subscriber.onSubscribe(
+                    new Flow.Subscription() {
+                      @Override
+                      public void request(long n) {
+                        throw requestFailure;
+                      }
+
+                      @Override
+                      public void cancel() {
+                        cancel.run();
+                      }
+                    }));
+  }
+
   private static Model throwingModel(AtomicInteger calls, Error failure) {
+    return model(
+        () -> {
+          calls.incrementAndGet();
+          throw failure;
+        });
+  }
+
+  private static Model model(Supplier<Flow.Publisher<ModelChunk>> stream) {
     return new Model() {
       @Override
       public Flow.Publisher<ModelChunk> chatStream(
           List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-        calls.incrementAndGet();
-        throw failure;
+        return stream.get();
       }
 
       @Override
@@ -604,52 +610,5 @@ final class SessionFinalizationTest {
             .map(LogRecord::getMessage)
             .toList();
     assertTrue(warnings.contains(warning), () -> "logged warnings: " + warnings);
-  }
-
-  /** Blocks until {@code latch} opens, as an extension that ignores interruption does. */
-  private static void blockIgnoringInterrupts(CountDownLatch latch) {
-    var interrupted = false;
-    while (latch.getCount() > 0) {
-      try {
-        latch.await();
-      } catch (InterruptedException e) {
-        interrupted = true;
-      }
-    }
-    if (interrupted) {
-      Thread.currentThread().interrupt();
-    }
-  }
-
-  /** Records the session start and end it sees, and does what the test sets for each. */
-  private final class RecordingProvider implements ExecutionProvider {
-
-    final AtomicInteger starts = new AtomicInteger();
-    final AtomicInteger ends = new AtomicInteger();
-    Supplier<SessionStartOutcome> start = SessionStartOutcome::accept;
-    Runnable end = () -> order.add("onSessionEnd");
-
-    @Override
-    public ExecutionCapabilities capabilities() {
-      return ExecutionCapabilities.newBuilder().build();
-    }
-
-    @Override
-    public SessionStartOutcome onSessionStart(SessionContext ctx) {
-      starts.incrementAndGet();
-      return start.get();
-    }
-
-    @Override
-    public void onSessionEnd(SessionContext ctx) {
-      ends.incrementAndGet();
-      end.run();
-    }
-
-    @Override
-    public CompletionStage<ExecutionResult> execute(
-        SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
-      throw new UnsupportedOperationException("not used");
-    }
   }
 }

@@ -457,4 +457,76 @@ final class CancellationTokenTest {
       }
     }
   }
+
+  // ── cancelAsync ───────────────────────────────────────────────────────────
+
+  @Test
+  void cancelAsyncCancelsTheTokenBeforeItReturnsWhileACallbackStillRuns() {
+    var token = new CancellationToken();
+    var release = new CountDownLatch(1);
+    token.onCancel(() -> Await.latch("the callback released", release));
+
+    var fired = token.cancelAsync("closed");
+
+    assertEquals(Optional.of("closed"), token.reason());
+    assertFalse(fired.isDone(), "the callback is still running");
+    release.countDown();
+    Await.value("the callbacks to have run", fired);
+  }
+
+  @Test
+  void cancelAsyncRunsTheCallbacksOffTheCallingThread() {
+    var token = new CancellationToken();
+    var ranOn = new AtomicReference<Thread>();
+    token.onCancel(() -> ranOn.set(Thread.currentThread()));
+
+    Await.value("the callbacks to have run", token.cancelAsync("closed"));
+
+    assertTrue(ranOn.get().isVirtual(), "callbacks run on a virtual thread");
+    assertFalse(ranOn.get() == Thread.currentThread(), "not on the caller's thread");
+  }
+
+  @Test
+  void cancelAsyncCompletesExceptionallyWithTheFirstErrorACallbackThrew() {
+    var token = new CancellationToken();
+    var first = new AssertionError("first");
+    var second = new AssertionError("second");
+    token.onCancel(
+        () -> {
+          throw first;
+        });
+    token.onCancel(
+        () -> {
+          throw second;
+        });
+
+    var failure = Await.failure("the callbacks to have run", token.cancelAsync("closed"));
+
+    assertSame(first, failure);
+    assertEquals(List.of(second), List.of(first.getSuppressed()));
+  }
+
+  @Test
+  void cancelAsyncOnACancelledTokenKeepsTheFirstReasonAndRunsNothing() {
+    var token = new CancellationToken();
+    token.cancel("first");
+    var fired = new AtomicInteger();
+    token.onCancel(fired::incrementAndGet);
+
+    var done = token.cancelAsync("second");
+
+    assertTrue(done.isDone(), "nothing left to run");
+    assertEquals(Optional.of("first"), token.reason());
+    assertEquals(1, fired.get());
+  }
+
+  @Test
+  void cancelAsyncRejectsABlankReason() {
+    var token = new CancellationToken();
+
+    var ex = assertThrows(IllegalArgumentException.class, () -> token.cancelAsync(" "));
+
+    assertEquals("reason must not be blank", ex.getMessage());
+    assertFalse(token.isCancelled());
+  }
 }

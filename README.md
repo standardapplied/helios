@@ -265,7 +265,7 @@ See [Sessions](#sessions-helios-session) below.
 - `runBlocking(msg)` and `runBlocking(msg, OutputSchema)` — synchronous convenience for one-shot use.
 - `interrupt(reason)` — queue a synthetic mid-run user message.
 - `answer(qid, response)` — resolve a pending `AskUserQuestion`.
-- `close()` — `AutoCloseable`; cancels the loop and never throws. Every end of a session runs one bounded teardown before the result settles: cancel and wait for live tool calls, `onSessionEnd`, scheduler shutdown, publisher drain, each wait bounded by `SessionLimits.teardownGrace` (5 s). A tool that ignores both its token and interruption may still run, and its effects land, after the result settles; it is logged as still running.
+- `close()` — `AutoCloseable`; cancels the loop and never throws, whatever a cancellation callback does. Every end of a session runs one bounded teardown before the result settles: cancel the session's token (its callbacks on a thread of their own) and wait for live tool calls, `onSessionEnd`, scheduler shutdown, publisher drain, each wait bounded by `SessionLimits.teardownGrace` (5 s). A tool that ignores both its token and interruption may still run, and its effects land, after the result settles; it is logged as still running.
 
 `SessionPresets` ships three curated `SessionOptions.Builder` factories:
 

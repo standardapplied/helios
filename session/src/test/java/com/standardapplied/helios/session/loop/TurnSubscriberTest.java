@@ -145,16 +145,7 @@ final class TurnSubscriberTest {
 
   @Test
   void aCancelThatThrowsStillReleasesTheWaiter() {
-    subscriber.onSubscribe(
-        new Flow.Subscription() {
-          @Override
-          public void request(long n) {}
-
-          @Override
-          public void cancel() {
-            throw new IllegalStateException("close failed");
-          }
-        });
+    subscriber.onSubscribe(throwingOnCancel(new IllegalStateException("close failed")));
     subscriber.onNext(new ModelChunk.TextDelta("Hel"));
 
     var failure = assertThrows(IllegalStateException.class, scheduler::fireLatest);
@@ -177,6 +168,27 @@ final class TurnSubscriberTest {
     assertTrue(Thread.interrupted());
     assertInstanceOf(InterruptedException.class, turn.error());
     assertEquals(1, subscription.cancels);
+  }
+
+  @Test
+  void anEndingThatCancelsTheStreamCancelsTheSubscriptionHeld() {
+    var failure = new AssertionError("request failed");
+    subscriber.onSubscribe(subscription);
+
+    subscriber.end(failure, true);
+    var turn = subscriber.awaitDone(new CancellationToken());
+
+    assertSame(failure, turn.error());
+    assertEquals(1, subscription.cancels);
+  }
+
+  @Test
+  void anEndingThatCancelsTheStreamBeforeAnySubscriptionEndsTheTurn() {
+    var failure = new IllegalStateException("chatStream failed");
+
+    subscriber.end(failure, true);
+
+    assertSame(failure, subscriber.awaitDone(new CancellationToken()).error());
   }
 
   @Test
@@ -340,6 +352,18 @@ final class TurnSubscriberTest {
                     s.sessionId(), s.currentTurnIndex(), s.cancellation(), model),
             CLOCK);
     return new TurnSubscriber(state, emitter, CLOCK, scheduler, Duration.ofHours(1));
+  }
+
+  private static Flow.Subscription throwingOnCancel(RuntimeException failure) {
+    return new Flow.Subscription() {
+      @Override
+      public void request(long n) {}
+
+      @Override
+      public void cancel() {
+        throw failure;
+      }
+    };
   }
 
   /** A subscription that counts every request and cancel it receives. */

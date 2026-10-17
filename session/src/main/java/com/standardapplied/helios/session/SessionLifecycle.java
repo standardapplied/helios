@@ -4,7 +4,6 @@ package com.standardapplied.helios.session;
 
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
-import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StopClassifier;
@@ -17,22 +16,22 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Start-up and shutdown of one session's runtime. Acquires the session's event stream and then its
  * scheduler, notifies the {@link ExecutionProvider} that the session starts once everything else is
- * built, starts the agent-loop virtual thread on first use and arms the wall-clock deadline; its
- * {@link SessionTeardown} releases all of it in reverse order before the result future settles.
+ * built ({@link SessionStart}, bounded by {@link SessionLimits#startTimeout()}), starts the
+ * agent-loop virtual thread on first use and arms the wall-clock deadline; its {@link
+ * SessionTeardown} releases all of it in reverse order before the result future settles.
  *
  * <p>The runtime ends exactly once: a start-up the provider does not accept, {@link #startIfNeeded}
- * and {@link #closeBeforeStart} share one compare-and-set, so exactly one path tears the runtime
- * down and settles the result.
+ * and {@link #close} share one compare-and-set, so exactly one path tears the runtime down and
+ * settles the result.
  */
 final class SessionLifecycle {
 
   private final SessionState state;
-  private final SessionContext sessionContext;
-  private final ExecutionProvider executionProvider;
   private final SessionLimits limits;
   private final CompletableFuture<ResultMessage> result;
   private final SessionEventPublisher events;
   private final ScheduledExecutorService deadlineScheduler;
+  private final SessionStart start;
   private final SessionTeardown teardown;
   private final AtomicBoolean started = new AtomicBoolean(false);
   private AgentLoop loop;
@@ -44,8 +43,6 @@ final class SessionLifecycle {
       SessionLimits limits,
       CompletableFuture<ResultMessage> result) {
     this.state = state;
-    this.sessionContext = sessionContext;
-    this.executionProvider = executionProvider;
     this.limits = limits;
     this.result = result;
     this.events = new SessionEventPublisher(state.sessionId());
@@ -59,6 +56,7 @@ final class SessionLifecycle {
             });
     scheduler.setRemoveOnCancelPolicy(true);
     this.deadlineScheduler = scheduler;
+    this.start = new SessionStart(state, sessionContext, executionProvider);
     this.teardown =
         new SessionTeardown(
             state,
@@ -94,49 +92,23 @@ final class SessionLifecycle {
 
   /**
    * Bind the loop and notify the execution provider that the session starts, the last step of the
-   * session's construction. A provider that refuses, returns {@code null} or throws a {@link
-   * RuntimeException} ends the session with {@link ResultMessage.ErrorProviderUnavailable}, its
-   * reason and cause redacted against the session's secret registry; one that throws an {@link
-   * Error} ends it with that error as the result's failure. Either way what the lifecycle acquired
-   * is released before the result settles, and {@code onSessionEnd} is never called.
+   * session's construction, waiting for it within {@code startTimeout}. A start the provider does
+   * not accept ({@link SessionStart}) ends the session with its {@link
+   * ResultMessage.ErrorProviderUnavailable}; an {@link Error} ends it with that error as the
+   * result's failure. Either way what the lifecycle acquired is released before the result settles,
+   * and {@code onSessionEnd} is never called.
    */
   void open(AgentLoop loop) {
     this.loop = loop;
-    SessionStartOutcome outcome;
     try {
-      outcome = executionProvider.onSessionStart(sessionContext);
-    } catch (RuntimeException e) {
-      outcome =
-          SessionStartOutcome.refuse(
-              "onSessionStart threw "
-                  + e.getClass().getSimpleName()
-                  + ": "
-                  + (e.getMessage() == null ? "(no message)" : e.getMessage()),
-              e);
+      start.await(limits.startTimeout()).ifPresent(this::refuse);
     } catch (Error e) {
       abandon();
       result.completeExceptionally(e);
-      return;
-    }
-    if (outcome == null) {
-      refuse("onSessionStart returned null", null);
-    } else if (outcome instanceof SessionStartOutcome.Refuse refuse) {
-      refuse(refuse.reason(), refuse.cause());
     }
   }
 
-  private void refuse(String reason, Throwable cause) {
-    var redactor = sessionContext.secrets().redactor();
-    var serialised = cause == null ? null : SerializedError.of(cause).redactedBy(redactor);
-    var refusal =
-        new ResultMessage.ErrorProviderUnavailable(
-            state.sessionId(),
-            executionProvider.getClass().getSimpleName(),
-            redactor.redact(reason).text(),
-            serialised,
-            state.totals().usage(),
-            state.totals().cost(),
-            state.elapsed());
+  private void refuse(ResultMessage refusal) {
     state.setTerminal(refusal);
     abandon();
     result.complete(refusal);
@@ -159,14 +131,17 @@ final class SessionLifecycle {
   }
 
   /**
-   * End the runtime of a session whose loop never started, writing a {@link
+   * Close the session: cancel its token, its callbacks on a thread of their own ({@link
+   * SessionTeardown#cancel}), so a callback that blocks or throws holds up neither the caller nor
+   * the result, and end the runtime of a session whose loop never started, writing a {@link
    * ResultMessage.Cancelled} terminal. The result future settles only once the runtime has ended,
    * as after a run, so a host that frees capacity on the result never frees it while the provider
-   * still holds the session. No-op once the loop started, or the session ended at start-up: the
-   * running loop observes the cancellation and ends the runtime itself. A teardown {@link Error}
-   * settles the result with it and is not thrown.
+   * still holds the session. Once the loop started, or the session ended at start-up, only the
+   * token is cancelled: the running loop observes it and ends the runtime itself. A teardown {@link
+   * Error} settles the result with it and is not thrown.
    */
-  void closeBeforeStart() {
+  void close() {
+    teardown.cancel("session closed");
     if (started.compareAndSet(false, true)) {
       var cancelled =
           new ResultMessage.Cancelled(
@@ -188,13 +163,14 @@ final class SessionLifecycle {
    * onError} (silent socket, hung edge / proxy / load balancer) blocks the loop indefinitely. The
    * wall-clock cancellation flips the token; the turn's subscriber observes it and unblocks; the
    * loop proceeds to its next iteration, where {@link StopClassifier} sees {@code state.elapsed() >
-   * maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}. The scheduler's shutdown
-   * drops it.
+   * maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}. The token is cancelled
+   * through {@link SessionTeardown#cancel}, so its callbacks never run on the scheduler's one
+   * thread. The scheduler's shutdown drops it.
    */
   private void scheduleWallClockDeadline() {
     var millis = limits.maxWallClock().toMillis();
     deadlineScheduler.schedule(
-        () -> state.cancellation().cancel("maxWallClock exceeded after " + millis + "ms"),
+        () -> teardown.cancel("maxWallClock exceeded after " + millis + "ms"),
         millis,
         TimeUnit.MILLISECONDS);
   }
