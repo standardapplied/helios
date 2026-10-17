@@ -263,15 +263,19 @@ final class SessionFinalizationTest {
                                 CompletableFuture.runAsync(
                                     () -> subscriber.onNext(new ModelChunk.TextDelta("Hel"))),
                             cancelled::countDown)));
-    OnStreamEventHook failing =
-        (event, ctx) -> {
-          if (event instanceof QueryEvent.AssistantText) {
-            emitting.countDown();
-            Await.latch("the stream cancelled", cancelled);
-            throw sentinel;
-          }
-        };
-    var session = AgentSession.create(options(model).withHook(failing).build());
+    var session =
+        AgentSession.create(
+            options(model)
+                .withHook(
+                    (OnStreamEventHook)
+                        (event, ctx) -> {
+                          if (event instanceof QueryEvent.AssistantText) {
+                            emitting.countDown();
+                            Await.latch("the stream cancelled", cancelled);
+                            throw sentinel;
+                          }
+                        })
+                .build());
     session.send("go");
     Await.latch("the hook running", emitting);
 
