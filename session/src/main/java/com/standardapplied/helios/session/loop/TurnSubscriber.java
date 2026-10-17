@@ -52,6 +52,7 @@ import java.util.concurrent.TimeUnit;
 final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
   private static final long CANCELLATION_CHECK_MILLIS = 10;
+  private static final String CANCELLED = "session cancelled while waiting for model stream";
 
   private final SessionState state;
   private final EventEmitter emitter;
@@ -185,11 +186,11 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * CancellationToken.onCancel} cleanup contract).
    */
   StreamedTurn awaitDone(CancellationToken cancellation) {
-    var registration = cancellation.onCancel(this::cancelled);
+    var registration = cancellation.onCancel(() -> end(new CancellationException(CANCELLED), true));
     try {
       while (!done.await(CANCELLATION_CHECK_MILLIS, TimeUnit.MILLISECONDS)) {
         if (cancellation.isCancelled()) {
-          cancelled();
+          end(new CancellationException(CANCELLED), true);
         }
       }
     } catch (InterruptedException e) {
@@ -202,10 +203,6 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     synchronized (lock) {
       return outcome;
     }
-  }
-
-  private void cancelled() {
-    end(new CancellationException("session cancelled while waiting for model stream"), true);
   }
 
   /** Whether the stream has ended and the runner has been released. */
