@@ -10,10 +10,6 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
-import com.standardapplied.helios.session.ask.AskUserQuestionTool;
-import com.standardapplied.helios.session.ask.QuestionGateway;
-import com.standardapplied.helios.session.hooks.DefaultHookContext;
-import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.LoopCollaborators;
@@ -21,12 +17,6 @@ import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StopClassifier;
 import com.standardapplied.helios.session.loop.ToolDispatch;
 import com.standardapplied.helios.session.loop.TurnRunner;
-import com.standardapplied.helios.session.memory.MemoryReadTool;
-import com.standardapplied.helios.session.memory.MemoryWriteTool;
-import com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator;
-import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolRegistry;
-import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
@@ -37,11 +27,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>One instance per session. Builds the loop substrate ({@link SessionState}, {@link
  * SteeringQueue}, {@link HookRegistry}, {@link ToolDispatch}, {@link LoopCollaborators}, {@link
- * TurnRunner}, {@link StopClassifier}, {@link AgentLoop}) in the constructor; its {@link
- * SessionLifecycle} defers starting the agent-loop virtual thread until the first {@link
- * #send(UserMessage)} or {@link #interrupt(String)} call so subscribers attached between
- * construction and first send observe every event. Open {@code AskUserQuestion} questions are its
- * {@link PendingQuestions}.
+ * TurnRunner}, {@link StopClassifier}, {@link AgentLoop}) in the constructor, the loop through
+ * {@link SessionWiring}, and notifies the execution provider last; its {@link SessionLifecycle}
+ * defers starting the agent-loop virtual thread until the first {@link #send(UserMessage)} or
+ * {@link #interrupt(String)} call so subscribers attached between construction and first send
+ * observe every event. Open {@code AskUserQuestion} questions are its {@link PendingQuestions}.
  *
  * <h2>Event delivery</h2>
  *
@@ -93,55 +83,19 @@ public final class AgentSessionImpl implements AgentSession {
     this.events = lifecycle.events();
     this.pendingQuestions = new PendingQuestions(state, events, clock);
     try {
-      this.loop = wire(options, sessionContext);
+      this.loop =
+          SessionWiring.agentLoop(
+              options,
+              sessionContext,
+              pendingQuestions,
+              steeringQueue,
+              events,
+              lifecycle.scheduler());
     } catch (RuntimeException | Error e) {
       lifecycle.abandon();
       throw e;
     }
     lifecycle.open(loop);
-  }
-
-  private AgentLoop wire(SessionOptions options, SessionContext sessionContext) {
-    var combinedTools = withBuiltins(options.tools(), options, pendingQuestions);
-    var toolDispatch =
-        new ToolDispatch(
-            sessionContext, combinedTools, options.concurrency(), lifecycle.scheduler());
-    var combinedHooks = new ArrayList<Hook>(options.hooks().size() + 1);
-    options
-        .permission()
-        .ifPresent(
-            p ->
-                combinedHooks.add(
-                    DefaultPermissionEvaluator.newBuilder(p, combinedTools)
-                        .withQuestionGateway(pendingQuestions)
-                        .build()));
-    combinedHooks.addAll(options.hooks());
-    var model = options.model();
-    var collaborators =
-        LoopCollaborators.newBuilder()
-            .withHooks(new HookRegistry(combinedHooks))
-            .withToolDispatch(toolDispatch)
-            .withSteeringQueue(steeringQueue)
-            .withEventSink(events::emit)
-            .withHookContextFactory(
-                s ->
-                    new DefaultHookContext(
-                        s.sessionId(), s.currentTurnIndex(), s.cancellation(), model))
-            .withClock(options.clock())
-            .build();
-    var turnRunner =
-        new TurnRunner(
-            collaborators,
-            model,
-            options.costCalculator(),
-            options.outputSchema().orElse(null),
-            lifecycle.scheduler());
-    return new AgentLoop(
-        collaborators,
-        turnRunner,
-        new StopClassifier(options.secretRegistry()),
-        options.tokenCounter(),
-        options.contextCompactor());
   }
 
   @Override
@@ -152,21 +106,17 @@ public final class AgentSessionImpl implements AgentSession {
   @Override
   public void send(UserMessage message) {
     Objects.requireNonNull(message, "message must not be null");
-    requireOpen();
-    if (!steeringQueue.offer(message)) {
-      throw new SteeringQueueFullException(
-          "steering queue full at capacity " + steeringQueue.capacity());
-    }
-    lifecycle.startIfNeeded();
-  }
-
-  private void requireOpen() {
     if (closed.get()) {
       throw new IllegalStateException("session is closed");
     }
     if (state.isTerminal() || resultFuture.isDone()) {
       throw new IllegalStateException("session is terminal");
     }
+    if (!steeringQueue.offer(message)) {
+      throw new SteeringQueueFullException(
+          "steering queue full at capacity " + steeringQueue.capacity());
+    }
+    lifecycle.startIfNeeded();
   }
 
   @Override
@@ -175,7 +125,12 @@ public final class AgentSessionImpl implements AgentSession {
     if (Strings.isBlank(reason)) {
       throw new IllegalArgumentException("reason must not be blank");
     }
-    requireOpen();
+    if (closed.get()) {
+      throw new IllegalStateException("session is closed");
+    }
+    if (state.isTerminal() || resultFuture.isDone()) {
+      throw new IllegalStateException("session is terminal");
+    }
     var synthetic = UserMessage.text("[interrupted by user: " + reason + "]");
     if (!steeringQueue.offer(synthetic)) {
       throw new SteeringQueueFullException(
@@ -245,20 +200,5 @@ public final class AgentSessionImpl implements AgentSession {
       throw new IllegalStateException("session is closed");
     }
     pendingQuestions.answer(questionId, response);
-  }
-
-  private static ToolRegistry withBuiltins(
-      ToolRegistry userTools, SessionOptions options, QuestionGateway gateway) {
-    var combined = new ArrayList<ToolBinding>(userTools.bindings().size() + 3);
-    combined.addAll(userTools.bindings());
-    combined.add(AskUserQuestionTool.binding(gateway));
-    options
-        .memoryBackend()
-        .ifPresent(
-            b -> {
-              combined.add(MemoryReadTool.binding(b));
-              combined.add(MemoryWriteTool.binding(b));
-            });
-    return new ToolRegistry(combined);
   }
 }

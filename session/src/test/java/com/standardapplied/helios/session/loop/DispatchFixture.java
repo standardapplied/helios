@@ -227,6 +227,6 @@ final class DispatchFixture implements AutoCloseable {
   }
 
   static void awaitIdle(ToolDispatch d) {
-    Await.until("every worker to end", () -> d.liveCalls() == 0);
+    Await.until("every worker to end", () -> d.awaitLiveCalls(SHORT).isEmpty());
   }
 }

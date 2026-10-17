@@ -127,6 +127,21 @@ final class SessionFinalizationTest {
     assertTrue(session.isStarted(), "a session that ended at start-up can never start");
   }
 
+  @Test
+  void aSessionWhoseResultFailedRefusesAnInterrupt() {
+    var provider = new RecordingProvider();
+    provider.start =
+        () -> {
+          throw new AssertionError("start failure");
+        };
+    var session = AgentSession.create(withProvider(provider).build());
+    Await.failure("the result to fail", session.result());
+
+    var refused = assertThrows(IllegalStateException.class, () -> session.interrupt("stop"));
+
+    assertEquals("session is terminal", refused.getMessage());
+  }
+
   // ── start-up unwinds what it acquired ───────────────────────────────────────
 
   static Stream<Arguments> startUpsNotAccepted() {

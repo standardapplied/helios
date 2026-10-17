@@ -56,7 +56,7 @@ public final class ToolDispatch {
   private final CategoryPermits fileWritePermits;
   private final CategoryPermits executionPermits;
   private final ScheduledExecutorService scheduler;
-  private final Set<DispatchedCall> liveCalls = ConcurrentHashMap.newKeySet();
+  private final Set<DispatchedCall.Live> liveCalls = ConcurrentHashMap.newKeySet();
 
   /**
    * Build a dispatcher.
@@ -148,16 +148,6 @@ public final class ToolDispatch {
   }
 
   /**
-   * Calls whose work, the worker and any cancellation of the call's token, has not ended yet,
-   * including calls already answered as {@link ToolOutcome.Unknown}.
-   *
-   * @return non-negative count
-   */
-  int liveCalls() {
-    return liveCalls.size();
-  }
-
-  /**
    * Wait up to {@code grace} for the work of every call still running to end: the calls whose
    * worker or token cancellation has not ended, including calls answered as {@link
    * ToolOutcome.Unknown}. Waiting cancels nothing; the session ends its calls by cancelling its
@@ -172,8 +162,8 @@ public final class ToolDispatch {
     Validate.positiveDuration("grace", grace);
     var until = System.nanoTime() + TimeUnit.NANOSECONDS.convert(grace);
     return List.copyOf(liveCalls).stream()
-        .filter(call -> !call.endsBy(until))
-        .map(DispatchedCall::call)
+        .filter(live -> !live.endsBy(until))
+        .map(DispatchedCall.Live::call)
         .toList();
   }
 

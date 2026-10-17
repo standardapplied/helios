@@ -199,7 +199,7 @@ final class ToolDispatchTest {
 
     assertEquals("user-stop", ex.getMessage());
     assertEquals(0, runs.get());
-    assertEquals(0, d.liveCalls());
+    assertEquals(List.of(), d.awaitLiveCalls(SHORT));
   }
 
   // ── a call that completes ─────────────────────────────────────────────────
@@ -428,7 +428,7 @@ final class ToolDispatchTest {
     fixture.scheduler.fireLatest();
 
     assertEquals(ToolResult.unknown("write", NEVER), running.ending("the dispatch").result());
-    assertEquals(1, d.liveCalls(), "the worker is still running");
+    assertEquals(List.of(call("write")), d.awaitLiveCalls(SHORT), "the worker is still running");
     assertEquals(0, d.availableFileWritePermits(), "and still holds the write permit");
   }
 
