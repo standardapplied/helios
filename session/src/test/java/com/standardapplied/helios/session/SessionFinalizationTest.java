@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.runtime.CancellationToken;
@@ -36,7 +37,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -164,6 +167,102 @@ final class SessionFinalizationTest {
 
     assertSame(sentinel, failureOf(model));
     assertEquals(1, calls.get());
+  }
+
+  @Test
+  void anErrorRequestingAfterTheStreamFailedTransientlyFailsTheResultWithoutARetry() {
+    var sentinel = new AssertionError("request failure");
+    var calls = new AtomicInteger();
+    var model =
+        model(
+            () -> {
+              calls.incrementAndGet();
+              return requesting(
+                  subscriber -> {
+                    subscriber.onError(new TransientStreamException("reset", null, "test"));
+                    throw sentinel;
+                  });
+            });
+
+    assertSame(sentinel, failureOf(model));
+    assertEquals(1, calls.get());
+  }
+
+  @Test
+  void anErrorRequestingAfterTheStreamCompletedFailsTheResult() {
+    var sentinel = new AssertionError("request failure");
+    var model =
+        model(
+            () ->
+                requesting(
+                    subscriber -> {
+                      subscriber.onNext(
+                          new ModelChunk.MessageStop("STOP", Response.Usage.of(1, 1), Map.of()));
+                      subscriber.onComplete();
+                      throw sentinel;
+                    }));
+
+    assertSame(sentinel, failureOf(model));
+  }
+
+  @Test
+  void anErrorRequestingAfterTheStreamEndedWithAnErrorRidesOnThatErrorAsSuppressed() {
+    var streamed = new AssertionError("stream failure");
+    var sentinel = new AssertionError("request failure");
+    var model =
+        model(
+            () ->
+                requesting(
+                    subscriber -> {
+                      subscriber.onError(streamed);
+                      throw sentinel;
+                    }));
+
+    assertSame(streamed, failureOf(model));
+    assertEquals(List.of(sentinel), List.of(streamed.getSuppressed()));
+  }
+
+  @Test
+  void anErrorCancellingAStalledStreamFailsTheResultCarryingTheTimeout() {
+    var sentinel = new AssertionError("cancel failure");
+    var model =
+        model(
+            () ->
+                subscriber ->
+                    subscriber.onSubscribe(
+                        subscription(
+                            () -> subscriber.onNext(new ModelChunk.KeepAlive()),
+                            () -> {
+                              throw sentinel;
+                            })));
+    var limits = SessionLimits.newBuilder().withStreamIdleTimeout(SHORT_GRACE).build();
+
+    try (var session = AgentSession.create(options(model).withLimits(limits).build())) {
+      session.send("go");
+
+      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    }
+    assertInstanceOf(TimeoutException.class, sentinel.getSuppressed()[0]);
+  }
+
+  @Test
+  void aStreamCancelThatNeverReturnsCannotKeepAClosedSessionFromSettling() {
+    var requested = new CountDownLatch(1);
+    var model =
+        model(
+            () ->
+                subscriber ->
+                    subscriber.onSubscribe(
+                        subscription(
+                            requested::countDown,
+                            () -> RecordingProvider.blockIgnoringInterrupts(released))));
+    var session = AgentSession.create(options(model).withLimits(grace()).build());
+    session.send("go");
+    Await.latch("the stream requested", requested);
+
+    session.close();
+
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
   }
 
   // ── a failing or hanging teardown still settles the result ──────────────────
@@ -611,6 +710,12 @@ final class SessionFinalizationTest {
                           throw requestFailure;
                         },
                         cancel)));
+  }
+
+  private static Flow.Publisher<ModelChunk> requesting(
+      Consumer<Flow.Subscriber<? super ModelChunk>> request) {
+    return subscriber ->
+        subscriber.onSubscribe(subscription(() -> request.accept(subscriber), () -> {}));
   }
 
   private static Flow.Subscription subscription(Runnable request, Runnable cancel) {
