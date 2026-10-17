@@ -442,8 +442,8 @@ final class AgentSessionImplTest {
     var executor = s.lifecycleForTests().publisherExecutor();
     s.send(UserMessage.text("hi"));
     terminalOf(s);
-    // closeRuntime() runs BEFORE resultFuture settles (hv2-bug2 Issue 2 fix), so the executor is
-    // already terminated by the time the result is available.
+    // The teardown drains the publisher before the result settles (hv2-bug2 Issue 2 fix), so the
+    // executor is already terminated by the time the result is available.
     assertTrue(executor.isShutdown(), "executor shut down after natural termination");
     assertTrue(executor.isTerminated(), "executor terminated after natural termination");
   }
