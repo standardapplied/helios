@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
 import java.io.File;
@@ -71,8 +72,8 @@ class JsonSnapshotTest {
     var snapshot = JsonSnapshot.ofObject("arguments", source);
 
     assertEquals(source, snapshot);
-    assertEquals(true, snapshot.containsKey("unit"));
-    assertEquals(true, ((Map<?, ?>) snapshot.get("options")).containsKey("lang"));
+    assertTrue(snapshot.containsKey("unit"));
+    assertTrue(asMap(snapshot.get("options")).containsKey("lang"));
   }
 
   @Test
@@ -119,7 +120,7 @@ class JsonSnapshotTest {
     assertEquals(source, JsonSnapshot.ofObject("arguments", source));
   }
 
-  static Stream<Arguments> rejected() {
+  static Stream<Arguments> aValueThatIsNotJsonIsRejectedNamingWhere() {
     var cyclicMap = new HashMap<String, Object>();
     cyclicMap.put("self", cyclicMap);
     var cyclicList = new ArrayList<Object>();
@@ -167,12 +168,8 @@ class JsonSnapshotTest {
 
   @ParameterizedTest
   @MethodSource
-  void rejected(Map<?, ?> source, String message) {
-    assertEquals(
-        message,
-        assertThrows(
-                IllegalArgumentException.class, () -> JsonSnapshot.ofObject("arguments", source))
-            .getMessage());
+  void aValueThatIsNotJsonIsRejectedNamingWhere(Map<?, ?> source, String message) {
+    assertEquals(message, rejection(source));
   }
 
   @Test
@@ -185,9 +182,7 @@ class JsonSnapshotTest {
 
     assertEquals(
         "arguments" + ".a".repeat(JsonSnapshot.MAX_DEPTH) + " nests deeper than 64 containers",
-        assertThrows(
-                IllegalArgumentException.class, () -> JsonSnapshot.ofObject("arguments", tooDeep))
-            .getMessage());
+        rejection(tooDeep));
   }
 
   @Test
@@ -204,9 +199,7 @@ class JsonSnapshotTest {
         "arguments.a"
             + "[0]".repeat(JsonSnapshot.MAX_DEPTH - 1)
             + " nests deeper than 64 containers",
-        assertThrows(
-                IllegalArgumentException.class, () -> JsonSnapshot.ofObject("arguments", tooDeep))
-            .getMessage());
+        rejection(tooDeep));
   }
 
   @Test
@@ -215,21 +208,14 @@ class JsonSnapshotTest {
     var overLimit = Map.of("a", Collections.nCopies(JsonSnapshot.MAX_VALUES - 1, 0));
 
     assertEquals(atLimit, JsonSnapshot.ofObject("arguments", atLimit));
-    assertEquals(
-        "arguments holds more than 100000 values",
-        assertThrows(
-                IllegalArgumentException.class, () -> JsonSnapshot.ofObject("arguments", overLimit))
-            .getMessage());
+    assertEquals("arguments holds more than 100000 values", rejection(overLimit));
   }
 
   @Test
   void aListLargerThanTheCountLimitIsRejectedWithoutAllocatingItsSize() {
     var huge = Map.of("a", Collections.nCopies(Integer.MAX_VALUE, 0));
 
-    assertEquals(
-        "arguments holds more than 100000 values",
-        assertThrows(IllegalArgumentException.class, () -> JsonSnapshot.ofObject("arguments", huge))
-            .getMessage());
+    assertEquals("arguments holds more than 100000 values", rejection(huge));
   }
 
   @Test
@@ -239,10 +225,7 @@ class JsonSnapshotTest {
 
     assertSame(atLimit, JsonSnapshot.ofObject("arguments", Map.of("s", atLimit)).get("s"));
     assertEquals(
-        "arguments.s is a string of 16777217 characters; at most 16777216",
-        assertThrows(
-                IllegalArgumentException.class, () -> JsonSnapshot.ofObject("arguments", overLimit))
-            .getMessage());
+        "arguments.s is a string of 16777217 characters; at most 16777216", rejection(overLimit));
   }
 
   @Test
@@ -251,11 +234,7 @@ class JsonSnapshotTest {
     var overLimit = Map.of("o", Map.of(atLimit + "k", 1));
 
     assertEquals(Map.of(atLimit, 1), JsonSnapshot.ofObject("arguments", Map.of(atLimit, 1)));
-    assertEquals(
-        "arguments.o has a key of 50001 characters; at most 50000",
-        assertThrows(
-                IllegalArgumentException.class, () -> JsonSnapshot.ofObject("arguments", overLimit))
-            .getMessage());
+    assertEquals("arguments.o has a key of 50001 characters; at most 50000", rejection(overLimit));
   }
 
   @Test
@@ -287,11 +266,7 @@ class JsonSnapshotTest {
             new BigDecimal(BigInteger.ONE, Integer.MIN_VALUE),
             new BigDecimal(BigInteger.ONE, Integer.MAX_VALUE))) {
       assertEquals(
-          "arguments.n is a number of more than 1000 digits",
-          assertThrows(
-                  IllegalArgumentException.class,
-                  () -> JsonSnapshot.ofObject("arguments", Map.of("n", tooLong)))
-              .getMessage());
+          "arguments.n is a number of more than 1000 digits", rejection(Map.of("n", tooLong)));
     }
   }
 
@@ -344,11 +319,7 @@ class JsonSnapshotTest {
       var coefficient = new BigDecimal(BigInteger.ONE.shiftLeft(128_000_000).negate());
       var exponent = new BigDecimal(BigInteger.ONE, -999_999_999);
       for (var number : List.of(coefficient, exponent)) {
-        System.out.println(
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> JsonSnapshot.ofObject("arguments", Map.of("n", number)))
-                .getMessage());
+        System.out.println(rejection(Map.of("n", number)));
       }
     }
   }
@@ -363,6 +334,12 @@ class JsonSnapshotTest {
     BigDecimalSubclass() {
       super("1");
     }
+  }
+
+  private static String rejection(Map<?, ?> source) {
+    return assertThrows(
+            IllegalArgumentException.class, () -> JsonSnapshot.ofObject("arguments", source))
+        .getMessage();
   }
 
   private static Map<String, Object> nested(int depth) {
