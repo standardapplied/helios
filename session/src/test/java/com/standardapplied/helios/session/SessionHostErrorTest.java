@@ -286,6 +286,38 @@ final class SessionHostErrorTest {
   }
 
   @Test
+  void anErrorOnSessionEndThrowsFailsTheResultAsItself() {
+    var sentinel = new AssertionError("end failure");
+    var provider = new RecordingProvider(order);
+    provider.end =
+        () -> {
+          throw sentinel;
+        };
+
+    try (var session =
+        AgentSession.create(withProvider(provider).withLimits(slowGrace()).build())) {
+      session.send("go");
+
+      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    }
+  }
+
+  @Test
+  void anErrorOnSessionEndThrowsForASessionClosedBeforeItStartedFailsTheResult() {
+    var sentinel = new AssertionError("end failure");
+    var provider = new RecordingProvider(order);
+    provider.end =
+        () -> {
+          throw sentinel;
+        };
+    var session = AgentSession.create(withProvider(provider).withLimits(slowGrace()).build());
+
+    session.close();
+
+    assertSame(sentinel, Await.failure("the result to fail", session.result()));
+  }
+
+  @Test
   void anErrorOnSessionEndJoinsFromAFailedFutureFailsTheResultAsItself() {
     var sentinel = new AssertionError("end failure");
     var provider = new RecordingProvider(order);

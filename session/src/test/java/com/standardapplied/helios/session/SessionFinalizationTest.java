@@ -42,6 +42,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -97,7 +99,24 @@ final class SessionFinalizationTest {
 
       assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
     }
-    assertSame(cleanup, logged.getFirst().getThrown());
+    var warning = logged.getFirst();
+    assertEquals(
+        List.of(Level.WARNING, "onSessionEnd threw — continuing shutdown", cleanup),
+        List.of(warning.getLevel(), warning.getMessage(), warning.getThrown()));
+  }
+
+  @Test
+  void aSessionClosedBeforeItStartsSettlesItsResultOnlyAfterTheProviderEnded() {
+    var provider = new RecordingProvider(order);
+    var session = AgentSession.create(withProvider(provider).build());
+    var settledDuringEnd = new AtomicBoolean(true);
+    provider.end = () -> settledDuringEnd.set(session.result().isDone());
+
+    session.close();
+
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+    assertEquals(1, provider.ends.get());
+    assertFalse(settledDuringEnd.get(), "the result settled while the provider still held it");
   }
 
   @Test
