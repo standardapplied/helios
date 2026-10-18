@@ -25,7 +25,8 @@ import java.util.Set;
  * JSON values or a {@link Map} from {@link String} keys to JSON values. A number is a {@link Byte},
  * {@link Short}, {@link Integer}, {@link Long}, {@link BigInteger} or {@link BigDecimal}, or a
  * finite {@link Float} or {@link Double}; it is kept as the same instance, so its precision never
- * changes. A {@code null} property is a key present with a {@code null} value; an absent property
+ * changes. A subclass of {@link BigInteger} or {@link BigDecimal} is rejected, since it may be
+ * mutable. A {@code null} property is a key present with a {@code null} value; an absent property
  * is an absent key. Containers keep their iteration order.
  *
  * <p>The limits are each at most the default of Jackson's {@code StreamReadConstraints}, the only
@@ -33,8 +34,9 @@ import java.util.Set;
  * included (Jackson 500); {@value #MAX_VALUES} values, containers included (Jackson unlimited);
  * {@value #MAX_STRING_LENGTH} characters in a string, the size of the largest event a provider
  * stream may carry (Jackson 100,000,000); {@value #MAX_KEY_LENGTH} characters in a key (Jackson
- * 50,000); {@value #MAX_NUMBER_DIGITS} digits in a {@link BigInteger} or {@link BigDecimal}
- * (Jackson 1,000).
+ * 50,000); {@value #MAX_NUMBER_DIGITS} digits in a {@link BigInteger} or {@link BigDecimal},
+ * counting every digit of its JSON text ({@link BigDecimal#toString()}), zeros and exponent
+ * included (Jackson 1,000).
  */
 public final class JsonSnapshot {
 
@@ -92,8 +94,12 @@ public final class JsonSnapshot {
       case String string -> string(string);
       case Double number -> number(number, Double.isFinite(number));
       case Float number -> number(number, Float.isFinite(number));
-      case BigInteger number -> number(number, number.abs().compareTo(NUMBER_BOUND) < 0);
-      case BigDecimal number -> number(number, number.precision() <= MAX_NUMBER_DIGITS);
+      case BigInteger number when number.getClass() == BigInteger.class ->
+          number(number, number.abs().compareTo(NUMBER_BOUND) < 0);
+      case BigDecimal number when number.getClass() == BigDecimal.class ->
+          number(
+              number,
+              number.precision() <= MAX_NUMBER_DIGITS && digits(number) <= MAX_NUMBER_DIGITS);
       case Map<?, ?> object -> object(object, depth + 1);
       case List<?> array -> array(array, depth + 1);
       default -> throw rejected("is a " + value.getClass().getName() + "; " + JSON_VALUES);
@@ -115,7 +121,7 @@ public final class JsonSnapshot {
 
   private List<Object> array(List<?> array, int depth) {
     enter(array, depth);
-    var copy = new ArrayList<>(array.size());
+    var copy = new ArrayList<>();
     var index = 0;
     for (var element : array) {
       path.addLast(index++);
@@ -155,6 +161,10 @@ public final class JsonSnapshot {
               : "is a number of more than " + MAX_NUMBER_DIGITS + " digits");
     }
     return number;
+  }
+
+  private static long digits(BigDecimal number) {
+    return number.toString().chars().filter(Character::isDigit).count();
   }
 
   private void enter(Object container, int depth) {

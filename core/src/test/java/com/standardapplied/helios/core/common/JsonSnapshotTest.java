@@ -137,6 +137,12 @@ class JsonSnapshotTest {
             Map.of("a", List.of(1, new AtomicLong(1))),
             "arguments.a[1] is a java.util.concurrent.atomic.AtomicLong; " + jsonValues()),
         Arguments.of(
+            Map.of("n", new BigIntegerSubclass()),
+            "arguments.n is a " + BigIntegerSubclass.class.getName() + "; " + jsonValues()),
+        Arguments.of(
+            Map.of("n", new BigDecimalSubclass()),
+            "arguments.n is a " + BigDecimalSubclass.class.getName() + "; " + jsonValues()),
+        Arguments.of(
             Map.of("a", new Object[] {1}), "arguments.a is a [Ljava.lang.Object;; " + jsonValues()),
         Arguments.of(
             Map.of("o", nonStringKey),
@@ -184,6 +190,16 @@ class JsonSnapshotTest {
   }
 
   @Test
+  void aListLargerThanTheCountLimitIsRejectedWithoutAllocatingItsSize() {
+    var huge = Map.of("a", Collections.nCopies(Integer.MAX_VALUE, 0));
+
+    assertEquals(
+        "arguments holds more than 100000 values",
+        assertThrows(IllegalArgumentException.class, () -> JsonSnapshot.ofObject("arguments", huge))
+            .getMessage());
+  }
+
+  @Test
   void stringsAreAcceptedToTheLengthLimitAndRejectedBeyondIt() {
     var atLimit = "x".repeat(JsonSnapshot.MAX_STRING_LENGTH);
     var overLimit = Map.of("s", atLimit + "x");
@@ -214,11 +230,20 @@ class JsonSnapshotTest {
     var digits = "9".repeat(JsonSnapshot.MAX_NUMBER_DIGITS);
     var accepted =
         Map.<String, Object>of(
-            "i", new BigInteger("-" + digits), "d", new BigDecimal("0." + digits + "E-5"));
+            "i",
+            new BigInteger("-" + digits),
+            "d",
+            new BigDecimal("-0." + digits.substring(1)),
+            "e",
+            new BigDecimal("9." + digits.substring(4) + "E+999"));
 
     assertEquals(accepted, JsonSnapshot.ofObject("arguments", accepted));
     for (var tooLong :
-        List.<Number>of(new BigInteger("1" + digits), new BigDecimal(digits + "1E-3"))) {
+        List.<Number>of(
+            new BigInteger("1" + digits),
+            new BigDecimal(digits + "1E-3"),
+            new BigDecimal("0." + digits + "E-5"),
+            new BigDecimal(digits + "E+5"))) {
       assertEquals(
           "arguments.n is a number of more than 1000 digits",
           assertThrows(
@@ -235,6 +260,18 @@ class JsonSnapshotTest {
         assertThrows(NullPointerException.class, () -> JsonSnapshot.ofObject("arguments", null))
             .getMessage());
     assertThrows(IllegalArgumentException.class, () -> JsonSnapshot.ofObject(" ", Map.of()));
+  }
+
+  private static final class BigIntegerSubclass extends BigInteger {
+    BigIntegerSubclass() {
+      super("1");
+    }
+  }
+
+  private static final class BigDecimalSubclass extends BigDecimal {
+    BigDecimalSubclass() {
+      super("1");
+    }
   }
 
   private static Map<String, Object> nested(int depth) {

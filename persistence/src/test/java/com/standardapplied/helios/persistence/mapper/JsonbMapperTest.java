@@ -9,7 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.JsonSnapshot;
 import com.standardapplied.helios.core.model.ToolCall;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -35,6 +38,20 @@ class JsonbMapperTest {
             + "\"days\":[1,null],\"options\":{\"lang\":null}}}]",
         json);
     assertEquals(calls, JsonbMapper.toolCallsFromJsonb(json));
+  }
+
+  @Test
+  void toolCallsWithNumbersAtTheSnapshotDigitLimitReadBack() {
+    var digits = "9".repeat(JsonSnapshot.MAX_NUMBER_DIGITS);
+    var integer = new BigInteger("-" + digits);
+    var arguments =
+        Map.<String, Object>of("i", integer, "d", new BigDecimal("-0.0000" + digits.substring(5)));
+    var json = JsonbMapper.objectToJsonb(List.of(new ToolCall("call_1", "sum", arguments)));
+
+    var read = JsonbMapper.toolCallsFromJsonb(json).getFirst();
+
+    assertEquals(arguments.keySet(), read.arguments().keySet());
+    assertEquals(integer, read.arguments().get("i"));
   }
 
   @Test
