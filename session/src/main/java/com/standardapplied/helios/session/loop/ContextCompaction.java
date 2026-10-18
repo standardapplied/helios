@@ -160,7 +160,8 @@ final class ContextCompaction {
    * rate — fire the pre-compact hook before the compactor runs and the post-compact hook after a
    * successful shrink, and emit {@link QueryEvent.ContextEdited} last. A returned identity (same
    * instance) or no-shrink result is treated as a no-op — the compactor opted out for this turn and
-   * the warning flag stays set. A throwing compactor is swallowed; the loop continues.
+   * the warning flag stays set. A throwing compactor is swallowed; the loop continues, unless what
+   * it threw carries an {@link Error} ({@link SessionEnding#failWith}), which ends the session.
    */
   private void compact(SessionState state, long tokensBefore) {
     var historyBefore = beforeCompact(state, state.history().snapshot());
@@ -168,7 +169,10 @@ final class ContextCompaction {
     try {
       result = contextCompactor.compact(historyBefore, state);
     } catch (RuntimeException e) {
-      LOGGER.log(Level.WARNING, "context compactor threw; leaving history unchanged this turn", e);
+      if (!state.ending().failWith(e)) {
+        LOGGER.log(
+            Level.WARNING, "context compactor threw; leaving history unchanged this turn", e);
+      }
       return;
     }
     if (result == null) {

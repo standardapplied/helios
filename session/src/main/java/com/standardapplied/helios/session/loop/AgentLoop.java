@@ -104,10 +104,12 @@ public final class AgentLoop {
    * @param state per-session mutable state; non-null
    * @param limits per-session limits; non-null
    * @return the terminal {@link ResultMessage}; never null, {@link
-   *     ResultMessage.ErrorDuringExecution} for any {@link Exception} that reached the loop
+   *     ResultMessage.ErrorDuringExecution} for any {@link Exception} that reached the loop; one
+   *     that carries an {@link Error} as a joined future's cause is also recorded by the session's
+   *     {@link SessionEnding#failWith}, so the result fails with that {@code Error}
    * @throws NullPointerException if {@code state} or {@code limits} is null
-   * @throws Error an {@link Error} a tool or a hook threw on the loop thread, as itself: a host
-   *     failure, never a terminal
+   * @throws Error an {@link Error} the model, a tool or a hook threw, as itself: a host failure,
+   *     never a terminal
    */
   public ResultMessage run(SessionState state, SessionLimits limits) {
     Objects.requireNonNull(state, "state must not be null");
@@ -119,6 +121,7 @@ public final class AgentLoop {
       }
       return terminal.orElseThrow();
     } catch (Exception e) {
+      state.ending().failWith(e);
       return crashTerminate(state, e);
     }
   }

@@ -12,8 +12,8 @@ import java.util.logging.Logger;
  * and waits up to {@code grace} for it, so a cancel that blocks never strands the thread that
  * cancels. A cancel still running when the grace passes, or when the waiting thread is interrupted,
  * is interrupted and logged as not known to have closed the stream; the waiting thread's interrupt
- * status is kept. What the cancel throws is the session's: an {@link Error} goes to its {@link
- * SessionEnding}, anything else is logged.
+ * status is kept. What the cancel throws is the session's: an {@link Error}, or one it carries, is
+ * recorded by its {@link SessionEnding#failWith}, anything else is logged.
  */
 final class StreamCancel {
 
@@ -38,13 +38,13 @@ final class StreamCancel {
                 () -> {
                   try {
                     subscription.cancel();
-                  } catch (RuntimeException e) {
-                    LOGGER.log(
-                        Level.WARNING,
-                        "cancelling the model stream of session " + sessionId + " threw",
-                        e);
-                  } catch (Error e) {
-                    ending.fail(e);
+                  } catch (RuntimeException | Error e) {
+                    if (!ending.failWith(e)) {
+                      LOGGER.log(
+                          Level.WARNING,
+                          "cancelling the model stream of session " + sessionId + " threw",
+                          e);
+                    }
                   }
                 });
     try {

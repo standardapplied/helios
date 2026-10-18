@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
@@ -395,6 +396,31 @@ final class TurnSubscriberTest {
 
     assertSame(failure, Await.failure("the subscription delivered", delivery));
     assertInstanceOf(CancellationException.class, turn.error());
+    assertSame(failure, state.ending().seal().orElseThrow());
+  }
+
+  @Test
+  void anErrorAStreamEndsWithInsideACompletionExceptionEndsTheSession() {
+    var failure = new AssertionError("joined failure");
+    subscriber.onSubscribe(subscription);
+
+    subscriber.onError(new CompletionException(failure));
+
+    assertInstanceOf(
+        CompletionException.class, subscriber.awaitDone(new CancellationToken()).error());
+    assertSame(failure, state.ending().seal().orElseThrow());
+  }
+
+  @Test
+  void anErrorACancelThrowsInsideACompletionExceptionEndsTheSessionUnlogged() {
+    var failure = new AssertionError("joined close failure");
+    subscriber.onSubscribe(cancelling(throwing(new CompletionException(failure))));
+
+    try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
+      subscriber.end(new CancellationException("closed"), true);
+    }
+
+    assertEquals(List.of(), logged);
     assertSame(failure, state.ending().seal().orElseThrow());
   }
 

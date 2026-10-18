@@ -578,7 +578,7 @@ final class DropMiddleToolResultsCompactorTest {
     var state = freshState();
     var history = chain(10);
 
-    var out = timingOut(throwingOnRelease(sentinel, calling)).compact(history, state);
+    var out = timingOut(failingOnRelease(() -> fail(sentinel), calling)).compact(history, state);
     released.countDown();
     Await.termination("the summary call to throw", Await.value("the summary call", calling));
 
@@ -598,7 +598,7 @@ final class DropMiddleToolResultsCompactorTest {
             .withSystemPrompt("system")
             .withLimits(SessionLimits.newBuilder().withMaxContextTokens(1_000).build())
             .withTokenCounter(messages -> 1_000_000)
-            .withContextCompactor(timingOut(throwingOnRelease(sentinel, calling)))
+            .withContextCompactor(timingOut(failingOnRelease(() -> fail(sentinel), calling)))
             .withHook(
                 (PreStopHook)
                     (response, ctx) -> {
@@ -625,17 +625,36 @@ final class DropMiddleToolResultsCompactorTest {
         .build();
   }
 
+  @Test
+  void anErrorTheSummaryCallJoinsFromAFailedFutureAfterItsTimeoutEndsTheSession() {
+    var sentinel = new AssertionError("summary failure");
+    var calling = new CompletableFuture<Thread>();
+    var state = freshState();
+
+    timingOut(failingOnRelease(() -> CompletableFuture.failedFuture(sentinel).join(), calling))
+        .compact(chain(10), state);
+    released.countDown();
+    Await.termination("the summary call to throw", Await.value("the summary call", calling));
+
+    assertSame(sentinel, state.ending().seal().orElseThrow());
+  }
+
+  private static void fail(AssertionError sentinel) {
+    throw sentinel;
+  }
+
   /**
    * A summary model whose call reports its thread, blocks until {@link #released} ignoring
-   * interrupts, then throws {@code sentinel}.
+   * interrupts, then runs {@code failure}, which throws.
    */
-  private Model throwingOnRelease(AssertionError sentinel, CompletableFuture<Thread> calling) {
+  private Model failingOnRelease(Runnable failure, CompletableFuture<Thread> calling) {
     return new BlockingModel() {
       @Override
       public Response<Void> chat(List<Message> messages, List<Tool> tools) {
         calling.complete(Thread.currentThread());
         RecordingProvider.blockIgnoringInterrupts(released);
-        throw sentinel;
+        failure.run();
+        throw new IllegalStateException("the failure did not throw");
       }
 
       @Override

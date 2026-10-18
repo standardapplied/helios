@@ -14,7 +14,9 @@ import com.standardapplied.helios.session.test.LogCapture;
 import java.time.Clock;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
@@ -85,6 +87,40 @@ final class SessionEndingTest {
     }
 
     assertFalse(state.cancellation().isCancelled());
+  }
+
+  @Test
+  void anErrorAJoinedOrAwaitedFutureCarriesIsRecordedAsItself() {
+    var joined = new AssertionError("joined");
+    var awaited = new AssertionError("awaited");
+
+    assertEquals(
+        List.of(true, true),
+        List.of(
+            ending.failWith(new CompletionException(joined)),
+            ending.failWith(new ExecutionException(awaited))));
+
+    assertSame(joined, ending.seal().orElseThrow());
+    assertEquals(List.of(awaited), List.of(joined.getSuppressed()));
+  }
+
+  @Test
+  void anExceptionThatCarriesNoErrorIsNotRecorded() {
+    assertEquals(
+        List.of(false, false),
+        List.of(
+            ending.failWith(new CompletionException(new IllegalStateException("plain"))),
+            ending.failWith(new IllegalStateException(new AssertionError("not a future's")))));
+
+    assertFalse(state.cancellation().isCancelled());
+    assertEquals(Optional.empty(), ending.seal());
+  }
+
+  @Test
+  void aNullThrowableIsRejected() {
+    var ex = assertThrows(NullPointerException.class, () -> ending.failWith(null));
+
+    assertEquals("thrown must not be null", ex.getMessage());
   }
 
   @Test

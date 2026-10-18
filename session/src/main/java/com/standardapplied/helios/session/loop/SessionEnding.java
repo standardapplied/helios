@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -78,6 +80,30 @@ public final class SessionEnding {
           "an Error reached session " + sessionId + " after its result settled",
           error);
     }
+  }
+
+  /**
+   * Record the host {@link Error} {@code thrown} is or carries, as {@link #fail} does: {@code
+   * thrown} itself, or the {@code Error} cause of a {@link CompletionException} or {@link
+   * ExecutionException}, such as a {@code join} or {@code get} of a failed future throws.
+   *
+   * @param thrown what a thread of the session caught; non-null
+   * @return whether {@code thrown} is or carries an {@code Error}
+   * @throws NullPointerException if {@code thrown} is null
+   */
+  public boolean failWith(Throwable thrown) {
+    Objects.requireNonNull(thrown, "thrown must not be null");
+    var error =
+        thrown instanceof Error itself
+            ? itself
+            : (thrown instanceof CompletionException || thrown instanceof ExecutionException)
+                    && thrown.getCause() instanceof Error cause
+                ? cause
+                : null;
+    if (error != null) {
+      fail(error);
+    }
+    return error != null;
   }
 
   /**
