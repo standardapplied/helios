@@ -6,6 +6,8 @@
 package com.standardapplied.helios.core.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -50,7 +52,7 @@ class ToolCallTest {
     assertTrue(built.arguments().isEmpty());
   }
 
-  static Stream<Arguments> rejected() {
+  static Stream<Arguments> anInvalidCallIsRejectedAlikeByTheConstructorAndTheBuilder() {
     var cyclic = new HashMap<String, Object>();
     cyclic.put("self", cyclic);
     return Stream.of(
@@ -80,7 +82,7 @@ class ToolCallTest {
 
   @ParameterizedTest
   @MethodSource
-  void rejected(
+  void anInvalidCallIsRejectedAlikeByTheConstructorAndTheBuilder(
       String id,
       String name,
       Map<String, Object> arguments,
@@ -114,12 +116,12 @@ class ToolCallTest {
             "c1",
             "weather",
             Map.of("days", new ArrayList<>(List.of(1)), "options", new HashMap<>(Map.of())));
-    var days = assertInstanceOfList(call.arguments().get("days"));
-    var options = assertInstanceOfMap(call.arguments().get("options"));
+    List<?> days = assertInstanceOf(List.class, call.arguments().get("days"));
+    Map<?, ?> options = assertInstanceOf(Map.class, call.arguments().get("options"));
 
     assertThrows(UnsupportedOperationException.class, () -> call.arguments().put("k", "v"));
-    assertThrows(UnsupportedOperationException.class, () -> days.add(2));
-    assertThrows(UnsupportedOperationException.class, () -> options.put("unit", "F"));
+    assertThrows(UnsupportedOperationException.class, () -> days.clear());
+    assertThrows(UnsupportedOperationException.class, () -> options.clear());
     assertEquals(
         new ToolCall("c1", "weather", Map.of("days", List.of(1), "options", Map.of())), call);
   }
@@ -149,17 +151,7 @@ class ToolCallTest {
 
     assertEquals(arguments, call.arguments());
     assertTrue(call.arguments().containsKey("city"));
-    assertTrue(assertInstanceOfMap(call.arguments().get("options")).containsKey("lang"));
-    assertEquals(false, call.arguments().containsKey("unit"));
-  }
-
-  @SuppressWarnings("unchecked")
-  private static List<Object> assertInstanceOfList(Object value) {
-    return (List<Object>) value;
-  }
-
-  @SuppressWarnings("unchecked")
-  private static Map<String, Object> assertInstanceOfMap(Object value) {
-    return (Map<String, Object>) value;
+    assertTrue(assertInstanceOf(Map.class, call.arguments().get("options")).containsKey("lang"));
+    assertFalse(call.arguments().containsKey("unit"));
   }
 }
