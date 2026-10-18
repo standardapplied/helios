@@ -11,11 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.JsonSnapshot;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.test.ConversationFixture;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -24,12 +22,7 @@ class JsonbMapperTest {
 
   @Test
   void toolCallsRoundTripWithEveryTopLevelAndNestedJsonNull() {
-    var arguments = new LinkedHashMap<String, Object>();
-    arguments.put("city", "Paris");
-    arguments.put("unit", null);
-    arguments.put("days", Arrays.asList(1, null));
-    arguments.put("options", Collections.singletonMap("lang", null));
-    var calls = List.of(new ToolCall("call_1", "weather", arguments));
+    var calls = List.of(new ToolCall("call_1", "weather", ConversationFixture.nullArguments()));
 
     var json = JsonbMapper.objectToJsonb(calls);
 
