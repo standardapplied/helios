@@ -503,15 +503,13 @@ the stream produced before it failed.
 authorises is now the call the tool executes, the events record and a journal persists: its
 arguments are copied once, all the way down, where they enter (`ToolCall`, `HookOutcome.MutateArgs`,
 both `QueryEvent.ToolMutated` inputs, `HeliosEvent.ToolCallStarted.args`, `ToolCallRecord.args`),
-through the new `core.common.JsonSnapshot.ofObject(name, map)`. A JSON value is `null`, a
-`Boolean`, a `String`, a `Byte`, `Short`, `Integer`, `Long`, `BigInteger` or `BigDecimal` (not a
-subclass, which may be mutable), a finite `Float` or `Double` (each kept as the same instance, so no
-precision changes), a `List`, or a `Map` with `String` keys. The limits are `JsonSnapshot.MAX_DEPTH`
-(64 nested containers), `MAX_VALUES` (100,000), `MAX_STRING_LENGTH` (16 MiB characters),
-`MAX_KEY_LENGTH` (50,000) and `MAX_NUMBER_DIGITS` (1,000 digits in a `BigInteger` or `BigDecimal`
-written out in full, as `toPlainString()` and PostgreSQL's `jsonb` write it, so `1E+999` is accepted
-and `1E+1000` rejected), each at most Jackson's default parser limit. A `null` property is a key
-present with a `null` value; an absent property is an absent key.
+by the new `core.common.JsonSnapshot.ofObject(name, map)`. A JSON value is `null`, a `Boolean`, a
+`String`, a `Byte`, `Short`, `Integer`, `Long`, `BigInteger` or `BigDecimal` (not a subclass), a
+finite `Float` or `Double`, a `List`, or a `Map` with `String` keys; a number is kept as the same
+instance. The limits, each within Jackson's default parser limits, are `MAX_DEPTH` (64 nested
+containers), `MAX_VALUES` (100,000), `MAX_STRING_LENGTH` (16 MiB), `MAX_KEY_LENGTH` (50,000) and
+`MAX_NUMBER_DIGITS` (1,000 digits written out in full, so `1E+999` is accepted and `1E+1000`
+rejected).
 
 | 2.x | 3.0 |
 |---|---|
@@ -520,7 +518,7 @@ present with a `null` value; an absent property is an absent key.
 | Provider-decoded arguments past a `JsonSnapshot` limit (nested deeper than 64, more than 100,000 values) reached the tool | the stream ends in an `Error` naming the tool, `Arguments of tool call '<name>' are rejected: <where> <why>`; the call is never dispatched |
 | A provider tool call without an id (Anthropic `tool_use` without `id`, OpenAI `function_call` without `call_id`, Gemini `function_call` step without `id`) came back from `chat` as a `ToolCall` with a `null` id, while `chatStream` ended in a bare `NullPointerException` | both end in the provider's exception, `Tool call '<name>' streamed without an id`, through the new `core.provider.ToolCallStarts`; a call without a name ends in `A tool call streamed without a tool name`, where a terminal event used to name it `'<unnamed>'` |
 | `OrderedMaps.copyOfKeepingNullValues(map)` | removed; `JsonSnapshot.ofObject(name, map)` |
-| `PgToolCallJournal` and `JsonbMapper.toolCallsFromJsonb` read a persisted fraction back as a `Double`, rounded, and one beyond `Double`'s range as `Infinity` | persisted arguments read back as JSON numbers exact in value, not as the original Java types: an integer as an `Integer`, `Long` or `BigInteger`, a fraction as a `BigDecimal` (the new `JsonbMapper.argumentsFromJsonb`). PostgreSQL's `jsonb` writes a number out in full, so a `Double` `1.0E300` reads back as a `BigInteger` and a `BigDecimal` `1E+3` as the `Integer` `1000` |
+| `PgToolCallJournal` and `JsonbMapper.toolCallsFromJsonb` read a persisted fraction back as a rounded `Double`, and one beyond `Double`'s range as `Infinity` | exact in value, through the new `JsonbMapper.argumentsFromJsonb`: an integer as an `Integer`, `Long` or `BigInteger`, a fraction as a `BigDecimal`. Not as the original type: `jsonb` writes a number out in full, so a `Double` `1.0E300` reads back as a `BigInteger` and a `BigDecimal` `1E+3` as the `Integer` `1000` |
 
 **Every runtime route requires an authenticated identity and acts only on its caller's own
 sessions.** `RuntimeServer` and `AgentHttpService` authenticate every request through one
