@@ -59,7 +59,8 @@ import java.util.concurrent.TimeUnit;
  *
  * Every {@link Error} that reaches the turn, through {@code onError}, a chunk's emission, the
  * subscription's request or its cancel, on whichever thread and whenever it arrives, is recorded by
- * the session's {@link SessionEnding}, which ends the session.
+ * the session's {@link SessionEnding}, which ends the session; so is one a {@link
+ * java.util.concurrent.CompletionException} carries ({@link SessionEnding#failWith}).
  */
 final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
@@ -257,12 +258,12 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * The one terminal transition: unless the stream already ended, snapshot it with {@code error}
    * (or none, for a completion), cancel the subscription when {@code cancelStream} and one is held,
    * and release the runner, or leave its release to the chunk whose event is being emitted. An
-   * {@link Error} is recorded by the session's {@link SessionEnding} first, whether or not the
-   * stream already ended.
+   * {@link Error}, or one {@code error} carries ({@link SessionEnding#failWith}), is recorded by
+   * the session's {@link SessionEnding} first, whether or not the stream already ended.
    */
   void end(Throwable error, boolean cancelStream) {
-    if (error instanceof Error fatal) {
-      ending.fail(fatal);
+    if (error != null) {
+      ending.failWith(error);
     }
     Flow.Subscription toCancel;
     boolean release;

@@ -72,6 +72,8 @@ final class ModelCall {
    * java.util.concurrent.TimeoutException} from the stream-idle watchdog, or any other unchecked
    * exception escaping the subscribe call) end the attempts immediately — only the type guard on
    * {@code TransientStreamException} triggers a retry.
+   *
+   * @throws Error an {@link Error} the turn ended with, as itself
    */
   Attempts stream(SessionState state, SessionLimits limits, List<Tool> visibleTools) {
     var policy = limits.streamRetryPolicy();
@@ -103,7 +105,8 @@ final class ModelCall {
 
   /**
    * One attempt. What opening or subscribing to the stream throws ends the turn; an {@link Error}
-   * also ends the session ({@link TurnSubscriber}), so no attempt follows it.
+   * also ends the session ({@link TurnSubscriber}), and one the turn ended with is thrown as
+   * itself, so it leaves the loop as a tool's or a hook's does.
    */
   private StreamedTurn streamOnce(SessionState state, SessionLimits limits, List<Tool> tools) {
     var subscriber =
@@ -124,7 +127,11 @@ final class ModelCall {
     } catch (Throwable t) {
       subscriber.end(t, true);
     }
-    return subscriber.awaitDone(state.cancellation());
+    var turn = subscriber.awaitDone(state.cancellation());
+    if (turn.error() instanceof Error error) {
+      throw error;
+    }
+    return turn;
   }
 
   /**

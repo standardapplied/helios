@@ -25,11 +25,12 @@ import java.util.logging.Logger;
  * event subscribers are given the same grace to drain. A tool call or {@code onSessionEnd} still
  * running when its grace has passed is logged as such, never taken for ended.
  *
- * <p>An {@link Error} {@code onSessionEnd} throws goes to the session's {@link
- * com.standardapplied.helios.session.loop.SessionEnding}, a {@link RuntimeException} is logged and
- * fails nothing on its own. The result settles with what sealing the session's ending returns: the
- * first recorded {@code Error}, carrying every later one, and a {@code RuntimeException} of {@code
- * onSessionEnd}, as suppressed.
+ * <p>An {@link Error} {@code onSessionEnd} throws, or carries as the cause of a joined future's
+ * exception, is recorded by the session's {@link
+ * com.standardapplied.helios.session.loop.SessionEnding#failWith}; any other {@link
+ * RuntimeException} is logged and fails nothing on its own. The result settles with what sealing
+ * the session's ending returns: the first recorded {@code Error}, carrying every later one, and a
+ * {@code RuntimeException} of {@code onSessionEnd}, as suppressed.
  */
 final class SessionTeardown {
 
@@ -135,12 +136,13 @@ final class SessionTeardown {
               try {
                 executionProvider.onSessionEnd(sessionContext);
                 done.complete(null);
-              } catch (RuntimeException e) {
-                LOGGER.log(Level.WARNING, "onSessionEnd threw — continuing shutdown", e);
-                done.complete(e);
-              } catch (Error e) {
-                state.ending().fail(e);
-                done.complete(null);
+              } catch (RuntimeException | Error e) {
+                if (state.ending().failWith(e)) {
+                  done.complete(null);
+                } else {
+                  LOGGER.log(Level.WARNING, "onSessionEnd threw — continuing shutdown", e);
+                  done.complete((RuntimeException) e);
+                }
               }
             });
     return done;

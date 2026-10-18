@@ -242,7 +242,7 @@ final class DispatchedCallTest {
   }
 
   @Test
-  void anErrorTheToolThrewEndsTheSessionWhenTheSessionWasCancelledBeforeItsAnswerWasRead() {
+  void anErrorTheToolThrewIsThrownAsItselfOnceTheSessionWasCancelled() {
     var sentinel = new AssertionError("tool failure");
     var session = new CancellationToken();
     var dispatched =
@@ -257,8 +257,30 @@ final class DispatchedCallTest {
     Await.until("the worker to end", live::isEmpty);
     session.cancel("session closed");
 
-    assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    assertSame(sentinel, assertThrows(AssertionError.class, () -> dispatched.await(NEVER)));
     assertSame(sentinel, ending.seal().orElseThrow());
+  }
+
+  @Test
+  void aThrowableThatIsNoErrorReadOnceTheSessionWasCancelledIsACancellation() {
+    var session = new CancellationToken();
+    var dispatched =
+        dispatched(
+            NEVER,
+            session,
+            new CategoryPermits(1, new CategoryPermits.Scope()),
+            (args, ctx) -> sneakyThrow(new Throwable("neither an Exception nor an Error")));
+    dispatched.start(busy);
+    Await.until("the worker to end", live::isEmpty);
+    session.cancel("session closed");
+
+    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    assertEquals("session closed", thrown.getMessage());
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <T extends Throwable> ToolResult sneakyThrow(Throwable thrown) throws T {
+    throw (T) thrown;
   }
 
   @Test

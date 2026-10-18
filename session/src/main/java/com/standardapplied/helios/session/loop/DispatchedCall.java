@@ -14,6 +14,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -31,8 +32,9 @@ import java.util.logging.Logger;
  * to the session's and is cancelled on a thread of its own, so a callback that blocks or throws
  * holds up neither the canceller nor the worker's interrupt. The work is the worker and that
  * cancellation; when both have ended, the worker gives the permit back and removes the link. Every
- * {@link Error} of the work, one a callback on the call's token throws or one the tool throws, goes
- * to the session's {@link SessionEnding}, the tool's before the answer settles with it.
+ * {@link Error} of the work, one a callback on the call's token throws or one the tool throws, is
+ * recorded by the session's {@link SessionEnding}, the tool's once the answer settled with it, so
+ * the caller reads it as itself.
  */
 final class DispatchedCall {
 
@@ -129,7 +131,8 @@ final class DispatchedCall {
    * @return the tool's result, a {@link ToolResult#threw threw} result for a non-{@link Error}
    *     throwable that escaped {@link com.standardapplied.helios.core.tool.Tool#execute
    *     Tool.execute}, or the timed-out or unknown result
-   * @throws Error the error the tool threw, as itself
+   * @throws Error the error the tool threw, as itself, the session's cancellation it caused
+   *     included
    * @throws CancellationException if the session's token is cancelled, or the calling thread is
    *     interrupted (its interrupt status is kept), before this method returns
    */
@@ -143,6 +146,11 @@ final class DispatchedCall {
       return expired(e.getCause(), stopGrace);
     } catch (InterruptedException e) {
       throw interrupted();
+    } catch (CancellationException e) {
+      if (answer.state() == Future.State.FAILED && answer.exceptionNow() instanceof Error error) {
+        throw error;
+      }
+      throw e;
     }
   }
 
@@ -233,11 +241,11 @@ final class DispatchedCall {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     } catch (Throwable e) {
-      if (e instanceof Error error) {
-        ending.fail(error);
-      }
       if (!answer.completeExceptionally(e)) {
         LOGGER.log(Level.SEVERE, "tool '" + call.name() + "' threw after its call was answered", e);
+      }
+      if (e instanceof Error error) {
+        ending.fail(error);
       }
     } finally {
       if (!tokenClaimed.compareAndSet(false, true)) {

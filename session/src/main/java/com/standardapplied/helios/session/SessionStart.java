@@ -19,10 +19,11 @@ import java.util.logging.Logger;
  * The execution provider's {@code onSessionStart}, run on a thread of its own and waited for within
  * a bound. A provider that refuses, returns {@code null}, throws, or has not returned when the
  * bound passes or the waiting thread is interrupted, refuses the session; an {@link Error} it
- * throws also goes to the session's {@link com.standardapplied.helios.session.loop.SessionEnding}.
- * A start that settles after the session stopped waiting is logged as a {@code WARNING}, and a late
- * acceptance is then ended by the session's bounded teardown, so the provider is never left holding
- * a session nobody ends.
+ * throws, or carries as the cause of a joined future's exception, is also recorded by the session's
+ * {@link com.standardapplied.helios.session.loop.SessionEnding#failWith}. A start that settles
+ * after the session stopped waiting is logged as a {@code WARNING}, and a late acceptance is then
+ * ended by the session's bounded teardown, so the provider is never left holding a session nobody
+ * ends.
  */
 final class SessionStart {
 
@@ -95,9 +96,7 @@ final class SessionStart {
     try {
       started = executionProvider.onSessionStart(sessionContext);
     } catch (Throwable t) {
-      if (t instanceof Error error) {
-        state.ending().fail(error);
-      }
+      state.ending().failWith(t);
       started =
           SessionStartOutcome.refuse(
               "onSessionStart threw "

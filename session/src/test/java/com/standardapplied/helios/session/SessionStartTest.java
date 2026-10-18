@@ -77,6 +77,17 @@ final class SessionStartTest {
   }
 
   @Test
+  void anErrorOnSessionStartJoinsFromAFailedFutureFailsTheResultAsItself() {
+    var sentinel = new AssertionError("start failure");
+    var provider = new RecordingProvider(order);
+    provider.start = () -> CompletableFuture.<SessionStartOutcome>failedFuture(sentinel).join();
+
+    try (var session = AgentSession.create(withProvider(provider).build())) {
+      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    }
+  }
+
+  @Test
   void aCompletionExceptionWithoutACauseAtStartUpIsAProviderRefusal() {
     var provider = new RecordingProvider(order);
     provider.start =

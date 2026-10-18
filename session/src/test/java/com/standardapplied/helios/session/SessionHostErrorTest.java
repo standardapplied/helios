@@ -29,6 +29,7 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.loop.TurnRunner;
+import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
@@ -501,6 +502,74 @@ final class SessionHostErrorTest {
   }
 
   @Test
+  void anErrorOnSessionEndJoinsFromAFailedFutureFailsTheResultAsItself() {
+    var sentinel = new AssertionError("end failure");
+    var provider = new RecordingProvider(order);
+    provider.end = () -> CompletableFuture.failedFuture(sentinel).join();
+
+    try (var session = AgentSession.create(withProvider(provider).build())) {
+      session.send("go");
+
+      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    }
+  }
+
+  @Test
+  void anErrorATokenCounterJoinsFromAFailedFutureFailsTheResultAsItself() {
+    var sentinel = new AssertionError("counter failure");
+
+    var failure =
+        failureOf(
+            options(ScriptedModel.newBuilder().withTextTurn("done").build())
+                .withTokenCounter(
+                    messages -> CompletableFuture.<Long>failedFuture(sentinel).join()));
+
+    assertSame(sentinel, failure);
+  }
+
+  @Test
+  void anErrorACompactorJoinsFromAFailedFutureFailsTheResultAsItself() {
+    var sentinel = new AssertionError("compactor failure");
+
+    var failure =
+        failureOf(
+            options(ScriptedModel.newBuilder().withTextTurn("done").build())
+                .withLimits(SessionLimits.newBuilder().withMaxContextTokens(1_000).build())
+                .withTokenCounter(messages -> 1_000_000L)
+                .withContextCompactor(
+                    (history, state) ->
+                        CompletableFuture.<CompactionResult>failedFuture(sentinel).join()));
+
+    assertSame(sentinel, failure);
+  }
+
+  @Test
+  void aModelStreamErrorLeavesTheLoopAsAToolErrorDoesWithoutALoopEnded() {
+    var modelFailure = new AssertionError("model failure");
+    var toolFailure = new AssertionError("tool failure");
+
+    var model =
+        endedRun(
+            options(
+                ScriptedModel.newBuilder()
+                    .withStreamTurn(ModelStreams.failing(modelFailure))
+                    .build()));
+    var tool =
+        endedRun(
+            callingTool(
+                new RecordingProvider(order),
+                binding(
+                    "fails",
+                    (args, ctx) -> {
+                      throw toolFailure;
+                    })));
+
+    assertEquals(
+        List.of(Map.entry(modelFailure, List.of()), Map.entry(toolFailure, List.of())),
+        List.of(model, tool));
+  }
+
+  @Test
   void aTeardownExceptionAfterALoopErrorRidesOnItAsSuppressed() {
     var primary = new AssertionError("hook failure");
     var cleanup = new IllegalStateException("end failure");
@@ -617,6 +686,19 @@ final class SessionHostErrorTest {
           List.of(Level.SEVERE, sentinel),
           List.of(reported.orElseThrow().getLevel(), reported.orElseThrow().getThrown()));
       assertInstanceOf(ResultMessage.Cancelled.class, session.result().join());
+    }
+  }
+
+  /** What a session's result fails with, and the {@code LoopEnded} events it emitted. */
+  private static Map.Entry<Throwable, List<QueryEvent.LoopEnded>> endedRun(
+      SessionOptions.Builder options) {
+    var events = new CollectingSubscriber();
+    try (var session = AgentSession.create(options.build())) {
+      session.events().subscribe(events);
+      session.send("go");
+      var failure = Await.failure("the result to fail", session.result());
+      events.awaitDone();
+      return Map.entry(failure, events.eventsOf(QueryEvent.LoopEnded.class));
     }
   }
 
