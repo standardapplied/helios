@@ -50,8 +50,17 @@ class JsonbMapperTest {
 
     var read = JsonbMapper.toolCallsFromJsonb(json).getFirst();
 
-    assertEquals(arguments.keySet(), read.arguments().keySet());
-    assertEquals(integer, read.arguments().get("i"));
+    assertEquals(arguments, read.arguments());
+  }
+
+  @Test
+  void argumentsReadFractionsBackAsExactDecimals() {
+    var beyondDouble = "2" + "0".repeat(308) + ".5";
+
+    assertEquals(
+        Map.of("x", new BigDecimal(beyondDouble), "y", new BigDecimal("0.10"), "n", 1),
+        JsonbMapper.argumentsFromJsonb("{\"x\":" + beyondDouble + ",\"y\":0.10,\"n\":1}"));
+    assertEquals(Map.of(), JsonbMapper.argumentsFromJsonb(" "));
   }
 
   @Test
