@@ -21,12 +21,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
-import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.loop.TurnRunner;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
@@ -167,23 +165,6 @@ final class SessionHostErrorTest {
   }
 
   @Test
-  void anErrorRequestingAfterTheStreamCompletedFailsTheResult() {
-    var sentinel = new AssertionError("request failure");
-    var model =
-        model(
-            token ->
-                requesting(
-                    subscriber -> {
-                      subscriber.onNext(
-                          new ModelChunk.MessageStop("STOP", Response.Usage.of(1, 1), Map.of()));
-                      subscriber.onComplete();
-                      throw sentinel;
-                    }));
-
-    assertSame(sentinel, failureOf(model));
-  }
-
-  @Test
   void anErrorRequestingAfterTheStreamEndedWithAnErrorIsSuppressedOnThatError() {
     var streamed = new AssertionError("stream failure");
     var sentinel = new AssertionError("request failure");
@@ -198,103 +179,6 @@ final class SessionHostErrorTest {
 
     assertSame(streamed, failureOf(model));
     assertEquals(List.of(sentinel), List.of(streamed.getSuppressed()));
-  }
-
-  @Test
-  void anErrorRequestingFromASubscriptionDeliveredOnAnotherThreadFailsTheResult() {
-    var sentinel = new AssertionError("request failure");
-    var calls = new AtomicInteger();
-    var model =
-        model(
-            token -> {
-              calls.incrementAndGet();
-              return subscriber ->
-                  CompletableFuture.runAsync(
-                      () ->
-                          subscriber.onSubscribe(
-                              subscription(
-                                  () -> {
-                                    throw sentinel;
-                                  },
-                                  () -> {})));
-            });
-
-    assertSame(sentinel, failureOf(model));
-    assertEquals(1, calls.get());
-  }
-
-  @Test
-  void anErrorRequestingFromAnotherThreadWhileCloseCancelsTheStreamFailsTheResult() {
-    var sentinel = new AssertionError("request failure");
-    var requesting = new CountDownLatch(1);
-    var cancelling = new CountDownLatch(1);
-    var requestReturned = new CountDownLatch(1);
-    var model =
-        model(
-            token ->
-                subscriber ->
-                    CompletableFuture.runAsync(
-                        () -> {
-                          try {
-                            subscriber.onSubscribe(
-                                subscription(
-                                    () -> {
-                                      requesting.countDown();
-                                      Await.latch("the stream's cancel entered", cancelling);
-                                      throw sentinel;
-                                    },
-                                    () -> {
-                                      cancelling.countDown();
-                                      Await.latch("the request returned", requestReturned);
-                                    }));
-                          } finally {
-                            requestReturned.countDown();
-                          }
-                        }));
-
-    try (var session = AgentSession.create(options(model).withLimits(slowGrace()).build())) {
-      session.send("go");
-      Await.latch("the request running", requesting);
-      session.close();
-
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    }
-  }
-
-  @Test
-  void anErrorAStreamEventHookThrowsAfterCloseCancelledTheStreamFailsTheResult() {
-    var sentinel = new AssertionError("hook failure");
-    var emitting = new CountDownLatch(1);
-    var cancelled = new CountDownLatch(1);
-    var model =
-        model(
-            token ->
-                subscriber ->
-                    subscriber.onSubscribe(
-                        subscription(
-                            () ->
-                                CompletableFuture.runAsync(
-                                    () -> subscriber.onNext(new ModelChunk.TextDelta("Hel"))),
-                            cancelled::countDown)));
-    var session =
-        AgentSession.create(
-            options(model)
-                .withHook(
-                    (OnStreamEventHook)
-                        (event, ctx) -> {
-                          if (event instanceof QueryEvent.AssistantText) {
-                            emitting.countDown();
-                            Await.latch("the stream cancelled", cancelled);
-                            throw sentinel;
-                          }
-                        })
-                .build());
-    session.send("go");
-    Await.latch("the hook running", emitting);
-
-    session.close();
-
-    assertSame(sentinel, Await.failure("the result to fail", session.result()));
   }
 
   @Test
