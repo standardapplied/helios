@@ -23,7 +23,8 @@ import java.util.logging.Logger;
  * {@link com.standardapplied.helios.session.loop.SessionEnding#failWith}. A start that settles
  * after the session stopped waiting is logged as a {@code WARNING}, and a late acceptance is then
  * ended by the session's bounded teardown, so the provider is never left holding a session nobody
- * ends.
+ * ends. That teardown runs on a thread of its own, which the interrupt that gave up on {@code
+ * onSessionStart} never reaches, so its waits get their full grace.
  */
 final class SessionStart {
 
@@ -35,7 +36,8 @@ final class SessionStart {
   private final Runnable lateTeardown;
 
   /**
-   * @param lateTeardown ends a provider that accepted after the session stopped waiting
+   * @param lateTeardown ends a provider that accepted after the session stopped waiting; run on a
+   *     thread of its own
    */
   SessionStart(
       SessionState state,
@@ -119,9 +121,9 @@ final class SessionStart {
             + (accepted ? "; its acceptance is ended by the session's teardown" : ""),
         started instanceof SessionStartOutcome.Refuse refuse ? refuse.cause() : null);
     if (accepted) {
-      // The interrupt that gave up on onSessionStart must not cut the teardown's waits short.
-      Thread.interrupted();
-      lateTeardown.run();
+      Thread.ofVirtual()
+          .name("helios-session-late-teardown-" + state.sessionId())
+          .start(lateTeardown);
     }
   }
 

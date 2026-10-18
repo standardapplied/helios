@@ -8,16 +8,21 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
+import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CancellationException;
@@ -252,7 +257,7 @@ final class SessionStartTest {
       accepting.countDown();
       Await.latch("onSessionEnd of the late acceptance", endEntered);
       ending.countDown();
-      Await.termination("the late acceptance's teardown", Await.value("the start", starting));
+      Await.termination("the start worker", Await.value("the start", starting));
     }
 
     assertEquals(
@@ -265,6 +270,39 @@ final class SessionStartTest {
             .filter(record -> record.getLevel() == Level.WARNING)
             .map(LogRecord::getMessage)
             .toList());
+  }
+
+  @Test
+  void aLateAcceptancesTeardownRunsWhereTheInterruptThatAbandonedItsStartNeverReaches() {
+    var accepting = new CountDownLatch(1);
+    var proceed = new CountDownLatch(1);
+    var teardownWaited = new CompletableFuture<Boolean>();
+    var provider = new RecordingProvider(order);
+    provider.start =
+        () -> {
+          RecordingProvider.blockIgnoringInterrupts(accepting);
+          return SessionStartOutcome.accept();
+        };
+    var token = new CancellationToken();
+    var start =
+        new SessionStart(
+            new SessionState(SID, token, Clock.systemUTC()),
+            new SessionContext(SID, token, Clock.systemUTC(), new SecretRegistry()),
+            provider,
+            () -> {
+              try {
+                proceed.await();
+                teardownWaited.complete(true);
+              } catch (InterruptedException e) {
+                teardownWaited.complete(false);
+              }
+            });
+
+    assertTrue(start.await(SHORT_START).isPresent(), "a start past its bound is refused");
+    accepting.countDown();
+    proceed.countDown();
+
+    assertTrue(Await.value("the late teardown", teardownWaited), "the teardown's wait was cut");
   }
 
   @Test
