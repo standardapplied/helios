@@ -394,6 +394,37 @@ final class SessionFinalizationTest {
   }
 
   @Test
+  void aToolThatEndsOnlyOnceItsProviderEndedIsReportedBeforeOnSessionEndRuns() {
+    var started = new CountDownLatch(1);
+    var providerEnded = new CountDownLatch(1);
+    var provider = new RecordingProvider(order);
+    provider.end = providerEnded::countDown;
+    var tool =
+        binding(
+            "needs-provider",
+            (args, ctx) -> {
+              started.countDown();
+              RecordingProvider.blockIgnoringInterrupts(providerEnded);
+              return ToolResult.success("late");
+            });
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
+        var session =
+            AgentSession.create(callingTool(provider, tool).withLimits(grace()).build())) {
+      session.send("go");
+      Await.latch("the tool to start", started);
+      session.close();
+
+      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+    }
+    assertReported(
+        logged,
+        "tool 'needs-provider' (call c-needs-provider) still runs PT0.05S after session "
+            + SID
+            + " ended; its effects may land after the result settled");
+  }
+
+  @Test
   void aRunThatEndsOnItsOwnEndsAnUnknownCallBeforeOnSessionEnd() {
     var tool =
         binding(

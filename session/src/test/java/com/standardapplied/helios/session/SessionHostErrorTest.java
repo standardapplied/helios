@@ -17,6 +17,7 @@ import static com.standardapplied.helios.session.EndingSessions.withProvider;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Model;
@@ -469,6 +470,84 @@ final class SessionHostErrorTest {
           List.of(reported.orElseThrow().getLevel(), reported.orElseThrow().getThrown()));
       assertInstanceOf(ResultMessage.Cancelled.class, session.result().join());
     }
+  }
+
+  @Test
+  void aSessionWhoseLoopEndedWithAnErrorRefusesASend() {
+    try (var session = failedByAHook()) {
+      var refused = assertThrows(IllegalStateException.class, () -> session.send("again"));
+
+      assertEquals("session is terminal", refused.getMessage());
+    }
+  }
+
+  @Test
+  void aSessionWhoseLoopEndedWithAnErrorRefusesAnInterrupt() {
+    try (var session = failedByAHook()) {
+      var refused = assertThrows(IllegalStateException.class, () -> session.interrupt("stop"));
+
+      assertEquals("session is terminal", refused.getMessage());
+    }
+  }
+
+  @Test
+  void anErrorACancellationCallbackThrowsWhenTheWallClockRunsOutFailsTheResult() {
+    var sentinel = new AssertionError("callback failure");
+    var model = ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(() -> {})).build();
+    var provider = new RecordingProvider(order);
+    var limits =
+        SessionLimits.newBuilder()
+            .withMaxWallClock(SHORT_GRACE)
+            .withStreamIdleTimeout(NOT_REACHED)
+            .build();
+
+    try (var session =
+        AgentSession.create(withProvider(provider, model).withLimits(limits).build())) {
+      provider
+          .context
+          .cancellation()
+          .onCancel(
+              () -> {
+                throw sentinel;
+              });
+      session.send("go");
+
+      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    }
+  }
+
+  @Test
+  void theLoopThreadThrowsTheResultsErrorToItsUncaughtExceptionHandler() {
+    var sentinel = new AssertionError("hook failure");
+    var sessionId = "sess-uncaught";
+    var uncaught = new CompletableFuture<Throwable>();
+    var previous = Thread.getDefaultUncaughtExceptionHandler();
+    Thread.setDefaultUncaughtExceptionHandler(
+        (thread, error) -> {
+          if (thread.getName().equals("helios-agent-loop-" + sessionId)) {
+            uncaught.complete(error);
+          }
+        });
+    var model = ScriptedModel.newBuilder().withTextTurn("done").build();
+
+    try (var session =
+        AgentSession.create(
+            failingAtStop(options(model), sentinel).withSessionId(sessionId).build())) {
+      session.send("go");
+
+      assertSame(sentinel, Await.value("the loop thread's uncaught Error", uncaught));
+    } finally {
+      Thread.setDefaultUncaughtExceptionHandler(previous);
+    }
+  }
+
+  private static AgentSession failedByAHook() {
+    var sentinel = new AssertionError("hook failure");
+    var model = ScriptedModel.newBuilder().withTextTurn("done").build();
+    var session = AgentSession.create(failingAtStop(options(model), sentinel).build());
+    session.send("go");
+    assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    return session;
   }
 
   /** What a session's result fails with, and the {@code LoopEnded} events it emitted. */
