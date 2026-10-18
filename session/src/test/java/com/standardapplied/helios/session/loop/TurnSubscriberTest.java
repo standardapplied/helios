@@ -323,7 +323,7 @@ final class TurnSubscriberTest {
   }
 
   @Test
-  void anInterruptWhileAnotherThreadCancelsTheStreamWaitsForThatOutcomeAndStaysSet() {
+  void anInterruptWhileAnotherThreadCancelsTheStreamReturnsThatOutcomeAndStaysSet() {
     var cancelling = new CountDownLatch(1);
     subscriber.onSubscribe(
         cancelling(

@@ -218,9 +218,8 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * com.standardapplied.helios.session.SessionLimits#maxWallClock()} which is only re-checked at
    * turn boundaries.
    *
-   * <p>An interrupt ends the stream as cancellation does: this keeps waiting until the turn's
-   * outcome is published, whichever thread ended it and is cancelling the subscription within its
-   * grace, and only then restores the interrupt status.
+   * <p>An interrupt ends the stream as cancellation does, unless another ending came first, and
+   * this returns the turn's outcome with the interrupt status restored.
    *
    * <p>The token is also read as this waits: it runs its callbacks one after another, so a callback
    * registered before this one that blocks would otherwise keep the stream open and the session
@@ -230,25 +229,19 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    */
   StreamedTurn awaitDone(CancellationToken cancellation) {
     var registration = cancellation.onCancel(() -> end(new CancellationException(CANCELLED), true));
-    var interrupted = false;
     try {
       while (!released()) {
-        try {
-          if (!done.await(CANCELLATION_CHECK_MILLIS, TimeUnit.MILLISECONDS)
-              && cancellation.isCancelled()) {
-            end(new CancellationException(CANCELLED), true);
-          }
-        } catch (InterruptedException e) {
-          interrupted = true;
-          end(e, true);
+        if (!done.await(CANCELLATION_CHECK_MILLIS, TimeUnit.MILLISECONDS)
+            && cancellation.isCancelled()) {
+          end(new CancellationException(CANCELLED), true);
         }
       }
+    } catch (InterruptedException e) {
+      end(e, true);
+      Thread.currentThread().interrupt();
     } finally {
       registration.remove();
       idleWatchdog.cancel();
-      if (interrupted) {
-        Thread.currentThread().interrupt();
-      }
     }
     synchronized (lock) {
       return outcome;
