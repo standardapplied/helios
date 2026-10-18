@@ -14,6 +14,7 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -172,16 +173,18 @@ final class QueryEventToolAndHookTest {
   }
 
   @Test
-  void toolMutatedDefensivelyCopiesInputs() {
-    var before = new HashMap<String, Object>();
-    before.put("k", "v");
-    var after = new HashMap<String, Object>();
-    after.put("k", "v2");
+  void toolMutatedCopiesInputsDeeply() {
+    var daysBefore = new ArrayList<Object>(List.of(1));
+    var daysAfter = new ArrayList<Object>(List.of(2));
+    var before = new HashMap<String, Object>(Map.of("k", "v", "days", daysBefore));
+    var after = new HashMap<String, Object>(Map.of("k", "v2", "days", daysAfter));
     var e = new QueryEvent.ToolMutated(SID, TURN, TS, CALL, "h", before, after);
     before.put("k", "tampered");
     after.put("k", "tampered");
-    assertEquals("v", e.inputBefore().get("k"), "inputBefore must be defensively copied");
-    assertEquals("v2", e.inputAfter().get("k"), "inputAfter must be defensively copied");
+    daysBefore.add(3);
+    daysAfter.add(3);
+    assertEquals(Map.of("k", "v", "days", List.of(1)), e.inputBefore());
+    assertEquals(Map.of("k", "v2", "days", List.of(2)), e.inputAfter());
   }
 
   @Test

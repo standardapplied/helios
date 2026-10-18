@@ -36,12 +36,13 @@ final class HookOutcomeTest {
   }
 
   @Test
-  void mutateArgsDefensivelyCopies() {
-    var src = new HashMap<String, Object>();
-    src.put("k", "v");
+  void mutateArgsCopiesDeeply() {
+    var days = new ArrayList<Object>(List.of(1));
+    var src = new HashMap<String, Object>(Map.of("k", "v", "days", days));
     var outcome = (HookOutcome.MutateArgs) HookOutcome.mutateArgs(src);
     src.put("k", "changed");
-    assertEquals("v", outcome.args().get("k"));
+    days.add(2);
+    assertEquals(Map.of("k", "v", "days", List.of(1)), outcome.args());
   }
 
   @Test
