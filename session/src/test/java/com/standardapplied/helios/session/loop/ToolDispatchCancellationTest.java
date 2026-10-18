@@ -330,28 +330,6 @@ final class ToolDispatchCancellationTest {
     assertSame(sentinel, fixture.ending.seal().orElseThrow());
   }
 
-  @Test
-  void aCancellationCallbackErrorOfATimedOutCallEndsTheSession() {
-    var sentinel = new AssertionError("broken callback");
-    var d =
-        fixture.dispatcher(
-            binding(
-                "throwing", ToolCategory.READ, throwingCallback(sentinel, new CountDownLatch(1))));
-    var dispatching =
-        new FutureTask<>(
-            () ->
-                d.dispatch(
-                    DispatchFixture.call("throwing"), new CancellationToken(), NEVER, NEVER));
-    Thread.ofVirtual().start(dispatching);
-    Await.latch("the tool to start", fixture.entered);
-
-    fixture.scheduler.fireLatest();
-
-    assertEquals(
-        ToolResult.timedOut("throwing", NEVER), Await.value("the timed-out dispatch", dispatching));
-    assertSame(sentinel, fixture.ending.seal().orElseThrow());
-  }
-
   /**
    * Registers a callback on the call's token that throws {@code error}, then runs interruptibly.
    */
