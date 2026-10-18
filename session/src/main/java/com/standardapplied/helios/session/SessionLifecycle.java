@@ -200,7 +200,7 @@ final class SessionLifecycle {
     }
     // An interrupt host code left on this thread is no request to cut the teardown's waits short.
     Thread.interrupted();
-    var settling = teardown.run(loop.toolDispatch());
+    var settling = teardown.endAndSeal(loop.toolDispatch());
     if (settling.isEmpty() && crash != null) {
       result.completeExceptionally(crash);
       return;
@@ -212,7 +212,7 @@ final class SessionLifecycle {
   }
 
   private void end(ResultMessage terminal) {
-    settle(terminal, teardown.run(loop.toolDispatch()));
+    settle(terminal, teardown.endAndSeal(loop.toolDispatch()));
   }
 
   private void settle(ResultMessage terminal, Optional<Error> failure) {

@@ -66,7 +66,7 @@ final class SessionTeardownTest {
     context.cancellation().onCancel(observed::countDown);
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
-      assertSame(sentinel, newTeardown(SHORT_GRACE).run(tools()).orElseThrow());
+      assertSame(sentinel, newTeardown(SHORT_GRACE).endAndSeal(tools()).orElseThrow());
     }
   }
 
@@ -88,7 +88,7 @@ final class SessionTeardownTest {
         };
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
-      assertSame(sentinel, newTeardown(provider, SHORT_GRACE).run(tools()).orElseThrow());
+      assertSame(sentinel, newTeardown(provider, SHORT_GRACE).endAndSeal(tools()).orElseThrow());
     }
   }
 
@@ -107,7 +107,7 @@ final class SessionTeardownTest {
 
     state.ending().fail(primary);
 
-    assertSame(primary, teardown.run(tools()).orElseThrow());
+    assertSame(primary, teardown.endAndSeal(tools()).orElseThrow());
     assertEquals(List.of(sentinel), List.of(primary.getSuppressed()));
   }
 

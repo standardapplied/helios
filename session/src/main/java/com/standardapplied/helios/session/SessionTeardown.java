@@ -42,6 +42,7 @@ final class SessionTeardown {
   private final SessionEventPublisher events;
   private final ScheduledExecutorService scheduler;
   private final Duration grace;
+  private volatile Exception sessionEndFailure;
 
   SessionTeardown(
       SessionState state,
@@ -64,12 +65,12 @@ final class SessionTeardown {
    * @param tools the session's tool dispatch, whose live calls are ended first
    * @return the {@link Error} the result settles with, or empty to settle it with its terminal
    */
-  Optional<Error> run(ToolDispatch tools) {
-    var sessionEnd = end(tools);
+  Optional<Error> endAndSeal(ToolDispatch tools) {
+    end(tools);
     var settling = state.ending().seal();
-    var stepFailure = sessionEnd.getNow(null);
-    if (stepFailure != null) {
-      settling.ifPresent(error -> error.addSuppressed(stepFailure));
+    var failure = sessionEndFailure;
+    if (failure != null) {
+      settling.ifPresent(error -> error.addSuppressed(failure));
     }
     return settling;
   }
@@ -77,11 +78,10 @@ final class SessionTeardown {
   /**
    * End the runtime of a session whose provider accepted it, at start-up or after the session
    * stopped waiting for it; in the latter case the runtime was already released, and releasing it
-   * again changes nothing.
-   *
-   * @return completes with the {@link Exception} {@code onSessionEnd} threw, or {@code null}
+   * again changes nothing. An exception {@code onSessionEnd} throws that the session's ending does
+   * not record is kept for {@link #endAndSeal}.
    */
-  CompletableFuture<Exception> end(ToolDispatch tools) {
+  void end(ToolDispatch tools) {
     if (!settlesWithin(state.ending().cancel("session ended"))) {
       LOGGER.warning(
           () ->
@@ -115,7 +115,6 @@ final class SessionTeardown {
                   + state.sessionId());
     }
     release();
-    return sessionEnd;
   }
 
   /** Shut the scheduler down and close the event stream: what the session acquired first. */
@@ -127,22 +126,21 @@ final class SessionTeardown {
   /**
    * Run {@code onSessionEnd} on a thread of its own, so one that never returns holds nothing up.
    */
-  private CompletableFuture<Exception> onSessionEnd() {
-    var done = new CompletableFuture<Exception>();
+  private CompletableFuture<Void> onSessionEnd() {
+    var done = new CompletableFuture<Void>();
     Thread.ofVirtual()
         .name("helios-teardown-onSessionEnd-" + state.sessionId())
         .start(
             () -> {
               try {
                 executionProvider.onSessionEnd(sessionContext);
-                done.complete(null);
               } catch (Exception | Error e) {
-                if (state.ending().failWith(e)) {
-                  done.complete(null);
-                } else {
+                if (!state.ending().failWith(e)) {
                   LOGGER.log(Level.WARNING, "onSessionEnd threw — continuing shutdown", e);
-                  done.complete((Exception) e);
+                  sessionEndFailure = (Exception) e;
                 }
+              } finally {
+                done.complete(null);
               }
             });
     return done;
