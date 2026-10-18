@@ -15,8 +15,6 @@ import com.standardapplied.helios.core.runtime.ToolCallStatus;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.OffsetDateTime;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -73,6 +71,21 @@ public abstract class ToolCallJournalContract {
         .withArgs(Map.of("k", "v"))
         .withStartedAt(startedAt)
         .build();
+  }
+
+  /** The arguments of a call started with {@code args}, as the journal reads them back. */
+  private Map<String, Object> startedArgs(Map<String, Object> args) {
+    var runId = newRunId();
+    journal.start(
+        ToolCallRecord.newBuilder()
+            .withRunId(runId)
+            .withIteration(0)
+            .withToolCallId("c1")
+            .withToolName("tool")
+            .withArgs(args)
+            .withStartedAt(Ids.now())
+            .build());
+    return journal.all(runId).getFirst().args();
   }
 
   @BeforeEach
@@ -196,44 +209,18 @@ public abstract class ToolCallJournalContract {
 
   @Test
   void argsNullPersistsAsNull() {
-    var runId = newRunId();
-    var record =
-        ToolCallRecord.newBuilder()
-            .withRunId(runId)
-            .withIteration(0)
-            .withToolCallId("c1")
-            .withToolName("send")
-            .withArgs(null)
-            .withStartedAt(Ids.now())
-            .build();
-    journal.start(record);
-    assertNull(journal.all(runId).get(0).args());
+    assertNull(startedArgs(null));
   }
 
   @Test
   void argsKeepEveryTopLevelAndNestedJsonNull() {
-    var runId = newRunId();
-    var args = new LinkedHashMap<String, Object>();
-    args.put("city", "Paris");
-    args.put("unit", null);
-    args.put("days", Arrays.asList(1, null));
-    args.put("options", Collections.singletonMap("lang", null));
-    journal.start(
-        ToolCallRecord.newBuilder()
-            .withRunId(runId)
-            .withIteration(0)
-            .withToolCallId("c1")
-            .withToolName("weather")
-            .withArgs(args)
-            .withStartedAt(Ids.now())
-            .build());
+    var args = ConversationFixture.nullArguments();
 
-    assertEquals(args, journal.all(runId).get(0).args());
+    assertEquals(args, startedArgs(args));
   }
 
   @Test
   void argsReadBackEveryNumberExactInValue() {
-    var runId = newRunId();
     var args = new LinkedHashMap<String, Object>();
     args.put("beyondDouble", new BigDecimal("2" + "0".repeat(308) + ".5"));
     args.put("large", new BigDecimal("-1E+999"));
@@ -243,17 +230,8 @@ public abstract class ToolCallJournalContract {
     args.put("float", 1.1f);
     args.put("byte", (byte) 7);
     args.put("integer", new BigInteger("9".repeat(1000)));
-    journal.start(
-        ToolCallRecord.newBuilder()
-            .withRunId(runId)
-            .withIteration(0)
-            .withToolCallId("c1")
-            .withToolName("sum")
-            .withArgs(args)
-            .withStartedAt(Ids.now())
-            .build());
 
-    var read = journal.all(runId).get(0).args();
+    var read = startedArgs(args);
 
     assertEquals(args.keySet(), read.keySet());
     args.forEach(

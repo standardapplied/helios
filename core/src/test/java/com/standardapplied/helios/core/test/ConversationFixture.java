@@ -10,7 +10,10 @@ import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -83,6 +86,20 @@ public final class ConversationFixture {
     var map = new HashMap<String, Object>();
     map.put("self", map);
     return map;
+  }
+
+  /**
+   * The arguments the {@code null-argument} golden streams call {@code weather} with, a JSON {@code
+   * null} at the top level, in a list and in a nested object: {@code
+   * {"city":"Paris","unit":null,"days":[1,null],"options":{"lang":null}}}.
+   */
+  public static Map<String, Object> nullArguments() {
+    var arguments = new LinkedHashMap<String, Object>();
+    arguments.put("city", "Paris");
+    arguments.put("unit", null);
+    arguments.put("days", Arrays.asList(1, null));
+    arguments.put("options", Collections.singletonMap("lang", null));
+    return arguments;
   }
 
   /** The output schema of the structured snapshots. */

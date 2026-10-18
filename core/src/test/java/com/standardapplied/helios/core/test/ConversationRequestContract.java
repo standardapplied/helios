@@ -7,9 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import java.net.URI;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -44,8 +41,8 @@ public abstract class ConversationRequestContract {
   protected abstract String reply();
 
   /**
-   * The golden file holding a recorded reply that calls tool {@code weather} with {@code
-   * {"city":"Paris","unit":null,"days":[1,null],"options":{"lang":null}}}.
+   * The golden file holding a recorded reply that calls tool {@code weather} with {@link
+   * ConversationFixture#nullArguments()}.
    *
    * @return the golden file name
    */
@@ -107,11 +104,7 @@ public abstract class ConversationRequestContract {
 
   @Test
   void aDecodedToolCallIsSentBackWithEveryNullArgument() {
-    var arguments = new LinkedHashMap<String, Object>();
-    arguments.put("city", "Paris");
-    arguments.put("unit", null);
-    arguments.put("days", Arrays.asList(1, null));
-    arguments.put("options", Collections.singletonMap("lang", null));
+    var arguments = ConversationFixture.nullArguments();
     var ask = Message.user("Weather in Paris?");
     var replies = List.of(Golden.read(toolCallReply()), Golden.read(reply()));
 
