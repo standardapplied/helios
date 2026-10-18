@@ -7,8 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.standardapplied.helios.core.test.Await;
+import java.io.File;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -19,6 +23,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -254,12 +259,54 @@ class JsonSnapshotTest {
   }
 
   @Test
+  void aDecimalWithAHugeCoefficientIsRejectedWithinASmallHeap(@TempDir Path directory)
+      throws Exception {
+    var log = directory.resolve("probe.log");
+    var builder =
+        new ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-Xmx32m",
+                "-cp",
+                String.join(
+                    File.pathSeparator,
+                    System.getProperty(
+                        "surefire.test.class.path", System.getProperty("java.class.path")),
+                    System.getProperty("jdk.module.path", "")),
+                HugeDecimalProbe.class.getName())
+            .redirectErrorStream(true)
+            .redirectOutput(log.toFile());
+    builder.environment().remove("JAVA_TOOL_OPTIONS");
+    builder.environment().remove("JDK_JAVA_OPTIONS");
+    builder.environment().remove("_JAVA_OPTIONS");
+    var process = builder.start();
+    try {
+      Await.termination("the huge-decimal probe", process);
+      assertEquals(0, process.exitValue(), Files.readString(log));
+      assertEquals("arguments.n is a number of more than 1000 digits", Files.readString(log));
+    } finally {
+      process.destroyForcibly();
+      Await.termination("the destroyed huge-decimal probe", process);
+    }
+  }
+
+  @Test
   void aMissingObjectOrABlankNameIsRejected() {
     assertEquals(
         "arguments must not be null",
         assertThrows(NullPointerException.class, () -> JsonSnapshot.ofObject("arguments", null))
             .getMessage());
     assertThrows(IllegalArgumentException.class, () -> JsonSnapshot.ofObject(" ", Map.of()));
+  }
+
+  public static final class HugeDecimalProbe {
+    public static void main(String[] args) {
+      var number = new BigDecimal(BigInteger.ONE.shiftLeft(128_000_000));
+      System.out.print(
+          assertThrows(
+                  IllegalArgumentException.class,
+                  () -> JsonSnapshot.ofObject("arguments", Map.of("n", number)))
+              .getMessage());
+    }
   }
 
   private static final class BigIntegerSubclass extends BigInteger {

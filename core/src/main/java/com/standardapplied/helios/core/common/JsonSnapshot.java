@@ -99,7 +99,7 @@ public final class JsonSnapshot {
       case BigDecimal number when number.getClass() == BigDecimal.class ->
           number(
               number,
-              number.precision() <= MAX_NUMBER_DIGITS
+              number.unscaledValue().abs().compareTo(NUMBER_BOUND) < 0
                   && number.toString().chars().filter(Character::isDigit).count()
                       <= MAX_NUMBER_DIGITS);
       case Map<?, ?> object -> object(object, depth + 1);
