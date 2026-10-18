@@ -201,6 +201,17 @@ final class ToolDispatchTest {
     assertEquals("stopGrace must be strictly positive, got " + grace, ex.getMessage());
   }
 
+  @ParameterizedTest
+  @ValueSource(longs = {0, -1})
+  void awaitingLiveCallsRejectsANonPositiveGrace(long millis) {
+    var d = fixture.dispatcher();
+    var grace = Duration.ofMillis(millis);
+
+    var ex = assertThrows(IllegalArgumentException.class, () -> d.awaitLiveCalls(grace));
+
+    assertEquals("grace must be strictly positive, got " + grace, ex.getMessage());
+  }
+
   @Test
   void unknownToolReturnsNotFound() {
     var result = fixture.dispatcher().dispatch(call("nope"), new CancellationToken(), NEVER, NEVER);
