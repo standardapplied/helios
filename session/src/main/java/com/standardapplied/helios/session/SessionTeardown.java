@@ -27,10 +27,10 @@ import java.util.logging.Logger;
  *
  * <p>An {@link Error} {@code onSessionEnd} throws, or carries as the cause of a joined future's
  * exception, is recorded by the session's {@link
- * com.standardapplied.helios.session.loop.SessionEnding#failWith}; any other {@link
- * RuntimeException} is logged and fails nothing on its own. The result settles with what sealing
- * the session's ending returns: the first recorded {@code Error}, carrying every later one, and a
- * {@code RuntimeException} of {@code onSessionEnd}, as suppressed.
+ * com.standardapplied.helios.session.loop.SessionEnding#failWith}; any other exception is logged
+ * and fails nothing on its own. The result settles with what sealing the session's ending returns:
+ * the first recorded {@code Error}, carrying every later one, and an exception of {@code
+ * onSessionEnd}, as suppressed.
  */
 final class SessionTeardown {
 
@@ -79,9 +79,9 @@ final class SessionTeardown {
    * stopped waiting for it; in the latter case the runtime was already released, and releasing it
    * again changes nothing.
    *
-   * @return completes with the {@link RuntimeException} {@code onSessionEnd} threw, or {@code null}
+   * @return completes with the {@link Exception} {@code onSessionEnd} threw, or {@code null}
    */
-  CompletableFuture<RuntimeException> end(ToolDispatch tools) {
+  CompletableFuture<Exception> end(ToolDispatch tools) {
     if (!settlesWithin(state.ending().cancel("session ended"))) {
       LOGGER.warning(
           () ->
@@ -127,8 +127,8 @@ final class SessionTeardown {
   /**
    * Run {@code onSessionEnd} on a thread of its own, so one that never returns holds nothing up.
    */
-  private CompletableFuture<RuntimeException> onSessionEnd() {
-    var done = new CompletableFuture<RuntimeException>();
+  private CompletableFuture<Exception> onSessionEnd() {
+    var done = new CompletableFuture<Exception>();
     Thread.ofVirtual()
         .name("helios-teardown-onSessionEnd-" + state.sessionId())
         .start(
@@ -136,12 +136,12 @@ final class SessionTeardown {
               try {
                 executionProvider.onSessionEnd(sessionContext);
                 done.complete(null);
-              } catch (RuntimeException | Error e) {
+              } catch (Exception | Error e) {
                 if (state.ending().failWith(e)) {
                   done.complete(null);
                 } else {
                   LOGGER.log(Level.WARNING, "onSessionEnd threw — continuing shutdown", e);
-                  done.complete((RuntimeException) e);
+                  done.complete((Exception) e);
                 }
               }
             });
