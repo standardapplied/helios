@@ -157,6 +157,7 @@ final class PreToolUseHookIntegrationTest {
         (call, ctx) -> {
           var outcome = HookOutcome.mutateArgs(Map.of("v", "mutated", "days", days));
           returned.countDown();
+          Await.latch("mutation", mutated);
           return outcome;
         };
     var mutator = mutateAfter(returned, days, mutated);

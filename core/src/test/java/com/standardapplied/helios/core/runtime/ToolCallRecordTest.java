@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.Ids;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -81,9 +83,9 @@ class ToolCallRecordTest {
   }
 
   @Test
-  void argsCopiedDefensively() {
-    var mutable = new java.util.HashMap<String, Object>();
-    mutable.put("k", "v");
+  void argsAreCopiedDeeply() {
+    var days = new ArrayList<Object>(List.of(1));
+    var mutable = new java.util.HashMap<String, Object>(Map.of("days", days));
     var record =
         ToolCallRecord.newBuilder()
             .withRunId(Ids.newId())
@@ -93,7 +95,8 @@ class ToolCallRecordTest {
             .withStartedAt(Ids.now())
             .build();
     mutable.put("k2", "v2");
-    assertEquals(1, record.args().size());
+    days.add(2);
+    assertEquals(Map.of("days", List.of(1)), record.args());
     assertThrows(UnsupportedOperationException.class, () -> record.args().put("x", "y"));
   }
 
