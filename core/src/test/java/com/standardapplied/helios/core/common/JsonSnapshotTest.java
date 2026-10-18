@@ -112,11 +112,11 @@ class JsonSnapshotTest {
 
   @Test
   void aSharedContainerThatIsNotACycleIsCopiedWhereverItAppears() {
-    var shared = List.of(1);
+    var list = List.of(1);
+    var object = Map.of("k", 1);
+    var source = Map.of("a", List.of(list, list), "o", List.of(object, object));
 
-    var snapshot = JsonSnapshot.ofObject("arguments", Map.of("a", List.of(shared, shared)));
-
-    assertEquals(Map.of("a", List.of(List.of(1), List.of(1))), snapshot);
+    assertEquals(source, JsonSnapshot.ofObject("arguments", source));
   }
 
   static Stream<Arguments> rejected() {
@@ -128,10 +128,14 @@ class JsonSnapshotTest {
     nonStringKey.put(7, "seven");
     var nullKey = new HashMap<String, Object>();
     nullKey.put(null, "none");
+    var afterASibling = new LinkedHashMap<String, Object>();
+    afterASibling.put("a", 1);
+    afterASibling.put("b", Double.NaN);
     return Stream.of(
         Arguments.of(cyclicMap, "arguments.self contains itself"),
         Arguments.of(Map.of("list", cyclicList), "arguments.list[0] contains itself"),
         Arguments.of(Map.of("n", Double.NaN), "arguments.n is NaN; a JSON number is finite"),
+        Arguments.of(afterASibling, "arguments.b is NaN; a JSON number is finite"),
         Arguments.of(
             Map.of("n", Double.POSITIVE_INFINITY),
             "arguments.n is Infinity; a JSON number is finite"),
@@ -181,6 +185,25 @@ class JsonSnapshotTest {
 
     assertEquals(
         "arguments" + ".a".repeat(JsonSnapshot.MAX_DEPTH) + " nests deeper than 64 containers",
+        assertThrows(
+                IllegalArgumentException.class, () -> JsonSnapshot.ofObject("arguments", tooDeep))
+            .getMessage());
+  }
+
+  @Test
+  void listsCountTowardTheDepthLimit() {
+    Object list = List.of();
+    for (var level = 2; level < JsonSnapshot.MAX_DEPTH; level++) {
+      list = List.of(list);
+    }
+    var atLimit = Map.of("a", list);
+    var tooDeep = Map.of("a", List.of(list));
+
+    assertEquals(atLimit, JsonSnapshot.ofObject("arguments", atLimit));
+    assertEquals(
+        "arguments.a"
+            + "[0]".repeat(JsonSnapshot.MAX_DEPTH - 1)
+            + " nests deeper than 64 containers",
         assertThrows(
                 IllegalArgumentException.class, () -> JsonSnapshot.ofObject("arguments", tooDeep))
             .getMessage());
@@ -251,6 +274,8 @@ class JsonSnapshotTest {
     for (var tooLong :
         List.<Number>of(
             new BigInteger("1" + digits),
+            new BigInteger("-1" + digits),
+            BigInteger.TEN.pow(JsonSnapshot.MAX_NUMBER_DIGITS),
             new BigDecimal(digits + "1E-3"),
             new BigDecimal("0." + digits + "E-5"),
             new BigDecimal(digits + "E+5"))) {
@@ -305,7 +330,7 @@ class JsonSnapshotTest {
 
   public static final class HugeDecimalProbe {
     public static void main(String[] args) {
-      var number = new BigDecimal(BigInteger.ONE.shiftLeft(128_000_000));
+      var number = new BigDecimal(BigInteger.ONE.shiftLeft(128_000_000).negate());
       System.out.print(
           assertThrows(
                   IllegalArgumentException.class,
