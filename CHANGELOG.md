@@ -577,6 +577,16 @@ and flushed, and reads nothing further.
 |---|---|
 | A `401`, `404`, `413`, `429` or `503` answered before the body was read, a `201` for a create that sent a body, Helidon's own answer to an unmatched path or to an exception escaping a route, all kept the connection alive and drained or re-parsed the unread body | each is written whole with `Connection: close` and then the connection ends; a client sends its next request on a new connection. A request whose body was read to its end, or that has none, keeps its connection. `RuntimeServer` installs the guard and `AgentHttpService` applies it to its own routes; a `WebServer` of your own adds `routing.addFeature(new UnreadBodyGuard())` for Helidon's own answers. An exception escaping a route is answered by the guard through Helidon's `DirectHandlers`, with the same status, headers and message; one that is not an `HttpException` is `500 Internal Server Error` |
 
+**Every hook has a non-blank name, checked when the session is built.** `Hook.name()` promised a
+non-blank name and nothing held a hook to it: an anonymous hook's default name was empty, so its
+first `Block`, `MutateArgs`, `MutateResult` or other decisive outcome built an event that rejected
+the blank name and ended the session with `ErrorDuringExecution`.
+
+| 2.x | 3.0 |
+|---|---|
+| `HookRegistry` never read a hook's `name()` until the hook decided, and called it again at every decision; an anonymous hook's default name was `""`, and a `null`, blank or throwing `name()` ended the session at the hook's first decisive outcome | `HookRegistry` (and so `AgentSession.create`) reads each hook's `name()` once and rejects a `null` (`NullPointerException`) or blank (`IllegalArgumentException`) one, and an exception `name()` throws propagates; that name is the one every event, decision and log line carries. An anonymous hook's default name is its binary class name, such as `com.acme.Policies$1` |
+| `HookDecision(Hook firingHook, HookOutcome outcome)`, `HookDecision.of(Hook, HookOutcome)`, `HookDecision.firingHookOptional()` | `HookDecision(String firingHookName, HookOutcome outcome)` and `HookDecision.of(String, HookOutcome)`; read the name through `firingHookName()`, `null` only on `HookDecision.proceed()` |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`

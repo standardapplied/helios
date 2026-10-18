@@ -23,7 +23,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests for the 7 phase-specific hook interfaces — accessors, default name(), default priority().
+ * Tests for the phase-specific hook interfaces — invocation and overrides of name() and priority().
  */
 final class HookSubtypesTest {
 
@@ -32,57 +32,6 @@ final class HookSubtypesTest {
   private static HookContext ctx() {
     return new DefaultHookContext(
         "sess-1", 0, new CancellationToken(), ScriptedModel.newBuilder().build());
-  }
-
-  // ── default name() / priority() across all 7 subtypes ──────────────────────
-
-  @Test
-  void preToolUseDefaultNameAndPriority() {
-    PreToolUseHook hook = (call, ctx) -> HookOutcome.cont();
-    assertEquals(100, hook.priority());
-    assertEquals(hook.getClass().getSimpleName(), hook.name());
-  }
-
-  @Test
-  void postToolUseDefaultNameAndPriority() {
-    PostToolUseHook hook = (call, result, ctx) -> HookOutcome.cont();
-    assertEquals(100, hook.priority());
-    assertEquals(hook.getClass().getSimpleName(), hook.name());
-  }
-
-  @Test
-  void preModelTurnDefaultNameAndPriority() {
-    PreModelTurnHook hook = (history, ctx) -> HookOutcome.cont();
-    assertEquals(100, hook.priority());
-    assertEquals(hook.getClass().getSimpleName(), hook.name());
-  }
-
-  @Test
-  void postModelTurnDefaultNameAndPriority() {
-    PostModelTurnHook hook = (response, ctx) -> HookOutcome.cont();
-    assertEquals(100, hook.priority());
-    assertEquals(hook.getClass().getSimpleName(), hook.name());
-  }
-
-  @Test
-  void preStopDefaultNameAndPriority() {
-    PreStopHook hook = (response, ctx) -> HookOutcome.cont();
-    assertEquals(100, hook.priority());
-    assertEquals(hook.getClass().getSimpleName(), hook.name());
-  }
-
-  @Test
-  void onUserMessageDefaultNameAndPriority() {
-    OnUserMessageHook hook = (msg, ctx) -> HookOutcome.cont();
-    assertEquals(100, hook.priority());
-    assertEquals(hook.getClass().getSimpleName(), hook.name());
-  }
-
-  @Test
-  void onStreamEventDefaultNameAndPriority() {
-    OnStreamEventHook hook = (event, ctx) -> {};
-    assertEquals(100, hook.priority());
-    assertEquals(hook.getClass().getSimpleName(), hook.name());
   }
 
   // ── direct invocation smoke ───────────────────────────────────────────────

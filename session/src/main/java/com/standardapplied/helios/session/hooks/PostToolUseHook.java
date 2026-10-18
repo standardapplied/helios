@@ -31,6 +31,6 @@ public non-sealed interface PostToolUseHook extends Hook {
 
   @Override
   default String name() {
-    return getClass().getSimpleName();
+    return HookNames.defaultName(this);
   }
 }

@@ -20,8 +20,7 @@ import java.util.function.Function;
  * against the same context.
  *
  * <p>{@link #emitHookFired(SessionState, String, String, String)} is a convenience for the common
- * "a hook just decided something" event — it falls back to the phase name when the firing hook
- * didn't declare its own.
+ * "a hook just decided something" event.
  *
  * <h2>Thread-safety</h2>
  *
@@ -58,10 +57,7 @@ final class EventEmitter {
     hooks.fireOnStreamEvent(event, hookContextFactory.apply(state));
   }
 
-  /**
-   * Emit a {@link QueryEvent.HookFired} event. When {@code hookName} is {@code null} the phase name
-   * is used as a fallback so the event is still meaningful.
-   */
+  /** Emit a {@link QueryEvent.HookFired} event naming the hook that decided. */
   void emitHookFired(SessionState state, String hookName, String phase, String outcomeKind) {
     emit(
         state,
@@ -69,7 +65,7 @@ final class EventEmitter {
             state.sessionId(),
             state.currentTurnIndex(),
             clock.instant(),
-            hookName == null ? phase : hookName,
+            hookName,
             phase,
             outcomeKind));
   }

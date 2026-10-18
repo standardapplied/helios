@@ -9,7 +9,6 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * Runs the tool calls of one model turn serially: fires {@code PreToolUse}, dispatches through
@@ -68,7 +67,7 @@ final class ToolRound {
 
   private boolean runOne(SessionState state, ToolCall call, SessionLimits limits) {
     var decision = collaborators.hooks().firePreToolUse(call, collaborators.hookContext(state));
-    var hookName = Objects.requireNonNullElse(HookEffects.firingHookName(decision), PRE_TOOL_USE);
+    var hookName = decision.firingHookName();
     if (decision.outcome() instanceof HookOutcome.Stop stop) {
       effects.stop(state, hookName, PRE_TOOL_USE, stop);
       return true;
@@ -162,7 +161,7 @@ final class ToolRound {
   private boolean afterTool(SessionState state, ToolCall call, ToolResult result) {
     var decision =
         collaborators.hooks().firePostToolUse(call, result, collaborators.hookContext(state));
-    var hookName = HookEffects.firingHookName(decision);
+    var hookName = decision.firingHookName();
     var kept = result;
     switch (decision.outcome()) {
       case HookOutcome.MutateResult mutate ->
