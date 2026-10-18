@@ -132,12 +132,13 @@ final class SessionLifecycle {
   /**
    * Close the session: cancel it ({@link
    * com.standardapplied.helios.session.loop.SessionEnding#cancel}), its token's callbacks on a
-   * thread of their own, so a callback that blocks or throws holds up neither the caller nor the
-   * result, and end the runtime of a session whose loop never started, writing a {@link
-   * ResultMessage.Cancelled} terminal. The result future settles only once the runtime has ended,
-   * as after a run, so a host that frees capacity on the result never frees it while the provider
-   * still holds the session. Once the loop started, or the session ended at start-up, only the
-   * session is cancelled: the running loop observes it and ends the runtime itself. Never throws.
+   * thread of their own, so a callback that throws never reaches the caller. For a session whose
+   * loop never started, also write a {@link ResultMessage.Cancelled} terminal and run the teardown
+   * on the caller's thread, each of its waits bounded by the teardown grace, then settle the
+   * result: as after a run, it settles only once the runtime has ended, so a host that frees
+   * capacity on the result never frees it while the provider still holds the session. Once the loop
+   * started, or the session ended at start-up, only the session is cancelled: the running loop
+   * observes it and ends the runtime itself. Never throws.
    */
   void close() {
     state.ending().cancel("session closed");
