@@ -79,7 +79,7 @@ final class SessionEventPublisherTest {
     publisher.subscribe(subscriber);
 
     emit(publisher, TEXT, ENDED);
-    publisher.close();
+    publisher.close(NOT_REACHED);
 
     assertEquals(List.of(TEXT, ENDED), subscriber.eventsOnceCompleted());
     assertTrue(publisher.executor().isTerminated());
@@ -91,7 +91,7 @@ final class SessionEventPublisherTest {
     emit(publisher, TEXT, ENDED);
     var beforeClose = Recorder.requestingAll();
     publisher.subscribe(beforeClose);
-    publisher.close();
+    publisher.close(NOT_REACHED);
     var afterClose = Recorder.requestingAll();
     publisher.subscribe(afterClose);
 
@@ -183,7 +183,7 @@ final class SessionEventPublisherTest {
   void aSubscriberAttachedAfterACloseWithoutATerminalIsCompletedAtOnce() {
     var publisher = new SessionEventPublisher(SID);
     emit(publisher, TEXT);
-    publisher.close();
+    publisher.close(NOT_REACHED);
     var subscriber = Recorder.requestingNothing();
     publisher.subscribe(subscriber);
 
@@ -212,19 +212,19 @@ final class SessionEventPublisherTest {
 
     assertSame(
         TEXT, Await.next("the event emitted by the subscribing thread", subscriber.received));
-    publisher.close();
+    publisher.close(NOT_REACHED);
     assertEquals(List.of(TEXT), subscriber.eventsOnceCompleted());
   }
 
   @Test
   void anEmitWithNoSubscriberNeitherWaitsNorReportsADrop() {
-    var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED, NOT_REACHED);
+    var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED);
     var logged = new CopyOnWriteArrayList<LogRecord>();
 
     try (var ignored = capturingLog(logged)) {
       emit(publisher, TEXT, ENDED);
     }
-    publisher.close();
+    publisher.close(NOT_REACHED);
 
     assertEquals(List.of(), logged);
     assertTrue(publisher.executor().isTerminated());
@@ -232,8 +232,7 @@ final class SessionEventPublisherTest {
 
   @Test
   void aFullSubscriberBufferDropsTheEventAfterTheEmitTimeoutAndLogsIt() {
-    var publisher =
-        new SessionEventPublisher(SID, Duration.ofMillis(20), Duration.ofMillis(20), NOT_REACHED);
+    var publisher = new SessionEventPublisher(SID, Duration.ofMillis(20), Duration.ofMillis(20));
     var stalled = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     var subscriber =
@@ -257,7 +256,7 @@ final class SessionEventPublisherTest {
           ENDED);
     }
     release.countDown();
-    publisher.close();
+    publisher.close(NOT_REACHED);
 
     assertEquals(1 + SUBSCRIBER_BUFFER, subscriber.eventsOnceCompleted().size());
     assertEquals(
@@ -271,12 +270,12 @@ final class SessionEventPublisherTest {
 
   @Test
   void closeInterruptsASubscriberThatOutlastsTheDrainGrace() {
-    var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED, Duration.ofMillis(20));
+    var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED);
     var interrupted = new CountDownLatch(1);
     publisher.subscribe(Recorder.requestingAll(event -> blockUntilInterrupted(interrupted)));
     emit(publisher, TEXT);
 
-    publisher.close();
+    publisher.close(Duration.ofMillis(20));
 
     Await.latch("the wedged subscriber to be interrupted", interrupted);
     assertTrue(publisher.executor().isShutdown());
@@ -284,7 +283,7 @@ final class SessionEventPublisherTest {
 
   @Test
   void anInterruptedCloseStopsTheDrainAndStaysInterrupted() {
-    var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED, NOT_REACHED);
+    var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED);
     var stalled = new CountDownLatch(1);
     var interrupted = new CountDownLatch(1);
     publisher.subscribe(
@@ -297,7 +296,7 @@ final class SessionEventPublisherTest {
     Await.latch("the subscriber to stall in onNext", stalled);
 
     Thread.currentThread().interrupt();
-    publisher.close();
+    publisher.close(NOT_REACHED);
 
     assertTrue(Thread.interrupted(), "close leaves the caller's interrupt set");
     Await.latch("the stalled subscriber to be interrupted", interrupted);
@@ -437,7 +436,7 @@ final class SessionEventPublisherTest {
   private static SessionEventPublisher endedPublisher() {
     var publisher = new SessionEventPublisher(SID);
     emit(publisher, ENDED);
-    publisher.close();
+    publisher.close(NOT_REACHED);
     return publisher;
   }
 

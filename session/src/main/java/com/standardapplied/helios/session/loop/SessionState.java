@@ -42,6 +42,7 @@ public final class SessionState {
   private final ConversationHistory history = new ConversationHistory();
   private final SessionTotals totals = new SessionTotals();
   private final ContextWatermark contextWatermark = new ContextWatermark();
+  private final SessionEnding ending;
   private final AtomicLong turnIndex = new AtomicLong(0);
   private final AtomicReference<Optional<ResultMessage>> terminal =
       new AtomicReference<>(Optional.empty());
@@ -66,6 +67,7 @@ public final class SessionState {
     this.cancellation = Objects.requireNonNull(cancellation, "cancellation must not be null");
     this.clock = Objects.requireNonNull(clock, "clock must not be null");
     this.startedAt = clock.instant();
+    this.ending = new SessionEnding(sessionId, cancellation);
   }
 
   /**
@@ -136,12 +138,12 @@ public final class SessionState {
   }
 
   /**
-   * The instant at which the state was constructed.
+   * How the session ends early: its one cancellation path and the sink of its host {@link Error}s.
    *
-   * @return non-null instant
+   * @return the session's ending
    */
-  public Instant startedAt() {
-    return startedAt;
+  public SessionEnding ending() {
+    return ending;
   }
 
   /**

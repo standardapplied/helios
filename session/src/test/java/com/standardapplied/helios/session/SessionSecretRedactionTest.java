@@ -188,22 +188,23 @@ final class SessionSecretRedactionTest {
                   throw new IllegalStateException("bad " + SECRET);
                 }),
             tool(
-                "errors",
+                "unsupported",
                 (args, ctx) -> {
-                  throw new AssertionError("bad " + SECRET);
+                  throw new UnsupportedOperationException("bad " + SECRET);
                 }));
 
-    var run = run(options, calling(List.of(List.of(call("c1", "throws"), call("c2", "errors")))));
+    var run =
+        run(options, calling(List.of(List.of(call("c1", "throws"), call("c2", "unsupported")))));
 
     assertEquals(
-        List.of("tool 'throws' threw: bad " + MARKER, "tool 'errors' threw: bad " + MARKER),
+        List.of("tool 'throws' threw: bad " + MARKER, "tool 'unsupported' threw: bad " + MARKER),
         run.toolResults().stream().map(e -> e.result().output()).toList());
     assertEquals(
         run.toolResults().stream().map(e -> e.result().output()).toList(), run.toolMessages(1));
     assertEquals(
         List.of(
             new ToolOutcome.Threw("java.lang.IllegalStateException"),
-            new ToolOutcome.Threw("java.lang.AssertionError")),
+            new ToolOutcome.Threw("java.lang.UnsupportedOperationException")),
         run.toolResults().stream().map(e -> e.result().outcome()).toList());
   }
 

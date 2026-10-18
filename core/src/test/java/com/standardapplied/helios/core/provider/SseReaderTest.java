@@ -17,6 +17,7 @@ import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.FeedableInputStream;
 import com.standardapplied.helios.core.test.StubHttpServer;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import java.io.ByteArrayInputStream;
 import java.io.EOFException;
 import java.io.FilterInputStream;
@@ -88,17 +89,7 @@ class SseReaderTest {
     @Override
     public int read() throws IOException {
       reading.countDown();
-      var interrupted = false;
-      while (closed.getCount() > 0) {
-        try {
-          closed.await();
-        } catch (InterruptedException e) {
-          interrupted = true;
-        }
-      }
-      if (interrupted) {
-        Thread.currentThread().interrupt();
-      }
+      Uninterruptible.await(closed);
       throw new IOException("body closed");
     }
 

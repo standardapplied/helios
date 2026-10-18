@@ -55,22 +55,34 @@ final class ModelCallTest {
   record Answer(String answer) {}
 
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+  private final SessionState state = new SessionState("sess-call", new CancellationToken(), CLOCK);
+  private final ToolDispatch dispatch =
+      new ToolDispatch(
+          SessionContext.forTesting("sess-call"),
+          ToolRegistry.empty(),
+          ConcurrencyLimits.defaults(),
+          scheduler,
+          state.ending());
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
   private final SteeringQueue queue = new SteeringQueue(1);
-  private final SessionState state = new SessionState("sess-call", new CancellationToken(), CLOCK);
+
+  private final CountDownLatch released = new CountDownLatch(1);
 
   @AfterEach
   void shutDownScheduler() {
+    released.countDown();
     scheduler.shutdownNow();
   }
 
+  private void untilReleased() {
+    try {
+      released.await();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
   private ModelCall modelCall(FailingModel model, Consumer<QueryEvent> sink) {
-    var dispatch =
-        new ToolDispatch(
-            SessionContext.forTesting("sess-call"),
-            ToolRegistry.empty(),
-            ConcurrencyLimits.defaults(),
-            scheduler);
     var collaborators =
         new LoopCollaborators(
             HookRegistry.empty(),
@@ -163,6 +175,30 @@ final class ModelCallTest {
   }
 
   @Test
+  void anEarlierCancellationCallbackThatBlocksCannotKeepTheBackOffAsleep() {
+    var model = new FailingModel(cancellation -> transientFailure());
+    state.cancellation().onCancel(this::untilReleased);
+    var retried = new CountDownLatch(1);
+    var call =
+        modelCall(
+            model,
+            event -> {
+              if (event instanceof QueryEvent.TurnRetried) {
+                retried.countDown();
+              }
+            });
+    var streaming = run(() -> call.stream(state, SLOW_RETRY, List.of()));
+
+    Await.latch("the first attempt's retry", retried);
+    Await.until(
+        "the back-off waits on the cancellation token",
+        () -> state.cancellation().activeCallbackCountForTests() == 2);
+    state.cancellation().cancelAsync("cancelled during the back-off", error -> {});
+
+    assertEquals(1, Await.value("the call", streaming).count());
+  }
+
+  @Test
   void interruptionDuringTheBackOffEndsItAndKeepsTheInterruptFlag() {
     var model = new FailingModel(cancellation -> transientFailure());
     Consumer<QueryEvent> interruptOnRetry =
@@ -187,6 +223,25 @@ final class ModelCallTest {
   }
 
   @Test
+  void aHostErrorRecordedBeforeARetryEndsTheAttemptsWithoutAnotherModelCall() {
+    var model = new FailingModel(cancellation -> transientFailure());
+    Consumer<QueryEvent> failingOnRetry =
+        event -> {
+          if (event instanceof QueryEvent.TurnRetried) {
+            state.ending().fail(new AssertionError("late host failure"));
+          }
+        };
+    var call = modelCall(model, failingOnRetry);
+
+    var attempts =
+        Await.value(
+            "the call", run(() -> call.stream(state, retrying(2, Duration.ofHours(1)), List.of())));
+
+    assertEquals(1, attempts.count());
+    assertEquals(1, model.calls.get());
+  }
+
+  @Test
   void aBackOffThatElapsesIsFollowedByTheNextAttempt() {
     var model = new FailingModel(cancellation -> transientFailure());
     var call = modelCall(model);
@@ -194,7 +249,7 @@ final class ModelCallTest {
     var attempts =
         Await.value(
             "the call",
-            run(() -> call.stream(state, retrying(2, Duration.ofMillis(1)), List.of())));
+            run(() -> call.stream(state, retrying(2, Duration.ofMillis(50)), List.of())));
 
     assertEquals(2, attempts.count());
     assertEquals(2, model.calls.get());

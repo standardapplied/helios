@@ -20,6 +20,9 @@ import java.util.Objects;
  * event, {@code PostToolUse} hooks and the history all see the redacted text. A {@code
  * MutateResult} output is new text and is redacted the same way.
  *
+ * <p>An {@link Error} a tool threw leaves the round as itself and ends the session; no later call
+ * of the round runs.
+ *
  * <ul>
  *   <li><b>PreToolUse</b>: {@code Continue} dispatches; {@code MutateArgs} emits {@link
  *       QueryEvent.ToolMutated} and dispatches with the replacement args; {@code Block} emits
@@ -151,8 +154,8 @@ final class ToolRound {
           .toolDispatch()
           .dispatch(
               call, state.cancellation(), limits.toolTimeoutDefault(), limits.toolStopGrace());
-    } catch (Throwable t) {
-      return ToolResult.threw(call.name(), t);
+    } catch (RuntimeException e) {
+      return ToolResult.threw(call.name(), e);
     }
   }
 

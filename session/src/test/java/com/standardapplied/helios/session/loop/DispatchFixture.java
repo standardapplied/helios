@@ -9,6 +9,7 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolOutcome;
@@ -37,6 +38,7 @@ final class DispatchFixture implements AutoCloseable {
   static final Duration SHORT = Duration.ofMillis(1);
 
   final ManualScheduler scheduler = new ManualScheduler();
+  final SessionEnding ending = new SessionEnding("dispatch", new CancellationToken());
   final CountDownLatch release = new CountDownLatch(1);
   final CountDownLatch entered = new CountDownLatch(1);
   final CountDownLatch callbackRelease = new CountDownLatch(1);
@@ -62,7 +64,7 @@ final class DispatchFixture implements AutoCloseable {
   }
 
   ToolDispatch dispatcher(ConcurrencyLimits limits, ToolBinding... bindings) {
-    return new ToolDispatch(CTX, new ToolRegistry(List.of(bindings)), limits, scheduler);
+    return new ToolDispatch(CTX, new ToolRegistry(List.of(bindings)), limits, scheduler, ending);
   }
 
   ToolDispatch dispatcher(ToolBinding... bindings) {
@@ -127,23 +129,15 @@ final class DispatchFixture implements AutoCloseable {
     return (args, ctx) -> {
       ctx.cancellation().onCancel(cancelled::countDown);
       entered.countDown();
-      awaitThroughInterrupts(release);
+      Uninterruptible.await(release);
       return ToolResult.success("late");
     };
   }
 
-  static void awaitThroughInterrupts(CountDownLatch latch) {
-    var interrupted = false;
-    while (latch.getCount() > 0) {
-      try {
-        latch.await();
-      } catch (InterruptedException e) {
-        interrupted = true;
-      }
-    }
-    if (interrupted) {
-      Thread.currentThread().interrupt();
-    }
+  /** Throws {@code thrown}, checked or not, as code compiled elsewhere may. */
+  @SuppressWarnings("unchecked")
+  static <T extends Throwable> ToolResult sneakyThrow(Throwable thrown) throws T {
+    throw (T) thrown;
   }
 
   /**
@@ -154,7 +148,7 @@ final class DispatchFixture implements AutoCloseable {
     return (args, ctx) -> {
       starts.incrementAndGet();
       entered.countDown();
-      awaitThroughInterrupts(release);
+      Uninterruptible.await(release);
       return ToolResult.success("done");
     };
   }
@@ -167,7 +161,7 @@ final class DispatchFixture implements AutoCloseable {
     var next = start(d, "write");
     Await.until(
         "the next writer to queue for the write permit",
-        () -> d.queuedDispatches(ToolCategory.WRITE) == 1);
+        () -> d.permitsFor(ToolCategory.WRITE).queued() == 1);
     assertEquals(1, starts.get(), "the next writer has not started");
 
     release.countDown();
@@ -203,7 +197,7 @@ final class DispatchFixture implements AutoCloseable {
    */
   ToolExecutor blockingCallback(CountDownLatch interrupted) {
     return (args, ctx) -> {
-      ctx.cancellation().onCancel(() -> awaitThroughInterrupts(release));
+      ctx.cancellation().onCancel(() -> Uninterruptible.await(release));
       return interruptible(interrupted).execute(args, ctx);
     };
   }
@@ -216,7 +210,7 @@ final class DispatchFixture implements AutoCloseable {
     session.onCancel(
         () -> {
           entered.countDown();
-          awaitThroughInterrupts(callbackRelease);
+          Uninterruptible.await(callbackRelease);
         });
   }
 
@@ -227,6 +221,6 @@ final class DispatchFixture implements AutoCloseable {
   }
 
   static void awaitIdle(ToolDispatch d) {
-    Await.until("every worker to end", () -> d.liveCalls() == 0);
+    Await.until("every worker to end", () -> d.awaitLiveCalls(SHORT).isEmpty());
   }
 }

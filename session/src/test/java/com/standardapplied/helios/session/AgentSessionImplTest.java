@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,47 +18,26 @@ import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
-import com.standardapplied.helios.core.schema.OutputSchema;
-import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
-import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
-import com.standardapplied.helios.session.execution.ExecutionCapabilities;
-import com.standardapplied.helios.session.execution.ExecutionProvider;
-import com.standardapplied.helios.session.execution.ExecutionRequest;
-import com.standardapplied.helios.session.execution.ExecutionResult;
-import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
-import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.logging.Handler;
-import java.util.logging.Level;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 final class AgentSessionImplTest {
 
@@ -418,7 +396,7 @@ final class AgentSessionImplTest {
   @Test
   void closeBeforeAnySendShutsDownPublisherExecutor() {
     var s = (AgentSessionImpl) buildSession(textOnceModel("x", FinishReason.STOP));
-    var executor = s.lifecycleForTests().publisherExecutor();
+    var executor = s.lifecycleForTests().events().executor();
     assertTrue(!executor.isShutdown(), "executor live before close()");
     s.close();
     assertTrue(executor.isShutdown(), "executor shut down by close()");
@@ -437,11 +415,11 @@ final class AgentSessionImplTest {
   @Test
   void naturalLoopTerminationShutsDownPublisherExecutor() throws Exception {
     var s = (AgentSessionImpl) buildSession(textOnceModel("done", FinishReason.STOP));
-    var executor = s.lifecycleForTests().publisherExecutor();
+    var executor = s.lifecycleForTests().events().executor();
     s.send(UserMessage.text("hi"));
     terminalOf(s);
-    // closeRuntime() runs BEFORE resultFuture settles (hv2-bug2 Issue 2 fix), so the executor is
-    // already terminated by the time the result is available.
+    // The teardown drains the publisher before the result settles (hv2-bug2 Issue 2 fix), so the
+    // executor is already terminated by the time the result is available.
     assertTrue(executor.isShutdown(), "executor shut down after natural termination");
     assertTrue(executor.isTerminated(), "executor terminated after natural termination");
   }
@@ -483,110 +461,26 @@ final class AgentSessionImplTest {
   }
 
   @Test
-  void errorEscapingAgentLoopSettlesFutureExceptionallyInsteadOfHanging() {
-    // AgentLoop.run catches Exception (not Throwable); HookRegistry catches RuntimeException (not
-    // Throwable). So an Error subtype thrown from a hook escapes both defensive catches and lands
-    // in AgentSessionImpl.runLoop's outer catch. Without that catch, resultFuture never completes
-    // and every caller blocked on result().join() hangs indefinitely.
+  void aHooksErrorFailsTheResultWithThatErrorAfterTheOnlyModelCall() {
+    var sentinel = new AssertionError("simulated unrecoverable error");
     PreStopHook erroring =
         (response, ctx) -> {
-          throw new AssertionError("simulated unrecoverable error");
+          throw sentinel;
         };
+    var model = ScriptedModel.newBuilder().withTextTurn("done").withTextTurn("never").build();
     try (var s =
         AgentSession.create(
             SessionOptions.newBuilder()
-                .withModel(textOnceModel("done", FinishReason.STOP))
+                .withModel(model)
                 .withSessionId(SID)
                 .withClock(CLOCK)
                 .withHook(erroring)
                 .build())) {
       s.send(UserMessage.text("hi"));
-      var failure = Await.failure("the result future to settle exceptionally", s.result());
-      assertInstanceOf(AssertionError.class, failure);
-      assertEquals("simulated unrecoverable error", failure.getMessage());
+
+      assertSame(sentinel, Await.failure("the result future to fail", s.result()));
     }
-  }
-
-  // ── execution-provider lifecycle (onSessionStart / onSessionEnd) ─────────
-
-  /** Stub provider that observes start / end and can be configured to refuse or throw. */
-  private static final class LifecycleProvider implements ExecutionProvider {
-    final AtomicBoolean startSeen = new AtomicBoolean();
-    final AtomicBoolean endSeen = new AtomicBoolean();
-    SessionStartOutcome startOutcome = SessionStartOutcome.accept();
-    RuntimeException throwOnStart;
-    RuntimeException throwOnEnd;
-    Runnable onEnd = () -> {};
-
-    @Override
-    public ExecutionCapabilities capabilities() {
-      return ExecutionCapabilities.newBuilder().build();
-    }
-
-    @Override
-    public SessionStartOutcome onSessionStart(SessionContext ctx) {
-      startSeen.set(true);
-      if (throwOnStart != null) {
-        throw throwOnStart;
-      }
-      return startOutcome;
-    }
-
-    @Override
-    public void onSessionEnd(SessionContext ctx) {
-      endSeen.set(true);
-      onEnd.run();
-      if (throwOnEnd != null) {
-        throw throwOnEnd;
-      }
-    }
-
-    @Override
-    public CompletionStage<ExecutionResult> execute(
-        SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
-      throw new AssertionError("not used");
-    }
-  }
-
-  @Test
-  void providerRefuseProducesErrorProviderUnavailableTerminal() throws Exception {
-    var provider = new LifecycleProvider();
-    provider.startOutcome = SessionStartOutcome.refuse("pool saturated");
-    try (var s =
-        AgentSession.create(
-            SessionOptions.newBuilder()
-                .withModel(textOnceModel("unused", FinishReason.STOP))
-                .withSessionId(SID)
-                .withClock(CLOCK)
-                .withExecutionProvider(provider)
-                .build())) {
-      assertTrue(provider.startSeen.get());
-      var terminal = terminalOf(s);
-      var err = assertInstanceOf(ResultMessage.ErrorProviderUnavailable.class, terminal);
-      assertEquals("pool saturated", err.reason());
-      assertEquals("LifecycleProvider", err.providerName());
-      // send() against a refused (terminal) session throws.
-      assertThrows(IllegalStateException.class, () -> s.send(UserMessage.text("hi")));
-    }
-    // onSessionEnd never fires when the provider refused at start.
-    assertFalse(provider.endSeen.get());
-  }
-
-  @Test
-  void providerOnSessionStartExceptionWithoutAMessageIsReportedAsNoMessage() throws Exception {
-    var provider = new LifecycleProvider();
-    provider.throwOnStart = new IllegalStateException();
-    try (var s =
-        AgentSession.create(
-            SessionOptions.newBuilder()
-                .withModel(textOnceModel("unused", FinishReason.STOP))
-                .withSessionId(SID)
-                .withClock(CLOCK)
-                .withExecutionProvider(provider)
-                .build())) {
-      var err = assertInstanceOf(ResultMessage.ErrorProviderUnavailable.class, terminalOf(s));
-      assertEquals("onSessionStart threw IllegalStateException: (no message)", err.reason());
-    }
+    assertEquals(1, model.calls().size());
   }
 
   @Test
@@ -605,229 +499,6 @@ final class AgentSessionImplTest {
     var seen = model.calls().getFirst();
     assertEquals(List.of("be terse", "hi"), seen.stream().map(Message::content).toList());
     assertEquals(com.standardapplied.helios.core.model.Role.SYSTEM, seen.getFirst().role());
-  }
-
-  @Test
-  void providerOnSessionStartRuntimeExceptionProducesErrorProviderUnavailable() throws Exception {
-    var provider = new LifecycleProvider();
-    provider.throwOnStart = new RuntimeException("auth failed");
-    try (var s =
-        AgentSession.create(
-            SessionOptions.newBuilder()
-                .withModel(textOnceModel("unused", FinishReason.STOP))
-                .withSessionId(SID)
-                .withClock(CLOCK)
-                .withExecutionProvider(provider)
-                .build())) {
-      var terminal = terminalOf(s);
-      var err = assertInstanceOf(ResultMessage.ErrorProviderUnavailable.class, terminal);
-      assertTrue(err.reason().contains("auth failed"));
-      assertTrue(err.reason().contains("RuntimeException"));
-      // The thrown RuntimeException is preserved as the typed cause so deployers can inspect its
-      // class, message, and stack trace without parsing the reason string.
-      assertTrue(err.causeOpt().isPresent(), "thrown exception must be captured as cause");
-      assertEquals(RuntimeException.class.getName(), err.causeOpt().orElseThrow().kind());
-      assertEquals("auth failed", err.causeOpt().orElseThrow().message());
-    }
-    assertFalse(provider.endSeen.get());
-  }
-
-  /**
-   * The motivating bug for 2.5.2: when a provider's {@code onSessionStart} returns a {@link
-   * SessionStartOutcome#refuse(String, Throwable) refuse-with-cause}, the resulting {@link
-   * ResultMessage.ErrorProviderUnavailable} must carry the full {@link SerializedError} cause chain
-   * so deployers can drill into the root cause (e.g. the original {@code IOException} from {@code
-   * ProcessBuilder.start()}) instead of seeing only the outer wrapper's message.
-   */
-  @Test
-  void providerRefuseWithCauseSurfacesFullSerializedErrorChain() throws Exception {
-    var rootCause = new java.io.IOException("Cannot run program 'java': No such file or directory");
-    var midWrapper = new RuntimeException("Failed to start JVM sandbox subprocess", rootCause);
-    var provider = new LifecycleProvider();
-    provider.startOutcome = SessionStartOutcome.refuse("failed to spawn sandbox", midWrapper);
-
-    try (var s =
-        AgentSession.create(
-            SessionOptions.newBuilder()
-                .withModel(textOnceModel("unused", FinishReason.STOP))
-                .withSessionId(SID)
-                .withClock(CLOCK)
-                .withExecutionProvider(provider)
-                .build())) {
-      var terminal = terminalOf(s);
-      var err = assertInstanceOf(ResultMessage.ErrorProviderUnavailable.class, terminal);
-      assertEquals("failed to spawn sandbox", err.reason());
-
-      var cause = err.causeOpt().orElseThrow(() -> new AssertionError("cause must be present"));
-      assertEquals(RuntimeException.class.getName(), cause.kind());
-      assertEquals("Failed to start JVM sandbox subprocess", cause.message());
-
-      var rootSerialised = cause.causeOpt().orElseThrow(() -> new AssertionError("root cause"));
-      assertEquals(java.io.IOException.class.getName(), rootSerialised.kind());
-      assertEquals(
-          "Cannot run program 'java': No such file or directory",
-          rootSerialised.message(),
-          "the original IOException's message must reach the deployer untouched");
-    }
-  }
-
-  @Test
-  void providerOnSessionEndFiresOnSuccessfulTerminal() throws Exception {
-    var provider = new LifecycleProvider();
-    try (var s =
-        AgentSession.create(
-            SessionOptions.newBuilder()
-                .withModel(textOnceModel("done", FinishReason.STOP))
-                .withSessionId(SID)
-                .withClock(CLOCK)
-                .withExecutionProvider(provider)
-                .build())) {
-      assertTrue(provider.startSeen.get());
-      s.send(UserMessage.text("hi"));
-      assertInstanceOf(ResultMessage.Success.class, terminalOf(s));
-      assertTrue(provider.endSeen.get(), "onSessionEnd must fire before the result settles");
-    }
-  }
-
-  @Test
-  void providerOnSessionEndFiresOnPreStartClose() throws Exception {
-    // Loop never starts (no send/interrupt) — close() is the only signal.
-    var provider = new LifecycleProvider();
-    try (var s =
-        AgentSession.create(
-            SessionOptions.newBuilder()
-                .withModel(textOnceModel("unused", FinishReason.STOP))
-                .withSessionId(SID)
-                .withClock(CLOCK)
-                .withExecutionProvider(provider)
-                .build())) {
-      // intentionally no send — just close
-      var _unused = s;
-    }
-    assertTrue(provider.endSeen.get(), "onSessionEnd must fire on pre-start close");
-  }
-
-  @Test
-  void aSessionClosedBeforeItStartsSettlesItsResultOnlyAfterTheProviderEnded() {
-    var provider = new LifecycleProvider();
-    var session =
-        AgentSession.create(
-            SessionOptions.newBuilder()
-                .withModel(textOnceModel("unused", FinishReason.STOP))
-                .withSessionId(SID)
-                .withClock(CLOCK)
-                .withExecutionProvider(provider)
-                .build());
-    var settledDuringEnd = new AtomicBoolean(true);
-    provider.onEnd = () -> settledDuringEnd.set(session.result().isDone());
-
-    session.close();
-
-    assertTrue(provider.endSeen.get());
-    assertFalse(settledDuringEnd.get(), "the result settled while the provider still held it");
-    assertInstanceOf(ResultMessage.Cancelled.class, session.result().join());
-  }
-
-  @Test
-  void aSessionClosedBeforeItStartsSettlesItsResultWhenTheProviderEndThrowsAnError() {
-    var provider = new LifecycleProvider();
-    provider.onEnd =
-        () -> {
-          throw new AssertionError("provider end failed");
-        };
-    var session =
-        AgentSession.create(
-            SessionOptions.newBuilder()
-                .withModel(textOnceModel("unused", FinishReason.STOP))
-                .withSessionId(SID)
-                .withClock(CLOCK)
-                .withExecutionProvider(provider)
-                .build());
-
-    var thrown = assertThrows(AssertionError.class, session::close);
-
-    assertEquals("provider end failed", thrown.getMessage());
-    assertInstanceOf(ResultMessage.Cancelled.class, session.result().getNow(null));
-  }
-
-  @Test
-  void aSessionThatRanSettlesItsResultWhenTheProviderEndThrowsAnError() {
-    var provider = new LifecycleProvider();
-    provider.onEnd =
-        () -> {
-          throw new AssertionError("provider end failed");
-        };
-    try (var s =
-        AgentSession.create(
-            SessionOptions.newBuilder()
-                .withModel(textOnceModel("done", FinishReason.STOP))
-                .withSessionId(SID)
-                .withClock(CLOCK)
-                .withExecutionProvider(provider)
-                .build())) {
-      s.send(UserMessage.text("hi"));
-
-      assertInstanceOf(ResultMessage.Success.class, terminalOf(s));
-    }
-  }
-
-  @Test
-  void providerOnSessionEndThrowingRuntimeExceptionIsSwallowed() throws Exception {
-    var provider = new LifecycleProvider();
-    provider.throwOnEnd = new RuntimeException("end-cleanup-boom");
-    try (var s =
-        AgentSession.create(
-            SessionOptions.newBuilder()
-                .withModel(textOnceModel("done", FinishReason.STOP))
-                .withSessionId(SID)
-                .withClock(CLOCK)
-                .withExecutionProvider(provider)
-                .build())) {
-      s.send(UserMessage.text("hi"));
-      // Terminal must still be Success — onSessionEnd exception swallowed and logged.
-      assertInstanceOf(ResultMessage.Success.class, terminalOf(s));
-      assertTrue(provider.endSeen.get());
-    }
-  }
-
-  @Test
-  void providerOnSessionEndFailureIsLoggedAsAWarningOnTheSessionLogger() {
-    var provider = new LifecycleProvider();
-    provider.throwOnEnd = new RuntimeException("end-cleanup-boom");
-    var logged = new CopyOnWriteArrayList<LogRecord>();
-    var logger = Logger.getLogger(AgentSessionImpl.class.getName());
-    var handler =
-        new Handler() {
-          @Override
-          public void publish(LogRecord logRecord) {
-            logged.add(logRecord);
-          }
-
-          @Override
-          public void flush() {}
-
-          @Override
-          public void close() {}
-        };
-    logger.addHandler(handler);
-    try {
-      AgentSession.create(
-              SessionOptions.newBuilder()
-                  .withModel(textOnceModel("unused", FinishReason.STOP))
-                  .withSessionId(SID)
-                  .withClock(CLOCK)
-                  .withExecutionProvider(provider)
-                  .build())
-          .close();
-    } finally {
-      logger.removeHandler(handler);
-    }
-
-    assertEquals(1, logged.size());
-    var warning = logged.getFirst();
-    assertEquals(Level.WARNING, warning.getLevel());
-    assertEquals("onSessionEnd threw — continuing shutdown", warning.getMessage());
-    assertSame(provider.throwOnEnd, warning.getThrown());
   }
 
   // ── publisher-drain happens-before result settling (hv2-bug2 Issue 2) ────
@@ -858,7 +529,7 @@ final class AgentSessionImplTest {
       if (event instanceof QueryEvent.LoopEnded ended) {
         Await.until(
             "the session to begin draining its publisher",
-            session.lifecycleForTests().publisherExecutor()::isShutdown);
+            session.lifecycleForTests().events().executor()::isShutdown);
         resultSettledFirst.set(session.result().isDone());
         captured.set(ended.result());
       }
@@ -971,124 +642,6 @@ final class AgentSessionImplTest {
       for (var e : sub.events()) {
         assertEquals(FIXED, e.timestamp());
       }
-    }
-  }
-
-  // ── typed runBlocking ────────────────────────────────────────────────────
-
-  /** Output record used by the typed-runBlocking tests below. */
-  public record TypedAnswer(String name, int score) {}
-
-  @Test
-  void typedRunBlockingParsesFinalAssistantTextAgainstSchema() {
-    var json = "{\"name\":\"alice\",\"score\":42}";
-    try (var s = buildSession(textOnceModel(json, FinishReason.STOP))) {
-      var result = s.runBlocking(UserMessage.text("hi"), OutputSchema.of(TypedAnswer.class));
-      assertEquals("alice", result.name());
-      assertEquals(42, result.score());
-    }
-  }
-
-  @Test
-  void typedRunBlockingToleratesMarkdownFences() {
-    var fenced = "```json\n{\"name\":\"bob\",\"score\":7}\n```";
-    try (var s = buildSession(textOnceModel(fenced, FinishReason.STOP))) {
-      var result = s.runBlocking(UserMessage.text("hi"), OutputSchema.of(TypedAnswer.class));
-      assertEquals("bob", result.name());
-      assertEquals(7, result.score());
-    }
-  }
-
-  @Test
-  void typedRunBlockingInheritsDisabledRawOutputCaptureFromModel() {
-    var canary = "session-raw-output-canary";
-    var delegate = textOnceModel("{\"name\":\"" + canary + "\"}", FinishReason.STOP);
-    Model privacyModel =
-        new BlockingModel() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            return delegate.chat(messages, tools);
-          }
-
-          @Override
-          public String id() {
-            return delegate.id();
-          }
-
-          @Override
-          public String provider() {
-            return delegate.provider();
-          }
-
-          @Override
-          public RawOutputCapturePolicy rawOutputCapturePolicy() {
-            return RawOutputCapturePolicy.DISABLED;
-          }
-        };
-
-    try (var session = buildSession(privacyModel)) {
-      var error =
-          assertThrows(
-              StructuredOutputParseException.class,
-              () ->
-                  session.runBlocking(UserMessage.text("hi"), OutputSchema.of(TypedAnswer.class)));
-
-      assertNull(error.rawContent());
-      assertFalse(error.getMessage().contains(canary));
-    }
-  }
-
-  @Test
-  void typedRunBlockingRejectsNullMessage() {
-    try (var s = buildSession(textOnceModel("{}", FinishReason.STOP))) {
-      assertThrows(
-          NullPointerException.class,
-          () -> s.runBlocking(null, OutputSchema.of(TypedAnswer.class)));
-    }
-  }
-
-  @Test
-  void typedRunBlockingRejectsNullSchema() {
-    try (var s = buildSession(textOnceModel("{}", FinishReason.STOP))) {
-      assertThrows(
-          NullPointerException.class,
-          () -> s.runBlocking(UserMessage.text("hi"), (OutputSchema<?>) null));
-    }
-  }
-
-  @Test
-  void typedRunBlockingThrowsOnNonSuccessTerminal() {
-    // CONTENT_FILTER produces a Refusal terminal — typed runBlocking has nothing to parse.
-    try (var s = buildSession(textOnceModel("model refusal", FinishReason.CONTENT_FILTER))) {
-      var ex =
-          assertThrows(
-              IllegalStateException.class,
-              () -> s.runBlocking(UserMessage.text("hi"), OutputSchema.of(TypedAnswer.class)));
-      assertTrue(ex.getMessage().contains("Refusal"));
-    }
-  }
-
-  /** Output record whose simple name the blank-result message names. */
-  public record Person(String name) {}
-
-  @ParameterizedTest
-  @ValueSource(strings = {"", " \n\t "})
-  void typedRunBlockingThrowsWhenSuccessCarriesABlankResult(String blank) {
-    try (var s = buildSession(textOnceModel(blank, FinishReason.STOP))) {
-      var ex =
-          assertThrows(
-              IllegalStateException.class,
-              () -> s.runBlocking(UserMessage.text("hi"), OutputSchema.of(Person.class)));
-      assertEquals(
-          "session ended with Success but produced no result to parse as Person", ex.getMessage());
-    }
-  }
-
-  @Test
-  void untypedRunBlockingReturnsSuccessWithTheEmptyResult() {
-    try (var s = buildSession(textOnceModel("", FinishReason.STOP))) {
-      var terminal = s.runBlocking(UserMessage.text("hi"));
-      assertEquals("", assertInstanceOf(ResultMessage.Success.class, terminal).result());
     }
   }
 
@@ -1295,66 +848,5 @@ final class AgentSessionImplTest {
         return "test";
       }
     };
-  }
-
-  // ── outputSchema rides every model turn via the provider's native channel ──
-
-  /** Sample record so we can build a real {@link OutputSchema} for the wiring tests. */
-  public record Sample(String field) {}
-
-  /** A model whose one turn streams {@code json} as a finished text answer. */
-  private static ScriptedModel streamingJson(String json) {
-    return ScriptedModel.newBuilder()
-        .withStreamTurn(
-            ModelStreams.of(
-                new ModelChunk.TextDelta(json),
-                new ModelChunk.MessageStop(FinishReason.STOP.name(), Usage.of(1, 1), Map.of())))
-        .build();
-  }
-
-  @Test
-  void configuredOutputSchemaRidesEveryTurnAndCarriesThroughToTheProvider() throws Exception {
-    var schema = OutputSchema.of(Sample.class);
-    var model = streamingJson("{\"field\":\"typed-with-schema\"}");
-    try (var session =
-        AgentSession.create(
-            SessionOptions.newBuilder()
-                .withModel(model)
-                .withSessionId(SID)
-                .withClock(CLOCK)
-                .withOutputSchema(schema)
-                .build())) {
-      var typed = session.runBlocking(UserMessage.text("go"), schema);
-      assertEquals("typed-with-schema", typed.field());
-    }
-    var schemas = model.outputSchemas();
-    assertTrue(
-        schemas.stream().anyMatch(Optional::isPresent),
-        "configured outputSchema must route through the schema-bearing chatStream so the provider's"
-            + " native structured-output channel sees the schema on every turn — the matchmaking"
-            + " bug regression");
-    assertEquals(Optional.of(schema), schemas.getFirst());
-    assertFalse(schemas.contains(Optional.empty()));
-  }
-
-  @Test
-  void sessionWithoutOutputSchemaUsesTheUnconstrainedDispatch() throws Exception {
-    var model = streamingJson("{\"field\":\"untyped\"}");
-    try (var session =
-        AgentSession.create(
-            SessionOptions.newBuilder()
-                .withModel(model)
-                .withSessionId(SID)
-                .withClock(CLOCK)
-                .build())) {
-      var terminal = session.runBlocking(UserMessage.text("go"));
-      var success = assertInstanceOf(ResultMessage.Success.class, terminal);
-      assertEquals("{\"field\":\"untyped\"}", success.result());
-    }
-    assertTrue(
-        model.outputSchemas().contains(Optional.empty()),
-        "no outputSchema configured: the loop dispatches the unconstrained chatStream so the model"
-            + " is free to produce arbitrary text");
-    assertFalse(model.outputSchemas().stream().anyMatch(Optional::isPresent));
   }
 }

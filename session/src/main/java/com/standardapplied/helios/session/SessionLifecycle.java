@@ -4,59 +4,49 @@ package com.standardapplied.helios.session;
 
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
-import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StopClassifier;
-import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
- * Start-up and shutdown of one session's runtime. Notifies the {@link ExecutionProvider} when the
- * session starts and ends, starts the agent-loop virtual thread on first use, arms the wall-clock
- * deadline on the scheduler it owns, and on the way out closes the event stream, stops the
- * scheduler and settles the result future.
+ * Start-up and shutdown of one session's runtime. Acquires the session's event stream and then its
+ * scheduler, notifies the {@link ExecutionProvider} that the session starts once everything else is
+ * built ({@link SessionStart}, bounded by {@link SessionLimits#startTimeout()}), starts the
+ * agent-loop virtual thread on first use and arms the wall-clock deadline; its {@link
+ * SessionTeardown} releases all of it in reverse order before the result future settles.
  *
- * <p>The loop is started at most once: {@link #startIfNeeded} and {@link #closeBeforeStart} share
- * one compare-and-set, so exactly one of the two paths ends the runtime.
+ * <p>The runtime ends exactly once: a start-up the provider does not accept, {@link #startIfNeeded}
+ * and {@link #close} share one compare-and-set, so exactly one path tears the runtime down and
+ * settles the result.
  */
 final class SessionLifecycle {
 
-  private static final Logger LOGGER = Logger.getLogger(AgentSessionImpl.class.getName());
-
   private final SessionState state;
-  private final SessionContext sessionContext;
-  private final ExecutionProvider executionProvider;
-  private final SessionEventPublisher events;
+  private final SessionLimits limits;
   private final CompletableFuture<ResultMessage> result;
+  private final SessionEventPublisher events;
   private final ScheduledExecutorService deadlineScheduler;
+  private final SessionStart start;
+  private final SessionTeardown teardown;
   private final AtomicBoolean started = new AtomicBoolean(false);
-  private final boolean providerAccepted;
-  private volatile ScheduledFuture<?> wallClockDeadline;
+  private AgentLoop loop;
 
-  /**
-   * Build the lifecycle and notify the execution provider that the session starts. A provider that
-   * refuses settles {@code result} with {@link ResultMessage.ErrorProviderUnavailable} at once.
-   */
   SessionLifecycle(
       SessionState state,
       SessionContext sessionContext,
       ExecutionProvider executionProvider,
-      SessionEventPublisher events,
+      SessionLimits limits,
       CompletableFuture<ResultMessage> result) {
     this.state = state;
-    this.sessionContext = sessionContext;
-    this.executionProvider = executionProvider;
-    this.events = events;
+    this.limits = limits;
     this.result = result;
+    this.events = new SessionEventPublisher(state.sessionId());
     var scheduler =
         new ScheduledThreadPoolExecutor(
             1,
@@ -67,7 +57,22 @@ final class SessionLifecycle {
             });
     scheduler.setRemoveOnCancelPolicy(true);
     this.deadlineScheduler = scheduler;
-    this.providerAccepted = invokeOnSessionStart();
+    this.teardown =
+        new SessionTeardown(
+            state,
+            sessionContext,
+            executionProvider,
+            events,
+            deadlineScheduler,
+            limits.teardownGrace());
+    this.start =
+        new SessionStart(
+            state, sessionContext, executionProvider, () -> teardown.end(loop.toolDispatch()));
+  }
+
+  /** The session's event stream, which the shutdown closes. */
+  SessionEventPublisher events() {
+    return events;
   }
 
   /**
@@ -79,96 +84,74 @@ final class SessionLifecycle {
     return deadlineScheduler;
   }
 
-  /** The event publisher's executor, which the shutdown closes. */
-  ExecutorService publisherExecutor() {
-    return events.executor();
+  /**
+   * Release what the lifecycle acquired, for a session whose construction failed before {@link
+   * #open} or whose provider did not accept it there; such a session can never start.
+   */
+  void abandon() {
+    started.set(true);
+    teardown.release();
   }
 
   /**
-   * Fire {@code executionProvider.onSessionStart(sessionContext)} and react to its outcome. When
-   * the provider returns {@link SessionStartOutcome.Refuse}, settle the result future immediately
-   * with {@link ResultMessage.ErrorProviderUnavailable}, its reason and cause redacted against the
-   * session's secret registry, so subsequent {@code send} / {@code interrupt} calls observe a
-   * terminal session.
-   *
-   * @return {@code true} when the provider accepted (so {@link #closeRuntime} must fire {@code
-   *     onSessionEnd}); {@code false} when the session was refused
+   * Bind the loop and notify the execution provider that the session starts, the last step of the
+   * session's construction, waiting for it within {@code startTimeout}. A start the provider does
+   * not accept ({@link SessionStart}) ends the session with its {@link
+   * ResultMessage.ErrorProviderUnavailable}, or with the {@link Error} {@code onSessionStart}
+   * threw, once what the lifecycle acquired is released. {@code onSessionEnd} is called only if the
+   * provider accepts after the session stopped waiting, by the {@link SessionTeardown} that ends
+   * that late acceptance.
    */
-  private boolean invokeOnSessionStart() {
-    SessionStartOutcome outcome;
-    try {
-      outcome = executionProvider.onSessionStart(sessionContext);
-    } catch (RuntimeException e) {
-      markRefused(
-          "onSessionStart threw "
-              + e.getClass().getSimpleName()
-              + ": "
-              + (e.getMessage() == null ? "(no message)" : e.getMessage()),
-          e);
-      return false;
-    }
-    Objects.requireNonNull(outcome, "onSessionStart returned null");
-    if (outcome instanceof SessionStartOutcome.Refuse refuse) {
-      markRefused(refuse.reason(), refuse.cause());
-      return false;
-    }
-    return true;
+  void open(AgentLoop loop) {
+    this.loop = loop;
+    start.await(limits.startTimeout()).ifPresent(this::refuse);
   }
 
-  private void markRefused(String reason, Throwable cause) {
-    var redactor = sessionContext.secrets().redactor();
-    var serialised = cause == null ? null : SerializedError.of(cause).redactedBy(redactor);
-    var refusal =
-        new ResultMessage.ErrorProviderUnavailable(
-            state.sessionId(),
-            executionProvider.getClass().getSimpleName(),
-            redactor.redact(reason).text(),
-            serialised,
-            state.totals().usage(),
-            state.totals().cost(),
-            state.elapsed());
+  private void refuse(ResultMessage refusal) {
     state.setTerminal(refusal);
-    result.complete(refusal);
+    abandon();
+    settle(refusal, state.ending().seal());
   }
 
   /** Start the agent loop on its virtual thread and arm the wall-clock deadline, at most once. */
-  void startIfNeeded(AgentLoop loop, SessionLimits limits) {
+  void startIfNeeded() {
     if (started.compareAndSet(false, true)) {
-      scheduleWallClockDeadline(limits);
-      Thread.ofVirtual()
-          .name("helios-agent-loop-" + state.sessionId())
-          .start(() -> runLoop(loop, limits));
+      scheduleWallClockDeadline();
+      Thread.ofVirtual().name("helios-agent-loop-" + state.sessionId()).start(this::runLoop);
     }
   }
 
-  /** Whether the loop was started, or can no longer start because the session closed first. */
+  /**
+   * Whether the loop was started, or can no longer start because the session closed or its provider
+   * did not accept it.
+   */
   boolean isStarted() {
     return started.get();
   }
 
   /**
-   * End the runtime of a session whose loop never started, writing a {@link
-   * ResultMessage.Cancelled} terminal unless one is already recorded (a refused session set {@link
-   * ResultMessage.ErrorProviderUnavailable} at construction). The result future settles only once
-   * the runtime has ended, as after a run, so a host that frees capacity on the result never frees
-   * it while the provider still holds the session; a refused session's settled at construction, and
-   * its provider holds nothing. No-op once the loop started: the running loop observes the
-   * cancellation and ends the runtime itself.
+   * Close the session: cancel it ({@link
+   * com.standardapplied.helios.session.loop.SessionEnding#cancel}), its token's callbacks on a
+   * thread of their own, so a callback that throws never reaches the caller. For a session whose
+   * loop never started, also write a {@link ResultMessage.Cancelled} terminal and run the teardown
+   * on the caller's thread, each of its waits bounded by the teardown grace, then settle the
+   * result: as after a run, it settles only once the runtime has ended, so a host that frees
+   * capacity on the result never frees it while the provider still holds the session. Once the loop
+   * started, or the session ended at start-up, only the session is cancelled: the running loop
+   * observes it and ends the runtime itself. Never throws.
    */
-  void closeBeforeStart() {
+  void close() {
+    state.ending().cancel("session closed");
     if (started.compareAndSet(false, true)) {
-      state.setTerminal(
+      var cancelled =
           new ResultMessage.Cancelled(
               state.sessionId(),
               "session closed",
               state.totals().usage(),
               state.totals().cost(),
-              state.elapsed()));
-      try {
-        closeRuntime();
-      } finally {
-        result.complete(state.terminal().orElseThrow());
-      }
+              state.elapsed());
+      state.setTerminal(cancelled);
+      end(cancelled);
     }
   }
 
@@ -180,98 +163,59 @@ final class SessionLifecycle {
    * onError} (silent socket, hung edge / proxy / load balancer) blocks the loop indefinitely. The
    * wall-clock cancellation flips the token; the turn's subscriber observes it and unblocks; the
    * loop proceeds to its next iteration, where {@link StopClassifier} sees {@code state.elapsed() >
-   * maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}.
-   *
-   * <p>The future is captured so {@link #closeRuntime()} can cancel it before shutdown.
+   * maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}. The session is cancelled
+   * through {@link com.standardapplied.helios.session.loop.SessionEnding#cancel}, so its token's
+   * callbacks never run on the scheduler's one thread. The scheduler's shutdown drops it.
    */
-  private void scheduleWallClockDeadline(SessionLimits limits) {
+  private void scheduleWallClockDeadline() {
     var millis = limits.maxWallClock().toMillis();
-    wallClockDeadline =
-        deadlineScheduler.schedule(
-            () -> state.cancellation().cancel("maxWallClock exceeded after " + millis + "ms"),
-            millis,
-            TimeUnit.MILLISECONDS);
+    deadlineScheduler.schedule(
+        () -> state.ending().cancel("maxWallClock exceeded after " + millis + "ms"),
+        millis,
+        TimeUnit.MILLISECONDS);
   }
 
   /**
-   * Drive the loop to terminal, drain the per-session publisher so every subscriber observes the
-   * final {@link QueryEvent.LoopEnded}, then settle the result future. The ordering (closeRuntime
-   * BEFORE the future resolves) is the happens-before guarantee that lets deployers read aggregates
-   * set by a {@code LoopEnded} subscriber immediately after {@code result().get()} / {@code
-   * runBlocking(...)} unblocks. Without it, a subscriber that captures usage / cost from {@code
-   * LoopEnded} races against the caller's read and silently drops data — observed as the
-   * matchmaking baseline's 3/24 viewers with {@code tokens=0/0 cost=$0.0000}.
+   * Drive the loop to terminal, tear the runtime down, then settle the result future. The teardown
+   * drains the publisher before the future resolves, the happens-before guarantee that lets
+   * deployers read aggregates set by a {@code LoopEnded} subscriber immediately after {@code
+   * result().get()} / {@code runBlocking(...)} unblocks.
    *
-   * <p>{@link AgentLoop#run} catches {@code Exception} and {@link
-   * com.standardapplied.helios.session.hooks.HookRegistry} catches {@code RuntimeException}; in
-   * practice only {@link Error} subtypes (OOM, StackOverflow, LinkageError, AssertionError from a
-   * hook) reach the outer {@code catch}. We still capture {@link Throwable} as defense-in-depth
-   * against future contract drift — without it a RuntimeException escape would leave callers
-   * blocked on {@code result().join()} forever. The failure is held across the publisher drain so
-   * {@code closeRuntime} always runs; {@link #rethrowSneakily} preserves the original throwable
-   * type without an {@code instanceof} cascade that would leave unreachable branches in coverage.
+   * <p>{@link AgentLoop#run} turns every {@link Exception} into a terminal, so only an {@link
+   * Error} escapes it, which goes to the session's {@link
+   * com.standardapplied.helios.session.loop.SessionEnding}. When the result settles with an {@code
+   * Error}, this thread then ends by throwing it to its uncaught-exception handler. A {@link
+   * RuntimeException} that escapes anyway, because turning it into a terminal failed, settles the
+   * result exceptionally as itself, so the result never stays pending.
    */
-  private void runLoop(AgentLoop loop, SessionLimits limits) {
+  private void runLoop() {
     ResultMessage terminal = null;
-    Throwable failure = null;
+    RuntimeException crash = null;
     try {
       terminal = loop.run(state, limits);
-    } catch (Throwable t) {
-      failure = t;
+    } catch (RuntimeException e) {
+      crash = e;
+    } catch (Error e) {
+      state.ending().fail(e);
     }
-    try {
-      closeRuntime();
-    } finally {
-      settle(terminal, failure);
+    // An interrupt host code left on this thread is no request to cut the teardown's waits short.
+    Thread.interrupted();
+    var settling = teardown.endAndSeal(loop.toolDispatch());
+    if (settling.isEmpty() && crash != null) {
+      result.completeExceptionally(crash);
+      return;
     }
-    if (failure != null) {
-      rethrowSneakily(failure);
-    }
-  }
-
-  private void settle(ResultMessage terminal, Throwable failure) {
-    if (failure == null) {
-      result.complete(terminal);
-    } else {
-      result.completeExceptionally(failure);
+    settle(terminal, settling);
+    if (settling.isPresent()) {
+      throw settling.get();
     }
   }
 
-  /**
-   * End the session's runtime: notify the execution provider, close the event stream and stop the
-   * wall-clock deadline. Called from exactly one of two mutually-exclusive paths — {@link
-   * #closeBeforeStart()}, or {@link #runLoop} after the loop returns — and never both, because the
-   * {@code started} CAS gates entry. Either path settles the result future only once this has
-   * returned or thrown, so a failure here never leaves a caller waiting on the result.
-   *
-   * <p>{@link SessionEventPublisher#close()} waits a bounded grace period for live subscribers to
-   * drain, so by the time this method returns every responsive subscriber has observed every
-   * emitted event including the terminal {@link QueryEvent.LoopEnded}.
-   */
-  private void closeRuntime() {
-    if (providerAccepted) {
-      try {
-        executionProvider.onSessionEnd(sessionContext);
-      } catch (RuntimeException e) {
-        LOGGER.log(Level.WARNING, "onSessionEnd threw — continuing shutdown", e);
-      }
-    }
-    events.close();
-    var deadline = wallClockDeadline;
-    if (deadline != null) {
-      deadline.cancel(false);
-    }
-    deadlineScheduler.shutdownNow();
+  private void end(ResultMessage terminal) {
+    settle(terminal, teardown.endAndSeal(loop.toolDispatch()));
   }
 
-  /**
-   * Throw any {@link Throwable} as if it were unchecked, without an {@code instanceof} cascade. The
-   * cast is erased at runtime; the JVM rethrows the original type. Used by {@link #runLoop} to
-   * propagate an escaping {@link Error} (the only realistic shape reaching it) without leaving
-   * unreachable RuntimeException / checked-exception branches behind.
-   */
-  @SuppressWarnings("unchecked")
-  private static <E extends Throwable> void rethrowSneakily(Throwable t) throws E {
-    throw (E) t;
+  private void settle(ResultMessage terminal, Optional<Error> failure) {
+    failure.ifPresentOrElse(result::completeExceptionally, () -> result.complete(terminal));
   }
 }
