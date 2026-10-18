@@ -59,13 +59,6 @@ final class DispatchedCall {
     }
   }
 
-  /**
-   * How often a caller's wait reads the session's token itself. The token runs its callbacks one
-   * after another, so an earlier callback that blocks would otherwise keep this call's link from
-   * running.
-   */
-  private static final long SESSION_CHECK_NANOS = TimeUnit.MILLISECONDS.toNanos(10);
-
   private final CancellationToken token = new CancellationToken();
   private final CompletableFuture<ToolResult> answer = new CompletableFuture<>();
   private final CountDownLatch answered = new CountDownLatch(1);
@@ -162,15 +155,9 @@ final class DispatchedCall {
    * @throws CancellationException if the session's token is cancelled before this method returns
    */
   private boolean settlesBy(CountDownLatch latch, long until) throws InterruptedException {
-    while (!latch.await(
-        Math.clamp(until - System.nanoTime(), 0L, SESSION_CHECK_NANOS), TimeUnit.NANOSECONDS)) {
-      throwIfSessionCancelled();
-      if (System.nanoTime() - until >= 0) {
-        return false;
-      }
-    }
+    var settled = TokenWait.opensBy(latch, parent, until);
     throwIfSessionCancelled();
-    return true;
+    return settled;
   }
 
   private void expire() {
