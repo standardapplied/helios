@@ -504,11 +504,12 @@ authorises is now the call the tool executes, the events record and a journal pe
 arguments are copied once, all the way down, where they enter (`ToolCall`, `HookOutcome.MutateArgs`,
 both `QueryEvent.ToolMutated` inputs, `HeliosEvent.ToolCallStarted.args`, `ToolCallRecord.args`),
 through the new `core.common.JsonSnapshot.ofObject(name, map)`. A JSON value is `null`, a
-`Boolean`, a `String`, a `Byte`, `Short`, `Integer`, `Long`, `BigInteger` or `BigDecimal`, a finite
-`Float` or `Double` (each kept as the same instance, so no precision changes), a `List`, or a `Map`
-with `String` keys. The limits are `JsonSnapshot.MAX_DEPTH` (64 nested containers),
-`MAX_VALUES` (100,000), `MAX_STRING_LENGTH` (16 MiB characters), `MAX_KEY_LENGTH` (50,000) and
-`MAX_NUMBER_DIGITS` (1,000), each at most Jackson's default parser limit. A `null` property is a key
+`Boolean`, a `String`, a `Byte`, `Short`, `Integer`, `Long`, `BigInteger` or `BigDecimal` (not a
+subclass, which may be mutable), a finite `Float` or `Double` (each kept as the same instance, so no
+precision changes), a `List`, or a `Map` with `String` keys. The limits are `JsonSnapshot.MAX_DEPTH`
+(64 nested containers), `MAX_VALUES` (100,000), `MAX_STRING_LENGTH` (16 MiB characters),
+`MAX_KEY_LENGTH` (50,000) and `MAX_NUMBER_DIGITS` (1,000 digits in the number's JSON text, a
+`BigDecimal`'s zeros and exponent included), each at most Jackson's default parser limit. A `null` property is a key
 present with a `null` value; an absent property is an absent key.
 
 | 2.x | 3.0 |
