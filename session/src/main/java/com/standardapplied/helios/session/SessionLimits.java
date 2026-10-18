@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session;
 
 import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.common.Validate;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.OptionalLong;
@@ -162,11 +163,7 @@ public record SessionLimits(
   }
 
   private static void requirePositiveNanos(String name, Duration value) {
-    Objects.requireNonNull(value, name + " must not be null");
-    if (value.isZero() || value.isNegative()) {
-      throw new IllegalArgumentException(name + " must be strictly positive, got " + value);
-    }
-    if (value.compareTo(MAX_DURATION) > 0) {
+    if (Validate.positiveDuration(name, value).compareTo(MAX_DURATION) > 0) {
       throw new IllegalArgumentException(
           name + " must be at most " + MAX_DURATION + " (Long.MAX_VALUE ns), got " + value);
     }
