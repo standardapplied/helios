@@ -270,18 +270,14 @@ final class DispatchedCallTest {
             NEVER,
             session,
             new CategoryPermits(1, new CategoryPermits.Scope()),
-            (args, ctx) -> sneakyThrow(new Throwable("neither an Exception nor an Error")));
+            (args, ctx) ->
+                DispatchFixture.sneakyThrow(new Throwable("neither an Exception nor an Error")));
     dispatched.start(busy);
     Await.until("the worker to end", live::isEmpty);
     session.cancel("session closed");
 
     var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
     assertEquals("session closed", thrown.getMessage());
-  }
-
-  @SuppressWarnings("unchecked")
-  private static <T extends Throwable> ToolResult sneakyThrow(Throwable thrown) throws T {
-    throw (T) thrown;
   }
 
   @Test

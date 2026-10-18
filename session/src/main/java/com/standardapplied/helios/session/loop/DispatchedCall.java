@@ -227,12 +227,12 @@ final class DispatchedCall {
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+    } catch (Error e) {
+      answer.completeExceptionally(e);
+      ending.fail(e);
     } catch (Throwable e) {
       if (!answer.completeExceptionally(e)) {
         LOGGER.log(Level.SEVERE, "tool '" + call.name() + "' threw after its call was answered", e);
-      }
-      if (e instanceof Error error) {
-        ending.fail(error);
       }
     } finally {
       if (!tokenClaimed.compareAndSet(false, true)) {
