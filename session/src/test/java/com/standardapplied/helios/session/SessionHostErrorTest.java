@@ -597,4 +597,26 @@ final class SessionHostErrorTest {
         };
     return options.withHook(failing);
   }
+
+  @Test
+  void anErrorAToolThrowsLeavesItsRoundWithoutAToolResult() {
+    var sentinel = new AssertionError("tool failure");
+    var tool =
+        binding(
+            "boom",
+            (args, ctx) -> {
+              throw sentinel;
+            });
+    var events = new CollectingSubscriber();
+
+    try (var session =
+        AgentSession.create(callingTool(new RecordingProvider(order), tool).build())) {
+      session.events().subscribe(events);
+      session.send("go");
+
+      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    }
+    events.awaitDone();
+    assertEquals(List.of(), events.eventsOf(QueryEvent.ToolResult.class));
+  }
 }
