@@ -8,6 +8,7 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.ContextCompactor;
 import com.standardapplied.helios.session.QueryEvent;
@@ -36,12 +37,13 @@ final class HookLoop implements AutoCloseable {
 
   /** A registry holding one READ tool, {@code echo}, that answers {@code "echoed: " + v}. */
   static ToolRegistry echoTool() {
+    return echoTool((args, ctx) -> ToolResult.success("echoed: " + args.get("v")));
+  }
+
+  /** A registry holding one READ tool, {@code echo}, run by {@code executor}. */
+  static ToolRegistry echoTool(ToolExecutor executor) {
     var echo =
-        Tool.newBuilder()
-            .withName("echo")
-            .withDescription("echo")
-            .withExecutor((args, ctx) -> ToolResult.success("echoed: " + args.get("v")))
-            .build();
+        Tool.newBuilder().withName("echo").withDescription("echo").withExecutor(executor).build();
     return new ToolRegistry(
         List.of(ToolBinding.newBuilder(echo).withCategory(ToolCategory.READ).build()));
   }

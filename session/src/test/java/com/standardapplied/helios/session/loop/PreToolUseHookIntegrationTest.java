@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
@@ -18,8 +17,6 @@ import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
-import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.ArrayList;
@@ -160,7 +157,7 @@ final class PreToolUseHookIntegrationTest {
           Await.latch("mutation", mutated);
           return outcome;
         };
-    var mutator = mutateAfter(returned, days, mutated);
+    var mutator = mutateAfter(returned, () -> days.add("added"), mutated);
     var executed = new AtomicReference<Map<String, Object>>();
     var model =
         ScriptedModel.newBuilder()
@@ -186,7 +183,7 @@ final class PreToolUseHookIntegrationTest {
     var call = HookLoop.echoCall(arguments);
     var observed = new CountDownLatch(1);
     var mutated = new CountDownLatch(1);
-    var mutator = mutateAfter(observed, options, mutated);
+    var mutator = mutateAfter(observed, () -> options.put("added", true), mutated);
     PreToolUseHook observer =
         (seen, ctx) -> {
           observed.countDown();
@@ -219,48 +216,26 @@ final class PreToolUseHookIntegrationTest {
   }
 
   /**
-   * A thread that waits for {@code ready}, then adds to {@code target} and counts down {@code
-   * done}.
+   * A thread that waits for {@code ready}, then runs {@code mutation} and counts down {@code done}.
    */
-  private static Thread mutateAfter(CountDownLatch ready, Object target, CountDownLatch done) {
+  private static Thread mutateAfter(CountDownLatch ready, Runnable mutation, CountDownLatch done) {
     return Thread.ofVirtual()
         .start(
             () -> {
               Await.latch("ready to mutate", ready);
-              switch (target) {
-                case List<?> list -> addTo(list);
-                case Map<?, ?> map -> putInto(map);
-                default -> throw new IllegalArgumentException(target.toString());
-              }
+              mutation.run();
               done.countDown();
             });
-  }
-
-  @SuppressWarnings("unchecked")
-  private static void addTo(List<?> list) {
-    ((List<Object>) list).add("added");
-  }
-
-  @SuppressWarnings("unchecked")
-  private static void putInto(Map<?, ?> map) {
-    ((Map<String, Object>) map).put("added", true);
   }
 
   /** A registry holding {@code echo}, which waits for {@code mutated} and records its arguments. */
   private static ToolRegistry awaitingTool(
       CountDownLatch mutated, AtomicReference<Map<String, Object>> executed) {
-    var echo =
-        Tool.newBuilder()
-            .withName("echo")
-            .withDescription("echo")
-            .withExecutor(
-                (args, ctx) -> {
-                  Await.latch("mutation", mutated);
-                  executed.set(args);
-                  return ToolResult.success("done");
-                })
-            .build();
-    return new ToolRegistry(
-        List.of(ToolBinding.newBuilder(echo).withCategory(ToolCategory.READ).build()));
+    return HookLoop.echoTool(
+        (args, ctx) -> {
+          Await.latch("mutation", mutated);
+          executed.set(args);
+          return ToolResult.success("done");
+        });
   }
 }
