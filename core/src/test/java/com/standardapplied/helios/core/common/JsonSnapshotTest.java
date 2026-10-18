@@ -259,16 +259,18 @@ class JsonSnapshotTest {
   }
 
   @Test
-  void bigNumbersAreAcceptedToTheDigitLimitAndRejectedBeyondIt() {
+  void bigNumbersAreAcceptedToTheDigitLimitOfTheirPlainNotationAndRejectedBeyondIt() {
     var digits = "9".repeat(JsonSnapshot.MAX_NUMBER_DIGITS);
-    var accepted =
-        Map.<String, Object>of(
-            "i",
-            new BigInteger("-" + digits),
-            "d",
-            new BigDecimal("-0." + digits.substring(1)),
-            "e",
-            new BigDecimal("9." + digits.substring(4) + "E+999"));
+    var accepted = new LinkedHashMap<String, Object>();
+    accepted.put("integer", new BigInteger("-" + digits));
+    accepted.put("fraction", new BigDecimal("-0." + digits.substring(1)));
+    accepted.put("exponent", new BigDecimal("9." + digits.substring(4) + "E+999"));
+    accepted.put("large", new BigDecimal("1E+999"));
+    accepted.put("small", new BigDecimal("-1E-999"));
+    accepted.put("zero", new BigDecimal(BigInteger.ZERO, -999_999_999));
+    accepted.put("zeros", new BigDecimal(BigInteger.ZERO, 999));
+    accepted.put("max", Double.MAX_VALUE);
+    accepted.put("min", -Double.MIN_VALUE);
 
     assertEquals(accepted, JsonSnapshot.ofObject("arguments", accepted));
     for (var tooLong :
@@ -278,7 +280,12 @@ class JsonSnapshotTest {
             BigInteger.TEN.pow(JsonSnapshot.MAX_NUMBER_DIGITS),
             new BigDecimal(digits + "1E-3"),
             new BigDecimal("0." + digits + "E-5"),
-            new BigDecimal(digits + "E+5"))) {
+            new BigDecimal(digits + "E+5"),
+            new BigDecimal("1E+1000"),
+            new BigDecimal("-1E-1000"),
+            new BigDecimal(BigInteger.ZERO, 1000),
+            new BigDecimal(BigInteger.ONE, Integer.MIN_VALUE),
+            new BigDecimal(BigInteger.ONE, Integer.MAX_VALUE))) {
       assertEquals(
           "arguments.n is a number of more than 1000 digits",
           assertThrows(
@@ -289,7 +296,7 @@ class JsonSnapshotTest {
   }
 
   @Test
-  void aDecimalWithAHugeCoefficientIsRejectedWithinASmallHeap(@TempDir Path directory)
+  void aDecimalWithAHugeCoefficientOrExponentIsRejectedWithinASmallHeap(@TempDir Path directory)
       throws Exception {
     var log = directory.resolve("probe.log");
     var builder =
@@ -312,7 +319,11 @@ class JsonSnapshotTest {
     try {
       Await.termination("the huge-decimal probe", process);
       assertEquals(0, process.exitValue(), Files.readString(log));
-      assertEquals("arguments.n is a number of more than 1000 digits", Files.readString(log));
+      assertEquals(
+          List.of(
+              "arguments.n is a number of more than 1000 digits",
+              "arguments.n is a number of more than 1000 digits"),
+          Files.readAllLines(log));
     } finally {
       process.destroyForcibly();
       Await.termination("the destroyed huge-decimal probe", process);
@@ -330,12 +341,15 @@ class JsonSnapshotTest {
 
   public static final class HugeDecimalProbe {
     public static void main(String[] args) {
-      var number = new BigDecimal(BigInteger.ONE.shiftLeft(128_000_000).negate());
-      System.out.print(
-          assertThrows(
-                  IllegalArgumentException.class,
-                  () -> JsonSnapshot.ofObject("arguments", Map.of("n", number)))
-              .getMessage());
+      var coefficient = new BigDecimal(BigInteger.ONE.shiftLeft(128_000_000).negate());
+      var exponent = new BigDecimal(BigInteger.ONE, -999_999_999);
+      for (var number : List.of(coefficient, exponent)) {
+        System.out.println(
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> JsonSnapshot.ofObject("arguments", Map.of("n", number)))
+                .getMessage());
+      }
     }
   }
 

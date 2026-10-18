@@ -35,9 +35,11 @@ import java.util.regex.Pattern;
  * included (Jackson 500); {@value #MAX_VALUES} values, containers included (Jackson unlimited);
  * {@value #MAX_STRING_LENGTH} characters in a string, the size of the largest event a provider
  * stream may carry (Jackson 100,000,000); {@value #MAX_KEY_LENGTH} characters in a key (Jackson
- * 50,000); {@value #MAX_NUMBER_DIGITS} digits in a {@link BigInteger} or {@link BigDecimal},
- * counting every digit of its JSON text ({@link BigDecimal#toString()}), zeros and exponent
- * included (Jackson 1,000).
+ * 50,000); {@value #MAX_NUMBER_DIGITS} digits in a {@link BigInteger} or {@link BigDecimal} written
+ * out in full ({@link BigDecimal#toPlainString()}), the form PostgreSQL's {@code jsonb} returns a
+ * number in, so every accepted number reads back from a journal (Jackson 1,000). Every finite
+ * {@link Double} and {@link Float} is within it: {@link Double#MIN_VALUE} written out in full has
+ * 326 digits.
  */
 public final class JsonSnapshot {
 
@@ -53,7 +55,7 @@ public final class JsonSnapshot {
   /** Characters an object key may hold. */
   public static final int MAX_KEY_LENGTH = 50_000;
 
-  /** Digits a {@link BigInteger} or {@link BigDecimal} may hold. */
+  /** Digits a {@link BigInteger} or {@link BigDecimal} may hold, written out in full. */
   public static final int MAX_NUMBER_DIGITS = 1_000;
 
   private static final Pattern PLAIN_KEY = Pattern.compile("[\\w$-]+");
@@ -93,8 +95,10 @@ public final class JsonSnapshot {
     count();
     return switch (value) {
       case null -> null;
-      case Boolean _, Byte _, Short _, Integer _, Long _ -> value;
-      case String string -> string(string);
+      case String string when string.length() > MAX_STRING_LENGTH ->
+          throw rejected(
+              "is a string of " + string.length() + " characters; at most " + MAX_STRING_LENGTH);
+      case Boolean _, Byte _, Short _, Integer _, Long _, String _ -> value;
       case Double number -> number(number, Double.isFinite(number));
       case Float number -> number(number, Float.isFinite(number));
       case BigInteger number when number.getClass() == BigInteger.class ->
@@ -103,8 +107,7 @@ public final class JsonSnapshot {
           number(
               number,
               number.unscaledValue().abs().compareTo(NUMBER_BOUND) < 0
-                  && number.toString().chars().filter(Character::isDigit).count()
-                      <= MAX_NUMBER_DIGITS);
+                  && plainDigits(number) <= MAX_NUMBER_DIGITS);
       case Map<?, ?> object -> object(object, depth + 1);
       case List<?> array -> array(array, depth + 1);
       default -> throw rejected("is a " + value.getClass().getName() + "; " + JSON_VALUES);
@@ -150,12 +153,12 @@ public final class JsonSnapshot {
     return string;
   }
 
-  private String string(String string) {
-    if (string.length() > MAX_STRING_LENGTH) {
-      throw rejected(
-          "is a string of " + string.length() + " characters; at most " + MAX_STRING_LENGTH);
+  private static long plainDigits(BigDecimal number) {
+    long scale = number.scale();
+    if (scale > 0) {
+      return Math.max(number.precision(), scale + 1);
     }
-    return string;
+    return number.signum() == 0 ? 1 : number.precision() - scale;
   }
 
   private Number number(Number number, boolean valid) {
