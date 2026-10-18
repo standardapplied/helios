@@ -23,6 +23,7 @@ import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -460,6 +461,91 @@ final class SessionStartTest {
 
     assertEquals("duplicate tool name in registry: AskUserQuestion", thrown.getMessage());
     assertEquals(0, provider.starts.get());
+  }
+
+  @Test
+  void aRefusalEndsTheSessionWithItsReasonAndProviderAndRefusesASend() {
+    var provider = new RecordingProvider(order);
+    provider.start = () -> SessionStartOutcome.refuse("pool saturated");
+
+    try (var session = AgentSession.create(withProvider(provider).build())) {
+      var refusal =
+          assertInstanceOf(
+              ResultMessage.ErrorProviderUnavailable.class,
+              Await.value("the result", session.result()));
+      assertEquals(
+          List.of("pool saturated", "RecordingProvider"),
+          List.of(refusal.reason(), refusal.providerName()));
+      assertThrows(IllegalStateException.class, () -> session.send("hi"));
+    }
+  }
+
+  @Test
+  void aStartUpExceptionIsARefusalNamingItAndCarryingItAsTheCause() {
+    var provider = new RecordingProvider(order);
+    provider.start =
+        () -> {
+          throw new IllegalStateException("auth failed");
+        };
+
+    try (var session = AgentSession.create(withProvider(provider).build())) {
+      var refusal =
+          assertInstanceOf(
+              ResultMessage.ErrorProviderUnavailable.class,
+              Await.value("the result", session.result()));
+      assertEquals("onSessionStart threw IllegalStateException: auth failed", refusal.reason());
+      var cause = refusal.causeOpt().orElseThrow();
+      assertEquals(
+          List.of(IllegalStateException.class.getName(), "auth failed"),
+          List.of(cause.kind(), cause.message()));
+    }
+  }
+
+  @Test
+  void aStartUpExceptionWithoutAMessageIsReportedAsNoMessage() {
+    var provider = new RecordingProvider(order);
+    provider.start =
+        () -> {
+          throw new IllegalStateException();
+        };
+
+    try (var session = AgentSession.create(withProvider(provider).build())) {
+      var refusal =
+          assertInstanceOf(
+              ResultMessage.ErrorProviderUnavailable.class,
+              Await.value("the result", session.result()));
+      assertEquals("onSessionStart threw IllegalStateException: (no message)", refusal.reason());
+    }
+  }
+
+  @Test
+  void aRefusalWithACauseCarriesItsWholeCauseChain() {
+    var root = new IOException("Cannot run program 'java': No such file or directory");
+    var wrapper = new RuntimeException("Failed to start JVM sandbox subprocess", root);
+    var provider = new RecordingProvider(order);
+    provider.start = () -> SessionStartOutcome.refuse("failed to spawn sandbox", wrapper);
+
+    try (var session = AgentSession.create(withProvider(provider).build())) {
+      var refusal =
+          assertInstanceOf(
+              ResultMessage.ErrorProviderUnavailable.class,
+              Await.value("the result", session.result()));
+      var cause = refusal.causeOpt().orElseThrow();
+      var rootCause = cause.causeOpt().orElseThrow();
+      assertEquals(
+          List.of(
+              "failed to spawn sandbox",
+              RuntimeException.class.getName(),
+              "Failed to start JVM sandbox subprocess",
+              IOException.class.getName(),
+              "Cannot run program 'java': No such file or directory"),
+          List.of(
+              refusal.reason(),
+              cause.kind(),
+              cause.message(),
+              rootCause.kind(),
+              rootCause.message()));
+    }
   }
 
   private static SessionOptions.Builder withProvider(RecordingProvider provider) {
