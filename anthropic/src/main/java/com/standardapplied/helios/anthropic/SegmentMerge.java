@@ -30,7 +30,8 @@ final class SegmentMerge {
     var verbatim = new ArrayList<Object>(blocksOf(first));
     verbatim.addAll(blocksOf(second));
     if (!verbatim.isEmpty()) {
-      metadata.put(RawContentEcho.RAW_CONTENT_KEY, serialize(verbatim));
+      metadata.put(
+          RawContentEcho.RAW_CONTENT_KEY, AnthropicJson.LENIENT.writeValueAsString(verbatim));
     }
     var thinkingBlocks = new ArrayList<ThinkingBlock>(ThinkingBlock.decodeAll(first.metadata()));
     if (!thinkingBlocks.isEmpty()) {
@@ -113,14 +114,6 @@ final class SegmentMerge {
           block("tool_use", "id", call.id(), "name", call.name(), "input", call.arguments()));
     }
     return blocks;
-  }
-
-  private static String serialize(List<Object> blocks) {
-    try {
-      return AnthropicJson.LENIENT.writeValueAsString(blocks);
-    } catch (RuntimeException e) {
-      throw new AnthropicException("Failed to merge paused-turn content arrays", e);
-    }
   }
 
   private static Map<String, Object> block(String type, Object... fields) {

@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -30,6 +31,9 @@ public final class JsonbMapper {
   public static final int MAX_JSONB_BYTES = 256 * 1024;
 
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
+
+  private static final ObjectMapper ARGUMENTS_MAPPER =
+      JsonMapper.builder().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
   private JsonbMapper() {}
 
@@ -93,11 +97,25 @@ public final class JsonbMapper {
 
   /** Deserializes a JSONB string to a {@code Map<String, Object>}. */
   public static Map<String, Object> fromJsonbObject(String json) {
+    return readObject(MAPPER, json);
+  }
+
+  /**
+   * Deserializes a JSONB string holding tool-call arguments to a {@code Map<String, Object>}. A
+   * number reads back as its exact JSON value: an integer as an {@link Integer}, {@link Long} or
+   * {@link java.math.BigInteger}, a fraction as a {@link java.math.BigDecimal}, never as a rounded
+   * or infinite {@link Double}.
+   */
+  public static Map<String, Object> argumentsFromJsonb(String json) {
+    return readObject(ARGUMENTS_MAPPER, json);
+  }
+
+  private static Map<String, Object> readObject(ObjectMapper mapper, String json) {
     if (Strings.isBlank(json) || "{}".equals(json)) {
       return Map.of();
     }
     try {
-      return MAPPER.readValue(json, OBJECT_MAP_TYPE);
+      return mapper.readValue(json, OBJECT_MAP_TYPE);
     } catch (Exception e) {
       throw new IllegalArgumentException("Failed to deserialize object from JSON: " + json, e);
     }
@@ -127,13 +145,16 @@ public final class JsonbMapper {
 
   private static final TypeReference<List<ToolCall>> TOOL_CALLS_TYPE = new TypeReference<>() {};
 
-  /** Deserializes a JSONB string to a list of tool calls. */
+  /**
+   * Deserializes a JSONB string to a list of tool calls, their arguments read as {@link
+   * #argumentsFromJsonb(String)} reads them.
+   */
   public static List<ToolCall> toolCallsFromJsonb(String json) {
     if (Strings.isBlank(json) || "[]".equals(json)) {
       return List.of();
     }
     try {
-      return MAPPER.readValue(json, TOOL_CALLS_TYPE);
+      return ARGUMENTS_MAPPER.readValue(json, TOOL_CALLS_TYPE);
     } catch (Exception e) {
       throw new IllegalArgumentException("Failed to deserialize tool calls from JSON: " + json, e);
     }

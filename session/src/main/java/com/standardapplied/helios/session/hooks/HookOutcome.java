@@ -4,7 +4,7 @@
  */
 package com.standardapplied.helios.session.hooks;
 
-import com.standardapplied.helios.core.common.OrderedMaps;
+import com.standardapplied.helios.core.common.JsonSnapshot;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Message;
 import java.util.List;
@@ -141,16 +141,18 @@ public sealed interface HookOutcome
   }
 
   /**
-   * Replace tool arguments at {@link PreToolUseHook}.
+   * Replace tool arguments at {@link PreToolUseHook}. Arguments {@link JsonSnapshot} rejects throw
+   * {@link IllegalArgumentException}; thrown from a hook, that makes the hook's outcome {@link
+   * Continue}.
    *
-   * @param args the replacement arguments; non-null, defensively copied in the given order, keeping
-   *     {@code null} values
+   * @param args the replacement arguments; non-null, a JSON object snapshotted as {@link
+   *     JsonSnapshot} defines it
    */
   record MutateArgs(Map<String, Object> args) implements HookOutcome {
 
     public MutateArgs {
       Objects.requireNonNull(args, "args must not be null");
-      args = OrderedMaps.copyOfKeepingNullValues(args);
+      args = JsonSnapshot.ofObject("args", args);
     }
   }
 

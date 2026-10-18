@@ -15,10 +15,12 @@ import org.junit.jupiter.api.Test;
 
 /**
  * What every provider's request carries of a conversation, proven offline against a stub: the
- * system message, and every earlier turn in order. These are the request-shape guarantees a live
- * test cannot check without reading what the model wrote. A provider's test extends this, supplies
- * its model at a stub's address and a recorded text reply, parses the request body Helios sent, and
- * reads the system prompt and the turn texts out of it.
+ * system message, every earlier turn in order, and a decoded tool call's arguments exactly as they
+ * streamed, each JSON {@code null} included. These are the request-shape guarantees a live test
+ * cannot check without reading what the model wrote. A provider's test extends this, supplies its
+ * model at a stub's address, a recorded text reply and a recorded tool call, parses the request
+ * body Helios sent, and reads the system prompt, the turn texts and the replayed arguments out of
+ * it.
  */
 public abstract class ConversationRequestContract {
 
@@ -37,6 +39,22 @@ public abstract class ConversationRequestContract {
    * @return the golden file name
    */
   protected abstract String reply();
+
+  /**
+   * The golden file holding a recorded reply that calls tool {@code weather} with {@link
+   * ConversationFixture#nullArguments()}.
+   *
+   * @return the golden file name
+   */
+  protected abstract String toolCallReply();
+
+  /**
+   * The arguments of the one tool call the request replays.
+   *
+   * @param request the parsed request body
+   * @return the arguments, parsed
+   */
+  protected abstract Map<String, Object> replayedArguments(Map<String, Object> request);
 
   /**
    * The request body parsed as a JSON object.
@@ -82,6 +100,32 @@ public abstract class ConversationRequestContract {
                 Message.user(turns.get(2))));
 
     assertEquals(turns, turnTexts(request));
+  }
+
+  @Test
+  void aDecodedToolCallIsSentBackWithEveryNullArgument() {
+    var arguments = ConversationFixture.nullArguments();
+    var ask = Message.user("Weather in Paris?");
+    var replies = List.of(Golden.read(toolCallReply()), Golden.read(reply()));
+
+    var requests =
+        ModelHarness.exchange(
+            replies,
+            modelAt(),
+            model -> {
+              var call =
+                  model.chat(List.of(ask), ConversationFixture.tools()).toolCalls().getFirst();
+              assertEquals(arguments, call.arguments());
+              model.chat(
+                  List.of(
+                      ask,
+                      Message.assistant(List.of(call)),
+                      Message.tool(call.id(), call.name(), "18C and sunny")),
+                  ConversationFixture.tools());
+            });
+
+    assertEquals(2, requests.size());
+    assertEquals(arguments, replayedArguments(parse(requests.getLast().body())));
   }
 
   /** The parsed body of the one request the model sends for {@code messages}. */

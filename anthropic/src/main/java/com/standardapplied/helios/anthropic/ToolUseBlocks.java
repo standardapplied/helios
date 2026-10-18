@@ -6,12 +6,12 @@ import com.standardapplied.helios.anthropic.api.AnthropicJson;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.provider.ToolArguments;
+import com.standardapplied.helios.core.provider.ToolCallStarts;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -35,10 +35,15 @@ final class ToolUseBlocks implements RawContentEcho.Source {
         name, json, AnthropicJson.STRUCTURED.reader(), AnthropicException::new);
   }
 
-  /** A tool-use block opening at {@code index}: the start of its call. */
+  /**
+   * A tool-use block opening at {@code index}: the start of its call.
+   *
+   * @throws AnthropicException if the block has no id or no name
+   */
   StreamEvent start(int index, String id, String name) {
+    var started = ToolCallStarts.of(id, name, AnthropicException::new);
     pending.put(index, new Pending(id, name, new StringBuilder()));
-    return new StreamEvent.ToolCallStart(id, name);
+    return started;
   }
 
   /** Input JSON streamed into the open block at {@code index}: its delta, if the block is open. */
@@ -68,14 +73,9 @@ final class ToolUseBlocks implements RawContentEcho.Source {
     return new StreamEvent.ToolCallComplete(call);
   }
 
-  /**
-   * The name of a tool-use block still open, {@code <unnamed>} when it has none, or {@code null}
-   * when no block is open.
-   */
+  /** The name of a tool-use block still open, or {@code null} when no block is open. */
   String open() {
-    return pending.isEmpty()
-        ? null
-        : Objects.requireNonNullElse(pending.values().iterator().next().name(), "<unnamed>");
+    return pending.isEmpty() ? null : pending.values().iterator().next().name();
   }
 
   /** The tool calls, in the order they closed. */

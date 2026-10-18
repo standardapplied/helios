@@ -2,28 +2,31 @@
 
 package com.standardapplied.helios.core.provider;
 
+import com.standardapplied.helios.core.common.JsonSnapshot;
 import com.standardapplied.helios.core.model.ProviderException;
 import java.util.Map;
 
 /**
- * The arguments a model streamed for a tool call, read as the JSON object every tool takes. A call
- * whose arguments are anything else is never dispatched: reading them fails with the provider's
- * exception, naming the tool, which ends the stream in an error.
+ * The arguments a model streamed for a tool call, read as the JSON object every tool takes and
+ * snapshotted as {@link JsonSnapshot} defines it. A call whose arguments are anything else is never
+ * dispatched: reading them fails with the provider's exception, naming the tool, which ends the
+ * stream in an error.
  */
 public final class ToolArguments {
 
   private ToolArguments() {}
 
   /**
-   * The JSON object {@code json} as a map; empty when no arguments streamed. A {@code null} value
-   * inside the object stays {@code null}.
+   * The JSON object {@code json} as a {@link JsonSnapshot}; empty when no arguments streamed. A
+   * {@code null} value inside the object stays {@code null}.
    *
    * @param toolName the tool the arguments are for
    * @param json the arguments as streamed
    * @param reader the provider's JSON reader
    * @param failure creates the provider's exception
    * @return the arguments
-   * @throws ProviderException if {@code json} is not a JSON object
+   * @throws ProviderException if {@code json} is not a JSON object, or is one {@link JsonSnapshot}
+   *     rejects
    */
   public static Map<String, Object> read(
       String toolName, String json, JsonBinding.Reader reader, ProviderFailure failure) {
@@ -39,7 +42,12 @@ public final class ToolArguments {
     if (arguments == null) {
       throw notAnObject(toolName, "null", failure, null);
     }
-    return arguments;
+    try {
+      return JsonSnapshot.ofObject("arguments", arguments);
+    } catch (IllegalArgumentException e) {
+      throw failure.create(
+          "Arguments of tool call '" + toolName + "' are rejected: " + e.getMessage(), 0, e);
+    }
   }
 
   private static ProviderException notAnObject(

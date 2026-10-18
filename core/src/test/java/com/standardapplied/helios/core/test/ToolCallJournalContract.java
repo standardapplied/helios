@@ -12,7 +12,10 @@ import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.runtime.ToolCallJournal;
 import com.standardapplied.helios.core.runtime.ToolCallRecord;
 import com.standardapplied.helios.core.runtime.ToolCallStatus;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,6 +71,21 @@ public abstract class ToolCallJournalContract {
         .withArgs(Map.of("k", "v"))
         .withStartedAt(startedAt)
         .build();
+  }
+
+  /** The arguments of a call started with {@code args}, as the journal reads them back. */
+  private Map<String, Object> startedArgs(Map<String, Object> args) {
+    var runId = newRunId();
+    journal.start(
+        ToolCallRecord.newBuilder()
+            .withRunId(runId)
+            .withIteration(0)
+            .withToolCallId("c1")
+            .withToolName("tool")
+            .withArgs(args)
+            .withStartedAt(Ids.now())
+            .build());
+    return journal.all(runId).getFirst().args();
   }
 
   @BeforeEach
@@ -191,18 +209,38 @@ public abstract class ToolCallJournalContract {
 
   @Test
   void argsNullPersistsAsNull() {
-    var runId = newRunId();
-    var record =
-        ToolCallRecord.newBuilder()
-            .withRunId(runId)
-            .withIteration(0)
-            .withToolCallId("c1")
-            .withToolName("send")
-            .withArgs(null)
-            .withStartedAt(Ids.now())
-            .build();
-    journal.start(record);
-    assertNull(journal.all(runId).get(0).args());
+    assertNull(startedArgs(null));
+  }
+
+  @Test
+  void argsKeepEveryTopLevelAndNestedJsonNull() {
+    var args = ConversationFixture.nullArguments();
+
+    assertEquals(args, startedArgs(args));
+  }
+
+  @Test
+  void argsReadBackEveryNumberExactInValue() {
+    var args = new LinkedHashMap<String, Object>();
+    args.put("beyondDouble", new BigDecimal("2" + "0".repeat(308) + ".5"));
+    args.put("large", new BigDecimal("-1E+999"));
+    args.put("small", new BigDecimal("1E-999"));
+    args.put("max", Double.MAX_VALUE);
+    args.put("min", Double.MIN_VALUE);
+    args.put("float", 1.1f);
+    args.put("byte", (byte) 7);
+    args.put("integer", new BigInteger("9".repeat(1000)));
+
+    var read = startedArgs(args);
+
+    assertEquals(args.keySet(), read.keySet());
+    args.forEach(
+        (key, value) ->
+            assertEquals(
+                0,
+                new BigDecimal(value.toString())
+                    .compareTo(new BigDecimal(read.get(key).toString())),
+                key + " read back as " + read.get(key)));
   }
 
   @Test
