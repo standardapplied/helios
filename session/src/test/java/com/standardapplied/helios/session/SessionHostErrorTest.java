@@ -26,7 +26,6 @@ import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.PreStopHook;
-import com.standardapplied.helios.session.loop.TurnRunner;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolRegistry;
