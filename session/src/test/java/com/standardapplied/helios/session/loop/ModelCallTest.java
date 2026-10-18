@@ -249,7 +249,7 @@ final class ModelCallTest {
     var attempts =
         Await.value(
             "the call",
-            run(() -> call.stream(state, retrying(2, Duration.ofMillis(1)), List.of())));
+            run(() -> call.stream(state, retrying(2, Duration.ofMillis(50)), List.of())));
 
     assertEquals(2, attempts.count());
     assertEquals(2, model.calls.get());

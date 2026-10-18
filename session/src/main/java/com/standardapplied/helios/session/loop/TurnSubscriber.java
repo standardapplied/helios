@@ -19,7 +19,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Translates a model's {@link ModelChunk} stream into per-turn {@link QueryEvent}s and accumulates
@@ -64,7 +63,6 @@ import java.util.concurrent.TimeUnit;
  */
 final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
 
-  private static final long CANCELLATION_CHECK_MILLIS = 10;
   private static final String CANCELLED = "session cancelled while waiting for model stream";
 
   private final SessionState state;
@@ -222,20 +220,17 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * <p>An interrupt ends the stream as cancellation does, unless another ending came first, and
    * this returns the turn's outcome with the interrupt status restored.
    *
-   * <p>The token is also read as this waits: it runs its callbacks one after another, so a callback
-   * registered before this one that blocks would otherwise keep the stream open and the session
-   * from ever reaching its teardown. The cancellation callback is removed in {@code finally} so a
-   * long-lived session token does not accumulate one stale registration per turn (see the {@code
-   * CancellationToken.onCancel} cleanup contract).
+   * <p>The token is also read as this waits ({@link TokenWait}), so a callback registered before
+   * this one that blocks cannot keep the stream open. The cancellation callback is removed in
+   * {@code finally} so a long-lived session token does not accumulate one stale registration per
+   * turn (see the {@code CancellationToken.onCancel} cleanup contract).
    */
   StreamedTurn awaitDone(CancellationToken cancellation) {
     var registration = cancellation.onCancel(() -> end(new CancellationException(CANCELLED), true));
     try {
-      while (!released()) {
-        if (!done.await(CANCELLATION_CHECK_MILLIS, TimeUnit.MILLISECONDS)
-            && cancellation.isCancelled()) {
-          end(new CancellationException(CANCELLED), true);
-        }
+      if (!TokenWait.opens(done, cancellation)) {
+        end(new CancellationException(CANCELLED), true);
+        done.await();
       }
     } catch (InterruptedException e) {
       end(e, true);
