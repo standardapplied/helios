@@ -74,10 +74,7 @@ final class FunctionCalls {
     return new StreamEvent.ToolCallComplete(toolCall);
   }
 
-  /**
-   * The name of a function call whose arguments are still open, {@code <unnamed>} when it has none,
-   * or {@code null} when no call is open.
-   */
+  /** The name of a function call whose arguments are still open, or {@code null} when none is. */
   String open() {
     return pending.isEmpty() ? null : pending.values().iterator().next().name();
   }

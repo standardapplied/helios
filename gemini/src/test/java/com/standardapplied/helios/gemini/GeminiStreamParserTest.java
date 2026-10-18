@@ -178,6 +178,17 @@ class GeminiStreamParserTest {
     assertInstanceOf(GeminiException.class, error.cause());
   }
 
+  @Test
+  void aNamelessFunctionCallStartingWithArgumentsThatAreNotAnObjectFailsForItsMissingName() {
+    var events =
+        drain(
+            stepStart(1, "{\"type\":\"function_call\",\"id\":\"c1\",\"arguments\":[1]}")
+                + interactionEnded("requires_action"));
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals("A tool call streamed without a tool name", error.message());
+  }
+
   @ParameterizedTest(name = "{0}")
   @ValueSource(
       strings = {

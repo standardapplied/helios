@@ -76,13 +76,14 @@ final class StreamedSteps {
     state.type = step.type();
     state.name = step.name();
     state.id = step.id();
-    state.startArguments =
-        state.isCall() && step.arguments() != null ? state.read(step.arguments().toString()) : null;
+    if (state.isCall()) {
+      var started = ToolCallStarts.of(state.id, state.name, GeminiException::new);
+      state.startArguments =
+          step.arguments() == null ? null : state.read(step.arguments().toString());
+      return started;
+    }
     if (step.hasTypeThought()) {
       return thought(step);
-    }
-    if (state.isCall()) {
-      return ToolCallStarts.of(state.id, state.name, GeminiException::new);
     }
     return step.hasTypeModelOutput() && step.hasContent() ? output.initialText(step) : null;
   }
@@ -131,10 +132,7 @@ final class StreamedSteps {
     return "thought".equals(state.type) ? output.thinkingComplete() : null;
   }
 
-  /**
-   * The name of a function call whose step is still open, {@code <unnamed>} when it has none, or
-   * {@code null} when none is open.
-   */
+  /** The name of a function call whose step is still open, or {@code null} when none is open. */
   String openCall() {
     return steps.values().stream()
         .filter(StepState::isCall)
