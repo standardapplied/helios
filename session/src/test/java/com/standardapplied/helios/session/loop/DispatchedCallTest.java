@@ -11,6 +11,7 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolExecutor;
@@ -100,7 +101,7 @@ final class DispatchedCallTest {
   /** Counts its run, then waits for {@link #toolRelease} through every interruption. */
   private ToolResult blocking(Map<String, Object> args, ToolContext ctx) {
     var result = counting(args, ctx);
-    DispatchFixture.awaitThroughInterrupts(toolRelease);
+    Uninterruptible.await(toolRelease);
     return result;
   }
 
@@ -110,7 +111,7 @@ final class DispatchedCallTest {
     session.onCancel(
         () -> {
           callbackEntered.countDown();
-          DispatchFixture.awaitThroughInterrupts(callbackRelease);
+          Uninterruptible.await(callbackRelease);
         });
     return session;
   }
@@ -151,7 +152,7 @@ final class DispatchedCallTest {
 
   @Test
   void aWorkerReachingAdmissionPastItsDeadlineKeepsTheToolFromStarting() {
-    busy.execute(() -> DispatchFixture.awaitThroughInterrupts(busyRelease));
+    busy.execute(() -> Uninterruptible.await(busyRelease));
 
     dispatched(Duration.ofNanos(1)).start(busy);
 
@@ -285,7 +286,7 @@ final class DispatchedCallTest {
 
   @Test
   void aTimeoutReadAfterTheSessionWasCancelledIsNotReturned() {
-    busy.execute(() -> DispatchFixture.awaitThroughInterrupts(busyRelease));
+    busy.execute(() -> Uninterruptible.await(busyRelease));
     var session = blockedSession();
     var dispatched = dispatched(Duration.ofNanos(1), session);
     dispatched.start(busy);

@@ -9,7 +9,6 @@ import static com.standardapplied.helios.session.loop.DispatchFixture.NEVER;
 import static com.standardapplied.helios.session.loop.DispatchFixture.SHORT;
 import static com.standardapplied.helios.session.loop.DispatchFixture.assertCancelled;
 import static com.standardapplied.helios.session.loop.DispatchFixture.awaitIdle;
-import static com.standardapplied.helios.session.loop.DispatchFixture.awaitThroughInterrupts;
 import static com.standardapplied.helios.session.loop.DispatchFixture.binding;
 import static com.standardapplied.helios.session.loop.DispatchFixture.call;
 import static com.standardapplied.helios.session.loop.DispatchFixture.start;
@@ -23,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolOutcome;
@@ -386,7 +386,7 @@ final class ToolDispatchTest {
           var current = inFlight.incrementAndGet();
           peak.updateAndGet(p -> Math.max(p, current));
           started.countDown();
-          awaitThroughInterrupts(fixture.release);
+          Uninterruptible.await(fixture.release);
           inFlight.decrementAndGet();
           return ToolResult.success("ok");
         };
@@ -420,7 +420,7 @@ final class ToolDispatchTest {
           var cancelled = new CountDownLatch(1);
           ctx.cancellation().onCancel(cancelled::countDown);
           fixture.entered.countDown();
-          awaitThroughInterrupts(cancelled);
+          Uninterruptible.await(cancelled);
           stopped.countDown();
           return ToolResult.success("stopped");
         };
@@ -595,7 +595,7 @@ final class ToolDispatchTest {
 
   @Test
   void aCallWhoseDeadlinePassesWhileTheSchedulerIsBusyTimesOutWithoutStartingTheTool() {
-    fixture.scheduler.execute(() -> awaitThroughInterrupts(fixture.schedulerFree));
+    fixture.scheduler.execute(() -> Uninterruptible.await(fixture.schedulerFree));
     var starts = new AtomicInteger();
     var d =
         fixture.dispatcher(
@@ -648,7 +648,7 @@ final class ToolDispatchTest {
         (args, ctx) -> {
           order.add(args.get("n"));
           fixture.entered.countDown();
-          awaitThroughInterrupts(fixture.release);
+          Uninterruptible.await(fixture.release);
           return ToolResult.success("done");
         };
     var d =
@@ -740,7 +740,7 @@ final class ToolDispatchTest {
   private ToolExecutor failsLate(Error error) {
     return (args, ctx) -> {
       fixture.entered.countDown();
-      awaitThroughInterrupts(fixture.release);
+      Uninterruptible.await(fixture.release);
       throw error;
     };
   }

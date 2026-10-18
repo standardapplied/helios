@@ -11,7 +11,6 @@ import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import java.util.List;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
@@ -29,21 +28,6 @@ final class RecordingProvider implements ExecutionProvider {
 
   RecordingProvider(List<String> order) {
     this.end = () -> order.add("onSessionEnd");
-  }
-
-  /** Blocks until {@code latch} opens, as an extension that ignores interruption does. */
-  static void blockIgnoringInterrupts(CountDownLatch latch) {
-    var interrupted = false;
-    while (latch.getCount() > 0) {
-      try {
-        latch.await();
-      } catch (InterruptedException e) {
-        interrupted = true;
-      }
-    }
-    if (interrupted) {
-      Thread.currentThread().interrupt();
-    }
   }
 
   @Override

@@ -19,6 +19,7 @@ import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.loop.SessionState;
 import java.io.IOException;
@@ -639,7 +640,7 @@ final class DropMiddleToolResultsCompactorTest {
       @Override
       public Response<Void> chat(List<Message> messages, List<Tool> tools) {
         calling.complete(Thread.currentThread());
-        RecordingProvider.blockIgnoringInterrupts(released);
+        Uninterruptible.await(released);
         failure.run();
         throw new IllegalStateException("the failure did not throw");
       }

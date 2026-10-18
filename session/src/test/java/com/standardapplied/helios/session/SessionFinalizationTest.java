@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.HookOutcome;
@@ -71,9 +72,7 @@ final class SessionFinalizationTest {
             token ->
                 subscriber ->
                     subscriber.onSubscribe(
-                        subscription(
-                            requested::countDown,
-                            () -> RecordingProvider.blockIgnoringInterrupts(released))));
+                        subscription(requested::countDown, () -> Uninterruptible.await(released))));
     var session = AgentSession.create(options(model).withLimits(grace()).build());
     session.send("go");
     Await.latch("the stream requested", requested);
@@ -104,7 +103,7 @@ final class SessionFinalizationTest {
   @Test
   void anOnSessionEndThatNeverReturnsIsReportedAndTheResultStillSettles() {
     var provider = new RecordingProvider(order);
-    provider.end = () -> RecordingProvider.blockIgnoringInterrupts(released);
+    provider.end = () -> Uninterruptible.await(released);
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
         var session = AgentSession.create(withProvider(provider).withLimits(grace()).build())) {
@@ -126,8 +125,7 @@ final class SessionFinalizationTest {
             .withHook(
                 (PreStopHook)
                     (response, ctx) -> {
-                      ctx.cancellation()
-                          .onCancel(() -> RecordingProvider.blockIgnoringInterrupts(released));
+                      ctx.cancellation().onCancel(() -> Uninterruptible.await(released));
                       return HookOutcome.cont();
                     })
             .withLimits(grace());
@@ -146,7 +144,7 @@ final class SessionFinalizationTest {
   @Test
   void anInterruptedCloseStopsWaitingForTheTeardownAndKeepsTheInterrupt() {
     var provider = new RecordingProvider(order);
-    provider.end = () -> RecordingProvider.blockIgnoringInterrupts(released);
+    provider.end = () -> Uninterruptible.await(released);
     var session = AgentSession.create(withProvider(provider).withLimits(slowGrace()).build());
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
@@ -170,10 +168,7 @@ final class SessionFinalizationTest {
         ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
     var provider = new RecordingProvider(order);
     var session = AgentSession.create(withProvider(provider, model).withLimits(grace()).build());
-    provider
-        .context
-        .cancellation()
-        .onCancel(() -> RecordingProvider.blockIgnoringInterrupts(released));
+    provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
     session.send("go");
     Await.latch("the model call to start", entered);
 
@@ -186,10 +181,7 @@ final class SessionFinalizationTest {
   void aCancellationCallbackThatNeverReturnsOnCloseIsReportedAndTheResultStillSettles() {
     var provider = new RecordingProvider(order);
     var session = AgentSession.create(withProvider(provider).withLimits(grace()).build());
-    provider
-        .context
-        .cancellation()
-        .onCancel(() -> RecordingProvider.blockIgnoringInterrupts(released));
+    provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
       session.close();
@@ -227,7 +219,7 @@ final class SessionFinalizationTest {
     provider.end =
         () -> {
           inTeardown.countDown();
-          RecordingProvider.blockIgnoringInterrupts(proceed);
+          Uninterruptible.await(proceed);
         };
 
     try (var session =
@@ -251,7 +243,7 @@ final class SessionFinalizationTest {
     provider.end =
         () -> {
           inTeardown.countDown();
-          RecordingProvider.blockIgnoringInterrupts(proceed);
+          Uninterruptible.await(proceed);
         };
     var limits =
         SessionLimits.newBuilder()
@@ -285,7 +277,7 @@ final class SessionFinalizationTest {
               new CollectingSubscriber(
                   event -> {
                     entered.countDown();
-                    RecordingProvider.blockIgnoringInterrupts(released);
+                    Uninterruptible.await(released);
                   }));
       session.send("go");
 
@@ -372,7 +364,7 @@ final class SessionFinalizationTest {
             "stuck",
             (args, ctx) -> {
               started.countDown();
-              RecordingProvider.blockIgnoringInterrupts(released);
+              Uninterruptible.await(released);
               return ToolResult.success("too late");
             });
 
@@ -404,7 +396,7 @@ final class SessionFinalizationTest {
             "needs-provider",
             (args, ctx) -> {
               started.countDown();
-              RecordingProvider.blockIgnoringInterrupts(providerEnded);
+              Uninterruptible.await(providerEnded);
               return ToolResult.success("late");
             });
 
@@ -432,7 +424,7 @@ final class SessionFinalizationTest {
             (args, ctx) -> {
               var sessionEnded = new CountDownLatch(1);
               ctx.sessionContext().cancellation().onCancel(sessionEnded::countDown);
-              RecordingProvider.blockIgnoringInterrupts(sessionEnded);
+              Uninterruptible.await(sessionEnded);
               order.add("tool ended");
               return ToolResult.success("late");
             });
@@ -480,7 +472,7 @@ final class SessionFinalizationTest {
     provider.end =
         () -> {
           ending.countDown();
-          RecordingProvider.blockIgnoringInterrupts(released);
+          Uninterruptible.await(released);
         };
     var loopThread = new CompletableFuture<Thread>();
     var options =

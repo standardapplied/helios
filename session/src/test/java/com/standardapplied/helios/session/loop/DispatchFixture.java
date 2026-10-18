@@ -9,6 +9,7 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolOutcome;
@@ -128,23 +129,9 @@ final class DispatchFixture implements AutoCloseable {
     return (args, ctx) -> {
       ctx.cancellation().onCancel(cancelled::countDown);
       entered.countDown();
-      awaitThroughInterrupts(release);
+      Uninterruptible.await(release);
       return ToolResult.success("late");
     };
-  }
-
-  static void awaitThroughInterrupts(CountDownLatch latch) {
-    var interrupted = false;
-    while (latch.getCount() > 0) {
-      try {
-        latch.await();
-      } catch (InterruptedException e) {
-        interrupted = true;
-      }
-    }
-    if (interrupted) {
-      Thread.currentThread().interrupt();
-    }
   }
 
   /**
@@ -155,7 +142,7 @@ final class DispatchFixture implements AutoCloseable {
     return (args, ctx) -> {
       starts.incrementAndGet();
       entered.countDown();
-      awaitThroughInterrupts(release);
+      Uninterruptible.await(release);
       return ToolResult.success("done");
     };
   }
@@ -204,7 +191,7 @@ final class DispatchFixture implements AutoCloseable {
    */
   ToolExecutor blockingCallback(CountDownLatch interrupted) {
     return (args, ctx) -> {
-      ctx.cancellation().onCancel(() -> awaitThroughInterrupts(release));
+      ctx.cancellation().onCancel(() -> Uninterruptible.await(release));
       return interruptible(interrupted).execute(args, ctx);
     };
   }
@@ -217,7 +204,7 @@ final class DispatchFixture implements AutoCloseable {
     session.onCancel(
         () -> {
           entered.countDown();
-          awaitThroughInterrupts(callbackRelease);
+          Uninterruptible.await(callbackRelease);
         });
   }
 
