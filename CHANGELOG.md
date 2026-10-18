@@ -497,7 +497,27 @@ the stream produced before it failed.
 | An Anthropic server-tool input that was not a JSON object was echoed back as `{"_raw": "..."}` | the stream ends in an `Error` naming the tool and the parse failure |
 | SSE framing took each `data: ` line (exactly one space) as one event | events end at a blank line; `data` with or without the space, several `data` lines joined by a newline, CR, LF or CRLF, comments ignored, one byte order mark at the start of the body dropped; an event cut off before its blank line is dropped; a line or an event over 16 MiB ends the stream in an `Error` |
 | `SseReader.Parser.finished()` and `complete()` | removed; a `Done` or `Error` from `parse` ends the stream, and `partial()` gives what a cut-off stream produced |
-| `ToolCall.Builder.withArguments` rejected a `null` value | a JSON `null` argument stays a `null` value (`OrderedMaps.copyOfKeepingNullValues`); `HookOutcome.MutateArgs`, both `QueryEvent.ToolMutated` inputs and `HeliosEvent.ToolCallStarted.args` keep it too |
+| `ToolCall.Builder.withArguments` rejected a `null` value | a JSON `null` argument stays a `null` value (`core.common.JsonSnapshot`); `HookOutcome.MutateArgs`, both `QueryEvent.ToolMutated` inputs and `HeliosEvent.ToolCallStarted.args` keep it too |
+
+**A tool call is a validated, deeply immutable snapshot of a JSON object.** The call a hook
+authorises is now the call the tool executes, the events record and a journal persists: its
+arguments are copied once, all the way down, where they enter (`ToolCall`, `HookOutcome.MutateArgs`,
+both `QueryEvent.ToolMutated` inputs, `HeliosEvent.ToolCallStarted.args`, `ToolCallRecord.args`),
+through the new `core.common.JsonSnapshot.ofObject(name, map)`. A JSON value is `null`, a
+`Boolean`, a `String`, a `Byte`, `Short`, `Integer`, `Long`, `BigInteger` or `BigDecimal`, a finite
+`Float` or `Double` (each kept as the same instance, so no precision changes), a `List`, or a `Map`
+with `String` keys. The limits are `JsonSnapshot.MAX_DEPTH` (64 nested containers),
+`MAX_VALUES` (100,000), `MAX_STRING_LENGTH` (16 MiB characters), `MAX_KEY_LENGTH` (50,000) and
+`MAX_NUMBER_DIGITS` (1,000), each at most Jackson's default parser limit. A `null` property is a key
+present with a `null` value; an absent property is an absent key.
+
+| 2.x | 3.0 |
+|---|---|
+| `new ToolCall(id, name, arguments)` accepted a `null` or blank id or name and kept the caller's map; `ToolCall.Builder` copied only the top level, so a nested list or map stayed the caller's and could change after construction | the canonical constructor and the builder validate alike: a `null` id, name or arguments throws `NullPointerException`, a blank id or name `IllegalArgumentException`, and the arguments are a deep, unmodifiable snapshot. `ToolCall.Builder.withArguments(null)` no longer means no arguments: leave it unset, or pass `Map.of()` |
+| Tool arguments could hold any Java object, a non-`String` key, `NaN` or an infinity, or themselves | `IllegalArgumentException` naming where, such as `arguments.items[2] is a java.io.File; ...`. A `PreToolUseHook` whose `MutateArgs` is rejected has thrown, so the hook counts as `Continue` and the call runs as it was |
+| Provider-decoded arguments past a `JsonSnapshot` limit (nested deeper than 64, more than 100,000 values) reached the tool | the stream ends in an `Error` naming the tool, `Arguments of tool call '<name>' are rejected: <where> <why>`; the call is never dispatched |
+| A provider tool call without an id (Anthropic `tool_use` without `id`, OpenAI `function_call` without `call_id`, Gemini `function_call` step without `id`) came back from `chat` as a `ToolCall` with a `null` id, while `chatStream` ended in a bare `NullPointerException` | both end in the provider's exception, `Tool call '<name>' streamed without an id`, through the new `core.provider.ToolCallStarts`; a call without a name ends in `A tool call streamed without a tool name`, where a terminal event used to name it `'<unnamed>'` |
+| `OrderedMaps.copyOfKeepingNullValues(map)` | removed; `JsonSnapshot.ofObject(name, map)` |
 
 **Every runtime route requires an authenticated identity and acts only on its caller's own
 sessions.** `RuntimeServer` and `AgentHttpService` authenticate every request through one

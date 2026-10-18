@@ -12,7 +12,6 @@ import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.test.ConversationFixture;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -110,24 +109,6 @@ class SegmentMergeTest {
             AnthropicException.class, () -> SegmentMerge.merge(corrupted, segment("", null, null)));
 
     assertEquals("Failed to decode segment content array", failure.getMessage());
-  }
-
-  @Test
-  void toolArgumentsThatCannotBeWrittenFailTheMerge() {
-    var call =
-        ToolCall.newBuilder()
-            .withId("t1")
-            .withName("search")
-            .withArguments(ConversationFixture.selfReferencing())
-            .build();
-    var unwritable = Response.newBuilder().withToolCalls(List.of(call)).build();
-
-    var failure =
-        assertThrows(
-            AnthropicException.class,
-            () -> SegmentMerge.merge(unwritable, segment("", null, null)));
-
-    assertEquals("Failed to merge paused-turn content arrays", failure.getMessage());
   }
 
   private static Response<Void> segment(

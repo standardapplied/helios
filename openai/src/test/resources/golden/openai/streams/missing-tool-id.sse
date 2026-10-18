@@ -1,0 +1,12 @@
+data: {"type":"response.created","response":{"id":"resp_1","object":"response","status":"in_progress","output":[],"model":"gpt-5.6","usage":null},"sequence_number":0}
+
+data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","name":"weather","arguments":"","status":"in_progress"},"sequence_number":1}
+
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"city\":\"Paris\",","sequence_number":2}
+
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"\"unit\":null,\"days\":[1,null],\"options\":{\"lang\":null}}","sequence_number":3}
+
+data: {"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":0,"arguments":"{\"city\":\"Paris\",\"unit\":null,\"days\":[1,null],\"options\":{\"lang\":null}}","sequence_number":4}
+
+data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[],"model":"gpt-5.6","usage":{"input_tokens":2006,"output_tokens":150,"total_tokens":2156,"input_tokens_details":{"cached_tokens":1920,"cache_write_tokens":40}}},"sequence_number":5}
+

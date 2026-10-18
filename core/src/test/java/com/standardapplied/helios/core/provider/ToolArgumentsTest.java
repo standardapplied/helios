@@ -3,11 +3,16 @@
 package com.standardapplied.helios.core.provider;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ProviderException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -17,11 +22,39 @@ class ToolArgumentsTest {
   private static final ProviderFailure FAILURE = ProviderException::new;
 
   @Test
-  void readsAJsonObjectKeepingANullValue() {
+  void readsAJsonObjectAsADeepSnapshotKeepingNullValues() {
+    var days = new ArrayList<Object>(Arrays.asList(1, null));
     var object = new LinkedHashMap<String, Object>();
     object.put("city", null);
+    object.put("days", days);
 
-    assertSame(object, ToolArguments.read("weather", "{\"city\":null}", json -> object, FAILURE));
+    var arguments =
+        ToolArguments.read("weather", "{\"city\":null,\"days\":[1,null]}", json -> object, FAILURE);
+    days.add(2);
+
+    var expected = new LinkedHashMap<String, Object>();
+    expected.put("city", null);
+    expected.put("days", Arrays.asList(1, null));
+    assertEquals(expected, arguments);
+    assertTrue(arguments.containsKey("city"));
+    assertThrows(UnsupportedOperationException.class, () -> arguments.put("unit", "C"));
+  }
+
+  @Test
+  void anObjectTheSnapshotRejectsFailsNamingTheToolAndWhere() {
+    var cyclic = new HashMap<String, Object>();
+    cyclic.put("self", cyclic);
+
+    var thrown =
+        assertThrows(
+            ProviderException.class,
+            () -> ToolArguments.read("weather", "{}", json -> cyclic, FAILURE));
+
+    assertEquals(
+        "Arguments of tool call 'weather' are rejected: arguments.self contains itself",
+        thrown.getMessage());
+    assertInstanceOf(IllegalArgumentException.class, thrown.getCause());
+    assertEquals(0, thrown.statusCode());
   }
 
   @Test

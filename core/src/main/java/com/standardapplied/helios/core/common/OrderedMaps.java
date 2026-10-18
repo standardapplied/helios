@@ -37,23 +37,4 @@ public final class OrderedMaps {
                 Objects.requireNonNull(value, () -> "value of key " + key + " must not be null")));
     return Collections.unmodifiableSequencedMap(copy);
   }
-
-  /**
-   * An unmodifiable copy of {@code map} in its iteration order that keeps {@code null} values, for
-   * a map read from JSON, where {@code null} is a value like any other.
-   *
-   * @param map the map to copy; non-null, with no null key
-   * @param <K> the key type
-   * @param <V> the value type
-   * @return the ordered copy
-   * @throws NullPointerException if {@code map} or a key is null
-   */
-  public static <K, V> SequencedMap<K, V> copyOfKeepingNullValues(
-      Map<? extends K, ? extends V> map) {
-    Objects.requireNonNull(map, "map must not be null");
-    var copy = new LinkedHashMap<K, V>();
-    map.forEach(
-        (key, value) -> copy.put(Objects.requireNonNull(key, "key must not be null"), value));
-    return Collections.unmodifiableSequencedMap(copy);
-  }
 }

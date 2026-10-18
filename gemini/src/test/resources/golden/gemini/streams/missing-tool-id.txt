@@ -1,0 +1,5 @@
+== chatStream
+KeepAlive[]
+onError GeminiException(Tool call 'weather' streamed without an id) status=0
+== chat
+threw GeminiException(Tool call 'weather' streamed without an id) status=0

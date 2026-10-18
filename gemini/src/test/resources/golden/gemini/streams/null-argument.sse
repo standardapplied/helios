@@ -4,7 +4,7 @@ data: {"event_type":"step.start","index":0,"step":{"type":"function_call","id":"
 
 data: {"event_type":"step.delta","index":0,"delta":{"type":"arguments_delta","arguments":"{\"city\":\"Paris\","}}
 
-data: {"event_type":"step.delta","index":0,"delta":{"type":"arguments_delta","arguments":"\"unit\":null}"}}
+data: {"event_type":"step.delta","index":0,"delta":{"type":"arguments_delta","arguments":"\"unit\":null,\"days\":[1,null],\"options\":{\"lang\":null}}"}}
 
 data: {"event_type":"step.stop","index":0,"status":"done"}
 

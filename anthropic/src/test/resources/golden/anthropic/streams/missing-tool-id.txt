@@ -1,0 +1,5 @@
+== chatStream
+KeepAlive[]
+onError AnthropicException(Tool call 'weather' streamed without an id) status=0
+== chat
+threw AnthropicException(Tool call 'weather' streamed without an id) status=0

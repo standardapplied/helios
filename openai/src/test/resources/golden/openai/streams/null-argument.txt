@@ -2,9 +2,9 @@
 KeepAlive[]
 ToolUseStart[callId=call_1, toolName=weather]
 ToolUseDelta[callId=call_1, argumentsDelta={"city":"Paris",]
-ToolUseDelta[callId=call_1, argumentsDelta="unit":null}]
-ToolUseStop[toolCall=ToolCall[id=call_1, name=weather, arguments={city=Paris, unit=null}]]
+ToolUseDelta[callId=call_1, argumentsDelta="unit":null,"days":[1,null],"options":{"lang":null}}]
+ToolUseStop[toolCall=ToolCall[id=call_1, name=weather, arguments={city=Paris, days=[1, null], options={lang=null}, unit=null}]]
 MessageStop[stopReason=TOOL_CALLS, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], metadata={}, citations=[]]
 onComplete
 == chat
-Response[content=, parsed=null, toolCalls=[ToolCall[id=call_1, name=weather, arguments={city=Paris, unit=null}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={}]
+Response[content=, parsed=null, toolCalls=[ToolCall[id=call_1, name=weather, arguments={city=Paris, days=[1, null], options={lang=null}, unit=null}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={}]

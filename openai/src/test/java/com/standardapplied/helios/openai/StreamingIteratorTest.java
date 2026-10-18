@@ -884,7 +884,7 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void aCompletionWhileANamelessFunctionCallIsOpenIsAnError() {
+  void aNamelessFunctionCallEndsTheStreamAtItsStart() {
     var sse =
         "data: {\"type\":\"response.output_item.added\",\"output_index\":0,"
             + "\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\"}}\n\n"
@@ -894,7 +894,8 @@ class StreamingIteratorTest {
 
     var error = assertInstanceOf(StreamEvent.Error.class, drain(sse).getLast());
 
-    assertEquals("Response ended while function call '<unnamed>' is still open", error.message());
+    assertEquals("A tool call streamed without a tool name", error.message());
+    assertInstanceOf(OpenAIException.class, error.cause());
     assertEquals(List.of(), error.partial().toolCalls());
   }
 
