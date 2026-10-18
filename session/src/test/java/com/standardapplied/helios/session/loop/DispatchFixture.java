@@ -134,6 +134,12 @@ final class DispatchFixture implements AutoCloseable {
     };
   }
 
+  /** Throws {@code thrown}, checked or not, as code compiled elsewhere may. */
+  @SuppressWarnings("unchecked")
+  static <T extends Throwable> ToolResult sneakyThrow(Throwable thrown) throws T {
+    throw (T) thrown;
+  }
+
   /**
    * Counts its starts, signals {@link #entered}, then waits for {@link #release} through every
    * interruption.

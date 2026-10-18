@@ -711,9 +711,9 @@ final class ToolDispatchTest {
   }
 
   @Test
-  void anErrorThrownAfterTheCallWasAnsweredIsLogged() {
-    var sentinel = new AssertionError("late failure");
-    var d = fixture.dispatcher(binding("late", ToolCategory.READ, failsLate(sentinel)));
+  void aThrowableThatIsNoErrorThrownAfterTheCallWasAnsweredIsLogged() {
+    var late = new Throwable("late failure");
+    var d = fixture.dispatcher(binding("late", ToolCategory.READ, failsLate(late)));
     var records = new CopyOnWriteArrayList<LogRecord>();
 
     try (var capture = LogCapture.of(DispatchedCall.class, records)) {
@@ -723,25 +723,28 @@ final class ToolDispatchTest {
     var logged = records.getFirst();
     assertEquals(Level.SEVERE, logged.getLevel());
     assertEquals("tool 'late' threw after its call was answered", logged.getMessage());
-    assertSame(sentinel, logged.getThrown());
+    assertSame(late, logged.getThrown());
   }
 
   @Test
-  void anErrorThrownAfterTheCallWasAnsweredEndsTheSession() {
+  void anErrorThrownAfterTheCallWasAnsweredEndsTheSessionAndIsNotLoggedByTheCall() {
     var sentinel = new AssertionError("late failure");
     var d = fixture.dispatcher(binding("late", ToolCategory.READ, failsLate(sentinel)));
-    try (var capture = LogCapture.of(DispatchedCall.class, new CopyOnWriteArrayList<>())) {
+    var records = new CopyOnWriteArrayList<LogRecord>();
+
+    try (var capture = LogCapture.of(DispatchedCall.class, records)) {
       answerUnknownThenFail(d);
     }
 
     assertSame(sentinel, fixture.ending.seal().orElseThrow());
+    assertEquals(List.of(), records);
   }
 
-  private ToolExecutor failsLate(Error error) {
+  private ToolExecutor failsLate(Throwable thrown) {
     return (args, ctx) -> {
       fixture.entered.countDown();
       Uninterruptible.await(fixture.release);
-      throw error;
+      return DispatchFixture.sneakyThrow(thrown);
     };
   }
 
