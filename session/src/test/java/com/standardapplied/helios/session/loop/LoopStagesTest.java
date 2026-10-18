@@ -33,6 +33,7 @@ import com.standardapplied.helios.session.hooks.OnUserMessageHook;
 import com.standardapplied.helios.session.hooks.PostCompactHook;
 import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
+import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
@@ -78,7 +79,8 @@ final class LoopStagesTest {
             SessionContext.forTesting("sess-loop"),
             ToolRegistry.empty(),
             ConcurrencyLimits.defaults(),
-            scheduler);
+            scheduler,
+            state.ending());
     var collaborators =
         new LoopCollaborators(
             new HookRegistry(List.of(hooks)),

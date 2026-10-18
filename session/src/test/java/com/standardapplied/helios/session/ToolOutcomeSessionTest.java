@@ -3,6 +3,7 @@ package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.InlineFile;
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -135,13 +137,37 @@ final class ToolOutcomeSessionTest {
   }
 
   @Test
-  void aThrownErrorIsThrewWithItsType() {
-    assertEquals(
-        expected(new ToolOutcome.Threw("java.lang.AssertionError"), "tool 't' threw: broken"),
-        resultOf(
-            (args, ctx) -> {
-              throw new AssertionError("broken");
-            }));
+  void aToolsErrorEndsTheSessionWithThatErrorAndRunsNothingAfterIt() {
+    var sentinel = new AssertionError("broken");
+    var laterCalls = new AtomicInteger();
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(call("t"), call("later"))
+            .withTextTurn("never")
+            .build();
+    var options =
+        withTools(
+                tool(
+                    "t",
+                    (args, ctx) -> {
+                      throw sentinel;
+                    }),
+                tool(
+                    "later",
+                    (args, ctx) -> {
+                      laterCalls.incrementAndGet();
+                      return ToolResult.success("ran");
+                    }))
+            .withModel(model)
+            .build();
+
+    try (var session = AgentSession.create(options)) {
+      session.send(UserMessage.text("go"));
+
+      assertSame(sentinel, Await.failure("the session to fail", session.result()));
+    }
+    assertEquals(1, model.calls().size());
+    assertEquals(0, laterCalls.get());
   }
 
   @Test

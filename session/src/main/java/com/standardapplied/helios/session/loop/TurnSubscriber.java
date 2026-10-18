@@ -26,13 +26,13 @@ import java.util.concurrent.ScheduledExecutorService;
  *
  * <p>Created once per model turn by {@link TurnRunner}. It owns the turn's {@link
  * Flow.Subscription}: it requests every chunk on subscribe, and cancels the stream when the {@link
- * IdleWatchdog} finds it stalled, when the session's {@link CancellationToken} is cancelled, or
- * when the waiting thread is interrupted. The idle clock starts at the first chunk, so a request
- * still awaiting its headers is bounded by the provider's response timeout, the session's wall
- * clock and its cancellation, never by the idle clock; every chunk re-arms it, a {@link
- * ModelChunk.KeepAlive} included, which adds and emits nothing. The runner blocks in {@link
- * #awaitDone(CancellationToken)} until the stream ends one of those ways or with {@code onComplete}
- * / {@code onError}.
+ * IdleWatchdog} finds it stalled, when the session's {@link CancellationToken} is cancelled, when
+ * the waiting thread is interrupted, or when opening or subscribing to the stream threw. The idle
+ * clock starts at the first chunk, so a request still awaiting its headers is bounded by the
+ * provider's response timeout, the session's wall clock and its cancellation, never by the idle
+ * clock; every chunk re-arms it, a {@link ModelChunk.KeepAlive} included, which adds and emits
+ * nothing. The runner blocks in {@link #awaitDone(CancellationToken)} until the stream ends one of
+ * those ways or with {@code onComplete} / {@code onError}.
  *
  * <h2>One terminal transition</h2>
  *
@@ -47,13 +47,30 @@ import java.util.concurrent.ScheduledExecutorService;
  * event outside the lock, so a stalled event sink or hook never blocks a cancellation of the
  * stream; the runner is released once that event is out, so every event of the turn precedes the
  * runner's next one.
+ *
+ * <h2>Cancelling the subscription</h2>
+ *
+ * The subscription is the provider's code, so it is cancelled through {@link StreamCancel}, within
+ * {@code cancelGrace} ({@link com.standardapplied.helios.session.SessionLimits#teardownGrace()}): a
+ * cancel that blocks never strands the runner.
+ *
+ * <h2>Host errors</h2>
+ *
+ * Every {@link Error} that reaches the turn, through {@code onError}, a chunk's emission, the
+ * subscription's request or its cancel, on whichever thread and whenever it arrives, is recorded by
+ * the session's {@link SessionEnding}, which ends the session; so is one a {@link
+ * java.util.concurrent.CompletionException} carries ({@link SessionEnding#failWith}).
  */
 final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
+
+  private static final String CANCELLED = "session cancelled while waiting for model stream";
 
   private final SessionState state;
   private final EventEmitter emitter;
   private final InstantSource clock;
   private final IdleWatchdog idleWatchdog;
+  private final StreamCancel streamCancel;
+  private final SessionEnding ending;
   private final CountDownLatch done = new CountDownLatch(1);
   private final Object lock = new Object();
   private final StringBuilder content = new StringBuilder();
@@ -68,14 +85,25 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       EventEmitter emitter,
       InstantSource clock,
       ScheduledExecutorService scheduler,
-      Duration idleTimeout) {
+      Duration idleTimeout,
+      Duration cancelGrace) {
     this.state = state;
     this.emitter = emitter;
     this.clock = clock;
     this.idleWatchdog =
         new IdleWatchdog(scheduler, idleTimeout, this::released, stalled -> end(stalled, true));
+    this.ending = state.ending();
+    this.streamCancel = new StreamCancel(state.sessionId(), cancelGrace, ending);
   }
 
+  /**
+   * Accept the first subscription and request every chunk, or cancel a subscription that arrives
+   * second or after the turn ended. What the request throws ends the turn, on whichever thread
+   * delivers the subscription, and is rethrown.
+   *
+   * @throws RuntimeException what requesting from the accepted subscription threw
+   * @throws Error what requesting from the accepted subscription threw
+   */
   @Override
   public void onSubscribe(Flow.Subscription subscription) {
     boolean accepted;
@@ -85,13 +113,24 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
         this.subscription = subscription;
       }
     }
-    if (!accepted) {
-      subscription.cancel();
+    if (accepted) {
+      try {
+        subscription.request(Long.MAX_VALUE);
+      } catch (RuntimeException | Error failure) {
+        end(failure, true);
+        throw failure;
+      }
       return;
     }
-    subscription.request(Long.MAX_VALUE);
+    streamCancel.cancel(subscription);
   }
 
+  /**
+   * Accumulate {@code chunk} and emit its event. An {@link Error} the emission throws, a stream
+   * event hook's, ends the turn before the runner is released, and is rethrown.
+   *
+   * @throws Error what emitting the chunk's event threw
+   */
   @Override
   public void onNext(ModelChunk chunk) {
     boolean subscribed;
@@ -112,13 +151,16 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     try {
       idleWatchdog.arm();
       emit(chunk);
+    } catch (Error error) {
+      end(error, true);
+      throw error;
     } finally {
-      boolean ended;
+      boolean release;
       synchronized (lock) {
         emitting = false;
-        ended = outcome != null;
+        release = outcome != null;
       }
-      if (ended) {
+      if (release) {
         done.countDown();
       }
     }
@@ -175,22 +217,24 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * com.standardapplied.helios.session.SessionLimits#maxWallClock()} which is only re-checked at
    * turn boundaries.
    *
-   * <p>The cancellation callback is removed in {@code finally} so a long-lived session token does
-   * not accumulate one stale registration per turn (see the {@code CancellationToken.onCancel}
-   * cleanup contract).
+   * <p>An interrupt ends the stream as cancellation does, unless another ending came first, and
+   * this returns the turn's outcome with the interrupt status restored.
+   *
+   * <p>The token is also read as this waits ({@link TokenWait}), so a callback registered before
+   * this one that blocks cannot keep the stream open. The cancellation callback is removed in
+   * {@code finally} so a long-lived session token does not accumulate one stale registration per
+   * turn (see the {@code CancellationToken.onCancel} cleanup contract).
    */
   StreamedTurn awaitDone(CancellationToken cancellation) {
-    var registration =
-        cancellation.onCancel(
-            () ->
-                end(
-                    new CancellationException("session cancelled while waiting for model stream"),
-                    true));
+    var registration = cancellation.onCancel(() -> end(new CancellationException(CANCELLED), true));
     try {
-      done.await();
+      if (!TokenWait.opens(done, cancellation)) {
+        end(new CancellationException(CANCELLED), true);
+        done.await();
+      }
     } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
       end(e, true);
+      Thread.currentThread().interrupt();
     } finally {
       registration.remove();
       idleWatchdog.cancel();
@@ -208,9 +252,14 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   /**
    * The one terminal transition: unless the stream already ended, snapshot it with {@code error}
    * (or none, for a completion), cancel the subscription when {@code cancelStream} and one is held,
-   * and release the runner, or leave its release to the chunk whose event is being emitted.
+   * and release the runner, or leave its release to the chunk whose event is being emitted. An
+   * {@link Error}, or one {@code error} carries ({@link SessionEnding#failWith}), is recorded by
+   * the session's {@link SessionEnding} first, whether or not the stream already ended.
    */
-  private void end(Throwable error, boolean cancelStream) {
+  void end(Throwable error, boolean cancelStream) {
+    if (error != null) {
+      ending.failWith(error);
+    }
     Flow.Subscription toCancel;
     boolean release;
     synchronized (lock) {
@@ -221,15 +270,12 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
       toCancel = cancelStream ? subscription : null;
       release = !emitting;
     }
-    try {
-      idleWatchdog.cancel();
-      if (toCancel != null) {
-        toCancel.cancel();
-      }
-    } finally {
-      if (release) {
-        done.countDown();
-      }
+    idleWatchdog.cancel();
+    if (toCancel != null) {
+      streamCancel.cancel(toCancel);
+    }
+    if (release) {
+      done.countDown();
     }
   }
 

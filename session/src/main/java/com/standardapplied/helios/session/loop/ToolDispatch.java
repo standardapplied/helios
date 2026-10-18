@@ -15,10 +15,13 @@ import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Synchronous tool dispatch surface. The agent loop calls {@link #dispatch(ToolCall,
@@ -37,12 +40,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <p>Each call stays linked to the session's cancellation token until its worker ends, so closing
  * the session cancels and interrupts every call still running, including one already answered as
- * {@link ToolOutcome.Unknown}. {@link #liveCalls()} counts them.
+ * {@link ToolOutcome.Unknown}. {@link #awaitLiveCalls(Duration)} waits for them to end.
  *
  * <h2>Thread-safety</h2>
  *
- * Safe to share across the agent loop's threads: the permit pools share one lock and the count of
- * live calls is atomic.
+ * Safe to share across the agent loop's threads: the permit pools share one lock and the set of
+ * live calls is concurrent.
  */
 public final class ToolDispatch {
 
@@ -53,7 +56,8 @@ public final class ToolDispatch {
   private final CategoryPermits fileWritePermits;
   private final CategoryPermits executionPermits;
   private final ScheduledExecutorService scheduler;
-  private final AtomicInteger liveCalls = new AtomicInteger();
+  private final Set<DispatchedCall.Live> liveCalls = ConcurrentHashMap.newKeySet();
+  private final SessionEnding ending;
 
   /**
    * Build a dispatcher.
@@ -63,13 +67,16 @@ public final class ToolDispatch {
    * @param registry the bindings the dispatcher will look calls up against; non-null
    * @param limits concurrency caps; non-null
    * @param scheduler the session's scheduler, on which each call's deadline runs; non-null
+   * @param ending the session's ending, which records every {@link Error} the work of a call
+   *     throws, a callback on a call's own token included; non-null
    * @throws NullPointerException if any argument is null
    */
   public ToolDispatch(
       SessionContext sessionContext,
       ToolRegistry registry,
       ConcurrencyLimits limits,
-      ScheduledExecutorService scheduler) {
+      ScheduledExecutorService scheduler,
+      SessionEnding ending) {
     this.sessionContext = Objects.requireNonNull(sessionContext, "sessionContext must not be null");
     this.registry = Objects.requireNonNull(registry, "registry must not be null");
     this.limits = Objects.requireNonNull(limits, "limits must not be null");
@@ -78,6 +85,7 @@ public final class ToolDispatch {
     this.fileWritePermits = new CategoryPermits(limits.maxConcurrentFileWrites(), scope);
     this.executionPermits = new CategoryPermits(limits.maxConcurrentExecutions(), scope);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
+    this.ending = Objects.requireNonNull(ending, "ending must not be null");
   }
 
   /**
@@ -135,23 +143,23 @@ public final class ToolDispatch {
   }
 
   /**
-   * Dispatches blocked waiting for a permit of {@code category}'s pool. Lets a test wait until a
-   * dispatch has queued behind a saturated pool before it acts.
+   * Wait up to {@code grace} for the work of every call still running to end: the calls whose
+   * worker or token cancellation has not ended, including calls answered as {@link
+   * ToolOutcome.Unknown}. Waiting cancels nothing; the session ends its calls by cancelling its
+   * token first. An interrupt of the waiting thread ends the wait, its interrupt status kept.
    *
-   * @return non-negative count
+   * @param grace how long to wait; non-null, positive
+   * @return the calls whose work had not ended when the wait ended, empty when none
+   * @throws NullPointerException if {@code grace} is null
+   * @throws IllegalArgumentException if {@code grace} is not positive
    */
-  int queuedDispatches(ToolCategory category) {
-    return permitsFor(category).queued();
-  }
-
-  /**
-   * Calls whose work, the worker and any cancellation of the call's token, has not ended yet,
-   * including calls already answered as {@link ToolOutcome.Unknown}.
-   *
-   * @return non-negative count
-   */
-  int liveCalls() {
-    return liveCalls.get();
+  public List<ToolCall> awaitLiveCalls(Duration grace) {
+    Validate.positiveDuration("grace", grace);
+    var until = System.nanoTime() + TimeUnit.NANOSECONDS.convert(grace);
+    return List.copyOf(liveCalls).stream()
+        .filter(live -> !live.endsBy(until))
+        .map(DispatchedCall.Live::call)
+        .toList();
   }
 
   /**
@@ -184,6 +192,7 @@ public final class ToolDispatch {
    * @return the tool's result, or a framework result on unknown tool or timeout
    * @throws NullPointerException if any argument is null
    * @throws IllegalArgumentException if {@code timeout} or {@code stopGrace} is not positive
+   * @throws Error the error the tool threw
    * @throws CancellationException if {@code cancellation} fires or the calling thread is
    *     interrupted (its interrupt status is kept) before this method returns a result
    */
@@ -207,12 +216,14 @@ public final class ToolDispatch {
             cancellation,
             timeout,
             permitsFor(binding.orElseThrow().category()),
-            liveCalls);
+            liveCalls,
+            ending);
     dispatched.start(scheduler);
     return dispatched.await(stopGrace);
   }
 
-  private CategoryPermits permitsFor(ToolCategory category) {
+  /** The permit pool a call of {@code category} acquires from. */
+  CategoryPermits permitsFor(ToolCategory category) {
     return switch (category) {
       case WRITE -> fileWritePermits;
       case EXECUTION -> executionPermits;

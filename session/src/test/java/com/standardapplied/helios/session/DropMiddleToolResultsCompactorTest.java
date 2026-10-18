@@ -19,18 +19,31 @@ import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.loop.SessionState;
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 final class DropMiddleToolResultsCompactorTest {
+
+  private static final Duration SHORT_SUMMARY_TIMEOUT = Duration.ofMillis(50);
+
+  private final CountDownLatch released = new CountDownLatch(1);
+
+  @AfterEach
+  void releaseHangingFixtures() {
+    released.countDown();
+  }
 
   private static Model summaryModel(String content) {
     return new BlockingModel() {
@@ -170,11 +183,57 @@ final class DropMiddleToolResultsCompactorTest {
 
   @Test
   void summarizerThrowingReturnsOriginalHistory() {
-    Model thrower =
+    var compactor =
+        compactorSummarizingWith(
+            () -> {
+              throw new RuntimeException("boom");
+            });
+    var history = chain(10);
+    var out = compactor.compact(history, freshState());
+    assertSame(history, out.history(), "throwing summarizer must yield no-op");
+    assertEquals(0, out.usage().inputTokens());
+  }
+
+  @Test
+  void anErrorTheSummarizerThrewLeavesTheCompactionAsItself() {
+    var sentinel = new AssertionError("host failure");
+    var compactor =
+        compactorSummarizingWith(
+            () -> {
+              throw sentinel;
+            });
+    var history = chain(10);
+    var state = freshState();
+
+    var thrown = assertThrows(AssertionError.class, () -> compactor.compact(history, state));
+
+    assertSame(sentinel, thrown);
+  }
+
+  @Test
+  void aCheckedExceptionTheSummarizerThrewUndeclaredLeavesTheHistoryUnchangedAtOnce() {
+    var compactor = compactorSummarizingWith(() -> throwUndeclared(new IOException("undeclared")));
+    var history = chain(10);
+
+    var compacted =
+        CompletableFuture.supplyAsync(
+            () -> compactor.compact(history, freshState()), Thread.ofVirtual()::start);
+
+    assertSame(history, Await.value("the compaction", compacted).history());
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <E extends Throwable> void throwUndeclared(Throwable t) throws E {
+    throw (E) t;
+  }
+
+  private static DropMiddleToolResultsCompactor compactorSummarizingWith(Runnable summary) {
+    Model summarizer =
         new BlockingModel() {
           @Override
           public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            throw new RuntimeException("boom");
+            summary.run();
+            return Response.newBuilder().withContent("unreached").build();
           }
 
           @Override
@@ -187,15 +246,11 @@ final class DropMiddleToolResultsCompactorTest {
             return "summary";
           }
         };
-    var compactor =
-        DropMiddleToolResultsCompactor.newBuilder(thrower)
-            .withHeadPreserved(1)
-            .withTailPreserved(1)
-            .build();
-    var history = chain(10);
-    var out = compactor.compact(history, freshState());
-    assertSame(history, out.history(), "throwing summarizer must yield no-op");
-    assertEquals(0, out.usage().inputTokens());
+    return DropMiddleToolResultsCompactor.newBuilder(summarizer)
+        .withHeadPreserved(1)
+        .withTailPreserved(1)
+        .withSummaryTimeout(Duration.ofMinutes(10))
+        .build();
   }
 
   @Test
@@ -531,6 +586,75 @@ final class DropMiddleToolResultsCompactorTest {
     assertSame(history, out.history(), "timeout must yield no-op");
     assertEquals(0, out.usage().inputTokens());
     Await.latch("the timed-out summary call to be interrupted", interrupted);
+  }
+
+  @Test
+  void anErrorTheSummaryCallThrowsAfterItsTimeoutEndsTheSession() {
+    var sentinel = new AssertionError("summary failure");
+    var calling = new CompletableFuture<Thread>();
+    var state = freshState();
+    var history = chain(10);
+
+    var out = timingOut(failingOnRelease(() -> fail(sentinel), calling)).compact(history, state);
+    released.countDown();
+    Await.termination("the summary call to throw", Await.value("the summary call", calling));
+
+    assertSame(history, out.history(), "timeout must yield no-op");
+    assertTrue(state.cancellation().isCancelled(), "a host Error ends the session");
+    assertSame(sentinel, state.ending().seal().orElseThrow());
+  }
+
+  /** A compactor over {@code summaryModel} that keeps one message at each end. */
+  private static DropMiddleToolResultsCompactor timingOut(Model summaryModel) {
+    return DropMiddleToolResultsCompactor.newBuilder(summaryModel)
+        .withHeadPreserved(1)
+        .withTailPreserved(1)
+        .withSummaryTimeout(SHORT_SUMMARY_TIMEOUT)
+        .build();
+  }
+
+  @Test
+  void anErrorTheSummaryCallJoinsFromAFailedFutureAfterItsTimeoutEndsTheSession() {
+    var sentinel = new AssertionError("summary failure");
+    var calling = new CompletableFuture<Thread>();
+    var state = freshState();
+
+    timingOut(failingOnRelease(() -> CompletableFuture.failedFuture(sentinel).join(), calling))
+        .compact(chain(10), state);
+    released.countDown();
+    Await.termination("the summary call to throw", Await.value("the summary call", calling));
+
+    assertSame(sentinel, state.ending().seal().orElseThrow());
+  }
+
+  private static void fail(AssertionError sentinel) {
+    throw sentinel;
+  }
+
+  /**
+   * A summary model whose call reports its thread, blocks until {@link #released} ignoring
+   * interrupts, then runs {@code failure}, which throws.
+   */
+  private Model failingOnRelease(Runnable failure, CompletableFuture<Thread> calling) {
+    return new BlockingModel() {
+      @Override
+      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
+        calling.complete(Thread.currentThread());
+        Uninterruptible.await(released);
+        failure.run();
+        throw new IllegalStateException("the failure did not throw");
+      }
+
+      @Override
+      public String id() {
+        return "summary";
+      }
+
+      @Override
+      public String provider() {
+        return "summary";
+      }
+    };
   }
 
   @Test

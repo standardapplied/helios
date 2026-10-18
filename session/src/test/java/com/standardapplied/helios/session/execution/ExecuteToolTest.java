@@ -6,6 +6,7 @@ package com.standardapplied.helios.session.execution;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -34,6 +35,7 @@ final class ExecuteToolTest {
     ExecutionRequest lastRequest;
     final ExecutionResult result;
     boolean throwOnExecute;
+    Error failWith;
     Set<Runtime> supportedRuntimes = EnumSet.allOf(Runtime.class);
 
     RecordingProvider(ExecutionResult result) {
@@ -52,6 +54,9 @@ final class ExecuteToolTest {
         SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
       this.lastSession = session;
       this.lastRequest = request;
+      if (failWith != null) {
+        return CompletableFuture.failedFuture(failWith);
+      }
       if (throwOnExecute) {
         return CompletableFuture.failedFuture(new RuntimeException("boom"));
       }
@@ -331,6 +336,18 @@ final class ExecuteToolTest {
     assertFalse(result.succeeded());
     assertTrue(result.output().contains("provider failed"));
     assertTrue(result.output().contains("boom"));
+  }
+
+  @Test
+  void anErrorTheProviderFailedWithIsRethrownAsItself() {
+    var provider = new RecordingProvider(ok(""));
+    provider.failWith = new AssertionError("host failure");
+    var tool = ExecuteTool.binding(provider).tool();
+    var args = Map.<String, Object>of("runtime", "BASH", "script", "x");
+
+    var thrown = assertThrows(AssertionError.class, () -> tool.execute(args, ctx()));
+
+    assertSame(provider.failWith, thrown);
   }
 
   @Test

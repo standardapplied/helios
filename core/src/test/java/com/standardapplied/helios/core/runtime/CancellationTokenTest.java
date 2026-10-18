@@ -15,6 +15,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
@@ -456,5 +458,113 @@ final class CancellationTokenTest {
         assertEquals(0, t.activeCallbackCountForTests(), "round " + round + " retained callbacks");
       }
     }
+  }
+
+  // ── cancelAsync ───────────────────────────────────────────────────────────
+
+  @Test
+  void cancelAsyncCancelsTheTokenBeforeItReturnsWhileACallbackStillRuns() {
+    var token = new CancellationToken();
+    var release = new CountDownLatch(1);
+    token.onCancel(() -> Await.latch("the callback released", release));
+
+    var fired = token.cancelAsync("closed", error -> {});
+
+    assertEquals(Optional.of("closed"), token.reason());
+    assertFalse(fired.isDone(), "the callback is still running");
+    release.countDown();
+    Await.value("the callbacks to have run", fired);
+  }
+
+  @Test
+  void cancelAsyncRunsTheCallbacksOffTheCallingThread() {
+    var token = new CancellationToken();
+    var ranOn = new AtomicReference<Thread>();
+    token.onCancel(() -> ranOn.set(Thread.currentThread()));
+
+    Await.value("the callbacks to have run", token.cancelAsync("closed", error -> {}));
+
+    assertTrue(ranOn.get().isVirtual(), "callbacks run on a virtual thread");
+    assertFalse(ranOn.get() == Thread.currentThread(), "not on the caller's thread");
+  }
+
+  @Test
+  void cancelAsyncHandsEachCallbackErrorToOnErrorAndCompletesNormallyOnceEveryCallbackRan() {
+    var token = new CancellationToken();
+    var first = new AssertionError("first");
+    var second = new AssertionError("second");
+    var laterCallbacks = new AtomicInteger();
+    var errors = new CopyOnWriteArrayList<Error>();
+    token.onCancel(
+        () -> {
+          throw first;
+        });
+    token.onCancel(
+        () -> {
+          throw second;
+        });
+    token.onCancel(laterCallbacks::incrementAndGet);
+
+    Await.value("the callbacks to have run", token.cancelAsync("closed", errors::add));
+
+    assertEquals(List.of(first, second), errors);
+    assertEquals(0, first.getSuppressed().length);
+    assertEquals(1, laterCallbacks.get());
+  }
+
+  @Test
+  void cancelAsyncHandsOnErrorAnErrorBeforeALaterCallbackReturns() {
+    var token = new CancellationToken();
+    var sentinel = new AssertionError("sentinel");
+    var release = new CountDownLatch(1);
+    var observed = new CompletableFuture<Error>();
+    token.onCancel(
+        () -> {
+          throw sentinel;
+        });
+    token.onCancel(() -> Await.latch("the callback released", release));
+
+    var fired = token.cancelAsync("closed", observed::complete);
+
+    try {
+      assertSame(sentinel, Await.value("the error handed on", observed));
+    } finally {
+      release.countDown();
+      Await.value("the callbacks to have run", fired);
+    }
+  }
+
+  @Test
+  void cancelAsyncRejectsANullOnErrorBeforeCancelling() {
+    var token = new CancellationToken();
+
+    assertThrows(NullPointerException.class, () -> token.cancelAsync("closed", null));
+
+    assertFalse(token.isCancelled());
+  }
+
+  @Test
+  void cancelAsyncOnACancelledTokenKeepsTheFirstReasonAndRunsNothing() {
+    var token = new CancellationToken();
+    token.cancel("first");
+    var fired = new AtomicInteger();
+    token.onCancel(fired::incrementAndGet);
+
+    var done = token.cancelAsync("second", error -> {});
+
+    assertTrue(done.isDone(), "nothing left to run");
+    assertEquals(Optional.of("first"), token.reason());
+    assertEquals(1, fired.get());
+  }
+
+  @Test
+  void cancelAsyncRejectsABlankReason() {
+    var token = new CancellationToken();
+
+    var ex =
+        assertThrows(IllegalArgumentException.class, () -> token.cancelAsync(" ", error -> {}));
+
+    assertEquals("reason must not be blank", ex.getMessage());
+    assertFalse(token.isCancelled());
   }
 }

@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -33,7 +35,8 @@ import java.util.logging.Logger;
  *
  * <ul>
  *   <li>A registration whose {@code onCancel} is ordered before the winning {@code cancel} fires
- *       exactly once, on the cancelling thread, unless its {@code remove()} is ordered in between.
+ *       exactly once, on the cancelling thread ({@link #cancelAsync}: on a thread of its own),
+ *       unless its {@code remove()} is ordered in between.
  *   <li>A registration ordered after the winning {@code cancel} fires exactly once, immediately, on
  *       the registering thread.
  *   <li>A {@code remove()} ordered before the winning {@code cancel} guarantees the callback never
@@ -45,8 +48,8 @@ import java.util.logging.Logger;
  * reentrantly without deadlocking. A callback throwing a {@link RuntimeException} is logged at
  * {@code WARNING} and does not stop later callbacks. A callback throwing an {@link Error} does not
  * stop later callbacks either, but once every claimed callback has run the first {@code Error} is
- * rethrown with any later ones attached as suppressed — the same "Errors escape, cleanup still
- * runs" rule the session loop applies to host failures.
+ * rethrown with any later ones attached as suppressed ({@link #cancelAsync} hands each to its
+ * {@code onError} instead).
  *
  * <p>Fired and removed registrations are dropped from the token immediately, so a long-lived token
  * retains only the callbacks that are still armed.
@@ -95,21 +98,69 @@ public final class CancellationToken {
    *     callback has run
    */
   public boolean cancel(String reason) {
+    var claimed = claim(reason);
+    if (claimed.isEmpty()) {
+      return false;
+    }
+    fire(claimed.get());
+    return true;
+  }
+
+  /**
+   * Signal cancellation as {@link #cancel(String)} does, but run the claimed callbacks on a virtual
+   * thread of their own. The token is cancelled when this returns; a callback that blocks or throws
+   * holds up only the returned future, never the caller. Each {@link Error} a callback throws is
+   * handed to {@code onError} as it is caught, on the callbacks' thread, and the remaining
+   * callbacks still run.
+   *
+   * @param reason a human-readable reason for the cancellation
+   * @param onError receives each {@link Error} a claimed callback throws, in order; it must not
+   *     throw
+   * @return a future that completes normally once every claimed callback has run; already complete
+   *     if the token was already cancelled, whose callbacks the earlier call runs
+   * @throws NullPointerException if {@code reason} or {@code onError} is null
+   * @throws IllegalArgumentException if {@code reason} is blank
+   */
+  public CompletableFuture<Void> cancelAsync(String reason, Consumer<Error> onError) {
+    Objects.requireNonNull(onError, "onError must not be null");
+    var claimed = claim(reason);
+    if (claimed.isEmpty()) {
+      return CompletableFuture.completedFuture(null);
+    }
+    return CompletableFuture.runAsync(
+        () ->
+            claimed
+                .get()
+                .forEach(
+                    registration -> {
+                      try {
+                        fire(List.of(registration));
+                      } catch (Error e) {
+                        onError.accept(e);
+                      }
+                    }),
+        task -> Thread.ofVirtual().name("helios-cancellation-callbacks").start(task));
+  }
+
+  /**
+   * Record {@code reason} if the token is not cancelled yet, and claim every pending registration.
+   *
+   * @return the claimed registrations, or empty if the token was already cancelled
+   */
+  private Optional<List<CallbackRegistration>> claim(String reason) {
     Objects.requireNonNull(reason, "reason must not be null");
     if (reason.isBlank()) {
       throw new IllegalArgumentException("reason must not be blank");
     }
-    List<CallbackRegistration> claimed;
     synchronized (lock) {
       if (this.reason != null) {
-        return false;
+        return Optional.empty();
       }
       this.reason = reason;
-      claimed = List.copyOf(registrations);
+      var claimed = List.copyOf(registrations);
       registrations.clear();
+      return Optional.of(claimed);
     }
-    fire(claimed);
-    return true;
   }
 
   /**

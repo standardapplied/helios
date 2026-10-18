@@ -8,7 +8,6 @@ import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.ask.QuestionGateway;
 import com.standardapplied.helios.session.loop.SessionState;
 import java.time.InstantSource;
-import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -94,16 +93,5 @@ final class PendingQuestions implements QuestionGateway {
           "no pending question with id '" + questionId + "' — already answered or unknown");
     }
     future.complete(response);
-  }
-
-  /** Fail every pending question with a {@link CancellationException}. */
-  void cancelAll() {
-    // Snapshot to avoid concurrent-mutation surprises while completing.
-    for (var entry : new ArrayList<>(pending.entrySet())) {
-      var future = pending.remove(entry.getKey());
-      if (future != null) {
-        future.completeExceptionally(new CancellationException("session cancelled"));
-      }
-    }
   }
 }

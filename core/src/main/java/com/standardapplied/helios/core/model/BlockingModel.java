@@ -19,7 +19,8 @@ import java.util.function.Supplier;
  * returns, so a session's idle clock, which starts at the first chunk, does not run during the
  * call; its {@code maxWallClock} and cancellation bound it. Cancelling the subscription or the
  * token interrupts that thread; a call that ignores the interrupt runs until it returns and its
- * answer is dropped, since Java cannot end a thread by force.
+ * answer is dropped, since Java cannot end a thread by force, while an {@link Error} it throws
+ * still reaches the subscriber through {@code onError}.
  */
 public interface BlockingModel extends Model {
 

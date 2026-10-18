@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,6 +11,7 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolExecutor;
@@ -18,7 +20,9 @@ import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.RunnableScheduledFuture;
@@ -43,7 +47,9 @@ final class DispatchedCallTest {
 
   private final Overdue scheduler = new Overdue();
   private final AtomicInteger runs = new AtomicInteger();
-  private final AtomicInteger live = new AtomicInteger();
+  private final Set<DispatchedCall.Live> live = ConcurrentHashMap.newKeySet();
+  private final SessionEnding ending =
+      new SessionEnding("dispatched-call", new CancellationToken());
   private final ScheduledThreadPoolExecutor busy = new ScheduledThreadPoolExecutor(1);
   private final CountDownLatch busyRelease = new CountDownLatch(1);
   private final CountDownLatch callbackEntered = new CountDownLatch(1);
@@ -84,7 +90,8 @@ final class DispatchedCallTest {
         session,
         timeout,
         permits,
-        live);
+        live,
+        ending);
   }
 
   private ToolResult counting(Map<String, Object> args, ToolContext ctx) {
@@ -94,7 +101,7 @@ final class DispatchedCallTest {
   /** Counts its run, then waits for {@link #toolRelease} through every interruption. */
   private ToolResult blocking(Map<String, Object> args, ToolContext ctx) {
     var result = counting(args, ctx);
-    DispatchFixture.awaitThroughInterrupts(toolRelease);
+    Uninterruptible.await(toolRelease);
     return result;
   }
 
@@ -104,7 +111,7 @@ final class DispatchedCallTest {
     session.onCancel(
         () -> {
           callbackEntered.countDown();
-          DispatchFixture.awaitThroughInterrupts(callbackRelease);
+          Uninterruptible.await(callbackRelease);
         });
     return session;
   }
@@ -139,17 +146,17 @@ final class DispatchedCallTest {
   void aDeadlineThatFiredBeforeTheWorkerWasAdmittedKeepsTheToolFromStarting() {
     dispatched(NEVER).start(scheduler);
 
-    Await.until("the worker to end", () -> live.get() == 0);
+    Await.until("the worker to end", live::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
   }
 
   @Test
   void aWorkerReachingAdmissionPastItsDeadlineKeepsTheToolFromStarting() {
-    busy.execute(() -> DispatchFixture.awaitThroughInterrupts(busyRelease));
+    busy.execute(() -> Uninterruptible.await(busyRelease));
 
     dispatched(Duration.ofNanos(1)).start(busy);
 
-    Await.until("the worker to end", () -> live.get() == 0);
+    Await.until("the worker to end", live::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
   }
 
@@ -166,7 +173,7 @@ final class DispatchedCallTest {
 
     permits.release(holder);
 
-    Await.until("the worker to end", () -> live.get() == 0);
+    Await.until("the worker to end", live::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
   }
 
@@ -188,7 +195,7 @@ final class DispatchedCallTest {
     }
     permits.release(later);
 
-    Await.until("the earlier call's worker to end", () -> live.get() == 0);
+    Await.until("the earlier call's worker to end", live::isEmpty);
     assertEquals(
         1, runsBeforeTheLaterCall, "the earlier call ran before the later one was admitted");
   }
@@ -227,7 +234,7 @@ final class DispatchedCallTest {
     var session = blockedSession();
     var dispatched = dispatched(NEVER, session);
     dispatched.start(busy);
-    Await.until("the worker to end", () -> live.get() == 0);
+    Await.until("the worker to end", live::isEmpty);
     assertEquals(1, runs.get(), "the tool ran and answered");
     cancelBehindTheBlockedCallback(session);
 
@@ -236,12 +243,50 @@ final class DispatchedCallTest {
   }
 
   @Test
+  void anErrorTheToolThrewIsThrownAsItselfOnceTheSessionWasCancelled() {
+    var sentinel = new AssertionError("tool failure");
+    var session = new CancellationToken();
+    var dispatched =
+        dispatched(
+            NEVER,
+            session,
+            new CategoryPermits(1, new CategoryPermits.Scope()),
+            (args, ctx) -> {
+              throw sentinel;
+            });
+    dispatched.start(busy);
+    Await.until("the worker to end", live::isEmpty);
+    session.cancel("session closed");
+
+    assertSame(sentinel, assertThrows(AssertionError.class, () -> dispatched.await(NEVER)));
+    assertSame(sentinel, ending.seal().orElseThrow());
+  }
+
+  @Test
+  void aThrowableThatIsNoErrorReadOnceTheSessionWasCancelledIsACancellation() {
+    var session = new CancellationToken();
+    var dispatched =
+        dispatched(
+            NEVER,
+            session,
+            new CategoryPermits(1, new CategoryPermits.Scope()),
+            (args, ctx) ->
+                DispatchFixture.sneakyThrow(new Throwable("neither an Exception nor an Error")));
+    dispatched.start(busy);
+    Await.until("the worker to end", live::isEmpty);
+    session.cancel("session closed");
+
+    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    assertEquals("session closed", thrown.getMessage());
+  }
+
+  @Test
   void aTimeoutReadAfterTheSessionWasCancelledIsNotReturned() {
-    busy.execute(() -> DispatchFixture.awaitThroughInterrupts(busyRelease));
+    busy.execute(() -> Uninterruptible.await(busyRelease));
     var session = blockedSession();
     var dispatched = dispatched(Duration.ofNanos(1), session);
     dispatched.start(busy);
-    Await.until("the worker to end", () -> live.get() == 0);
+    Await.until("the worker to end", live::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
     cancelBehindTheBlockedCallback(session);
 

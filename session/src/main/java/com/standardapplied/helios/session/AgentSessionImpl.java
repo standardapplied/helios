@@ -10,10 +10,6 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
-import com.standardapplied.helios.session.ask.AskUserQuestionTool;
-import com.standardapplied.helios.session.ask.QuestionGateway;
-import com.standardapplied.helios.session.hooks.DefaultHookContext;
-import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.LoopCollaborators;
@@ -21,12 +17,6 @@ import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StopClassifier;
 import com.standardapplied.helios.session.loop.ToolDispatch;
 import com.standardapplied.helios.session.loop.TurnRunner;
-import com.standardapplied.helios.session.memory.MemoryReadTool;
-import com.standardapplied.helios.session.memory.MemoryWriteTool;
-import com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator;
-import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolRegistry;
-import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
@@ -37,11 +27,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>One instance per session. Builds the loop substrate ({@link SessionState}, {@link
  * SteeringQueue}, {@link HookRegistry}, {@link ToolDispatch}, {@link LoopCollaborators}, {@link
- * TurnRunner}, {@link StopClassifier}, {@link AgentLoop}) in the constructor; its {@link
- * SessionLifecycle} defers starting the agent-loop virtual thread until the first {@link
- * #send(UserMessage)} or {@link #interrupt(String)} call so subscribers attached between
- * construction and first send observe every event. Open {@code AskUserQuestion} questions are its
- * {@link PendingQuestions}.
+ * TurnRunner}, {@link StopClassifier}, {@link AgentLoop}) in the constructor, the loop through
+ * {@link SessionWiring}, and notifies the execution provider last; its {@link SessionLifecycle}
+ * defers starting the agent-loop virtual thread until the first {@link #send(UserMessage)} or
+ * {@link #interrupt(String)} call so subscribers attached between construction and first send
+ * observe every event. Open {@code AskUserQuestion} questions are its {@link PendingQuestions}.
  *
  * <h2>Event delivery</h2>
  *
@@ -62,7 +52,6 @@ public final class AgentSessionImpl implements AgentSession {
   private final String sessionId;
   private final SessionState state;
   private final SteeringQueue steeringQueue;
-  private final SessionLimits limits;
   private final SessionEventPublisher events;
   private final SessionLifecycle lifecycle;
   private final AgentLoop loop;
@@ -80,61 +69,34 @@ public final class AgentSessionImpl implements AgentSession {
   public AgentSessionImpl(SessionOptions options) {
     Objects.requireNonNull(options, "options must not be null");
     this.sessionId = options.sessionId();
-    this.limits = options.limits();
     this.rawOutputCapturePolicy = options.model().rawOutputCapturePolicy();
     var clock = options.clock();
-    var concurrency = options.concurrency();
     var cancellation = new CancellationToken();
     this.state = new SessionState(sessionId, cancellation, clock);
     options.systemPrompt().ifPresent(prompt -> this.state.history().append(Message.system(prompt)));
     var sessionContext =
         new SessionContext(sessionId, cancellation, clock, options.secretRegistry());
-    this.steeringQueue = new SteeringQueue(concurrency.maxQueuedUserMessages());
-    this.events = new SessionEventPublisher(sessionId);
-    this.pendingQuestions = new PendingQuestions(state, events, clock);
-    var combinedTools = withBuiltins(options.tools(), options, pendingQuestions);
+    this.steeringQueue = new SteeringQueue(options.concurrency().maxQueuedUserMessages());
     this.lifecycle =
         new SessionLifecycle(
-            state, sessionContext, options.executionProvider(), events, resultFuture);
-    var toolDispatch =
-        new ToolDispatch(sessionContext, combinedTools, concurrency, lifecycle.scheduler());
-    var combinedHooks = new ArrayList<Hook>(options.hooks().size() + 1);
-    options
-        .permission()
-        .ifPresent(
-            p ->
-                combinedHooks.add(
-                    DefaultPermissionEvaluator.newBuilder(p, combinedTools)
-                        .withQuestionGateway(pendingQuestions)
-                        .build()));
-    combinedHooks.addAll(options.hooks());
-    var model = options.model();
-    var collaborators =
-        LoopCollaborators.newBuilder()
-            .withHooks(new HookRegistry(combinedHooks))
-            .withToolDispatch(toolDispatch)
-            .withSteeringQueue(steeringQueue)
-            .withEventSink(events::emit)
-            .withHookContextFactory(
-                s ->
-                    new DefaultHookContext(
-                        s.sessionId(), s.currentTurnIndex(), s.cancellation(), model))
-            .withClock(clock)
-            .build();
-    var turnRunner =
-        new TurnRunner(
-            collaborators,
-            model,
-            options.costCalculator(),
-            options.outputSchema().orElse(null),
-            lifecycle.scheduler());
-    this.loop =
-        new AgentLoop(
-            collaborators,
-            turnRunner,
-            new StopClassifier(options.secretRegistry()),
-            options.tokenCounter(),
-            options.contextCompactor());
+            state, sessionContext, options.executionProvider(), options.limits(), resultFuture);
+    this.events = lifecycle.events();
+    this.pendingQuestions = new PendingQuestions(state, events, clock);
+    try {
+      this.loop =
+          SessionWiring.agentLoop(
+              options,
+              sessionContext,
+              pendingQuestions,
+              steeringQueue,
+              events,
+              lifecycle.scheduler(),
+              state.ending());
+    } catch (RuntimeException | Error e) {
+      lifecycle.abandon();
+      throw e;
+    }
+    lifecycle.open(loop);
   }
 
   @Override
@@ -148,14 +110,14 @@ public final class AgentSessionImpl implements AgentSession {
     if (closed.get()) {
       throw new IllegalStateException("session is closed");
     }
-    if (state.isTerminal()) {
+    if (state.isTerminal() || resultFuture.isDone()) {
       throw new IllegalStateException("session is terminal");
     }
     if (!steeringQueue.offer(message)) {
       throw new SteeringQueueFullException(
           "steering queue full at capacity " + steeringQueue.capacity());
     }
-    lifecycle.startIfNeeded(loop, limits);
+    lifecycle.startIfNeeded();
   }
 
   @Override
@@ -167,7 +129,7 @@ public final class AgentSessionImpl implements AgentSession {
     if (closed.get()) {
       throw new IllegalStateException("session is closed");
     }
-    if (state.isTerminal()) {
+    if (state.isTerminal() || resultFuture.isDone()) {
       throw new IllegalStateException("session is terminal");
     }
     var synthetic = UserMessage.text("[interrupted by user: " + reason + "]");
@@ -177,7 +139,7 @@ public final class AgentSessionImpl implements AgentSession {
               + steeringQueue.capacity()
               + " — cannot enqueue interrupt");
     }
-    lifecycle.startIfNeeded(loop, limits);
+    lifecycle.startIfNeeded();
   }
 
   @Override
@@ -210,12 +172,7 @@ public final class AgentSessionImpl implements AgentSession {
     if (!closed.compareAndSet(false, true)) {
       return;
     }
-    state.cancellation().cancel("session closed");
-    pendingQuestions.cancelAll();
-    // If the loop has never started, the lifecycle completes the future so result().get() doesn't
-    // hang. If the loop is running, it will observe the cancellation on its next iteration and
-    // complete the future itself.
-    lifecycle.closeBeforeStart();
+    lifecycle.close();
   }
 
   /** Package-private accessor for tests that assert the runtime's executors shut down. */
@@ -242,20 +199,5 @@ public final class AgentSessionImpl implements AgentSession {
       throw new IllegalStateException("session is closed");
     }
     pendingQuestions.answer(questionId, response);
-  }
-
-  private static ToolRegistry withBuiltins(
-      ToolRegistry userTools, SessionOptions options, QuestionGateway gateway) {
-    var combined = new ArrayList<ToolBinding>(userTools.bindings().size() + 3);
-    combined.addAll(userTools.bindings());
-    combined.add(AskUserQuestionTool.binding(gateway));
-    options
-        .memoryBackend()
-        .ifPresent(
-            b -> {
-              combined.add(MemoryReadTool.binding(b));
-              combined.add(MemoryWriteTool.binding(b));
-            });
-    return new ToolRegistry(combined);
   }
 }
