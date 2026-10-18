@@ -62,7 +62,8 @@ class AnthropicStreamTranscriptTest {
         "eof-mid-event",
         "max-tokens",
         "bad-tool-arguments",
-        "null-argument");
+        "null-argument",
+        "missing-tool-id");
   }
 
   @ParameterizedTest

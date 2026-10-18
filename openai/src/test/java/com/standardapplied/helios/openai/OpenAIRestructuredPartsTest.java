@@ -39,25 +39,9 @@ class OpenAIRestructuredPartsTest {
 
   @Test
   void aToolCallWithoutArgumentsSendsAnEmptyObject() {
-    var message = Message.assistant(List.of(new ToolCall("c1", "search", null)));
+    var message = Message.assistant(List.of(new ToolCall("c1", "search", Map.of())));
 
     assertEquals("{}", OpenAIInput.assistant(message).getFirst().arguments());
-  }
-
-  @Test
-  void toolCallArgumentsThatCannotBeWrittenFailTheRequest() {
-    var call =
-        ToolCall.newBuilder()
-            .withId("c1")
-            .withName("search")
-            .withArguments(ConversationFixture.selfReferencing())
-            .build();
-
-    var failure =
-        assertThrows(
-            OpenAIException.class, () -> OpenAIInput.assistant(Message.assistant(List.of(call))));
-
-    assertEquals("Failed to serialize tool call arguments", failure.getMessage());
   }
 
   @Test

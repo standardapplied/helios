@@ -9,11 +9,52 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.JsonSnapshot;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.test.ConversationFixture;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class JsonbMapperTest {
+
+  @Test
+  void toolCallsRoundTripWithEveryTopLevelAndNestedJsonNull() {
+    var calls = List.of(new ToolCall("call_1", "weather", ConversationFixture.nullArguments()));
+
+    var json = JsonbMapper.objectToJsonb(calls);
+
+    assertEquals(
+        "[{\"id\":\"call_1\",\"name\":\"weather\",\"arguments\":{\"city\":\"Paris\",\"unit\":null,"
+            + "\"days\":[1,null],\"options\":{\"lang\":null}}}]",
+        json);
+    assertEquals(calls, JsonbMapper.toolCallsFromJsonb(json));
+  }
+
+  @Test
+  void toolCallsWithNumbersAtTheSnapshotDigitLimitReadBack() {
+    var digits = "9".repeat(JsonSnapshot.MAX_NUMBER_DIGITS);
+    var integer = new BigInteger("-" + digits);
+    var arguments =
+        Map.<String, Object>of("i", integer, "d", new BigDecimal("-0.0000" + digits.substring(5)));
+    var json = JsonbMapper.objectToJsonb(List.of(new ToolCall("call_1", "sum", arguments)));
+
+    var read = JsonbMapper.toolCallsFromJsonb(json).getFirst();
+
+    assertEquals(arguments, read.arguments());
+  }
+
+  @Test
+  void argumentsReadFractionsBackAsExactDecimals() {
+    var beyondDouble = "2" + "0".repeat(308) + ".5";
+
+    assertEquals(
+        Map.of("x", new BigDecimal(beyondDouble), "y", new BigDecimal("0.10"), "n", 1),
+        JsonbMapper.argumentsFromJsonb("{\"x\":" + beyondDouble + ",\"y\":0.10,\"n\":1}"));
+    assertEquals(Map.of(), JsonbMapper.argumentsFromJsonb(" "));
+  }
 
   @Test
   void toJsonbWithNullMap() {

@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.test.DeclarationOrderFixture;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -60,33 +59,5 @@ class OrderedMapsTest {
     assertEquals(
         "value of key city must not be null",
         assertThrows(NullPointerException.class, () -> OrderedMaps.copyOf(source)).getMessage());
-  }
-
-  @Test
-  void copyKeepingNullValuesKeepsThemInOrderAndIsUnmodifiable() {
-    var source = new LinkedHashMap<String, String>();
-    source.put("b", null);
-    source.put("a", "v");
-
-    var copy = OrderedMaps.copyOfKeepingNullValues(source);
-
-    assertEquals(source, copy);
-    assertEquals(List.of("b", "a"), List.copyOf(copy.keySet()));
-    assertThrows(UnsupportedOperationException.class, () -> copy.put("c", "w"));
-  }
-
-  @Test
-  void copyKeepingNullValuesRejectsANullMapOrKey() {
-    var source = new LinkedHashMap<String, String>();
-    source.put(null, "v");
-
-    assertEquals(
-        "map must not be null",
-        assertThrows(NullPointerException.class, () -> OrderedMaps.copyOfKeepingNullValues(null))
-            .getMessage());
-    assertEquals(
-        "key must not be null",
-        assertThrows(NullPointerException.class, () -> OrderedMaps.copyOfKeepingNullValues(source))
-            .getMessage());
   }
 }

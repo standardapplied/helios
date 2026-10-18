@@ -9,7 +9,6 @@ import com.standardapplied.helios.openai.api.OpenAIJson;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
-import java.util.Map;
 
 /**
  * A conversation in the Responses API's shape: system messages joined into the instructions, and
@@ -72,7 +71,9 @@ record OpenAIInput(String instructions, List<InputItem> items) {
     }
     if (message.hasToolCalls()) {
       for (var call : message.toolCalls()) {
-        items.add(InputItem.functionCall(call.id(), call.name(), arguments(call.arguments())));
+        items.add(
+            InputItem.functionCall(
+                call.id(), call.name(), OpenAIJson.LENIENT.writeValueAsString(call.arguments())));
       }
     }
     if (items.isEmpty()) {
@@ -83,16 +84,5 @@ record OpenAIInput(String instructions, List<InputItem> items) {
 
   private static String appendSystemText(String existing, String additional) {
     return existing == null ? additional : existing + "\n\n" + additional;
-  }
-
-  private static String arguments(Map<String, Object> arguments) {
-    if (arguments == null || arguments.isEmpty()) {
-      return "{}";
-    }
-    try {
-      return OpenAIJson.LENIENT.writeValueAsString(arguments);
-    } catch (RuntimeException e) {
-      throw new OpenAIException("Failed to serialize tool call arguments", e);
-    }
   }
 }

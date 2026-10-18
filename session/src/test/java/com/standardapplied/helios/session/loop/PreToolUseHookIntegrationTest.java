@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
@@ -16,10 +17,15 @@ import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -137,5 +143,99 @@ final class PreToolUseHookIntegrationTest {
     var blocked = loop.first(QueryEvent.ToolBlocked.class);
     assertEquals(
         "MySecurityGuard", blocked.hookName(), "ToolBlocked.hookName must carry the hook's name");
+  }
+
+  @Test
+  void aMutationFromAnotherThreadOfTheMapAHookReturnedNeverReachesTheTool() {
+    var days = new ArrayList<Object>(List.of(1, 2));
+    var returned = new CountDownLatch(1);
+    var mutated = new CountDownLatch(1);
+    PreToolUseHook rewriter =
+        (call, ctx) -> {
+          var outcome = HookOutcome.mutateArgs(Map.of("v", "mutated", "days", days));
+          returned.countDown();
+          Await.latch("mutation", mutated);
+          return outcome;
+        };
+    var mutator = mutateAfter(returned, () -> days.add("added"), mutated);
+    var executed = new AtomicReference<Map<String, Object>>();
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(HookLoop.echoCall(Map.of("v", "original")))
+            .withTextTurn("done")
+            .build();
+
+    var result =
+        loop.run(model, awaitingTool(mutated, executed), UserMessage.text("call"), rewriter);
+
+    Await.termination("mutator", mutator);
+    assertInstanceOf(ResultMessage.Success.class, result);
+    var expected = Map.<String, Object>of("v", "mutated", "days", List.of(1, 2));
+    assertEquals(expected, executed.get());
+    assertEquals(expected, loop.first(QueryEvent.ToolMutated.class).inputAfter());
+    assertEquals(expected, loop.first(QueryEvent.ToolUse.class).call().arguments());
+  }
+
+  @Test
+  void aMutationFromAnotherThreadOfTheMapAModelCallWasBuiltFromNeverReachesTheTool() {
+    var options = new HashMap<String, Object>(Map.of("lang", "en"));
+    var arguments = new HashMap<String, Object>(Map.of("options", options));
+    var call = HookLoop.echoCall(arguments);
+    var observed = new CountDownLatch(1);
+    var mutated = new CountDownLatch(1);
+    var mutator = mutateAfter(observed, () -> options.put("added", true), mutated);
+    PreToolUseHook observer =
+        (seen, ctx) -> {
+          observed.countDown();
+          Await.latch("mutation", mutated);
+          return HookOutcome.cont();
+        };
+    var executed = new AtomicReference<Map<String, Object>>();
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(call).withTextTurn("done").build();
+
+    var result =
+        loop.run(model, awaitingTool(mutated, executed), UserMessage.text("call"), observer);
+
+    Await.termination("mutator", mutator);
+    assertInstanceOf(ResultMessage.Success.class, result);
+    assertEquals(Map.of("options", Map.of("lang", "en")), executed.get());
+    assertEquals(executed.get(), loop.first(QueryEvent.ToolUse.class).call().arguments());
+  }
+
+  @Test
+  void aHookReturningArgumentsThatAreNotJsonIsTreatedAsContinueAndTheToolNeverSeesThem() {
+    var cyclic = new HashMap<String, Object>();
+    cyclic.put("self", cyclic);
+    PreToolUseHook broken = (call, ctx) -> HookOutcome.mutateArgs(cyclic);
+
+    var result = callEchoThenAnswer(Map.of("v", "original"), "done", broken);
+
+    assertInstanceOf(ResultMessage.Success.class, result);
+    assertTrue(loop.eventsOf(QueryEvent.ToolMutated.class).isEmpty());
+    assertEquals("echoed: original", loop.first(QueryEvent.ToolResult.class).result().output());
+  }
+
+  /**
+   * A thread that waits for {@code ready}, then runs {@code mutation} and counts down {@code done}.
+   */
+  private static Thread mutateAfter(CountDownLatch ready, Runnable mutation, CountDownLatch done) {
+    return Thread.ofVirtual()
+        .start(
+            () -> {
+              Await.latch("ready to mutate", ready);
+              mutation.run();
+              done.countDown();
+            });
+  }
+
+  /** A registry holding {@code echo}, which waits for {@code mutated} and records its arguments. */
+  private static ToolRegistry awaitingTool(
+      CountDownLatch mutated, AtomicReference<Map<String, Object>> executed) {
+    return HookLoop.echoTool(
+        (args, ctx) -> {
+          Await.latch("mutation", mutated);
+          executed.set(args);
+          return ToolResult.success("done");
+        });
   }
 }

@@ -5,9 +5,8 @@
 
 package com.standardapplied.helios.core.runtime;
 
+import com.standardapplied.helios.core.common.JsonSnapshot;
 import java.time.OffsetDateTime;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -24,7 +23,8 @@ import java.util.UUID;
  * @param iteration zero-based iteration index at the time the call was journaled
  * @param toolCallId model-supplied call identifier (matches {@code ToolCall.id()})
  * @param toolName the tool's name
- * @param args arguments passed to the tool, nullable for tools without parameters
+ * @param args arguments passed to the tool, a JSON object snapshotted as {@link JsonSnapshot}
+ *     defines it; nullable for tools without parameters
  * @param status current status; transitions {@code STARTED -> SUCCEEDED|FAILED}
  * @param output truncated output text from a successful {@link
  *     com.standardapplied.helios.core.tool.ToolResult}, nullable
@@ -53,10 +53,7 @@ public record ToolCallRecord(
     if (iteration < 0) {
       throw new IllegalArgumentException("iteration must be >= 0");
     }
-    // Defensive copy that preserves insertion order and allows null values. Models routinely emit
-    // null arg values (e.g. {"timeout": null}); Map.copyOf rejects nulls, so we use an unmodifiable
-    // wrapper around a LinkedHashMap instead.
-    args = args == null ? null : Collections.unmodifiableMap(new LinkedHashMap<>(args));
+    args = args == null ? null : JsonSnapshot.ofObject("args", args);
   }
 
   public static Builder newBuilder() {

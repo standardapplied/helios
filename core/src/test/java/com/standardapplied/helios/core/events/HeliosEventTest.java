@@ -18,6 +18,7 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.core.trace.Trace;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -302,14 +303,15 @@ class HeliosEventTest {
   // ----- Tool calls -----
 
   @Test
-  void toolCallStartedDefensiveCopiesArgs() {
-    var args = new HashMap<String, Object>();
-    args.put("k", "v1");
+  void toolCallStartedCopiesArgsDeeply() {
+    var tags = new ArrayList<Object>(List.of("a"));
+    var args = new HashMap<String, Object>(Map.of("k", "v1", "tags", tags));
     var event =
         new HeliosEvent.ToolCallStarted(
             NOW, Ids.newId(), Optional.empty(), "call_1", "search", args);
     args.put("k", "v2");
-    assertEquals("v1", event.args().get("k"));
+    tags.add("b");
+    assertEquals(Map.of("k", "v1", "tags", List.of("a")), event.args());
   }
 
   @Test

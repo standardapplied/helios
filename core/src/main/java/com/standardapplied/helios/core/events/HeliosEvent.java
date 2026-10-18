@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.core.events;
 
+import com.standardapplied.helios.core.common.JsonSnapshot;
 import com.standardapplied.helios.core.common.OrderedMaps;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Message;
@@ -341,7 +342,7 @@ public sealed interface HeliosEvent
       if (Strings.isBlank(toolName)) {
         throw new IllegalArgumentException("toolName must not be blank");
       }
-      args = args == null ? Map.of() : OrderedMaps.copyOfKeepingNullValues(args);
+      args = args == null ? Map.of() : JsonSnapshot.ofObject("args", args);
     }
   }
 

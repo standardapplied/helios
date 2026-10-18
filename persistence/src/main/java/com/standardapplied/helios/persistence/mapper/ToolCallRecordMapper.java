@@ -25,7 +25,7 @@ public final class ToolCallRecordMapper {
     var argsJson = row.column("args").getString();
     Map<String, Object> args = null;
     if (!Strings.isBlank(argsJson)) {
-      var parsed = JsonbMapper.fromJsonbObject(argsJson);
+      var parsed = JsonbMapper.argumentsFromJsonb(argsJson);
       args = parsed.isEmpty() ? null : parsed;
     }
     var iterObj = row.column("iteration").get(Object.class);
