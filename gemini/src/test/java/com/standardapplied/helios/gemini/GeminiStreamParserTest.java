@@ -167,16 +167,15 @@ class GeminiStreamParserTest {
   }
 
   @Test
-  void interactionCompletedWhileANamelessFunctionCallIsOpenNamesItUnnamed() {
+  void aNamelessFunctionCallEndsTheStreamAtItsStart() {
     var events =
         drain(
             stepStart(1, "{\"type\":\"function_call\",\"id\":\"c1\"}")
                 + interactionEnded("requires_action"));
 
     var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
-    assertEquals(
-        "Interaction completed while function call '<unnamed>' is still open", error.message());
-    assertNull(error.cause());
+    assertEquals("A tool call streamed without a tool name", error.message());
+    assertInstanceOf(GeminiException.class, error.cause());
   }
 
   @ParameterizedTest(name = "{0}")

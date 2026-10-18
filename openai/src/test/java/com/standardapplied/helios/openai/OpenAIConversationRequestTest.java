@@ -37,6 +37,21 @@ class OpenAIConversationRequestTest extends ConversationRequestContract {
   }
 
   @Override
+  protected String toolCallReply() {
+    return "openai/streams/null-argument.sse";
+  }
+
+  @Override
+  protected Map<String, Object> replayedArguments(Map<String, Object> request) {
+    var call =
+        objects(request.get("input")).stream()
+            .filter(item -> "function_call".equals(item.get("type")))
+            .findFirst()
+            .orElseThrow();
+    return parse((String) call.get("arguments"));
+  }
+
+  @Override
   protected String systemPrompt(Map<String, Object> request) {
     return (String) request.get("instructions");
   }

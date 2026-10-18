@@ -13,6 +13,9 @@ import com.standardapplied.helios.core.runtime.ToolCallJournal;
 import com.standardapplied.helios.core.runtime.ToolCallRecord;
 import com.standardapplied.helios.core.runtime.ToolCallStatus;
 import java.time.OffsetDateTime;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -203,6 +206,27 @@ public abstract class ToolCallJournalContract {
             .build();
     journal.start(record);
     assertNull(journal.all(runId).get(0).args());
+  }
+
+  @Test
+  void argsKeepEveryTopLevelAndNestedJsonNull() {
+    var runId = newRunId();
+    var args = new LinkedHashMap<String, Object>();
+    args.put("city", "Paris");
+    args.put("unit", null);
+    args.put("days", Arrays.asList(1, null));
+    args.put("options", Collections.singletonMap("lang", null));
+    journal.start(
+        ToolCallRecord.newBuilder()
+            .withRunId(runId)
+            .withIteration(0)
+            .withToolCallId("c1")
+            .withToolName("weather")
+            .withArgs(args)
+            .withStartedAt(Ids.now())
+            .build());
+
+    assertEquals(args, journal.all(runId).get(0).args());
   }
 
   @Test

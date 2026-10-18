@@ -129,19 +129,16 @@ class AnthropicStreamParserTest {
   }
 
   @Test
-  void aMessageStopWhileANamelessToolUseIsOpenIsAnError() {
-    parser.parse(
-        "{\"type\":\"content_block_start\",\"index\":0,"
-            + "\"content_block\":{\"type\":\"tool_use\",\"id\":\"t1\"}}");
-    parser.parse(
-        "{\"type\":\"content_block_delta\",\"index\":0,"
-            + "\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\"}}");
-    parser.parse("{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}");
-
+  void aNamelessToolUseFailsAtItsStart() {
     var error =
-        assertInstanceOf(StreamEvent.Error.class, parser.parse("{\"type\":\"message_stop\"}"));
+        assertInstanceOf(
+            StreamEvent.Error.class,
+            parser.parse(
+                "{\"type\":\"content_block_start\",\"index\":0,"
+                    + "\"content_block\":{\"type\":\"tool_use\",\"id\":\"t1\"}}"));
 
-    assertEquals("message_stop while tool use '<unnamed>' is still open", error.message());
+    assertEquals("A tool call streamed without a tool name", error.message());
+    assertInstanceOf(AnthropicException.class, error.cause());
     assertEquals(List.of(), error.partial().toolCalls());
   }
 

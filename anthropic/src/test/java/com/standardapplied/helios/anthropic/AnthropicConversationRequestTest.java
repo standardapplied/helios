@@ -36,6 +36,18 @@ class AnthropicConversationRequestTest extends ConversationRequestContract {
   }
 
   @Override
+  protected String toolCallReply() {
+    return "anthropic/streams/null-argument.sse";
+  }
+
+  @Override
+  @SuppressWarnings("unchecked")
+  protected Map<String, Object> replayedArguments(Map<String, Object> request) {
+    var assistant = objects(request.get("messages")).get(1);
+    return (Map<String, Object>) objects(assistant.get("content")).getFirst().get("input");
+  }
+
+  @Override
   protected String systemPrompt(Map<String, Object> request) {
     return String.join("", texts(request.get("system")).toList());
   }

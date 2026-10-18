@@ -9,11 +9,33 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.ToolCall;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class JsonbMapperTest {
+
+  @Test
+  void toolCallsRoundTripWithEveryTopLevelAndNestedJsonNull() {
+    var arguments = new LinkedHashMap<String, Object>();
+    arguments.put("city", "Paris");
+    arguments.put("unit", null);
+    arguments.put("days", Arrays.asList(1, null));
+    arguments.put("options", Collections.singletonMap("lang", null));
+    var calls = List.of(new ToolCall("call_1", "weather", arguments));
+
+    var json = JsonbMapper.objectToJsonb(calls);
+
+    assertEquals(
+        "[{\"id\":\"call_1\",\"name\":\"weather\",\"arguments\":{\"city\":\"Paris\",\"unit\":null,"
+            + "\"days\":[1,null],\"options\":{\"lang\":null}}}]",
+        json);
+    assertEquals(calls, JsonbMapper.toolCallsFromJsonb(json));
+  }
 
   @Test
   void toJsonbWithNullMap() {

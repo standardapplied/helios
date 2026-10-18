@@ -46,7 +46,8 @@ class GeminiStreamTranscriptTest {
         "requires-action",
         "failed",
         "bad-tool-arguments",
-        "null-argument");
+        "null-argument",
+        "missing-tool-id");
   }
 
   @ParameterizedTest

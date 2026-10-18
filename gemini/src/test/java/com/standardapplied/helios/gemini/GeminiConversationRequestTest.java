@@ -47,6 +47,21 @@ class GeminiConversationRequestTest extends ConversationRequestContract {
   }
 
   @Override
+  protected String toolCallReply() {
+    return "gemini/streams/null-argument.sse";
+  }
+
+  @Override
+  @SuppressWarnings("unchecked")
+  protected Map<String, Object> replayedArguments(Map<String, Object> request) {
+    return objects(request.get("input")).stream()
+        .filter(step -> "function_call".equals(step.get("type")))
+        .map(step -> (Map<String, Object>) step.get("arguments"))
+        .findFirst()
+        .orElseThrow();
+  }
+
+  @Override
   protected String systemPrompt(Map<String, Object> request) {
     return (String) request.get("system_instruction");
   }

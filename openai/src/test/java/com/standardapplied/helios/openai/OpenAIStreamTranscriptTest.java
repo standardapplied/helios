@@ -53,7 +53,8 @@ class OpenAIStreamTranscriptTest {
         "incomplete",
         "refusal",
         "bad-tool-arguments",
-        "null-argument");
+        "null-argument",
+        "missing-tool-id");
   }
 
   @ParameterizedTest

@@ -5,13 +5,13 @@ package com.standardapplied.helios.openai;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.provider.ToolArguments;
+import com.standardapplied.helios.core.provider.ToolCallStarts;
 import com.standardapplied.helios.openai.api.OpenAIJson;
 import com.standardapplied.helios.openai.api.OutputItem;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * The function calls of a streamed response, keyed by output item: each announced when its item is
@@ -24,13 +24,18 @@ final class FunctionCalls {
   private final Map<String, Pending> pending = new LinkedHashMap<>();
   private final List<ToolCall> calls = new ArrayList<>();
 
-  /** An added output item: the start of a call when it is a function call. */
+  /**
+   * An added output item: the start of a call when it is a function call.
+   *
+   * @throws OpenAIException if the function call has no call id or no name
+   */
   StreamEvent added(OutputItem item) {
     if (item == null || !item.hasTypeFunctionCall()) {
       return null;
     }
+    var started = ToolCallStarts.of(item.callId(), item.name(), OpenAIException::new);
     pending.put(item.id(), new Pending(item.callId(), item.name(), new StringBuilder()));
-    return new StreamEvent.ToolCallStart(item.callId(), item.name());
+    return started;
   }
 
   /** Arguments streamed into the call of item {@code itemId}, if it is open. */
@@ -74,9 +79,7 @@ final class FunctionCalls {
    * or {@code null} when no call is open.
    */
   String open() {
-    return pending.isEmpty()
-        ? null
-        : Objects.requireNonNullElse(pending.values().iterator().next().name(), "<unnamed>");
+    return pending.isEmpty() ? null : pending.values().iterator().next().name();
   }
 
   /** The tool calls, in the order their arguments completed. */

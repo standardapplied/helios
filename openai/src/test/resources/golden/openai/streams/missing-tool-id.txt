@@ -1,0 +1,5 @@
+== chatStream
+KeepAlive[]
+onError OpenAIException(Tool call 'weather' streamed without an id) status=0
+== chat
+threw OpenAIException(Tool call 'weather' streamed without an id) status=0
