@@ -66,7 +66,7 @@ public final class SessionEnding {
   public void fail(Error error) {
     Objects.requireNonNull(error, "error must not be null");
     boolean recorded;
-    synchronized (errors) {
+    synchronized (this) {
       recorded = !sealed;
       if (recorded && errors.stream().noneMatch(kept -> kept == error)) {
         errors.add(error);
@@ -112,15 +112,13 @@ public final class SessionEnding {
    * @return the first recorded {@link Error}, every later one added to it as suppressed, or empty
    *     when none was recorded
    */
-  public Optional<Error> seal() {
-    synchronized (errors) {
-      sealed = true;
-      if (errors.isEmpty()) {
-        return Optional.empty();
-      }
-      var first = errors.getFirst();
-      errors.stream().skip(1).forEach(first::addSuppressed);
-      return Optional.of(first);
+  public synchronized Optional<Error> seal() {
+    sealed = true;
+    if (errors.isEmpty()) {
+      return Optional.empty();
     }
+    var first = errors.getFirst();
+    errors.stream().skip(1).forEach(first::addSuppressed);
+    return Optional.of(first);
   }
 }
