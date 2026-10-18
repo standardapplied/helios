@@ -7,34 +7,26 @@ package com.standardapplied.helios.session.hooks;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 final class HookDecisionTest {
 
-  private static final PreToolUseHook NAMED_HOOK =
-      new PreToolUseHook() {
-        @Override
-        public HookOutcome beforeTool(
-            com.standardapplied.helios.core.model.ToolCall call, HookContext ctx) {
-          return HookOutcome.cont();
-        }
-
-        @Override
-        public String name() {
-          return "myHook";
-        }
-      };
+  private static final HookOutcome BLOCK = HookOutcome.block("nope");
 
   @Test
-  void proceedSingletonIsContinue() {
+  void proceedSingletonIsContinueWithNoName() {
     var d = HookDecision.proceed();
     assertTrue(d.shouldContinue());
     assertInstanceOf(HookOutcome.Continue.class, d.outcome());
-    assertTrue(d.firingHookOptional().isEmpty());
+    assertNull(d.firingHookName());
   }
 
   @Test
@@ -43,51 +35,64 @@ final class HookDecisionTest {
   }
 
   @Test
-  void ofWrapsHookAndOutcome() {
-    var d = HookDecision.of(NAMED_HOOK, HookOutcome.block("nope"));
+  void ofWrapsNameAndOutcome() {
+    var d = HookDecision.of("myHook", BLOCK);
     assertFalse(d.shouldContinue());
-    assertInstanceOf(HookOutcome.Block.class, d.outcome());
-    assertEquals(NAMED_HOOK, d.firingHookOptional().orElseThrow());
-    assertEquals("myHook", d.firingHook().name());
+    assertSame(BLOCK, d.outcome());
+    assertEquals("myHook", d.firingHookName());
   }
 
-  @Test
-  void ofRejectsNullHook() {
-    var ex =
-        assertThrows(
-            NullPointerException.class, () -> HookDecision.of(null, HookOutcome.block("nope")));
-    assertEquals("hook must not be null", ex.getMessage());
+  @ParameterizedTest
+  @NullSource
+  @ValueSource(strings = {"", " \t"})
+  void ofRejectsAMissingName(String name) {
+    var ex = assertThrows(IllegalArgumentException.class, () -> HookDecision.of(name, BLOCK));
+    assertEquals(
+        "firingHookName must not be blank when outcome is non-Continue, got " + BLOCK,
+        ex.getMessage());
   }
 
   @Test
   void ofRejectsNullOutcome() {
-    assertThrows(NullPointerException.class, () -> HookDecision.of(NAMED_HOOK, null));
+    var ex = assertThrows(NullPointerException.class, () -> HookDecision.of("myHook", null));
+    assertEquals("outcome must not be null", ex.getMessage());
   }
 
   @Test
   void ofRejectsContinueOutcome() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class, () -> HookDecision.of(NAMED_HOOK, HookOutcome.cont()));
-    assertTrue(ex.getMessage().contains("HookDecision.proceed()"));
+            IllegalArgumentException.class, () -> HookDecision.of("myHook", HookOutcome.cont()));
+    assertEquals("use HookDecision.proceed() for Continue outcomes", ex.getMessage());
   }
 
   @Test
   void constructorRejectsNullOutcome() {
-    assertThrows(NullPointerException.class, () -> new HookDecision(NAMED_HOOK, null));
+    var ex = assertThrows(NullPointerException.class, () -> new HookDecision("myHook", null));
+    assertEquals("outcome must not be null", ex.getMessage());
+  }
+
+  @ParameterizedTest
+  @NullSource
+  @ValueSource(strings = {"", " \t"})
+  void constructorRejectsANonContinueOutcomeWithoutAName(String name) {
+    var ex = assertThrows(IllegalArgumentException.class, () -> new HookDecision(name, BLOCK));
+    assertEquals(
+        "firingHookName must not be blank when outcome is non-Continue, got " + BLOCK,
+        ex.getMessage());
   }
 
   @Test
-  void constructorRejectsNonContinueWithoutHook() {
+  void constructorRejectsAContinueOutcomeWithAName() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> new HookDecision(null, HookOutcome.block("nope")));
-    assertTrue(ex.getMessage().contains("firingHook must not be null"));
+            IllegalArgumentException.class, () -> new HookDecision("myHook", HookOutcome.cont()));
+    assertEquals(
+        "firingHookName must be null when outcome is Continue, got myHook", ex.getMessage());
   }
 
   @Test
-  void constructorAllowsContinueWithoutHook() {
+  void constructorAllowsContinueWithoutAName() {
     var d = new HookDecision(null, HookOutcome.cont());
     assertTrue(d.shouldContinue());
   }

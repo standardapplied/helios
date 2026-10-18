@@ -43,7 +43,7 @@ final class SteeringDrain {
     for (var message : drained) {
       var decision =
           collaborators.hooks().fireOnUserMessage(message, collaborators.hookContext(state));
-      var hookName = HookEffects.firingHookName(decision);
+      var hookName = decision.firingHookName();
       switch (decision.outcome()) {
         case HookOutcome.MutateText mutate ->
             accepted.add(mutateText(state, message, hookName, mutate));
@@ -95,7 +95,7 @@ final class SteeringDrain {
             state.currentTurnIndex(),
             collaborators.clock().instant(),
             message,
-            hookName == null ? PHASE : hookName,
+            hookName,
             block.reason()));
   }
 

@@ -6,6 +6,7 @@ package com.standardapplied.helios.session.hooks;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,7 +23,11 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 final class HookRegistryTest {
 
@@ -48,6 +53,67 @@ final class HookRegistryTest {
     list.add(null);
     var ex = assertThrows(NullPointerException.class, () -> new HookRegistry(list));
     assertEquals("hooks must not contain null", ex.getMessage());
+  }
+
+  /** A {@code PreToolUse} hook that continues under the name {@code source} gives. */
+  private record NamedBy(Supplier<String> source) implements PreToolUseHook {
+
+    @Override
+    public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+      return HookOutcome.cont();
+    }
+
+    @Override
+    public String name() {
+      return source.get();
+    }
+  }
+
+  @Test
+  void constructorRejectsANullName() {
+    var hooks = List.of(new NamedBy(() -> null));
+    var ex = assertThrows(NullPointerException.class, () -> new HookRegistry(hooks));
+    assertEquals("hook " + NamedBy.class.getName() + " returned a null name", ex.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"", " \t"})
+  void constructorRejectsABlankName(String name) {
+    var hooks = List.of(new NamedBy(() -> name));
+    var ex = assertThrows(IllegalArgumentException.class, () -> new HookRegistry(hooks));
+    assertEquals("hook " + NamedBy.class.getName() + " returned a blank name", ex.getMessage());
+  }
+
+  @Test
+  void constructorPropagatesWhatANameThrows() {
+    var failure = new IllegalStateException("no name");
+    var hooks =
+        List.of(
+            new NamedBy(
+                () -> {
+                  throw failure;
+                }));
+    assertSame(failure, assertThrows(IllegalStateException.class, () -> new HookRegistry(hooks)));
+  }
+
+  @Test
+  void aDecisionCarriesTheNameReadWhenTheRegistryWasBuilt() {
+    var reads = new AtomicInteger();
+    PreToolUseHook gate =
+        new PreToolUseHook() {
+          @Override
+          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+            return HookOutcome.block("no");
+          }
+
+          @Override
+          public String name() {
+            return reads.getAndIncrement() == 0 ? "Gate" : null;
+          }
+        };
+    var registry = new HookRegistry(List.of(gate));
+    assertEquals("Gate", registry.firePreToolUse(CALL, ctx()).firingHookName());
+    assertEquals(1, reads.get());
   }
 
   @Test
@@ -85,7 +151,7 @@ final class HookRegistryTest {
     var decision = HookRegistry.empty().firePreToolUse(CALL, ctx());
     assertTrue(decision.shouldContinue());
     assertInstanceOf(HookOutcome.Continue.class, decision.outcome());
-    assertTrue(decision.firingHookOptional().isEmpty());
+    assertEquals(null, decision.firingHookName());
   }
 
   @Test
@@ -270,7 +336,7 @@ final class HookRegistryTest {
     var decision = registry.firePreToolUse(CALL, ctx());
     assertInstanceOf(HookOutcome.Block.class, decision.outcome());
     assertEquals(List.of("continue", "block"), fired);
-    assertEquals(blockHook, decision.firingHookOptional().orElseThrow());
+    assertEquals(blockHook.name(), decision.firingHookName());
   }
 
   @Test
@@ -358,7 +424,7 @@ final class HookRegistryTest {
     PostToolUseHook hook = (call, result, ctx) -> HookOutcome.inject("more");
     var decision = new HookRegistry(List.of(hook)).firePostToolUse(CALL, OK, ctx());
     assertInstanceOf(HookOutcome.Inject.class, decision.outcome());
-    assertEquals(hook, decision.firingHookOptional().orElseThrow());
+    assertEquals(hook.name(), decision.firingHookName());
   }
 
   @Test
@@ -367,7 +433,7 @@ final class HookRegistryTest {
     var decision =
         new HookRegistry(List.of(hook)).firePreModelTurn(List.of(Message.user("hi")), ctx());
     assertInstanceOf(HookOutcome.Stop.class, decision.outcome());
-    assertEquals(hook, decision.firingHookOptional().orElseThrow());
+    assertEquals(hook.name(), decision.firingHookName());
   }
 
   @Test
@@ -391,6 +457,6 @@ final class HookRegistryTest {
     OnUserMessageHook hook = (msg, ctx) -> HookOutcome.block("PII");
     var decision = new HookRegistry(List.of(hook)).fireOnUserMessage(UserMessage.text("hi"), ctx());
     assertInstanceOf(HookOutcome.Block.class, decision.outcome());
-    assertEquals(hook, decision.firingHookOptional().orElseThrow());
+    assertEquals(hook.name(), decision.firingHookName());
   }
 }
