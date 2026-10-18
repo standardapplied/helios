@@ -183,25 +183,35 @@ final class SessionLifecycle {
    * <p>{@link AgentLoop#run} turns every {@link Exception} into a terminal, so only an {@link
    * Error} escapes it, which goes to the session's {@link
    * com.standardapplied.helios.session.loop.SessionEnding}. When the result settles with an {@code
-   * Error}, this thread then ends by throwing it to its uncaught-exception handler.
+   * Error}, this thread then ends by throwing it to its uncaught-exception handler. A {@link
+   * RuntimeException} that escapes anyway, because turning it into a terminal failed, settles the
+   * result exceptionally as itself, so the result never stays pending.
    */
   private void runLoop() {
     ResultMessage terminal = null;
+    RuntimeException crash = null;
     try {
       terminal = loop.run(state, limits);
+    } catch (RuntimeException e) {
+      crash = e;
     } catch (Error e) {
       state.ending().fail(e);
     }
-    var settling = end(terminal);
+    // An interrupt host code left on this thread is no request to cut the teardown's waits short.
+    Thread.interrupted();
+    var settling = teardown.run(loop.toolDispatch());
+    if (settling.isEmpty() && crash != null) {
+      result.completeExceptionally(crash);
+      return;
+    }
+    settle(terminal, settling);
     if (settling.isPresent()) {
       throw settling.get();
     }
   }
 
-  private Optional<Error> end(ResultMessage terminal) {
-    var settling = teardown.run(loop.toolDispatch());
-    settle(terminal, settling);
-    return settling;
+  private void end(ResultMessage terminal) {
+    settle(terminal, teardown.run(loop.toolDispatch()));
   }
 
   private void settle(ResultMessage terminal, Optional<Error> failure) {

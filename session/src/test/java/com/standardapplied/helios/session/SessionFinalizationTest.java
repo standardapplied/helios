@@ -15,6 +15,7 @@ import static com.standardapplied.helios.session.EndingSessions.slowGrace;
 import static com.standardapplied.helios.session.EndingSessions.subscription;
 import static com.standardapplied.helios.session.EndingSessions.withProvider;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,11 +31,13 @@ import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -421,5 +424,80 @@ final class SessionFinalizationTest {
     var answered = events.eventsOf(QueryEvent.ToolResult.class).getFirst().result();
     assertInstanceOf(ToolOutcome.Unknown.class, answered.outcome());
     assertEquals(List.of("tool ended", "onSessionEnd"), order);
+  }
+
+  @Test
+  void aRuntimeExceptionTheLoopCannotTurnIntoATerminalFailsTheResultAsItself() {
+    var failure = new Unprintable();
+    var model =
+        model(
+            token -> {
+              throw failure;
+            });
+
+    try (var session = AgentSession.create(options(model).build())) {
+      session.send("go");
+
+      assertSame(failure, Await.failure("the result to fail", session.result()));
+    }
+  }
+
+  @Test
+  void anInterruptAHookLeavesOnTheLoopThreadDoesNotCutTheWaitForOnSessionEndShort() {
+    var provider = new RecordingProvider(order);
+    var ending = new CountDownLatch(1);
+    provider.end =
+        () -> {
+          ending.countDown();
+          RecordingProvider.blockIgnoringInterrupts(released);
+        };
+    var loopThread = new CompletableFuture<Thread>();
+    var options =
+        withProvider(provider)
+            .withHook(
+                (PreStopHook)
+                    (response, ctx) -> {
+                      loopThread.complete(Thread.currentThread());
+                      Thread.currentThread().interrupt();
+                      return HookOutcome.cont();
+                    })
+            .withLimits(slowGrace());
+
+    try (var session = AgentSession.create(options.build())) {
+      session.send("go");
+      Await.latch("onSessionEnd to start", ending);
+      var loop = Await.value("the loop thread", loopThread);
+      Await.until(
+          "the result to settle or the loop to wait for onSessionEnd",
+          () -> session.result().isDone() || loop.getState() == Thread.State.TIMED_WAITING);
+
+      assertFalse(session.result().isDone(), "the result settled while onSessionEnd runs");
+    }
+  }
+
+  @Test
+  void anOnSessionEndThatThrowsAnUndeclaredCheckedExceptionLetsTheResultSettleAtOnce() {
+    var provider = new RecordingProvider(order);
+    provider.end = () -> throwUndeclared(new IOException("undeclared"));
+
+    try (var session =
+        AgentSession.create(withProvider(provider).withLimits(slowGrace()).build())) {
+      session.send("go");
+
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
+    }
+  }
+
+  /** An exception whose message cannot be read, so the loop cannot serialise it. */
+  private static final class Unprintable extends RuntimeException {
+    @Override
+    public String getMessage() {
+      throw this;
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <E extends Throwable> void throwUndeclared(Throwable t) throws E {
+    throw (E) t;
   }
 }

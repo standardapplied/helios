@@ -21,6 +21,7 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.loop.SessionState;
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -208,6 +209,23 @@ final class DropMiddleToolResultsCompactorTest {
     assertSame(sentinel, thrown);
   }
 
+  @Test
+  void aCheckedExceptionTheSummarizerThrewUndeclaredLeavesTheHistoryUnchangedAtOnce() {
+    var compactor = compactorSummarizingWith(() -> throwUndeclared(new IOException("undeclared")));
+    var history = chain(10);
+
+    var compacted =
+        CompletableFuture.supplyAsync(
+            () -> compactor.compact(history, freshState()), Thread.ofVirtual()::start);
+
+    assertSame(history, Await.value("the compaction", compacted).history());
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <E extends Throwable> void throwUndeclared(Throwable t) throws E {
+    throw (E) t;
+  }
+
   private static DropMiddleToolResultsCompactor compactorSummarizingWith(Runnable summary) {
     Model summarizer =
         new BlockingModel() {
@@ -230,6 +248,7 @@ final class DropMiddleToolResultsCompactorTest {
     return DropMiddleToolResultsCompactor.newBuilder(summarizer)
         .withHeadPreserved(1)
         .withTailPreserved(1)
+        .withSummaryTimeout(Duration.ofMinutes(10))
         .build();
   }
 
