@@ -36,10 +36,9 @@ import java.util.regex.Pattern;
  * {@value #MAX_STRING_LENGTH} characters in a string, the size of the largest event a provider
  * stream may carry (Jackson 100,000,000); {@value #MAX_KEY_LENGTH} characters in a key (Jackson
  * 50,000); {@value #MAX_NUMBER_DIGITS} digits in a {@link BigInteger} or {@link BigDecimal} written
- * out in full ({@link BigDecimal#toPlainString()}), the form PostgreSQL's {@code jsonb} returns a
- * number in, so every accepted number reads back from a journal (Jackson 1,000). Every finite
- * {@link Double} and {@link Float} is within it: {@link Double#MIN_VALUE} written out in full has
- * 326 digits.
+ * out in full, as PostgreSQL's {@code jsonb} returns it, so every accepted number reads back from a
+ * journal (Jackson 1,000). A finite {@link Double} or {@link Float} written out in full has at most
+ * 326 digits, within the limit.
  */
 public final class JsonSnapshot {
 
@@ -61,6 +60,8 @@ public final class JsonSnapshot {
   private static final Pattern PLAIN_KEY = Pattern.compile("[\\w$-]+");
 
   private static final BigInteger NUMBER_BOUND = BigInteger.TEN.pow(MAX_NUMBER_DIGITS);
+
+  private static final String NOT_FINITE = "; a JSON number is finite";
 
   private static final String JSON_VALUES =
       "a JSON value is null, a Boolean, a String, a Byte, Short, Integer, Long, BigInteger or"
@@ -98,16 +99,14 @@ public final class JsonSnapshot {
       case String string when string.length() > MAX_STRING_LENGTH ->
           throw rejected(
               "is a string of " + string.length() + " characters; at most " + MAX_STRING_LENGTH);
-      case Boolean _, Byte _, Short _, Integer _, Long _, String _ -> value;
-      case Double number -> number(number, Double.isFinite(number));
-      case Float number -> number(number, Float.isFinite(number));
+      case Double number when !Double.isFinite(number) ->
+          throw rejected("is " + number + NOT_FINITE);
+      case Float number when !Float.isFinite(number) -> throw rejected("is " + number + NOT_FINITE);
+      case Boolean _, Byte _, Short _, Integer _, Long _, String _, Double _, Float _ -> value;
       case BigInteger number when number.getClass() == BigInteger.class ->
-          number(number, number.abs().compareTo(NUMBER_BOUND) < 0);
+          bounded(number, number.abs().compareTo(NUMBER_BOUND) < 0);
       case BigDecimal number when number.getClass() == BigDecimal.class ->
-          number(
-              number,
-              number.unscaledValue().abs().compareTo(NUMBER_BOUND) < 0
-                  && plainDigits(number) <= MAX_NUMBER_DIGITS);
+          bounded(number, withinDigitLimit(number));
       case Map<?, ?> object -> object(object, depth + 1);
       case List<?> array -> array(array, depth + 1);
       default -> throw rejected("is a " + value.getClass().getName() + "; " + JSON_VALUES);
@@ -153,20 +152,20 @@ public final class JsonSnapshot {
     return string;
   }
 
-  private static long plainDigits(BigDecimal number) {
+  private static boolean withinDigitLimit(BigDecimal number) {
+    if (number.unscaledValue().abs().compareTo(NUMBER_BOUND) >= 0) {
+      return false;
+    }
     long scale = number.scale();
     if (scale > 0) {
-      return Math.max(number.precision(), scale + 1);
+      return Math.max(number.precision(), scale + 1) <= MAX_NUMBER_DIGITS;
     }
-    return number.signum() == 0 ? 1 : number.precision() - scale;
+    return number.signum() == 0 || number.precision() - scale <= MAX_NUMBER_DIGITS;
   }
 
-  private Number number(Number number, boolean valid) {
-    if (!valid) {
-      throw rejected(
-          number instanceof Double || number instanceof Float
-              ? "is " + number + "; a JSON number is finite"
-              : "is a number of more than " + MAX_NUMBER_DIGITS + " digits");
+  private Number bounded(Number number, boolean withinDigitLimit) {
+    if (!withinDigitLimit) {
+      throw rejected("is a number of more than " + MAX_NUMBER_DIGITS + " digits");
     }
     return number;
   }
