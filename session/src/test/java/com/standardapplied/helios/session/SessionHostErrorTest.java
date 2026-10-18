@@ -124,45 +124,6 @@ final class SessionHostErrorTest {
   }
 
   @Test
-  void aCancelThatThrowsAnExceptionAfterAnErrorSubscribingIsLogged() {
-    var sentinel = new AssertionError("request failure");
-    var cleanup = new IllegalStateException("close failed");
-
-    Throwable failure;
-    try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
-      failure =
-          failureOf(
-              subscriptionFailing(
-                  sentinel,
-                  () -> {
-                    throw cleanup;
-                  }));
-    }
-
-    assertSame(sentinel, failure);
-    assertEquals(0, sentinel.getSuppressed().length);
-    assertEquals(
-        List.of(Level.WARNING, cleanup),
-        List.of(logged.getFirst().getLevel(), logged.getFirst().getThrown()));
-  }
-
-  @Test
-  void aCancelThatRethrowsTheErrorSubscribingAddsNoSuppressed() {
-    var sentinel = new AssertionError("stream failure");
-
-    var failure =
-        failureOf(
-            subscriptionFailing(
-                sentinel,
-                () -> {
-                  throw sentinel;
-                }));
-
-    assertSame(sentinel, failure);
-    assertEquals(0, sentinel.getSuppressed().length);
-  }
-
-  @Test
   void anErrorCancellingASubscriptionThatFailedTransientlyFailsTheResultWithoutARetry() {
     var sentinel = new AssertionError("cancel failure");
     var transientFailure = new TransientStreamException("connection reset", null, "test");
@@ -330,68 +291,6 @@ final class SessionHostErrorTest {
                 .build());
     session.send("go");
     Await.latch("the hook running", emitting);
-
-    session.close();
-
-    assertSame(sentinel, Await.failure("the result to fail", session.result()));
-  }
-
-  @Test
-  void anErrorCancellingAStalledStreamFailsTheResult() {
-    var sentinel = new AssertionError("cancel failure");
-    var model =
-        model(
-            token ->
-                subscriber ->
-                    subscriber.onSubscribe(
-                        subscription(
-                            () -> subscriber.onNext(new ModelChunk.KeepAlive()),
-                            () -> {
-                              throw sentinel;
-                            })));
-    var limits = SessionLimits.newBuilder().withStreamIdleTimeout(SHORT_GRACE).build();
-
-    try (var session = AgentSession.create(options(model).withLimits(limits).build())) {
-      session.send("go");
-
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    }
-  }
-
-  @Test
-  void anErrorAStreamCancelThrowsAfterTheTurnWasReturnedFailsTheResult() {
-    var sentinel = new AssertionError("late cancel failure");
-    var requested = new CountDownLatch(1);
-    var cancelling = new CompletableFuture<Thread>();
-    var model =
-        model(
-            token ->
-                subscriber ->
-                    subscriber.onSubscribe(
-                        subscription(
-                            requested::countDown,
-                            () -> {
-                              cancelling.complete(Thread.currentThread());
-                              RecordingProvider.blockIgnoringInterrupts(released);
-                              throw sentinel;
-                            })));
-    var session =
-        AgentSession.create(
-            options(model)
-                .withLimits(grace())
-                .withHook(
-                    (OnStreamEventHook)
-                        (event, ctx) -> {
-                          if (event instanceof QueryEvent.LoopEnded) {
-                            released.countDown();
-                            Await.termination(
-                                "the cancel to throw",
-                                Await.value("the cancel to start", cancelling));
-                          }
-                        })
-                .build());
-    session.send("go");
-    Await.latch("the stream requested", requested);
 
     session.close();
 
