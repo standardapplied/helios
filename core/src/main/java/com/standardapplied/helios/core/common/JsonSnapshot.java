@@ -99,7 +99,9 @@ public final class JsonSnapshot {
       case BigDecimal number when number.getClass() == BigDecimal.class ->
           number(
               number,
-              number.precision() <= MAX_NUMBER_DIGITS && digits(number) <= MAX_NUMBER_DIGITS);
+              number.precision() <= MAX_NUMBER_DIGITS
+                  && number.toString().chars().filter(Character::isDigit).count()
+                      <= MAX_NUMBER_DIGITS);
       case Map<?, ?> object -> object(object, depth + 1);
       case List<?> array -> array(array, depth + 1);
       default -> throw rejected("is a " + value.getClass().getName() + "; " + JSON_VALUES);
@@ -161,10 +163,6 @@ public final class JsonSnapshot {
               : "is a number of more than " + MAX_NUMBER_DIGITS + " digits");
     }
     return number;
-  }
-
-  private static long digits(BigDecimal number) {
-    return number.toString().chars().filter(Character::isDigit).count();
   }
 
   private void enter(Object container, int depth) {
