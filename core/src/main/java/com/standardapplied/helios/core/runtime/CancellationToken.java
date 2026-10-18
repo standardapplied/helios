@@ -35,7 +35,8 @@ import java.util.logging.Logger;
  *
  * <ul>
  *   <li>A registration whose {@code onCancel} is ordered before the winning {@code cancel} fires
- *       exactly once, on the cancelling thread, unless its {@code remove()} is ordered in between.
+ *       exactly once, on the cancelling thread ({@link #cancelAsync}: on a thread of its own),
+ *       unless its {@code remove()} is ordered in between.
  *   <li>A registration ordered after the winning {@code cancel} fires exactly once, immediately, on
  *       the registering thread.
  *   <li>A {@code remove()} ordered before the winning {@code cancel} guarantees the callback never
@@ -47,8 +48,8 @@ import java.util.logging.Logger;
  * reentrantly without deadlocking. A callback throwing a {@link RuntimeException} is logged at
  * {@code WARNING} and does not stop later callbacks. A callback throwing an {@link Error} does not
  * stop later callbacks either, but once every claimed callback has run the first {@code Error} is
- * rethrown with any later ones attached as suppressed — the same "Errors escape, cleanup still
- * runs" rule the session loop applies to host failures.
+ * rethrown with any later ones attached as suppressed ({@link #cancelAsync} hands each to its
+ * {@code onError} instead).
  *
  * <p>Fired and removed registrations are dropped from the token immediately, so a long-lived token
  * retains only the callbacks that are still armed.
