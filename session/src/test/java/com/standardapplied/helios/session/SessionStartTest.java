@@ -12,6 +12,7 @@ import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
@@ -223,7 +224,7 @@ final class SessionStartTest {
   @Test
   void aLateAcceptanceIsReportedBeforeItsOnSessionEndReturns() {
     lateAcceptanceReporting(
-        () -> RecordingProvider.blockIgnoringInterrupts(released),
+        () -> Uninterruptible.await(released),
         shortStartSlowTeardown(),
         "onSessionStart settled after session "
             + SID
@@ -241,13 +242,13 @@ final class SessionStartTest {
     provider.start =
         () -> {
           starting.complete(Thread.currentThread());
-          RecordingProvider.blockIgnoringInterrupts(accepting);
+          Uninterruptible.await(accepting);
           return SessionStartOutcome.accept();
         };
     provider.end =
         () -> {
           endEntered.countDown();
-          RecordingProvider.blockIgnoringInterrupts(ending);
+          Uninterruptible.await(ending);
         };
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
@@ -280,7 +281,7 @@ final class SessionStartTest {
     var provider = new RecordingProvider(order);
     provider.start =
         () -> {
-          RecordingProvider.blockIgnoringInterrupts(accepting);
+          Uninterruptible.await(accepting);
           return SessionStartOutcome.accept();
         };
     var token = new CancellationToken();
@@ -308,7 +309,7 @@ final class SessionStartTest {
   @Test
   void anOnSessionEndThatNeverReturnsForALateAcceptanceIsReportedAsNotDisposed() {
     lateAcceptanceReporting(
-        () -> RecordingProvider.blockIgnoringInterrupts(released),
+        () -> Uninterruptible.await(released),
         shortStart(),
         "onSessionEnd of RecordingProvider did not return within PT0.05S; the session's"
             + " provider resources are not known to be released, session "
@@ -321,7 +322,7 @@ final class SessionStartTest {
     var provider = new RecordingProvider(order);
     provider.start =
         () -> {
-          RecordingProvider.blockIgnoringInterrupts(refusing);
+          Uninterruptible.await(refusing);
           return SessionStartOutcome.refuse("too late");
         };
 
@@ -370,7 +371,7 @@ final class SessionStartTest {
     var provider = new RecordingProvider(order);
     provider.start =
         () -> {
-          RecordingProvider.blockIgnoringInterrupts(failing);
+          Uninterruptible.await(failing);
           throw failure;
         };
 
@@ -484,7 +485,7 @@ final class SessionStartTest {
 
   private static Supplier<SessionStartOutcome> acceptingOnceOpened(CountDownLatch latch) {
     return () -> {
-      RecordingProvider.blockIgnoringInterrupts(latch);
+      Uninterruptible.await(latch);
       return SessionStartOutcome.accept();
     };
   }

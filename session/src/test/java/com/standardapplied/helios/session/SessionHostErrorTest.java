@@ -25,6 +25,7 @@ import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
@@ -200,7 +201,7 @@ final class SessionHostErrorTest {
                             BlockingModel.publisherOf(
                                 () -> {
                                   calling.complete(Thread.currentThread());
-                                  RecordingProvider.blockIgnoringInterrupts(released);
+                                  Uninterruptible.await(released);
                                   throw sentinel;
                                 },
                                 token)))
@@ -276,7 +277,7 @@ final class SessionHostErrorTest {
         () -> {
           throw sentinel;
         });
-    cancellation.onCancel(() -> RecordingProvider.blockIgnoringInterrupts(released));
+    cancellation.onCancel(() -> Uninterruptible.await(released));
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
       session.close();
@@ -401,7 +402,7 @@ final class SessionHostErrorTest {
         binding(
             "late",
             (args, ctx) -> {
-              RecordingProvider.blockIgnoringInterrupts(lateTool);
+              Uninterruptible.await(lateTool);
               throw sentinel;
             });
     var model =
@@ -444,7 +445,7 @@ final class SessionHostErrorTest {
             "stuck",
             (args, ctx) -> {
               started.countDown();
-              RecordingProvider.blockIgnoringInterrupts(throwing);
+              Uninterruptible.await(throwing);
               throw sentinel;
             });
 

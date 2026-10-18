@@ -18,6 +18,7 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
@@ -255,7 +256,7 @@ final class TurnSubscriberTest {
         cancelling(
             () -> {
               cancelling.complete(Thread.currentThread());
-              DispatchFixture.awaitThroughInterrupts(released);
+              Uninterruptible.await(released);
               throw sentinel;
             }));
     try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
