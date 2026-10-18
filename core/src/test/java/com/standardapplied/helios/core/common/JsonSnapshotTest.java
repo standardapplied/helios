@@ -152,8 +152,13 @@ class JsonSnapshotTest {
         Arguments.of(
             Map.of("o", nonStringKey),
             "arguments.o has a key that is a java.lang.Integer; a JSON object's keys are Strings"),
+        Arguments.of(nullKey, "arguments has a key that is null; a JSON object's keys are Strings"),
         Arguments.of(
-            nullKey, "arguments has a key that is null; a JSON object's keys are Strings"));
+            Map.of("a.b", Map.of("[0]", List.of(1, new Object()))),
+            "arguments[\"a.b\"][\"[0]\"][1] is a java.lang.Object; " + jsonValues()),
+        Arguments.of(
+            Map.of("say \"\\hi\"", new Object()),
+            "arguments[\"say \\\"\\\\hi\\\"\"] is a java.lang.Object; " + jsonValues()));
   }
 
   @ParameterizedTest

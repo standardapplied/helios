@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.SequencedMap;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Deep, unmodifiable snapshots of a JSON object held as Java values, the shape of a tool call's
@@ -54,6 +55,8 @@ public final class JsonSnapshot {
 
   /** Digits a {@link BigInteger} or {@link BigDecimal} may hold. */
   public static final int MAX_NUMBER_DIGITS = 1_000;
+
+  private static final Pattern PLAIN_KEY = Pattern.compile("[\\w$-]+");
 
   private static final BigInteger NUMBER_BOUND = BigInteger.TEN.pow(MAX_NUMBER_DIGITS);
 
@@ -183,7 +186,11 @@ public final class JsonSnapshot {
   private IllegalArgumentException rejected(String problem) {
     var where = new StringBuilder(name);
     for (var step : path) {
-      where.append(step instanceof Integer index ? "[" + index + "]" : "." + step);
+      if (step instanceof String key && !PLAIN_KEY.matcher(key).matches()) {
+        where.append("[\"").append(key.replace("\\", "\\\\").replace("\"", "\\\"")).append("\"]");
+      } else {
+        where.append(step instanceof Integer index ? "[" + index + "]" : "." + step);
+      }
     }
     return new IllegalArgumentException(where + " " + problem);
   }
