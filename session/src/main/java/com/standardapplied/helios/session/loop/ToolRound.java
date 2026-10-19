@@ -10,7 +10,9 @@ import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.hooks.HookDecision;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.permissions.Permission;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -21,8 +23,9 @@ import java.util.Optional;
  *
  * <p>Each result's output, whether a tool produced it or the round substituted it, is redacted once
  * against the session's secret registry before its {@link QueryEvent.ToolResult} is emitted, so the
- * event, {@code PostToolUse} hooks and the history all see the redacted text. A {@code
- * MutateResult} output is new text and is redacted the same way.
+ * event, {@code PostToolUse} hooks and the history all see the redacted text. A substituted
+ * result's event also counts what was redacted from its reason. A {@code MutateResult} output is
+ * new text and is redacted the same way.
  *
  * <p>An {@link Error} a tool threw leaves the round as itself and ends the session; no later call
  * of the round runs.
@@ -48,8 +51,12 @@ final class ToolRound {
   private static final String PRE_TOOL_USE = "PreToolUseHook";
   private static final String POST_TOOL_USE = "PostToolUseHook";
 
-  /** The call to run after {@code PreToolUse}, and the result standing in for its dispatch. */
-  private record PlannedCall(ToolCall call, ToolResult substitute) {}
+  /**
+   * The call to run after {@code PreToolUse}, the result standing in for its dispatch, and what was
+   * redacted from that result's reason.
+   */
+  private record PlannedCall(
+      ToolCall call, ToolResult substitute, Map<String, Integer> redactions) {}
 
   private final LoopCollaborators collaborators;
   private final EventEmitter emitter;
@@ -93,7 +100,7 @@ final class ToolRound {
           case HookOutcome.Inject inject -> {
             effects.inject(state, hookName, PRE_TOOL_USE, inject);
             yield new PlannedCall(
-                finalCall, ToolResult.rejected(hookName, "hook injected a user message"));
+                finalCall, ToolResult.rejected(hookName, "hook injected a user message"), Map.of());
           }
           default -> authorize(state, finalCall);
         };
@@ -101,14 +108,21 @@ final class ToolRound {
         planned.substitute() == null
             ? dispatch(state, planned.call(), limits)
             : planned.substitute();
-    return afterTool(state, planned.call(), emitRedacted(state, planned.call(), result));
+    return afterTool(
+        state, planned.call(), emitRedacted(state, planned.call(), result, planned.redactions()));
   }
 
-  /** Redact {@code raw}'s output, emit its {@link QueryEvent.ToolResult}, return it redacted. */
-  private ToolResult emitRedacted(SessionState state, ToolCall call, ToolResult raw) {
+  /**
+   * Redact {@code raw}'s output, emit its {@link QueryEvent.ToolResult} counting {@code earlier}
+   * redactions too, return it redacted.
+   */
+  private ToolResult emitRedacted(
+      SessionState state, ToolCall call, ToolResult raw, Map<String, Integer> earlier) {
     var redaction = collaborators.secrets().redactor().redact(raw.output());
     var output = redaction.counts().isEmpty() ? raw.output() : redaction.text();
     var result = raw.withOutput(output);
+    var counts = new LinkedHashMap<>(earlier);
+    redaction.counts().forEach((name, count) -> counts.merge(name, count, Integer::sum));
     emitter.emit(
         state,
         new QueryEvent.ToolResult(
@@ -117,7 +131,7 @@ final class ToolRound {
             collaborators.clock().instant(),
             call,
             result,
-            redaction.counts()));
+            counts));
     return result;
   }
 
@@ -159,7 +173,7 @@ final class ToolRound {
         state,
         new QueryEvent.ToolUse(
             state.sessionId(), state.currentTurnIndex(), collaborators.clock().instant(), call));
-    return new PlannedCall(call, null);
+    return new PlannedCall(call, null, Map.of());
   }
 
   /**
@@ -174,6 +188,7 @@ final class ToolRound {
 
   private PlannedCall block(SessionState state, ToolCall call, String by, String reason) {
     var diagnostic = ToolAuthorization.diagnostic(collaborators.secrets(), reason);
+    var text = diagnostic.text();
     emitter.emit(
         state,
         new QueryEvent.ToolBlocked(
@@ -182,8 +197,8 @@ final class ToolRound {
             collaborators.clock().instant(),
             call,
             by,
-            diagnostic));
-    return new PlannedCall(call, ToolResult.rejected(by, diagnostic));
+            text));
+    return new PlannedCall(call, ToolResult.rejected(by, text), diagnostic.counts());
   }
 
   private ToolResult dispatch(SessionState state, ToolCall call, SessionLimits limits) {
@@ -225,7 +240,7 @@ final class ToolRound {
       String hookName,
       HookOutcome.MutateResult mutate) {
     emitter.emitHookFired(state, hookName, POST_TOOL_USE, "MutateResult");
-    return emitRedacted(state, call, result.withOutput(mutate.output()));
+    return emitRedacted(state, call, result.withOutput(mutate.output()), Map.of());
   }
 
   /**

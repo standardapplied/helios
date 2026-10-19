@@ -263,15 +263,15 @@ final class ToolAuthorizationTest {
   void aDiagnosticHasEverySecretRedacted() {
     var secrets = new SecretRegistry();
     secrets.register("TOKEN", "tok-0123456789");
-    assertEquals(
-        "key Write(<redacted:TOKEN>) denied",
-        ToolAuthorization.diagnostic(secrets, "key Write(tok-0123456789) denied"));
+    var diagnostic = ToolAuthorization.diagnostic(secrets, "key Write(tok-0123456789) denied");
+    assertEquals("key Write(<redacted:TOKEN>) denied", diagnostic.text());
+    assertEquals(Map.of("TOKEN", 1), diagnostic.counts());
   }
 
   @Test
   void aDiagnosticAtTheBoundIsKeptWhole() {
     var reason = "r".repeat(ToolAuthorization.MAX_REASON_CHARS);
-    assertEquals(reason, ToolAuthorization.diagnostic(new SecretRegistry(), reason));
+    assertEquals(reason, ToolAuthorization.diagnostic(new SecretRegistry(), reason).text());
   }
 
   @Test
@@ -279,7 +279,7 @@ final class ToolAuthorizationTest {
     var reason = "r".repeat(ToolAuthorization.MAX_REASON_CHARS + 5);
     assertEquals(
         "r".repeat(ToolAuthorization.MAX_REASON_CHARS) + "… [5 more chars]",
-        ToolAuthorization.diagnostic(new SecretRegistry(), reason));
+        ToolAuthorization.diagnostic(new SecretRegistry(), reason).text());
   }
 
   @Test
@@ -287,6 +287,6 @@ final class ToolAuthorizationTest {
     var reason = "r".repeat(ToolAuthorization.MAX_REASON_CHARS - 1) + "😀" + "tail";
     assertEquals(
         "r".repeat(ToolAuthorization.MAX_REASON_CHARS - 1) + "😀… [4 more chars]",
-        ToolAuthorization.diagnostic(new SecretRegistry(), reason));
+        ToolAuthorization.diagnostic(new SecretRegistry(), reason).text());
   }
 }

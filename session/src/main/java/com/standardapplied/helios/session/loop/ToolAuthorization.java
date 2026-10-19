@@ -2,10 +2,12 @@
 
 package com.standardapplied.helios.session.loop;
 
+import com.standardapplied.helios.core.common.RedactionResult;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.function.Function;
 
@@ -52,14 +54,17 @@ final class ToolAuthorization {
 
   /**
    * {@code reason} with every registered secret redacted, cut after {@link #MAX_REASON_CHARS}
-   * characters (never inside a surrogate pair) with a note of how much was cut.
+   * characters (never inside a surrogate pair) with a note of how much was cut, and the count of
+   * each secret redacted.
    */
-  static String diagnostic(SecretRegistry secrets, String reason) {
-    var redacted = secrets.redactor().redact(reason).text();
+  static RedactionResult diagnostic(SecretRegistry secrets, String reason) {
+    var redaction = secrets.redactor().redact(reason);
+    var redacted = redaction.text();
     if (redacted.length() <= MAX_REASON_CHARS) {
-      return redacted;
+      return redaction;
     }
     var end = redacted.offsetByCodePoints(0, redacted.codePointCount(0, MAX_REASON_CHARS));
-    return redacted.substring(0, end) + "… [" + (redacted.length() - end) + " more chars]";
+    var cut = redacted.substring(0, end) + "… [" + (redacted.length() - end) + " more chars]";
+    return new RedactionResult(cut.getBytes(StandardCharsets.UTF_8), redaction.counts());
   }
 }

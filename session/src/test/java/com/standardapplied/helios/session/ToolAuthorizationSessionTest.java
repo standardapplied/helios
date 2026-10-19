@@ -192,6 +192,9 @@ final class ToolAuthorizationSessionTest {
     var reason = KEY_FAILED + "path is <redacted:TOKEN>";
     assertEquals(new ToolOutcome.Rejected("Permission", reason), run.onlyResult().outcome());
     assertEquals(reason, run.onlyBlock().reason());
+    assertEquals(
+        Map.of("TOKEN", 1),
+        run.events().eventsOf(QueryEvent.ToolResult.class).getFirst().redactions());
     assertEquals(List.of(), run.events().eventsOf(QueryEvent.ToolUse.class));
   }
 
@@ -218,6 +221,9 @@ final class ToolAuthorizationSessionTest {
             "Permission",
             redacted.substring(0, 1024) + "… [" + (redacted.length() - 1024) + " more chars]"),
         run.onlyResult().outcome());
+    assertEquals(
+        Map.of("TOKEN", 1),
+        run.events().eventsOf(QueryEvent.ToolResult.class).getFirst().redactions());
   }
 
   // ── authorization follows every mutation ─────────────────────────────────
