@@ -17,6 +17,7 @@ import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -424,6 +425,55 @@ final class GrepToolTest {
                 "big.txt:1000:hit\n[truncated at 1000 matches]\n"
                     + "[withheld by permission policy: 1]\n"),
         result.output());
+  }
+
+  @Test
+  void aTrustedWalkDoesNotFollowADirectorySwappedAfterItsCheck(@TempDir Path tmp)
+      throws IOException {
+    assertEquals(
+        "[withheld by permission policy: 1]\n", grepSwappingPublicAfterChecking(tmp, "./public"));
+  }
+
+  @Test
+  void aTrustedWalkDoesNotReadAFileWhoseDirectoryIsSwappedAfterItsCheck(@TempDir Path tmp)
+      throws IOException {
+    assertEquals(
+        "[withheld by permission policy: 1]\n",
+        grepSwappingPublicAfterChecking(tmp, "./public/key"));
+  }
+
+  /**
+   * Greps a trusted workspace holding {@code public/key} and a withheld {@code secrets/key}, moving
+   * {@code public} out of the workspace for a link to {@code secrets} as soon as {@code trigger}
+   * has been checked.
+   */
+  private static String grepSwappingPublicAfterChecking(Path tmp, String trigger)
+      throws IOException {
+    var root = Files.createDirectories(tmp.resolve("ws"));
+    Files.createDirectories(root.resolve("public"));
+    Files.createDirectories(root.resolve("secrets"));
+    Files.writeString(root.resolve("public/key"), "SAFE\n", StandardCharsets.UTF_8);
+    Files.writeString(root.resolve("secrets/key"), "TOPSECRET\n", StandardCharsets.UTF_8);
+    Predicate<String> withheld =
+        key -> {
+          if (key.equals(trigger)) {
+            swap(root.resolve("public"), tmp.resolve("moved"), root.resolve("secrets"));
+          }
+          return key.equals("./secrets");
+        };
+    return GrepTool.binding(new WorkspaceRoot(root, false))
+        .tool()
+        .execute(Map.of("pattern", "[A-Z]", "path", "."), withholding(withheld))
+        .output();
+  }
+
+  private static void swap(Path directory, Path aside, Path linkTarget) {
+    try {
+      Files.move(directory, aside);
+      Files.createSymbolicLink(directory, linkTarget);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   /** The directory of {@code dir} that a walk of it visits first. */
