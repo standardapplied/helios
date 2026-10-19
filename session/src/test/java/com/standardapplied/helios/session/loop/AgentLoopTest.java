@@ -114,7 +114,7 @@ final class AgentLoopTest {
             new LoopCollaborators(
                 null,
                 dispatch,
-                LoopFixture.ADMIT_ALL,
+                Authorizations.ADMIT_ALL,
                 queue,
                 events::add,
                 fixture::hookContext,
@@ -125,7 +125,7 @@ final class AgentLoopTest {
             new LoopCollaborators(
                 hooks,
                 null,
-                LoopFixture.ADMIT_ALL,
+                Authorizations.ADMIT_ALL,
                 queue,
                 events::add,
                 fixture::hookContext,
@@ -136,7 +136,7 @@ final class AgentLoopTest {
             new LoopCollaborators(
                 hooks,
                 dispatch,
-                LoopFixture.ADMIT_ALL,
+                Authorizations.ADMIT_ALL,
                 null,
                 events::add,
                 fixture::hookContext,
@@ -145,19 +145,25 @@ final class AgentLoopTest {
         NullPointerException.class,
         () ->
             new LoopCollaborators(
-                hooks, dispatch, LoopFixture.ADMIT_ALL, queue, null, fixture::hookContext, clock));
+                hooks,
+                dispatch,
+                Authorizations.ADMIT_ALL,
+                queue,
+                null,
+                fixture::hookContext,
+                clock));
     assertThrows(
         NullPointerException.class,
         () ->
             new LoopCollaborators(
-                hooks, dispatch, LoopFixture.ADMIT_ALL, queue, events::add, null, clock));
+                hooks, dispatch, Authorizations.ADMIT_ALL, queue, events::add, null, clock));
     assertThrows(
         NullPointerException.class,
         () ->
             new LoopCollaborators(
                 hooks,
                 dispatch,
-                LoopFixture.ADMIT_ALL,
+                Authorizations.ADMIT_ALL,
                 queue,
                 events::add,
                 fixture::hookContext,
@@ -354,7 +360,7 @@ final class AgentLoopTest {
             new LoopCollaborators(
                 hooks,
                 dispatch,
-                LoopFixture.ADMIT_ALL,
+                Authorizations.ADMIT_ALL,
                 queue,
                 e -> {
                   throw new RuntimeException("sink boom");
