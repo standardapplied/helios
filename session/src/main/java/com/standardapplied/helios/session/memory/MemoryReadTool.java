@@ -12,7 +12,7 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolArgs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
+import com.standardapplied.helios.session.tools.Withholding;
 import java.io.IOException;
 import java.nio.file.NoSuchFileException;
 import java.util.List;
@@ -33,8 +33,11 @@ import java.util.Objects;
  *       regular file. Useful for advertising the memory tree from {@code /memories/}.
  * </ul>
  *
- * <p>{@link ToolCategory#READ}; permission key carries the requested path so the permission system
- * can match {@code /memories/**} globs.
+ * <p>{@link ToolCategory#READ}. Memory is its own namespace: the permission key is the canonical
+ * memory path ({@code /memories/} or {@code /memories/a/b}), so a call is authorised by {@code
+ * MemoryRead} rules on that key, and a {@code Read} rule over the directory backing a filesystem
+ * memory store does not apply to it. A listing withholds every path a {@code MemoryRead} DENY rule
+ * matches and ends with {@code [withheld by permission policy: <count>]}.
  */
 public final class MemoryReadTool {
 
@@ -78,8 +81,7 @@ public final class MemoryReadTool {
             .build();
     return ToolBinding.newBuilder(tool)
         .withCategory(ToolCategory.READ)
-        .withPermissionKeyExtractor(
-            args -> new ToolPermissionKey(NAME, ToolArgs.stringArg(args, "path")))
+        .withPathArgument(ToolBinding.PathArgument.required("path", MemoryPaths.INSTANCE))
         .build();
   }
 
@@ -93,15 +95,7 @@ public final class MemoryReadTool {
     var list = ToolArgs.boolArg(args, "list", false);
     try {
       if (list) {
-        var entries = backend.list(path);
-        if (entries.isEmpty()) {
-          return ToolResult.success("(empty)\n");
-        }
-        var sb = new StringBuilder();
-        for (var e : entries) {
-          sb.append(e).append('\n');
-        }
-        return ToolResult.success(sb.toString());
+        return ToolResult.success(listing(ctx, backend.list(path)));
       }
       return ToolResult.success(backend.view(path));
     } catch (NoSuchFileException e) {
@@ -111,5 +105,16 @@ public final class MemoryReadTool {
     } catch (IOException e) {
       return ToolResult.failure("MemoryRead: I/O error reading " + path + ": " + e.getMessage());
     }
+  }
+
+  private static String listing(ToolContext ctx, List<String> entries) {
+    var withholding = Withholding.of(ctx);
+    var out = new StringBuilder();
+    for (var entry : entries) {
+      if (!withholding.withholds(entry)) {
+        out.append(entry).append('\n');
+      }
+    }
+    return (out.isEmpty() ? "(empty)\n" : out) + withholding.note();
   }
 }

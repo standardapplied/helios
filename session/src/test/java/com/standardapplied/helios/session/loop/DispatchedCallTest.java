@@ -89,6 +89,7 @@ final class DispatchedCallTest {
         SessionContext.forTesting("dispatched-call"),
         session,
         timeout,
+        key -> false,
         permits,
         live,
         ending);

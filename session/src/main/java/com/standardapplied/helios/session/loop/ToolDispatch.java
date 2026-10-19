@@ -22,13 +22,14 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 /**
  * Synchronous tool dispatch surface. The agent loop calls {@link #dispatch(ToolCall,
- * CancellationToken, Duration, Duration)} once per tool call the model emits; the dispatcher looks
- * the call up in its {@link ToolRegistry} and runs it as a {@link DispatchedCall}: a virtual thread
- * admitted by the per-{@link ToolCategory category} {@link CategoryPermits}, which runs the tool,
- * and the permit is given back when the call's work has ended.
+ * CancellationToken, Duration, Duration, Predicate)} once per tool call the model emits; the
+ * dispatcher looks the call up in its {@link ToolRegistry} and runs it as a {@link DispatchedCall}:
+ * a virtual thread admitted by the per-{@link ToolCategory category} {@link CategoryPermits}, which
+ * runs the tool, and the permit is given back when the call's work has ended.
  *
  * <p>{@link ToolCategory#WRITE} tool calls acquire from the {@code fileWritePermits} pool; {@link
  * ToolCategory#EXECUTION} calls acquire from the {@code executionPermits} pool; every other
@@ -189,6 +190,8 @@ public final class ToolDispatch {
    * @param cancellation the session's cancellation token; non-null
    * @param timeout per-call budget, from now; non-null, positive
    * @param stopGrace how long to wait for a timed-out tool to stop; non-null, positive
+   * @param withheld true for the canonical key of an entry the call must not return, handed to the
+   *     tool through its {@link ToolContext}; non-null
    * @return the tool's result, or a framework result on unknown tool or timeout
    * @throws NullPointerException if any argument is null
    * @throws IllegalArgumentException if {@code timeout} or {@code stopGrace} is not positive
@@ -197,11 +200,16 @@ public final class ToolDispatch {
    *     interrupted (its interrupt status is kept) before this method returns a result
    */
   public ToolResult dispatch(
-      ToolCall call, CancellationToken cancellation, Duration timeout, Duration stopGrace) {
+      ToolCall call,
+      CancellationToken cancellation,
+      Duration timeout,
+      Duration stopGrace,
+      Predicate<String> withheld) {
     Objects.requireNonNull(call, "call must not be null");
     Objects.requireNonNull(cancellation, "cancellation must not be null");
     Validate.positiveDuration("timeout", timeout);
     Validate.positiveDuration("stopGrace", stopGrace);
+    Objects.requireNonNull(withheld, "withheld must not be null");
     cancellation.throwIfCancelled();
 
     var binding = registry.get(call.name());
@@ -215,6 +223,7 @@ public final class ToolDispatch {
             sessionContext,
             cancellation,
             timeout,
+            withheld,
             permitsFor(binding.orElseThrow().category()),
             liveCalls,
             ending);

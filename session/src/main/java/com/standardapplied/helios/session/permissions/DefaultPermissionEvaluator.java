@@ -5,15 +5,17 @@
 package com.standardapplied.helios.session.permissions;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
-import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolBinding.PathArgument;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
+import java.util.stream.Stream;
 
 /**
  * The Permission system: authorizes each tool call against a {@link Permission} and a {@link
@@ -24,7 +26,7 @@ import java.util.concurrent.CancellationException;
  * <p>Evaluation order per spec §12.4:
  *
  * <ol>
- *   <li>Resolve {@code permissionKey} from the tool + input via {@link ToolBinding}.
+ *   <li>Take the canonical call's key, which {@link ToolBinding#canonicalize} computed.
  *   <li>If any {@code deny} rule matches → {@link PermissionEffect#DENY}.
  *   <li>If {@link PermissionMode#BYPASS_PERMISSIONS} → {@link PermissionEffect#ALLOW}.
  *   <li>If any {@code allow} rule matches → {@link PermissionEffect#ALLOW}.
@@ -36,13 +38,20 @@ import java.util.concurrent.CancellationException;
  *       ToolCategory#DELEGATION} → Allow. {@link PermissionMode#LOCKED_DOWN} denies every category.
  * </ol>
  *
- * <p>{@link #authorize} fails closed: a call naming no registered tool, a permission key that
- * throws, is null, names another tool or carries a secret of its {@link SecretRegistry}, and an ASK
- * with no {@link ToolApprover} are each denied. A key carrying a secret is denied before any rule
- * or approver sees it, so no approval prompt or event shows the secret. An ASK goes to the approver
- * with an {@link ApprovalRequest} for this call, its reason redacted through the registry since a
- * rule's pattern may hold a secret the key does not; see {@link ToolApprover} for how its answer is
- * read.
+ * <p>{@link #authorize} decides on the key it is handed, never on one recomputed from the call's
+ * arguments, and fails closed: a call naming no registered tool, a key that names another tool or
+ * carries a secret of its {@link SecretRegistry}, and an ASK with no {@link ToolApprover} are each
+ * denied. A key carrying a secret is denied before any rule or approver sees it, so no approval
+ * prompt or event shows the secret. An ASK goes to the approver with an {@link ApprovalRequest} for
+ * this call, its reason redacted through the registry since a rule's pattern may hold a secret the
+ * key does not; see {@link ToolApprover} for how its answer is read.
+ *
+ * <p>{@link #denies} answers whether a DENY rule matches a key alone; tools that walk below their
+ * authorised path withhold every entry it denies.
+ *
+ * <p>Building an evaluator checks every rule's glob against the {@link
+ * com.standardapplied.helios.session.tools.PathSpace} of the tool it names: a rule for a registered
+ * path tool whose glob can never match a canonical path is a configuration error.
  *
  * <h2>Thread-safety</h2>
  *
@@ -94,28 +103,23 @@ public final class DefaultPermissionEvaluator {
   }
 
   /**
-   * Decide whether {@code call}, exactly as given, may run. Never returns {@link
-   * PermissionEffect#ASK}: an ASK is resolved through the approver before this returns.
+   * Decide whether the canonical call, exactly as given, may run, on its key. Never returns {@link
+   * PermissionEffect#ASK}: an ASK is resolved through the approver, which gets the canonical call
+   * and key, before this returns.
    *
-   * @param call the final call; non-null
+   * @param canonical the final call, canonicalised, and its key; non-null
    * @return an {@link PermissionEffect#ALLOW} or {@link PermissionEffect#DENY} decision
-   * @throws NullPointerException if {@code call} is null
+   * @throws NullPointerException if {@code canonical} is null
    */
-  public PermissionDecision authorize(ToolCall call) {
-    Objects.requireNonNull(call, "call must not be null");
+  public PermissionDecision authorize(ToolBinding.CanonicalCall canonical) {
+    Objects.requireNonNull(canonical, "canonical must not be null");
+    var call = canonical.call();
     var registered = tools.get(call.name());
     if (registered.isEmpty()) {
       return PermissionDecision.deny("no tool named '" + call.name() + "' is registered");
     }
-    var binding = registered.orElseThrow();
-    var category = binding.category();
-    ToolPermissionKey key;
-    try {
-      key = binding.permissionKey(call.arguments());
-    } catch (RuntimeException e) {
-      return PermissionDecision.deny(
-          "permission key of " + call.name() + " failed: " + describe(e));
-    }
+    var category = registered.orElseThrow().category();
+    var key = canonical.key();
     if (secrets.leaks(describe(key))) {
       return PermissionDecision.deny("permission key of " + call.name() + " carries a secret");
     }
@@ -150,8 +154,25 @@ public final class DefaultPermissionEvaluator {
       return PermissionDecision.deny(
           "approval of " + request.reason() + " cancelled: " + cancellationReason(e));
     } catch (RuntimeException e) {
-      return PermissionDecision.deny("approver threw on " + request.reason() + ": " + describe(e));
+      return PermissionDecision.deny(
+          "approver threw on "
+              + request.reason()
+              + ": "
+              + e.getClass().getName()
+              + ": "
+              + e.getMessage());
     }
+  }
+
+  /**
+   * Whether a DENY rule of the policy matches {@code key}, whatever the mode.
+   *
+   * @param key a permission key; non-null
+   * @return {@code true} when a DENY rule matches
+   * @throws NullPointerException if {@code key} is null
+   */
+  public boolean denies(ToolPermissionKey key) {
+    return matcher.firstMatch(key, permission.deny()).isPresent();
   }
 
   /**
@@ -196,10 +217,6 @@ public final class DefaultPermissionEvaluator {
   private static String cancellationReason(CancellationException e) {
     var cause = e.getCause();
     return cause == null ? e.getMessage() : cause.getMessage();
-  }
-
-  private static String describe(RuntimeException e) {
-    return e.getClass().getName() + ": " + e.getMessage();
   }
 
   private static PermissionDecision byRule(PermissionRule rule, ToolPermissionKey key) {
@@ -290,9 +307,38 @@ public final class DefaultPermissionEvaluator {
      * Build the immutable evaluator.
      *
      * @return a fresh evaluator
+     * @throws IllegalArgumentException if a rule for a registered path tool has a glob that no
+     *     canonical path can match
      */
     public DefaultPermissionEvaluator build() {
+      Stream.of(permission.deny(), permission.allow(), permission.ask())
+          .flatMap(List::stream)
+          .forEach(this::requireMatchable);
       return new DefaultPermissionEvaluator(permission, tools, approver, secrets);
+    }
+
+    /**
+     * Refuse a rule for a registered path tool whose glob no canonical path of the tool's space can
+     * match.
+     */
+    private void requireMatchable(PermissionRule rule) {
+      var space =
+          tools.get(rule.toolName()).flatMap(ToolBinding::pathArgument).map(PathArgument::space);
+      if (space.isEmpty() || rule.argPattern().isEmpty()) {
+        return;
+      }
+      var glob = rule.argPattern().orElseThrow();
+      if (!space.orElseThrow().admits(glob)) {
+        throw new IllegalArgumentException(
+            "rule "
+                + rule.toolName()
+                + "("
+                + glob
+                + ") can never match: "
+                + rule.toolName()
+                + " keys are canonical paths such as "
+                + space.orElseThrow().example());
+      }
     }
   }
 }

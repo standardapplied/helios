@@ -12,15 +12,18 @@ import java.util.Objects;
  *
  * <p>The {@code toolName} identifies the tool; the {@code canonicalArgs} is a tool-defined
  * normalised representation of the call's arguments — typically a path, a domain, a query
- * substring, or similar. Rules match on either or both fields.
+ * substring, or similar. Rules match on either or both fields. A path tool's canonical args are the
+ * canonical spelling of its path argument ({@link ToolBinding#canonicalize}): {@code .} or {@code
+ * ./a/b} in a workspace, with no {@code .}, {@code ..} or empty segment and no trailing {@code /},
+ * and {@code /memories/} or {@code /memories/a/b} in memory.
  *
  * <p>Examples:
  *
  * <ul>
- *   <li>{@code Read} produces {@code ("Read", "/workspace/foo.txt")}.
- *   <li>{@code Grep} produces {@code ("Grep", "/workspace/src")} — the search path, not the
+ *   <li>{@code Read} produces {@code ("Read", "./foo.txt")}, the canonical path of its target.
+ *   <li>{@code Grep} produces {@code ("Grep", "./src")} — the canonical search path, not the
  *       pattern.
- *   <li>{@code Fetch} produces {@code ("Fetch", "api.example.com")} — the host.
+ *   <li>{@code MemoryRead} produces {@code ("MemoryRead", "/memories/notes.md")}.
  *   <li>{@code AskUserQuestion} produces {@code ("AskUserQuestion", "")} — control tools rarely
  *       need finer matching.
  * </ul>

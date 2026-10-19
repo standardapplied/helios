@@ -70,7 +70,7 @@ final class ExecuteToolTest {
 
   private static ToolContext ctx() {
     var session = SessionContext.forTesting("execute-tool-test");
-    return new ToolContext(session, session.cancellation(), Duration.ofSeconds(5));
+    return new ToolContext(session, session.cancellation(), Duration.ofSeconds(5), key -> false);
   }
 
   // ── binding shape ────────────────────────────────────────────────────────
@@ -424,7 +424,8 @@ final class ExecuteToolTest {
     var token = new CancellationToken();
     token.cancel("test");
     var toolCtx =
-        new ToolContext(SessionContext.forTesting("cancel-test"), token, Duration.ofSeconds(1));
+        new ToolContext(
+            SessionContext.forTesting("cancel-test"), token, Duration.ofSeconds(1), key -> false);
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), toolCtx);
     assertFalse(result.succeeded());
     assertTrue(result.output().contains("test"));

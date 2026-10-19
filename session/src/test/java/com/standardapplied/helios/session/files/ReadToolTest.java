@@ -10,11 +10,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.test.SampleDocuments;
+import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -48,7 +51,7 @@ final class ReadToolTest {
     assertTrue(out.contains("     2\tbeta\n"), out);
     assertTrue(out.contains("     3\tgamma\n"), out);
     assertEquals(ToolCategory.READ, binding.category());
-    assertEquals("hello.txt", binding.permissionKey(Map.of("path", "hello.txt")).canonicalArgs());
+    assertEquals("./hello.txt", keyOf(binding, Map.of("path", "hello.txt")).canonicalArgs());
     assertTrue(tracker.hasReadInSession(file));
   }
 
@@ -610,7 +613,8 @@ final class ReadToolTest {
         new ToolContext(
             new SessionContext("read-cut", new CancellationToken(), Clock.systemUTC(), registry),
             new CancellationToken(),
-            Duration.ofDays(1));
+            Duration.ofDays(1),
+            key -> false);
 
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
@@ -643,7 +647,7 @@ final class ReadToolTest {
 
   @Test
   @DisabledOnOs(OS.WINDOWS)
-  void symlinkOutsideWorkspaceIsRefusedAndInsideIsReadAtRealPath(@TempDir Path tmp)
+  void symlinkOutsideWorkspaceIsRefusedAndInsideIsReadAtItsCanonicalPath(@TempDir Path tmp)
       throws IOException {
     var root = Files.createDirectory(tmp.resolve("ws"));
     var outside = Files.createDirectory(tmp.resolve("outside"));
@@ -662,7 +666,15 @@ final class ReadToolTest {
     var dangling = tool.execute(Map.of("path", "dangling.txt"), ToolContext.noop());
     assertFalse(dangling.succeeded());
 
-    var alias = tool.execute(Map.of("path", "alias.txt"), ToolContext.noop());
+    var throughTheLink = tool.execute(Map.of("path", "alias.txt"), ToolContext.noop());
+    assertEquals(
+        "Read: path is not canonical or changed after it was authorised: alias.txt now resolves"
+            + " to ./inside.txt",
+        throughTheLink.output());
+
+    var alias =
+        tool.execute(
+            Map.of("path", WorkspaceRoot.of(root).canonical("alias.txt")), ToolContext.noop());
     assertTrue(alias.succeeded(), alias.output());
     assertTrue(alias.output().contains("inside"), alias.output());
     assertTrue(tracker.fingerprintAtLastRead(root.toRealPath().resolve("inside.txt")).isPresent());
@@ -715,5 +727,9 @@ final class ReadToolTest {
     } finally {
       Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rw-------"));
     }
+  }
+
+  private static ToolPermissionKey keyOf(ToolBinding binding, Map<String, Object> args) {
+    return binding.canonicalize(new ToolCall("call-1", binding.name(), args)).key();
   }
 }

@@ -14,7 +14,7 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolArgs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
+import com.standardapplied.helios.session.tools.Withholding;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -54,6 +54,12 @@ import java.util.regex.PatternSyntaxException;
  *   <li>Only regular files are opened: symlinks, FIFOs and device files discovered during the walk
  *       are skipped, and every open is no-follow via {@link WorkspaceRoot#newInputStream(Path)}.
  * </ul>
+ *
+ * <p>The {@code path} is the canonical one the call was authorised on ({@link
+ * WorkspaceRoot#resolveCanonical(String)}). Since the tool returns file contents, a file or
+ * directory below it that a {@code Grep} or a {@code Read} DENY rule matches is withheld, a
+ * directory without being read, and the output ends with {@code [withheld by permission policy:
+ * <count>]}.
  */
 public final class GrepTool {
 
@@ -111,7 +117,9 @@ public final class GrepTool {
             .build();
     return ToolBinding.newBuilder(tool)
         .withCategory(ToolCategory.SEARCH)
-        .withPermissionKeyExtractor(args -> new ToolPermissionKey(NAME, ToolArgs.pathArg(args)))
+        .withPathArgument(
+            ToolBinding.PathArgument.optional("path", ".", workspace)
+                .withDenyRulesOf(ReadTool.NAME))
         .build();
   }
 
@@ -125,24 +133,26 @@ public final class GrepTool {
 
   private static ToolResult grep(ToolContext ctx, WorkspaceRoot workspace, GrepRequest request) {
     try {
-      var root = workspace.resolveSafe(request.path());
+      var root = workspace.resolveCanonical(request.path());
       if (!workspace.attributes(root).isDirectory()) {
         return ToolResult.failure("Grep: not a directory: " + workspace.relativize(root));
       }
       var include = request.includeMatcher(root.getFileSystem());
       var hits = new ArrayList<Hit>();
+      var withholding = Withholding.of(ctx);
       var count =
           WorkspaceWalk.run(
               workspace,
               root,
               ctx.cancellation(),
+              withholding,
               MAX_MATCHES,
               MAX_FILE_BYTES,
               (file, attrs, remaining) ->
                   include.matches(file.getFileName())
                       ? searchFile(workspace, file, request.regex(), remaining, hits)
                       : 0);
-      return ToolResult.success(format(hits, count >= MAX_MATCHES));
+      return ToolResult.success(format(hits, count >= MAX_MATCHES) + withholding.note());
     } catch (WorkspaceRoot.WorkspaceEscapeException e) {
       return ToolResult.failure("Grep: " + e.getMessage());
     } catch (IllegalArgumentException e) {

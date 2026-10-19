@@ -11,9 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 final class ToolBindingTest {
@@ -35,7 +39,11 @@ final class ToolBindingTest {
             NullPointerException.class,
             () ->
                 new ToolBinding(
-                    null, ToolCategory.READ, args -> ToolPermissionKey.of("x"), ctx -> true));
+                    null,
+                    ToolCategory.READ,
+                    args -> ToolPermissionKey.of("x"),
+                    ctx -> true,
+                    Optional.empty()));
     assertEquals("tool must not be null", ex.getMessage());
   }
 
@@ -46,7 +54,11 @@ final class ToolBindingTest {
             NullPointerException.class,
             () ->
                 new ToolBinding(
-                    dummyTool("t"), null, args -> ToolPermissionKey.of("t"), ctx -> true));
+                    dummyTool("t"),
+                    null,
+                    args -> ToolPermissionKey.of("t"),
+                    ctx -> true,
+                    Optional.empty()));
     assertEquals("category must not be null", ex.getMessage());
   }
 
@@ -55,7 +67,9 @@ final class ToolBindingTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new ToolBinding(dummyTool("t"), ToolCategory.READ, null, ctx -> true));
+            () ->
+                new ToolBinding(
+                    dummyTool("t"), ToolCategory.READ, null, ctx -> true, Optional.empty()));
     assertEquals("permissionKeyExtractor must not be null", ex.getMessage());
   }
 
@@ -66,8 +80,27 @@ final class ToolBindingTest {
             NullPointerException.class,
             () ->
                 new ToolBinding(
-                    dummyTool("t"), ToolCategory.READ, args -> ToolPermissionKey.of("t"), null));
+                    dummyTool("t"),
+                    ToolCategory.READ,
+                    args -> ToolPermissionKey.of("t"),
+                    null,
+                    Optional.empty()));
     assertEquals("visibility must not be null", ex.getMessage());
+  }
+
+  @Test
+  void canonicalConstructorRejectsNullPathArgument() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new ToolBinding(
+                    dummyTool("t"),
+                    ToolCategory.READ,
+                    args -> ToolPermissionKey.of("t"),
+                    ctx -> true,
+                    null));
+    assertEquals("pathArgument must not be null", ex.getMessage());
   }
 
   // ── builder happy path ────────────────────────────────────────────────────
@@ -84,7 +117,7 @@ final class ToolBindingTest {
   @Test
   void builderDefaultPermissionKeyExtractorUsesToolName() {
     var binding = ToolBinding.newBuilder(dummyTool("Read")).withCategory(ToolCategory.READ).build();
-    var key = binding.permissionKey(Map.of("path", "/x"));
+    var key = binding.canonicalize(call("Read", Map.of("path", "/x"))).key();
     assertEquals("Read", key.toolName());
     assertEquals("", key.canonicalArgs());
   }
@@ -104,7 +137,7 @@ final class ToolBindingTest {
             .withPermissionKeyExtractor(
                 args -> new ToolPermissionKey("Read", String.valueOf(args.get("path"))))
             .build();
-    var key = binding.permissionKey(Map.of("path", "/workspace/foo.txt"));
+    var key = binding.canonicalize(call("Read", Map.of("path", "/workspace/foo.txt"))).key();
     assertEquals("/workspace/foo.txt", key.canonicalArgs());
   }
 
@@ -165,21 +198,200 @@ final class ToolBindingTest {
   // ── runtime guards ───────────────────────────────────────────────────────
 
   @Test
-  void permissionKeyRejectsNullArgs() {
+  void canonicalizeRejectsANullCall() {
     var binding = ToolBinding.newBuilder(dummyTool("t")).withCategory(ToolCategory.READ).build();
-    var ex = assertThrows(NullPointerException.class, () -> binding.permissionKey(null));
-    assertEquals("arguments must not be null", ex.getMessage());
+    var ex = assertThrows(NullPointerException.class, () -> binding.canonicalize(null));
+    assertEquals("call must not be null", ex.getMessage());
   }
 
   @Test
-  void permissionKeyRejectsExtractorReturningNull() {
+  void canonicalizeRejectsExtractorReturningNull() {
     var binding =
         ToolBinding.newBuilder(dummyTool("t"))
             .withCategory(ToolCategory.READ)
             .withPermissionKeyExtractor(args -> null)
             .build();
-    var ex = assertThrows(NullPointerException.class, () -> binding.permissionKey(Map.of()));
+    var ex =
+        assertThrows(NullPointerException.class, () -> binding.canonicalize(call("t", Map.of())));
     assertEquals("permissionKeyExtractor returned null", ex.getMessage());
+  }
+
+  // ── path arguments ───────────────────────────────────────────────────────
+
+  /** A space that spells a path by prefixing it with {@code ./} and refuses {@code bad}. */
+  private static final PathSpace DOTTED =
+      new PathSpace() {
+        @Override
+        public String canonical(String requested) {
+          if (requested.equals("bad")) {
+            throw new IllegalStateException("no such target: bad");
+          }
+          return requested.startsWith("./") ? requested : "./" + requested;
+        }
+
+        @Override
+        public boolean admits(String glob) {
+          return true;
+        }
+
+        @Override
+        public String example() {
+          return "./x";
+        }
+      };
+
+  private static ToolBinding pathTool(ToolBinding.PathArgument path) {
+    return ToolBinding.newBuilder(dummyTool("P"))
+        .withCategory(ToolCategory.READ)
+        .withPathArgument(path)
+        .build();
+  }
+
+  private static ToolCall call(String name, Map<String, Object> args) {
+    return new ToolCall("call-1", name, args);
+  }
+
+  @Test
+  void aCallWithoutAPathArgumentIsUnchanged() {
+    var binding = ToolBinding.newBuilder(dummyTool("t")).withCategory(ToolCategory.READ).build();
+    var call = call("t", Map.of("path", "a"));
+    assertSame(call, binding.canonicalize(call).call());
+  }
+
+  @Test
+  void aPathArgumentIsReplacedByItsCanonicalSpellingAndKeysTheCall() {
+    var binding = pathTool(ToolBinding.PathArgument.required("path", DOTTED));
+    var canonical = binding.canonicalize(call("P", Map.of("path", "a/b", "limit", 3)));
+    assertEquals(
+        new ToolBinding.CanonicalCall(
+            call("P", Map.of("path", "./a/b", "limit", 3)), new ToolPermissionKey("P", "./a/b")),
+        canonical);
+  }
+
+  @Test
+  void anExplicitExtractorReadsTheCanonicalArguments() {
+    var binding =
+        ToolBinding.newBuilder(dummyTool("P"))
+            .withCategory(ToolCategory.READ)
+            .withPermissionKeyExtractor(
+                args -> new ToolPermissionKey("P", "key:" + args.get("path")))
+            .withPathArgument(ToolBinding.PathArgument.required("path", DOTTED))
+            .build();
+    assertEquals(
+        new ToolPermissionKey("P", "key:./a"),
+        binding.canonicalize(call("P", Map.of("path", "a"))).key());
+  }
+
+  @Test
+  void anAbsentOrEmptyOptionalPathTakesItsDefault() {
+    var binding = pathTool(ToolBinding.PathArgument.optional("path", "d", DOTTED));
+    assertEquals(
+        new ToolPermissionKey("P", "./d"), binding.canonicalize(call("P", Map.of())).key());
+    assertEquals(
+        new ToolPermissionKey("P", "./d"),
+        binding.canonicalize(call("P", Map.of("path", ""))).key());
+  }
+
+  @Test
+  void aJsonNullPathIsAbsent() {
+    var args = new HashMap<String, Object>();
+    args.put("path", null);
+    var binding = pathTool(ToolBinding.PathArgument.optional("path", "d", DOTTED));
+    assertEquals(new ToolPermissionKey("P", "./d"), binding.canonicalize(call("P", args)).key());
+  }
+
+  @Test
+  void anAbsentOrEmptyRequiredPathIsRefused() {
+    var binding = pathTool(ToolBinding.PathArgument.required("path", DOTTED));
+    var absent =
+        assertThrows(
+            IllegalArgumentException.class, () -> binding.canonicalize(call("P", Map.of())));
+    assertEquals("'path' is required", absent.getMessage());
+    var empty =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> binding.canonicalize(call("P", Map.of("path", ""))));
+    assertEquals("'path' is required", empty.getMessage());
+  }
+
+  @Test
+  void aNonStringPathIsRefused() {
+    var binding = pathTool(ToolBinding.PathArgument.optional("path", ".", DOTTED));
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> binding.canonicalize(call("P", Map.of("path", 42))));
+    assertEquals("'path' must be a string", ex.getMessage());
+  }
+
+  @Test
+  void whatTheSpaceThrowsPropagates() {
+    var binding = pathTool(ToolBinding.PathArgument.required("path", DOTTED));
+    var ex =
+        assertThrows(
+            IllegalStateException.class,
+            () -> binding.canonicalize(call("P", Map.of("path", "bad"))));
+    assertEquals("no such target: bad", ex.getMessage());
+  }
+
+  @Test
+  void pathArgumentFactoriesDeclareNoOtherToolsDenyRules() {
+    assertEquals(
+        new ToolBinding.PathArgument("path", Optional.empty(), DOTTED, Set.of()),
+        ToolBinding.PathArgument.required("path", DOTTED));
+    assertEquals(
+        new ToolBinding.PathArgument("path", Optional.of("."), DOTTED, Set.of()),
+        ToolBinding.PathArgument.optional("path", ".", DOTTED));
+  }
+
+  @Test
+  void withDenyRulesOfNamesTheOtherTools() {
+    var path = ToolBinding.PathArgument.optional("path", ".", DOTTED).withDenyRulesOf("Read");
+    assertEquals(
+        new ToolBinding.PathArgument("path", Optional.of("."), DOTTED, Set.of("Read")), path);
+  }
+
+  @Test
+  void pathArgumentRejectsABlankName() {
+    assertThrows(
+        IllegalArgumentException.class, () -> ToolBinding.PathArgument.required(" ", DOTTED));
+  }
+
+  @Test
+  void pathArgumentRejectsNullComponents() {
+    var noDefault =
+        assertThrows(
+            NullPointerException.class,
+            () -> new ToolBinding.PathArgument("path", null, DOTTED, Set.of()));
+    assertEquals("defaultValue must not be null", noDefault.getMessage());
+    var noSpace =
+        assertThrows(
+            NullPointerException.class, () -> ToolBinding.PathArgument.required("path", null));
+    assertEquals("space must not be null", noSpace.getMessage());
+  }
+
+  @Test
+  void builderRejectsANullPathArgument() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> ToolBinding.newBuilder(dummyTool("t")).withPathArgument(null));
+    assertEquals("pathArgument must not be null", ex.getMessage());
+  }
+
+  @Test
+  void canonicalCallRejectsNullComponents() {
+    var call = call("t", Map.of());
+    assertEquals(
+        "call must not be null",
+        assertThrows(
+                NullPointerException.class,
+                () -> new ToolBinding.CanonicalCall(null, ToolPermissionKey.of("t")))
+            .getMessage());
+    assertEquals(
+        "key must not be null",
+        assertThrows(NullPointerException.class, () -> new ToolBinding.CanonicalCall(call, null))
+            .getMessage());
   }
 
   @Test

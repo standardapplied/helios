@@ -13,7 +13,6 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolArgs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.NoSuchFileException;
@@ -38,6 +37,10 @@ import java.util.Objects;
  *   <li>{@code oldString} and {@code newString} (for {@code str_replace}).
  *   <li>{@code lineNumber} (for {@code insert}) — 1-based line position.
  * </ul>
+ *
+ * <p>Memory is its own namespace: the permission key is the canonical memory path ({@code
+ * /memories/a/b}), so a call is authorised by {@code MemoryWrite} rules on that key, and a rule for
+ * a workspace tool over the directory backing a filesystem memory store does not apply to it.
  *
  * <p>Failures from the backend surface as {@link ToolResult#failure(String)} so the model can
  * self-correct (e.g. by re-reading the file when an {@code oldString} match collision happens).
@@ -108,8 +111,7 @@ public final class MemoryWriteTool {
             .build();
     return ToolBinding.newBuilder(tool)
         .withCategory(ToolCategory.WRITE)
-        .withPermissionKeyExtractor(
-            args -> new ToolPermissionKey(NAME, ToolArgs.stringArg(args, "path")))
+        .withPathArgument(ToolBinding.PathArgument.required("path", MemoryPaths.INSTANCE))
         .build();
   }
 

@@ -3,17 +3,19 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
-import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.time.Clock;
 import java.time.InstantSource;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * The per-session collaborators the {@link AgentLoop} and its {@link TurnRunner} share: built once
@@ -23,8 +25,11 @@ import java.util.function.Function;
  * @param hooks priority-sorted hook registry; non-null
  * @param toolDispatch dispatcher for the tool calls the model emits; non-null
  * @param authorization the mandatory permission check of every call of a registered tool, run on
- *     the call the {@code PreToolUse} hooks leave; only an {@code ALLOW} decision runs the call,
- *     and anything else, {@code null} or a thrown exception refuses it; non-null
+ *     the call the {@code PreToolUse} hooks leave once canonicalised, with its key; only an {@code
+ *     ALLOW} decision runs the call, and anything else, {@code null} or a thrown exception refuses
+ *     it; non-null
+ * @param withholding true when a DENY rule matches a key; a tool walking below its path withholds
+ *     every entry whose key it matches; non-null
  * @param steeringQueue per-session inbox the loop drains and into which {@code Inject} outcomes
  *     queue synthetic user messages; non-null
  * @param eventSink consumer for every {@link QueryEvent} the loop emits; non-null
@@ -34,7 +39,8 @@ import java.util.function.Function;
 public record LoopCollaborators(
     HookRegistry hooks,
     ToolDispatch toolDispatch,
-    Function<ToolCall, PermissionDecision> authorization,
+    Function<ToolBinding.CanonicalCall, PermissionDecision> authorization,
+    Predicate<ToolPermissionKey> withholding,
     SteeringQueue steeringQueue,
     Consumer<QueryEvent> eventSink,
     Function<SessionState, HookContext> hookContextFactory,
@@ -49,6 +55,7 @@ public record LoopCollaborators(
     Objects.requireNonNull(hooks, "hooks must not be null");
     Objects.requireNonNull(toolDispatch, "toolDispatch must not be null");
     Objects.requireNonNull(authorization, "authorization must not be null");
+    Objects.requireNonNull(withholding, "withholding must not be null");
     Objects.requireNonNull(steeringQueue, "steeringQueue must not be null");
     Objects.requireNonNull(eventSink, "eventSink must not be null");
     Objects.requireNonNull(hookContextFactory, "hookContextFactory must not be null");
@@ -82,7 +89,8 @@ public record LoopCollaborators(
 
     private HookRegistry hooks;
     private ToolDispatch toolDispatch;
-    private Function<ToolCall, PermissionDecision> authorization;
+    private Function<ToolBinding.CanonicalCall, PermissionDecision> authorization;
+    private Predicate<ToolPermissionKey> withholding;
     private SteeringQueue steeringQueue;
     private Consumer<QueryEvent> eventSink;
     private Function<SessionState, HookContext> hookContextFactory;
@@ -118,8 +126,21 @@ public record LoopCollaborators(
      * @param authorization non-null
      * @return this builder
      */
-    public Builder withAuthorization(Function<ToolCall, PermissionDecision> authorization) {
+    public Builder withAuthorization(
+        Function<ToolBinding.CanonicalCall, PermissionDecision> authorization) {
       this.authorization = authorization;
+      return this;
+    }
+
+    /**
+     * Set the test of whether a DENY rule matches a key, which withholds an entry a walking tool
+     * would return.
+     *
+     * @param withholding non-null
+     * @return this builder
+     */
+    public Builder withWithholding(Predicate<ToolPermissionKey> withholding) {
+      this.withholding = withholding;
       return this;
     }
 
@@ -175,7 +196,14 @@ public record LoopCollaborators(
      */
     public LoopCollaborators build() {
       return new LoopCollaborators(
-          hooks, toolDispatch, authorization, steeringQueue, eventSink, hookContextFactory, clock);
+          hooks,
+          toolDispatch,
+          authorization,
+          withholding,
+          steeringQueue,
+          eventSink,
+          hookContextFactory,
+          clock);
     }
   }
 }

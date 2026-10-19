@@ -68,12 +68,14 @@ final class DefaultPermissionEvaluatorTest {
     return new Permission(mode, allow, ask, deny);
   }
 
-  private static ToolCall call(String name) {
-    return new ToolCall("c", name, Map.of());
+  private static ToolBinding.CanonicalCall call(String name) {
+    return new ToolBinding.CanonicalCall(
+        new ToolCall("c", name, Map.of()), ToolPermissionKey.of(name));
   }
 
-  private static ToolCall writeCall(String path) {
-    return new ToolCall("c", "Write", Map.of("path", path));
+  private static ToolBinding.CanonicalCall writeCall(String path) {
+    return new ToolBinding.CanonicalCall(
+        new ToolCall("c", "Write", Map.of("path", path)), new ToolPermissionKey("Write", path));
   }
 
   private static DefaultPermissionEvaluator evaluator(Permission permission, ToolRegistry tools) {
@@ -162,23 +164,6 @@ final class DefaultPermissionEvaluatorTest {
   }
 
   @Test
-  void aPermissionKeyThatThrowsDeniesTheCall() {
-    var throwing =
-        ToolBinding.newBuilder(tool("Write"))
-            .withCategory(ToolCategory.WRITE)
-            .withPermissionKeyExtractor(
-                args -> {
-                  throw new IllegalArgumentException("bad path");
-                })
-            .build();
-    var e = evaluator(Permission.empty(PermissionMode.BYPASS_PERMISSIONS), tools(throwing));
-    assertEquals(
-        PermissionDecision.deny(
-            "permission key of Write failed: java.lang.IllegalArgumentException: bad path"),
-        e.authorize(call("Write")));
-  }
-
-  @Test
   void aPermissionKeyCarryingASecretIsDeniedBeforeTheApproverIsAsked() {
     var secrets = new SecretRegistry();
     secrets.register("TOKEN", "test-registered-secret-123");
@@ -241,7 +226,7 @@ final class DefaultPermissionEvaluatorTest {
     assertEquals(
         List.of(
             new ApprovalRequest(
-                call,
+                call.call(),
                 new ToolPermissionKey("Write", "secretXvalue"),
                 ToolCategory.WRITE,
                 Optional.of(askSecret),
@@ -250,27 +235,7 @@ final class DefaultPermissionEvaluatorTest {
   }
 
   @Test
-  void aNullPermissionKeyDeniesTheCall() {
-    var nullKey =
-        ToolBinding.newBuilder(tool("Write"))
-            .withCategory(ToolCategory.WRITE)
-            .withPermissionKeyExtractor(args -> null)
-            .build();
-    var e = evaluator(Permission.empty(PermissionMode.BYPASS_PERMISSIONS), tools(nullKey));
-    assertEquals(
-        PermissionDecision.deny(
-            "permission key of Write failed: java.lang.NullPointerException:"
-                + " permissionKeyExtractor returned null"),
-        e.authorize(call("Write")));
-  }
-
-  @Test
   void aPermissionKeyNamingAnotherToolDeniesTheCall() {
-    var impostor =
-        ToolBinding.newBuilder(tool("Write"))
-            .withCategory(ToolCategory.WRITE)
-            .withPermissionKeyExtractor(args -> new ToolPermissionKey("Read", "/etc"))
-            .build();
     var e =
         evaluator(
             rules(
@@ -278,10 +243,12 @@ final class DefaultPermissionEvaluatorTest {
                 List.of(PermissionRule.any(PermissionEffect.ALLOW, "Read")),
                 List.of(),
                 List.of()),
-            tools(impostor));
+            tools(binding("Write", ToolCategory.WRITE)));
+    var impostor =
+        new ToolBinding.CanonicalCall(call("Write").call(), new ToolPermissionKey("Read", "/etc"));
     assertEquals(
         PermissionDecision.deny("permission key of Write names another tool: Read(/etc)"),
-        e.authorize(call("Write")));
+        e.authorize(impostor));
   }
 
   // ── rules ────────────────────────────────────────────────────────────────

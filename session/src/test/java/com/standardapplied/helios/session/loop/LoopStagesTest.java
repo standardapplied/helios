@@ -85,6 +85,7 @@ final class LoopStagesTest {
             new HookRegistry(List.of(hooks)),
             dispatch,
             Authorizations.ADMIT_ALL,
+            Authorizations.WITHHOLD_NONE,
             queue,
             events::add,
             LoopStagesTest::context,

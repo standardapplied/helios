@@ -12,7 +12,7 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolArgs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
+import com.standardapplied.helios.session.tools.Withholding;
 import java.io.IOException;
 import java.nio.file.DirectoryIteratorException;
 import java.nio.file.Path;
@@ -37,6 +37,11 @@ import java.util.Objects;
  * <p>Hidden entries (names starting with {@code "."}) are included; symlinks are reported as {@code
  * "@"} entries without following them. Output is plain text, one entry per line, with a trailing
  * {@code "/"} for directories.
+ *
+ * <p>The {@code path} is the canonical one the call was authorised on ({@link
+ * WorkspaceRoot#resolveCanonical(String)}). An entry that an {@code LS} DENY rule matches is
+ * withheld, keyed by its own path or, for a symlink, by the target it resolves to, and the output
+ * ends with {@code [withheld by permission policy: <count>]}.
  */
 public final class LsTool {
 
@@ -74,7 +79,7 @@ public final class LsTool {
             .build();
     return ToolBinding.newBuilder(tool)
         .withCategory(ToolCategory.READ)
-        .withPermissionKeyExtractor(args -> new ToolPermissionKey(NAME, ToolArgs.pathArg(args)))
+        .withPathArgument(ToolBinding.PathArgument.optional("path", ".", workspace))
         .build();
   }
 
@@ -82,15 +87,19 @@ public final class LsTool {
       ToolContext ctx, WorkspaceRoot workspace, Map<String, Object> args) {
     var pathArg = ToolArgs.pathArg(args);
     try {
-      var resolved = workspace.resolveSafe(pathArg);
+      var resolved = workspace.resolveCanonical(pathArg);
       if (!workspace.attributes(resolved).isDirectory()) {
         return ToolResult.failure("LS: not a directory: " + workspace.relativize(resolved));
       }
       var entries = new ArrayList<Entry>();
+      var withholding = Withholding.of(ctx);
       try (var stream = workspace.newDirectoryStream(resolved)) {
         for (Path entry : stream) {
           ctx.cancellation().throwIfCancelled();
-          entries.add(Entry.of(entry, workspace.attributes(entry)));
+          var attributes = workspace.attributes(entry);
+          if (!withholding.withholds(key(workspace, entry, attributes))) {
+            entries.add(Entry.of(entry, attributes));
+          }
         }
       } catch (DirectoryIteratorException e) {
         throw e.getCause();
@@ -101,11 +110,27 @@ public final class LsTool {
       for (var entry : entries) {
         out.append(entry.render()).append('\n');
       }
-      return ToolResult.success(out.toString());
+      return ToolResult.success(out.append(withholding.note()).toString());
     } catch (WorkspaceRoot.WorkspaceEscapeException e) {
       return ToolResult.failure("LS: " + e.getMessage());
     } catch (IOException e) {
       return ToolResult.failure("LS: I/O error listing " + pathArg + ": " + e.getMessage());
+    }
+  }
+
+  /**
+   * The canonical key of a listed entry: its own path, or for a symlink the target it resolves to,
+   * falling back to its own path when the target cannot be resolved.
+   */
+  private static String key(WorkspaceRoot workspace, Path entry, BasicFileAttributes attributes) {
+    var own = workspace.spell(entry);
+    if (!attributes.isSymbolicLink()) {
+      return own;
+    }
+    try {
+      return workspace.canonical(own);
+    } catch (WorkspaceRoot.WorkspaceEscapeException unresolvable) {
+      return own;
     }
   }
 
