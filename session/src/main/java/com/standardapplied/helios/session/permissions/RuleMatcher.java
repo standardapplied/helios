@@ -95,41 +95,42 @@ public final class RuleMatcher {
   }
 
   /**
-   * Convert a glob to a regex: a trailing {@code /**} matches the path before it and everything
-   * below it, {@code /**}{@code /} and a leading {@code **}{@code /} match zero or more whole
-   * segments, any other {@code **} matches any characters, {@code *} and {@code ?} match within a
-   * segment, and every other character is literal.
+   * Convert a glob to a regex: {@code /**} ending a segment and a leading {@code **}{@code /} match
+   * zero or more whole segments, any other {@code **} matches any characters, {@code *} and {@code
+   * ?} match within a segment, and every other code point is literal.
    */
   private static String globToRegex(String glob) {
     var out = new StringBuilder();
     var i = 0;
-    if (glob.startsWith("**/")) {
+    while (glob.startsWith("**/", i)) {
       out.append("(.*/)?");
-      i = 3;
+      i += 3;
     }
     while (i < glob.length()) {
-      if (glob.startsWith("/**/", i)) {
-        out.append("/(.*/)?");
-        i += 4;
-      } else if (glob.startsWith("/**", i) && i + 3 == glob.length()) {
+      if (glob.startsWith("/**", i) && endsSegment(glob, i + 3)) {
         out.append("(/.*)?");
         i += 3;
       } else if (glob.startsWith("**", i)) {
         out.append(".*");
         i += 2;
       } else {
-        out.append(literalOrWildcard(glob.charAt(i)));
-        i++;
+        var codePoint = glob.codePointAt(i);
+        out.append(literalOrWildcard(codePoint));
+        i += Character.charCount(codePoint);
       }
     }
     return out.toString();
   }
 
-  private static String literalOrWildcard(char c) {
-    return switch (c) {
+  private static boolean endsSegment(String glob, int index) {
+    return index == glob.length() || glob.charAt(index) == '/';
+  }
+
+  private static String literalOrWildcard(int codePoint) {
+    return switch (codePoint) {
       case '*' -> "[^/]*";
       case '?' -> "[^/]";
-      default -> Pattern.quote(String.valueOf(c));
+      default -> Pattern.quote(Character.toString(codePoint));
     };
   }
 }
