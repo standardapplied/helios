@@ -5,7 +5,6 @@ package com.standardapplied.helios.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
@@ -389,8 +388,11 @@ final class ToolAuthorizationSessionTest {
 
   // ── an approval that never comes ─────────────────────────────────────────
 
-  /** A session asking about one {@code Write}, ended by {@code end} while the question is open. */
-  private record Unanswered(AgentSession session, String questionId, Run run) {}
+  /**
+   * A session asking about one {@code Write}, ended by {@code end} while the question is open, and
+   * what an {@code Allow} answer to that question threw once the session had ended.
+   */
+  private record Unanswered(Run run, RuntimeException lateAnswer) {}
 
   private Unanswered endedWhileAsking(InstantSource clock, Consumer<AgentSession> end) {
     var asked = new CompletableFuture<String>();
@@ -412,7 +414,16 @@ final class ToolAuthorizationSessionTest {
       end.accept(session);
       var terminal = Await.value("the session to end", session.result());
       events.awaitDone();
-      return new Unanswered(session, questionId, new Run(events, terminal));
+      return new Unanswered(new Run(events, terminal), lateAnswer(session, questionId));
+    }
+  }
+
+  private static RuntimeException lateAnswer(AgentSession session, String questionId) {
+    try {
+      session.answer(questionId, AskUserQuestionResponse.single(questionId, "Allow"));
+      return null;
+    } catch (RuntimeException e) {
+      return e;
     }
   }
 
@@ -431,10 +442,8 @@ final class ToolAuthorizationSessionTest {
   @Test
   void aLateApprovalCannotAuthorizeTheCall() {
     var unanswered = endedWhileAsking(Clock.systemUTC(), AgentSession::close);
-    var id = unanswered.questionId();
-    var late = AskUserQuestionResponse.single(id, "Allow");
 
-    assertThrows(IllegalStateException.class, () -> unanswered.session().answer(id, late));
+    assertInstanceOf(IllegalStateException.class, unanswered.lateAnswer());
     assertEquals(List.of(), executed);
   }
 
@@ -458,5 +467,16 @@ final class ToolAuthorizationSessionTest {
         unanswered.run().onlyResult().outcome());
     assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, unanswered.run().terminal());
     assertEquals(List.of(), executed);
+    assertEquals(
+        "no pending question with id '"
+            + unanswered
+                .run()
+                .events()
+                .eventsOf(QueryEvent.QuestionAsked.class)
+                .getFirst()
+                .request()
+                .questionId()
+            + "' — already answered or unknown",
+        unanswered.lateAnswer().getMessage());
   }
 }

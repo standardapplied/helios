@@ -172,10 +172,7 @@ final class SessionLifecycle {
         this::expireWallClock, limits.maxWallClock().toMillis(), TimeUnit.MILLISECONDS);
   }
 
-  /**
-   * The wall-clock deadline's task: cancel the session as over its {@code maxWallClock}.
-   * Package-private so a test can end a wait at the deadline without waiting for it in real time.
-   */
+  /** The wall-clock deadline's task, package-private so a test can run it without the delay. */
   void expireWallClock() {
     state.ending().cancel("maxWallClock exceeded after " + limits.maxWallClock().toMillis() + "ms");
   }
