@@ -13,6 +13,7 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
+import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
@@ -20,9 +21,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.Map;
 import java.util.function.Predicate;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -188,6 +191,43 @@ final class LsToolTest {
             .execute(Map.of("path", outside.toString()), withholding(denied::equals));
 
     assertEquals("[withheld by permission policy: 2]\n", result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void anUninspectableEntryWhoseOwnPathIsDeniedIsWithheld(@TempDir Path tmp) throws IOException {
+    var docs = Files.createDirectory(tmp.resolve("docs"));
+    Files.writeString(docs.resolve("private-name.txt"), "p", StandardCharsets.UTF_8);
+
+    var result = listUnsearchable(docs, tmp, "./docs/private-name.txt"::equals);
+
+    assertEquals("[withheld by permission policy: 1]\n", result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void anUninspectableEntryThatIsNotDeniedFailsWithoutBeingNamed(@TempDir Path tmp)
+      throws IOException {
+    var docs = Files.createDirectory(tmp.resolve("docs"));
+    Files.writeString(docs.resolve("private-name.txt"), "p", StandardCharsets.UTF_8);
+
+    var result = listUnsearchable(docs, tmp, key -> false);
+
+    assertEquals(
+        "LS: I/O error listing docs: could not inspect a directory entry", result.output());
+  }
+
+  private static ToolResult listUnsearchable(Path dir, Path root, Predicate<String> withheld)
+      throws IOException {
+    Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("r--------"));
+    try {
+      Assumptions.assumeFalse(Files.isExecutable(dir), "permissions are not enforced (root)");
+      return LsTool.binding(WorkspaceRoot.of(root))
+          .tool()
+          .execute(Map.of("path", "docs"), withholding(withheld));
+    } finally {
+      Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
+    }
   }
 
   private static ToolContext withholding(Predicate<String> withheld) {
