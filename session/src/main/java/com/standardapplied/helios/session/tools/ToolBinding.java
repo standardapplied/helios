@@ -80,7 +80,7 @@ public record ToolBinding(
    * @return the canonical call and its key
    * @throws NullPointerException if {@code call} is null, or the extractor returns null
    * @throws IllegalArgumentException if a required path argument is absent or empty, or the path
-   *     argument is not a string
+   *     argument is not a string (an explicit JSON {@code null} included)
    * @throws RuntimeException whatever the path space throws for a path that names no target
    */
   public CanonicalCall canonicalize(ToolCall call) {
@@ -195,7 +195,7 @@ public record ToolBinding(
     private ToolCall canonicalize(ToolCall call) {
       var value = call.arguments().get(name);
       var requested =
-          value == null || "".equals(value)
+          !call.arguments().containsKey(name) || "".equals(value)
               ? defaultValue.orElseThrow(
                   () -> new IllegalArgumentException("'" + name + "' is required"))
               : value;

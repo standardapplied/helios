@@ -15,6 +15,7 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -293,11 +294,18 @@ final class ToolBindingTest {
   }
 
   @Test
-  void aJsonNullPathIsAbsent() {
+  void aJsonNullPathIsRefusedEvenWithADefault() {
     var args = new HashMap<String, Object>();
     args.put("path", null);
-    var binding = pathTool(ToolBinding.PathArgument.optional("path", "d", DOTTED));
-    assertEquals(new ToolPermissionKey("P", "./d"), binding.canonicalize(call("P", args)).key());
+    for (var path :
+        List.of(
+            ToolBinding.PathArgument.optional("path", "d", DOTTED),
+            ToolBinding.PathArgument.required("path", DOTTED))) {
+      var binding = pathTool(path);
+      var ex =
+          assertThrows(IllegalArgumentException.class, () -> binding.canonicalize(call("P", args)));
+      assertEquals("'path' must be a string", ex.getMessage());
+    }
   }
 
   @Test

@@ -141,4 +141,21 @@ final class MemoryReadToolTest {
 
     assertEquals("(empty)\n[withheld by permission policy: 1]\n", result.output());
   }
+
+  @Test
+  void aListedEntryIsCheckedUnderTheKeyItsOwnReadHas(@TempDir Path tmp) throws IOException {
+    var backend = seeded(tmp, "locked\\private/key.md", "locked");
+    var binding = MemoryReadTool.binding(backend);
+    var readKey = keyOf(binding, Map.of("path", "/memories/locked\\private/key.md"));
+    var context =
+        new ToolContext(
+            SessionContext.forTesting("memory"),
+            new CancellationToken(),
+            Duration.ofMinutes(1),
+            readKey.canonicalArgs()::equals);
+
+    var result = binding.tool().execute(Map.of("path", "/memories/", "list", true), context);
+
+    assertEquals("(empty)\n[withheld by permission policy: 1]\n", result.output());
+  }
 }

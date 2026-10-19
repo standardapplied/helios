@@ -157,7 +157,6 @@ final class MemoryFiles {
   }
 
   private String toMemoryPath(Path absolute) {
-    var rel = root.relativize(absolute).toString().replace('\\', '/');
-    return PREFIX + rel;
+    return PREFIX + root.relativize(absolute);
   }
 }

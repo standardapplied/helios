@@ -21,7 +21,6 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayDeque;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Objects;
 
@@ -50,15 +49,16 @@ import java.util.Objects;
  * the entry it opened if that entry is subsequently renamed; this is confinement, not a filesystem
  * snapshot or protection against in-place edits by another writer.
  *
- * <p>Strict mode requires Linux x86-64/AArch64, the default filesystem, mounted {@code
- * /proc/self/fd} and explicit native access: {@code
- * --enable-native-access=com.standardapplied.helios.session} on the module path, or {@code
- * --enable-native-access=ALL-UNNAMED} on the class path. Unsupported configurations fail closed. No
- * native library download, compiler or private JDK API is required.
+ * <p>Both modes require Linux x86-64/AArch64, the default filesystem, mounted {@code /proc/self/fd}
+ * and explicit native access: {@code --enable-native-access=com.standardapplied.helios.session} on
+ * the module path, or {@code --enable-native-access=ALL-UNNAMED} on the class path. Unsupported
+ * configurations fail closed. No native library download, compiler or private JDK API is required.
  *
  * <p>{@code confineSymlinks=false} is the explicitly weaker trusted-workspace mode: paths are still
- * canonicalised (so the open primitives keep working no-follow) but the canonical result may lie
- * anywhere a symlink points, including outside the root. It is never the default.
+ * canonicalised, but the canonical result may lie anywhere a symlink points, including outside the
+ * root. Its I/O is the same descriptor-relative, no-follow I/O as strict mode, so a symlink swapped
+ * in after a path was canonicalised (or a walk's entry was checked against the permission policy)
+ * cannot redirect it. It is never the default.
  *
  * <p>As the {@link PathSpace} of the path tools, it spells every target canonically ({@link
  * #canonical(String)}): {@code .} for the root, {@code ./a/b} below it, with no {@code .}, {@code
@@ -83,21 +83,15 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
    * @throws NullPointerException if {@code root} is null
    * @throws IllegalArgumentException if {@code root} does not exist as a directory or cannot be
    *     canonicalised
-   * @throws UnsupportedOperationException if strict mode is unavailable on this platform or native
-   *     access has not been enabled
+   * @throws UnsupportedOperationException if descriptor-relative I/O is unavailable on this
+   *     platform or native access has not been enabled
    */
   public WorkspaceRoot {
     Objects.requireNonNull(root, "root must not be null");
     try {
       root = root.toRealPath();
-      if (confineSymlinks) {
-        LinuxSyscalls.requireSupport(root);
-      }
-      var attrs =
-          confineSymlinks
-              ? LinuxFiles.attributes(root)
-              : Files.readAttributes(root, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-      if (!attrs.isDirectory()) {
+      LinuxSyscalls.requireSupport(root);
+      if (!LinuxFiles.attributes(root).isDirectory()) {
         throw new IllegalArgumentException("root is not a directory: " + root);
       }
     } catch (IOException e) {
@@ -272,10 +266,7 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
    */
   public BasicFileAttributes attributes(Path resolved) throws IOException {
     requireResolved(resolved);
-    if (confineSymlinks) {
-      return LinuxFiles.attributes(resolved);
-    }
-    return Files.readAttributes(resolved, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+    return LinuxFiles.attributes(resolved);
   }
 
   /**
@@ -300,18 +291,7 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
    */
   public InputStream newInputStream(Path resolved, long maxBytes) throws IOException {
     requireResolved(resolved);
-    if (confineSymlinks) {
-      return LinuxFiles.input(resolved, maxBytes);
-    }
-    if (maxBytes < 0) {
-      throw new IllegalArgumentException("maxBytes must not be negative");
-    }
-    var attrs = attributes(resolved);
-    if (!attrs.isRegularFile() || attrs.size() > maxBytes) {
-      throw new IOException("entry is not a regular file within the size limit: " + resolved);
-    }
-    return Handle.PinnedInput.limited(
-        Files.newInputStream(resolved, LinkOption.NOFOLLOW_LINKS), maxBytes);
+    return LinuxFiles.input(resolved, maxBytes);
   }
 
   /**
@@ -333,17 +313,7 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
   public OutputStream newOutputStream(Path resolved, OpenOption... options) throws IOException {
     Objects.requireNonNull(options, "options must not be null");
     requireResolved(resolved);
-    if (confineSymlinks) {
-      return LinuxFiles.output(resolved, options);
-    }
-    var effectiveOptions =
-        options.length == 0
-            ? new OpenOption[] {StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING}
-            : options;
-    var withNoFollow =
-        Arrays.copyOf(effectiveOptions, effectiveOptions.length + 1, OpenOption[].class);
-    withNoFollow[effectiveOptions.length] = LinkOption.NOFOLLOW_LINKS;
-    return Files.newOutputStream(requireResolved(resolved), withNoFollow);
+    return LinuxFiles.output(resolved, options);
   }
 
   /**
@@ -355,11 +325,7 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
    */
   public void createDirectories(Path resolved) throws IOException {
     requireResolved(resolved);
-    if (confineSymlinks) {
-      LinuxFiles.createDirectories(root, resolved);
-    } else {
-      Files.createDirectories(resolved);
-    }
+    LinuxFiles.createDirectories(resolved.startsWith(root) ? root : resolved.getRoot(), resolved);
   }
 
   /**
@@ -370,14 +336,7 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
    */
   public void deleteFile(Path resolved) throws IOException {
     requireResolved(resolved);
-    if (confineSymlinks) {
-      LinuxFiles.deleteFile(resolved);
-    } else {
-      if (attributes(resolved).isDirectory()) {
-        throw new IOException("refusing to delete a directory: " + resolved);
-      }
-      Files.delete(resolved);
-    }
+    LinuxFiles.deleteFile(resolved);
   }
 
   /**
@@ -389,9 +348,7 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
    */
   public DirectoryStream<Path> newDirectoryStream(Path resolved) throws IOException {
     requireResolved(resolved);
-    return confineSymlinks
-        ? PinnedDirectoryStream.open(resolved)
-        : Files.newDirectoryStream(resolved);
+    return PinnedDirectoryStream.open(resolved);
   }
 
   /**
