@@ -30,6 +30,6 @@ public non-sealed interface PreModelTurnHook extends Hook {
 
   @Override
   default String name() {
-    return getClass().getSimpleName();
+    return HookNames.defaultName(this);
   }
 }

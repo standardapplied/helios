@@ -5,7 +5,6 @@ package com.standardapplied.helios.session.loop;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.hooks.HookDecision;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -25,11 +24,6 @@ final class HookEffects {
   HookEffects(EventEmitter emitter, SteeringQueue steeringQueue) {
     this.emitter = emitter;
     this.steeringQueue = steeringQueue;
-  }
-
-  /** The name of the hook that decided, or {@code null} when no hook did. */
-  static String firingHookName(HookDecision decision) {
-    return decision.firingHookOptional().map(h -> h.name()).orElse(null);
   }
 
   /** The {@link ResultMessage.Success} that ends the session with {@code text}. */

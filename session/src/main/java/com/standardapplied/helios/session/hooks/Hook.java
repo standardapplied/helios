@@ -31,9 +31,14 @@ public sealed interface Hook
         OnStreamEventHook {
 
   /**
-   * The hook's stable name. Surfaced in audit events, error messages, and the {@link
-   * com.standardapplied.helios.session.QueryEvent.HookFired HookFired} event once that subtype
-   * lands. Must be non-blank and stable across the hook's lifetime.
+   * The hook's name, surfaced in audit events, log lines and the {@link
+   * com.standardapplied.helios.session.QueryEvent.HookFired HookFired}, {@link
+   * com.standardapplied.helios.session.QueryEvent.ToolBlocked ToolBlocked} and {@link
+   * com.standardapplied.helios.session.QueryEvent.ToolMutated ToolMutated} events. {@link
+   * HookRegistry} reads it once, when it is built, and uses that name for the hook's lifetime; it
+   * rejects a null or blank name, so a session with such a hook fails to be created. Each phase
+   * interface defaults it to the implementing class's simple name, or to its binary name (e.g.
+   * {@code com.acme.Policies$1}) for an anonymous class.
    *
    * @return non-blank, non-null identifier
    */

@@ -10,7 +10,6 @@ import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.MockModel;
@@ -27,14 +26,12 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.hooks.PostModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
-import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
 import java.time.InstantSource;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -145,41 +142,5 @@ final class TurnStagesTest {
             + " the injected message",
         warning.getMessage());
     assertEquals(List.of("PreModelTurnHook", "injector"), List.of(warning.getParameters()));
-  }
-
-  @Test
-  void aPreToolHookWithoutANameIsReportedUnderThePhaseName() {
-    var unnamed =
-        new PreToolUseHook() {
-          @Override
-          public String name() {
-            return null;
-          }
-
-          @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-            return call.id().equals("c1")
-                ? HookOutcome.block("no")
-                : HookOutcome.mutateArgs(Map.of("v", "mutated"));
-          }
-        };
-    var model =
-        ScriptedModel.newBuilder()
-            .withToolCallsTurn(
-                new ToolCall("c1", "echo", Map.of()), new ToolCall("c2", "echo", Map.of()))
-            .build();
-
-    runner(model, unnamed).runTurn(state, SessionLimits.defaults());
-
-    var blocked = only(QueryEvent.ToolBlocked.class);
-    var mutated = only(QueryEvent.ToolMutated.class);
-    assertEquals("PreToolUseHook", blocked.hookName());
-    assertEquals("PreToolUseHook", mutated.hookName());
-  }
-
-  private <T extends QueryEvent> T only(Class<T> type) {
-    var matching = events.stream().filter(type::isInstance).map(type::cast).toList();
-    assertEquals(1, matching.size(), type.getSimpleName());
-    return matching.getFirst();
   }
 }

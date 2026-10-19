@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.hooks;
 
+import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
@@ -28,8 +29,8 @@ import java.util.logging.Logger;
  * outcome it sees — see spec §9.4. Stream-event hooks all fire (observe-only).
  *
  * <p>The decisive {@code fire*} methods return a {@link HookDecision} pairing the outcome with the
- * firing {@link Hook}, so the orchestrator can attribute {@link QueryEvent.HookFired} events to the
- * actual hook (not the phase name).
+ * name the registry read from the firing hook when it was built, so the orchestrator can attribute
+ * {@link QueryEvent.HookFired} events to the actual hook (not the phase name).
  *
  * <p>If a hook throws, the orchestrator treats the outcome as {@link HookOutcome.Continue} and logs
  * at {@code WARNING} — see spec §9.4. Hook misbehavior cannot abort the session.
@@ -42,39 +43,43 @@ public final class HookRegistry {
 
   private static final Logger LOGGER = Logger.getLogger(HookRegistry.class.getName());
 
-  private final List<PreToolUseHook> preToolUse;
-  private final List<PostToolUseHook> postToolUse;
-  private final List<PreModelTurnHook> preModelTurn;
-  private final List<PostModelTurnHook> postModelTurn;
-  private final List<PreStopHook> preStop;
-  private final List<PreCompactHook> preCompact;
-  private final List<PostCompactHook> postCompact;
-  private final List<OnUserMessageHook> onUserMessage;
-  private final List<OnStreamEventHook> onStreamEvent;
-  private final Map<Class<? extends Hook>, List<? extends Hook>> hooksByPhase;
+  private final List<Registered<PreToolUseHook>> preToolUse;
+  private final List<Registered<PostToolUseHook>> postToolUse;
+  private final List<Registered<PreModelTurnHook>> preModelTurn;
+  private final List<Registered<PostModelTurnHook>> postModelTurn;
+  private final List<Registered<PreStopHook>> preStop;
+  private final List<Registered<PreCompactHook>> preCompact;
+  private final List<Registered<PostCompactHook>> postCompact;
+  private final List<Registered<OnUserMessageHook>> onUserMessage;
+  private final List<Registered<OnStreamEventHook>> onStreamEvent;
+  private final Map<Class<? extends Hook>, List<?>> hooksByPhase;
+
+  /** A hook with the name the registry read from it when it was built. */
+  private record Registered<H extends Hook>(H hook, String name) {}
 
   /**
    * Build a registry from the given hooks. Hooks are partitioned by phase via their sealed permits
-   * and sorted by priority.
+   * and sorted by priority. Each hook's {@link Hook#name()} is called exactly once, here; an
+   * exception it throws propagates unchanged.
    *
    * @param hooks the hooks; non-null but may be empty
-   * @throws NullPointerException if {@code hooks} is null or contains null elements
+   * @throws NullPointerException if {@code hooks} is null, contains null elements, or holds a hook
+   *     whose name is null
+   * @throws IllegalArgumentException if a hook's name is blank
    */
   public HookRegistry(List<? extends Hook> hooks) {
     Objects.requireNonNull(hooks, "hooks must not be null");
-    for (var h : hooks) {
-      Objects.requireNonNull(h, "hooks must not contain null");
-    }
-    this.preToolUse = sortByPriority(hooks, PreToolUseHook.class);
-    this.postToolUse = sortByPriority(hooks, PostToolUseHook.class);
-    this.preModelTurn = sortByPriority(hooks, PreModelTurnHook.class);
-    this.postModelTurn = sortByPriority(hooks, PostModelTurnHook.class);
-    this.preStop = sortByPriority(hooks, PreStopHook.class);
-    this.preCompact = sortByPriority(hooks, PreCompactHook.class);
-    this.postCompact = sortByPriority(hooks, PostCompactHook.class);
-    this.onUserMessage = sortByPriority(hooks, OnUserMessageHook.class);
-    this.onStreamEvent = sortByPriority(hooks, OnStreamEventHook.class);
-    var byPhase = new HashMap<Class<? extends Hook>, List<? extends Hook>>();
+    var registered = hooks.stream().map(HookRegistry::register).toList();
+    this.preToolUse = sortByPriority(registered, PreToolUseHook.class);
+    this.postToolUse = sortByPriority(registered, PostToolUseHook.class);
+    this.preModelTurn = sortByPriority(registered, PreModelTurnHook.class);
+    this.postModelTurn = sortByPriority(registered, PostModelTurnHook.class);
+    this.preStop = sortByPriority(registered, PreStopHook.class);
+    this.preCompact = sortByPriority(registered, PreCompactHook.class);
+    this.postCompact = sortByPriority(registered, PostCompactHook.class);
+    this.onUserMessage = sortByPriority(registered, OnUserMessageHook.class);
+    this.onStreamEvent = sortByPriority(registered, OnStreamEventHook.class);
+    var byPhase = new HashMap<Class<? extends Hook>, List<?>>();
     byPhase.put(PreToolUseHook.class, preToolUse);
     byPhase.put(PostToolUseHook.class, postToolUse);
     byPhase.put(PreModelTurnHook.class, preModelTurn);
@@ -96,12 +101,22 @@ public final class HookRegistry {
     return new HookRegistry(List.of());
   }
 
-  private static <H extends Hook> List<H> sortByPriority(
-      List<? extends Hook> hooks, Class<H> phase) {
+  private static Registered<Hook> register(Hook hook) {
+    Objects.requireNonNull(hook, "hooks must not contain null");
+    var type = hook.getClass().getName();
+    var name = Objects.requireNonNull(hook.name(), () -> "hook " + type + " returned a null name");
+    if (Strings.isBlank(name)) {
+      throw new IllegalArgumentException("hook " + type + " returned a blank name");
+    }
+    return new Registered<>(hook, name);
+  }
+
+  private static <H extends Hook> List<Registered<H>> sortByPriority(
+      List<Registered<Hook>> hooks, Class<H> phase) {
     return hooks.stream()
-        .filter(phase::isInstance)
-        .map(phase::cast)
-        .sorted(Comparator.comparingInt(Hook::priority))
+        .filter(registered -> phase.isInstance(registered.hook()))
+        .map(registered -> new Registered<>(phase.cast(registered.hook()), registered.name()))
+        .sorted(Comparator.comparingInt(registered -> registered.hook().priority()))
         .toList();
   }
 
@@ -235,11 +250,11 @@ public final class HookRegistry {
   public void fireOnStreamEvent(QueryEvent event, HookContext ctx) {
     Objects.requireNonNull(event, "event must not be null");
     Objects.requireNonNull(ctx, "ctx must not be null");
-    for (var hook : onStreamEvent) {
+    for (var registered : onStreamEvent) {
       try {
-        hook.onEvent(event, ctx);
+        registered.hook().onEvent(event, ctx);
       } catch (RuntimeException ex) {
-        LOGGER.log(Level.WARNING, "hook " + hook.name() + " threw on stream event", ex);
+        LOGGER.log(Level.WARNING, "hook " + registered.name() + " threw on stream event", ex);
       }
     }
   }
@@ -250,26 +265,28 @@ public final class HookRegistry {
    * (logged) and treated as Continue — see spec §9.4.
    */
   private <H extends Hook> HookDecision fireDeciding(
-      List<H> phaseHooks, Function<H, HookOutcome> body) {
-    for (var hook : phaseHooks) {
-      var outcome = safeFire(hook, body);
+      List<Registered<H>> phaseHooks, Function<H, HookOutcome> body) {
+    for (var registered : phaseHooks) {
+      var outcome = safeFire(registered, body);
       if (!(outcome instanceof HookOutcome.Continue)) {
-        return HookDecision.of(hook, outcome);
+        return HookDecision.of(registered.name(), outcome);
       }
     }
     return HookDecision.proceed();
   }
 
-  private static <H extends Hook> HookOutcome safeFire(H hook, Function<H, HookOutcome> body) {
+  private static <H extends Hook> HookOutcome safeFire(
+      Registered<H> registered, Function<H, HookOutcome> body) {
     try {
-      var outcome = body.apply(hook);
+      var outcome = body.apply(registered.hook());
       if (outcome == null) {
-        LOGGER.warning("hook " + hook.name() + " returned null outcome; treating as Continue");
+        LOGGER.warning(
+            "hook " + registered.name() + " returned null outcome; treating as Continue");
         return HookOutcome.cont();
       }
       return outcome;
     } catch (RuntimeException ex) {
-      LOGGER.log(Level.WARNING, "hook " + hook.name() + " threw; treating as Continue", ex);
+      LOGGER.log(Level.WARNING, "hook " + registered.name() + " threw; treating as Continue", ex);
       return HookOutcome.cont();
     }
   }

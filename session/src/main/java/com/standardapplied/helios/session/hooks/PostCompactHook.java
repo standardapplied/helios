@@ -42,6 +42,6 @@ public non-sealed interface PostCompactHook extends Hook {
 
   @Override
   default String name() {
-    return getClass().getSimpleName();
+    return HookNames.defaultName(this);
   }
 }

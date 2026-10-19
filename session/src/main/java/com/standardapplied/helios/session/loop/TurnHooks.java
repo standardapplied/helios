@@ -65,7 +65,7 @@ final class TurnHooks {
   }
 
   private Decision apply(SessionState state, HookDecision decision, Phase phase) {
-    var hookName = HookEffects.firingHookName(decision);
+    var hookName = decision.firingHookName();
     return switch (decision.outcome()) {
       case HookOutcome.Stop stop -> {
         effects.stop(state, hookName, phase.phaseName, stop);
