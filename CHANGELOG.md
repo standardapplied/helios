@@ -595,8 +595,8 @@ One ordered after it changed an authorized call just before it ran. Every call n
 `PreToolUse` chain, then authorization of the final immutable call, then dispatch of that same
 call. Authorization admits only an `ALLOW`. A missing tool, a key that throws, is `null`, names
 another tool or carries a secret of the session's `SecretRegistry`, a check that throws or returns
-`null`, and an ASK nobody approves each refuse the call as `ToolOutcome.Rejected("Permission", reason)`, with a `ToolBlocked` event. A refusal's reason
-and a hook's `Block` reason are redacted through the session's `SecretRegistry` and cut at 1024
+`null`, and an ASK nobody approves each refuse the call as `ToolOutcome.Rejected("Permission", reason)`, with a `ToolBlocked` event. A refusal's reason,
+the reason an `ApprovalRequest` carries, and a hook's `Block` reason are redacted through the session's `SecretRegistry` and cut at 1024
 characters. A `PreToolUse` hook is a guard and fails closed; every other phase still skips a hook
 that throws or returns `null`.
 

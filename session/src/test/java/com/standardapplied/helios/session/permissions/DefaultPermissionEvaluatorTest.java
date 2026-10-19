@@ -215,6 +215,38 @@ final class DefaultPermissionEvaluatorTest {
   }
 
   @Test
+  void anAskRulePatternCarryingASecretReachesTheApproverRedactedWithTheRuleIntact() {
+    var secrets = new SecretRegistry();
+    secrets.register("PASSWORD", "secret*value");
+    var askSecret = PermissionRule.withGlob(PermissionEffect.ASK, "Write", "secret*value");
+    var requests = new ArrayList<ApprovalRequest>();
+    var e =
+        DefaultPermissionEvaluator.newBuilder(
+                rules(PermissionMode.DEFAULT, List.of(), List.of(askSecret), List.of()),
+                tools(pathKeyed("Write", ToolCategory.WRITE)))
+            .withApprover(
+                request -> {
+                  requests.add(request);
+                  return PermissionDecision.deny("no");
+                })
+            .withSecretRegistry(secrets)
+            .build();
+    var call = writeCall("secretXvalue");
+
+    e.authorize(call);
+
+    assertEquals(
+        List.of(
+            new ApprovalRequest(
+                call,
+                new ToolPermissionKey("Write", "secretXvalue"),
+                ToolCategory.WRITE,
+                Optional.of(askSecret),
+                "ask rule Write(<redacted:PASSWORD>) matched Write(secretXvalue)")),
+        requests);
+  }
+
+  @Test
   void aNullPermissionKeyDeniesTheCall() {
     var nullKey =
         ToolBinding.newBuilder(tool("Write"))

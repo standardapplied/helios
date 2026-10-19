@@ -18,7 +18,7 @@ import java.util.Optional;
  * @param key the call's permission key; non-null
  * @param category the tool's category; non-null
  * @param rule the ask rule that matched, empty when the mode or category default asked; non-null
- * @param reason the ASK decision's reason; non-blank
+ * @param reason the ASK decision's reason, redacted through the session's secrets; non-blank
  */
 public record ApprovalRequest(
     ToolCall call,

@@ -5,15 +5,19 @@ package com.standardapplied.helios.session;
 import static com.standardapplied.helios.session.WriteToolSessions.run;
 import static com.standardapplied.helios.session.WriteToolSessions.write;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.ask.AskUserQuestionOption;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
+import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -57,6 +61,27 @@ final class ToolApprovalSessionTest {
     assertEquals(
         List.of("Allow", "Deny"),
         request.options().stream().map(AskUserQuestionOption::label).toList());
+  }
+
+  @Test
+  void anAskRulePatternCarryingASecretIsRedactedInTheQuestion() {
+    var askSecret = PermissionRule.withGlob(PermissionEffect.ASK, "Write", "secret*value");
+    var secrets = new SecretRegistry();
+    secrets.register("PASSWORD", "secret*value");
+    var run =
+        run(
+            options(
+                    new Permission(
+                        PermissionMode.DEFAULT, List.of(), List.of(askSecret), List.of()))
+                .withSecretRegistry(secrets),
+            session -> QuestionAnswers.selecting(session, "Deny"),
+            write("secretXvalue"));
+
+    var request = run.events().eventsOf(QueryEvent.QuestionAsked.class).getFirst().request();
+    assertEquals(
+        "ask rule Write(<redacted:PASSWORD>) matched Write(secretXvalue)",
+        request.options().getFirst().description());
+    assertFalse(request.toString().contains("secret*value"));
   }
 
   @Test
