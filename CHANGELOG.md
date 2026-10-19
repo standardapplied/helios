@@ -600,7 +600,7 @@ stage and ends `NotFound`, as without a policy.
 
 | 2.x | 3.0 |
 |---|---|
-| The permission evaluator is a `PreToolUseHook` at priority 50 | a fixed stage after every `PreToolUse` hook |
+| The permission evaluator is a `PreToolUseHook` at priority 50 | a fixed stage after every `PreToolUse` hook; its refusals carry the name `Permission`, which `HookRegistry` (and so `AgentSession.create`) rejects for a hook (`IllegalArgumentException`) |
 | A `PreToolUseHook` that throws or returns `null` is `Continue` | it refuses the call, `Rejected(by = the hook)`, with reason `hook threw <exception class>: <message>` or `hook returned null`, logged at `WARNING` with the exception class alone; later `PreToolUse` hooks do not run |
 | The first `PreToolUse` `MutateArgs` ends the chain | it passes the new arguments to the next hook; `Block`, `Inject` and `Stop` end the chain |
 | `HookRegistry.firePreToolUse` returns `HookDecision` | returns `PreToolUseResult(call, mutations, decision)` |

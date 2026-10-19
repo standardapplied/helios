@@ -17,9 +17,6 @@ import java.util.function.Function;
  */
 final class ToolAuthorization {
 
-  /** The name a refusal by the permission policy carries as its {@code by}. */
-  static final String BY = "Permission";
-
   static final int MAX_REASON_CHARS = 1024;
 
   private ToolAuthorization() {}
