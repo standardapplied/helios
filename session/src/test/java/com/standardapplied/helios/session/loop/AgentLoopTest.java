@@ -300,7 +300,7 @@ final class AgentLoopTest {
                 hooks,
                 dispatch,
                 Authorizations.ADMIT_ALL,
-                Authorizations.WITHHOLD_NONE,
+                Authorizations.NO_RULE,
                 queue,
                 e -> {
                   throw new RuntimeException("sink boom");

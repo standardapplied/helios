@@ -55,7 +55,7 @@ final class LoopCollaboratorsTest {
                     null,
                     dispatch,
                     Authorizations.ADMIT_ALL,
-                    Authorizations.WITHHOLD_NONE,
+                    Authorizations.NO_RULE,
                     queue,
                     events::add,
                     contextFactory,
@@ -73,7 +73,7 @@ final class LoopCollaboratorsTest {
                     hooks,
                     null,
                     Authorizations.ADMIT_ALL,
-                    Authorizations.WITHHOLD_NONE,
+                    Authorizations.NO_RULE,
                     queue,
                     events::add,
                     contextFactory,
@@ -91,7 +91,7 @@ final class LoopCollaboratorsTest {
                     hooks,
                     dispatch,
                     null,
-                    Authorizations.WITHHOLD_NONE,
+                    Authorizations.NO_RULE,
                     queue,
                     events::add,
                     contextFactory,
@@ -114,7 +114,7 @@ final class LoopCollaboratorsTest {
                     events::add,
                     contextFactory,
                     CLOCK));
-    assertEquals("withholding must not be null", ex.getMessage());
+    assertEquals("decidingRule must not be null", ex.getMessage());
   }
 
   @Test
@@ -127,7 +127,7 @@ final class LoopCollaboratorsTest {
                     hooks,
                     dispatch,
                     Authorizations.ADMIT_ALL,
-                    Authorizations.WITHHOLD_NONE,
+                    Authorizations.NO_RULE,
                     null,
                     events::add,
                     contextFactory,
@@ -145,7 +145,7 @@ final class LoopCollaboratorsTest {
                     hooks,
                     dispatch,
                     Authorizations.ADMIT_ALL,
-                    Authorizations.WITHHOLD_NONE,
+                    Authorizations.NO_RULE,
                     queue,
                     null,
                     contextFactory,
@@ -163,7 +163,7 @@ final class LoopCollaboratorsTest {
                     hooks,
                     dispatch,
                     Authorizations.ADMIT_ALL,
-                    Authorizations.WITHHOLD_NONE,
+                    Authorizations.NO_RULE,
                     queue,
                     events::add,
                     null,
@@ -181,7 +181,7 @@ final class LoopCollaboratorsTest {
                     hooks,
                     dispatch,
                     Authorizations.ADMIT_ALL,
-                    Authorizations.WITHHOLD_NONE,
+                    Authorizations.NO_RULE,
                     queue,
                     events::add,
                     contextFactory,
@@ -196,7 +196,7 @@ final class LoopCollaboratorsTest {
             .withHooks(hooks)
             .withToolDispatch(dispatch)
             .withAuthorization(Authorizations.ADMIT_ALL)
-            .withWithholding(Authorizations.WITHHOLD_NONE)
+            .withDecidingRule(Authorizations.NO_RULE)
             .withSteeringQueue(queue)
             .withEventSink(events::add)
             .withHookContextFactory(contextFactory)
@@ -206,7 +206,7 @@ final class LoopCollaboratorsTest {
     assertSame(hooks, collaborators.hooks());
     assertSame(dispatch, collaborators.toolDispatch());
     assertSame(Authorizations.ADMIT_ALL, collaborators.authorization());
-    assertSame(Authorizations.WITHHOLD_NONE, collaborators.withholding());
+    assertSame(Authorizations.NO_RULE, collaborators.decidingRule());
     assertSame(queue, collaborators.steeringQueue());
     assertSame(contextFactory, collaborators.hookContextFactory());
     assertSame(CLOCK, collaborators.clock());
@@ -219,7 +219,7 @@ final class LoopCollaboratorsTest {
             .withHooks(hooks)
             .withToolDispatch(dispatch)
             .withAuthorization(Authorizations.ADMIT_ALL)
-            .withWithholding(Authorizations.WITHHOLD_NONE)
+            .withDecidingRule(Authorizations.NO_RULE)
             .withSteeringQueue(queue)
             .withEventSink(events::add)
             .withHookContextFactory(contextFactory)
@@ -243,7 +243,7 @@ final class LoopCollaboratorsTest {
             hooks,
             dispatch,
             Authorizations.ADMIT_ALL,
-            Authorizations.WITHHOLD_NONE,
+            Authorizations.NO_RULE,
             queue,
             events::add,
             contextFactory,

@@ -8,14 +8,15 @@ import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
+import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.time.Clock;
 import java.time.InstantSource;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Predicate;
 
 /**
  * The per-session collaborators the {@link AgentLoop} and its {@link TurnRunner} share: built once
@@ -28,8 +29,9 @@ import java.util.function.Predicate;
  *     the call the {@code PreToolUse} hooks leave once canonicalised, with its key; only an {@code
  *     ALLOW} decision runs the call, and anything else, {@code null} or a thrown exception refuses
  *     it; non-null
- * @param withholding true when a DENY rule matches a key; a tool walking below its path withholds
- *     every entry whose key it matches; non-null
+ * @param decidingRule the policy rule that decides a key, if one does; a tool walking below its
+ *     path withholds every entry its own DENY rule decides, or a DENY or ASK rule of a tool whose
+ *     content it returns; non-null
  * @param steeringQueue per-session inbox the loop drains and into which {@code Inject} outcomes
  *     queue synthetic user messages; non-null
  * @param eventSink consumer for every {@link QueryEvent} the loop emits; non-null
@@ -40,7 +42,7 @@ public record LoopCollaborators(
     HookRegistry hooks,
     ToolDispatch toolDispatch,
     Function<ToolBinding.CanonicalCall, PermissionDecision> authorization,
-    Predicate<ToolPermissionKey> withholding,
+    Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule,
     SteeringQueue steeringQueue,
     Consumer<QueryEvent> eventSink,
     Function<SessionState, HookContext> hookContextFactory,
@@ -55,7 +57,7 @@ public record LoopCollaborators(
     Objects.requireNonNull(hooks, "hooks must not be null");
     Objects.requireNonNull(toolDispatch, "toolDispatch must not be null");
     Objects.requireNonNull(authorization, "authorization must not be null");
-    Objects.requireNonNull(withholding, "withholding must not be null");
+    Objects.requireNonNull(decidingRule, "decidingRule must not be null");
     Objects.requireNonNull(steeringQueue, "steeringQueue must not be null");
     Objects.requireNonNull(eventSink, "eventSink must not be null");
     Objects.requireNonNull(hookContextFactory, "hookContextFactory must not be null");
@@ -90,7 +92,7 @@ public record LoopCollaborators(
     private HookRegistry hooks;
     private ToolDispatch toolDispatch;
     private Function<ToolBinding.CanonicalCall, PermissionDecision> authorization;
-    private Predicate<ToolPermissionKey> withholding;
+    private Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule;
     private SteeringQueue steeringQueue;
     private Consumer<QueryEvent> eventSink;
     private Function<SessionState, HookContext> hookContextFactory;
@@ -133,14 +135,14 @@ public record LoopCollaborators(
     }
 
     /**
-     * Set the test of whether a DENY rule matches a key, which withholds an entry a walking tool
-     * would return.
+     * Set the policy rule that decides a key, which withholds an entry a walking tool would return.
      *
-     * @param withholding non-null
+     * @param decidingRule non-null
      * @return this builder
      */
-    public Builder withWithholding(Predicate<ToolPermissionKey> withholding) {
-      this.withholding = withholding;
+    public Builder withDecidingRule(
+        Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule) {
+      this.decidingRule = decidingRule;
       return this;
     }
 
@@ -199,7 +201,7 @@ public record LoopCollaborators(
           hooks,
           toolDispatch,
           authorization,
-          withholding,
+          decidingRule,
           steeringQueue,
           eventSink,
           hookContextFactory,

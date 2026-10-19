@@ -177,7 +177,8 @@ final class ToolRound {
         ToolAuthorization.admit(
             collaborators.toolDispatch().registry(),
             collaborators.authorization(),
-            collaborators.withholding(),
+            collaborators.decidingRule(),
+            collaborators.secrets(),
             call);
     return switch (verdict) {
       case ToolAuthorization.Refused refused ->

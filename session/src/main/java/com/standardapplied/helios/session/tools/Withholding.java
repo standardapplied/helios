@@ -7,9 +7,10 @@ import java.util.Objects;
 
 /**
  * The one filter a tool that walks below its authorised path applies to each entry it would return:
- * an entry whose canonical key a DENY rule of the session's policy matches is skipped and counted,
- * and the count ends the tool's output as a fixed line that names no entry. One per call, confined
- * to the walk's thread.
+ * an entry whose canonical key the call's policy withholds (a DENY rule of the walking tool, or a
+ * DENY or ASK rule of a tool whose content it returns, decides the key) is skipped and counted, and
+ * the count ends the tool's output as a fixed line that names no entry. One per call, confined to
+ * the walk's thread.
  */
 public final class Withholding {
 

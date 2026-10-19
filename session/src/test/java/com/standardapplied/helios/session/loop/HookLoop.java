@@ -84,7 +84,7 @@ final class HookLoop implements AutoCloseable {
             new HookRegistry(List.of(hooks)),
             fixture.dispatch(tools),
             authorization,
-            Authorizations.WITHHOLD_NONE,
+            Authorizations.NO_RULE,
             queue,
             fixture.events::add,
             fixture::hookContext,

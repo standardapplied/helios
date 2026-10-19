@@ -167,11 +167,16 @@ all `./secrets/key`), `/memories/` or `/memories/a/b` in memory. A path that nam
 refused before any rule is evaluated, and the tool runs on the path that was authorised. Globs
 match that spelling: a trailing `/**` matches the path before it and everything below it (`./**`
 matches `.`), `/**/` and a leading `**/` match zero or more segments, `*` and `?` stay within a
-segment. A rule for a path tool that no canonical path can match, such as `Read("secrets/**")`,
-fails `AgentSession.create`. `Glob`, `Grep`, `LS` and a `MemoryRead` listing withhold every entry
-below their path that one of their own DENY rules matches (for `Grep`, which returns contents,
-`Read`'s too), never descend into a denied directory, and end with
-`[withheld by permission policy: <n>]`. Memory is its own namespace: a memory call is authorised by
+segment. Rules name real paths: a rule written through a symlink, such as `./link/**`, never
+matches, since a key never goes through one, and creation cannot detect that. A rule for a path tool
+that no canonical path can match, such as `Read("secrets/**")`, fails `AgentSession.create`. A call
+whose key carries a registered secret is refused, with or without a policy. `Glob`, `Grep`, `LS`
+and a `MemoryRead` listing withhold every entry below their path that one of their own DENY rules
+matches (for `Grep`, which returns contents, also every entry a `Read` DENY or ASK rule decides,
+without asking), never descend into a withheld directory, and end with
+`[withheld by permission policy: <n>]`. The allow that admitted a walk's start covers what it finds
+except what those rules withhold; a mode or category default, such as `LOCKED_DOWN`'s deny, is not
+a rule and withholds nothing. Memory is its own namespace: a memory call is authorised by
 `MemoryRead`/`MemoryWrite` rules on its `/memories/...` key, and a `Read` rule over the directory
 backing a filesystem memory store does not apply to it.
 

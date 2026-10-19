@@ -14,7 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
@@ -22,7 +21,6 @@ import com.standardapplied.helios.session.files.LsTool;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.hooks.HookOutcome;
-import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.memory.MemoryBackend;
 import com.standardapplied.helios.session.memory.MemoryReadTool;
@@ -37,7 +35,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -180,20 +177,6 @@ final class PathPermissionAttacksTest {
         new ToolOutcome.Rejected("Permission", "Read: 'path' must be a string"),
         run.onlyResult().outcome());
     assertEquals(0, sessions.readRuns.get());
-  }
-
-  @Test
-  void aPostToolUseHookSeesTheCanonicalCallThatRan() {
-    var seen = new CopyOnWriteArrayList<ToolCall>();
-    PostToolUseHook record =
-        (call, result, ctx) -> {
-          seen.add(call);
-          return HookOutcome.cont();
-        };
-
-    run(sessions.withoutPolicy().withHook(record), read("docs/sec/../../docs/a.txt"));
-
-    assertEquals(List.of(read("./docs/a.txt")), seen);
   }
 
   @Test

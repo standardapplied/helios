@@ -34,7 +34,8 @@ import java.util.regex.Pattern;
  * </ul>
  *
  * <p>A wildcard matches line terminators like any other character. The matching works on plain
- * strings, not on the filesystem.
+ * strings, not on the filesystem, so a glob names real paths: one written through a symlink, such
+ * as {@code ./link/**}, never matches, since a canonical path never goes through one.
  *
  * <h2>Thread-safety</h2>
  *

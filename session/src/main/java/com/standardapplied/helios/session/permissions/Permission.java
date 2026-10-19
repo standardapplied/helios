@@ -23,7 +23,10 @@ import java.util.stream.Stream;
  * {@code /memories/} or {@code /memories/a/b} in memory), however the model spelled it; see {@link
  * RuleMatcher} for the glob dialect. A DENY rule also withholds the entries a walking tool ({@code
  * Glob}, {@code Grep}, {@code LS}, a {@code MemoryRead} listing) would return below its path, and a
- * {@code Read} DENY rule withholds the files {@code Grep} would search.
+ * {@code Read} DENY or ASK rule that decides a file withholds it from {@code Grep}, without asking.
+ * The allow that admitted a walk's start covers what it finds except what these rules withhold; a
+ * mode or category default, such as {@link PermissionMode#LOCKED_DOWN}'s, is not a rule and
+ * withholds nothing.
  *
  * @param mode the coarse policy lever; non-null
  * @param allow rules that, on match, allow the call; non-null

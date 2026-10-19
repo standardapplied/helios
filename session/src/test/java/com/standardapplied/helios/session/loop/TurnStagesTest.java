@@ -72,7 +72,7 @@ final class TurnStagesTest {
             new HookRegistry(List.of(hooks)),
             dispatch,
             Authorizations.ADMIT_ALL,
-            Authorizations.WITHHOLD_NONE,
+            Authorizations.NO_RULE,
             queue,
             events::add,
             TurnStagesTest::context,

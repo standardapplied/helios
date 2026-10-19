@@ -249,6 +249,23 @@ final class CanonicalPermissionPathsTest {
         "Read: parent directory does not exist: ./<redacted:DIR>/x", run.onlyBlock().reason());
   }
 
+  @Test
+  void aCanonicalPathCarryingASecretIsRefusedWithNoPolicySet() throws IOException {
+    sessions.write("s3cr3t-dir-name/f", "hidden");
+    Files.createSymbolicLink(sessions.root.resolve("docs/l"), Path.of("../s3cr3t-dir-name"));
+    var secrets = new SecretRegistry();
+    secrets.register("DIR", "s3cr3t-dir-name");
+
+    var run = run(sessions.withoutPolicy().withSecretRegistry(secrets), read("docs/l/f"));
+
+    assertEquals(
+        new ToolOutcome.Rejected("Permission", "permission key of Read carries a secret"),
+        run.onlyResult().outcome());
+    assertEquals(List.of(), run.events().eventsOf(QueryEvent.ToolUse.class));
+    assertFalse(run.events().events().toString().contains("s3cr3t-dir-name"));
+    assertEquals(0, sessions.readRuns.get());
+  }
+
   // ── a target swapped after approval ──────────────────────────────────────
 
   @Test
