@@ -10,6 +10,7 @@ import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.hooks.HookDecision;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Runs the tool calls of one model turn serially: runs the {@code PreToolUse} chain, authorizes the
@@ -33,8 +34,9 @@ import java.util.List;
  *       the final call goes to authorization.
  *   <li><b>Authorization</b>: a refusal emits {@link QueryEvent.ToolBlocked} and substitutes a
  *       rejected result by {@link ToolAuthorization#BY}; an admitted call emits {@link
- *       QueryEvent.ToolUse} and is dispatched. A refusal's reason and a hook's {@code Block} reason
- *       are redacted and bounded by {@link ToolAuthorization#diagnostic}.
+ *       QueryEvent.ToolUse} and is dispatched. A call naming no registered tool skips the stage,
+ *       and dispatch answers it {@code NotFound}. A refusal's reason and a hook's {@code Block}
+ *       reason are redacted and bounded by {@link ToolAuthorization#diagnostic}.
  *   <li><b>PostToolUse</b>: {@code MutateResult} rewrites the tool result's output and keeps its
  *       outcome, since a hook changes what the model reads, not what happened; {@code Inject}
  *       queues a synthetic user message; {@code Stop} appends the result and terminates.
@@ -148,7 +150,7 @@ final class ToolRound {
    * QueryEvent.ToolUse}.
    */
   private PlannedCall authorize(SessionState state, ToolCall call) {
-    var refusal = ToolAuthorization.refusal(collaborators.authorization(), call);
+    var refusal = refusal(call);
     if (refusal.isPresent()) {
       return block(state, call, ToolAuthorization.BY, refusal.orElseThrow());
     }
@@ -157,6 +159,16 @@ final class ToolRound {
         new QueryEvent.ToolUse(
             state.sessionId(), state.currentTurnIndex(), collaborators.clock().instant(), call));
     return new PlannedCall(call, null);
+  }
+
+  /**
+   * Why the permission stage refuses {@code call}; empty for a call naming no tool of the
+   * dispatcher's registry, which dispatch answers {@code NotFound}, policy or none.
+   */
+  private Optional<String> refusal(ToolCall call) {
+    return collaborators.toolDispatch().registry().get(call.name()).isEmpty()
+        ? Optional.empty()
+        : ToolAuthorization.refusal(collaborators.authorization(), call);
   }
 
   private PlannedCall block(SessionState state, ToolCall call, String by, String reason) {

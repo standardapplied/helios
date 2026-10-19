@@ -22,9 +22,9 @@ import java.util.function.Function;
  *
  * @param hooks priority-sorted hook registry; non-null
  * @param toolDispatch dispatcher for the tool calls the model emits; non-null
- * @param authorization the mandatory permission check of every tool call, run on the call the
- *     {@code PreToolUse} hooks leave; only an {@code ALLOW} decision runs the call, and anything
- *     else, {@code null} or a thrown exception refuses it; non-null
+ * @param authorization the mandatory permission check of every call of a registered tool, run on
+ *     the call the {@code PreToolUse} hooks leave; only an {@code ALLOW} decision runs the call,
+ *     and anything else, {@code null} or a thrown exception refuses it; non-null
  * @param steeringQueue per-session inbox the loop drains and into which {@code Inject} outcomes
  *     queue synthetic user messages; non-null
  * @param eventSink consumer for every {@link QueryEvent} the loop emits; non-null

@@ -595,7 +595,8 @@ final immutable call, then dispatch of that same call. Only an `ALLOW` admits it
 including a failure and a permission key carrying a secret of the session's `SecretRegistry`, is
 `ToolOutcome.Rejected("Permission", reason)` with a `ToolBlocked` event. That reason and a hook's
 `Block` reason are redacted through the session's `SecretRegistry` and cut at 1024 characters; an
-`ApprovalRequest`'s reason is redacted too, but not cut.
+`ApprovalRequest`'s reason is redacted too, but not cut. A call naming no registered tool skips the
+stage and ends `NotFound`, as without a policy.
 
 | 2.x | 3.0 |
 |---|---|
@@ -606,7 +607,6 @@ including a failure and a permission key carrying a secret of the session's `Sec
 | `DefaultPermissionEvaluator.Builder.withQuestionGateway(QuestionGateway)` | `withApprover(ToolApprover)`; `ToolApprover.askingUser(gateway)` is the old prompt |
 | `DefaultPermissionEvaluator` implements `PreToolUseHook`: `beforeTool`, `priority()`, `name()`, `Builder.withPriority(int)` | `authorize(ToolCall)` returns an `ALLOW` or `DENY` `PermissionDecision`; no priority, since no hook runs after it |
 | `PermissionDecision(effect, reason)`; deny reasons read `permission: deny rule for <tool>` | `PermissionDecision(effect, reason, rule)`; reasons name the tool, key and rule or default that decided, such as `deny rule Write(/etc/**) matched Write(/etc/passwd)` |
-| A call naming no registered tool passed the evaluator and ended `NotFound` | under a permission policy it is refused, `Rejected("Permission", "no tool named '<name>' is registered")` |
 | `Permission` accepted a rule of any effect in any list, and a match in `deny` denied whatever the rule's effect | a matched rule decides with its own effect, so the constructor throws `IllegalArgumentException` for a rule whose effect is not its list's |
 
 ### Added
