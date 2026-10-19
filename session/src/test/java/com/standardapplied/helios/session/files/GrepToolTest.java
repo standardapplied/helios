@@ -428,14 +428,13 @@ final class GrepToolTest {
   }
 
   @Test
-  void aTrustedWalkDoesNotFollowADirectorySwappedAfterItsCheck(@TempDir Path tmp)
-      throws IOException {
+  void aWalkDoesNotFollowADirectorySwappedAfterItsCheck(@TempDir Path tmp) throws IOException {
     assertEquals(
         "[withheld by permission policy: 1]\n", grepSwappingPublicAfterChecking(tmp, "./public"));
   }
 
   @Test
-  void aTrustedWalkDoesNotReadAFileWhoseDirectoryIsSwappedAfterItsCheck(@TempDir Path tmp)
+  void aWalkDoesNotReadAFileWhoseDirectoryIsSwappedAfterItsCheck(@TempDir Path tmp)
       throws IOException {
     assertEquals(
         "[withheld by permission policy: 1]\n",
@@ -443,9 +442,9 @@ final class GrepToolTest {
   }
 
   /**
-   * Greps a trusted workspace holding {@code public/key} and a withheld {@code secrets/key}, moving
-   * {@code public} out of the workspace for a link to {@code secrets} as soon as {@code trigger}
-   * has been checked.
+   * Greps a workspace holding {@code public/key} and a withheld {@code secrets/key}, moving {@code
+   * public} out of the workspace for a link to {@code secrets} as soon as {@code trigger} has been
+   * checked.
    */
   private static String grepSwappingPublicAfterChecking(Path tmp, String trigger)
       throws IOException {
@@ -461,7 +460,7 @@ final class GrepToolTest {
           }
           return key.equals("./secrets");
         };
-    return GrepTool.binding(new WorkspaceRoot(root, false))
+    return GrepTool.binding(WorkspaceRoot.of(root))
         .tool()
         .execute(Map.of("pattern", "[A-Z]", "path", "."), withholding(withheld))
         .output();

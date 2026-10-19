@@ -632,7 +632,6 @@ withhold entries their DENY rules match.
 | `X/**` does not match `X`; `/**/` needs one segment | `X/**` matches `X`; `/**/` and a leading `**/` match zero segments |
 | `Read`/`LS`/`Glob`/`Grep` re-resolve the raw path when they run | they run on the authorised canonical path and fail when it no longer resolves to itself |
 | A non-string `path`, JSON `null` included, is treated as missing (`"."` for `LS`, `Glob`, `Grep`) | refused |
-| `new WorkspaceRoot(root, false)` is portable, and its I/O follows a symlink swapped into a path after it was resolved | it uses strict mode's descriptor-relative, no-follow I/O and its platform requirements (Linux x86-64/AArch64, `/proc/self/fd`, native access); only where canonical targets may lie differs |
 | `Permission.defaultInWorkspace()` asks for `Write`, `Edit`, `MultiEdit` | those rules are removed |
 | `Glob`, `Grep`, `LS` and `MemoryRead` `list` return every entry below their path | they withhold entries their own DENY rules match (and, for `Grep`, which returns contents, `Read`'s), never descend into a denied directory, and end with `[withheld by permission policy: <n>]` |
 | `new ToolContext(SessionContext, CancellationToken, Duration)` | `ToolContext(SessionContext, CancellationToken, Duration, Predicate<String> withheld)`; `ToolContext.noop()` withholds nothing |

@@ -86,6 +86,10 @@ final class Handle implements AutoCloseable {
       this.remaining = maxBytes;
     }
 
+    static InputStream limited(InputStream input, long maxBytes) {
+      return new PinnedInput(input, null, maxBytes);
+    }
+
     @Override
     public int read() throws IOException {
       int value = super.read();
