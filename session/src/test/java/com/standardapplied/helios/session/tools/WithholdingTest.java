@@ -2,27 +2,19 @@
 
 package com.standardapplied.helios.session.tools;
 
+import static com.standardapplied.helios.session.test.BindingCalls.withholding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
-import com.standardapplied.helios.core.tool.ToolContext;
-import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 /** The one filter walking tools apply: skip and count what the call's policy denies. */
 final class WithholdingTest {
 
   private static Withholding denying(String prefix) {
-    return Withholding.of(
-        new ToolContext(
-            SessionContext.forTesting("withholding"),
-            new CancellationToken(),
-            Duration.ofMinutes(1),
-            key -> key.startsWith(prefix)));
+    return Withholding.of(withholding(key -> key.startsWith(prefix)));
   }
 
   @Test

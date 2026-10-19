@@ -36,41 +36,6 @@ final class RuleMatcherTest {
   }
 
   @Test
-  void exactPathMatches() {
-    var rule = PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "/workspace/foo.txt");
-    var key = new ToolPermissionKey("Read", "/workspace/foo.txt");
-    assertTrue(matcher.matches(key, rule));
-  }
-
-  @Test
-  void singleStarMatchesOneSegment() {
-    var rule = PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "/workspace/*");
-    assertTrue(matcher.matches(new ToolPermissionKey("Read", "/workspace/foo.txt"), rule));
-    assertFalse(matcher.matches(new ToolPermissionKey("Read", "/workspace/sub/foo.txt"), rule));
-  }
-
-  @Test
-  void doubleStarMatchesAnyDepth() {
-    var rule = PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "/workspace/**");
-    assertTrue(matcher.matches(new ToolPermissionKey("Read", "/workspace/foo.txt"), rule));
-    assertTrue(matcher.matches(new ToolPermissionKey("Read", "/workspace/sub/deep/foo.txt"), rule));
-  }
-
-  @Test
-  void questionMarkMatchesSingleCharacter() {
-    var rule = PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "/a/?.txt");
-    assertTrue(matcher.matches(new ToolPermissionKey("Read", "/a/x.txt"), rule));
-    assertFalse(matcher.matches(new ToolPermissionKey("Read", "/a/xy.txt"), rule));
-  }
-
-  @Test
-  void regexMetaCharsEscaped() {
-    var rule = PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "/a.b/(c)");
-    assertTrue(matcher.matches(new ToolPermissionKey("Read", "/a.b/(c)"), rule));
-    assertFalse(matcher.matches(new ToolPermissionKey("Read", "/aXb/(c)"), rule));
-  }
-
-  @Test
   void emptyCanonicalArgsMatchAnyArgsRule() {
     var rule = PermissionRule.any(PermissionEffect.ALLOW, "Execute");
     var key = new ToolPermissionKey("Execute", "");
@@ -156,7 +121,16 @@ final class RuleMatcherTest {
     "**/**/k, ./ak, false",
     "./🔒/k, ./🔒/k, true",
     "./🔒/**, ./🔒/k, true",
-    "./?, ./🔒, true"
+    "./?, ./🔒, true",
+    "/workspace/foo.txt, /workspace/foo.txt, true",
+    "/workspace/*, /workspace/foo.txt, true",
+    "/workspace/*, /workspace/sub/foo.txt, false",
+    "/workspace/**, /workspace/foo.txt, true",
+    "/workspace/**, /workspace/sub/deep/foo.txt, true",
+    "/a/?.txt, /a/x.txt, true",
+    "/a/?.txt, /a/xy.txt, false",
+    "/a.b/(c), /a.b/(c), true",
+    "/a.b/(c), /aXb/(c), false"
   })
   void wildcardsAndLiteralsFollowTheDialect(String glob, String canonical, boolean matches) {
     assertEquals(matches, globMatches(glob, canonical));

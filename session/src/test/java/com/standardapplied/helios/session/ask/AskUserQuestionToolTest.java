@@ -4,16 +4,14 @@
  */
 package com.standardapplied.helios.session.ask;
 
+import static com.standardapplied.helios.session.test.BindingCalls.keyOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolContext;
-import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -202,9 +200,5 @@ final class AskUserQuestionToolTest {
   @Test
   void rejectsNullGateway() {
     assertThrows(NullPointerException.class, () -> AskUserQuestionTool.binding(null));
-  }
-
-  private static ToolPermissionKey keyOf(ToolBinding binding, Map<String, Object> args) {
-    return binding.canonicalize(new ToolCall("call-1", binding.name(), args)).key();
   }
 }

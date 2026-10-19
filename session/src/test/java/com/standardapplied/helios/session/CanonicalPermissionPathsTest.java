@@ -287,11 +287,11 @@ final class CanonicalPermissionPathsTest {
             "rule Read(secrets/**) can never match: Read keys are canonical paths such as"
                 + " ./src/Main.java"),
         Arguments.of(
-            PermissionRule.withGlob(PermissionEffect.DENY, "Read", "./a/../b"),
+            PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "./a/../b"),
             "rule Read(./a/../b) can never match: Read keys are canonical paths such as"
                 + " ./src/Main.java"),
         Arguments.of(
-            PermissionRule.withGlob(PermissionEffect.DENY, "Read", "./docs/"),
+            PermissionRule.withGlob(PermissionEffect.ASK, "Read", "./docs/"),
             "rule Read(./docs/) can never match: Read keys are canonical paths such as"
                 + " ./src/Main.java"),
         Arguments.of(

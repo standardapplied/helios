@@ -4,24 +4,20 @@
  */
 package com.standardapplied.helios.session.memory;
 
+import static com.standardapplied.helios.session.test.BindingCalls.keyOf;
+import static com.standardapplied.helios.session.test.BindingCalls.withholding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
-import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -120,19 +116,10 @@ final class MemoryReadToolTest {
     assertThrows(NullPointerException.class, () -> MemoryReadTool.binding(null));
   }
 
-  private static ToolPermissionKey keyOf(ToolBinding binding, Map<String, Object> args) {
-    return binding.canonicalize(new ToolCall("call-1", binding.name(), args)).key();
-  }
-
   @Test
   void aListingWithEveryEntryWithheldIsEmptyThenNoted(@TempDir Path tmp) throws IOException {
     var backend = seeded(tmp, "locked.md", "locked");
-    var context =
-        new ToolContext(
-            SessionContext.forTesting("memory"),
-            new CancellationToken(),
-            Duration.ofMinutes(1),
-            "/memories/locked.md"::equals);
+    var context = withholding("/memories/locked.md"::equals);
 
     var result =
         MemoryReadTool.binding(backend)
@@ -147,12 +134,7 @@ final class MemoryReadToolTest {
     var backend = seeded(tmp, "locked\\private/key.md", "locked");
     var binding = MemoryReadTool.binding(backend);
     var readKey = keyOf(binding, Map.of("path", "/memories/locked\\private/key.md"));
-    var context =
-        new ToolContext(
-            SessionContext.forTesting("memory"),
-            new CancellationToken(),
-            Duration.ofMinutes(1),
-            readKey.canonicalArgs()::equals);
+    var context = withholding(readKey.canonicalArgs()::equals);
 
     var result = binding.tool().execute(Map.of("path", "/memories/", "list", true), context);
 
