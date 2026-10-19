@@ -139,11 +139,12 @@ final class ToolApprovalSessionTest {
             event -> {
               if (event instanceof QueryEvent.QuestionAsked question) {
                 var id = question.request().questionId();
-                var first = asked.isEmpty();
-                asked.add(id);
-                answer(session, id, first ? "Allow" : "Deny");
-                if (first) {
-                  duplicate.complete(answer(session, id, "Allow"));
+                if (asked.isEmpty()) {
+                  asked.add(id);
+                  answer(session, id, "Allow");
+                } else {
+                  duplicate.complete(answer(session, asked.getFirst(), "Allow"));
+                  answer(session, id, "Deny");
                 }
               }
             };
@@ -155,7 +156,9 @@ final class ToolApprovalSessionTest {
             write("/tmp/a"),
             new ToolCall("c2", "Write", Map.of("path", "/tmp/a")));
 
-    assertInstanceOf(IllegalArgumentException.class, Await.value("the duplicate", duplicate));
+    assertEquals(
+        "no pending question with id '" + asked.getFirst() + "' — already answered or unknown",
+        Await.value("the duplicate", duplicate).getMessage());
     assertEquals(List.of(Map.<String, Object>of("path", "/tmp/a")), executed);
     assertEquals(
         List.of(
@@ -226,6 +229,7 @@ final class ToolApprovalSessionTest {
     var unanswered = endedWhileAsking(Clock.systemUTC(), AgentSession::close);
 
     assertInstanceOf(IllegalStateException.class, unanswered.lateAnswer());
+    assertEquals("session is closed", unanswered.lateAnswer().getMessage());
     assertEquals(List.of(), executed);
   }
 
