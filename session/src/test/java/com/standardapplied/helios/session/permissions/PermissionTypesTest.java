@@ -170,7 +170,8 @@ final class PermissionTypesTest {
                     list.equals("allow") ? rule : none,
                     list.equals("ask") ? rule : none,
                     list.equals("deny") ? rule : none));
-    assertEquals("the " + list + " list holds a " + effect + " rule for Write", ex.getMessage());
+    assertEquals(
+        "the " + list + " list holds a rule for Write whose effect is " + effect, ex.getMessage());
   }
 
   @Test
