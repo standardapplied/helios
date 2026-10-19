@@ -88,6 +88,14 @@ final class HookRegistryTest {
   }
 
   @Test
+  void constructorRejectsTheReservedNamePermission() {
+    var hooks = List.of(new NamedBy(() -> "Permission"));
+    var ex = assertThrows(IllegalArgumentException.class, () -> new HookRegistry(hooks));
+    assertEquals(
+        "hook " + NamedBy.class.getName() + " uses the reserved name Permission", ex.getMessage());
+  }
+
+  @Test
   void constructorPropagatesWhatANameThrows() {
     var failure = new IllegalStateException("no name");
     var hooks =

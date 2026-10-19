@@ -11,6 +11,7 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.permissions.Permission;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -74,7 +75,7 @@ public final class HookRegistry {
    * @param hooks the hooks; non-null but may be empty
    * @throws NullPointerException if {@code hooks} is null, contains null elements, or holds a hook
    *     whose name is null
-   * @throws IllegalArgumentException if a hook's name is blank
+   * @throws IllegalArgumentException if a hook's name is blank or {@link Permission#NAME}
    */
   public HookRegistry(List<? extends Hook> hooks) {
     Objects.requireNonNull(hooks, "hooks must not be null");
@@ -116,6 +117,9 @@ public final class HookRegistry {
     var name = Objects.requireNonNull(hook.name(), () -> "hook " + type + " returned a null name");
     if (Strings.isBlank(name)) {
       throw new IllegalArgumentException("hook " + type + " returned a blank name");
+    }
+    if (name.equals(Permission.NAME)) {
+      throw new IllegalArgumentException("hook " + type + " uses the reserved name " + name);
     }
     return new Registered<>(hook, name);
   }

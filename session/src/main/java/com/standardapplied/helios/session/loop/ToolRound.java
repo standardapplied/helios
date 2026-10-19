@@ -9,6 +9,7 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.hooks.HookDecision;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.permissions.Permission;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,7 +34,7 @@ import java.util.Optional;
  *       message and substitutes a rejected result; {@code Stop} terminates; with none of the three,
  *       the final call goes to authorization.
  *   <li><b>Authorization</b>: a refusal emits {@link QueryEvent.ToolBlocked} and substitutes a
- *       rejected result by {@link ToolAuthorization#BY}; an admitted call emits {@link
+ *       rejected result by {@link Permission#NAME}; an admitted call emits {@link
  *       QueryEvent.ToolUse} and is dispatched. A call naming no registered tool skips the stage,
  *       and dispatch answers it {@code NotFound}. A refusal's reason and a hook's {@code Block}
  *       reason are redacted and bounded by {@link ToolAuthorization#diagnostic}.
@@ -146,13 +147,13 @@ final class ToolRound {
 
   /**
    * Run the mandatory permission stage on the final call: a refusal is blocked {@link
-   * ToolAuthorization#BY by the permission policy}; an admitted call is announced by its {@link
+   * Permission#NAME by the permission policy}; an admitted call is announced by its {@link
    * QueryEvent.ToolUse}.
    */
   private PlannedCall authorize(SessionState state, ToolCall call) {
     var refusal = refusal(call);
     if (refusal.isPresent()) {
-      return block(state, call, ToolAuthorization.BY, refusal.orElseThrow());
+      return block(state, call, Permission.NAME, refusal.orElseThrow());
     }
     emitter.emit(
         state,

@@ -31,6 +31,12 @@ public record Permission(
     List<PermissionRule> deny) {
 
   /**
+   * The name a refusal by the permission policy carries as its {@code by}, in its {@code Rejected}
+   * outcome and {@code ToolBlocked} event; reserved, so no hook may take it.
+   */
+  public static final String NAME = "Permission";
+
+  /**
    * Canonical constructor; defensively copies all three rule lists. A matched rule decides with its
    * own effect, so each list holds only rules of its effect.
    *
