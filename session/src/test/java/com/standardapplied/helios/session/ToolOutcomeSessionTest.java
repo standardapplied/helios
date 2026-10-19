@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.session;
 
+import static com.standardapplied.helios.session.WriteToolSessions.run;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -56,24 +57,15 @@ final class ToolOutcomeSessionTest {
     }
   }
 
-  private record Run(CollectingSubscriber events, ScriptedModel model, ResultMessage terminal) {
+  private static List<QueryEvent.ToolResult> toolResults(WriteToolSessions.Run run) {
+    return run.events().eventsOf(QueryEvent.ToolResult.class);
+  }
 
-    List<QueryEvent.ToolResult> toolResults() {
-      return events.eventsOf(QueryEvent.ToolResult.class);
-    }
-
-    ToolResult onlyResult() {
-      var results = toolResults();
-      assertEquals(1, results.size(), "tool results");
-      return results.getFirst().result();
-    }
-
-    List<String> toolMessages(int call) {
-      return model.calls().get(call).stream()
-          .filter(m -> m.role() == Role.TOOL)
-          .map(Message::content)
-          .toList();
-    }
+  private static List<String> toolMessages(WriteToolSessions.Run run, int call) {
+    return run.model().calls().get(call).stream()
+        .filter(m -> m.role() == Role.TOOL)
+        .map(Message::content)
+        .toList();
   }
 
   private static ToolBinding tool(String name, ToolExecutor executor) {
@@ -89,18 +81,6 @@ final class ToolOutcomeSessionTest {
 
   private static SessionOptions.Builder withTools(ToolBinding... tools) {
     return SessionOptions.newBuilder().withTools(new ToolRegistry(List.of(tools)));
-  }
-
-  private static Run run(SessionOptions.Builder options, ToolCall... calls) {
-    var model = ScriptedModel.newBuilder().withToolCallsTurn(calls).withTextTurn("done").build();
-    var events = new CollectingSubscriber();
-    try (var session = AgentSession.create(options.withModel(model).build())) {
-      session.events().subscribe(events);
-      session.send(UserMessage.text("go"));
-      var terminal = Await.value("the session to end", session.result());
-      events.awaitDone();
-      return new Run(events, model, terminal);
-    }
   }
 
   private static ToolResult resultOf(ToolExecutor executor) {
@@ -178,7 +158,7 @@ final class ToolOutcomeSessionTest {
     assertEquals(
         expected(new ToolOutcome.Threw("java.lang.NullPointerException"), reported),
         run.onlyResult());
-    assertEquals(List.of(reported), run.toolMessages(1));
+    assertEquals(List.of(reported), toolMessages(run, 1));
     assertInstanceOf(ResultMessage.Success.class, run.terminal());
   }
 
@@ -230,7 +210,7 @@ final class ToolOutcomeSessionTest {
   }
 
   @Test
-  void aPermissionDenialIsRejectedByTheEvaluator() {
+  void aPermissionDenialIsRejectedByThePermissionPolicy() {
     var options =
         withTools(tool("t", (args, ctx) -> ToolResult.success("ran")))
             .withPermission(
@@ -242,8 +222,8 @@ final class ToolOutcomeSessionTest {
 
     assertEquals(
         expected(
-            new ToolOutcome.Rejected("DefaultPermissionEvaluator", "permission: deny rule for t"),
-            "blocked by DefaultPermissionEvaluator: permission: deny rule for t"),
+            new ToolOutcome.Rejected("Permission", "deny rule t matched t"),
+            "blocked by Permission: deny rule t matched t"),
         run(options, call("t")).onlyResult());
   }
 
@@ -263,12 +243,12 @@ final class ToolOutcomeSessionTest {
         List.of(
             new ToolResult(new ToolOutcome.Failed(), "raw failure", PNG),
             new ToolResult(new ToolOutcome.Failed(), "rewritten", PNG)),
-        run.toolResults().stream().map(QueryEvent.ToolResult::result).toList());
-    assertEquals(List.of("rewritten"), run.toolMessages(1));
+        toolResults(run).stream().map(QueryEvent.ToolResult::result).toList());
+    assertEquals(List.of("rewritten"), toolMessages(run, 1));
   }
 
   @Test
-  void aRejectedResultIsRedactedWithItsOutcomeIntact() {
+  void aRejectionReasonIsRedactedInItsOutcomeAndOutput() {
     var secrets = new SecretRegistry();
     secrets.register("API_KEY", SECRET);
     var options =
@@ -276,14 +256,17 @@ final class ToolOutcomeSessionTest {
             .withSecretRegistry(secrets)
             .withHook(new Gate(HookOutcome.block("saw " + SECRET)));
 
-    var event = run(options, call("t")).toolResults().getFirst();
+    var run = run(options, call("t"));
 
     assertEquals(
         expected(
-            new ToolOutcome.Rejected("Gate", "saw " + SECRET),
+            new ToolOutcome.Rejected("Gate", "saw <redacted:API_KEY>"),
             "blocked by Gate: saw <redacted:API_KEY>"),
-        event.result());
-    assertEquals(Map.of("API_KEY", 1), event.redactions());
+        run.onlyResult());
+    assertEquals(
+        "saw <redacted:API_KEY>",
+        run.events().eventsOf(QueryEvent.ToolBlocked.class).getFirst().reason());
+    assertEquals(Map.of("API_KEY", 1), toolResults(run).getFirst().redactions());
   }
 
   @Test

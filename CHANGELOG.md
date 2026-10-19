@@ -404,7 +404,7 @@ drift.
 | `ToolResult(boolean success, output, attachments)`, `success()` | `ToolResult(ToolOutcome outcome, output, attachments)`, `succeeded()`. New framework factories `threw(toolName, cause)`, `timedOut(toolName, limit)`, `notFound(toolName)`, `rejected(by, reason)`, and `withOutput(text)` |
 | `ToolResult.failure(String, Exception)` | removed: return `failure(text)`, or throw and Helios reports `Threw` |
 | A tool's thrown exception: `Tool execution failed: <msg>`; a throwable from dispatch, including a call cancelled before it ran: `tool dispatch failed: <msg>` | both `Threw`, text `tool '<name>' threw: <msg>` (the simple class name when the message is null) |
-| A `PreToolUse` `Block`: `blocked by hook: <reason>` | `Rejected(by, reason)`, text `blocked by <by>: <reason>`, where `by` is the name `ToolBlocked` carries. A permission denial is a `Block` from `DefaultPermissionEvaluator`, so it is `Rejected` too |
+| A `PreToolUse` `Block`: `blocked by hook: <reason>` | `Rejected(by, reason)`, text `blocked by <by>: <reason>`, where `by` is the name `ToolBlocked` carries. A permission denial is `Rejected("Permission", reason)` too |
 | A `PreToolUse` `Inject`: `tool skipped: hook injected user message` | `Rejected(by, "hook injected a user message")`, text `blocked by <by>: hook injected a user message` |
 | A `PostToolUse` `MutateResult` became a successful result with no attachments | the result keeps its outcome and attachments and replaces only its output: a hook changes what the model reads, not what happened |
 | `ToolDispatch.dispatch` accepted a zero timeout | the timeout must be positive, like `SessionLimits.toolTimeoutDefault` |
@@ -587,6 +587,29 @@ the blank name and ended the session with `ErrorDuringExecution`.
 | `HookRegistry` never checked a hook's `name()` and called it again at every decision, so a blank or throwing `name()` ended the session at the hook's first decisive outcome, and a `null` one fell back to the phase name, such as `PreToolUseHook`, at some decisions and ended the session at others | `HookRegistry` (and so `AgentSession.create`) reads each hook's `name()` once and rejects a `null` (`NullPointerException`) or blank (`IllegalArgumentException`) one, and an exception `name()` throws propagates; that name is the one every event, decision and log line carries. An anonymous hook's default name is its binary class name, such as `com.acme.Policies$1` |
 | `HookDecision(Hook firingHook, HookOutcome outcome)`, `HookDecision.of(Hook, HookOutcome)`, `HookDecision.firingHookOptional()` | `HookDecision(String firingHookName, HookOutcome outcome)` and `HookDecision.of(String, HookOutcome)`; read the name through `firingHookName()`, `null` only on `HookDecision.proceed()` |
 
+**Tool authorization is mandatory, fails closed and runs on the call that executes.** The
+permission evaluator was an ordinary `PreToolUse` hook, so a throwing permission-key extractor, or
+a `MutateArgs` from a hook ordered before or after it, got a denied call executed; a `WRITE` tool
+ran under `LOCKED_DOWN`. Every call now runs the `PreToolUse` chain, then authorization of the
+final immutable call, then dispatch of that same call. Only an `ALLOW` admits it; anything else,
+including a failure and a permission key carrying a secret of the session's `SecretRegistry`, is
+`ToolOutcome.Rejected("Permission", reason)` with a `ToolBlocked` event. That reason and a hook's
+`Block` reason are redacted through the session's `SecretRegistry` and cut at 1024 characters; an
+`ApprovalRequest`'s reason is redacted too, but not cut. A call naming no registered tool skips the
+stage and ends `NotFound`, as without a policy.
+
+| 2.x | 3.0 |
+|---|---|
+| The permission evaluator is a `PreToolUseHook` at priority 50 | a fixed stage after every `PreToolUse` hook; its refusals carry the name `Permission`, which `HookRegistry` (and so `AgentSession.create`) rejects for a hook (`IllegalArgumentException`) |
+| A `PreToolUseHook` that throws or returns `null` is `Continue` | it refuses the call, `Rejected(by = the hook)`, with reason `hook threw <exception class>: <message>` or `hook returned null`, logged at `WARNING` with the exception class alone; later `PreToolUse` hooks do not run |
+| The first `PreToolUse` `MutateArgs` ends the chain | it passes the new arguments to the next hook; `Block`, `Inject` and `Stop` end the chain |
+| `HookRegistry.firePreToolUse` returns `HookDecision` | returns `PreToolUseResult(call, mutations, decision)` |
+| `DefaultPermissionEvaluator.Builder.withQuestionGateway(QuestionGateway)` | `withApprover(ToolApprover)`; `ToolApprover.askingUser(gateway)` is the old prompt |
+| `new DefaultPermissionEvaluator(permission, tools)` | `DefaultPermissionEvaluator.newBuilder(permission, tools).build()`, with `withSecretRegistry` for the registry whose secrets no key may carry |
+| `DefaultPermissionEvaluator` implements `PreToolUseHook`: `beforeTool`, `priority()`, `name()`, `Builder.withPriority(int)` | `authorize(ToolCall)` returns an `ALLOW` or `DENY` `PermissionDecision`; no priority, since no hook runs after it |
+| `PermissionDecision(effect, reason)`; deny reasons read `permission: deny rule for <tool>` | `PermissionDecision(effect, reason, rule)`; reasons name the tool, key and rule or default that decided, such as `deny rule Write(/etc/**) matched Write(/etc/passwd)` |
+| `Permission` accepted a rule of any effect in any list, and a match in `deny` denied whatever the rule's effect | a matched rule decides with its own effect, so the constructor throws `IllegalArgumentException` for a rule whose effect is not its list's |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
@@ -680,6 +703,14 @@ the blank name and ended the session with `ErrorDuringExecution`.
   `Redirect.NORMAL`, which never follows `https` to `http`, and the 10-second connect timeout of
   `create(...)`. It takes no `ModelConfig`, so no configured key or header reaches it, and an
   architecture rule allows it only in `helios-onnx`. `create(...)` still never follows a redirect.
+- **`ToolApprover`, `ApprovalRequest`, `PermissionDecision.rule()`, `PermissionDecision.byRule` and
+  `DefaultPermissionEvaluator.Builder.withSecretRegistry`.** A `ToolApprover` decides a call the
+  policy answered with ASK, from an `ApprovalRequest(call, key, category, rule, reason)` for the
+  final immutable call, whose `rule` is the ask rule that matched (empty when a mode or category
+  default asked). Only its `ALLOW` admits the call. `ToolApprover.askingUser(gateway)` is the human
+  approver the session wires over `AgentSession.answer`, under a fresh question id per request, so
+  an answer resolves one call only. `PermissionDecision.rule()` is the rule that decided;
+  `withSecretRegistry` takes the registry whose secrets no permission key may carry.
 
 ### Fixed
 
@@ -804,6 +835,10 @@ the blank name and ended the session with `ErrorDuringExecution`.
 
 ### Security
 
+- **A deny rule no longer misses a key that holds a line break.** `RuleMatcher` compiled a rule's `*`
+  and `**` to a pattern whose `.` did not match a line terminator, so a deny rule missed a key
+  holding one: `Write(/etc/**)` did not match `Write(/etc/cron.d/x\ny)`, and the mode's default,
+  such as `ACCEPT_EDITS`, allowed the write. A rule's wildcards now match across line terminators.
 - **`helios-runtime` and `helios-persistence` resolve Helidon 4.5.5 (was 4.4.1).** No advisory is
   filed against 4.4.1; the upgrade fixes framing. Through 4.5.3 a response carrying `Connection:
   close` did not end the connection: Helidon skipped draining the request body and then parsed the

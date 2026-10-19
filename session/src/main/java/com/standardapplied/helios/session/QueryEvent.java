@@ -466,16 +466,16 @@ public sealed interface QueryEvent
 
   /**
    * A {@link com.standardapplied.helios.session.hooks.PreToolUseHook PreToolUseHook} mutated a tool
-   * call's arguments. The loop dispatches the tool with {@code inputAfter} instead of {@code
-   * inputBefore}. Both maps are surfaced for auditability.
+   * call's arguments. The next hook of the chain sees {@code inputAfter}; the last mutation's is
+   * what the call is authorized and dispatched with. Both maps are surfaced for auditability.
    *
    * @param sessionId the session id
    * @param turnIndex the turn index in which the mutation fired
    * @param timestamp the event timestamp
-   * @param call the original call; non-null
+   * @param call the call as the hook received it; non-null
    * @param hookName the name of the hook that mutated the input; non-null and non-blank
-   * @param inputBefore the original arguments; non-null, a JSON object snapshotted as {@link
-   *     JsonSnapshot} defines it
+   * @param inputBefore the arguments the hook received; non-null, a JSON object snapshotted as
+   *     {@link JsonSnapshot} defines it
    * @param inputAfter the replacement arguments; non-null, a JSON object snapshotted as {@link
    *     JsonSnapshot} defines it
    */

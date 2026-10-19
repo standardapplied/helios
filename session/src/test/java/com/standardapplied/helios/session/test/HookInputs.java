@@ -8,15 +8,26 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.MockModel;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
 import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import java.util.Map;
 
 /**
  * What a test hands a hook that observes tool calls and gates the stop: a hook context on turn 0 of
- * session {@code sess}, a tool call by name and a final text response.
+ * session {@code sess}, a tool call by name and a final text response; and a {@code PreToolUse}
+ * hook under a name of the test's choosing.
  */
 public final class HookInputs {
 
   private static final MockModel MODEL = new MockModel("");
+
+  private record Named(String name, int priority, PreToolUseHook body) implements PreToolUseHook {
+
+    @Override
+    public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+      return body.beforeTool(call, ctx);
+    }
+  }
 
   private HookInputs() {}
 
@@ -37,6 +48,30 @@ public final class HookInputs {
    */
   public static ToolCall call(String name) {
     return new ToolCall("c-" + name, name, Map.of());
+  }
+
+  /**
+   * A {@code PreToolUse} hook named {@code name}, at {@code body}'s priority, that runs {@code
+   * body}.
+   *
+   * @param name the hook's name
+   * @param body what the hook does
+   * @return the hook
+   */
+  public static PreToolUseHook named(String name, PreToolUseHook body) {
+    return new Named(name, body.priority(), body);
+  }
+
+  /**
+   * A {@code PreToolUse} hook named {@code name}, at {@code priority}, that runs {@code body}.
+   *
+   * @param name the hook's name
+   * @param priority the hook's priority
+   * @param body what the hook does
+   * @return the hook
+   */
+  public static PreToolUseHook named(String name, int priority, PreToolUseHook body) {
+    return new Named(name, priority, body);
   }
 
   /**

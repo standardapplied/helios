@@ -161,9 +161,8 @@ final class Phase2AcceptanceTest {
       var blocked = findEvent(sub.events(), QueryEvent.ToolBlocked.class);
       assertNotNull(blocked, "expected the deny rule to surface a ToolBlocked event");
       assertEquals("Read", blocked.call().name());
-      assertTrue(
-          blocked.reason().contains("deny rule for Read"),
-          "reason should reference the deny rule, got: " + blocked.reason());
+      assertEquals("Permission", blocked.hookName());
+      assertEquals("deny rule Read(sensitive.txt) matched Read(sensitive.txt)", blocked.reason());
 
       // Verify a QuestionAsked event surfaced.
       var question = findEvent(sub.events(), QueryEvent.QuestionAsked.class);

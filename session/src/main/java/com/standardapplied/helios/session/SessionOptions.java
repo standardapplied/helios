@@ -50,8 +50,9 @@ import java.util.Optional;
  * @param hooks the hooks fired at lifecycle phases (pre/post-model-turn, pre/post-tool-use,
  *     pre-stop, on-user-message, on-stream-event); non-null, defaults to {@link List#of()}
  * @param permission optional permission policy; when present, an internal {@code
- *     DefaultPermissionEvaluator} runs as a {@code PreToolUseHook} at priority 50 (before
- *     user-supplied hooks) and gates each tool dispatch through the policy
+ *     DefaultPermissionEvaluator} authorizes every tool call as a fixed stage after every {@code
+ *     PreToolUseHook}, on the exact call that runs, asking the user through {@link
+ *     AgentSession#answer} when the policy asks; when absent, every call is admitted
  * @param memoryBackend optional persistent memory backend; when present, the session auto-registers
  *     the {@code MemoryRead} tool so the model can view {@code /memories/...} files
  * @param costCalculator per-model {@code Usage → CostEstimate} lookup. Each completed model turn's
@@ -310,8 +311,8 @@ public record SessionOptions(
 
     /**
      * Set (or clear) the permission policy. Pass {@code null} to clear. When non-null, an internal
-     * {@code DefaultPermissionEvaluator} runs as a {@code PreToolUseHook} at priority 50 before
-     * user-supplied hooks.
+     * {@code DefaultPermissionEvaluator} authorizes every tool call as a fixed stage after every
+     * {@code PreToolUseHook}, on the exact call that runs; no hook priority moves a hook past it.
      *
      * @param permission nullable policy
      * @return this builder

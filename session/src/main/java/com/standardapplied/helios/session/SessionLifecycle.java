@@ -113,10 +113,23 @@ final class SessionLifecycle {
     settle(refusal, state.ending().seal());
   }
 
-  /** Start the agent loop on its virtual thread and arm the wall-clock deadline, at most once. */
+  /**
+   * Start the agent loop on its virtual thread and arm the wall-clock deadline, at most once. The
+   * deadline cancels the session's {@link
+   * com.standardapplied.helios.core.runtime.CancellationToken} when {@code limits.maxWallClock()}
+   * elapses. Without it, {@code maxWallClock} is only checked at turn boundaries by {@link
+   * StopClassifier}, so a turn whose model stream never delivers {@code onComplete} / {@code
+   * onError} (silent socket, hung edge / proxy / load balancer) blocks the loop indefinitely. The
+   * wall-clock cancellation flips the token; the turn's subscriber observes it and unblocks; the
+   * loop proceeds to its next iteration, where {@link StopClassifier} sees {@code state.elapsed() >
+   * maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}. The session is cancelled
+   * through {@link com.standardapplied.helios.session.loop.SessionEnding#cancel}, so its token's
+   * callbacks never run on the scheduler's one thread. The scheduler's shutdown drops it.
+   */
   void startIfNeeded() {
     if (started.compareAndSet(false, true)) {
-      scheduleWallClockDeadline();
+      deadlineScheduler.schedule(
+          this::expireWallClock, limits.maxWallClock().toMillis(), TimeUnit.MILLISECONDS);
       Thread.ofVirtual().name("helios-agent-loop-" + state.sessionId()).start(this::runLoop);
     }
   }
@@ -155,24 +168,9 @@ final class SessionLifecycle {
     }
   }
 
-  /**
-   * Arm a one-shot task that cancels the session's {@link
-   * com.standardapplied.helios.core.runtime.CancellationToken} when {@code limits.maxWallClock()}
-   * elapses. Without this, {@code maxWallClock} is only checked at turn boundaries by {@link
-   * StopClassifier}, so a turn whose model stream never delivers {@code onComplete} / {@code
-   * onError} (silent socket, hung edge / proxy / load balancer) blocks the loop indefinitely. The
-   * wall-clock cancellation flips the token; the turn's subscriber observes it and unblocks; the
-   * loop proceeds to its next iteration, where {@link StopClassifier} sees {@code state.elapsed() >
-   * maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}. The session is cancelled
-   * through {@link com.standardapplied.helios.session.loop.SessionEnding#cancel}, so its token's
-   * callbacks never run on the scheduler's one thread. The scheduler's shutdown drops it.
-   */
-  private void scheduleWallClockDeadline() {
-    var millis = limits.maxWallClock().toMillis();
-    deadlineScheduler.schedule(
-        () -> state.ending().cancel("maxWallClock exceeded after " + millis + "ms"),
-        millis,
-        TimeUnit.MILLISECONDS);
+  /** The wall-clock deadline's task, package-private so a test can run it without the delay. */
+  void expireWallClock() {
+    state.ending().cancel("maxWallClock exceeded after " + limits.maxWallClock().toMillis() + "ms");
   }
 
   /**
