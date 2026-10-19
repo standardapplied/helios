@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.hooks;
 
+import static com.standardapplied.helios.session.test.HookInputs.named;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -410,17 +411,11 @@ final class HookRegistryTest {
   void aPreToolUseHookThatThrowsBlocksTheCallAndEndsTheChain() {
     var fired = new ArrayList<String>();
     PreToolUseHook throwing =
-        new PreToolUseHook() {
-          @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-            throw new IllegalStateException("hook boom");
-          }
-
-          @Override
-          public String name() {
-            return "Guard";
-          }
-        };
+        named(
+            "Guard",
+            (call, ctx) -> {
+              throw new IllegalStateException("hook boom");
+            });
     PreToolUseHook later = (call, ctx) -> fired.add("later") ? HookOutcome.cont() : null;
 
     var result = new HookRegistry(List.of(throwing, later)).firePreToolUse(CALL, ctx());
@@ -435,18 +430,7 @@ final class HookRegistryTest {
   @Test
   void aPreToolUseHookReturningNullBlocksTheCallAndEndsTheChain() {
     var fired = new ArrayList<String>();
-    PreToolUseHook nullReturn =
-        new PreToolUseHook() {
-          @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-            return null;
-          }
-
-          @Override
-          public String name() {
-            return "Guard";
-          }
-        };
+    PreToolUseHook nullReturn = named("Guard", (call, ctx) -> null);
     PreToolUseHook later = (call, ctx) -> fired.add("later") ? HookOutcome.cont() : null;
 
     var result = new HookRegistry(List.of(nullReturn, later)).firePreToolUse(CALL, ctx());
@@ -525,20 +509,6 @@ final class HookRegistryTest {
 
     assertEquals(new ToolCall("c", "read", Map.of("path", "a")), result.call());
     assertEquals(HookDecision.of("B", HookOutcome.block("no")), result.decision());
-  }
-
-  private static PreToolUseHook named(String name, PreToolUseHook body) {
-    return new PreToolUseHook() {
-      @Override
-      public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-        return body.beforeTool(call, ctx);
-      }
-
-      @Override
-      public String name() {
-        return name;
-      }
-    };
   }
 
   // ── happy-path per phase ─────────────────────────────────────────────────

@@ -2,19 +2,18 @@
 
 package com.standardapplied.helios.session.loop;
 
+import static com.standardapplied.helios.session.test.HookInputs.named;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -130,18 +129,7 @@ final class PreToolUseHookIntegrationTest {
 
   @Test
   void hookFiredCarriesActualHookName() {
-    var named =
-        new PreToolUseHook() {
-          @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-            return HookOutcome.block("nope");
-          }
-
-          @Override
-          public String name() {
-            return "MySecurityGuard";
-          }
-        };
+    var named = named("MySecurityGuard", (call, ctx) -> HookOutcome.block("nope"));
     callEchoThenAnswer(Map.of("v", "x"), "done", named);
     var hookFired = loop.first(QueryEvent.HookFired.class);
     assertEquals("MySecurityGuard", hookFired.hookName(), "hookName must carry the hook's name");
@@ -239,20 +227,6 @@ final class PreToolUseHookIntegrationTest {
   }
 
   // ── the chain ────────────────────────────────────────────────────────────
-
-  private static PreToolUseHook named(String name, PreToolUseHook body) {
-    return new PreToolUseHook() {
-      @Override
-      public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-        return body.beforeTool(call, ctx);
-      }
-
-      @Override
-      public String name() {
-        return name;
-      }
-    };
-  }
 
   private static PreToolUseHook recording(String name, List<String> seen, HookOutcome outcome) {
     return named(
