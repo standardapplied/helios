@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.permissions;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
@@ -36,9 +37,11 @@ import java.util.concurrent.CancellationException;
  * </ol>
  *
  * <p>{@link #authorize} fails closed: a call naming no registered tool, a permission key that
- * throws, is null or names another tool, and an ASK with no {@link ToolApprover} are each denied.
- * An ASK goes to the approver with an {@link ApprovalRequest} for this call; see {@link
- * ToolApprover} for how its answer is read.
+ * throws, is null, names another tool or carries a secret of its {@link SecretRegistry}, and an ASK
+ * with no {@link ToolApprover} are each denied. A key carrying a secret is denied before any rule
+ * or approver sees it, so no approval prompt or event shows the secret. An ASK goes to the approver
+ * with an {@link ApprovalRequest} for this call; see {@link ToolApprover} for how its answer is
+ * read.
  *
  * <h2>Thread-safety</h2>
  *
@@ -50,24 +53,26 @@ public final class DefaultPermissionEvaluator {
   private final ToolRegistry tools;
   private final RuleMatcher matcher;
   private final Optional<ToolApprover> approver;
+  private final SecretRegistry secrets;
 
   /**
-   * Build an evaluator with no approver, so ASK refuses the call.
+   * Build an evaluator with no approver, so ASK refuses the call, and an empty secret registry.
    *
    * @param permission the policy to enforce; non-null
    * @param tools the tool registry (for category + permissionKey lookup); non-null
    * @throws NullPointerException if either argument is null
    */
   public DefaultPermissionEvaluator(Permission permission, ToolRegistry tools) {
-    this(permission, tools, null);
+    this(permission, tools, null, new SecretRegistry());
   }
 
   private DefaultPermissionEvaluator(
-      Permission permission, ToolRegistry tools, ToolApprover approver) {
+      Permission permission, ToolRegistry tools, ToolApprover approver, SecretRegistry secrets) {
     this.permission = Objects.requireNonNull(permission, "permission must not be null");
     this.tools = Objects.requireNonNull(tools, "tools must not be null");
     this.matcher = new RuleMatcher();
     this.approver = Optional.ofNullable(approver);
+    this.secrets = secrets;
   }
 
   /**
@@ -76,6 +81,7 @@ public final class DefaultPermissionEvaluator {
    * <pre>{@code
    * var eval = DefaultPermissionEvaluator.newBuilder(perm, tools)
    *     .withApprover(ToolApprover.askingUser(gateway))
+   *     .withSecretRegistry(sessionContext.secrets())
    *     .build();
    * }</pre>
    *
@@ -118,6 +124,9 @@ public final class DefaultPermissionEvaluator {
     } catch (RuntimeException e) {
       return PermissionDecision.deny(
           "permission key of " + call.name() + " failed: " + describe(e));
+    }
+    if (secrets.leaks(describe(key))) {
+      return PermissionDecision.deny("permission key of " + call.name() + " carries a secret");
     }
     if (!key.toolName().equals(call.name())) {
       return PermissionDecision.deny(
@@ -253,6 +262,7 @@ public final class DefaultPermissionEvaluator {
     private final Permission permission;
     private final ToolRegistry tools;
     private ToolApprover approver;
+    private SecretRegistry secrets = new SecretRegistry();
 
     private Builder(Permission permission, ToolRegistry tools) {
       this.permission = Objects.requireNonNull(permission, "permission must not be null");
@@ -272,12 +282,25 @@ public final class DefaultPermissionEvaluator {
     }
 
     /**
+     * Set the secrets no permission key may carry; defaults to a new empty registry. Pass the
+     * session's registry.
+     *
+     * @param secrets the secret registry; non-null
+     * @return this builder
+     * @throws NullPointerException if {@code secrets} is null
+     */
+    public Builder withSecretRegistry(SecretRegistry secrets) {
+      this.secrets = Objects.requireNonNull(secrets, "secrets must not be null");
+      return this;
+    }
+
+    /**
      * Build the immutable evaluator.
      *
      * @return a fresh evaluator
      */
     public DefaultPermissionEvaluator build() {
-      return new DefaultPermissionEvaluator(permission, tools, approver);
+      return new DefaultPermissionEvaluator(permission, tools, approver, secrets);
     }
   }
 }

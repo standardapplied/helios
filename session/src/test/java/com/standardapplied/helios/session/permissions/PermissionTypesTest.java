@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 final class PermissionTypesTest {
 
@@ -151,6 +153,24 @@ final class PermissionTypesTest {
             NullPointerException.class,
             () -> new Permission(PermissionMode.DEFAULT, List.of(), List.of(), null));
     assertEquals("deny must not be null", ex.getMessage());
+  }
+
+  @ParameterizedTest(name = "{0} in the {1} list")
+  @CsvSource({"DENY, allow", "ASK, allow", "ALLOW, ask", "DENY, ask", "ALLOW, deny", "ASK, deny"})
+  void permissionRejectsARuleWhoseEffectIsNotItsLists(PermissionEffect effect, String list) {
+    var rule = List.of(PermissionRule.any(effect, "Write"));
+    List<PermissionRule> none = List.of();
+
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new Permission(
+                    PermissionMode.LOCKED_DOWN,
+                    list.equals("allow") ? rule : none,
+                    list.equals("ask") ? rule : none,
+                    list.equals("deny") ? rule : none));
+    assertEquals("the " + list + " list holds a " + effect + " rule for Write", ex.getMessage());
   }
 
   @Test

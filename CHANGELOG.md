@@ -404,7 +404,7 @@ drift.
 | `ToolResult(boolean success, output, attachments)`, `success()` | `ToolResult(ToolOutcome outcome, output, attachments)`, `succeeded()`. New framework factories `threw(toolName, cause)`, `timedOut(toolName, limit)`, `notFound(toolName)`, `rejected(by, reason)`, and `withOutput(text)` |
 | `ToolResult.failure(String, Exception)` | removed: return `failure(text)`, or throw and Helios reports `Threw` |
 | A tool's thrown exception: `Tool execution failed: <msg>`; a throwable from dispatch, including a call cancelled before it ran: `tool dispatch failed: <msg>` | both `Threw`, text `tool '<name>' threw: <msg>` (the simple class name when the message is null) |
-| A `PreToolUse` `Block`: `blocked by hook: <reason>` | `Rejected(by, reason)`, text `blocked by <by>: <reason>`, where `by` is the name `ToolBlocked` carries. A permission denial is a `Block` from `DefaultPermissionEvaluator`, so it is `Rejected` too |
+| A `PreToolUse` `Block`: `blocked by hook: <reason>` | `Rejected(by, reason)`, text `blocked by <by>: <reason>`, where `by` is the name `ToolBlocked` carries. A permission denial is `Rejected("Permission", reason)` too |
 | A `PreToolUse` `Inject`: `tool skipped: hook injected user message` | `Rejected(by, "hook injected a user message")`, text `blocked by <by>: hook injected a user message` |
 | A `PostToolUse` `MutateResult` became a successful result with no attachments | the result keeps its outcome and attachments and replaces only its output: a hook changes what the model reads, not what happened |
 | `ToolDispatch.dispatch` accepted a zero timeout | the timeout must be positive, like `SessionLimits.toolTimeoutDefault` |
@@ -593,9 +593,9 @@ A permission-key extractor that threw made the evaluator a `Continue`, and a `WR
 `LOCKED_DOWN`. A `MutateArgs` from a hook ordered before it ended the chain before authorization.
 One ordered after it changed an authorized call just before it ran. Every call now runs the
 `PreToolUse` chain, then authorization of the final immutable call, then dispatch of that same
-call. Authorization admits only an `ALLOW`. A missing tool, a key that throws, is `null` or names
-another tool, a check that throws or returns `null`, and an ASK nobody approves each refuse the
-call as `ToolOutcome.Rejected("Permission", reason)`, with a `ToolBlocked` event. A refusal's reason
+call. Authorization admits only an `ALLOW`. A missing tool, a key that throws, is `null`, names
+another tool or carries a secret of the session's `SecretRegistry`, a check that throws or returns
+`null`, and an ASK nobody approves each refuse the call as `ToolOutcome.Rejected("Permission", reason)`, with a `ToolBlocked` event. A refusal's reason
 and a hook's `Block` reason are redacted through the session's `SecretRegistry` and cut at 1024
 characters. A `PreToolUse` hook is a guard and fails closed; every other phase still skips a hook
 that throws or returns `null`.
@@ -603,13 +603,14 @@ that throws or returns `null`.
 | 2.x | 3.0 |
 |---|---|
 | The permission evaluator is a `PreToolUseHook` at priority 50 | a fixed stage after every `PreToolUse` hook |
-| A `PreToolUseHook` that throws or returns `null` is `Continue` | it refuses the call, `Rejected(by = the hook)`, with reason `hook threw <exception class>: <message>` or `hook returned null`, logged at `WARNING`; later `PreToolUse` hooks do not run |
+| A `PreToolUseHook` that throws or returns `null` is `Continue` | it refuses the call, `Rejected(by = the hook)`, with reason `hook threw <exception class>: <message>` or `hook returned null`, logged at `WARNING` with the exception class alone; later `PreToolUse` hooks do not run |
 | The first `PreToolUse` `MutateArgs` ends the chain | it passes the new arguments to the next hook; `Block`, `Inject` and `Stop` end the chain |
 | `HookRegistry.firePreToolUse` returns `HookDecision` | returns `PreToolUseResult(call, mutations, decision)` |
 | `DefaultPermissionEvaluator.Builder.withQuestionGateway(QuestionGateway)` | `withApprover(ToolApprover)`; `ToolApprover.askingUser(gateway)` is the old prompt |
 | `DefaultPermissionEvaluator` implements `PreToolUseHook`: `beforeTool`, `priority()`, `name()`, `Builder.withPriority(int)` | `authorize(ToolCall)` returns an `ALLOW` or `DENY` `PermissionDecision`; no priority, since no hook runs after it |
 | `PermissionDecision(effect, reason)`; deny reasons read `permission: deny rule for <tool>` | `PermissionDecision(effect, reason, rule)`; reasons name the tool, key and rule or default that decided, such as `deny rule Write(/etc/**) matched Write(/etc/passwd)` |
 | A call naming no registered tool passed the evaluator and ended `NotFound` | under a permission policy it is refused, `Rejected("Permission", "no tool named '<name>' is registered")` |
+| `Permission` accepted a rule of any effect in any list, and a match in `deny` denied whatever the rule's effect | a matched rule decides with its own effect, so the constructor throws `IllegalArgumentException` for a rule whose effect is not its list's |
 
 ### Added
 
@@ -704,7 +705,8 @@ that throws or returns `null`.
   `Redirect.NORMAL`, which never follows `https` to `http`, and the 10-second connect timeout of
   `create(...)`. It takes no `ModelConfig`, so no configured key or header reaches it, and an
   architecture rule allows it only in `helios-onnx`. `create(...)` still never follows a redirect.
-- **`ToolApprover`, `ApprovalRequest`, `PermissionDecision.rule()` and `PermissionDecision.byRule`.**
+- **`ToolApprover`, `ApprovalRequest`, `PermissionDecision.rule()`, `PermissionDecision.byRule` and
+  `DefaultPermissionEvaluator.Builder.withSecretRegistry`.**
   A `ToolApprover` decides a call the policy answered with ASK. It receives an
   `ApprovalRequest(call, key, category, rule, reason)` holding the final immutable call, its
   permission key and category, and the ask rule that matched. The rule is empty when a mode or
@@ -712,7 +714,9 @@ that throws or returns `null`.
   reason. `ASK`, `null`, an exception, a cancellation and an interrupt each refuse it, and an
   interrupt is restored. `ToolApprover.askingUser(gateway)` is the human approver the session wires
   over `AgentSession.answer`, asking under a fresh question id per request, so an answer resolves
-  one call only. `PermissionDecision.rule()` is the rule that decided, empty for a mode or category
+  one call only; a response to another question, or one selecting more than one option, denies
+  it. `DefaultPermissionEvaluator.Builder.withSecretRegistry` takes the registry whose secrets no
+  permission key may carry; the session passes its own. `PermissionDecision.rule()` is the rule that decided, empty for a mode or category
   default.
 
 ### Fixed

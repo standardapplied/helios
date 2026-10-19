@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.session;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
@@ -56,7 +57,8 @@ final class SessionWiring {
         LoopCollaborators.newBuilder()
             .withHooks(new HookRegistry(options.hooks()))
             .withToolDispatch(toolDispatch)
-            .withAuthorization(authorization(options, combinedTools, pendingQuestions))
+            .withAuthorization(
+                authorization(options, combinedTools, pendingQuestions, sessionContext.secrets()))
             .withSteeringQueue(steeringQueue)
             .withEventSink(events::emit)
             .withHookContextFactory(
@@ -81,13 +83,14 @@ final class SessionWiring {
   }
 
   private static Function<ToolCall, PermissionDecision> authorization(
-      SessionOptions options, ToolRegistry tools, QuestionGateway gateway) {
+      SessionOptions options, ToolRegistry tools, QuestionGateway gateway, SecretRegistry secrets) {
     if (options.permission().isEmpty()) {
       return call -> NO_POLICY;
     }
     var evaluator =
         DefaultPermissionEvaluator.newBuilder(options.permission().orElseThrow(), tools)
             .withApprover(ToolApprover.askingUser(gateway))
+            .withSecretRegistry(secrets)
             .build();
     return evaluator::authorize;
   }
