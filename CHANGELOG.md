@@ -832,13 +832,13 @@ stage and ends `NotFound`, as without a policy.
   `java.lang.reflect` denied, a reference to `java.lang.reflect.Method` was labelled with either
   package depending on the JVM run. It is now labelled with the most specific one,
   `deniedPackages:java.lang.reflect`.
-- **A permission rule's wildcards stopped at a line break.** `RuleMatcher` compiled a rule's `*`
-  and `**` to a pattern whose `.` did not match a line terminator, so a deny rule missed a key
-  holding one: `Write(/etc/**)` did not match `Write(/etc/cron.d/x\ny)`, and the mode's default,
-  such as `ACCEPT_EDITS`, allowed the write. A rule's wildcards now match across line terminators.
 
 ### Security
 
+- **A deny rule no longer misses a key that holds a line break.** `RuleMatcher` compiled a rule's `*`
+  and `**` to a pattern whose `.` did not match a line terminator, so a deny rule missed a key
+  holding one: `Write(/etc/**)` did not match `Write(/etc/cron.d/x\ny)`, and the mode's default,
+  such as `ACCEPT_EDITS`, allowed the write. A rule's wildcards now match across line terminators.
 - **`helios-runtime` and `helios-persistence` resolve Helidon 4.5.5 (was 4.4.1).** No advisory is
   filed against 4.4.1; the upgrade fixes framing. Through 4.5.3 a response carrying `Connection:
   close` did not end the connection: Helidon skipped draining the request body and then parsed the
