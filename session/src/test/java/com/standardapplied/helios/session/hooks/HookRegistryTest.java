@@ -6,6 +6,7 @@ package com.standardapplied.helios.session.hooks;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -55,12 +56,12 @@ final class HookRegistryTest {
     assertEquals("hooks must not contain null", ex.getMessage());
   }
 
-  /** A {@code PreToolUse} hook that continues under the name {@code source} gives. */
+  /** A {@code PreToolUse} hook that blocks every call under the name {@code source} gives. */
   private record NamedBy(Supplier<String> source) implements PreToolUseHook {
 
     @Override
     public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-      return HookOutcome.cont();
+      return HookOutcome.block("no");
     }
 
     @Override
@@ -99,19 +100,8 @@ final class HookRegistryTest {
   @Test
   void aDecisionCarriesTheNameReadWhenTheRegistryWasBuilt() {
     var reads = new AtomicInteger();
-    PreToolUseHook gate =
-        new PreToolUseHook() {
-          @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-            return HookOutcome.block("no");
-          }
-
-          @Override
-          public String name() {
-            return reads.getAndIncrement() == 0 ? "Gate" : null;
-          }
-        };
-    var registry = new HookRegistry(List.of(gate));
+    var registry =
+        new HookRegistry(List.of(new NamedBy(() -> reads.getAndIncrement() == 0 ? "Gate" : null)));
     assertEquals("Gate", registry.firePreToolUse(CALL, ctx()).firingHookName());
     assertEquals(1, reads.get());
   }
@@ -151,7 +141,7 @@ final class HookRegistryTest {
     var decision = HookRegistry.empty().firePreToolUse(CALL, ctx());
     assertTrue(decision.shouldContinue());
     assertInstanceOf(HookOutcome.Continue.class, decision.outcome());
-    assertEquals(null, decision.firingHookName());
+    assertNull(decision.firingHookName());
   }
 
   @Test

@@ -67,7 +67,6 @@ public record HookDecision(String firingHookName, HookOutcome outcome) {
    *     #proceed()} for that case), or {@code firingHookName} is null or blank
    */
   public static HookDecision of(String firingHookName, HookOutcome outcome) {
-    Objects.requireNonNull(outcome, "outcome must not be null");
     if (outcome instanceof HookOutcome.Continue) {
       throw new IllegalArgumentException("use HookDecision.proceed() for Continue outcomes");
     }

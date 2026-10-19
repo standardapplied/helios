@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.session;
 
+import static com.standardapplied.helios.session.EndingSessions.binding;
+import static com.standardapplied.helios.session.test.HookInputs.call;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -8,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.Hook;
@@ -17,12 +18,9 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
-import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
@@ -36,8 +34,6 @@ final class HookNamesSessionTest {
 
   private static final String FIRST_ANONYMOUS = HookNamesSessionTest.class.getName() + "$1";
   private static final String SECOND_ANONYMOUS = HookNamesSessionTest.class.getName() + "$2";
-
-  private static final ToolCall CALL = new ToolCall("c1", "t", Map.of());
 
   /** A {@code PreToolUse} hook that blocks every call under the name {@code source} gives. */
   private record NamedBy(Supplier<String> source) implements PreToolUseHook {
@@ -75,18 +71,12 @@ final class HookNamesSessionTest {
   }
 
   private static SessionOptions options(Hook hook) {
-    var tool =
-        Tool.newBuilder()
-            .withName("t")
-            .withDescription("t")
-            .withExecutor((args, ctx) -> ToolResult.success("ran"))
-            .build();
-    var model = ScriptedModel.newBuilder().withToolCallsTurn(CALL).withTextTurn("done").build();
+    var model =
+        ScriptedModel.newBuilder().withToolCallsTurn(call("t")).withTextTurn("done").build();
+    var tool = binding("t", (args, ctx) -> ToolResult.success("ran"));
     return SessionOptions.newBuilder()
         .withModel(model)
-        .withTools(
-            new ToolRegistry(
-                List.of(ToolBinding.newBuilder(tool).withCategory(ToolCategory.READ).build())))
+        .withTools(new ToolRegistry(List.of(tool)))
         .withHook(hook)
         .build();
   }

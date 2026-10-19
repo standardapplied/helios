@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.hooks;
 
+import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
@@ -27,11 +28,9 @@ import java.util.logging.Logger;
  * order for ties. For non-observe phases, firing returns the first non-{@link HookOutcome.Continue}
  * outcome it sees — see spec §9.4. Stream-event hooks all fire (observe-only).
  *
- * <p>Each hook's {@link Hook#name()} is read once, when the registry is built, and that recorded
- * name is the one every event, decision and log line carries. The decisive {@code fire*} methods
- * return a {@link HookDecision} pairing the outcome with the firing hook's name, so the
- * orchestrator can attribute {@link QueryEvent.HookFired} events to the actual hook (not the phase
- * name).
+ * <p>The decisive {@code fire*} methods return a {@link HookDecision} pairing the outcome with the
+ * name the registry read from the firing hook when it was built, so the orchestrator can attribute
+ * {@link QueryEvent.HookFired} events to the actual hook (not the phase name).
  *
  * <p>If a hook throws, the orchestrator treats the outcome as {@link HookOutcome.Continue} and logs
  * at {@code WARNING} — see spec §9.4. Hook misbehavior cannot abort the session.
@@ -104,12 +103,10 @@ public final class HookRegistry {
 
   private static Registered<Hook> register(Hook hook) {
     Objects.requireNonNull(hook, "hooks must not contain null");
-    var name =
-        Objects.requireNonNull(
-            hook.name(), () -> "hook " + hook.getClass().getName() + " returned a null name");
-    if (name.isBlank()) {
-      throw new IllegalArgumentException(
-          "hook " + hook.getClass().getName() + " returned a blank name");
+    var type = hook.getClass().getName();
+    var name = Objects.requireNonNull(hook.name(), () -> "hook " + type + " returned a null name");
+    if (Strings.isBlank(name)) {
+      throw new IllegalArgumentException("hook " + type + " returned a blank name");
     }
     return new Registered<>(hook, name);
   }
