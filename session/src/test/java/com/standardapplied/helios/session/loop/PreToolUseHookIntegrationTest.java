@@ -319,10 +319,13 @@ final class PreToolUseHookIntegrationTest {
 
     runChain(MUTATES_TO_A, recording("B", seen, HookOutcome.block("no")));
 
+    var mutated = HookLoop.echoCall(Map.of("v", "a"));
     assertEquals(List.of("B:a"), seen);
+    assertEquals(mutated, loop.first(QueryEvent.ToolBlocked.class).call());
     assertEquals(
         new ToolOutcome.Rejected("B", "no"),
         loop.first(QueryEvent.ToolResult.class).result().outcome());
+    assertEquals(mutated, loop.first(QueryEvent.ToolResult.class).call());
     assertEquals(List.of(), executed);
   }
 
@@ -336,6 +339,8 @@ final class PreToolUseHookIntegrationTest {
         recording("C", seen, HookOutcome.cont()));
 
     assertEquals(List.of(), seen);
+    assertEquals(
+        HookLoop.echoCall(Map.of("v", "a")), loop.first(QueryEvent.ToolResult.class).call());
   }
 
   @Test
