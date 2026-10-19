@@ -286,6 +286,7 @@ final class ToolOutcomeSessionTest {
     assertEquals(
         "saw <redacted:API_KEY>",
         run.events().eventsOf(QueryEvent.ToolBlocked.class).getFirst().reason());
+    assertEquals(Map.of("API_KEY", 1), run.toolResults().getFirst().redactions());
   }
 
   @Test
