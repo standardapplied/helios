@@ -4,6 +4,7 @@ package com.standardapplied.helios.session;
 
 import static com.standardapplied.helios.session.WriteToolSessions.run;
 import static com.standardapplied.helios.session.WriteToolSessions.write;
+import static com.standardapplied.helios.session.test.HookInputs.named;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
@@ -12,7 +13,6 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
@@ -46,15 +46,6 @@ final class ToolAuthorizationSessionTest {
 
   private final WriteToolSessions sessions = new WriteToolSessions();
   private final List<Map<String, Object>> executed = sessions.executed;
-
-  /** A named {@code PreToolUse} hook at {@code priority}. */
-  private record Named(String name, int priority, PreToolUseHook body) implements PreToolUseHook {
-
-    @Override
-    public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-      return body.beforeTool(call, ctx);
-    }
-  }
 
   private static Permission policy(PermissionMode mode, List<PermissionRule> rules) {
     var allow = rules.stream().filter(r -> r.effect() == PermissionEffect.ALLOW).toList();
@@ -232,7 +223,7 @@ final class ToolAuthorizationSessionTest {
   @ValueSource(ints = {10, 90})
   void noHookPriorityTurnsADeniedTargetIntoAnExecutedCall(int priority) {
     var redirect =
-        new Named(
+        named(
             "Redirect", priority, (call, ctx) -> HookOutcome.mutateArgs(Map.of("path", "/etc/x")));
     var options =
         options(policy(PermissionMode.DEFAULT, List.of(ALLOW_TMP, DENY_ETC))).withHook(redirect);
@@ -248,7 +239,7 @@ final class ToolAuthorizationSessionTest {
   @Test
   void anAllowedMutationRunsOnceWithExactlyTheAuthorizedArguments() {
     var retarget =
-        new Named("Retarget", 90, (call, ctx) -> HookOutcome.mutateArgs(Map.of("path", "/tmp/b")));
+        named("Retarget", 90, (call, ctx) -> HookOutcome.mutateArgs(Map.of("path", "/tmp/b")));
     var options =
         options(policy(PermissionMode.DEFAULT, List.of(ALLOW_TMP, DENY_ETC))).withHook(retarget);
 
@@ -262,7 +253,7 @@ final class ToolAuthorizationSessionTest {
   @Test
   void aHookThatMutatesTheNestedArgumentsItReceivedRefusesTheCall() {
     PreToolUseHook inPlace =
-        new Named(
+        named(
             "InPlace",
             100,
             (call, ctx) -> {
@@ -289,7 +280,7 @@ final class ToolAuthorizationSessionTest {
   private void assertAFailedGuardRefuses(PreToolUseHook guard, String reason) {
     var fired = new CopyOnWriteArrayList<String>();
     var recording =
-        new Named(
+        named(
             "Recording",
             200,
             (call, ctx) -> {
@@ -298,7 +289,7 @@ final class ToolAuthorizationSessionTest {
             });
     var options =
         options(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))
-            .withHook(new Named("Guard", 100, guard))
+            .withHook(named("Guard", 100, guard))
             .withHook(recording);
 
     var run = run(options, write("/tmp/a"));
@@ -331,7 +322,7 @@ final class ToolAuthorizationSessionTest {
         options(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))
             .withSecretRegistry(secrets)
             .withHook(
-                new Named(
+                named(
                     "Guard",
                     100,
                     (call, ctx) -> {
@@ -363,7 +354,7 @@ final class ToolAuthorizationSessionTest {
     var options =
         options(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))
             .withHook(
-                new Named(
+                named(
                     "Guard",
                     100,
                     (call, ctx) -> {
