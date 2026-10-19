@@ -143,7 +143,20 @@ final class RuleMatcherTest {
     "'./{a,b}', './{a,b}', true",
     "./a+b, ./a+b, true",
     "./a+b, ./aab, false",
-    "./a.b, ./aXb, false"
+    "./a.b, ./aXb, false",
+    "./a/**x, ./ax, false",
+    "./**/**/secrets/**, ./secrets/k, true",
+    "./**/**/secrets/**, ./a/b/secrets/k, true",
+    "./**/**/secrets/**, ./a/secretsx/k, false",
+    "./a/**/**, ./a, true",
+    "./a/**/**, ./a/b/c, true",
+    "./a/**/**, ./ab, false",
+    "**/**/k, k, true",
+    "**/**/k, ./a/b/k, true",
+    "**/**/k, ./ak, false",
+    "./🔒/k, ./🔒/k, true",
+    "./🔒/**, ./🔒/k, true",
+    "./?, ./🔒, true"
   })
   void wildcardsAndLiteralsFollowTheDialect(String glob, String canonical, boolean matches) {
     assertEquals(matches, globMatches(glob, canonical));

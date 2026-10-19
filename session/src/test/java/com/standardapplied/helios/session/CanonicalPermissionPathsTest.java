@@ -37,6 +37,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -89,6 +90,23 @@ final class CanonicalPermissionPathsTest {
     assertEquals(
         new ToolOutcome.Rejected(
             "Permission", "deny rule Read(./secrets/**) matched Read(./secrets/key)"),
+        run.onlyResult().outcome());
+    assertNoSecretEmitted(run);
+    assertEquals(0, sessions.readRuns.get());
+  }
+
+  @ParameterizedTest(name = "DENY Read({0}) refuses Read {1}")
+  @CsvSource({"./**/**/secrets/**, secrets/key", "./🔒/**, 🔒/key"})
+  void aDenyRuleBindsAdjacentRecursiveWildcardsAndSupplementaryCharacters(String glob, String path)
+      throws IOException {
+    sessions.write("🔒/key", PathToolSessions.SECRET);
+    var deny = PermissionRule.withGlob(PermissionEffect.DENY, ReadTool.NAME, glob);
+
+    var run = run(sessions.options(policy(PermissionMode.DEFAULT, deny)), read(path));
+
+    assertEquals(
+        new ToolOutcome.Rejected(
+            "Permission", "deny rule Read(" + glob + ") matched Read(./" + path + ")"),
         run.onlyResult().outcome());
     assertNoSecretEmitted(run);
     assertEquals(0, sessions.readRuns.get());

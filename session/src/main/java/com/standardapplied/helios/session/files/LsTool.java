@@ -119,8 +119,11 @@ public final class LsTool {
   }
 
   /**
-   * The canonical key of a listed entry: its own path, or for a symlink the target it resolves to,
-   * falling back to its own path when the target cannot be resolved.
+   * The canonical key of a listed entry: its own path, or for a symlink the real target it resolves
+   * to, falling back to its own path when the target is dangling, looping or outside a strict
+   * workspace. The target is resolved from the entry itself, not from its spelling, because an
+   * entry of an outside directory in a trusted workspace is spelled by an absolute path that {@link
+   * WorkspaceRoot#canonical(String)} refuses.
    */
   private static String key(WorkspaceRoot workspace, Path entry, BasicFileAttributes attributes) {
     var own = workspace.spell(entry);
@@ -128,8 +131,8 @@ public final class LsTool {
       return own;
     }
     try {
-      return workspace.canonical(own);
-    } catch (WorkspaceRoot.WorkspaceEscapeException unresolvable) {
+      return workspace.spell(workspace.resolveCanonical(entry.toRealPath().toString()));
+    } catch (IOException | WorkspaceRoot.WorkspaceEscapeException unresolvable) {
       return own;
     }
   }

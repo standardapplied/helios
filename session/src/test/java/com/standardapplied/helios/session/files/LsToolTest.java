@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -148,15 +149,49 @@ final class LsToolTest {
   void aLinkWhoseTargetCannotBeResolvedIsKeyedByItsOwnPath(@TempDir Path tmp) throws IOException {
     Files.createSymbolicLink(tmp.resolve("dangling"), tmp.resolve("gone"));
     Files.writeString(tmp.resolve("kept.txt"), "k", StandardCharsets.UTF_8);
-    var context =
-        new ToolContext(
-            SessionContext.forTesting("ls"),
-            new CancellationToken(),
-            Duration.ofMinutes(1),
-            "./dangling"::equals);
-
-    var result = LsTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of(), context);
+    var result =
+        LsTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of(), withholding("./dangling"::equals));
 
     assertEquals("kept.txt\n[withheld by permission policy: 1]\n", result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void aLinkLeadingOutsideAStrictWorkspaceIsKeyedByItsOwnPath(@TempDir Path tmp)
+      throws IOException {
+    var root = Files.createDirectory(tmp.resolve("ws"));
+    Files.createSymbolicLink(root.resolve("out"), Files.createDirectory(tmp.resolve("outside")));
+
+    var result =
+        LsTool.binding(WorkspaceRoot.of(root))
+            .tool()
+            .execute(Map.of(), withholding("./out"::equals));
+
+    assertEquals("[withheld by permission policy: 1]\n", result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void aTrustedOutsideListingKeysALinkByItsRealTarget(@TempDir Path tmp) throws IOException {
+    var root = Files.createDirectory(tmp.resolve("ws"));
+    var outside = Files.createDirectory(tmp.resolve("outside")).toRealPath();
+    Files.createDirectory(outside.resolve("secrets"));
+    Files.createSymbolicLink(outside.resolve("alias"), Path.of("secrets"));
+    Files.createSymbolicLink(root.resolve("ext"), outside);
+    var denied = outside.resolve("secrets").toString();
+
+    var result =
+        LsTool.binding(new WorkspaceRoot(root, false))
+            .tool()
+            .execute(Map.of("path", outside.toString()), withholding(denied::equals));
+
+    assertEquals("[withheld by permission policy: 2]\n", result.output());
+  }
+
+  private static ToolContext withholding(Predicate<String> withheld) {
+    return new ToolContext(
+        SessionContext.forTesting("ls"), new CancellationToken(), Duration.ofMinutes(1), withheld);
   }
 }
