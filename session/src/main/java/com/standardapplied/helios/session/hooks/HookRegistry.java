@@ -159,16 +159,14 @@ public final class HookRegistry {
     var mutations = new ArrayList<HookDecision>();
     for (var registered : preToolUse) {
       var outcome = guard(registered, current, ctx);
-      switch (outcome) {
-        case HookOutcome.MutateArgs mutate -> {
-          mutations.add(HookDecision.of(registered.name(), mutate));
-          current = new ToolCall(current.id(), current.name(), mutate.args());
-        }
-        case HookOutcome.Block _, HookOutcome.Inject _, HookOutcome.Stop _ -> {
-          return new PreToolUseResult(
-              current, mutations, HookDecision.of(registered.name(), outcome));
-        }
-        default -> {}
+      if (outcome instanceof HookOutcome.MutateArgs mutate) {
+        mutations.add(HookDecision.of(registered.name(), mutate));
+        current = new ToolCall(current.id(), current.name(), mutate.args());
+      } else if (outcome instanceof HookOutcome.Block
+          || outcome instanceof HookOutcome.Inject
+          || outcome instanceof HookOutcome.Stop) {
+        return new PreToolUseResult(
+            current, mutations, HookDecision.of(registered.name(), outcome));
       }
     }
     return new PreToolUseResult(current, mutations, HookDecision.proceed());
