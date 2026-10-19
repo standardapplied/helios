@@ -106,6 +106,36 @@ final class HookRegistryTest {
     assertEquals(1, reads.get());
   }
 
+  /** Blocks every call and rewrites every result, named {@code Gate} only on its first read. */
+  private static final class TwoPhaseGate implements PreToolUseHook, PostToolUseHook {
+
+    private final AtomicInteger reads = new AtomicInteger();
+
+    @Override
+    public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+      return HookOutcome.block("no");
+    }
+
+    @Override
+    public HookOutcome afterTool(ToolCall call, ToolResult result, HookContext ctx) {
+      return HookOutcome.mutateResult("x");
+    }
+
+    @Override
+    public String name() {
+      return reads.getAndIncrement() == 0 ? "Gate" : null;
+    }
+  }
+
+  @Test
+  void aHookOfTwoPhasesHasItsNameReadOnceForBoth() {
+    var gate = new TwoPhaseGate();
+    var registry = new HookRegistry(List.of(gate));
+    assertEquals("Gate", registry.firePreToolUse(CALL, ctx()).firingHookName());
+    assertEquals("Gate", registry.firePostToolUse(CALL, OK, ctx()).firingHookName());
+    assertEquals(1, gate.reads.get());
+  }
+
   @Test
   void emptyFactoryProducesEmptyRegistry() {
     var registry = HookRegistry.empty();
