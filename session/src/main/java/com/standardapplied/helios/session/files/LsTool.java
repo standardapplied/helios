@@ -41,7 +41,9 @@ import java.util.Objects;
  * <p>The {@code path} is the canonical one the call was authorised on ({@link
  * WorkspaceRoot#resolveCanonical(String)}). An entry that an {@code LS} DENY rule matches is
  * withheld, keyed by its own path or, for a symlink, by the target it resolves to, and the output
- * ends with {@code [withheld by permission policy: <count>]}.
+ * ends with {@code [withheld by permission policy: <count>]}. An entry whose metadata cannot be
+ * read is withheld when its own path is denied; otherwise the listing fails without naming it,
+ * since a symlink's target could not be checked.
  */
 public final class LsTool {
 
@@ -96,7 +98,15 @@ public final class LsTool {
       try (var stream = workspace.newDirectoryStream(resolved)) {
         for (Path entry : stream) {
           ctx.cancellation().throwIfCancelled();
-          var attributes = workspace.attributes(entry);
+          BasicFileAttributes attributes;
+          try {
+            attributes = workspace.attributes(entry);
+          } catch (IOException uninspectable) {
+            if (withholding.withholds(workspace.spell(entry))) {
+              continue;
+            }
+            throw new IOException("could not inspect a directory entry", uninspectable);
+          }
           if (!withholding.withholds(key(workspace, entry, attributes))) {
             entries.add(Entry.of(entry, attributes));
           }
