@@ -215,6 +215,22 @@ final class DefaultPermissionEvaluatorTest {
   }
 
   @Test
+  void aPermissionKeyCarryingASecretIsDeniedWhereThePolicyWouldAllowIt() {
+    var secrets = new SecretRegistry();
+    secrets.register("TOKEN", "test-registered-secret-123");
+    var e =
+        DefaultPermissionEvaluator.newBuilder(
+                Permission.empty(PermissionMode.BYPASS_PERMISSIONS),
+                tools(pathKeyed("Write", ToolCategory.WRITE)))
+            .withSecretRegistry(secrets)
+            .build();
+
+    assertEquals(
+        PermissionDecision.deny("permission key of Write carries a secret"),
+        e.authorize(writeCall("/tmp/test-registered-secret-123")));
+  }
+
+  @Test
   void anAskRulePatternCarryingASecretReachesTheApproverRedactedWithTheRuleIntact() {
     var secrets = new SecretRegistry();
     secrets.register("PASSWORD", "secret*value");
@@ -298,6 +314,37 @@ final class DefaultPermissionEvaluatorTest {
             tools(binding("Read", ToolCategory.READ)));
     assertEquals(
         PermissionDecision.byRule(deny, "deny rule Read matched Read"), e.authorize(call("Read")));
+  }
+
+  @Test
+  void anExplicitDenyWinsOverAnAskForTheSameCall() {
+    var deny = PermissionRule.any(PermissionEffect.DENY, "Read");
+    var e =
+        new DefaultPermissionEvaluator(
+            rules(
+                PermissionMode.DEFAULT,
+                List.of(),
+                List.of(PermissionRule.any(PermissionEffect.ASK, "Read")),
+                List.of(deny)),
+            tools(binding("Read", ToolCategory.READ)));
+    assertEquals(
+        PermissionDecision.byRule(deny, "deny rule Read matched Read"), e.authorize(call("Read")));
+  }
+
+  @Test
+  void anAllowRuleWinsOverAnAskForTheSameCall() {
+    var allow = PermissionRule.any(PermissionEffect.ALLOW, "Write");
+    var e =
+        new DefaultPermissionEvaluator(
+            rules(
+                PermissionMode.DEFAULT,
+                List.of(allow),
+                List.of(PermissionRule.any(PermissionEffect.ASK, "Write")),
+                List.of()),
+            tools(binding("Write", ToolCategory.WRITE)));
+    assertEquals(
+        PermissionDecision.byRule(allow, "allow rule Write matched Write"),
+        e.authorize(call("Write")));
   }
 
   @Test

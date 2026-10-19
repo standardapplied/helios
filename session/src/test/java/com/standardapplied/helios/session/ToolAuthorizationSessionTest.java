@@ -142,6 +142,64 @@ final class ToolAuthorizationSessionTest {
     assertEquals(List.of(), executed);
   }
 
+  // ── a refusal's diagnostic ───────────────────────────────────────────────
+
+  private static final String KEY_FAILED =
+      "permission key of Write failed: java.lang.IllegalStateException: ";
+
+  /** A run whose {@code Write} key throws {@code message}, with {@link #SECRET} registered. */
+  private WriteToolSessions.Run keyThrowing(String message) {
+    var secrets = new SecretRegistry();
+    secrets.register("TOKEN", SECRET);
+    var options =
+        SessionOptions.newBuilder()
+            .withTools(
+                new ToolRegistry(
+                    List.of(
+                        sessions.writeTool(
+                            args -> {
+                              throw new IllegalStateException(message);
+                            }))))
+            .withPermission(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))
+            .withSecretRegistry(secrets);
+    return run(options, write("/tmp/a"));
+  }
+
+  @Test
+  void aRefusalReasonHasEverySecretRedactedAndTheCallIsNeverAnnounced() {
+    var run = keyThrowing("path is " + SECRET);
+
+    var reason = KEY_FAILED + "path is <redacted:TOKEN>";
+    assertEquals(new ToolOutcome.Rejected("Permission", reason), run.onlyResult().outcome());
+    assertEquals(reason, run.onlyBlock().reason());
+    assertEquals(List.of(), run.events().eventsOf(QueryEvent.ToolUse.class));
+  }
+
+  @Test
+  void aRefusalReasonIsCutAfter1024Chars() {
+    var reason = KEY_FAILED + "x".repeat(2000);
+
+    var run = keyThrowing("x".repeat(2000));
+
+    var cut = reason.substring(0, 1024) + "… [" + (reason.length() - 1024) + " more chars]";
+    assertEquals(new ToolOutcome.Rejected("Permission", cut), run.onlyResult().outcome());
+    assertEquals(cut, run.onlyBlock().reason());
+  }
+
+  @Test
+  void aSecretAcrossTheCutIsRedactedBeforeTheReasonIsCut() {
+    var padding = "x".repeat(1020 - KEY_FAILED.length());
+
+    var run = keyThrowing(padding + SECRET);
+
+    var redacted = KEY_FAILED + padding + "<redacted:TOKEN>";
+    assertEquals(
+        new ToolOutcome.Rejected(
+            "Permission",
+            redacted.substring(0, 1024) + "… [" + (redacted.length() - 1024) + " more chars]"),
+        run.onlyResult().outcome());
+  }
+
   // ── authorization follows every mutation ─────────────────────────────────
 
   @ParameterizedTest(name = "a mutating hook at priority {0}")
