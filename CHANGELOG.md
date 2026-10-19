@@ -865,12 +865,13 @@ canonical call is the one keyed, announced, dispatched and shown to `PostToolUse
   `java.lang.reflect` denied, a reference to `java.lang.reflect.Method` was labelled with either
   package depending on the JVM run. It is now labelled with the most specific one,
   `deniedPackages:java.lang.reflect`.
-- **A deny rule on a path was bypassed by spelling the path differently (`secrets/key`,
-  `docs/../secrets/key`, an absolute path, a symlink), by swapping a symlink in after approval, or
-  by searching or listing from a directory above it (`Grep .`, `LS .`).**
 
 ### Security
 
+- **A deny rule on a path can no longer be bypassed.** It was bypassed by spelling the path
+  differently (`secrets/key`, `docs/../secrets/key`, an absolute path, a symlink), by swapping a
+  symlink in after approval, or by searching or listing from a directory above it (`Grep .`,
+  `LS .`). Path tools now key on the canonical path they touch (see Breaking).
 - **A deny rule no longer misses a key that holds a line break.** `RuleMatcher` compiled a rule's `*`
   and `**` to a pattern whose `.` did not match a line terminator, so a deny rule missed a key
   holding one: `Write(/etc/**)` did not match `Write(/etc/cron.d/x\ny)`, and the mode's default,
