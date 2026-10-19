@@ -50,7 +50,15 @@ final class LoopCollaboratorsTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new LoopCollaborators(null, dispatch, queue, events::add, contextFactory, CLOCK));
+            () ->
+                new LoopCollaborators(
+                    null,
+                    dispatch,
+                    LoopFixture.ADMIT_ALL,
+                    queue,
+                    events::add,
+                    contextFactory,
+                    CLOCK));
     assertEquals("hooks must not be null", ex.getMessage());
   }
 
@@ -59,8 +67,21 @@ final class LoopCollaboratorsTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new LoopCollaborators(hooks, null, queue, events::add, contextFactory, CLOCK));
+            () ->
+                new LoopCollaborators(
+                    hooks, null, LoopFixture.ADMIT_ALL, queue, events::add, contextFactory, CLOCK));
     assertEquals("toolDispatch must not be null", ex.getMessage());
+  }
+
+  @Test
+  void nullAuthorizationRejected() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new LoopCollaborators(
+                    hooks, dispatch, null, queue, events::add, contextFactory, CLOCK));
+    assertEquals("authorization must not be null", ex.getMessage());
   }
 
   @Test
@@ -68,7 +89,15 @@ final class LoopCollaboratorsTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new LoopCollaborators(hooks, dispatch, null, events::add, contextFactory, CLOCK));
+            () ->
+                new LoopCollaborators(
+                    hooks,
+                    dispatch,
+                    LoopFixture.ADMIT_ALL,
+                    null,
+                    events::add,
+                    contextFactory,
+                    CLOCK));
     assertEquals("steeringQueue must not be null", ex.getMessage());
   }
 
@@ -77,7 +106,9 @@ final class LoopCollaboratorsTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new LoopCollaborators(hooks, dispatch, queue, null, contextFactory, CLOCK));
+            () ->
+                new LoopCollaborators(
+                    hooks, dispatch, LoopFixture.ADMIT_ALL, queue, null, contextFactory, CLOCK));
     assertEquals("eventSink must not be null", ex.getMessage());
   }
 
@@ -86,7 +117,9 @@ final class LoopCollaboratorsTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new LoopCollaborators(hooks, dispatch, queue, events::add, null, CLOCK));
+            () ->
+                new LoopCollaborators(
+                    hooks, dispatch, LoopFixture.ADMIT_ALL, queue, events::add, null, CLOCK));
     assertEquals("hookContextFactory must not be null", ex.getMessage());
   }
 
@@ -95,7 +128,15 @@ final class LoopCollaboratorsTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new LoopCollaborators(hooks, dispatch, queue, events::add, contextFactory, null));
+            () ->
+                new LoopCollaborators(
+                    hooks,
+                    dispatch,
+                    LoopFixture.ADMIT_ALL,
+                    queue,
+                    events::add,
+                    contextFactory,
+                    null));
     assertEquals("clock must not be null", ex.getMessage());
   }
 
@@ -105,6 +146,7 @@ final class LoopCollaboratorsTest {
         LoopCollaborators.newBuilder()
             .withHooks(hooks)
             .withToolDispatch(dispatch)
+            .withAuthorization(LoopFixture.ADMIT_ALL)
             .withSteeringQueue(queue)
             .withEventSink(events::add)
             .withHookContextFactory(contextFactory)
@@ -113,6 +155,7 @@ final class LoopCollaboratorsTest {
 
     assertSame(hooks, collaborators.hooks());
     assertSame(dispatch, collaborators.toolDispatch());
+    assertSame(LoopFixture.ADMIT_ALL, collaborators.authorization());
     assertSame(queue, collaborators.steeringQueue());
     assertSame(contextFactory, collaborators.hookContextFactory());
     assertSame(CLOCK, collaborators.clock());
@@ -124,6 +167,7 @@ final class LoopCollaboratorsTest {
         LoopCollaborators.newBuilder()
             .withHooks(hooks)
             .withToolDispatch(dispatch)
+            .withAuthorization(LoopFixture.ADMIT_ALL)
             .withSteeringQueue(queue)
             .withEventSink(events::add)
             .withHookContextFactory(contextFactory)
@@ -143,7 +187,8 @@ final class LoopCollaboratorsTest {
   @Test
   void hookContextAndEmitterUseTheSharedFactoryAndSink() {
     var collaborators =
-        new LoopCollaborators(hooks, dispatch, queue, events::add, contextFactory, CLOCK);
+        new LoopCollaborators(
+            hooks, dispatch, LoopFixture.ADMIT_ALL, queue, events::add, contextFactory, CLOCK);
     var state = new SessionState("sess-collab", new CancellationToken(), CLOCK);
 
     assertEquals("sess-collab", collaborators.hookContext(state).sessionId());

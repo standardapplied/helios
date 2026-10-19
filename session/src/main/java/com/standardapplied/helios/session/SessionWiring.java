@@ -2,11 +2,11 @@
 
 package com.standardapplied.helios.session;
 
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.ask.QuestionGateway;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
-import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.LoopCollaborators;
@@ -17,17 +17,26 @@ import com.standardapplied.helios.session.loop.TurnRunner;
 import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.memory.MemoryWriteTool;
 import com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator;
+import com.standardapplied.helios.session.permissions.PermissionDecision;
+import com.standardapplied.helios.session.permissions.ToolApprover;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.ArrayList;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Function;
 
 /**
  * Builds one session's agent loop from its options: the tool registry with the built-in tools, the
- * tool dispatch, the hooks with the permission evaluator first, the loop collaborators and the turn
- * runner. It acquires nothing, so a failure here leaves only what the caller acquired to release.
+ * tool dispatch, the hooks, the permission stage, the loop collaborators and the turn runner. The
+ * permission stage is the {@link DefaultPermissionEvaluator} of the session's {@link
+ * com.standardapplied.helios.session.permissions.Permission}, asking the user through the session's
+ * questions, or admits every call when the session has none. It acquires nothing, so a failure here
+ * leaves only what the caller acquired to release.
  */
 final class SessionWiring {
+
+  private static final PermissionDecision NO_POLICY =
+      PermissionDecision.allow("no permission policy");
 
   private SessionWiring() {}
 
@@ -42,21 +51,12 @@ final class SessionWiring {
     var combinedTools = withBuiltins(options.tools(), options, pendingQuestions);
     var toolDispatch =
         new ToolDispatch(sessionContext, combinedTools, options.concurrency(), scheduler, ending);
-    var combinedHooks = new ArrayList<Hook>(options.hooks().size() + 1);
-    options
-        .permission()
-        .ifPresent(
-            p ->
-                combinedHooks.add(
-                    DefaultPermissionEvaluator.newBuilder(p, combinedTools)
-                        .withQuestionGateway(pendingQuestions)
-                        .build()));
-    combinedHooks.addAll(options.hooks());
     var model = options.model();
     var collaborators =
         LoopCollaborators.newBuilder()
-            .withHooks(new HookRegistry(combinedHooks))
+            .withHooks(new HookRegistry(options.hooks()))
             .withToolDispatch(toolDispatch)
+            .withAuthorization(authorization(options, combinedTools, pendingQuestions))
             .withSteeringQueue(steeringQueue)
             .withEventSink(events::emit)
             .withHookContextFactory(
@@ -78,6 +78,18 @@ final class SessionWiring {
         new StopClassifier(options.secretRegistry()),
         options.tokenCounter(),
         options.contextCompactor());
+  }
+
+  private static Function<ToolCall, PermissionDecision> authorization(
+      SessionOptions options, ToolRegistry tools, QuestionGateway gateway) {
+    if (options.permission().isEmpty()) {
+      return call -> NO_POLICY;
+    }
+    var evaluator =
+        DefaultPermissionEvaluator.newBuilder(options.permission().orElseThrow(), tools)
+            .withApprover(ToolApprover.askingUser(gateway))
+            .build();
+    return evaluator::authorize;
   }
 
   private static ToolRegistry withBuiltins(

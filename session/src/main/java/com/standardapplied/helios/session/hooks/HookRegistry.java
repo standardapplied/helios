@@ -11,6 +11,7 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.UserMessage;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -25,15 +26,27 @@ import java.util.logging.Logger;
  * {@link com.standardapplied.helios.session.SessionOptions.Builder#withHook(Hook)}.
  *
  * <p>Hooks of each phase are sorted by {@link Hook#priority()} (low → high), then by registration
- * order for ties. For non-observe phases, firing returns the first non-{@link HookOutcome.Continue}
- * outcome it sees — see spec §9.4. Stream-event hooks all fire (observe-only).
+ * order for ties. For decisive phases other than {@code PreToolUse}, firing returns the first
+ * non-{@link HookOutcome.Continue} outcome it sees — see spec §9.4. Stream-event hooks all fire
+ * (observe-only).
  *
  * <p>The decisive {@code fire*} methods return a {@link HookDecision} pairing the outcome with the
  * name the registry read from the firing hook when it was built, so the orchestrator can attribute
  * {@link QueryEvent.HookFired} events to the actual hook (not the phase name).
  *
- * <p>If a hook throws, the orchestrator treats the outcome as {@link HookOutcome.Continue} and logs
- * at {@code WARNING} — see spec §9.4. Hook misbehavior cannot abort the session.
+ * <p><b>{@code PreToolUse} hooks are guards and chain.</b> Each hook receives the call as the hooks
+ * before it left it: {@link HookOutcome.MutateArgs} passes the same call with the new arguments to
+ * the next hook, and {@link HookOutcome.Block}, {@link HookOutcome.Inject} and {@link
+ * HookOutcome.Stop} end the chain; any other outcome passes the call unchanged. A hook that throws
+ * a {@link RuntimeException} or returns {@code null} fails closed: it ends the chain as a {@code
+ * Block} with reason {@code hook threw <exception class>: <message>} or {@code hook returned null},
+ * logged at {@code WARNING}. {@link #firePreToolUse} returns the result as a {@link
+ * PreToolUseResult}. The session's permission check is not a hook: it runs after the chain, on the
+ * final call.
+ *
+ * <p>In every other phase a hook that throws a {@link RuntimeException} or returns {@code null} is
+ * treated as {@link HookOutcome.Continue} and logged at {@code WARNING}, so the next hook of the
+ * phase runs — see spec §9.4. An {@link Error} escapes from every phase.
  *
  * <h2>Thread-safety</h2>
  *
@@ -132,18 +145,50 @@ public final class HookRegistry {
   }
 
   /**
-   * Fire every registered {@link PreToolUseHook} until one returns a non-{@link
-   * HookOutcome.Continue} outcome. Returns {@link HookDecision#proceed()} if no hook decides
-   * anything.
+   * Run the {@link PreToolUseHook} chain on {@code call}: each hook sees the call as the hooks
+   * before it left it, until one blocks, injects or stops, or a hook fails. See the class javadoc.
    *
-   * @param call the impending tool call; non-null
+   * @param call the call the model emitted; non-null
    * @param ctx the per-invocation context; non-null
-   * @return the first decisive decision, or {@link HookDecision#proceed()}
+   * @return the final call, its argument mutations and the decision that ended the chain
    */
-  public HookDecision firePreToolUse(ToolCall call, HookContext ctx) {
+  public PreToolUseResult firePreToolUse(ToolCall call, HookContext ctx) {
     Objects.requireNonNull(call, "call must not be null");
     Objects.requireNonNull(ctx, "ctx must not be null");
-    return fireDeciding(preToolUse, hook -> hook.beforeTool(call, ctx));
+    var current = call;
+    var mutations = new ArrayList<HookDecision>();
+    for (var registered : preToolUse) {
+      var outcome = guard(registered, current, ctx);
+      switch (outcome) {
+        case HookOutcome.MutateArgs mutate -> {
+          mutations.add(HookDecision.of(registered.name(), mutate));
+          current = new ToolCall(current.id(), current.name(), mutate.args());
+        }
+        case HookOutcome.Block _, HookOutcome.Inject _, HookOutcome.Stop _ -> {
+          return new PreToolUseResult(
+              current, mutations, HookDecision.of(registered.name(), outcome));
+        }
+        default -> {}
+      }
+    }
+    return new PreToolUseResult(current, mutations, HookDecision.proceed());
+  }
+
+  private static HookOutcome guard(
+      Registered<PreToolUseHook> registered, ToolCall call, HookContext ctx) {
+    try {
+      var outcome = registered.hook().beforeTool(call, ctx);
+      if (outcome == null) {
+        LOGGER.warning(
+            "PreToolUse hook " + registered.name() + " returned null; refusing the call");
+        return HookOutcome.block("hook returned null");
+      }
+      return outcome;
+    } catch (RuntimeException ex) {
+      LOGGER.log(
+          Level.WARNING, "PreToolUse hook " + registered.name() + " threw; refusing the call", ex);
+      return HookOutcome.block("hook threw " + ex.getClass().getName() + ": " + ex.getMessage());
+    }
   }
 
   /**

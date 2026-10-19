@@ -6,10 +6,8 @@ package com.standardapplied.helios.session.hooks;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
@@ -125,7 +123,7 @@ final class HookRegistryTest {
   void aHookOfTwoPhasesHasItsNameReadOnceForBoth() {
     var gate = new TwoPhaseGate();
     var registry = new HookRegistry(List.of(gate));
-    assertEquals("Gate", registry.firePreToolUse(CALL, ctx()).firingHookName());
+    assertEquals("Gate", registry.firePreToolUse(CALL, ctx()).decision().firingHookName());
     assertEquals("Gate", registry.firePostToolUse(CALL, OK, ctx()).firingHookName());
     assertEquals(1, gate.reads.get());
   }
@@ -161,11 +159,9 @@ final class HookRegistryTest {
   // ── empty registry returns Continue for every phase ──────────────────────
 
   @Test
-  void firePreToolUseEmptyReturnsContinue() {
-    var decision = HookRegistry.empty().firePreToolUse(CALL, ctx());
-    assertTrue(decision.shouldContinue());
-    assertInstanceOf(HookOutcome.Continue.class, decision.outcome());
-    assertNull(decision.firingHookName());
+  void firePreToolUseEmptyReturnsTheCallUnchanged() {
+    var result = HookRegistry.empty().firePreToolUse(CALL, ctx());
+    assertEquals(new PreToolUseResult(CALL, List.of(), HookDecision.proceed()), result);
   }
 
   @Test
@@ -347,7 +343,7 @@ final class HookRegistryTest {
           }
         };
     var registry = new HookRegistry(List.of(neverFiresHook, blockHook, continueHook));
-    var decision = registry.firePreToolUse(CALL, ctx());
+    var decision = registry.firePreToolUse(CALL, ctx()).decision();
     assertInstanceOf(HookOutcome.Block.class, decision.outcome());
     assertEquals(List.of("continue", "block"), fired);
     assertEquals(blockHook.name(), decision.firingHookName());
@@ -402,33 +398,138 @@ final class HookRegistryTest {
   }
 
   @Test
-  void hookThrowsTreatedAsContinue() {
-    PreToolUseHook throwing =
-        (call, ctx) -> {
-          throw new RuntimeException("hook boom");
-        };
-    PreToolUseHook decisive = (call, ctx) -> HookOutcome.block("nope");
+  void aPreToolUseHookThatThrowsBlocksTheCallAndEndsTheChain() {
     var fired = new ArrayList<String>();
-    PreToolUseHook tracking =
+    PreToolUseHook throwing =
         new PreToolUseHook() {
           @Override
           public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-            fired.add("tracked");
-            return HookOutcome.cont();
+            throw new IllegalStateException("hook boom");
+          }
+
+          @Override
+          public String name() {
+            return "Guard";
           }
         };
-    var decision =
-        new HookRegistry(List.of(throwing, tracking, decisive)).firePreToolUse(CALL, ctx());
-    assertTrue(fired.contains("tracked"), "subsequent hooks fired after throw");
-    assertInstanceOf(HookOutcome.Block.class, decision.outcome());
+    PreToolUseHook later = (call, ctx) -> fired.add("later") ? HookOutcome.cont() : null;
+
+    var result = new HookRegistry(List.of(throwing, later)).firePreToolUse(CALL, ctx());
+
+    assertEquals(
+        HookDecision.of(
+            "Guard", HookOutcome.block("hook threw java.lang.IllegalStateException: hook boom")),
+        result.decision());
+    assertEquals(List.of(), fired);
   }
 
   @Test
-  void hookReturningNullTreatedAsContinue() {
-    PreToolUseHook nullReturn = (call, ctx) -> null;
-    PreToolUseHook decisive = (call, ctx) -> HookOutcome.block("nope");
-    var decision = new HookRegistry(List.of(nullReturn, decisive)).firePreToolUse(CALL, ctx());
-    assertInstanceOf(HookOutcome.Block.class, decision.outcome());
+  void aPreToolUseHookReturningNullBlocksTheCallAndEndsTheChain() {
+    var fired = new ArrayList<String>();
+    PreToolUseHook nullReturn =
+        new PreToolUseHook() {
+          @Override
+          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+            return null;
+          }
+
+          @Override
+          public String name() {
+            return "Guard";
+          }
+        };
+    PreToolUseHook later = (call, ctx) -> fired.add("later") ? HookOutcome.cont() : null;
+
+    var result = new HookRegistry(List.of(nullReturn, later)).firePreToolUse(CALL, ctx());
+
+    assertEquals(
+        HookDecision.of("Guard", HookOutcome.block("hook returned null")), result.decision());
+    assertEquals(List.of(), fired);
+  }
+
+  @Test
+  void anErrorFromAPreToolUseHookEscapes() {
+    var failure = new AssertionError("host failure");
+    PreToolUseHook failing =
+        (call, ctx) -> {
+          throw failure;
+        };
+    var registry = new HookRegistry(List.of(failing));
+    assertSame(
+        failure, assertThrows(AssertionError.class, () -> registry.firePreToolUse(CALL, ctx())));
+  }
+
+  @Test
+  void eachPreToolUseHookSeesTheArgumentsTheHooksBeforeItLeft() {
+    var seen = new ArrayList<Map<String, Object>>();
+    PreToolUseHook a = named("A", (call, ctx) -> HookOutcome.mutateArgs(Map.of("path", "a")));
+    PreToolUseHook b =
+        named(
+            "B",
+            (call, ctx) -> {
+              seen.add(call.arguments());
+              return HookOutcome.mutateArgs(Map.of("path", "b"));
+            });
+    PreToolUseHook c =
+        named(
+            "C",
+            (call, ctx) -> {
+              seen.add(call.arguments());
+              return HookOutcome.cont();
+            });
+
+    var result = new HookRegistry(List.of(a, b, c)).firePreToolUse(CALL, ctx());
+
+    assertEquals(List.of(Map.of("path", "a"), Map.of("path", "b")), seen);
+    assertEquals(
+        new PreToolUseResult(
+            new ToolCall("c", "read", Map.of("path", "b")),
+            List.of(
+                HookDecision.of("A", HookOutcome.mutateArgs(Map.of("path", "a"))),
+                HookDecision.of("B", HookOutcome.mutateArgs(Map.of("path", "b")))),
+            HookDecision.proceed()),
+        result);
+  }
+
+  @Test
+  void aMutationVariantOfAnotherPhasePassesTheCallUnchanged() {
+    var seen = new ArrayList<ToolCall>();
+    PreToolUseHook wrongPhase = (call, ctx) -> HookOutcome.mutateText("ignored");
+    PreToolUseHook recording =
+        (call, ctx) -> {
+          seen.add(call);
+          return HookOutcome.cont();
+        };
+
+    var result = new HookRegistry(List.of(wrongPhase, recording)).firePreToolUse(CALL, ctx());
+
+    assertEquals(List.of(CALL), seen);
+    assertEquals(new PreToolUseResult(CALL, List.of(), HookDecision.proceed()), result);
+  }
+
+  @Test
+  void aBlockAfterAMutationEndsTheChainWithTheMutatedCall() {
+    PreToolUseHook a = named("A", (call, ctx) -> HookOutcome.mutateArgs(Map.of("path", "a")));
+    PreToolUseHook b = named("B", (call, ctx) -> HookOutcome.block("no"));
+
+    var result = new HookRegistry(List.of(a, b)).firePreToolUse(CALL, ctx());
+
+    assertEquals(new ToolCall("c", "read", Map.of("path", "a")), result.call());
+    assertEquals(HookDecision.of("B", HookOutcome.block("no")), result.decision());
+  }
+
+  private static PreToolUseHook named(String name, PreToolUseHook body) {
+    return new PreToolUseHook() {
+      @Override
+      public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+        return body.beforeTool(call, ctx);
+      }
+
+      @Override
+      public String name() {
+        return name;
+      }
+    };
   }
 
   // ── happy-path per phase ─────────────────────────────────────────────────
@@ -513,8 +614,54 @@ final class HookRegistryTest {
 
     var logged = onlyWarning(() -> registry.firePreToolUse(CALL, ctx()));
 
+    assertEquals("PreToolUse hook Gate threw; refusing the call", logged.getMessage());
+    assertSame(failure, logged.getThrown());
+  }
+
+  @Test
+  void aThrowingObserverPhaseHookIsLoggedUnderItsRecordedName() {
+    var failure = new IllegalStateException("boom");
+    var name = gateThenRenamed();
+    PostToolUseHook hook =
+        new PostToolUseHook() {
+          @Override
+          public HookOutcome afterTool(ToolCall call, ToolResult result, HookContext ctx) {
+            throw failure;
+          }
+
+          @Override
+          public String name() {
+            return name.get();
+          }
+        };
+    var registry = new HookRegistry(List.of(hook));
+
+    var logged = onlyWarning(() -> registry.firePostToolUse(CALL, OK, ctx()));
+
     assertEquals("hook Gate threw; treating as Continue", logged.getMessage());
     assertSame(failure, logged.getThrown());
+  }
+
+  @Test
+  void aNullObserverPhaseOutcomeIsLoggedUnderItsRecordedName() {
+    var name = gateThenRenamed();
+    PostToolUseHook hook =
+        new PostToolUseHook() {
+          @Override
+          public HookOutcome afterTool(ToolCall call, ToolResult result, HookContext ctx) {
+            return null;
+          }
+
+          @Override
+          public String name() {
+            return name.get();
+          }
+        };
+    var registry = new HookRegistry(List.of(hook));
+
+    var logged = onlyWarning(() -> registry.firePostToolUse(CALL, OK, ctx()));
+
+    assertEquals("hook Gate returned null outcome; treating as Continue", logged.getMessage());
   }
 
   @Test
@@ -536,7 +683,7 @@ final class HookRegistryTest {
 
     var logged = onlyWarning(() -> registry.firePreToolUse(CALL, ctx()));
 
-    assertEquals("hook Gate returned null outcome; treating as Continue", logged.getMessage());
+    assertEquals("PreToolUse hook Gate returned null; refusing the call", logged.getMessage());
   }
 
   @Test

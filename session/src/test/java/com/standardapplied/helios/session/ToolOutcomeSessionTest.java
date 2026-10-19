@@ -230,7 +230,7 @@ final class ToolOutcomeSessionTest {
   }
 
   @Test
-  void aPermissionDenialIsRejectedByTheEvaluator() {
+  void aPermissionDenialIsRejectedByThePermissionPolicy() {
     var options =
         withTools(tool("t", (args, ctx) -> ToolResult.success("ran")))
             .withPermission(
@@ -242,8 +242,8 @@ final class ToolOutcomeSessionTest {
 
     assertEquals(
         expected(
-            new ToolOutcome.Rejected("DefaultPermissionEvaluator", "permission: deny rule for t"),
-            "blocked by DefaultPermissionEvaluator: permission: deny rule for t"),
+            new ToolOutcome.Rejected("Permission", "deny rule t matched t"),
+            "blocked by Permission: deny rule t matched t"),
         run(options, call("t")).onlyResult());
   }
 
@@ -268,7 +268,7 @@ final class ToolOutcomeSessionTest {
   }
 
   @Test
-  void aRejectedResultIsRedactedWithItsOutcomeIntact() {
+  void aRejectionReasonIsRedactedInItsOutcomeAndOutput() {
     var secrets = new SecretRegistry();
     secrets.register("API_KEY", SECRET);
     var options =
@@ -276,14 +276,16 @@ final class ToolOutcomeSessionTest {
             .withSecretRegistry(secrets)
             .withHook(new Gate(HookOutcome.block("saw " + SECRET)));
 
-    var event = run(options, call("t")).toolResults().getFirst();
+    var run = run(options, call("t"));
 
     assertEquals(
         expected(
-            new ToolOutcome.Rejected("Gate", "saw " + SECRET),
+            new ToolOutcome.Rejected("Gate", "saw <redacted:API_KEY>"),
             "blocked by Gate: saw <redacted:API_KEY>"),
-        event.result());
-    assertEquals(Map.of("API_KEY", 1), event.redactions());
+        run.onlyResult());
+    assertEquals(
+        "saw <redacted:API_KEY>",
+        run.events().eventsOf(QueryEvent.ToolBlocked.class).getFirst().reason());
   }
 
   @Test

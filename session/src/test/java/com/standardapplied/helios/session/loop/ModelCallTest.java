@@ -87,6 +87,7 @@ final class ModelCallTest {
         new LoopCollaborators(
             HookRegistry.empty(),
             dispatch,
+            LoopFixture.ADMIT_ALL,
             queue,
             sink,
             s ->

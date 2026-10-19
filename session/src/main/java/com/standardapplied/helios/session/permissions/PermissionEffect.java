@@ -9,8 +9,7 @@ package com.standardapplied.helios.session.permissions;
  *
  * <ul>
  *   <li>{@link #ALLOW} — proceed with the call.
- *   <li>{@link #ASK} — surface the call for user confirmation (Phase 2 part 5 wires the question
- *       handler; until then, treated as {@link #DENY}).
+ *   <li>{@link #ASK} — refer the call to the session's {@link ToolApprover}; with none, refuse it.
  *   <li>{@link #DENY} — refuse the call with the rule's reason.
  * </ul>
  */
