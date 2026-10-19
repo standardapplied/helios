@@ -631,7 +631,7 @@ canonical call is the one keyed, announced, dispatched and shown to `PostToolUse
 | `Glob`, `Grep`, `LS` and `MemoryRead` `list` return every entry below their path | they withhold entries their own DENY rules match (and, for `Grep`, which returns contents, `Read`'s), never descend into a denied directory, and end with `[withheld by permission policy: <n>]` |
 | `new ToolContext(SessionContext, CancellationToken, Duration)` | `ToolContext(SessionContext, CancellationToken, Duration, Predicate<String> withheld)`; `ToolContext.noop()` withholds nothing |
 | `ToolDispatch.dispatch(ToolCall, CancellationToken, Duration, Duration)` | `dispatch(ToolCall, CancellationToken, Duration, Duration, Predicate<String> withheld)` |
-| A permission-key extractor that throws is refused as `permission key of <tool> failed: <class>: <message>` | refused before authorization as `<tool>: <message>` |
+| A permission-key extractor that throws is refused as `permission key of <tool> failed: <class>: <message>` under a `Permission`, and is never called without one | refused before authorization as `<tool>: <message>`, with or without a `Permission` |
 
 ### Added
 
