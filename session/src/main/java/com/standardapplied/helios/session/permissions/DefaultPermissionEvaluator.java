@@ -4,105 +4,78 @@
  */
 package com.standardapplied.helios.session.permissions;
 
-import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.session.ask.AskUserQuestionOption;
-import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
-import com.standardapplied.helios.session.ask.QuestionGateway;
-import com.standardapplied.helios.session.hooks.HookContext;
-import com.standardapplied.helios.session.hooks.HookOutcome;
-import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
-import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 
 /**
- * The Permission system, packaged as a {@link PreToolUseHook} at priority {@code 50} so it fires
- * before user-supplied hooks (default priority {@code 100}). Translates a {@link Permission} +
- * {@link ToolRegistry} into the per-call decision and surfaces it as a {@link HookOutcome}.
+ * The Permission system: authorizes each tool call against a {@link Permission} and a {@link
+ * ToolRegistry}. The session runs it as a fixed stage of tool dispatch, after every {@code
+ * PreToolUse} hook, on the exact call that runs if it is admitted; it is not a hook, so no hook
+ * priority, outcome or failure moves, skips or follows it.
  *
  * <p>Evaluation order per spec §12.4:
  *
  * <ol>
  *   <li>Resolve {@code permissionKey} from the tool + input via {@link ToolBinding}.
- *   <li>If any {@code deny} rule matches → {@link HookOutcome.Block}.
- *   <li>If {@link PermissionMode#BYPASS_PERMISSIONS} → {@link HookOutcome.Continue}.
- *   <li>If any {@code allow} rule matches → {@link HookOutcome.Continue}.
- *   <li>If any {@code ask} rule matches: when a {@link QuestionGateway} is wired, emit an {@code
- *       AskUserQuestion} and route the user's choice back into the loop as {@link
- *       HookOutcome.Continue} or {@link HookOutcome.Block}. When no gateway is wired (a degenerate
- *       configuration — the agent loop always wires one), ASK falls back to Block with a clear
- *       reason.
- *   <li>Default-by-category: {@link ToolCategory#READ} / {@link ToolCategory#SEARCH} → Continue (or
- *       Block under {@link PermissionMode#PLAN}); {@link ToolCategory#WRITE} / {@link
- *       ToolCategory#EXECUTION} / {@link ToolCategory#NETWORK} → Ask; {@link ToolCategory#CONTROL}
- *       / {@link ToolCategory#DELEGATION} → Continue.
+ *   <li>If any {@code deny} rule matches → {@link PermissionEffect#DENY}.
+ *   <li>If {@link PermissionMode#BYPASS_PERMISSIONS} → {@link PermissionEffect#ALLOW}.
+ *   <li>If any {@code allow} rule matches → {@link PermissionEffect#ALLOW}.
+ *   <li>If any {@code ask} rule matches → {@link PermissionEffect#ASK}.
+ *   <li>Default-by-category: {@link ToolCategory#READ} / {@link ToolCategory#SEARCH} → Allow;
+ *       {@link ToolCategory#WRITE} / {@link ToolCategory#EXECUTION} / {@link ToolCategory#NETWORK}
+ *       → Ask (Deny for writes and execution under {@link PermissionMode#PLAN}, Allow for writes
+ *       under {@link PermissionMode#ACCEPT_EDITS}); {@link ToolCategory#CONTROL} / {@link
+ *       ToolCategory#DELEGATION} → Allow. {@link PermissionMode#LOCKED_DOWN} denies every category.
  * </ol>
  *
- * <p>If the tool is not registered in the {@link ToolRegistry}, the evaluator returns {@link
- * HookOutcome.Continue} — the tool dispatch path will surface its own "tool not found" failure, and
- * the permission hook should not block on an unknown name.
- *
- * <h2>Question format</h2>
- *
- * The ASK path emits a two-option {@code AskUserQuestion} with header {@code "Permission"}, a
- * question body of the form {@code "Allow <toolName>(<canonicalArgs>)?"}, and options {@code
- * "Allow"} / {@code "Deny"}. The user's choice is matched case-insensitively against {@code
- * "allow"} to route as Continue; anything else is Block.
+ * <p>{@link #authorize} fails closed: a call naming no registered tool, a permission key that
+ * throws, is null or names another tool, and an ASK with no {@link ToolApprover} are each denied.
+ * An ASK goes to the approver with an {@link ApprovalRequest} for this call; see {@link
+ * ToolApprover} for how its answer is read.
  *
  * <h2>Thread-safety</h2>
  *
- * Immutable. Safe to share across sessions.
+ * Immutable. Safe to share across sessions when the approver is.
  */
-public final class DefaultPermissionEvaluator implements PreToolUseHook {
-
-  static final String ALLOW_LABEL = "Allow";
-  static final String DENY_LABEL = "Deny";
+public final class DefaultPermissionEvaluator {
 
   private final Permission permission;
   private final ToolRegistry tools;
   private final RuleMatcher matcher;
-  private final int priority;
-  private final Optional<QuestionGateway> questionGateway;
+  private final Optional<ToolApprover> approver;
 
   /**
-   * Build an evaluator with the spec's default priority of 50 and no question gateway. ASK
-   * decisions fall back to Block — useful for tests and read-only deployments. Production sessions
-   * that need to prompt the user wire a real gateway via {@link #newBuilder(Permission,
-   * ToolRegistry)}.
+   * Build an evaluator with no approver, so ASK refuses the call.
    *
    * @param permission the policy to enforce; non-null
    * @param tools the tool registry (for category + permissionKey lookup); non-null
    * @throws NullPointerException if either argument is null
    */
   public DefaultPermissionEvaluator(Permission permission, ToolRegistry tools) {
-    this(permission, tools, 50, null);
+    this(permission, tools, null);
   }
 
   private DefaultPermissionEvaluator(
-      Permission permission, ToolRegistry tools, int priority, QuestionGateway questionGateway) {
+      Permission permission, ToolRegistry tools, ToolApprover approver) {
     this.permission = Objects.requireNonNull(permission, "permission must not be null");
     this.tools = Objects.requireNonNull(tools, "tools must not be null");
-    if (priority < 0) {
-      throw new IllegalArgumentException("priority must be non-negative, got " + priority);
-    }
-    this.priority = priority;
     this.matcher = new RuleMatcher();
-    this.questionGateway = Optional.ofNullable(questionGateway);
+    this.approver = Optional.ofNullable(approver);
   }
 
   /**
-   * Start building an evaluator with a custom priority and/or a {@link QuestionGateway}. The
-   * required {@code permission} and {@code tools} arguments are supplied up-front; optional knobs
-   * default sensibly and override fluently:
+   * Start building an evaluator with a {@link ToolApprover}:
    *
    * <pre>{@code
    * var eval = DefaultPermissionEvaluator.newBuilder(perm, tools)
-   *     .withQuestionGateway(gateway)
+   *     .withApprover(ToolApprover.askingUser(gateway))
    *     .build();
    * }</pre>
    *
@@ -124,132 +97,150 @@ public final class DefaultPermissionEvaluator implements PreToolUseHook {
     return permission;
   }
 
-  @Override
-  public int priority() {
-    return priority;
-  }
-
-  @Override
-  public String name() {
-    return "DefaultPermissionEvaluator";
-  }
-
-  @Override
-  public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-    Objects.requireNonNull(call, "call must not be null");
-    Objects.requireNonNull(ctx, "ctx must not be null");
-
-    var bindingOpt = tools.get(call.name());
-    if (bindingOpt.isEmpty()) {
-      return HookOutcome.cont();
-    }
-    var binding = bindingOpt.orElseThrow();
-    var key = binding.permissionKey(call.arguments());
-    var decision = evaluate(key, binding.category());
-    return switch (decision.effect()) {
-      case ALLOW -> HookOutcome.cont();
-      case ASK -> handleAsk(key, decision);
-      case DENY -> HookOutcome.block("permission: " + decision.reason());
-    };
-  }
-
   /**
-   * Route an ASK decision through the session's {@link QuestionGateway}, blocking the agent-loop's
-   * virtual thread until the host calls {@link
-   * com.standardapplied.helios.session.AgentSession#answer(String,
-   * com.standardapplied.helios.session.ask.AskUserQuestionResponse) AgentSession.answer}. Returns
-   * {@link HookOutcome.Continue} only when the user's selection matches {@link #ALLOW_LABEL}
-   * (case-insensitive); anything else is Block.
+   * Decide whether {@code call}, exactly as given, may run. Never returns {@link
+   * PermissionEffect#ASK}: an ASK is resolved through the approver before this returns.
+   *
+   * @param call the final call; non-null
+   * @return an {@link PermissionEffect#ALLOW} or {@link PermissionEffect#DENY} decision
+   * @throws NullPointerException if {@code call} is null
    */
-  private HookOutcome handleAsk(
-      com.standardapplied.helios.session.tools.ToolPermissionKey key, PermissionDecision decision) {
-    if (questionGateway.isEmpty()) {
-      return HookOutcome.block(
-          "permission: ASK rule without handler — no QuestionGateway wired. " + decision.reason());
+  public PermissionDecision authorize(ToolCall call) {
+    Objects.requireNonNull(call, "call must not be null");
+    var binding = tools.get(call.name());
+    if (binding.isEmpty()) {
+      return PermissionDecision.deny("no tool named '" + call.name() + "' is registered");
     }
-    var argsSuffix = key.canonicalArgs().isEmpty() ? "" : "(" + key.canonicalArgs() + ")";
-    var request =
-        new AskUserQuestionRequest(
-            "perm-" + Ids.newId(),
-            "Permission",
-            "Allow " + key.toolName() + argsSuffix + "?",
-            List.of(
-                new AskUserQuestionOption(ALLOW_LABEL, decision.reason()),
-                new AskUserQuestionOption(DENY_LABEL, "Refuse this tool call")),
-            false);
+    var category = binding.orElseThrow().category();
+    ToolPermissionKey key;
     try {
-      var response = questionGateway.orElseThrow().ask(request);
-      var picked = response.selectedLabels().stream().findFirst().orElse("").trim();
-      if (picked.equalsIgnoreCase(ALLOW_LABEL)) {
-        return HookOutcome.cont();
+      key = binding.orElseThrow().permissionKey(call.arguments());
+    } catch (RuntimeException e) {
+      return PermissionDecision.deny(
+          "permission key of " + call.name() + " failed: " + describe(e));
+    }
+    if (!key.toolName().equals(call.name())) {
+      return PermissionDecision.deny(
+          "permission key of " + call.name() + " names another tool: " + describe(key));
+    }
+    var decision = evaluate(key, category);
+    if (decision.effect() != PermissionEffect.ASK) {
+      return decision;
+    }
+    return approve(new ApprovalRequest(call, key, category, decision.rule(), decision.reason()));
+  }
+
+  private PermissionDecision approve(ApprovalRequest request) {
+    if (approver.isEmpty()) {
+      return PermissionDecision.deny("no approver for " + request.reason());
+    }
+    try {
+      var answer = approver.orElseThrow().approve(request);
+      if (answer == null) {
+        return PermissionDecision.deny("approver returned null for " + request.reason());
       }
-      return HookOutcome.block("permission: user denied (" + decision.reason() + ")");
+      return answer.effect() == PermissionEffect.ASK
+          ? PermissionDecision.deny("approver returned ASK for " + request.reason())
+          : answer;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return HookOutcome.block("permission: interrupted while waiting for user");
+      return PermissionDecision.deny("interrupted while awaiting approval of " + request.reason());
     } catch (CancellationException e) {
-      return HookOutcome.block("permission: cancelled while waiting for user");
+      return PermissionDecision.deny(
+          "approval of " + request.reason() + " cancelled: " + cancellationReason(e));
+    } catch (RuntimeException e) {
+      return PermissionDecision.deny("approver threw on " + request.reason() + ": " + describe(e));
     }
   }
 
   /**
-   * Evaluate a tool call's permission key against the policy. Visible for testing.
+   * Evaluate a tool call's permission key against the policy.
    *
    * @param key the canonical permission key; non-null
    * @param category the tool's category; non-null
-   * @return the resolved decision
+   * @return the resolved decision, carrying the rule that decided if one did
    */
-  public PermissionDecision evaluate(
-      com.standardapplied.helios.session.tools.ToolPermissionKey key, ToolCategory category) {
+  public PermissionDecision evaluate(ToolPermissionKey key, ToolCategory category) {
     Objects.requireNonNull(key, "key must not be null");
     Objects.requireNonNull(category, "category must not be null");
 
     var denied = matcher.firstMatch(key, permission.deny());
     if (denied.isPresent()) {
-      return PermissionDecision.deny("deny rule for " + key.toolName());
+      return byRule(denied.orElseThrow(), key);
     }
     if (permission.mode() == PermissionMode.BYPASS_PERMISSIONS) {
-      return PermissionDecision.allow("BYPASS_PERMISSIONS");
+      return PermissionDecision.allow("BYPASS_PERMISSIONS allows " + describe(key));
     }
     var allowed = matcher.firstMatch(key, permission.allow());
     if (allowed.isPresent()) {
-      return PermissionDecision.allow("allow rule for " + key.toolName());
+      return byRule(allowed.orElseThrow(), key);
     }
     var asked = matcher.firstMatch(key, permission.ask());
     if (asked.isPresent()) {
-      return PermissionDecision.ask("ask rule for " + key.toolName());
+      return byRule(asked.orElseThrow(), key);
     }
-    return defaultForCategory(category, permission.mode(), key.toolName());
+    return defaultForCategory(category, permission.mode(), describe(key));
+  }
+
+  /** The {@code <tool>(<canonical args>)} form of a key, without parentheses for empty args. */
+  static String describe(ToolPermissionKey key) {
+    return key.toolName() + (key.canonicalArgs().isEmpty() ? "" : "(" + key.canonicalArgs() + ")");
+  }
+
+  /**
+   * Why an approval was cancelled. {@link java.util.concurrent.CompletableFuture#get()} rethrows
+   * the cancellation that completed a future as the cause of a new one, so the reason is the
+   * cause's when there is one.
+   */
+  private static String cancellationReason(CancellationException e) {
+    var cause = e.getCause();
+    return cause == null ? e.getMessage() : cause.getMessage();
+  }
+
+  private static String describe(RuntimeException e) {
+    return e.getClass().getName() + ": " + e.getMessage();
+  }
+
+  private static PermissionDecision byRule(PermissionRule rule, ToolPermissionKey key) {
+    var pattern = rule.argPattern().map(glob -> "(" + glob + ")").orElse("");
+    return PermissionDecision.byRule(
+        rule,
+        rule.effect().name().toLowerCase(Locale.ROOT)
+            + " rule "
+            + rule.toolName()
+            + pattern
+            + " matched "
+            + describe(key));
   }
 
   private static PermissionDecision defaultForCategory(
-      ToolCategory category, PermissionMode mode, String toolName) {
+      ToolCategory category, PermissionMode mode, String call) {
     if (mode == PermissionMode.LOCKED_DOWN) {
       return PermissionDecision.deny(
           "LOCKED_DOWN mode forbids "
               + category
               + " by default ("
-              + toolName
+              + call
               + ") — add an explicit allow rule to open this tool");
     }
     return switch (category) {
       case READ, SEARCH ->
           mode == PermissionMode.PLAN
-              ? PermissionDecision.allow("default-allow under PLAN (" + toolName + ")")
-              : PermissionDecision.allow("default-allow READ/SEARCH (" + toolName + ")");
+              ? PermissionDecision.allow("default-allow under PLAN (" + call + ")")
+              : PermissionDecision.allow("default-allow READ/SEARCH (" + call + ")");
       case WRITE ->
           mode == PermissionMode.PLAN
-              ? PermissionDecision.deny("PLAN mode forbids writes (" + toolName + ")")
+              ? PermissionDecision.deny("PLAN mode forbids writes (" + call + ")")
               : mode == PermissionMode.ACCEPT_EDITS
-                  ? PermissionDecision.allow("ACCEPT_EDITS allows writes (" + toolName + ")")
-                  : PermissionDecision.ask("default-ask on WRITE (" + toolName + ")");
+                  ? PermissionDecision.allow("ACCEPT_EDITS allows writes (" + call + ")")
+                  : PermissionDecision.ask("default-ask on WRITE (" + call + ")");
       case EXECUTION ->
           mode == PermissionMode.PLAN
-              ? PermissionDecision.deny("PLAN mode forbids execution (" + toolName + ")")
-              : PermissionDecision.ask("default-ask on EXECUTION (" + toolName + ")");
-      case NETWORK -> PermissionDecision.ask("default-ask on NETWORK (" + toolName + ")");
-      case CONTROL -> PermissionDecision.allow("default-allow CONTROL (" + toolName + ")");
-      case DELEGATION -> PermissionDecision.allow("default-allow DELEGATION (" + toolName + ")");
+              ? PermissionDecision.deny("PLAN mode forbids execution (" + call + ")")
+              : PermissionDecision.ask("default-ask on EXECUTION (" + call + ")");
+      case NETWORK -> PermissionDecision.ask("default-ask on NETWORK (" + call + ")");
+      case CONTROL -> PermissionDecision.allow("default-allow CONTROL (" + call + ")");
+      case DELEGATION -> PermissionDecision.allow("default-allow DELEGATION (" + call + ")");
     };
   }
 
@@ -261,8 +252,7 @@ public final class DefaultPermissionEvaluator implements PreToolUseHook {
 
     private final Permission permission;
     private final ToolRegistry tools;
-    private int priority = 50;
-    private QuestionGateway questionGateway;
+    private ToolApprover approver;
 
     private Builder(Permission permission, ToolRegistry tools) {
       this.permission = Objects.requireNonNull(permission, "permission must not be null");
@@ -270,32 +260,14 @@ public final class DefaultPermissionEvaluator implements PreToolUseHook {
     }
 
     /**
-     * Override the priority at which this evaluator runs in the {@code PreToolUseHook} chain. Lower
-     * numbers fire earlier; the spec's default is 50.
+     * Wire the {@link ToolApprover} that decides ASK calls; without one, ASK refuses.
      *
-     * @param priority non-negative priority
+     * @param approver the approver; non-null
      * @return this builder
-     * @throws IllegalArgumentException if {@code priority} is negative
+     * @throws NullPointerException if {@code approver} is null
      */
-    public Builder withPriority(int priority) {
-      if (priority < 0) {
-        throw new IllegalArgumentException("priority must be non-negative, got " + priority);
-      }
-      this.priority = priority;
-      return this;
-    }
-
-    /**
-     * Wire a {@link QuestionGateway} so ASK decisions surface as {@code AskUserQuestion} prompts
-     * rather than silently falling back to Block.
-     *
-     * @param questionGateway the gateway; non-null
-     * @return this builder
-     * @throws NullPointerException if {@code questionGateway} is null
-     */
-    public Builder withQuestionGateway(QuestionGateway questionGateway) {
-      this.questionGateway =
-          Objects.requireNonNull(questionGateway, "questionGateway must not be null");
+    public Builder withApprover(ToolApprover approver) {
+      this.approver = Objects.requireNonNull(approver, "approver must not be null");
       return this;
     }
 
@@ -305,7 +277,7 @@ public final class DefaultPermissionEvaluator implements PreToolUseHook {
      * @return a fresh evaluator
      */
     public DefaultPermissionEvaluator build() {
-      return new DefaultPermissionEvaluator(permission, tools, priority, questionGateway);
+      return new DefaultPermissionEvaluator(permission, tools, approver);
     }
   }
 }

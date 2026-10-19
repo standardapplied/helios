@@ -18,12 +18,14 @@ import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.permissions.PermissionDecision;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * Runs an {@link AgentLoop} to its terminal with the hooks a hook integration test registers, then
@@ -58,12 +60,28 @@ final class HookLoop implements AutoCloseable {
     return run(model, ToolRegistry.empty(), message, hooks);
   }
 
-  /** Runs the loop over {@code message} with {@code hooks} and {@code tools}. */
+  /**
+   * Runs the loop over {@code message} with {@code hooks} and {@code tools}, admitting every call.
+   */
   ResultMessage run(Model model, ToolRegistry tools, UserMessage message, Hook... hooks) {
+    return run(model, tools, LoopFixture.ADMIT_ALL, message, hooks);
+  }
+
+  /**
+   * Runs the loop over {@code message} with {@code hooks} and {@code tools}, authorizing through
+   * {@code authorization}.
+   */
+  ResultMessage run(
+      Model model,
+      ToolRegistry tools,
+      Function<ToolCall, PermissionDecision> authorization,
+      UserMessage message,
+      Hook... hooks) {
     var queue = new SteeringQueue(8);
     queue.offer(message);
     var collaborators =
-        fixture.collaborators(new HookRegistry(List.of(hooks)), fixture.dispatch(tools), queue);
+        fixture.collaborators(
+            new HookRegistry(List.of(hooks)), fixture.dispatch(tools), authorization, queue);
     return fixture
         .loop(collaborators, model, TokenCounter.charBased(), ContextCompactor.disabled())
         .run(state, SessionLimits.defaults());

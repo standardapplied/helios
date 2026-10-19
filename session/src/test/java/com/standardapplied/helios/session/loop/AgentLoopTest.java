@@ -111,24 +111,57 @@ final class AgentLoopTest {
     assertThrows(
         NullPointerException.class,
         () ->
-            new LoopCollaborators(null, dispatch, queue, events::add, fixture::hookContext, clock));
-    assertThrows(
-        NullPointerException.class,
-        () -> new LoopCollaborators(hooks, null, queue, events::add, fixture::hookContext, clock));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new LoopCollaborators(hooks, dispatch, null, events::add, fixture::hookContext, clock));
-    assertThrows(
-        NullPointerException.class,
-        () -> new LoopCollaborators(hooks, dispatch, queue, null, fixture::hookContext, clock));
-    assertThrows(
-        NullPointerException.class,
-        () -> new LoopCollaborators(hooks, dispatch, queue, events::add, null, clock));
+            new LoopCollaborators(
+                null,
+                dispatch,
+                LoopFixture.ADMIT_ALL,
+                queue,
+                events::add,
+                fixture::hookContext,
+                clock));
     assertThrows(
         NullPointerException.class,
         () ->
-            new LoopCollaborators(hooks, dispatch, queue, events::add, fixture::hookContext, null));
+            new LoopCollaborators(
+                hooks,
+                null,
+                LoopFixture.ADMIT_ALL,
+                queue,
+                events::add,
+                fixture::hookContext,
+                clock));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new LoopCollaborators(
+                hooks,
+                dispatch,
+                LoopFixture.ADMIT_ALL,
+                null,
+                events::add,
+                fixture::hookContext,
+                clock));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new LoopCollaborators(
+                hooks, dispatch, LoopFixture.ADMIT_ALL, queue, null, fixture::hookContext, clock));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new LoopCollaborators(
+                hooks, dispatch, LoopFixture.ADMIT_ALL, queue, events::add, null, clock));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new LoopCollaborators(
+                hooks,
+                dispatch,
+                LoopFixture.ADMIT_ALL,
+                queue,
+                events::add,
+                fixture::hookContext,
+                null));
     assertThrows(
         NullPointerException.class,
         () -> new AgentLoop(collaborators, runner, classifier, null, compactor));
@@ -321,6 +354,7 @@ final class AgentLoopTest {
             new LoopCollaborators(
                 hooks,
                 dispatch,
+                LoopFixture.ADMIT_ALL,
                 queue,
                 e -> {
                   throw new RuntimeException("sink boom");

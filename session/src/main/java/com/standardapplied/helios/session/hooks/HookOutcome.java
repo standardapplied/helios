@@ -141,9 +141,9 @@ public sealed interface HookOutcome
   }
 
   /**
-   * Replace tool arguments at {@link PreToolUseHook}. Arguments {@link JsonSnapshot} rejects throw
-   * {@link IllegalArgumentException}; thrown from a hook, that makes the hook's outcome {@link
-   * Continue}.
+   * Replace tool arguments at {@link PreToolUseHook}; the next hook of the chain sees the call with
+   * these arguments. Arguments {@link JsonSnapshot} rejects throw {@link IllegalArgumentException};
+   * thrown from a hook, like any exception, that refuses the call.
    *
    * @param args the replacement arguments; non-null, a JSON object snapshotted as {@link
    *     JsonSnapshot} defines it
