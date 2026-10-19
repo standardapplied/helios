@@ -832,6 +832,10 @@ stage and ends `NotFound`, as without a policy.
   `java.lang.reflect` denied, a reference to `java.lang.reflect.Method` was labelled with either
   package depending on the JVM run. It is now labelled with the most specific one,
   `deniedPackages:java.lang.reflect`.
+- **A permission rule's wildcards stopped at a line break.** `RuleMatcher` compiled a rule's `*`
+  and `**` to a pattern whose `.` did not match a line terminator, so a deny rule missed a key
+  holding one: `Write(/etc/**)` did not match `Write(/etc/cron.d/x\ny)`, and the mode's default,
+  such as `ACCEPT_EDITS`, allowed the write. A rule's wildcards now match across line terminators.
 
 ### Security
 
