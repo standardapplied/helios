@@ -64,9 +64,10 @@ final class LoopFixture implements AutoCloseable {
         state.sessionId(), state.currentTurnIndex(), state.cancellation(), hookModel);
   }
 
-  /** Collaborators that emit into {@link #events}, on this fixture's clock. */
+  /** Collaborators that admit every call and emit into {@link #events}, on this fixture's clock. */
   LoopCollaborators collaborators(HookRegistry hooks, ToolDispatch dispatch, SteeringQueue queue) {
-    return new LoopCollaborators(hooks, dispatch, queue, events::add, this::hookContext, clock);
+    return new LoopCollaborators(
+        hooks, dispatch, Authorizations.ADMIT_ALL, queue, events::add, this::hookContext, clock);
   }
 
   /** A runner of {@code model} with no costs and no output schema. */

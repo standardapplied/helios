@@ -36,17 +36,19 @@ public sealed interface Hook
    * com.standardapplied.helios.session.QueryEvent.ToolBlocked ToolBlocked} and {@link
    * com.standardapplied.helios.session.QueryEvent.ToolMutated ToolMutated} events. {@link
    * HookRegistry} reads it once, when it is built, and uses that name for the hook's lifetime; it
-   * rejects a null or blank name, so a session with such a hook fails to be created. Each phase
-   * interface defaults it to the implementing class's simple name, or to its binary name (e.g.
-   * {@code com.acme.Policies$1}) for an anonymous class.
+   * rejects a null or blank name and the reserved {@link
+   * com.standardapplied.helios.session.permissions.Permission#NAME Permission}, so a session with
+   * such a hook fails to be created. Each phase interface defaults it to the implementing class's
+   * simple name, or to its binary name (e.g. {@code com.acme.Policies$1}) for an anonymous class.
    *
    * @return non-blank, non-null identifier
    */
   String name();
 
   /**
-   * Firing priority. Lower values fire earlier. The default is {@code 100}; permission hooks
-   * conventionally use {@code 50} so they evaluate before user-supplied hooks.
+   * Firing priority. Lower values fire earlier. The default is {@code 100}. The session's
+   * permission check is not a hook: it runs after every {@code PreToolUse} hook, whatever its
+   * priority.
    *
    * @return non-negative priority
    */

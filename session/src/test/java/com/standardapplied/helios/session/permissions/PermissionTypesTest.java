@@ -9,10 +9,16 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 final class PermissionTypesTest {
 
@@ -149,6 +155,25 @@ final class PermissionTypesTest {
     assertEquals("deny must not be null", ex.getMessage());
   }
 
+  @ParameterizedTest(name = "{0} in the {1} list")
+  @CsvSource({"DENY, allow", "ASK, allow", "ALLOW, ask", "DENY, ask", "ALLOW, deny", "ASK, deny"})
+  void permissionRejectsARuleWhoseEffectIsNotItsLists(PermissionEffect effect, String list) {
+    var rule = List.of(PermissionRule.any(effect, "Write"));
+    List<PermissionRule> none = List.of();
+
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new Permission(
+                    PermissionMode.LOCKED_DOWN,
+                    list.equals("allow") ? rule : none,
+                    list.equals("ask") ? rule : none,
+                    list.equals("deny") ? rule : none));
+    assertEquals(
+        "the " + list + " list holds a rule for Write whose effect is " + effect, ex.getMessage());
+  }
+
   @Test
   void defaultInWorkspaceExposesExpectedRules() {
     var p = Permission.defaultInWorkspace();
@@ -218,8 +243,40 @@ final class PermissionTypesTest {
   }
 
   @Test
+  void decisionFactoriesCarryNoRule() {
+    assertEquals(Optional.empty(), PermissionDecision.allow("ok").rule());
+    assertEquals(Optional.empty(), PermissionDecision.ask("confirm").rule());
+    assertEquals(Optional.empty(), PermissionDecision.deny("nope").rule());
+  }
+
+  @Test
+  void aDecisionByARuleTakesTheRulesEffect() {
+    var rule = PermissionRule.withGlob(PermissionEffect.ASK, "Write", "/tmp/**");
+    assertEquals(
+        new PermissionDecision(PermissionEffect.ASK, "asked", Optional.of(rule)),
+        PermissionDecision.byRule(rule, "asked"));
+  }
+
+  @Test
+  void aDecisionByARuleRejectsANullRule() {
+    var ex = assertThrows(NullPointerException.class, () -> PermissionDecision.byRule(null, "r"));
+    assertEquals("rule must not be null", ex.getMessage());
+  }
+
+  @Test
+  void decisionRejectsNullRule() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new PermissionDecision(PermissionEffect.ALLOW, "r", null));
+    assertEquals("rule must not be null", ex.getMessage());
+  }
+
+  @Test
   void decisionRejectsNullEffect() {
-    var ex = assertThrows(NullPointerException.class, () -> new PermissionDecision(null, "r"));
+    var ex =
+        assertThrows(
+            NullPointerException.class, () -> new PermissionDecision(null, "r", Optional.empty()));
     assertEquals("effect must not be null", ex.getMessage());
   }
 
@@ -227,7 +284,8 @@ final class PermissionTypesTest {
   void decisionRejectsNullReason() {
     var ex =
         assertThrows(
-            NullPointerException.class, () -> new PermissionDecision(PermissionEffect.ALLOW, null));
+            NullPointerException.class,
+            () -> new PermissionDecision(PermissionEffect.ALLOW, null, Optional.empty()));
     assertEquals("reason must not be null", ex.getMessage());
   }
 
@@ -236,7 +294,57 @@ final class PermissionTypesTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new PermissionDecision(PermissionEffect.ALLOW, "  "));
+            () -> new PermissionDecision(PermissionEffect.ALLOW, "  ", Optional.empty()));
+    assertEquals("reason must not be blank", ex.getMessage());
+  }
+
+  // ── ApprovalRequest ──────────────────────────────────────────────────────
+
+  private static final ToolCall CALL = new ToolCall("c", "Write", Map.of("path", "/tmp/a"));
+  private static final ToolPermissionKey KEY = new ToolPermissionKey("Write", "/tmp/a");
+
+  @Test
+  void anApprovalRequestRejectsANullComponent() {
+    var none = Optional.<PermissionRule>empty();
+    var write = ToolCategory.WRITE;
+    assertEquals(
+        "call must not be null",
+        assertThrows(
+                NullPointerException.class,
+                () -> new ApprovalRequest(null, KEY, write, none, "asked"))
+            .getMessage());
+    assertEquals(
+        "key must not be null",
+        assertThrows(
+                NullPointerException.class,
+                () -> new ApprovalRequest(CALL, null, write, none, "asked"))
+            .getMessage());
+    assertEquals(
+        "category must not be null",
+        assertThrows(
+                NullPointerException.class,
+                () -> new ApprovalRequest(CALL, KEY, null, none, "asked"))
+            .getMessage());
+    assertEquals(
+        "rule must not be null",
+        assertThrows(
+                NullPointerException.class,
+                () -> new ApprovalRequest(CALL, KEY, write, null, "asked"))
+            .getMessage());
+    assertEquals(
+        "reason must not be null",
+        assertThrows(
+                NullPointerException.class, () -> new ApprovalRequest(CALL, KEY, write, none, null))
+            .getMessage());
+  }
+
+  @Test
+  void anApprovalRequestRejectsABlankReason() {
+    var none = Optional.<PermissionRule>empty();
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new ApprovalRequest(CALL, KEY, ToolCategory.WRITE, none, " "));
     assertEquals("reason must not be blank", ex.getMessage());
   }
 }

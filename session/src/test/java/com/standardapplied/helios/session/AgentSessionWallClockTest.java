@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import com.standardapplied.helios.core.model.BlockingModel;
@@ -16,6 +17,8 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
 import org.junit.jupiter.api.Test;
 
@@ -38,9 +41,10 @@ final class AgentSessionWallClockTest {
 
   @Test
   void maxWallClockTerminatesHangingChatStream() {
+    var token = new CompletableFuture<CancellationToken>();
     var options =
         SessionOptions.newBuilder()
-            .withModel(hangingChatStreamModel())
+            .withModel(hangingChatStreamModel(token))
             .withSessionId("sess-hang-wallclock")
             .withLimits(
                 SessionLimits.newBuilder()
@@ -62,11 +66,14 @@ final class AgentSessionWallClockTest {
                   + ": "
                   + terminal);
     }
+    assertEquals(
+        Optional.of("maxWallClock exceeded after 500ms"),
+        Await.value("the model's token", token).reason());
   }
 
   // ── inline Model whose chatStream hangs forever ──────────────────────────
 
-  private static Model hangingChatStreamModel() {
+  private static Model hangingChatStreamModel(CompletableFuture<CancellationToken> token) {
     return new BlockingModel() {
       @Override
       public Response<Void> chat(List<Message> messages, List<Tool> tools) {
@@ -76,6 +83,7 @@ final class AgentSessionWallClockTest {
       @Override
       public Flow.Publisher<ModelChunk> chatStream(
           List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
+        token.complete(cancellation);
         return subscriber ->
             subscriber.onSubscribe(
                 new Flow.Subscription() {

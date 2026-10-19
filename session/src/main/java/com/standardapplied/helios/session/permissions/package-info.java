@@ -16,15 +16,15 @@
  * com.standardapplied.helios.session.permissions.RuleMatcher} translates globs to anchored regexes
  * once at construction.
  *
- * <p>{@link com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator} packages the
- * policy as a {@link com.standardapplied.helios.session.hooks.PreToolUseHook} at priority {@code
- * 50} (before user hooks). The evaluator translates a call into a {@link
- * com.standardapplied.helios.session.permissions.PermissionDecision}, which becomes a {@link
- * com.standardapplied.helios.session.hooks.HookOutcome}: {@code ALLOW → Continue}, {@code DENY →
- * Block}, {@code ASK → AskUserQuestion} via the session's {@link
- * com.standardapplied.helios.session.ask.QuestionGateway} (or fallback {@code Block} when no
- * gateway is wired). Build with {@code DefaultPermissionEvaluator.newBuilder(perm,
- * tools).withQuestionGateway(gw) .build()}.
+ * <p>{@link com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator} enforces the
+ * policy as a fixed stage of tool dispatch, after every {@code PreToolUse} hook, so no hook can
+ * reorder, skip or follow it. It turns the final call into a {@link
+ * com.standardapplied.helios.session.permissions.PermissionDecision}: {@code ALLOW} runs the call,
+ * {@code DENY} refuses it, and {@code ASK} refers it to a {@link
+ * com.standardapplied.helios.session.permissions.ToolApprover}, by default {@link
+ * com.standardapplied.helios.session.permissions.ToolApprover#askingUser} over the session's {@link
+ * com.standardapplied.helios.session.ask.QuestionGateway}. With no approver, ASK refuses. Build
+ * with {@code DefaultPermissionEvaluator.newBuilder(perm, tools).withApprover(approver) .build()}.
  *
  * <p>Two curated policies live as static factories on {@code Permission}: {@code
  * defaultInWorkspace()} (reads + memory allowed, writes / edit / execute asked) and {@code

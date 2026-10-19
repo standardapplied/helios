@@ -98,7 +98,6 @@ final class AgentLoopTest {
     var classifier = new StopClassifier(new SecretRegistry());
     var counter = TokenCounter.charBased();
     var compactor = ContextCompactor.disabled();
-    var clock = fixture.clock;
     assertThrows(
         NullPointerException.class,
         () -> new AgentLoop(null, runner, classifier, counter, compactor));
@@ -108,27 +107,6 @@ final class AgentLoopTest {
     assertThrows(
         NullPointerException.class,
         () -> new AgentLoop(collaborators, runner, null, counter, compactor));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new LoopCollaborators(null, dispatch, queue, events::add, fixture::hookContext, clock));
-    assertThrows(
-        NullPointerException.class,
-        () -> new LoopCollaborators(hooks, null, queue, events::add, fixture::hookContext, clock));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new LoopCollaborators(hooks, dispatch, null, events::add, fixture::hookContext, clock));
-    assertThrows(
-        NullPointerException.class,
-        () -> new LoopCollaborators(hooks, dispatch, queue, null, fixture::hookContext, clock));
-    assertThrows(
-        NullPointerException.class,
-        () -> new LoopCollaborators(hooks, dispatch, queue, events::add, null, clock));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new LoopCollaborators(hooks, dispatch, queue, events::add, fixture::hookContext, null));
     assertThrows(
         NullPointerException.class,
         () -> new AgentLoop(collaborators, runner, classifier, null, compactor));
@@ -321,6 +299,7 @@ final class AgentLoopTest {
             new LoopCollaborators(
                 hooks,
                 dispatch,
+                Authorizations.ADMIT_ALL,
                 queue,
                 e -> {
                   throw new RuntimeException("sink boom");

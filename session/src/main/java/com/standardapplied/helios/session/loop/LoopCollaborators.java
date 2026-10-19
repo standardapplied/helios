@@ -3,10 +3,12 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.permissions.PermissionDecision;
 import java.time.Clock;
 import java.time.InstantSource;
 import java.util.Objects;
@@ -20,6 +22,9 @@ import java.util.function.Function;
  *
  * @param hooks priority-sorted hook registry; non-null
  * @param toolDispatch dispatcher for the tool calls the model emits; non-null
+ * @param authorization the mandatory permission check of every call of a registered tool, run on
+ *     the call the {@code PreToolUse} hooks leave; only an {@code ALLOW} decision runs the call,
+ *     and anything else, {@code null} or a thrown exception refuses it; non-null
  * @param steeringQueue per-session inbox the loop drains and into which {@code Inject} outcomes
  *     queue synthetic user messages; non-null
  * @param eventSink consumer for every {@link QueryEvent} the loop emits; non-null
@@ -29,6 +34,7 @@ import java.util.function.Function;
 public record LoopCollaborators(
     HookRegistry hooks,
     ToolDispatch toolDispatch,
+    Function<ToolCall, PermissionDecision> authorization,
     SteeringQueue steeringQueue,
     Consumer<QueryEvent> eventSink,
     Function<SessionState, HookContext> hookContextFactory,
@@ -42,6 +48,7 @@ public record LoopCollaborators(
   public LoopCollaborators {
     Objects.requireNonNull(hooks, "hooks must not be null");
     Objects.requireNonNull(toolDispatch, "toolDispatch must not be null");
+    Objects.requireNonNull(authorization, "authorization must not be null");
     Objects.requireNonNull(steeringQueue, "steeringQueue must not be null");
     Objects.requireNonNull(eventSink, "eventSink must not be null");
     Objects.requireNonNull(hookContextFactory, "hookContextFactory must not be null");
@@ -75,6 +82,7 @@ public record LoopCollaborators(
 
     private HookRegistry hooks;
     private ToolDispatch toolDispatch;
+    private Function<ToolCall, PermissionDecision> authorization;
     private SteeringQueue steeringQueue;
     private Consumer<QueryEvent> eventSink;
     private Function<SessionState, HookContext> hookContextFactory;
@@ -101,6 +109,17 @@ public record LoopCollaborators(
      */
     public Builder withToolDispatch(ToolDispatch toolDispatch) {
       this.toolDispatch = toolDispatch;
+      return this;
+    }
+
+    /**
+     * Set the permission check every tool call passes before it runs.
+     *
+     * @param authorization non-null
+     * @return this builder
+     */
+    public Builder withAuthorization(Function<ToolCall, PermissionDecision> authorization) {
+      this.authorization = authorization;
       return this;
     }
 
@@ -156,7 +175,7 @@ public record LoopCollaborators(
      */
     public LoopCollaborators build() {
       return new LoopCollaborators(
-          hooks, toolDispatch, steeringQueue, eventSink, hookContextFactory, clock);
+          hooks, toolDispatch, authorization, steeringQueue, eventSink, hookContextFactory, clock);
     }
   }
 }

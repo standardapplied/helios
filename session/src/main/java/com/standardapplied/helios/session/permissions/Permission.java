@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session.permissions;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -30,18 +31,42 @@ public record Permission(
     List<PermissionRule> deny) {
 
   /**
-   * Canonical constructor; defensively copies all three rule lists.
+   * The name a refusal by the permission policy carries as its {@code by}, in its {@code Rejected}
+   * outcome and {@code ToolBlocked} event; reserved, so no hook may take it.
+   */
+  public static final String NAME = "Permission";
+
+  /**
+   * Canonical constructor; defensively copies all three rule lists. A matched rule decides with its
+   * own effect, so each list holds only rules of its effect.
    *
    * @throws NullPointerException if any argument is null or any list contains null elements
+   * @throws IllegalArgumentException if a rule's effect is not its list's
    */
   public Permission {
     Objects.requireNonNull(mode, "mode must not be null");
     Objects.requireNonNull(allow, "allow must not be null");
     Objects.requireNonNull(ask, "ask must not be null");
     Objects.requireNonNull(deny, "deny must not be null");
-    allow = List.copyOf(allow);
-    ask = List.copyOf(ask);
-    deny = List.copyOf(deny);
+    allow = rulesOf(PermissionEffect.ALLOW, allow);
+    ask = rulesOf(PermissionEffect.ASK, ask);
+    deny = rulesOf(PermissionEffect.DENY, deny);
+  }
+
+  private static List<PermissionRule> rulesOf(PermissionEffect effect, List<PermissionRule> rules) {
+    var copy = List.copyOf(rules);
+    for (var rule : copy) {
+      if (rule.effect() != effect) {
+        throw new IllegalArgumentException(
+            "the "
+                + effect.name().toLowerCase(Locale.ROOT)
+                + " list holds a rule for "
+                + rule.toolName()
+                + " whose effect is "
+                + rule.effect());
+      }
+    }
+    return copy;
   }
 
   /**

@@ -5,54 +5,36 @@
 package com.standardapplied.helios.session.permissions;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.BlockingModel;
-import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.hooks.DefaultHookContext;
-import com.standardapplied.helios.session.hooks.HookContext;
-import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.ask.AskUserQuestionOption;
+import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
+import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
+import com.standardapplied.helios.session.ask.QuestionGateway;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 final class DefaultPermissionEvaluatorTest {
 
-  private static final Model STUB_MODEL =
-      new BlockingModel() {
-        @Override
-        public Response<Void> chat(
-            List<Message> messages, List<com.standardapplied.helios.core.tool.Tool> tools) {
-          return Response.newBuilder().build();
-        }
-
-        @Override
-        public String id() {
-          return "stub";
-        }
-
-        @Override
-        public String provider() {
-          return "stub";
-        }
-      };
-
-  private static HookContext ctx() {
-    return new DefaultHookContext("sess", 0, new CancellationToken(), STUB_MODEL);
-  }
+  private static final PermissionRule ASK_WRITE =
+      PermissionRule.withGlob(PermissionEffect.ASK, "Write", "/tmp/**");
 
   private static Tool tool(String name) {
     return Tool.newBuilder()
@@ -66,7 +48,7 @@ final class DefaultPermissionEvaluatorTest {
     return ToolBinding.newBuilder(tool(name)).withCategory(category).build();
   }
 
-  private static ToolBinding bindingWithPathKey(String name, ToolCategory category) {
+  private static ToolBinding pathKeyed(String name, ToolCategory category) {
     return ToolBinding.newBuilder(tool(name))
         .withCategory(category)
         .withPermissionKeyExtractor(
@@ -74,48 +56,44 @@ final class DefaultPermissionEvaluatorTest {
         .build();
   }
 
+  private static ToolRegistry tools(ToolBinding... bindings) {
+    return new ToolRegistry(List.of(bindings));
+  }
+
+  private static Permission rules(
+      PermissionMode mode,
+      List<PermissionRule> allow,
+      List<PermissionRule> ask,
+      List<PermissionRule> deny) {
+    return new Permission(mode, allow, ask, deny);
+  }
+
+  private static ToolCall call(String name) {
+    return new ToolCall("c", name, Map.of());
+  }
+
+  private static ToolCall writeCall(String path) {
+    return new ToolCall("c", "Write", Map.of("path", path));
+  }
+
+  private static DefaultPermissionEvaluator evaluator(Permission permission, ToolRegistry tools) {
+    return DefaultPermissionEvaluator.newBuilder(permission, tools).build();
+  }
+
+  /** An evaluator whose ask rule {@link #ASK_WRITE} goes to {@code approver}. */
+  private static DefaultPermissionEvaluator asking(ToolApprover approver) {
+    return DefaultPermissionEvaluator.newBuilder(
+            rules(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()),
+            tools(pathKeyed("Write", ToolCategory.WRITE)))
+        .withApprover(approver)
+        .build();
+  }
+
   // ── construction ─────────────────────────────────────────────────────────
 
   @Test
-  void constructorRejectsNullPermission() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new DefaultPermissionEvaluator(null, ToolRegistry.empty()));
-    assertEquals("permission must not be null", ex.getMessage());
-  }
-
-  @Test
-  void constructorRejectsNullTools() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new DefaultPermissionEvaluator(Permission.defaultInWorkspace(), null));
-    assertEquals("tools must not be null", ex.getMessage());
-  }
-
-  @Test
-  void builderRejectsNegativePriority() {
-    var b =
-        DefaultPermissionEvaluator.newBuilder(
-            Permission.defaultInWorkspace(), ToolRegistry.empty());
-    var ex = assertThrows(IllegalArgumentException.class, () -> b.withPriority(-1));
-    assertEquals("priority must be non-negative, got -1", ex.getMessage());
-  }
-
-  @Test
-  void defaultPriorityIsFifty() {
-    var e = new DefaultPermissionEvaluator(Permission.defaultInWorkspace(), ToolRegistry.empty());
-    assertEquals(50, e.priority());
-  }
-
-  @Test
-  void builderCustomPriorityRetained() {
-    var e =
-        DefaultPermissionEvaluator.newBuilder(Permission.defaultInWorkspace(), ToolRegistry.empty())
-            .withPriority(25)
-            .build();
-    assertEquals(25, e.priority());
+  void anEvaluatorIsBuiltOnlyThroughItsBuilder() {
+    assertEquals(List.of(), List.of(DefaultPermissionEvaluator.class.getConstructors()));
   }
 
   @Test
@@ -137,340 +115,452 @@ final class DefaultPermissionEvaluatorTest {
   }
 
   @Test
-  void builderRejectsNullQuestionGateway() {
+  void builderRejectsNullApprover() {
     var b =
         DefaultPermissionEvaluator.newBuilder(
             Permission.defaultInWorkspace(), ToolRegistry.empty());
-    var ex = assertThrows(NullPointerException.class, () -> b.withQuestionGateway(null));
-    assertEquals("questionGateway must not be null", ex.getMessage());
+    var ex = assertThrows(NullPointerException.class, () -> b.withApprover(null));
+    assertEquals("approver must not be null", ex.getMessage());
   }
 
   @Test
-  void builderWithAllOptionsAppliesEverySetter() {
-    // Exercise every Builder setter in one go so a missed default propagation surfaces here.
-    var perm = Permission.defaultInWorkspace();
-    var tools = ToolRegistry.empty();
-    var gateway =
-        new com.standardapplied.helios.session.ask.QuestionGateway() {
-          @Override
-          public com.standardapplied.helios.session.ask.AskUserQuestionResponse ask(
-              com.standardapplied.helios.session.ask.AskUserQuestionRequest request) {
-            throw new UnsupportedOperationException("not invoked by this test");
-          }
-        };
-    var e =
-        DefaultPermissionEvaluator.newBuilder(perm, tools)
-            .withPriority(12)
-            .withQuestionGateway(gateway)
-            .build();
-    assertSame(perm, e.permission());
-    assertEquals(12, e.priority());
-    // Gateway presence drives the ASK code path; cover via the dedicated ASK tests elsewhere.
-  }
-
-  @Test
-  void nameIsClassSimpleName() {
-    var e = new DefaultPermissionEvaluator(Permission.defaultInWorkspace(), ToolRegistry.empty());
-    assertEquals("DefaultPermissionEvaluator", e.name());
+  void builderRejectsNullSecretRegistry() {
+    var b =
+        DefaultPermissionEvaluator.newBuilder(
+            Permission.defaultInWorkspace(), ToolRegistry.empty());
+    var ex = assertThrows(NullPointerException.class, () -> b.withSecretRegistry(null));
+    assertEquals("secrets must not be null", ex.getMessage());
   }
 
   @Test
   void permissionAccessorReturnsConstructorValue() {
     var perm = Permission.defaultInWorkspace();
-    var e = new DefaultPermissionEvaluator(perm, ToolRegistry.empty());
-    assertSame(perm, e.permission());
-  }
-
-  // ── beforeTool: unknown tool falls through ────────────────────────────────
-
-  @Test
-  void unknownToolReturnsContinue() {
-    var e = new DefaultPermissionEvaluator(Permission.defaultInWorkspace(), ToolRegistry.empty());
-    var outcome = e.beforeTool(new ToolCall("c", "unknown", Map.of()), ctx());
-    assertInstanceOf(HookOutcome.Continue.class, outcome);
+    assertSame(perm, evaluator(perm, ToolRegistry.empty()).permission());
   }
 
   @Test
-  void beforeToolRejectsNullCall() {
-    var e = new DefaultPermissionEvaluator(Permission.defaultInWorkspace(), ToolRegistry.empty());
-    assertThrows(NullPointerException.class, () -> e.beforeTool(null, ctx()));
+  void authorizeRejectsNullCall() {
+    var e = evaluator(Permission.defaultInWorkspace(), ToolRegistry.empty());
+    assertThrows(NullPointerException.class, () -> e.authorize(null));
   }
-
-  @Test
-  void beforeToolRejectsNullCtx() {
-    var e = new DefaultPermissionEvaluator(Permission.defaultInWorkspace(), ToolRegistry.empty());
-    var call = new ToolCall("c", "x", Map.of());
-    assertThrows(NullPointerException.class, () -> e.beforeTool(call, null));
-  }
-
-  // ── deny rules win first ─────────────────────────────────────────────────
-
-  @Test
-  void denyRuleBlocksEvenWithAllowMatch() {
-    var perm =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.any(PermissionEffect.ALLOW, "Read")),
-            List.of(),
-            List.of(PermissionRule.any(PermissionEffect.DENY, "Read")));
-    var tools = new ToolRegistry(List.of(binding("Read", ToolCategory.READ)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    var outcome = e.beforeTool(new ToolCall("c", "Read", Map.of()), ctx());
-    var block = assertInstanceOf(HookOutcome.Block.class, outcome);
-    assertTrue(block.reason().contains("deny rule"));
-  }
-
-  // ── BYPASS_PERMISSIONS skips rules ──────────────────────────────────────
-
-  @Test
-  void bypassPermissionsAllowsEverythingExceptDeny() {
-    var perm = Permission.empty(PermissionMode.BYPASS_PERMISSIONS);
-    var tools = new ToolRegistry(List.of(binding("Execute", ToolCategory.EXECUTION)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    var outcome = e.beforeTool(new ToolCall("c", "Execute", Map.of()), ctx());
-    assertInstanceOf(HookOutcome.Continue.class, outcome);
-  }
-
-  @Test
-  void bypassPermissionsRespectsExplicitDeny() {
-    var perm =
-        new Permission(
-            PermissionMode.BYPASS_PERMISSIONS,
-            List.of(),
-            List.of(),
-            List.of(PermissionRule.any(PermissionEffect.DENY, "Execute")));
-    var tools = new ToolRegistry(List.of(binding("Execute", ToolCategory.EXECUTION)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    var outcome = e.beforeTool(new ToolCall("c", "Execute", Map.of()), ctx());
-    assertInstanceOf(HookOutcome.Block.class, outcome);
-  }
-
-  // ── allow rule ───────────────────────────────────────────────────────────
-
-  @Test
-  void allowRuleProducesContinue() {
-    var perm =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.any(PermissionEffect.ALLOW, "Read")),
-            List.of(),
-            List.of());
-    var tools = new ToolRegistry(List.of(binding("Read", ToolCategory.READ)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    var outcome = e.beforeTool(new ToolCall("c", "Read", Map.of()), ctx());
-    assertInstanceOf(HookOutcome.Continue.class, outcome);
-  }
-
-  @Test
-  void allowRuleWithGlobMatchesPath() {
-    var perm =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "/workspace/**")),
-            List.of(),
-            List.of());
-    var tools = new ToolRegistry(List.of(bindingWithPathKey("Read", ToolCategory.READ)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    var outcome =
-        e.beforeTool(new ToolCall("c", "Read", Map.of("path", "/workspace/foo.txt")), ctx());
-    assertInstanceOf(HookOutcome.Continue.class, outcome);
-  }
-
-  @Test
-  void allowRuleGlobMissBlocksViaDefaultPolicy() {
-    var perm =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "/workspace/**")),
-            List.of(),
-            List.of());
-    var tools = new ToolRegistry(List.of(bindingWithPathKey("Read", ToolCategory.READ)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    // /etc/foo.txt doesn't match /workspace/** → falls through to default category policy →
-    // READ → Continue.
-    var outcome = e.beforeTool(new ToolCall("c", "Read", Map.of("path", "/etc/foo.txt")), ctx());
-    assertInstanceOf(HookOutcome.Continue.class, outcome);
-  }
-
-  // ── ask rule → Block in Phase 2 ─────────────────────────────────────────
-
-  @Test
-  void askRuleFallsBackToBlockUntilPhase2Part5() {
-    var perm =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(),
-            List.of(PermissionRule.any(PermissionEffect.ASK, "Write")),
-            List.of());
-    var tools = new ToolRegistry(List.of(binding("Write", ToolCategory.WRITE)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    var outcome = e.beforeTool(new ToolCall("c", "Write", Map.of()), ctx());
-    var block = assertInstanceOf(HookOutcome.Block.class, outcome);
-    assertTrue(block.reason().contains("ASK rule without handler"));
-  }
-
-  // ── default-by-category ─────────────────────────────────────────────────
-
-  @Test
-  void defaultReadIsAllowedUnderDEFAULTMode() {
-    var perm = Permission.empty(PermissionMode.DEFAULT);
-    var tools = new ToolRegistry(List.of(binding("Read", ToolCategory.READ)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    assertInstanceOf(
-        HookOutcome.Continue.class, e.beforeTool(new ToolCall("c", "Read", Map.of()), ctx()));
-  }
-
-  @Test
-  void defaultSearchIsAllowedUnderDEFAULTMode() {
-    var perm = Permission.empty(PermissionMode.DEFAULT);
-    var tools = new ToolRegistry(List.of(binding("KbSearch", ToolCategory.SEARCH)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    assertInstanceOf(
-        HookOutcome.Continue.class, e.beforeTool(new ToolCall("c", "KbSearch", Map.of()), ctx()));
-  }
-
-  @Test
-  void defaultWriteIsAskUnderDEFAULTMode() {
-    var perm = Permission.empty(PermissionMode.DEFAULT);
-    var tools = new ToolRegistry(List.of(binding("Write", ToolCategory.WRITE)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    // ASK without handler → Block.
-    assertInstanceOf(
-        HookOutcome.Block.class, e.beforeTool(new ToolCall("c", "Write", Map.of()), ctx()));
-  }
-
-  @Test
-  void defaultWriteIsAllowedUnderACCEPT_EDITSMode() {
-    var perm = Permission.empty(PermissionMode.ACCEPT_EDITS);
-    var tools = new ToolRegistry(List.of(binding("Write", ToolCategory.WRITE)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    assertInstanceOf(
-        HookOutcome.Continue.class, e.beforeTool(new ToolCall("c", "Write", Map.of()), ctx()));
-  }
-
-  @Test
-  void defaultWriteIsDeniedUnderPLANMode() {
-    var perm = Permission.empty(PermissionMode.PLAN);
-    var tools = new ToolRegistry(List.of(binding("Write", ToolCategory.WRITE)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    var outcome = e.beforeTool(new ToolCall("c", "Write", Map.of()), ctx());
-    var block = assertInstanceOf(HookOutcome.Block.class, outcome);
-    assertTrue(block.reason().contains("PLAN mode forbids writes"));
-  }
-
-  @Test
-  void defaultExecutionIsAskUnderDEFAULTMode() {
-    var perm = Permission.empty(PermissionMode.DEFAULT);
-    var tools = new ToolRegistry(List.of(binding("Execute", ToolCategory.EXECUTION)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    assertInstanceOf(
-        HookOutcome.Block.class, e.beforeTool(new ToolCall("c", "Execute", Map.of()), ctx()));
-  }
-
-  @Test
-  void defaultExecutionIsDeniedUnderPLAN() {
-    var perm = Permission.empty(PermissionMode.PLAN);
-    var tools = new ToolRegistry(List.of(binding("Execute", ToolCategory.EXECUTION)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    var outcome = e.beforeTool(new ToolCall("c", "Execute", Map.of()), ctx());
-    var block = assertInstanceOf(HookOutcome.Block.class, outcome);
-    assertTrue(block.reason().contains("PLAN mode forbids execution"));
-  }
-
-  @Test
-  void defaultNetworkIsAsk() {
-    var perm = Permission.empty(PermissionMode.DEFAULT);
-    var tools = new ToolRegistry(List.of(binding("Fetch", ToolCategory.NETWORK)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    assertInstanceOf(
-        HookOutcome.Block.class, e.beforeTool(new ToolCall("c", "Fetch", Map.of()), ctx()));
-  }
-
-  @Test
-  void defaultControlIsAllow() {
-    var perm = Permission.empty(PermissionMode.DEFAULT);
-    var tools = new ToolRegistry(List.of(binding("Ask", ToolCategory.CONTROL)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    assertInstanceOf(
-        HookOutcome.Continue.class, e.beforeTool(new ToolCall("c", "Ask", Map.of()), ctx()));
-  }
-
-  @Test
-  void defaultDelegationIsAllow() {
-    var perm = Permission.empty(PermissionMode.DEFAULT);
-    var tools = new ToolRegistry(List.of(binding("SubAgent", ToolCategory.DELEGATION)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    assertInstanceOf(
-        HookOutcome.Continue.class, e.beforeTool(new ToolCall("c", "SubAgent", Map.of()), ctx()));
-  }
-
-  // ── evaluate() direct ────────────────────────────────────────────────────
 
   @Test
   void evaluateRejectsNullArgs() {
-    var e = new DefaultPermissionEvaluator(Permission.defaultInWorkspace(), ToolRegistry.empty());
+    var e = evaluator(Permission.defaultInWorkspace(), ToolRegistry.empty());
     assertThrows(NullPointerException.class, () -> e.evaluate(null, ToolCategory.READ));
     assertThrows(NullPointerException.class, () -> e.evaluate(ToolPermissionKey.of("Read"), null));
   }
 
-  // ── LOCKED_DOWN ──────────────────────────────────────────────────────────
+  // ── fail closed ──────────────────────────────────────────────────────────
 
   @Test
-  void lockedDownDeniesEveryCategoryByDefault() {
-    var perm = Permission.empty(PermissionMode.LOCKED_DOWN);
-    var tools =
-        new ToolRegistry(
-            List.of(
-                binding("Read", ToolCategory.READ),
-                binding("Glob", ToolCategory.SEARCH),
-                binding("Write", ToolCategory.WRITE),
-                binding("Execute", ToolCategory.EXECUTION),
-                binding("Fetch", ToolCategory.NETWORK),
-                binding("Ask", ToolCategory.CONTROL),
-                binding("SubAgent", ToolCategory.DELEGATION)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    for (var name : List.of("Read", "Glob", "Write", "Execute", "Fetch", "Ask", "SubAgent")) {
-      var outcome = e.beforeTool(new ToolCall("c", name, Map.of()), ctx());
-      assertInstanceOf(
-          HookOutcome.Block.class, outcome, "LOCKED_DOWN should block " + name + " by default");
-    }
+  void aCallNamingNoRegisteredToolIsDenied() {
+    var e = evaluator(Permission.empty(PermissionMode.BYPASS_PERMISSIONS), ToolRegistry.empty());
+    assertEquals(
+        PermissionDecision.deny("no tool named 'unknown' is registered"),
+        e.authorize(call("unknown")));
+  }
+
+  @Test
+  void aPermissionKeyThatThrowsDeniesTheCall() {
+    var throwing =
+        ToolBinding.newBuilder(tool("Write"))
+            .withCategory(ToolCategory.WRITE)
+            .withPermissionKeyExtractor(
+                args -> {
+                  throw new IllegalArgumentException("bad path");
+                })
+            .build();
+    var e = evaluator(Permission.empty(PermissionMode.BYPASS_PERMISSIONS), tools(throwing));
+    assertEquals(
+        PermissionDecision.deny(
+            "permission key of Write failed: java.lang.IllegalArgumentException: bad path"),
+        e.authorize(call("Write")));
+  }
+
+  @Test
+  void aPermissionKeyCarryingASecretIsDeniedBeforeTheApproverIsAsked() {
+    var secrets = new SecretRegistry();
+    secrets.register("TOKEN", "test-registered-secret-123");
+    var requests = new ArrayList<ApprovalRequest>();
+    var e =
+        DefaultPermissionEvaluator.newBuilder(
+                rules(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()),
+                tools(pathKeyed("Write", ToolCategory.WRITE)))
+            .withApprover(
+                request -> {
+                  requests.add(request);
+                  return PermissionDecision.allow("approved");
+                })
+            .withSecretRegistry(secrets)
+            .build();
+
+    assertEquals(
+        PermissionDecision.deny("permission key of Write carries a secret"),
+        e.authorize(writeCall("/tmp/test-registered-secret-123")));
+    assertEquals(List.of(), requests);
+  }
+
+  @Test
+  void aPermissionKeyCarryingASecretIsDeniedWhereThePolicyWouldAllowIt() {
+    var secrets = new SecretRegistry();
+    secrets.register("TOKEN", "test-registered-secret-123");
+    var e =
+        DefaultPermissionEvaluator.newBuilder(
+                Permission.empty(PermissionMode.BYPASS_PERMISSIONS),
+                tools(pathKeyed("Write", ToolCategory.WRITE)))
+            .withSecretRegistry(secrets)
+            .build();
+
+    assertEquals(
+        PermissionDecision.deny("permission key of Write carries a secret"),
+        e.authorize(writeCall("/tmp/test-registered-secret-123")));
+  }
+
+  @Test
+  void anAskRulePatternCarryingASecretReachesTheApproverRedactedWithTheRuleIntact() {
+    var secrets = new SecretRegistry();
+    secrets.register("PASSWORD", "secret*value");
+    var askSecret = PermissionRule.withGlob(PermissionEffect.ASK, "Write", "secret*value");
+    var requests = new ArrayList<ApprovalRequest>();
+    var e =
+        DefaultPermissionEvaluator.newBuilder(
+                rules(PermissionMode.DEFAULT, List.of(), List.of(askSecret), List.of()),
+                tools(pathKeyed("Write", ToolCategory.WRITE)))
+            .withApprover(
+                request -> {
+                  requests.add(request);
+                  return PermissionDecision.deny("no");
+                })
+            .withSecretRegistry(secrets)
+            .build();
+    var call = writeCall("secretXvalue");
+
+    e.authorize(call);
+
+    assertEquals(
+        List.of(
+            new ApprovalRequest(
+                call,
+                new ToolPermissionKey("Write", "secretXvalue"),
+                ToolCategory.WRITE,
+                Optional.of(askSecret),
+                "ask rule Write(<redacted:PASSWORD>) matched Write(secretXvalue)")),
+        requests);
+  }
+
+  @Test
+  void aNullPermissionKeyDeniesTheCall() {
+    var nullKey =
+        ToolBinding.newBuilder(tool("Write"))
+            .withCategory(ToolCategory.WRITE)
+            .withPermissionKeyExtractor(args -> null)
+            .build();
+    var e = evaluator(Permission.empty(PermissionMode.BYPASS_PERMISSIONS), tools(nullKey));
+    assertEquals(
+        PermissionDecision.deny(
+            "permission key of Write failed: java.lang.NullPointerException:"
+                + " permissionKeyExtractor returned null"),
+        e.authorize(call("Write")));
+  }
+
+  @Test
+  void aPermissionKeyNamingAnotherToolDeniesTheCall() {
+    var impostor =
+        ToolBinding.newBuilder(tool("Write"))
+            .withCategory(ToolCategory.WRITE)
+            .withPermissionKeyExtractor(args -> new ToolPermissionKey("Read", "/etc"))
+            .build();
+    var e =
+        evaluator(
+            rules(
+                PermissionMode.DEFAULT,
+                List.of(PermissionRule.any(PermissionEffect.ALLOW, "Read")),
+                List.of(),
+                List.of()),
+            tools(impostor));
+    assertEquals(
+        PermissionDecision.deny("permission key of Write names another tool: Read(/etc)"),
+        e.authorize(call("Write")));
+  }
+
+  // ── rules ────────────────────────────────────────────────────────────────
+
+  @Test
+  void anExplicitDenyWinsOverAnAllowForTheSameCall() {
+    var deny = PermissionRule.any(PermissionEffect.DENY, "Read");
+    var e =
+        evaluator(
+            rules(
+                PermissionMode.DEFAULT,
+                List.of(PermissionRule.any(PermissionEffect.ALLOW, "Read")),
+                List.of(),
+                List.of(deny)),
+            tools(binding("Read", ToolCategory.READ)));
+    assertEquals(
+        PermissionDecision.byRule(deny, "deny rule Read matched Read"), e.authorize(call("Read")));
+  }
+
+  @Test
+  void anExplicitDenyWinsOverAnAskForTheSameCall() {
+    var deny = PermissionRule.any(PermissionEffect.DENY, "Read");
+    var e =
+        evaluator(
+            rules(
+                PermissionMode.DEFAULT,
+                List.of(),
+                List.of(PermissionRule.any(PermissionEffect.ASK, "Read")),
+                List.of(deny)),
+            tools(binding("Read", ToolCategory.READ)));
+    assertEquals(
+        PermissionDecision.byRule(deny, "deny rule Read matched Read"), e.authorize(call("Read")));
+  }
+
+  @Test
+  void anAllowRuleWinsOverAnAskForTheSameCall() {
+    var allow = PermissionRule.any(PermissionEffect.ALLOW, "Write");
+    var e =
+        evaluator(
+            rules(
+                PermissionMode.DEFAULT,
+                List.of(allow),
+                List.of(PermissionRule.any(PermissionEffect.ASK, "Write")),
+                List.of()),
+            tools(binding("Write", ToolCategory.WRITE)));
+    assertEquals(
+        PermissionDecision.byRule(allow, "allow rule Write matched Write"),
+        e.authorize(call("Write")));
+  }
+
+  @Test
+  void bypassPermissionsAllowsEveryCategory() {
+    var e =
+        evaluator(
+            Permission.empty(PermissionMode.BYPASS_PERMISSIONS),
+            tools(binding("Execute", ToolCategory.EXECUTION)));
+    assertEquals(
+        PermissionDecision.allow("BYPASS_PERMISSIONS allows Execute"),
+        e.authorize(call("Execute")));
+  }
+
+  @Test
+  void bypassPermissionsKeepsAnExplicitDeny() {
+    var deny = PermissionRule.any(PermissionEffect.DENY, "Execute");
+    var e =
+        evaluator(
+            rules(PermissionMode.BYPASS_PERMISSIONS, List.of(), List.of(), List.of(deny)),
+            tools(binding("Execute", ToolCategory.EXECUTION)));
+    assertEquals(
+        PermissionDecision.byRule(deny, "deny rule Execute matched Execute"),
+        e.authorize(call("Execute")));
+  }
+
+  @Test
+  void anAllowRuleOverridesTheCategoryDefault() {
+    var allow = PermissionRule.withGlob(PermissionEffect.ALLOW, "Write", "/workspace/**");
+    var e =
+        evaluator(
+            rules(PermissionMode.DEFAULT, List.of(allow), List.of(), List.of()),
+            tools(pathKeyed("Write", ToolCategory.WRITE)));
+    assertEquals(
+        PermissionDecision.byRule(
+            allow, "allow rule Write(/workspace/**) matched Write(/workspace/a.txt)"),
+        e.authorize(writeCall("/workspace/a.txt")));
+  }
+
+  @Test
+  void aCallTheAllowGlobMissesFallsToTheCategoryDefault() {
+    var allow = PermissionRule.withGlob(PermissionEffect.ALLOW, "Write", "/workspace/**");
+    var e =
+        evaluator(
+            rules(PermissionMode.DEFAULT, List.of(allow), List.of(), List.of()),
+            tools(pathKeyed("Write", ToolCategory.WRITE)));
+    assertEquals(
+        PermissionDecision.deny("no approver for default-ask on WRITE (Write(/etc/passwd))"),
+        e.authorize(writeCall("/etc/passwd")));
+  }
+
+  @Test
+  void anAskRuleWithNoApproverIsDenied() {
+    var e =
+        evaluator(
+            rules(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()),
+            tools(pathKeyed("Write", ToolCategory.WRITE)));
+    assertEquals(
+        PermissionDecision.deny("no approver for ask rule Write(/tmp/**) matched Write(/tmp/a)"),
+        e.authorize(writeCall("/tmp/a")));
+  }
+
+  @Test
+  void anAskRuleOverridesAnAllowingCategoryDefault() {
+    var ask = PermissionRule.any(PermissionEffect.ASK, "Read");
+    var e =
+        evaluator(
+            rules(PermissionMode.DEFAULT, List.of(), List.of(ask), List.of()),
+            tools(binding("Read", ToolCategory.READ)));
+    assertEquals(
+        PermissionDecision.byRule(ask, "ask rule Read matched Read"),
+        e.evaluate(ToolPermissionKey.of("Read"), ToolCategory.READ));
   }
 
   @Test
   void lockedDownAllowRuleOpensASingleTool() {
-    var perm = Permission.lockedDown();
-    var tools =
-        new ToolRegistry(
-            List.of(
-                binding("Read", ToolCategory.READ),
-                binding("Execute", ToolCategory.EXECUTION),
-                binding("AskUserQuestion", ToolCategory.CONTROL)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    assertInstanceOf(
-        HookOutcome.Continue.class,
-        e.beforeTool(new ToolCall("c1", "Execute", Map.of()), ctx()),
-        "Execute is explicitly allowed");
-    assertInstanceOf(
-        HookOutcome.Continue.class,
-        e.beforeTool(new ToolCall("c2", "AskUserQuestion", Map.of()), ctx()),
-        "AskUserQuestion is explicitly allowed");
-    assertInstanceOf(
-        HookOutcome.Block.class,
-        e.beforeTool(new ToolCall("c3", "Read", Map.of()), ctx()),
-        "Read is not allowed under lockedDown");
+    var e =
+        evaluator(
+            Permission.lockedDown(),
+            tools(binding("Read", ToolCategory.READ), binding("Execute", ToolCategory.EXECUTION)));
+    assertEquals(PermissionEffect.ALLOW, e.authorize(call("Execute")).effect());
+    assertEquals(PermissionEffect.DENY, e.authorize(call("Read")).effect());
+  }
+
+  // ── category defaults per mode ───────────────────────────────────────────
+
+  @ParameterizedTest(name = "{0} {1} -> {2}")
+  @CsvSource({
+    "DEFAULT, READ, ALLOW, default-allow READ/SEARCH (T)",
+    "DEFAULT, SEARCH, ALLOW, default-allow READ/SEARCH (T)",
+    "DEFAULT, WRITE, ASK, default-ask on WRITE (T)",
+    "DEFAULT, EXECUTION, ASK, default-ask on EXECUTION (T)",
+    "DEFAULT, NETWORK, ASK, default-ask on NETWORK (T)",
+    "DEFAULT, CONTROL, ALLOW, default-allow CONTROL (T)",
+    "DEFAULT, DELEGATION, ALLOW, default-allow DELEGATION (T)",
+    "PLAN, READ, ALLOW, default-allow under PLAN (T)",
+    "PLAN, SEARCH, ALLOW, default-allow under PLAN (T)",
+    "PLAN, WRITE, DENY, PLAN mode forbids writes (T)",
+    "PLAN, EXECUTION, DENY, PLAN mode forbids execution (T)",
+    "PLAN, NETWORK, ASK, default-ask on NETWORK (T)",
+    "PLAN, CONTROL, ALLOW, default-allow CONTROL (T)",
+    "PLAN, DELEGATION, ALLOW, default-allow DELEGATION (T)",
+    "ACCEPT_EDITS, WRITE, ALLOW, ACCEPT_EDITS allows writes (T)",
+    "ACCEPT_EDITS, EXECUTION, ASK, default-ask on EXECUTION (T)",
+    "BYPASS_PERMISSIONS, READ, ALLOW, BYPASS_PERMISSIONS allows T",
+    "BYPASS_PERMISSIONS, SEARCH, ALLOW, BYPASS_PERMISSIONS allows T",
+    "BYPASS_PERMISSIONS, WRITE, ALLOW, BYPASS_PERMISSIONS allows T",
+    "BYPASS_PERMISSIONS, EXECUTION, ALLOW, BYPASS_PERMISSIONS allows T",
+    "BYPASS_PERMISSIONS, NETWORK, ALLOW, BYPASS_PERMISSIONS allows T",
+    "BYPASS_PERMISSIONS, CONTROL, ALLOW, BYPASS_PERMISSIONS allows T",
+    "BYPASS_PERMISSIONS, DELEGATION, ALLOW, BYPASS_PERMISSIONS allows T"
+  })
+  void theModeAndCategoryDecideWhenNoRuleMatches(
+      PermissionMode mode, ToolCategory category, PermissionEffect effect, String reason) {
+    var e = evaluator(Permission.empty(mode), ToolRegistry.empty());
+    assertEquals(
+        new PermissionDecision(effect, reason, Optional.empty()),
+        e.evaluate(ToolPermissionKey.of("T"), category));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"READ", "SEARCH", "WRITE", "EXECUTION", "NETWORK", "CONTROL", "DELEGATION"})
+  void lockedDownDeniesEveryCategoryByDefault(ToolCategory category) {
+    var e = evaluator(Permission.empty(PermissionMode.LOCKED_DOWN), ToolRegistry.empty());
+    assertEquals(
+        PermissionDecision.deny(
+            "LOCKED_DOWN mode forbids "
+                + category
+                + " by default (T) — add an explicit allow rule to open this tool"),
+        e.evaluate(ToolPermissionKey.of("T"), category));
+  }
+
+  // ── askingUser ───────────────────────────────────────────────────────────
+
+  /** A gateway that records each question and answers it with {@code label}. */
+  private static final class AnsweringGateway implements QuestionGateway {
+
+    private final List<AskUserQuestionRequest> asked = new ArrayList<>();
+    private final String label;
+
+    AnsweringGateway(String label) {
+      this.label = label;
+    }
+
+    @Override
+    public AskUserQuestionResponse ask(AskUserQuestionRequest request) {
+      asked.add(request);
+      return AskUserQuestionResponse.single(request.questionId(), label);
+    }
   }
 
   @Test
-  void lockedDownDenyRuleStillWinsOverAllow() {
-    var perm =
-        new Permission(
-            PermissionMode.LOCKED_DOWN,
-            List.of(PermissionRule.any(PermissionEffect.ALLOW, "Execute")),
-            List.of(),
-            List.of(PermissionRule.any(PermissionEffect.DENY, "Execute")));
-    var tools = new ToolRegistry(List.of(binding("Execute", ToolCategory.EXECUTION)));
-    var e = new DefaultPermissionEvaluator(perm, tools);
-    assertInstanceOf(
-        HookOutcome.Block.class, e.beforeTool(new ToolCall("c", "Execute", Map.of()), ctx()));
+  void askingUserRejectsANullGateway() {
+    var ex = assertThrows(NullPointerException.class, () -> ToolApprover.askingUser(null));
+    assertEquals("gateway must not be null", ex.getMessage());
+  }
+
+  @Test
+  void askingUserAsksAPermissionQuestionForTheCall() {
+    var gateway = new AnsweringGateway("Deny");
+    asking(ToolApprover.askingUser(gateway)).authorize(writeCall("/tmp/a"));
+
+    var question = gateway.asked.getFirst();
+    assertTrue(question.questionId().startsWith("perm-"));
+    assertEquals("Permission", question.header());
+    assertEquals("Allow Write(/tmp/a)?", question.question());
+    assertEquals(
+        List.of(
+            new AskUserQuestionOption("Allow", "ask rule Write(/tmp/**) matched Write(/tmp/a)"),
+            new AskUserQuestionOption("Deny", "Refuse this tool call")),
+        question.options());
+  }
+
+  @Test
+  void askingUserAsksEachRequestUnderAFreshQuestionId() {
+    var gateway = new AnsweringGateway("Allow");
+    var e = asking(ToolApprover.askingUser(gateway));
+    e.authorize(writeCall("/tmp/a"));
+    e.authorize(writeCall("/tmp/a"));
+
+    assertEquals(2, gateway.asked.size());
+    assertNotEquals(gateway.asked.get(0).questionId(), gateway.asked.get(1).questionId());
+  }
+
+  @Test
+  void askingUserOmitsTheParenthesesOfAnEmptyKey() {
+    var gateway = new AnsweringGateway("Deny");
+    DefaultPermissionEvaluator.newBuilder(
+            Permission.empty(PermissionMode.DEFAULT), tools(binding("Fetch", ToolCategory.NETWORK)))
+        .withApprover(ToolApprover.askingUser(gateway))
+        .build()
+        .authorize(call("Fetch"));
+
+    assertEquals("Allow Fetch?", gateway.asked.getFirst().question());
+  }
+
+  @Test
+  void askingUserDeniesAResponseToAnotherQuestion() {
+    QuestionGateway replaying = request -> AskUserQuestionResponse.single("perm-earlier", "Allow");
+
+    assertEquals(
+        PermissionDecision.deny(
+            "approval of Write(/tmp/a) answered another question: perm-earlier"),
+        asking(ToolApprover.askingUser(replaying)).authorize(writeCall("/tmp/a")));
+  }
+
+  @Test
+  void askingUserDeniesAResponseSelectingMoreThanOneOption() {
+    QuestionGateway ambiguous =
+        request -> new AskUserQuestionResponse(request.questionId(), List.of("Allow", "Allow"), "");
+
+    assertEquals(
+        PermissionDecision.deny("approval of Write(/tmp/a) selected 2 options, not one"),
+        asking(ToolApprover.askingUser(ambiguous)).authorize(writeCall("/tmp/a")));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"Allow", "allow", " ALLOW "})
+  void askingUserAllowsOnAnAllowSelection(String label) {
+    assertEquals(
+        PermissionDecision.allow("user allowed Write(/tmp/a)"),
+        asking(ToolApprover.askingUser(new AnsweringGateway(label)))
+            .authorize(writeCall("/tmp/a")));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"Deny", "Something else"})
+  void askingUserDeniesOnAnyOtherSelection(String label) {
+    assertEquals(
+        PermissionDecision.deny("user denied Write(/tmp/a)"),
+        asking(ToolApprover.askingUser(new AnsweringGateway(label)))
+            .authorize(writeCall("/tmp/a")));
   }
 }

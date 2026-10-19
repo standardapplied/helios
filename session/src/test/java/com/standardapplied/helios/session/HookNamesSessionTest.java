@@ -145,6 +145,16 @@ final class HookNamesSessionTest {
   }
 
   @Test
+  void theReservedNamePermissionStopsTheSessionBeingCreated() {
+    var options = options(new NamedBy(() -> "Permission"));
+
+    var ex = assertThrows(IllegalArgumentException.class, () -> AgentSession.create(options));
+
+    assertEquals(
+        "hook " + NamedBy.class.getName() + " uses the reserved name Permission", ex.getMessage());
+  }
+
+  @Test
   void aNameThatThrowsStopsTheSessionBeingCreatedWithThatException() {
     var failure = new IllegalStateException("no name");
     var options =

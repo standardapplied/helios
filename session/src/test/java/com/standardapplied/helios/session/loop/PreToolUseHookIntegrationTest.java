@@ -2,19 +2,18 @@
 
 package com.standardapplied.helios.session.loop;
 
+import static com.standardapplied.helios.session.test.HookInputs.named;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -24,7 +23,9 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,11 @@ import org.junit.jupiter.api.Test;
 /** {@link PreToolUseHook} outcomes, and the hook name they carry, wired through the loop. */
 final class PreToolUseHookIntegrationTest {
 
+  private static final PreToolUseHook MUTATES_TO_A =
+      named("A", (call, ctx) -> HookOutcome.mutateArgs(Map.of("v", "a")));
+
   private final HookLoop loop = new HookLoop();
+  private final List<Map<String, Object>> executed = new CopyOnWriteArrayList<>();
 
   @AfterEach
   void closeLoop() {
@@ -124,18 +129,7 @@ final class PreToolUseHookIntegrationTest {
 
   @Test
   void hookFiredCarriesActualHookName() {
-    var named =
-        new PreToolUseHook() {
-          @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-            return HookOutcome.block("nope");
-          }
-
-          @Override
-          public String name() {
-            return "MySecurityGuard";
-          }
-        };
+    var named = named("MySecurityGuard", (call, ctx) -> HookOutcome.block("nope"));
     callEchoThenAnswer(Map.of("v", "x"), "done", named);
     var hookFired = loop.first(QueryEvent.HookFired.class);
     assertEquals("MySecurityGuard", hookFired.hookName(), "hookName must carry the hook's name");
@@ -203,16 +197,136 @@ final class PreToolUseHookIntegrationTest {
   }
 
   @Test
-  void aHookReturningArgumentsThatAreNotJsonIsTreatedAsContinueAndTheToolNeverSeesThem() {
+  void aHookReturningArgumentsThatAreNotJsonRefusesTheCallAndTheToolNeverRuns() {
     var cyclic = new HashMap<String, Object>();
     cyclic.put("self", cyclic);
     PreToolUseHook broken = (call, ctx) -> HookOutcome.mutateArgs(cyclic);
+    var executions = new AtomicInteger();
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(HookLoop.echoCall(Map.of("v", "original")))
+            .withTextTurn("done")
+            .build();
 
-    var result = callEchoThenAnswer(Map.of("v", "original"), "done", broken);
+    loop.run(
+        model,
+        HookLoop.echoTool(
+            (args, ctx) -> {
+              executions.incrementAndGet();
+              return ToolResult.success("ran");
+            }),
+        UserMessage.text("call echo"),
+        broken);
 
-    assertInstanceOf(ResultMessage.Success.class, result);
-    assertTrue(loop.eventsOf(QueryEvent.ToolMutated.class).isEmpty());
-    assertEquals("echoed: original", loop.first(QueryEvent.ToolResult.class).result().output());
+    var by = loop.first(QueryEvent.ToolBlocked.class).hookName();
+    assertEquals(
+        new ToolOutcome.Rejected(
+            by, "hook threw java.lang.IllegalArgumentException: args.self contains itself"),
+        loop.first(QueryEvent.ToolResult.class).result().outcome());
+    assertEquals(0, executions.get());
+  }
+
+  // ── the chain ────────────────────────────────────────────────────────────
+
+  private static PreToolUseHook recording(String name, List<String> seen, HookOutcome outcome) {
+    return named(
+        name,
+        (call, ctx) -> {
+          seen.add(name + ":" + call.arguments().get("v"));
+          return outcome;
+        });
+  }
+
+  private void runChain(PreToolUseHook... hooks) {
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(HookLoop.echoCall(Map.of("v", "o")))
+            .withTextTurn("done")
+            .build();
+    loop.run(
+        model,
+        HookLoop.echoTool(
+            (args, ctx) -> {
+              executed.add(args);
+              return ToolResult.success("ran");
+            }),
+        UserMessage.text("call echo"),
+        hooks);
+  }
+
+  @Test
+  void eachHookSeesTheCallTheHooksBeforeItLeftAndTheToolRunsTheLast() {
+    var seen = new ArrayList<String>();
+
+    runChain(
+        MUTATES_TO_A,
+        recording("B", seen, HookOutcome.mutateArgs(Map.of("v", "b"))),
+        recording("C", seen, HookOutcome.cont()));
+
+    assertEquals(List.of("B:a", "C:b"), seen);
+    assertEquals(List.of(Map.<String, Object>of("v", "b")), executed);
+    assertEquals(
+        List.of("ToolMutated A o -> a", "ToolMutated B a -> b", "ToolUse b"),
+        loop.eventsOf(QueryEvent.class).stream()
+            .<String>mapMulti(
+                (event, out) -> {
+                  switch (event) {
+                    case QueryEvent.ToolMutated m ->
+                        out.accept(
+                            "ToolMutated "
+                                + m.hookName()
+                                + " "
+                                + m.inputBefore().get("v")
+                                + " -> "
+                                + m.inputAfter().get("v"));
+                    case QueryEvent.ToolUse u ->
+                        out.accept("ToolUse " + u.call().arguments().get("v"));
+                    default -> {}
+                  }
+                })
+            .toList());
+  }
+
+  @Test
+  void aBlockAfterAMutationRefusesTheMutatedCall() {
+    var seen = new ArrayList<String>();
+
+    runChain(MUTATES_TO_A, recording("B", seen, HookOutcome.block("no")));
+
+    var mutated = HookLoop.echoCall(Map.of("v", "a"));
+    assertEquals(List.of("B:a"), seen);
+    assertEquals(mutated, loop.first(QueryEvent.ToolBlocked.class).call());
+    assertEquals(
+        new ToolOutcome.Rejected("B", "no"),
+        loop.first(QueryEvent.ToolResult.class).result().outcome());
+    assertEquals(mutated, loop.first(QueryEvent.ToolResult.class).call());
+    assertEquals(List.of(), executed);
+  }
+
+  @Test
+  void anInjectAfterAMutationEndsTheChain() {
+    var seen = new ArrayList<String>();
+
+    runChain(
+        MUTATES_TO_A,
+        named("B", (call, ctx) -> HookOutcome.inject("look again")),
+        recording("C", seen, HookOutcome.cont()));
+
+    assertEquals(List.of(), seen);
+    assertEquals(
+        HookLoop.echoCall(Map.of("v", "a")), loop.first(QueryEvent.ToolResult.class).call());
+  }
+
+  @Test
+  void aStopAfterAMutationEndsTheChain() {
+    var seen = new ArrayList<String>();
+
+    runChain(
+        MUTATES_TO_A,
+        named("B", (call, ctx) -> HookOutcome.stop("halt")),
+        recording("C", seen, HookOutcome.cont()));
+
+    assertEquals(List.of(), seen);
   }
 
   /**
