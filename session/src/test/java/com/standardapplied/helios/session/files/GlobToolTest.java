@@ -203,6 +203,21 @@ final class GlobToolTest {
   }
 
   @Test
+  void aLinkedRootIsRefusedForTheCanonicalPathItResolvesTo(@TempDir Path tmp) throws IOException {
+    var ws = WorkspaceRoot.of(tmp);
+    Files.createDirectories(ws.root().resolve("real"));
+    Files.createSymbolicLink(ws.root().resolve("alias"), ws.root().resolve("real"));
+    var result =
+        GlobTool.binding(ws)
+            .tool()
+            .execute(Map.of("pattern", "*", "path", "alias"), ToolContext.noop());
+    assertEquals(
+        "Glob: path is not canonical or changed after it was authorised: alias now resolves to"
+            + " ./real",
+        result.output());
+  }
+
+  @Test
   void permissionKeyCarriesPath(@TempDir Path tmp) {
     var binding = GlobTool.binding(WorkspaceRoot.of(tmp));
     assertEquals("./src", keyOf(binding, Map.of("pattern", "*", "path", "src")).canonicalArgs());

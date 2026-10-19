@@ -112,6 +112,19 @@ final class LsToolTest {
   }
 
   @Test
+  void aLinkedDirectoryIsRefusedForTheCanonicalPathItResolvesTo(@TempDir Path tmp)
+      throws IOException {
+    var ws = WorkspaceRoot.of(tmp);
+    Files.createDirectories(ws.root().resolve("real"));
+    Files.createSymbolicLink(ws.root().resolve("alias"), ws.root().resolve("real"));
+    var result = LsTool.binding(ws).tool().execute(Map.of("path", "alias"), ToolContext.noop());
+    assertEquals(
+        "LS: path is not canonical or changed after it was authorised: alias now resolves to"
+            + " ./real",
+        result.output());
+  }
+
+  @Test
   void permissionKeyCarriesPath(@TempDir Path tmp) throws IOException {
     Files.createDirectory(tmp.resolve("src"));
     var binding = LsTool.binding(WorkspaceRoot.of(tmp));
