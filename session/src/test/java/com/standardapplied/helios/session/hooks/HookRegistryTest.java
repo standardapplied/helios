@@ -59,12 +59,12 @@ final class HookRegistryTest {
     assertEquals("hooks must not contain null", ex.getMessage());
   }
 
-  /** A {@code PreToolUse} hook that blocks every call under the name {@code source} gives. */
+  /** A {@code PreToolUse} hook that continues under the name {@code source} gives. */
   private record NamedBy(Supplier<String> source) implements PreToolUseHook {
 
     @Override
     public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
-      return HookOutcome.block("no");
+      return HookOutcome.cont();
     }
 
     @Override
@@ -98,15 +98,6 @@ final class HookRegistryTest {
                   throw failure;
                 }));
     assertSame(failure, assertThrows(IllegalStateException.class, () -> new HookRegistry(hooks)));
-  }
-
-  @Test
-  void aDecisionCarriesTheNameReadWhenTheRegistryWasBuilt() {
-    var reads = new AtomicInteger();
-    var registry =
-        new HookRegistry(List.of(new NamedBy(() -> reads.getAndIncrement() == 0 ? "Gate" : null)));
-    assertEquals("Gate", registry.firePreToolUse(CALL, ctx()).firingHookName());
-    assertEquals(1, reads.get());
   }
 
   /** Blocks every call and rewrites every result, named {@code Gate} only on its first read. */
