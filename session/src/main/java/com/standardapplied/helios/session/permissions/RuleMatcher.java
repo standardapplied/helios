@@ -20,9 +20,10 @@ import java.util.regex.Pattern;
  *
  * <p>Glob syntax: {@code *} matches a single path segment, {@code **} matches any number of
  * segments (including zero), {@code ?} matches a single non-slash character, all other characters
- * are literal. This is the standard subset of {@code java.nio.file.PathMatcher} glob syntax; we
- * re-implement here to avoid the {@code Path}-based matcher's filesystem dependence — the canonical
- * args we match against are plain strings, not real paths.
+ * are literal; a wildcard matches line terminators like any other character. This is the standard
+ * subset of {@code java.nio.file.PathMatcher} glob syntax; we re-implement here to avoid the {@code
+ * Path}-based matcher's filesystem dependence — the canonical args we match against are plain
+ * strings, not real paths.
  *
  * <h2>Thread-safety</h2>
  *
@@ -80,7 +81,7 @@ public final class RuleMatcher {
    */
   static boolean globMatches(String glob, String input) {
     return PATTERN_CACHE
-        .computeIfAbsent(glob, g -> Pattern.compile(globToRegex(g)))
+        .computeIfAbsent(glob, g -> Pattern.compile(globToRegex(g), Pattern.DOTALL))
         .matcher(input)
         .matches();
   }

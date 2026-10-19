@@ -108,6 +108,20 @@ final class ToolAuthorizationSessionTest {
   }
 
   @Test
+  void aDenyRuleCoversATargetWhoseKeyHoldsALineTerminator() {
+    var run =
+        run(
+            options(policy(PermissionMode.ACCEPT_EDITS, List.of(DENY_ETC))),
+            write("/etc/cron.d/x\ny"));
+
+    assertEquals(
+        new ToolOutcome.Rejected(
+            "Permission", "deny rule Write(/etc/**) matched Write(/etc/cron.d/x\ny)"),
+        run.onlyResult().outcome());
+    assertEquals(List.of(), executed);
+  }
+
+  @Test
   void aPermissionKeyCarryingASecretIsRefusedBeforeAnyoneIsAskedAboutIt() {
     var secrets = new SecretRegistry();
     secrets.register("TOKEN", SECRET);
