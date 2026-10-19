@@ -86,6 +86,26 @@ final class ToolApprovalSessionTest {
   }
 
   @Test
+  void anAnswerSelectingBothAllowAndDenyRefusesTheCall() {
+    Function<AgentSession, Consumer<QueryEvent>> reactions =
+        session ->
+            event -> {
+              if (event instanceof QueryEvent.QuestionAsked question) {
+                var id = question.request().questionId();
+                session.answer(id, new AskUserQuestionResponse(id, List.of("Allow", "Deny"), ""));
+              }
+            };
+
+    var run = run(options(Permission.empty(PermissionMode.DEFAULT)), reactions, write("/tmp/a"));
+
+    assertEquals(
+        new ToolOutcome.Rejected(
+            "Permission", "approval of Write(/tmp/a) selected 2 options, not one"),
+        run.onlyResult().outcome());
+    assertEquals(List.of(), executed);
+  }
+
+  @Test
   void aDuplicateApprovalCannotAuthorizeASecondCall() {
     var duplicate = new CompletableFuture<RuntimeException>();
     var asked = new CopyOnWriteArrayList<String>();

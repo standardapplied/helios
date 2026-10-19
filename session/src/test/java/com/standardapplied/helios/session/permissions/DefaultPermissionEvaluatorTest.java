@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
@@ -132,6 +133,15 @@ final class DefaultPermissionEvaluatorTest {
   }
 
   @Test
+  void builderRejectsNullSecretRegistry() {
+    var b =
+        DefaultPermissionEvaluator.newBuilder(
+            Permission.defaultInWorkspace(), ToolRegistry.empty());
+    var ex = assertThrows(NullPointerException.class, () -> b.withSecretRegistry(null));
+    assertEquals("secrets must not be null", ex.getMessage());
+  }
+
+  @Test
   void permissionAccessorReturnsConstructorValue() {
     var perm = Permission.defaultInWorkspace();
     assertSame(perm, new DefaultPermissionEvaluator(perm, ToolRegistry.empty()).permission());
@@ -179,6 +189,29 @@ final class DefaultPermissionEvaluatorTest {
         PermissionDecision.deny(
             "permission key of Write failed: java.lang.IllegalArgumentException: bad path"),
         e.authorize(call("Write")));
+  }
+
+  @Test
+  void aPermissionKeyCarryingASecretIsDeniedBeforeTheApproverIsAsked() {
+    var secrets = new SecretRegistry();
+    secrets.register("TOKEN", "test-registered-secret-123");
+    var requests = new ArrayList<ApprovalRequest>();
+    var e =
+        DefaultPermissionEvaluator.newBuilder(
+                rules(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()),
+                tools(pathKeyed("Write", ToolCategory.WRITE)))
+            .withApprover(
+                request -> {
+                  requests.add(request);
+                  return PermissionDecision.allow("approved");
+                })
+            .withSecretRegistry(secrets)
+            .build();
+
+    assertEquals(
+        PermissionDecision.deny("permission key of Write carries a secret"),
+        e.authorize(writeCall("/tmp/test-registered-secret-123")));
+    assertEquals(List.of(), requests);
   }
 
   @Test
@@ -429,6 +462,26 @@ final class DefaultPermissionEvaluatorTest {
         .authorize(call("Fetch"));
 
     assertEquals("Allow Fetch?", gateway.asked.getFirst().question());
+  }
+
+  @Test
+  void askingUserDeniesAResponseToAnotherQuestion() {
+    QuestionGateway replaying = request -> AskUserQuestionResponse.single("perm-earlier", "Allow");
+
+    assertEquals(
+        PermissionDecision.deny(
+            "approval of Write(/tmp/a) answered another question: perm-earlier"),
+        asking(ToolApprover.askingUser(replaying)).authorize(writeCall("/tmp/a")));
+  }
+
+  @Test
+  void askingUserDeniesAResponseSelectingMoreThanOneOption() {
+    QuestionGateway ambiguous =
+        request -> new AskUserQuestionResponse(request.questionId(), List.of("Allow", "Allow"), "");
+
+    assertEquals(
+        PermissionDecision.deny("approval of Write(/tmp/a) selected 2 options, not one"),
+        asking(ToolApprover.askingUser(ambiguous)).authorize(writeCall("/tmp/a")));
   }
 
   @ParameterizedTest

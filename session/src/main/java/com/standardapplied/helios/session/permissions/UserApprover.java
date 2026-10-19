@@ -10,7 +10,8 @@ import java.util.List;
 
 /**
  * The {@link ToolApprover} that asks the user through a {@link QuestionGateway}; see {@link
- * ToolApprover#askingUser}. Each request gets its own question id, so an answer resolves one call.
+ * ToolApprover#askingUser}. Each request gets its own question id, so an answer resolves one call:
+ * a response to another question id, or one that selects other than exactly one option, denies it.
  */
 record UserApprover(QuestionGateway gateway) implements ToolApprover {
 
@@ -29,8 +30,23 @@ record UserApprover(QuestionGateway gateway) implements ToolApprover {
                 new AskUserQuestionOption(ALLOW_LABEL, request.reason()),
                 new AskUserQuestionOption(DENY_LABEL, "Refuse this tool call")),
             false);
-    var picked = gateway.ask(question).selectedLabels().getFirst().trim();
-    return picked.equalsIgnoreCase(ALLOW_LABEL)
+    var response = gateway.ask(question);
+    if (!question.questionId().equals(response.questionId())) {
+      return PermissionDecision.deny(
+          "approval of "
+              + DefaultPermissionEvaluator.describe(key)
+              + " answered another question: "
+              + response.questionId());
+    }
+    if (response.selectedLabels().size() != 1) {
+      return PermissionDecision.deny(
+          "approval of "
+              + DefaultPermissionEvaluator.describe(key)
+              + " selected "
+              + response.selectedLabels().size()
+              + " options, not one");
+    }
+    return response.selectedLabels().getFirst().trim().equalsIgnoreCase(ALLOW_LABEL)
         ? PermissionDecision.allow("user allowed " + DefaultPermissionEvaluator.describe(key))
         : PermissionDecision.deny("user denied " + DefaultPermissionEvaluator.describe(key));
   }

@@ -7,21 +7,26 @@ import static com.standardapplied.helios.session.WriteToolSessions.write;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
+import com.standardapplied.helios.session.test.LogCapture;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -32,6 +37,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  */
 final class ToolAuthorizationSessionTest {
 
+  private static final String SECRET = "test-registered-secret-123";
   private static final PermissionRule ALLOW_TMP =
       PermissionRule.withGlob(PermissionEffect.ALLOW, "Write", "/tmp/**");
   private static final PermissionRule DENY_ETC =
@@ -98,6 +104,27 @@ final class ToolAuthorizationSessionTest {
         new ToolOutcome.Rejected(
             "Permission", "deny rule Write(/etc/**) matched Write(/etc/passwd)"),
         run.onlyResult().outcome());
+    assertEquals(List.of(), executed);
+  }
+
+  @Test
+  void aPermissionKeyCarryingASecretIsRefusedBeforeAnyoneIsAskedAboutIt() {
+    var secrets = new SecretRegistry();
+    secrets.register("TOKEN", SECRET);
+    var options =
+        SessionOptions.newBuilder()
+            .withTools(
+                new ToolRegistry(
+                    List.of(sessions.writeTool(args -> new ToolPermissionKey("Write", SECRET)))))
+            .withPermission(Permission.empty(PermissionMode.DEFAULT))
+            .withSecretRegistry(secrets);
+
+    var run = run(options, write("/tmp/a"));
+
+    assertEquals(
+        new ToolOutcome.Rejected("Permission", "permission key of Write carries a secret"),
+        run.onlyResult().outcome());
+    assertEquals(List.of(), run.events().eventsOf(QueryEvent.QuestionAsked.class));
     assertEquals(List.of(), executed);
   }
 
@@ -196,6 +223,40 @@ final class ToolAuthorizationSessionTest {
   @Test
   void aGuardThatReturnsNullRefusesTheCall() {
     assertAFailedGuardRefuses((call, ctx) -> null, "hook returned null");
+  }
+
+  @Test
+  void aGuardThatThrowsASecretLogsOnlyItsExceptionClass() {
+    var secrets = new SecretRegistry();
+    secrets.register("TOKEN", SECRET);
+    var options =
+        options(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))
+            .withSecretRegistry(secrets)
+            .withHook(
+                new Named(
+                    "Guard",
+                    100,
+                    (call, ctx) -> {
+                      throw new IllegalStateException("guard saw " + SECRET);
+                    }));
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+
+    WriteToolSessions.Run run;
+    try (var ignored = LogCapture.of(HookRegistry.class, logged)) {
+      run = run(options, write("/tmp/a"));
+    }
+
+    assertEquals(
+        new ToolOutcome.Rejected(
+            "Guard", "hook threw java.lang.IllegalStateException: guard saw <redacted:TOKEN>"),
+        run.onlyResult().outcome());
+    assertEquals(
+        List.of(
+            "WARNING PreToolUse hook Guard threw java.lang.IllegalStateException; refusing the"
+                + " call null"),
+        logged.stream()
+            .map(r -> r.getLevel() + " " + r.getMessage() + " " + r.getThrown())
+            .toList());
   }
 
   @Test

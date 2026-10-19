@@ -6,6 +6,7 @@ package com.standardapplied.helios.session.hooks;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -614,8 +615,10 @@ final class HookRegistryTest {
 
     var logged = onlyWarning(() -> registry.firePreToolUse(CALL, ctx()));
 
-    assertEquals("PreToolUse hook Gate threw; refusing the call", logged.getMessage());
-    assertSame(failure, logged.getThrown());
+    assertEquals(
+        "PreToolUse hook Gate threw java.lang.IllegalStateException; refusing the call",
+        logged.getMessage());
+    assertNull(logged.getThrown());
   }
 
   @Test

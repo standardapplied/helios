@@ -40,9 +40,10 @@ import java.util.logging.Logger;
  * HookOutcome.Stop} end the chain; any other outcome passes the call unchanged. A hook that throws
  * a {@link RuntimeException} or returns {@code null} fails closed: it ends the chain as a {@code
  * Block} with reason {@code hook threw <exception class>: <message>} or {@code hook returned null},
- * logged at {@code WARNING}. {@link #firePreToolUse} returns the result as a {@link
- * PreToolUseResult}. The session's permission check is not a hook: it runs after the chain, on the
- * final call.
+ * logged at {@code WARNING} with the exception class alone, since the message may carry a secret
+ * that only the session redacts from the reason. {@link #firePreToolUse} returns the result as a
+ * {@link PreToolUseResult}. The session's permission check is not a hook: it runs after the chain,
+ * on the final call.
  *
  * <p>In every other phase a hook that throws a {@link RuntimeException} or returns {@code null} is
  * treated as {@link HookOutcome.Continue} and logged at {@code WARNING}, so the next hook of the
@@ -183,8 +184,12 @@ public final class HookRegistry {
       }
       return outcome;
     } catch (RuntimeException ex) {
-      LOGGER.log(
-          Level.WARNING, "PreToolUse hook " + registered.name() + " threw; refusing the call", ex);
+      LOGGER.warning(
+          "PreToolUse hook "
+              + registered.name()
+              + " threw "
+              + ex.getClass().getName()
+              + "; refusing the call");
       return HookOutcome.block("hook threw " + ex.getClass().getName() + ": " + ex.getMessage());
     }
   }
