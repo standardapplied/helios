@@ -40,7 +40,8 @@ import java.util.concurrent.CancellationException;
  * throws, is null, names another tool or carries a secret of its {@link SecretRegistry}, and an ASK
  * with no {@link ToolApprover} are each denied. A key carrying a secret is denied before any rule
  * or approver sees it, so no approval prompt or event shows the secret. An ASK goes to the approver
- * with an {@link ApprovalRequest} for this call; see {@link ToolApprover} for how its answer is
+ * with an {@link ApprovalRequest} for this call, its reason redacted through the registry since a
+ * rule's pattern may hold a secret the key does not; see {@link ToolApprover} for how its answer is
  * read.
  *
  * <h2>Thread-safety</h2>
@@ -136,7 +137,8 @@ public final class DefaultPermissionEvaluator {
     if (decision.effect() != PermissionEffect.ASK) {
       return decision;
     }
-    return approve(new ApprovalRequest(call, key, category, decision.rule(), decision.reason()));
+    var reason = secrets.redactor().redact(decision.reason()).text();
+    return approve(new ApprovalRequest(call, key, category, decision.rule(), reason));
   }
 
   private PermissionDecision approve(ApprovalRequest request) {
@@ -282,8 +284,8 @@ public final class DefaultPermissionEvaluator {
     }
 
     /**
-     * Set the secrets no permission key may carry; defaults to a new empty registry. Pass the
-     * session's registry.
+     * Set the secrets no permission key may carry and an approval reason redacts; defaults to a new
+     * empty registry. Pass the session's registry.
      *
      * @param secrets the secret registry; non-null
      * @return this builder
