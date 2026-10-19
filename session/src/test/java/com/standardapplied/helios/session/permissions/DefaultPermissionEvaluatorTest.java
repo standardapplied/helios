@@ -76,6 +76,10 @@ final class DefaultPermissionEvaluatorTest {
     return new ToolCall("c", "Write", Map.of("path", path));
   }
 
+  private static DefaultPermissionEvaluator evaluator(Permission permission, ToolRegistry tools) {
+    return DefaultPermissionEvaluator.newBuilder(permission, tools).build();
+  }
+
   /** An evaluator whose ask rule {@link #ASK_WRITE} goes to {@code approver}. */
   private static DefaultPermissionEvaluator asking(ToolApprover approver) {
     return DefaultPermissionEvaluator.newBuilder(
@@ -88,21 +92,8 @@ final class DefaultPermissionEvaluatorTest {
   // ── construction ─────────────────────────────────────────────────────────
 
   @Test
-  void constructorRejectsNullPermission() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new DefaultPermissionEvaluator(null, ToolRegistry.empty()));
-    assertEquals("permission must not be null", ex.getMessage());
-  }
-
-  @Test
-  void constructorRejectsNullTools() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new DefaultPermissionEvaluator(Permission.defaultInWorkspace(), null));
-    assertEquals("tools must not be null", ex.getMessage());
+  void anEvaluatorIsBuiltOnlyThroughItsBuilder() {
+    assertEquals(List.of(), List.of(DefaultPermissionEvaluator.class.getConstructors()));
   }
 
   @Test
@@ -144,18 +135,18 @@ final class DefaultPermissionEvaluatorTest {
   @Test
   void permissionAccessorReturnsConstructorValue() {
     var perm = Permission.defaultInWorkspace();
-    assertSame(perm, new DefaultPermissionEvaluator(perm, ToolRegistry.empty()).permission());
+    assertSame(perm, evaluator(perm, ToolRegistry.empty()).permission());
   }
 
   @Test
   void authorizeRejectsNullCall() {
-    var e = new DefaultPermissionEvaluator(Permission.defaultInWorkspace(), ToolRegistry.empty());
+    var e = evaluator(Permission.defaultInWorkspace(), ToolRegistry.empty());
     assertThrows(NullPointerException.class, () -> e.authorize(null));
   }
 
   @Test
   void evaluateRejectsNullArgs() {
-    var e = new DefaultPermissionEvaluator(Permission.defaultInWorkspace(), ToolRegistry.empty());
+    var e = evaluator(Permission.defaultInWorkspace(), ToolRegistry.empty());
     assertThrows(NullPointerException.class, () -> e.evaluate(null, ToolCategory.READ));
     assertThrows(NullPointerException.class, () -> e.evaluate(ToolPermissionKey.of("Read"), null));
   }
@@ -164,9 +155,7 @@ final class DefaultPermissionEvaluatorTest {
 
   @Test
   void aCallNamingNoRegisteredToolIsDenied() {
-    var e =
-        new DefaultPermissionEvaluator(
-            Permission.empty(PermissionMode.BYPASS_PERMISSIONS), ToolRegistry.empty());
+    var e = evaluator(Permission.empty(PermissionMode.BYPASS_PERMISSIONS), ToolRegistry.empty());
     assertEquals(
         PermissionDecision.deny("no tool named 'unknown' is registered"),
         e.authorize(call("unknown")));
@@ -182,9 +171,7 @@ final class DefaultPermissionEvaluatorTest {
                   throw new IllegalArgumentException("bad path");
                 })
             .build();
-    var e =
-        new DefaultPermissionEvaluator(
-            Permission.empty(PermissionMode.BYPASS_PERMISSIONS), tools(throwing));
+    var e = evaluator(Permission.empty(PermissionMode.BYPASS_PERMISSIONS), tools(throwing));
     assertEquals(
         PermissionDecision.deny(
             "permission key of Write failed: java.lang.IllegalArgumentException: bad path"),
@@ -269,9 +256,7 @@ final class DefaultPermissionEvaluatorTest {
             .withCategory(ToolCategory.WRITE)
             .withPermissionKeyExtractor(args -> null)
             .build();
-    var e =
-        new DefaultPermissionEvaluator(
-            Permission.empty(PermissionMode.BYPASS_PERMISSIONS), tools(nullKey));
+    var e = evaluator(Permission.empty(PermissionMode.BYPASS_PERMISSIONS), tools(nullKey));
     assertEquals(
         PermissionDecision.deny(
             "permission key of Write failed: java.lang.NullPointerException:"
@@ -287,7 +272,7 @@ final class DefaultPermissionEvaluatorTest {
             .withPermissionKeyExtractor(args -> new ToolPermissionKey("Read", "/etc"))
             .build();
     var e =
-        new DefaultPermissionEvaluator(
+        evaluator(
             rules(
                 PermissionMode.DEFAULT,
                 List.of(PermissionRule.any(PermissionEffect.ALLOW, "Read")),
@@ -305,7 +290,7 @@ final class DefaultPermissionEvaluatorTest {
   void anExplicitDenyWinsOverAnAllowForTheSameCall() {
     var deny = PermissionRule.any(PermissionEffect.DENY, "Read");
     var e =
-        new DefaultPermissionEvaluator(
+        evaluator(
             rules(
                 PermissionMode.DEFAULT,
                 List.of(PermissionRule.any(PermissionEffect.ALLOW, "Read")),
@@ -320,7 +305,7 @@ final class DefaultPermissionEvaluatorTest {
   void anExplicitDenyWinsOverAnAskForTheSameCall() {
     var deny = PermissionRule.any(PermissionEffect.DENY, "Read");
     var e =
-        new DefaultPermissionEvaluator(
+        evaluator(
             rules(
                 PermissionMode.DEFAULT,
                 List.of(),
@@ -335,7 +320,7 @@ final class DefaultPermissionEvaluatorTest {
   void anAllowRuleWinsOverAnAskForTheSameCall() {
     var allow = PermissionRule.any(PermissionEffect.ALLOW, "Write");
     var e =
-        new DefaultPermissionEvaluator(
+        evaluator(
             rules(
                 PermissionMode.DEFAULT,
                 List.of(allow),
@@ -350,7 +335,7 @@ final class DefaultPermissionEvaluatorTest {
   @Test
   void bypassPermissionsAllowsEveryCategory() {
     var e =
-        new DefaultPermissionEvaluator(
+        evaluator(
             Permission.empty(PermissionMode.BYPASS_PERMISSIONS),
             tools(binding("Execute", ToolCategory.EXECUTION)));
     assertEquals(
@@ -362,7 +347,7 @@ final class DefaultPermissionEvaluatorTest {
   void bypassPermissionsKeepsAnExplicitDeny() {
     var deny = PermissionRule.any(PermissionEffect.DENY, "Execute");
     var e =
-        new DefaultPermissionEvaluator(
+        evaluator(
             rules(PermissionMode.BYPASS_PERMISSIONS, List.of(), List.of(), List.of(deny)),
             tools(binding("Execute", ToolCategory.EXECUTION)));
     assertEquals(
@@ -374,7 +359,7 @@ final class DefaultPermissionEvaluatorTest {
   void anAllowRuleOverridesTheCategoryDefault() {
     var allow = PermissionRule.withGlob(PermissionEffect.ALLOW, "Write", "/workspace/**");
     var e =
-        new DefaultPermissionEvaluator(
+        evaluator(
             rules(PermissionMode.DEFAULT, List.of(allow), List.of(), List.of()),
             tools(pathKeyed("Write", ToolCategory.WRITE)));
     assertEquals(
@@ -387,7 +372,7 @@ final class DefaultPermissionEvaluatorTest {
   void aCallTheAllowGlobMissesFallsToTheCategoryDefault() {
     var allow = PermissionRule.withGlob(PermissionEffect.ALLOW, "Write", "/workspace/**");
     var e =
-        new DefaultPermissionEvaluator(
+        evaluator(
             rules(PermissionMode.DEFAULT, List.of(allow), List.of(), List.of()),
             tools(pathKeyed("Write", ToolCategory.WRITE)));
     assertEquals(
@@ -398,7 +383,7 @@ final class DefaultPermissionEvaluatorTest {
   @Test
   void anAskRuleWithNoApproverIsDenied() {
     var e =
-        new DefaultPermissionEvaluator(
+        evaluator(
             rules(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()),
             tools(pathKeyed("Write", ToolCategory.WRITE)));
     assertEquals(
@@ -410,7 +395,7 @@ final class DefaultPermissionEvaluatorTest {
   void anAskRuleOverridesAnAllowingCategoryDefault() {
     var ask = PermissionRule.any(PermissionEffect.ASK, "Read");
     var e =
-        new DefaultPermissionEvaluator(
+        evaluator(
             rules(PermissionMode.DEFAULT, List.of(), List.of(ask), List.of()),
             tools(binding("Read", ToolCategory.READ)));
     assertEquals(
@@ -421,7 +406,7 @@ final class DefaultPermissionEvaluatorTest {
   @Test
   void lockedDownAllowRuleOpensASingleTool() {
     var e =
-        new DefaultPermissionEvaluator(
+        evaluator(
             Permission.lockedDown(),
             tools(binding("Read", ToolCategory.READ), binding("Execute", ToolCategory.EXECUTION)));
     assertEquals(PermissionEffect.ALLOW, e.authorize(call("Execute")).effect());
@@ -458,7 +443,7 @@ final class DefaultPermissionEvaluatorTest {
   })
   void theModeAndCategoryDecideWhenNoRuleMatches(
       PermissionMode mode, ToolCategory category, PermissionEffect effect, String reason) {
-    var e = new DefaultPermissionEvaluator(Permission.empty(mode), ToolRegistry.empty());
+    var e = evaluator(Permission.empty(mode), ToolRegistry.empty());
     assertEquals(
         new PermissionDecision(effect, reason, Optional.empty()),
         e.evaluate(ToolPermissionKey.of("T"), category));
@@ -468,9 +453,7 @@ final class DefaultPermissionEvaluatorTest {
   @ValueSource(
       strings = {"READ", "SEARCH", "WRITE", "EXECUTION", "NETWORK", "CONTROL", "DELEGATION"})
   void lockedDownDeniesEveryCategoryByDefault(ToolCategory category) {
-    var e =
-        new DefaultPermissionEvaluator(
-            Permission.empty(PermissionMode.LOCKED_DOWN), ToolRegistry.empty());
+    var e = evaluator(Permission.empty(PermissionMode.LOCKED_DOWN), ToolRegistry.empty());
     assertEquals(
         PermissionDecision.deny(
             "LOCKED_DOWN mode forbids "

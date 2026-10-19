@@ -56,28 +56,17 @@ public final class DefaultPermissionEvaluator {
   private final Optional<ToolApprover> approver;
   private final SecretRegistry secrets;
 
-  /**
-   * Build an evaluator with no approver, so ASK refuses the call, and an empty secret registry.
-   *
-   * @param permission the policy to enforce; non-null
-   * @param tools the tool registry (for category + permissionKey lookup); non-null
-   * @throws NullPointerException if either argument is null
-   */
-  public DefaultPermissionEvaluator(Permission permission, ToolRegistry tools) {
-    this(permission, tools, null, new SecretRegistry());
-  }
-
   private DefaultPermissionEvaluator(
       Permission permission, ToolRegistry tools, ToolApprover approver, SecretRegistry secrets) {
-    this.permission = Objects.requireNonNull(permission, "permission must not be null");
-    this.tools = Objects.requireNonNull(tools, "tools must not be null");
+    this.permission = permission;
+    this.tools = tools;
     this.matcher = new RuleMatcher();
     this.approver = Optional.ofNullable(approver);
     this.secrets = secrets;
   }
 
   /**
-   * Start building an evaluator with a {@link ToolApprover}:
+   * Start building an evaluator; without {@link Builder#withApprover} ASK refuses the call:
    *
    * <pre>{@code
    * var eval = DefaultPermissionEvaluator.newBuilder(perm, tools)

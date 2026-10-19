@@ -136,7 +136,8 @@ final class ToolAuthorizationTest {
   @Test
   void anAskWithNoApproverRefusesTheCall() {
     var evaluator =
-        new DefaultPermissionEvaluator(Permission.empty(PermissionMode.DEFAULT), writeTool());
+        DefaultPermissionEvaluator.newBuilder(Permission.empty(PermissionMode.DEFAULT), writeTool())
+            .build();
     assertEquals(
         new ToolOutcome.Rejected(
             "Permission", "no approver for default-ask on WRITE (Write(/tmp/a))"),

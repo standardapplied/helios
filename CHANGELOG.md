@@ -605,6 +605,7 @@ stage and ends `NotFound`, as without a policy.
 | The first `PreToolUse` `MutateArgs` ends the chain | it passes the new arguments to the next hook; `Block`, `Inject` and `Stop` end the chain |
 | `HookRegistry.firePreToolUse` returns `HookDecision` | returns `PreToolUseResult(call, mutations, decision)` |
 | `DefaultPermissionEvaluator.Builder.withQuestionGateway(QuestionGateway)` | `withApprover(ToolApprover)`; `ToolApprover.askingUser(gateway)` is the old prompt |
+| `new DefaultPermissionEvaluator(permission, tools)` | `DefaultPermissionEvaluator.newBuilder(permission, tools).build()`, with `withSecretRegistry` for the registry whose secrets no key may carry |
 | `DefaultPermissionEvaluator` implements `PreToolUseHook`: `beforeTool`, `priority()`, `name()`, `Builder.withPriority(int)` | `authorize(ToolCall)` returns an `ALLOW` or `DENY` `PermissionDecision`; no priority, since no hook runs after it |
 | `PermissionDecision(effect, reason)`; deny reasons read `permission: deny rule for <tool>` | `PermissionDecision(effect, reason, rule)`; reasons name the tool, key and rule or default that decided, such as `deny rule Write(/etc/**) matched Write(/etc/passwd)` |
 | `Permission` accepted a rule of any effect in any list, and a match in `deny` denied whatever the rule's effect | a matched rule decides with its own effect, so the constructor throws `IllegalArgumentException` for a rule whose effect is not its list's |
