@@ -11,6 +11,7 @@ import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolOutcome;
+import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookRegistry;
@@ -138,6 +139,25 @@ final class ToolAuthorizationSessionTest {
     assertEquals(
         new ToolOutcome.Rejected("Permission", "permission key of Write carries a secret"),
         run.onlyResult().outcome());
+    assertEquals(List.of(), run.events().eventsOf(QueryEvent.QuestionAsked.class));
+    assertEquals(List.of(), executed);
+  }
+
+  @ParameterizedTest(name = "under a policy: {0}")
+  @ValueSource(booleans = {true, false})
+  void aCallNamingNoRegisteredToolIsNotFoundWithOrWithoutAPolicy(boolean policed) {
+    var options =
+        SessionOptions.newBuilder().withTools(new ToolRegistry(List.of(sessions.writeTool())));
+    if (policed) {
+      options.withPermission(Permission.empty(PermissionMode.LOCKED_DOWN));
+    }
+
+    var run = run(options, new ToolCall("c1", "Missing", Map.of()));
+
+    assertEquals(
+        new ToolResult(new ToolOutcome.NotFound(), "tool not found: Missing", List.of()),
+        run.onlyResult());
+    assertEquals(List.of(), run.events().eventsOf(QueryEvent.ToolBlocked.class));
     assertEquals(List.of(), run.events().eventsOf(QueryEvent.QuestionAsked.class));
     assertEquals(List.of(), executed);
   }
