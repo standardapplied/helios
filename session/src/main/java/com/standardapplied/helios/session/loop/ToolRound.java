@@ -13,7 +13,6 @@ import com.standardapplied.helios.session.permissions.Permission;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * Runs the tool calls of one model turn serially: runs the {@code PreToolUse} chain, authorizes the
@@ -165,7 +164,9 @@ final class ToolRound {
    * QueryEvent.ToolUse}.
    */
   private PlannedCall authorize(SessionState state, ToolCall call) {
-    var refusal = refusal(call);
+    var refusal =
+        ToolAuthorization.refusal(
+            collaborators.toolDispatch().registry(), collaborators.authorization(), call);
     if (refusal.isPresent()) {
       return block(state, call, Permission.NAME, refusal.orElseThrow());
     }
@@ -174,16 +175,6 @@ final class ToolRound {
         new QueryEvent.ToolUse(
             state.sessionId(), state.currentTurnIndex(), collaborators.clock().instant(), call));
     return new PlannedCall(call, null, Map.of());
-  }
-
-  /**
-   * Why the permission stage refuses {@code call}; empty for a call naming no tool of the
-   * dispatcher's registry, which dispatch answers {@code NotFound}, policy or none.
-   */
-  private Optional<String> refusal(ToolCall call) {
-    return collaborators.toolDispatch().registry().get(call.name()).isEmpty()
-        ? Optional.empty()
-        : ToolAuthorization.refusal(collaborators.authorization(), call);
   }
 
   private PlannedCall block(SessionState state, ToolCall call, String by, String reason) {

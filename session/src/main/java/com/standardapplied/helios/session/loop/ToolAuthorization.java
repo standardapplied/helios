@@ -7,6 +7,7 @@ import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
+import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.function.Function;
@@ -24,14 +25,19 @@ final class ToolAuthorization {
   private ToolAuthorization() {}
 
   /**
-   * Why {@code call} may not run, or empty when {@code authorization} allows it.
+   * Why {@code call} may not run, or empty when {@code authorization} allows it or {@code tools}
+   * binds no tool of its name, which dispatch answers {@code NotFound}, policy or none.
    *
+   * @param tools the registry dispatch looks the call up in
    * @param authorization the session's permission check
    * @param call the final call
    * @return the refusal reason, unredacted
    */
   static Optional<String> refusal(
-      Function<ToolCall, PermissionDecision> authorization, ToolCall call) {
+      ToolRegistry tools, Function<ToolCall, PermissionDecision> authorization, ToolCall call) {
+    if (tools.get(call.name()).isEmpty()) {
+      return Optional.empty();
+    }
     PermissionDecision decision;
     try {
       decision = authorization.apply(call);
