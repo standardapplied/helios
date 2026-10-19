@@ -19,6 +19,7 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -26,6 +27,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -478,5 +481,95 @@ final class HookRegistryTest {
     var decision = new HookRegistry(List.of(hook)).fireOnUserMessage(UserMessage.text("hi"), ctx());
     assertInstanceOf(HookOutcome.Block.class, decision.outcome());
     assertEquals(hook.name(), decision.firingHookName());
+  }
+
+  // ── log lines carry the name read when the registry was built ────────────
+
+  /** A name that is {@code Gate} the first time it is read and {@code Renamed} after that. */
+  private static Supplier<String> gateThenRenamed() {
+    var reads = new AtomicInteger();
+    return () -> reads.getAndIncrement() == 0 ? "Gate" : "Renamed";
+  }
+
+  private static LogRecord onlyWarning(Runnable fire) {
+    var logged = new ArrayList<LogRecord>();
+    try (var ignored = LogCapture.of(HookRegistry.class, logged)) {
+      fire.run();
+    }
+    assertEquals(1, logged.size(), "log records");
+    var only = logged.getFirst();
+    assertEquals(Level.WARNING, only.getLevel());
+    return only;
+  }
+
+  @Test
+  void aThrowingDecisiveHookIsLoggedUnderItsRecordedName() {
+    var failure = new IllegalStateException("boom");
+    var name = gateThenRenamed();
+    PreToolUseHook hook =
+        new PreToolUseHook() {
+          @Override
+          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+            throw failure;
+          }
+
+          @Override
+          public String name() {
+            return name.get();
+          }
+        };
+    var registry = new HookRegistry(List.of(hook));
+
+    var logged = onlyWarning(() -> registry.firePreToolUse(CALL, ctx()));
+
+    assertEquals("hook Gate threw; treating as Continue", logged.getMessage());
+    assertSame(failure, logged.getThrown());
+  }
+
+  @Test
+  void aNullOutcomeIsLoggedUnderItsRecordedName() {
+    var name = gateThenRenamed();
+    PreToolUseHook hook =
+        new PreToolUseHook() {
+          @Override
+          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+            return null;
+          }
+
+          @Override
+          public String name() {
+            return name.get();
+          }
+        };
+    var registry = new HookRegistry(List.of(hook));
+
+    var logged = onlyWarning(() -> registry.firePreToolUse(CALL, ctx()));
+
+    assertEquals("hook Gate returned null outcome; treating as Continue", logged.getMessage());
+  }
+
+  @Test
+  void aThrowingStreamEventHookIsLoggedUnderItsRecordedName() {
+    var failure = new IllegalStateException("boom");
+    var name = gateThenRenamed();
+    OnStreamEventHook hook =
+        new OnStreamEventHook() {
+          @Override
+          public void onEvent(QueryEvent event, HookContext ctx) {
+            throw failure;
+          }
+
+          @Override
+          public String name() {
+            return name.get();
+          }
+        };
+    var registry = new HookRegistry(List.of(hook));
+    var event = new QueryEvent.AssistantText("sess", 0, Instant.EPOCH, "x");
+
+    var logged = onlyWarning(() -> registry.fireOnStreamEvent(event, ctx()));
+
+    assertEquals("hook Gate threw on stream event", logged.getMessage());
+    assertSame(failure, logged.getThrown());
   }
 }
