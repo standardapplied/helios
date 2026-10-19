@@ -25,8 +25,8 @@
  *
  * <p>{@link com.standardapplied.helios.session.hooks.HookRegistry} is the priority-sorted,
  * type-fanned dispatcher the loop calls. {@link
- * com.standardapplied.helios.session.hooks.HookDecision} pairs the firing hook (for observability —
- * surfaced on {@code QueryEvent.HookFired}) with the outcome. {@link
+ * com.standardapplied.helios.session.hooks.HookDecision} pairs the firing hook's name (for
+ * observability — surfaced on {@code QueryEvent.HookFired}) with the outcome. {@link
  * com.standardapplied.helios.session.hooks.HookContext} (and {@link
  * com.standardapplied.helios.session.hooks.DefaultHookContext}) carries the per-fire session id /
  * turn / model handle / cancellation token so hooks can take their own actions (e.g. call the model

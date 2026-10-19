@@ -215,7 +215,7 @@ final class ContextCompaction {
   private List<Message> beforeCompact(SessionState state, List<Message> historyBefore) {
     var decision =
         collaborators.hooks().firePreCompact(historyBefore, collaborators.hookContext(state));
-    var hookName = HookEffects.firingHookName(decision);
+    var hookName = decision.firingHookName();
     return switch (decision.outcome()) {
       case HookOutcome.Continue ignored -> historyBefore;
       case HookOutcome.MutateHistory mutate -> {
@@ -240,7 +240,7 @@ final class ContextCompaction {
    */
   private boolean afterCompactStops(SessionState state, CompactionPayload payload) {
     var decision = collaborators.hooks().firePostCompact(payload, collaborators.hookContext(state));
-    var hookName = HookEffects.firingHookName(decision);
+    var hookName = decision.firingHookName();
     return switch (decision.outcome()) {
       case HookOutcome.Continue ignored -> false;
       case HookOutcome.Stop stop -> {

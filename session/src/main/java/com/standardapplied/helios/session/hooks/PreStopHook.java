@@ -33,6 +33,6 @@ public non-sealed interface PreStopHook extends Hook {
 
   @Override
   default String name() {
-    return getClass().getSimpleName();
+    return HookNames.defaultName(this);
   }
 }

@@ -114,19 +114,6 @@ final class EventEmitterTest {
   }
 
   @Test
-  void emitHookFiredFallsBackToPhaseWhenHookNameNull() {
-    var sinkEvents = new ArrayList<QueryEvent>();
-    var emitter =
-        new EventEmitter(sinkEvents::add, HookRegistry.empty(), ctxFactory(stubModel()), CLOCK);
-    emitter.emitHookFired(newState(), null, "PreToolUseHook", "Block");
-    assertEquals(1, sinkEvents.size());
-    var fired = (QueryEvent.HookFired) sinkEvents.get(0);
-    assertEquals("PreToolUseHook", fired.hookName(), "falls back to phase when hookName is null");
-    assertEquals("PreToolUseHook", fired.phase());
-    assertEquals("Block", fired.outcomeKind());
-  }
-
-  @Test
   void emitHookFiredUsesProvidedHookName() {
     var sinkEvents = new ArrayList<QueryEvent>();
     var emitter =

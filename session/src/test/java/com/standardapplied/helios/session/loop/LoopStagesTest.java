@@ -29,7 +29,6 @@ import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookRegistry;
-import com.standardapplied.helios.session.hooks.OnUserMessageHook;
 import com.standardapplied.helios.session.hooks.PostCompactHook;
 import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
@@ -229,33 +228,6 @@ final class LoopStagesTest {
         "PostCompactHook ''{0}'' {1} is not honored at this phase", records.get(1).getMessage());
     assertEquals(List.of("post", "Inject"), List.of(records.get(1).getParameters()));
     assertEquals(0, queue.size());
-  }
-
-  @Test
-  void anOnUserMessageHookWithoutANameIsReportedUnderThePhaseName() {
-    queue.offer(UserMessage.text("hello"));
-    var unnamed =
-        new OnUserMessageHook() {
-          @Override
-          public String name() {
-            return null;
-          }
-
-          @Override
-          public HookOutcome onUserMessage(UserMessage message, HookContext ctx) {
-            return HookOutcome.block("not today");
-          }
-        };
-
-    loop(new MockModel("unused"), unnamed).run(state, SessionLimits.defaults());
-
-    var blocked =
-        events.stream()
-            .filter(QueryEvent.MessageBlocked.class::isInstance)
-            .map(QueryEvent.MessageBlocked.class::cast)
-            .findFirst()
-            .orElseThrow();
-    assertEquals("OnUserMessageHook", blocked.hookName());
   }
 
   @Test

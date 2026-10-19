@@ -47,7 +47,7 @@ final class PreStopDecision {
             .withUsage(outcome.usage())
             .build();
     var decision = collaborators.hooks().firePreStop(response, collaborators.hookContext(state));
-    var hookName = HookEffects.firingHookName(decision);
+    var hookName = decision.firingHookName();
     return switch (decision.outcome()) {
       case HookOutcome.Stop stop -> {
         emitter.emitHookFired(state, hookName, PHASE, "Stop");

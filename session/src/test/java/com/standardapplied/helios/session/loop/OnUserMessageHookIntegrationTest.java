@@ -3,7 +3,6 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,14 +38,14 @@ final class OnUserMessageHookIntegrationTest {
     // Message blocked → history stays empty → loop terminates with EmptyHistory error.
     assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result);
     assertTrue(loop.eventsOf(QueryEvent.UserMessageReceived.class).isEmpty());
-    assertTrue(
-        loop.eventsOf(QueryEvent.HookFired.class).stream()
-            .anyMatch(h -> h.outcomeKind().equals("Block")));
+    var fired = loop.first(QueryEvent.HookFired.class);
+    assertEquals("Block", fired.outcomeKind());
+    assertEquals(blocker.name(), fired.hookName());
     // The dropped message surfaces as MessageBlocked so UIs/audit can render the drop.
     var blocked = loop.first(QueryEvent.MessageBlocked.class);
     assertSame(dropped, blocked.message());
     assertEquals("PII", blocked.reason());
-    assertFalse(blocked.hookName().isBlank(), "hookName must be non-blank");
+    assertEquals(blocker.name(), blocked.hookName());
   }
 
   @Test
