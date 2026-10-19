@@ -9,7 +9,9 @@ import java.util.Objects;
  * Decides a tool call the policy answered with {@link PermissionEffect#ASK}. Only {@link
  * PermissionEffect#ALLOW} admits the call; {@link PermissionEffect#DENY} refuses it with this
  * approver's reason, and {@link PermissionEffect#ASK}, {@code null}, a thrown exception or an
- * interrupt refuse it too. The approver runs on the agent loop's thread and may block it.
+ * interrupt refuse it too. The approver runs on the agent loop's thread and may block it. The
+ * session does not interrupt it, so an approver that waits must bound or end its wait itself; the
+ * human approver's wait ends when the session is cancelled or its wall-clock deadline passes.
  */
 @FunctionalInterface
 public interface ToolApprover {
