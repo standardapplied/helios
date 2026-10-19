@@ -191,6 +191,20 @@ final class WorkspaceCanonicalPathTest {
     assertFalse(new WorkspaceRoot(root, false).admits("/abs/../x"));
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {"<root>*/**", "<root>-old/**", "<parent>/?s/secrets/**", "/**/secrets"})
+  void aTrustedWorkspaceAdmitsAnAbsoluteGlobThatCanMatchOutsideItsRoot(String glob) {
+    var spelled = glob.replace("<root>", root.toString()).replace("<parent>", tmp.toString());
+
+    assertTrue(new WorkspaceRoot(root, false).admits(spelled));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"<root>", "<root>/**", "<root>/secrets/*", "<root>/a?/b"})
+  void aTrustedWorkspaceRefusesAnAbsoluteGlobInsideItsRootSpelledRelative(String glob) {
+    assertFalse(new WorkspaceRoot(root, false).admits(glob.replace("<root>", root.toString())));
+  }
+
   @Test
   void theExampleIsACanonicalPath() {
     assertEquals("./src/Main.java", workspace.example());

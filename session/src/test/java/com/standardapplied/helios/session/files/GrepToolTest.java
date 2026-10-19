@@ -391,6 +391,20 @@ final class GrepToolTest {
   }
 
   @Test
+  void aWithheldFileCountsWhateverItsSize(@TempDir Path tmp) throws IOException {
+    Files.writeString(tmp.resolve("small.txt"), "TOPSECRET\n", StandardCharsets.UTF_8);
+    Files.writeString(
+        tmp.resolve("large.txt"), "TOPSECRET\n".repeat(200_000), StandardCharsets.UTF_8);
+
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "TOP"), withholding(key -> true));
+
+    assertEquals("[withheld by permission policy: 2]\n", result.output());
+  }
+
+  @Test
   void theWithheldLineFollowsTheTruncationMarker(@TempDir Path tmp) throws IOException {
     Files.createDirectories(tmp.resolve("first"));
     Files.createDirectories(tmp.resolve("second"));

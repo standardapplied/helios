@@ -37,7 +37,8 @@ import java.util.Objects;
  * memory path ({@code /memories/} or {@code /memories/a/b}), so a call is authorised by {@code
  * MemoryRead} rules on that key, and a {@code Read} rule over the directory backing a filesystem
  * memory store does not apply to it. A listing withholds every path a {@code MemoryRead} DENY rule
- * matches and ends with {@code [withheld by permission policy: <count>]}.
+ * matches, keyed by its canonical spelling however the backend spelled it, and ends with {@code
+ * [withheld by permission policy: <count>]}.
  */
 public final class MemoryReadTool {
 
@@ -111,10 +112,19 @@ public final class MemoryReadTool {
     var withholding = Withholding.of(ctx);
     var out = new StringBuilder();
     for (var entry : entries) {
-      if (!withholding.withholds(entry)) {
+      if (!withholding.withholds(key(entry))) {
         out.append(entry).append('\n');
       }
     }
     return (out.isEmpty() ? "(empty)\n" : out) + withholding.note();
+  }
+
+  /** The canonical key of a listed entry, or the entry as listed when it is no memory path. */
+  private static String key(String entry) {
+    try {
+      return MemoryPaths.INSTANCE.canonical(entry);
+    } catch (IllegalArgumentException notAMemoryPath) {
+      return entry;
+    }
   }
 }
