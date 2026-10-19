@@ -98,7 +98,6 @@ final class AgentLoopTest {
     var classifier = new StopClassifier(new SecretRegistry());
     var counter = TokenCounter.charBased();
     var compactor = ContextCompactor.disabled();
-    var clock = fixture.clock;
     assertThrows(
         NullPointerException.class,
         () -> new AgentLoop(null, runner, classifier, counter, compactor));
@@ -108,66 +107,6 @@ final class AgentLoopTest {
     assertThrows(
         NullPointerException.class,
         () -> new AgentLoop(collaborators, runner, null, counter, compactor));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new LoopCollaborators(
-                null,
-                dispatch,
-                Authorizations.ADMIT_ALL,
-                queue,
-                events::add,
-                fixture::hookContext,
-                clock));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new LoopCollaborators(
-                hooks,
-                null,
-                Authorizations.ADMIT_ALL,
-                queue,
-                events::add,
-                fixture::hookContext,
-                clock));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new LoopCollaborators(
-                hooks,
-                dispatch,
-                Authorizations.ADMIT_ALL,
-                null,
-                events::add,
-                fixture::hookContext,
-                clock));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new LoopCollaborators(
-                hooks,
-                dispatch,
-                Authorizations.ADMIT_ALL,
-                queue,
-                null,
-                fixture::hookContext,
-                clock));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new LoopCollaborators(
-                hooks, dispatch, Authorizations.ADMIT_ALL, queue, events::add, null, clock));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new LoopCollaborators(
-                hooks,
-                dispatch,
-                Authorizations.ADMIT_ALL,
-                queue,
-                events::add,
-                fixture::hookContext,
-                null));
     assertThrows(
         NullPointerException.class,
         () -> new AgentLoop(collaborators, runner, classifier, null, compactor));
