@@ -6,7 +6,6 @@ import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.schema.OutputSchema;
@@ -17,7 +16,6 @@ import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookRegistry;
-import com.standardapplied.helios.session.permissions.PermissionDecision;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
@@ -26,7 +24,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.function.Function;
 
 /**
  * Wires the collaborators of a {@link TurnRunner} or {@link AgentLoop} under test: a tool dispatch
@@ -61,10 +58,6 @@ final class LoopFixture implements AutoCloseable {
         new SessionEnding("test", new CancellationToken()));
   }
 
-  /** A permission stage that admits every call. */
-  static final Function<ToolCall, PermissionDecision> ADMIT_ALL =
-      call -> PermissionDecision.allow("admitted by the test");
-
   /** The hook context of {@code state}'s current turn. */
   HookContext hookContext(SessionState state) {
     return new DefaultHookContext(
@@ -73,17 +66,8 @@ final class LoopFixture implements AutoCloseable {
 
   /** Collaborators that admit every call and emit into {@link #events}, on this fixture's clock. */
   LoopCollaborators collaborators(HookRegistry hooks, ToolDispatch dispatch, SteeringQueue queue) {
-    return collaborators(hooks, dispatch, ADMIT_ALL, queue);
-  }
-
-  /** Collaborators that authorize through {@code authorization} and emit into {@link #events}. */
-  LoopCollaborators collaborators(
-      HookRegistry hooks,
-      ToolDispatch dispatch,
-      Function<ToolCall, PermissionDecision> authorization,
-      SteeringQueue queue) {
     return new LoopCollaborators(
-        hooks, dispatch, authorization, queue, events::add, this::hookContext, clock);
+        hooks, dispatch, Authorizations.ADMIT_ALL, queue, events::add, this::hookContext, clock);
   }
 
   /** A runner of {@code model} with no costs and no output schema. */

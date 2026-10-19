@@ -71,7 +71,7 @@ final class TurnStagesTest {
         new LoopCollaborators(
             new HookRegistry(List.of(hooks)),
             dispatch,
-            LoopFixture.ADMIT_ALL,
+            Authorizations.ADMIT_ALL,
             queue,
             events::add,
             TurnStagesTest::context,

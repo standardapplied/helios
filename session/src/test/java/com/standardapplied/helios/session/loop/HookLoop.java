@@ -64,7 +64,7 @@ final class HookLoop implements AutoCloseable {
    * Runs the loop over {@code message} with {@code hooks} and {@code tools}, admitting every call.
    */
   ResultMessage run(Model model, ToolRegistry tools, UserMessage message, Hook... hooks) {
-    return run(model, tools, LoopFixture.ADMIT_ALL, message, hooks);
+    return run(model, tools, Authorizations.ADMIT_ALL, message, hooks);
   }
 
   /**
@@ -80,8 +80,14 @@ final class HookLoop implements AutoCloseable {
     var queue = new SteeringQueue(8);
     queue.offer(message);
     var collaborators =
-        fixture.collaborators(
-            new HookRegistry(List.of(hooks)), fixture.dispatch(tools), authorization, queue);
+        new LoopCollaborators(
+            new HookRegistry(List.of(hooks)),
+            fixture.dispatch(tools),
+            authorization,
+            queue,
+            fixture.events::add,
+            fixture::hookContext,
+            fixture.clock);
     return fixture
         .loop(collaborators, model, TokenCounter.charBased(), ContextCompactor.disabled())
         .run(state, SessionLimits.defaults());

@@ -54,7 +54,7 @@ final class LoopCollaboratorsTest {
                 new LoopCollaborators(
                     null,
                     dispatch,
-                    LoopFixture.ADMIT_ALL,
+                    Authorizations.ADMIT_ALL,
                     queue,
                     events::add,
                     contextFactory,
@@ -69,7 +69,13 @@ final class LoopCollaboratorsTest {
             NullPointerException.class,
             () ->
                 new LoopCollaborators(
-                    hooks, null, LoopFixture.ADMIT_ALL, queue, events::add, contextFactory, CLOCK));
+                    hooks,
+                    null,
+                    Authorizations.ADMIT_ALL,
+                    queue,
+                    events::add,
+                    contextFactory,
+                    CLOCK));
     assertEquals("toolDispatch must not be null", ex.getMessage());
   }
 
@@ -93,7 +99,7 @@ final class LoopCollaboratorsTest {
                 new LoopCollaborators(
                     hooks,
                     dispatch,
-                    LoopFixture.ADMIT_ALL,
+                    Authorizations.ADMIT_ALL,
                     null,
                     events::add,
                     contextFactory,
@@ -108,7 +114,7 @@ final class LoopCollaboratorsTest {
             NullPointerException.class,
             () ->
                 new LoopCollaborators(
-                    hooks, dispatch, LoopFixture.ADMIT_ALL, queue, null, contextFactory, CLOCK));
+                    hooks, dispatch, Authorizations.ADMIT_ALL, queue, null, contextFactory, CLOCK));
     assertEquals("eventSink must not be null", ex.getMessage());
   }
 
@@ -119,7 +125,7 @@ final class LoopCollaboratorsTest {
             NullPointerException.class,
             () ->
                 new LoopCollaborators(
-                    hooks, dispatch, LoopFixture.ADMIT_ALL, queue, events::add, null, CLOCK));
+                    hooks, dispatch, Authorizations.ADMIT_ALL, queue, events::add, null, CLOCK));
     assertEquals("hookContextFactory must not be null", ex.getMessage());
   }
 
@@ -132,7 +138,7 @@ final class LoopCollaboratorsTest {
                 new LoopCollaborators(
                     hooks,
                     dispatch,
-                    LoopFixture.ADMIT_ALL,
+                    Authorizations.ADMIT_ALL,
                     queue,
                     events::add,
                     contextFactory,
@@ -146,7 +152,7 @@ final class LoopCollaboratorsTest {
         LoopCollaborators.newBuilder()
             .withHooks(hooks)
             .withToolDispatch(dispatch)
-            .withAuthorization(LoopFixture.ADMIT_ALL)
+            .withAuthorization(Authorizations.ADMIT_ALL)
             .withSteeringQueue(queue)
             .withEventSink(events::add)
             .withHookContextFactory(contextFactory)
@@ -155,7 +161,7 @@ final class LoopCollaboratorsTest {
 
     assertSame(hooks, collaborators.hooks());
     assertSame(dispatch, collaborators.toolDispatch());
-    assertSame(LoopFixture.ADMIT_ALL, collaborators.authorization());
+    assertSame(Authorizations.ADMIT_ALL, collaborators.authorization());
     assertSame(queue, collaborators.steeringQueue());
     assertSame(contextFactory, collaborators.hookContextFactory());
     assertSame(CLOCK, collaborators.clock());
@@ -167,7 +173,7 @@ final class LoopCollaboratorsTest {
         LoopCollaborators.newBuilder()
             .withHooks(hooks)
             .withToolDispatch(dispatch)
-            .withAuthorization(LoopFixture.ADMIT_ALL)
+            .withAuthorization(Authorizations.ADMIT_ALL)
             .withSteeringQueue(queue)
             .withEventSink(events::add)
             .withHookContextFactory(contextFactory)
@@ -188,7 +194,7 @@ final class LoopCollaboratorsTest {
   void hookContextAndEmitterUseTheSharedFactoryAndSink() {
     var collaborators =
         new LoopCollaborators(
-            hooks, dispatch, LoopFixture.ADMIT_ALL, queue, events::add, contextFactory, CLOCK);
+            hooks, dispatch, Authorizations.ADMIT_ALL, queue, events::add, contextFactory, CLOCK);
     var state = new SessionState("sess-collab", new CancellationToken(), CLOCK);
 
     assertEquals("sess-collab", collaborators.hookContext(state).sessionId());
