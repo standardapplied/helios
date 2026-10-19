@@ -45,8 +45,9 @@ public sealed interface Hook
   String name();
 
   /**
-   * Firing priority. Lower values fire earlier. The default is {@code 100}; permission hooks
-   * conventionally use {@code 50} so they evaluate before user-supplied hooks.
+   * Firing priority. Lower values fire earlier. The default is {@code 100}. The session's
+   * permission check is not a hook: it runs after every {@code PreToolUse} hook, whatever its
+   * priority.
    *
    * @return non-negative priority
    */

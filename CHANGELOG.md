@@ -595,7 +595,7 @@ final immutable call, then dispatch of that same call. Only an `ALLOW` admits it
 including a failure and a permission key carrying a secret of the session's `SecretRegistry`, is
 `ToolOutcome.Rejected("Permission", reason)` with a `ToolBlocked` event. That reason and a hook's
 `Block` reason are redacted through the session's `SecretRegistry` and cut at 1024 characters; an
-`ApprovalRequest`'s reason is redacted too.
+`ApprovalRequest`'s reason is redacted too, but not cut.
 
 | 2.x | 3.0 |
 |---|---|
