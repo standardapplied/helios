@@ -60,10 +60,10 @@ public record Permission(
         throw new IllegalArgumentException(
             "the "
                 + effect.name().toLowerCase(Locale.ROOT)
-                + " list holds a "
-                + rule.effect()
-                + " rule for "
-                + rule.toolName());
+                + " list holds a rule for "
+                + rule.toolName()
+                + " whose effect is "
+                + rule.effect());
       }
     }
     return copy;
