@@ -18,6 +18,9 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.PostToolUseHook;
+import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
@@ -29,6 +32,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Stream;
@@ -213,6 +217,25 @@ final class CanonicalPermissionPathsTest {
     assertEquals(new ToolCall("c1", ReadTool.NAME, Map.of("path", "./docs/a.txt")), announced);
     assertTrue(output(run).contains("alpha"), output(run));
     assertEquals(announced, run.events().eventsOf(QueryEvent.ToolResult.class).getFirst().call());
+  }
+
+  @Test
+  void hooksBeforeTheStageSeeTheModelsSpellingAndHooksAfterItTheCanonicalCall() {
+    var seen = new CopyOnWriteArrayList<ToolCall>();
+    PreToolUseHook before =
+        (call, ctx) -> {
+          seen.add(call);
+          return HookOutcome.cont();
+        };
+    PostToolUseHook after =
+        (call, result, ctx) -> {
+          seen.add(call);
+          return HookOutcome.cont();
+        };
+
+    run(sessions.withoutPolicy().withHook(before).withHook(after), read("docs/../docs/a.txt"));
+
+    assertEquals(List.of(read("docs/../docs/a.txt"), read("./docs/a.txt")), seen);
   }
 
   @Test
