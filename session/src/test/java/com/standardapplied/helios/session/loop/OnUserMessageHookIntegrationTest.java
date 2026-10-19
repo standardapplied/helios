@@ -3,7 +3,6 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -46,7 +45,7 @@ final class OnUserMessageHookIntegrationTest {
     var blocked = loop.first(QueryEvent.MessageBlocked.class);
     assertSame(dropped, blocked.message());
     assertEquals("PII", blocked.reason());
-    assertFalse(blocked.hookName().isBlank(), "hookName must be non-blank");
+    assertEquals(blocker.name(), blocked.hookName());
   }
 
   @Test
