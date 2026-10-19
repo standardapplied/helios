@@ -111,7 +111,7 @@ final class WorkspaceWalk extends SimpleFileVisitor<Path> {
     if (cancellation.isCancelled()) {
       return FileVisitResult.TERMINATE;
     }
-    if (!attrs.isRegularFile() || attrs.size() > maxFileBytes || withheld(file)) {
+    if (!attrs.isRegularFile() || withheld(file) || attrs.size() > maxFileBytes) {
       return FileVisitResult.CONTINUE;
     }
     results += action.visit(file, attrs, maxResults - results);

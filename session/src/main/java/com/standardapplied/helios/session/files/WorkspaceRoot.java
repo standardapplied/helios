@@ -200,8 +200,9 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
 
   /**
    * Whether {@code glob} can match a canonical spelling of this workspace: its first segment is
-   * {@code .}, starts with {@code **}, or, in a trusted workspace only, is empty (an absolute
-   * path), and no later segment is empty, {@code .} or {@code ..}.
+   * {@code .}, starts with {@code **}, or, in a trusted workspace only, is empty (an absolute path
+   * whose literal part does not lie at or under the root, which is spelled relative), and no later
+   * segment is empty, {@code .} or {@code ..}.
    *
    * @param glob a rule's glob; non-null
    * @return whether a canonical spelling can match it
@@ -210,8 +211,27 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
   public boolean admits(String glob) {
     var first = glob.split("/", -1)[0];
     var anchored =
-        first.equals(".") || first.startsWith("**") || (first.isEmpty() && !confineSymlinks);
+        first.equals(".")
+            || first.startsWith("**")
+            || (first.isEmpty() && !confineSymlinks && !matchesOnlyInRoot(glob));
     return anchored && PathSpace.laterSegmentsProper(glob);
+  }
+
+  /** Whether every path the absolute {@code glob} can match lies at or under the root, if any. */
+  private boolean matchesOnlyInRoot(String glob) {
+    var wildcard = Math.min(indexOrEnd(glob, '*'), indexOrEnd(glob, '?'));
+    var literal =
+        wildcard == glob.length() ? glob : glob.substring(0, glob.lastIndexOf('/', wildcard));
+    try {
+      return Path.of(literal).startsWith(root);
+    } catch (InvalidPathException unspellable) {
+      return true;
+    }
+  }
+
+  private static int indexOrEnd(String text, char c) {
+    var index = text.indexOf(c);
+    return index < 0 ? text.length() : index;
   }
 
   @Override

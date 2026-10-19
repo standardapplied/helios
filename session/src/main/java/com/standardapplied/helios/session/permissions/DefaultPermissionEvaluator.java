@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session.permissions;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.session.tools.PathSpace;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolBinding.PathArgument;
 import com.standardapplied.helios.session.tools.ToolCategory;
@@ -49,9 +50,9 @@ import java.util.stream.Stream;
  * <p>{@link #denies} answers whether a DENY rule matches a key alone; tools that walk below their
  * authorised path withhold every entry it denies.
  *
- * <p>Building an evaluator checks every rule's glob against the {@link
- * com.standardapplied.helios.session.tools.PathSpace} of the tool it names: a rule for a registered
- * path tool whose glob can never match a canonical path is a configuration error.
+ * <p>Building an evaluator checks every rule's glob against the {@link PathSpace} of the tool it
+ * names, or, for a tool not registered, of every walk that also withholds what that tool's DENY
+ * rules match: a rule whose glob can never match a canonical path there is a configuration error.
  *
  * <h2>Thread-safety</h2>
  *
@@ -318,17 +319,17 @@ public final class DefaultPermissionEvaluator {
     }
 
     /**
-     * Refuse a rule for a registered path tool whose glob no canonical path of the tool's space can
-     * match.
+     * Refuse a rule whose glob no canonical path can match in a space the rule is matched in: the
+     * registered tool's own, or, for a tool not registered, that of every walk which also withholds
+     * what the tool's DENY rules match.
      */
     private void requireMatchable(PermissionRule rule) {
-      var space =
-          tools.get(rule.toolName()).flatMap(ToolBinding::pathArgument).map(PathArgument::space);
-      if (space.isEmpty() || rule.argPattern().isEmpty()) {
+      if (rule.argPattern().isEmpty()) {
         return;
       }
       var glob = rule.argPattern().orElseThrow();
-      if (!space.orElseThrow().admits(glob)) {
+      var refusing = spacesOf(rule.toolName()).filter(space -> !space.admits(glob)).findFirst();
+      if (refusing.isPresent()) {
         throw new IllegalArgumentException(
             "rule "
                 + rule.toolName()
@@ -337,8 +338,17 @@ public final class DefaultPermissionEvaluator {
                 + ") can never match: "
                 + rule.toolName()
                 + " keys are canonical paths such as "
-                + space.orElseThrow().example());
+                + refusing.orElseThrow().example());
       }
+    }
+
+    private Stream<PathSpace> spacesOf(String toolName) {
+      var own = tools.get(toolName);
+      var bindings = own.isPresent() ? own.stream() : tools.bindings().stream();
+      return bindings
+          .flatMap(binding -> binding.pathArgument().stream())
+          .filter(path -> own.isPresent() || path.denyRulesOf().contains(toolName))
+          .map(PathArgument::space);
     }
   }
 }
