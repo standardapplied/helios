@@ -110,15 +110,18 @@ final class ToolAuthorizationSessionTest {
     assertEquals(List.of(), executed);
   }
 
-  @Test
-  void aPermissionKeyCarryingASecretIsRefusedBeforeAnyoneIsAskedAboutIt() {
+  @ParameterizedTest(name = "the secret in its tool name: {0}")
+  @ValueSource(booleans = {false, true})
+  void aPermissionKeyCarryingASecretIsRefusedBeforeAnyoneIsAskedAboutIt(boolean inToolName) {
     var secrets = new SecretRegistry();
     secrets.register("TOKEN", SECRET);
+    var key =
+        inToolName
+            ? new ToolPermissionKey(SECRET, "/tmp/a")
+            : new ToolPermissionKey("Write", SECRET);
     var options =
         SessionOptions.newBuilder()
-            .withTools(
-                new ToolRegistry(
-                    List.of(sessions.writeTool(args -> new ToolPermissionKey("Write", SECRET)))))
+            .withTools(new ToolRegistry(List.of(sessions.writeTool(args -> key))))
             .withPermission(Permission.empty(PermissionMode.DEFAULT))
             .withSecretRegistry(secrets);
 

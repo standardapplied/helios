@@ -5,7 +5,6 @@
 package com.standardapplied.helios.session.permissions;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -162,45 +161,6 @@ final class DefaultPermissionEvaluatorTest {
     assertEquals(
         PermissionDecision.deny("no tool named 'unknown' is registered"),
         e.authorize(call("unknown")));
-  }
-
-  @Test
-  void aPermissionKeyCarryingASecretIsDeniedBeforeTheApproverIsAsked() {
-    var secrets = new SecretRegistry();
-    secrets.register("TOKEN", "test-registered-secret-123");
-    var requests = new ArrayList<ApprovalRequest>();
-    var e =
-        DefaultPermissionEvaluator.newBuilder(
-                rules(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()),
-                tools(pathKeyed("Write", ToolCategory.WRITE)))
-            .withApprover(
-                request -> {
-                  requests.add(request);
-                  return PermissionDecision.allow("approved");
-                })
-            .withSecretRegistry(secrets)
-            .build();
-
-    assertEquals(
-        PermissionDecision.deny("permission key of Write carries a secret"),
-        e.authorize(writeCall("/tmp/test-registered-secret-123")));
-    assertEquals(List.of(), requests);
-  }
-
-  @Test
-  void aPermissionKeyCarryingASecretIsDeniedWhereThePolicyWouldAllowIt() {
-    var secrets = new SecretRegistry();
-    secrets.register("TOKEN", "test-registered-secret-123");
-    var e =
-        DefaultPermissionEvaluator.newBuilder(
-                Permission.empty(PermissionMode.BYPASS_PERMISSIONS),
-                tools(pathKeyed("Write", ToolCategory.WRITE)))
-            .withSecretRegistry(secrets)
-            .build();
-
-    assertEquals(
-        PermissionDecision.deny("permission key of Write carries a secret"),
-        e.authorize(writeCall("/tmp/test-registered-secret-123")));
   }
 
   @Test
@@ -397,29 +357,49 @@ final class DefaultPermissionEvaluatorTest {
     assertEquals(PermissionEffect.DENY, e.authorize(call("Read")).effect());
   }
 
-  // ── denies ───────────────────────────────────────────────────────────────
+  // ── decidingRule ─────────────────────────────────────────────────────────
 
-  @Test
-  void deniesAnswersForDenyRulesAloneWhateverTheMode() {
-    var e =
-        evaluator(
-            rules(
-                PermissionMode.BYPASS_PERMISSIONS,
-                List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "Grep", "./**")),
-                List.of(PermissionRule.withGlob(PermissionEffect.ASK, "Grep", "./docs/**")),
-                List.of(PermissionRule.withGlob(PermissionEffect.DENY, "Grep", "./secrets/**"))),
-            tools(binding("Grep", ToolCategory.SEARCH)));
+  private static final PermissionRule DENY_SECRETS =
+      PermissionRule.withGlob(PermissionEffect.DENY, "Grep", "./secrets/**");
+  private static final PermissionRule ALLOW_PUBLIC =
+      PermissionRule.withGlob(PermissionEffect.ALLOW, "Grep", "./docs/public/**");
+  private static final PermissionRule ASK_DOCS =
+      PermissionRule.withGlob(PermissionEffect.ASK, "Grep", "./docs/**");
 
-    assertTrue(e.denies(new ToolPermissionKey("Grep", "./secrets")));
-    assertTrue(e.denies(new ToolPermissionKey("Grep", "./secrets/key")));
-    assertFalse(e.denies(new ToolPermissionKey("Grep", "./docs/a.txt")));
-    assertFalse(e.denies(new ToolPermissionKey("Read", "./secrets/key")));
+  private static DefaultPermissionEvaluator grepRules(PermissionMode mode) {
+    return evaluator(
+        rules(mode, List.of(ALLOW_PUBLIC), List.of(ASK_DOCS), List.of(DENY_SECRETS)),
+        tools(binding("Grep", ToolCategory.SEARCH)));
+  }
+
+  private static ToolPermissionKey grep(String path) {
+    return new ToolPermissionKey("Grep", path);
   }
 
   @Test
-  void deniesRejectsANullKey() {
+  void theDecidingRuleIsTheRuleEvaluateDecidesBy() {
+    var e = grepRules(PermissionMode.DEFAULT);
+
+    assertEquals(Optional.of(DENY_SECRETS), e.decidingRule(grep("./secrets/key")));
+    assertEquals(Optional.of(ALLOW_PUBLIC), e.decidingRule(grep("./docs/public/a.txt")));
+    assertEquals(Optional.of(ASK_DOCS), e.decidingRule(grep("./docs/a.txt")));
+    assertEquals(Optional.empty(), e.decidingRule(grep("./src/a.txt")));
+    assertEquals(Optional.empty(), e.decidingRule(new ToolPermissionKey("Read", "./secrets/key")));
+  }
+
+  @Test
+  void underBypassPermissionsOnlyADenyRuleDecides() {
+    var e = grepRules(PermissionMode.BYPASS_PERMISSIONS);
+
+    assertEquals(Optional.of(DENY_SECRETS), e.decidingRule(grep("./secrets/key")));
+    assertEquals(Optional.empty(), e.decidingRule(grep("./docs/public/a.txt")));
+    assertEquals(Optional.empty(), e.decidingRule(grep("./docs/a.txt")));
+  }
+
+  @Test
+  void decidingRuleRejectsANullKey() {
     var e = evaluator(Permission.defaultInWorkspace(), tools());
-    assertThrows(NullPointerException.class, () -> e.denies(null));
+    assertThrows(NullPointerException.class, () -> e.decidingRule(null));
   }
 
   // ── category defaults per mode ───────────────────────────────────────────

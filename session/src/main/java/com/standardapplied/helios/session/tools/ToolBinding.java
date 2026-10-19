@@ -140,14 +140,14 @@ public record ToolBinding(
    * @param defaultValue the path used when the argument is absent or empty; empty when the argument
    *     is required; non-null
    * @param space the namespace the path names a target in; non-null
-   * @param denyRulesOf the other tools whose DENY rules also withhold the entries a walk below this
-   *     path returns; non-null
+   * @param contentRulesOf the tools whose content a walk below this path returns, and so whose DENY
+   *     and ASK rules also withhold its entries; non-null
    */
   public record PathArgument(
-      String name, Optional<String> defaultValue, PathSpace space, Set<String> denyRulesOf) {
+      String name, Optional<String> defaultValue, PathSpace space, Set<String> contentRulesOf) {
 
     /**
-     * Canonical constructor; copies {@code denyRulesOf}.
+     * Canonical constructor; copies {@code contentRulesOf}.
      *
      * @throws NullPointerException if any argument is null
      * @throws IllegalArgumentException if {@code name} is blank
@@ -156,7 +156,7 @@ public record ToolBinding(
       Validate.notBlank("name", name);
       Objects.requireNonNull(defaultValue, "defaultValue must not be null");
       Objects.requireNonNull(space, "space must not be null");
-      denyRulesOf = Set.copyOf(denyRulesOf);
+      contentRulesOf = Set.copyOf(contentRulesOf);
     }
 
     /**
@@ -183,12 +183,13 @@ public record ToolBinding(
     }
 
     /**
-     * This argument, with the tools whose DENY rules also withhold what a walk below it returns.
+     * This argument, with the tools whose content a walk below it returns, and so whose DENY and
+     * ASK rules also withhold its entries.
      *
      * @param toolNames the tools' names; non-null
      * @return a new argument
      */
-    public PathArgument withDenyRulesOf(String... toolNames) {
+    public PathArgument withContentRulesOf(String... toolNames) {
       return new PathArgument(name, defaultValue, space, Set.of(toolNames));
     }
 

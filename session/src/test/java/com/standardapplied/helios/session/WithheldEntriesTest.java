@@ -149,7 +149,7 @@ final class WithheldEntriesTest {
     assertEquals("/memories/notes.md\n" + ONE_WITHHELD, out);
   }
 
-  // ── only DENY rules filter ───────────────────────────────────────────────
+  // ── only DENY rules of the walking tool filter ───────────────────────────
 
   @Test
   void anAskRuleBelowTheWalkFiltersNothingAndAsksNothing() {
@@ -176,7 +176,7 @@ final class WithheldEntriesTest {
     assertEquals(ONE_WITHHELD, out);
   }
 
-  // ── a content walk obeys Read's deny rules; a name walk does not ─────────
+  // ── a content walk obeys Read's deny and ask rules; a name walk does not ──
 
   @Test
   void grepWithholdsWhatReadsDenyRulesMatchWhileLsAndGlobListIt() {
@@ -191,5 +191,50 @@ final class WithheldEntriesTest {
     assertEquals("docs/\nsecrets/\nlink@\n", output(ls));
     assertTrue(output(glob).contains("secrets/sub/c.txt\n"), output(glob));
     assertFalse(output(glob).contains("withheld"), output(glob));
+  }
+
+  @Test
+  void grepWithholdsWhatReadsAskRulesMatchWithoutAskingWhileLsAndGlobListIt() {
+    var options =
+        sessions.options(
+            policy(
+                PermissionMode.DEFAULT,
+                PermissionRule.withGlob(PermissionEffect.ASK, ReadTool.NAME, "./secrets/**")));
+
+    var grep = run(options, call(GrepTool.NAME, grepTop()));
+    var ls = run(options, call(LsTool.NAME, Map.of()));
+    var glob = run(options, call(GlobTool.NAME, Map.of("pattern", "**")));
+
+    assertEquals(ONE_WITHHELD, output(grep));
+    assertNoSecretEmitted(grep);
+    assertEquals(List.of(), grep.events().eventsOf(QueryEvent.QuestionAsked.class));
+    assertEquals("docs/\nsecrets/\nlink@\n", output(ls));
+    assertTrue(output(glob).contains("secrets/sub/c.txt\n"), output(glob));
+  }
+
+  @Test
+  void grepReturnsWhatReadWouldReadWithoutAsking() {
+    var permission =
+        policy(
+            PermissionMode.DEFAULT,
+            PermissionRule.withGlob(PermissionEffect.ALLOW, ReadTool.NAME, "./secrets/b.txt"),
+            PermissionRule.withGlob(PermissionEffect.ASK, ReadTool.NAME, "./secrets/*"));
+
+    var out = runTool(permission, GrepTool.NAME, grepTop());
+
+    assertEquals("secrets/b.txt:1:" + SECRET + "\n" + TWO_WITHHELD, out);
+  }
+
+  @Test
+  void readsAskRulesWithholdNothingUnderBypassPermissions() {
+    var permission =
+        policy(
+            PermissionMode.BYPASS_PERMISSIONS,
+            PermissionRule.withGlob(PermissionEffect.ASK, ReadTool.NAME, "./secrets/**"));
+
+    var out = runTool(permission, GrepTool.NAME, grepTop());
+
+    assertEquals(3, out.lines().filter(line -> line.endsWith(SECRET)).count());
+    assertFalse(out.contains("withheld"), out);
   }
 }

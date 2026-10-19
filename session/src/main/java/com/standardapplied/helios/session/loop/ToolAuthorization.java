@@ -7,14 +7,15 @@ import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
+import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.stream.Stream;
 
 /**
  * The mandatory permission stage of a tool call, between the {@code PreToolUse} hooks and dispatch:
@@ -26,6 +27,10 @@ import java.util.stream.Stream;
 final class ToolAuthorization {
 
   static final int MAX_REASON_CHARS = 1024;
+
+  private static final Set<PermissionEffect> OWN_RULES = Set.of(PermissionEffect.DENY);
+  private static final Set<PermissionEffect> CONTENT_RULES =
+      Set.of(PermissionEffect.DENY, PermissionEffect.ASK);
 
   private ToolAuthorization() {}
 
@@ -50,19 +55,22 @@ final class ToolAuthorization {
   /**
    * Decide {@code call}: canonicalise it through its binding, whether or not a policy is set, and
    * authorise the canonical call. A call {@code tools} binds no tool for is admitted unchanged and
-   * dispatch answers it {@code NotFound}, policy or none. A call whose canonicalisation throws is
-   * refused before {@code authorization} sees it.
+   * dispatch answers it {@code NotFound}, policy or none. A call whose canonicalisation throws, or
+   * whose key carries a secret of {@code secrets}, is refused before {@code authorization} sees it,
+   * so no approval prompt or event shows the secret.
    *
    * @param tools the registry dispatch looks the call up in
    * @param authorization the session's permission check of a canonical call
-   * @param withholding true when a DENY rule matches a key
+   * @param decidingRule the policy rule that decides a key, if one does
+   * @param secrets the session's secrets, which no permission key may carry
    * @param call the final call
    * @return the canonical call with what it withholds, or why it is refused
    */
   static Verdict admit(
       ToolRegistry tools,
       Function<ToolBinding.CanonicalCall, PermissionDecision> authorization,
-      Predicate<ToolPermissionKey> withholding,
+      Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule,
+      SecretRegistry secrets,
       ToolCall call) {
     var registered = tools.get(call.name());
     if (registered.isEmpty()) {
@@ -75,9 +83,13 @@ final class ToolAuthorization {
     } catch (RuntimeException e) {
       return new Refused(call.name() + ": " + e.getMessage());
     }
+    var key = canonical.key();
+    if (secrets.leaks(key.toolName()) || secrets.leaks(key.canonicalArgs())) {
+      return new Refused("permission key of " + call.name() + " carries a secret");
+    }
     return refusal(authorization, canonical)
         .<Verdict>map(Refused::new)
-        .orElseGet(() -> new Admitted(canonical.call(), withheld(binding, withholding)));
+        .orElseGet(() -> new Admitted(canonical.call(), withheld(binding, decidingRule)));
   }
 
   private static Optional<String> refusal(
@@ -105,18 +117,28 @@ final class ToolAuthorization {
   }
 
   /**
-   * True for a key that a DENY rule of the call's tool, or of a tool its path argument names in
-   * {@link ToolBinding.PathArgument#denyRulesOf}, matches.
+   * True for a key that a DENY rule of the call's tool decides, or a DENY or ASK rule of a tool its
+   * path argument names in {@link ToolBinding.PathArgument#contentRulesOf}.
    */
   private static Predicate<String> withheld(
-      ToolBinding binding, Predicate<ToolPermissionKey> withholding) {
-    var names =
-        Stream.concat(
-                Stream.of(binding.name()),
-                binding.pathArgument().stream().flatMap(path -> path.denyRulesOf().stream()))
-            .toList();
+      ToolBinding binding, Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule) {
+    var contentTools =
+        binding.pathArgument().map(ToolBinding.PathArgument::contentRulesOf).orElse(Set.of());
     return key ->
-        names.stream().anyMatch(tool -> withholding.test(new ToolPermissionKey(tool, key)));
+        decidedBy(decidingRule, binding.name(), key, OWN_RULES)
+            || contentTools.stream()
+                .anyMatch(tool -> decidedBy(decidingRule, tool, key, CONTENT_RULES));
+  }
+
+  private static boolean decidedBy(
+      Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule,
+      String tool,
+      String key,
+      Set<PermissionEffect> effects) {
+    return decidingRule
+        .apply(new ToolPermissionKey(tool, key))
+        .filter(rule -> effects.contains(rule.effect()))
+        .isPresent();
   }
 
   /**

@@ -57,9 +57,9 @@ import java.util.regex.PatternSyntaxException;
  *
  * <p>The {@code path} is the canonical one the call was authorised on ({@link
  * WorkspaceRoot#resolveCanonical(String)}). Since the tool returns file contents, a file or
- * directory below it that a {@code Grep} or a {@code Read} DENY rule matches is withheld, a
- * directory without being read, and the output ends with {@code [withheld by permission policy:
- * <count>]}.
+ * directory below it that a {@code Grep} DENY rule matches, or that a {@code Read} DENY or ASK rule
+ * decides, is withheld without asking, a directory without being read, and the output ends with
+ * {@code [withheld by permission policy: <count>]}.
  */
 public final class GrepTool {
 
@@ -119,7 +119,7 @@ public final class GrepTool {
         .withCategory(ToolCategory.SEARCH)
         .withPathArgument(
             ToolBinding.PathArgument.optional("path", ".", workspace)
-                .withDenyRulesOf(ReadTool.NAME))
+                .withContentRulesOf(ReadTool.NAME))
         .build();
   }
 

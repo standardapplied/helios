@@ -353,8 +353,8 @@ final class ToolBindingTest {
   }
 
   @Test
-  void withDenyRulesOfNamesTheOtherTools() {
-    var path = ToolBinding.PathArgument.optional("path", ".", DOTTED).withDenyRulesOf("Read");
+  void withContentRulesOfNamesTheOtherTools() {
+    var path = ToolBinding.PathArgument.optional("path", ".", DOTTED).withContentRulesOf("Read");
     assertEquals(
         new ToolBinding.PathArgument("path", Optional.of("."), DOTTED, Set.of("Read")), path);
   }

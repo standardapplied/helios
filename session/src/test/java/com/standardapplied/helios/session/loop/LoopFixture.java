@@ -70,7 +70,7 @@ final class LoopFixture implements AutoCloseable {
         hooks,
         dispatch,
         Authorizations.ADMIT_ALL,
-        Authorizations.WITHHOLD_NONE,
+        Authorizations.NO_RULE,
         queue,
         events::add,
         this::hookContext,

@@ -40,19 +40,20 @@ import java.util.stream.Stream;
  * </ol>
  *
  * <p>{@link #authorize} decides on the key it is handed, never on one recomputed from the call's
- * arguments, and fails closed: a call naming no registered tool, a key that names another tool or
- * carries a secret of its {@link SecretRegistry}, and an ASK with no {@link ToolApprover} are each
- * denied. A key carrying a secret is denied before any rule or approver sees it, so no approval
- * prompt or event shows the secret. An ASK goes to the approver with an {@link ApprovalRequest} for
- * this call, its reason redacted through the registry since a rule's pattern may hold a secret the
- * key does not; see {@link ToolApprover} for how its answer is read.
+ * arguments, and fails closed: a call naming no registered tool, a key that names another tool, and
+ * an ASK with no {@link ToolApprover} are each denied. A key carrying a session secret never
+ * reaches it: the session's permission stage refuses that call first, with or without a policy. An
+ * ASK goes to the approver with an {@link ApprovalRequest} for this call, its reason redacted
+ * through the {@link SecretRegistry} since a rule's pattern may hold a secret the key does not; see
+ * {@link ToolApprover} for how its answer is read.
  *
- * <p>{@link #denies} answers whether a DENY rule matches a key alone; tools that walk below their
- * authorised path withhold every entry it denies.
+ * <p>{@link #decidingRule} answers which rule decides a key alone, if one does; tools that walk
+ * below their authorised path withhold every entry their own DENY rules, or the DENY and ASK rules
+ * of a tool whose content they return, decide.
  *
  * <p>Building an evaluator checks every rule's glob against the {@link PathSpace} of the tool it
- * names, or, for a tool not registered, of every walk that also withholds what that tool's DENY
- * rules match: a rule whose glob can never match a canonical path there is a configuration error.
+ * names, or, for a tool not registered, of every walk that returns that tool's content: a rule
+ * whose glob can never match a canonical path there is a configuration error.
  *
  * <h2>Thread-safety</h2>
  *
@@ -121,9 +122,6 @@ public final class DefaultPermissionEvaluator {
     }
     var category = registered.orElseThrow().category();
     var key = canonical.key();
-    if (secrets.leaks(describe(key))) {
-      return PermissionDecision.deny("permission key of " + call.name() + " carries a secret");
-    }
     if (!key.toolName().equals(call.name())) {
       return PermissionDecision.deny(
           "permission key of " + call.name() + " names another tool: " + describe(key));
@@ -166,14 +164,23 @@ public final class DefaultPermissionEvaluator {
   }
 
   /**
-   * Whether a DENY rule of the policy matches {@code key}, whatever the mode.
+   * The rule that decides {@code key}, in {@link #evaluate}'s order: the first matching DENY rule
+   * in any mode, then, unless the mode is {@link PermissionMode#BYPASS_PERMISSIONS}, the first
+   * matching ALLOW rule, then the first matching ASK rule. Empty when a mode or category default
+   * decides.
    *
    * @param key a permission key; non-null
-   * @return {@code true} when a DENY rule matches
+   * @return the deciding rule, or empty
    * @throws NullPointerException if {@code key} is null
    */
-  public boolean denies(ToolPermissionKey key) {
-    return matcher.firstMatch(key, permission.deny()).isPresent();
+  public Optional<PermissionRule> decidingRule(ToolPermissionKey key) {
+    var denied = matcher.firstMatch(key, permission.deny());
+    if (denied.isPresent() || permission.mode() == PermissionMode.BYPASS_PERMISSIONS) {
+      return denied;
+    }
+    return matcher
+        .firstMatch(key, permission.allow())
+        .or(() -> matcher.firstMatch(key, permission.ask()));
   }
 
   /**
@@ -187,20 +194,12 @@ public final class DefaultPermissionEvaluator {
     Objects.requireNonNull(key, "key must not be null");
     Objects.requireNonNull(category, "category must not be null");
 
-    var denied = matcher.firstMatch(key, permission.deny());
-    if (denied.isPresent()) {
-      return byRule(denied.orElseThrow(), key);
+    var rule = decidingRule(key);
+    if (rule.isPresent()) {
+      return byRule(rule.orElseThrow(), key);
     }
     if (permission.mode() == PermissionMode.BYPASS_PERMISSIONS) {
       return PermissionDecision.allow("BYPASS_PERMISSIONS allows " + describe(key));
-    }
-    var allowed = matcher.firstMatch(key, permission.allow());
-    if (allowed.isPresent()) {
-      return byRule(allowed.orElseThrow(), key);
-    }
-    var asked = matcher.firstMatch(key, permission.ask());
-    if (asked.isPresent()) {
-      return byRule(asked.orElseThrow(), key);
     }
     return defaultForCategory(category, permission.mode(), describe(key));
   }
@@ -292,8 +291,8 @@ public final class DefaultPermissionEvaluator {
     }
 
     /**
-     * Set the secrets no permission key may carry and an approval reason redacts; defaults to a new
-     * empty registry. Pass the session's registry.
+     * Set the secrets an approval reason redacts; defaults to a new empty registry. Pass the
+     * session's registry.
      *
      * @param secrets the secret registry; non-null
      * @return this builder
@@ -320,8 +319,8 @@ public final class DefaultPermissionEvaluator {
 
     /**
      * Refuse a rule whose glob no canonical path can match in a space the rule is matched in: the
-     * registered tool's own, or, for a tool not registered, that of every walk which also withholds
-     * what the tool's DENY rules match.
+     * registered tool's own, or, for a tool not registered, that of every walk that returns the
+     * tool's content.
      */
     private void requireMatchable(PermissionRule rule) {
       if (rule.argPattern().isEmpty()) {
@@ -347,7 +346,7 @@ public final class DefaultPermissionEvaluator {
       var bindings = own.isPresent() ? own.stream() : tools.bindings().stream();
       return bindings
           .flatMap(binding -> binding.pathArgument().stream())
-          .filter(path -> own.isPresent() || path.denyRulesOf().contains(toolName))
+          .filter(path -> own.isPresent() || path.contentRulesOf().contains(toolName))
           .map(PathArgument::space);
     }
   }
