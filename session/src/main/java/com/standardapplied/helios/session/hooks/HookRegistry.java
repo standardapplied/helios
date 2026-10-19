@@ -34,16 +34,11 @@ import java.util.logging.Logger;
  * name the registry read from the firing hook when it was built, so the orchestrator can attribute
  * {@link QueryEvent.HookFired} events to the actual hook (not the phase name).
  *
- * <p><b>{@code PreToolUse} hooks are guards and chain.</b> Each hook receives the call as the hooks
- * before it left it: {@link HookOutcome.MutateArgs} passes the same call with the new arguments to
- * the next hook, and {@link HookOutcome.Block}, {@link HookOutcome.Inject} and {@link
- * HookOutcome.Stop} end the chain; any other outcome passes the call unchanged. A hook that throws
- * a {@link RuntimeException} or returns {@code null} fails closed: it ends the chain as a {@code
- * Block} with reason {@code hook threw <exception class>: <message>} or {@code hook returned null},
- * logged at {@code WARNING} with the exception class alone, since the message may carry a secret
- * that only the session redacts from the reason. {@link #firePreToolUse} returns the result as a
- * {@link PreToolUseResult}. The session's permission check is not a hook: it runs after the chain,
- * on the final call.
+ * <p><b>{@code PreToolUse} hooks are guards and chain</b>, as {@link PreToolUseHook} describes;
+ * {@link #firePreToolUse} returns the chain's {@link PreToolUseResult}. A guard that fails ends the
+ * chain as a {@code Block} with reason {@code hook threw <exception class>: <message>} or {@code
+ * hook returned null}, logged at {@code WARNING} with the exception class alone, since the message
+ * may carry a secret that only the session redacts from the reason.
  *
  * <p>In every other phase a hook that throws a {@link RuntimeException} or returns {@code null} is
  * treated as {@link HookOutcome.Continue} and logged at {@code WARNING}, so the next hook of the

@@ -8,9 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
-import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.Hook;
@@ -27,15 +24,8 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
-import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
-import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -72,37 +62,16 @@ final class ObserverHookIsolationTest {
     }
   }
 
-  private final AtomicInteger executions = new AtomicInteger();
+  private final WriteToolSessions sessions = new WriteToolSessions();
   private final List<Phase> recorded = new CopyOnWriteArrayList<>();
 
-  private ToolBinding writeTool() {
-    var tool =
-        Tool.newBuilder()
-            .withName("Write")
-            .withDescription("write")
-            .withExecutor(
-                (args, ctx) -> {
-                  executions.incrementAndGet();
-                  return ToolResult.success("wrote");
-                })
-            .build();
-    return ToolBinding.newBuilder(tool).withCategory(ToolCategory.WRITE).build();
-  }
-
   /** Runs a session through every phase: a tool round, a compaction and a stop. */
-  private QueryEvent.ToolResult runWith(Phase phase, Supplier<HookOutcome> failing) {
-    var model =
-        ScriptedModel.newBuilder()
-            .withToolCallsTurn(new ToolCall("c1", "Write", Map.of()))
-            .withTextTurn("done")
-            .build();
+  private ToolResult runWith(Phase phase, Supplier<HookOutcome> failing) {
     TokenCounter counter =
         messages -> messages.stream().anyMatch(m -> m.role() == Role.TOOL) ? 96L : 10L;
     var options =
-        SessionOptions.newBuilder()
-            .withModel(model)
-            .withTools(new ToolRegistry(List.of(writeTool())))
-            .withPermission(
+        sessions
+            .options(
                 new Permission(
                     PermissionMode.DEFAULT,
                     List.of(PermissionRule.any(PermissionEffect.ALLOW, "Write")),
@@ -123,24 +92,15 @@ final class ObserverHookIsolationTest {
                       recorded.add(phase);
                       return HookOutcome.cont();
                     }));
-    var events = new CollectingSubscriber();
-    try (var session = AgentSession.create(options.build())) {
-      session.events().subscribe(events);
-      session.send(UserMessage.text("go"));
-      Await.value("the session to end", session.result());
-      events.awaitDone();
-    }
-    var results = events.eventsOf(QueryEvent.ToolResult.class);
-    assertEquals(1, results.size(), "tool results");
-    return results.getFirst();
+    return WriteToolSessions.run(options, WriteToolSessions.write("/w")).onlyResult();
   }
 
   private void assertIsolated(Phase phase, Supplier<HookOutcome> failing) {
     var result = runWith(phase, failing);
 
     assertFalse(recorded.isEmpty(), "the recording hook of " + phase + " fired");
-    assertEquals(new ToolOutcome.Succeeded(), result.result().outcome());
-    assertEquals(1, executions.get());
+    assertEquals(new ToolOutcome.Succeeded(), result.outcome());
+    assertEquals(1, sessions.executed.size());
   }
 
   @ParameterizedTest

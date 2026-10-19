@@ -114,14 +114,15 @@ public final class DefaultPermissionEvaluator {
    */
   public PermissionDecision authorize(ToolCall call) {
     Objects.requireNonNull(call, "call must not be null");
-    var binding = tools.get(call.name());
-    if (binding.isEmpty()) {
+    var registered = tools.get(call.name());
+    if (registered.isEmpty()) {
       return PermissionDecision.deny("no tool named '" + call.name() + "' is registered");
     }
-    var category = binding.orElseThrow().category();
+    var binding = registered.orElseThrow();
+    var category = binding.category();
     ToolPermissionKey key;
     try {
-      key = binding.orElseThrow().permissionKey(call.arguments());
+      key = binding.permissionKey(call.arguments());
     } catch (RuntimeException e) {
       return PermissionDecision.deny(
           "permission key of " + call.name() + " failed: " + describe(e));

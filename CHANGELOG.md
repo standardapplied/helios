@@ -588,17 +588,14 @@ the blank name and ended the session with `ErrorDuringExecution`.
 | `HookDecision(Hook firingHook, HookOutcome outcome)`, `HookDecision.of(Hook, HookOutcome)`, `HookDecision.firingHookOptional()` | `HookDecision(String firingHookName, HookOutcome outcome)` and `HookDecision.of(String, HookOutcome)`; read the name through `firingHookName()`, `null` only on `HookDecision.proceed()` |
 
 **Tool authorization is mandatory, fails closed and runs on the call that executes.** The
-permission evaluator was an ordinary `PreToolUse` hook, so a hook could get a denied call executed.
-A permission-key extractor that threw made the evaluator a `Continue`, and a `WRITE` tool ran under
-`LOCKED_DOWN`. A `MutateArgs` from a hook ordered before it ended the chain before authorization.
-One ordered after it changed an authorized call just before it ran. Every call now runs the
-`PreToolUse` chain, then authorization of the final immutable call, then dispatch of that same
-call. Authorization admits only an `ALLOW`. A missing tool, a key that throws, is `null`, names
-another tool or carries a secret of the session's `SecretRegistry`, a check that throws or returns
-`null`, and an ASK nobody approves each refuse the call as `ToolOutcome.Rejected("Permission", reason)`, with a `ToolBlocked` event. A refusal's reason,
-the reason an `ApprovalRequest` carries, and a hook's `Block` reason are redacted through the session's `SecretRegistry` and cut at 1024
-characters. A `PreToolUse` hook is a guard and fails closed; every other phase still skips a hook
-that throws or returns `null`.
+permission evaluator was an ordinary `PreToolUse` hook, so a throwing permission-key extractor, or
+a `MutateArgs` from a hook ordered before or after it, got a denied call executed; a `WRITE` tool
+ran under `LOCKED_DOWN`. Every call now runs the `PreToolUse` chain, then authorization of the
+final immutable call, then dispatch of that same call. Only an `ALLOW` admits it; anything else,
+including a failure and a permission key carrying a secret of the session's `SecretRegistry`, is
+`ToolOutcome.Rejected("Permission", reason)` with a `ToolBlocked` event. That reason and a hook's
+`Block` reason are redacted through the session's `SecretRegistry` and cut at 1024 characters; an
+`ApprovalRequest`'s reason is redacted too.
 
 | 2.x | 3.0 |
 |---|---|
@@ -706,18 +703,13 @@ that throws or returns `null`.
   `create(...)`. It takes no `ModelConfig`, so no configured key or header reaches it, and an
   architecture rule allows it only in `helios-onnx`. `create(...)` still never follows a redirect.
 - **`ToolApprover`, `ApprovalRequest`, `PermissionDecision.rule()`, `PermissionDecision.byRule` and
-  `DefaultPermissionEvaluator.Builder.withSecretRegistry`.**
-  A `ToolApprover` decides a call the policy answered with ASK. It receives an
-  `ApprovalRequest(call, key, category, rule, reason)` holding the final immutable call, its
-  permission key and category, and the ask rule that matched. The rule is empty when a mode or
-  category default asked. Only `ALLOW` admits the call. `DENY` refuses it with the approver's
-  reason. `ASK`, `null`, an exception, a cancellation and an interrupt each refuse it, and an
-  interrupt is restored. `ToolApprover.askingUser(gateway)` is the human approver the session wires
-  over `AgentSession.answer`, asking under a fresh question id per request, so an answer resolves
-  one call only; a response to another question, or one selecting more than one option, denies
-  it. `DefaultPermissionEvaluator.Builder.withSecretRegistry` takes the registry whose secrets no
-  permission key may carry; the session passes its own. `PermissionDecision.rule()` is the rule that decided, empty for a mode or category
-  default.
+  `DefaultPermissionEvaluator.Builder.withSecretRegistry`.** A `ToolApprover` decides a call the
+  policy answered with ASK, from an `ApprovalRequest(call, key, category, rule, reason)` for the
+  final immutable call, whose `rule` is the ask rule that matched (empty when a mode or category
+  default asked). Only its `ALLOW` admits the call. `ToolApprover.askingUser(gateway)` is the human
+  approver the session wires over `AgentSession.answer`, under a fresh question id per request, so
+  an answer resolves one call only. `PermissionDecision.rule()` is the rule that decided;
+  `withSecretRegistry` takes the registry whose secrets no permission key may carry.
 
 ### Fixed
 

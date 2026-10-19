@@ -20,12 +20,12 @@ record UserApprover(QuestionGateway gateway) implements ToolApprover {
 
   @Override
   public PermissionDecision approve(ApprovalRequest request) throws InterruptedException {
-    var key = request.key();
+    var action = DefaultPermissionEvaluator.describe(request.key());
     var question =
         new AskUserQuestionRequest(
             "perm-" + Ids.newId(),
             "Permission",
-            "Allow " + DefaultPermissionEvaluator.describe(key) + "?",
+            "Allow " + action + "?",
             List.of(
                 new AskUserQuestionOption(ALLOW_LABEL, request.reason()),
                 new AskUserQuestionOption(DENY_LABEL, "Refuse this tool call")),
@@ -33,21 +33,18 @@ record UserApprover(QuestionGateway gateway) implements ToolApprover {
     var response = gateway.ask(question);
     if (!question.questionId().equals(response.questionId())) {
       return PermissionDecision.deny(
-          "approval of "
-              + DefaultPermissionEvaluator.describe(key)
-              + " answered another question: "
-              + response.questionId());
+          "approval of " + action + " answered another question: " + response.questionId());
     }
     if (response.selectedLabels().size() != 1) {
       return PermissionDecision.deny(
           "approval of "
-              + DefaultPermissionEvaluator.describe(key)
+              + action
               + " selected "
               + response.selectedLabels().size()
               + " options, not one");
     }
     return response.selectedLabels().getFirst().trim().equalsIgnoreCase(ALLOW_LABEL)
-        ? PermissionDecision.allow("user allowed " + DefaultPermissionEvaluator.describe(key))
-        : PermissionDecision.deny("user denied " + DefaultPermissionEvaluator.describe(key));
+        ? PermissionDecision.allow("user allowed " + action)
+        : PermissionDecision.deny("user denied " + action);
   }
 }
