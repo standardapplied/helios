@@ -156,23 +156,24 @@ try (var session = AgentSession.create(
 }
 ```
 
-Rule order: **deny → bypass-shortcut → allow → ask → default-by-category**. A path tool's key is
-the canonical path it touches, however the model spelled it: `.` or `./a/b` in the workspace
-(`secrets/key`, `docs/../secrets/key`, an absolute path and a symlink to it are all
-`./secrets/key`), `/memories/` or `/memories/a/b` in memory. A path that names no target is refused
-before any rule is evaluated, and the tool runs on the path that was authorised. Globs match that
-spelling: a trailing `/**` matches the path before it and everything below it (`./**` matches `.`),
-`/**/` and a leading `**/` match zero or more segments, `*` and `?` stay within a segment. A rule for
-a path tool that no canonical path can match, such as `Read("secrets/**")`, fails
-`AgentSession.create`. `Glob`, `Grep`, `LS` and a `MemoryRead` listing withhold every entry below
-their path that one of their own DENY rules matches (for `Grep`, which returns contents, `Read`'s
-too), never descend into a denied directory, and end with `[withheld by permission policy: <n>]`.
-Memory is its own namespace: a memory call is authorised by `MemoryRead`/`MemoryWrite` rules on its
-`/memories/...` key, and a `Read` rule over the directory backing a filesystem memory store does not
-apply to it. ASK decisions route
+Rule order: **deny → bypass-shortcut → allow → ask → default-by-category**. ASK decisions route
 through the session's `QuestionGateway` and surface as an `AskUserQuestion` prompt the host
 answers via `session.answer(questionId, response)`. `SessionPresets.workspace(...)` ships
 `Permission.defaultInWorkspace()`; `SessionPresets.readOnly(...)` ships `Permission.planMode()`.
+
+A path tool's key is the canonical path it touches, however the model spelled it: `.` or `./a/b`
+in the workspace (`secrets/key`, `docs/../secrets/key`, an absolute path and a symlink to it are
+all `./secrets/key`), `/memories/` or `/memories/a/b` in memory. A path that names no target is
+refused before any rule is evaluated, and the tool runs on the path that was authorised. Globs
+match that spelling: a trailing `/**` matches the path before it and everything below it (`./**`
+matches `.`), `/**/` and a leading `**/` match zero or more segments, `*` and `?` stay within a
+segment. A rule for a path tool that no canonical path can match, such as `Read("secrets/**")`,
+fails `AgentSession.create`. `Glob`, `Grep`, `LS` and a `MemoryRead` listing withhold every entry
+below their path that one of their own DENY rules matches (for `Grep`, which returns contents,
+`Read`'s too), never descend into a denied directory, and end with
+`[withheld by permission policy: <n>]`. Memory is its own namespace: a memory call is authorised by
+`MemoryRead`/`MemoryWrite` rules on its `/memories/...` key, and a `Read` rule over the directory
+backing a filesystem memory store does not apply to it.
 
 ## Hooks
 

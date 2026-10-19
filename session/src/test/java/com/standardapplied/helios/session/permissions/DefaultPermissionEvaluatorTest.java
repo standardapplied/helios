@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session.permissions;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -251,6 +252,22 @@ final class DefaultPermissionEvaluatorTest {
         e.authorize(impostor));
   }
 
+  @Test
+  void authorizeDecidesOnTheKeyItIsHandedNotOneRecomputedFromTheArguments() {
+    var deny = PermissionRule.withGlob(PermissionEffect.DENY, "Read", "./secrets/**");
+    var e =
+        evaluator(
+            rules(PermissionMode.DEFAULT, List.of(), List.of(), List.of(deny)),
+            tools(pathKeyed("Read", ToolCategory.READ)));
+    var handed =
+        new ToolBinding.CanonicalCall(
+            new ToolCall("c", "Read", Map.of("path", "./docs/a.txt")),
+            new ToolPermissionKey("Read", "./secrets/key"));
+    assertEquals(
+        PermissionDecision.byRule(deny, "deny rule Read(./secrets/**) matched Read(./secrets/key)"),
+        e.authorize(handed));
+  }
+
   // ── rules ────────────────────────────────────────────────────────────────
 
   @Test
@@ -378,6 +395,31 @@ final class DefaultPermissionEvaluatorTest {
             tools(binding("Read", ToolCategory.READ), binding("Execute", ToolCategory.EXECUTION)));
     assertEquals(PermissionEffect.ALLOW, e.authorize(call("Execute")).effect());
     assertEquals(PermissionEffect.DENY, e.authorize(call("Read")).effect());
+  }
+
+  // ── denies ───────────────────────────────────────────────────────────────
+
+  @Test
+  void deniesAnswersForDenyRulesAloneWhateverTheMode() {
+    var e =
+        evaluator(
+            rules(
+                PermissionMode.BYPASS_PERMISSIONS,
+                List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "Grep", "./**")),
+                List.of(PermissionRule.withGlob(PermissionEffect.ASK, "Grep", "./docs/**")),
+                List.of(PermissionRule.withGlob(PermissionEffect.DENY, "Grep", "./secrets/**"))),
+            tools(binding("Grep", ToolCategory.SEARCH)));
+
+    assertTrue(e.denies(new ToolPermissionKey("Grep", "./secrets")));
+    assertTrue(e.denies(new ToolPermissionKey("Grep", "./secrets/key")));
+    assertFalse(e.denies(new ToolPermissionKey("Grep", "./docs/a.txt")));
+    assertFalse(e.denies(new ToolPermissionKey("Read", "./secrets/key")));
+  }
+
+  @Test
+  void deniesRejectsANullKey() {
+    var e = evaluator(Permission.defaultInWorkspace(), tools());
+    assertThrows(NullPointerException.class, () -> e.denies(null));
   }
 
   // ── category defaults per mode ───────────────────────────────────────────

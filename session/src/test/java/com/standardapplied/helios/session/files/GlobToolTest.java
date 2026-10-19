@@ -4,18 +4,16 @@
  */
 package com.standardapplied.helios.session.files;
 
+import static com.standardapplied.helios.session.test.BindingCalls.keyOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
-import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -275,9 +273,5 @@ final class GlobToolTest {
         GlobTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "*.md"), ctx);
     assertTrue(result.succeeded(), result.output());
     assertEquals("", result.output());
-  }
-
-  private static ToolPermissionKey keyOf(ToolBinding binding, Map<String, Object> args) {
-    return binding.canonicalize(new ToolCall("call-1", binding.name(), args)).key();
   }
 }

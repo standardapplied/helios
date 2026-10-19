@@ -4,25 +4,21 @@
  */
 package com.standardapplied.helios.session.files;
 
+import static com.standardapplied.helios.session.test.BindingCalls.keyOf;
+import static com.standardapplied.helios.session.test.BindingCalls.withholding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.time.Duration;
 import java.util.Map;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.Assumptions;
@@ -143,10 +139,6 @@ final class LsToolTest {
     assertThrows(NullPointerException.class, () -> LsTool.binding(null));
   }
 
-  private static ToolPermissionKey keyOf(ToolBinding binding, Map<String, Object> args) {
-    return binding.canonicalize(new ToolCall("call-1", binding.name(), args)).key();
-  }
-
   @Test
   @DisabledOnOs(OS.WINDOWS)
   void aLinkWhoseTargetCannotBeResolvedIsKeyedByItsOwnPath(@TempDir Path tmp) throws IOException {
@@ -228,10 +220,5 @@ final class LsToolTest {
     } finally {
       Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
     }
-  }
-
-  private static ToolContext withholding(Predicate<String> withheld) {
-    return new ToolContext(
-        SessionContext.forTesting("ls"), new CancellationToken(), Duration.ofMinutes(1), withheld);
   }
 }

@@ -170,12 +170,8 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
    * @return its spelling
    */
   public String spell(Path resolved) {
-    Objects.requireNonNull(resolved, "resolved must not be null");
-    if (!resolved.startsWith(root)) {
-      return resolved.toString();
-    }
-    var relative = root.relativize(resolved).toString();
-    return relative.isEmpty() ? "." : "./" + relative;
+    var relative = relativize(resolved);
+    return resolved.startsWith(root) && !resolved.equals(root) ? "./" + relative : relative;
   }
 
   /**

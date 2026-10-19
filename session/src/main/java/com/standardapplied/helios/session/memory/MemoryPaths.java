@@ -58,13 +58,9 @@ final class MemoryPaths implements PathSpace {
    */
   @Override
   public boolean admits(String glob) {
-    if (glob.equals(PREFIX)) {
-      return true;
-    }
-    if (glob.startsWith(PREFIX)) {
-      return PathSpace.laterSegmentsProper(glob.substring(PREFIX.length() - 1));
-    }
-    return glob.startsWith("**") && PathSpace.laterSegmentsProper(glob);
+    return glob.equals(PREFIX)
+        || ((glob.startsWith(PREFIX) || glob.startsWith("**"))
+            && PathSpace.laterSegmentsProper(glob));
   }
 
   @Override
