@@ -389,8 +389,7 @@ final class LinuxFilesTest {
   }
 
   @Test
-  void trustedWorkspaceSharesTheDescriptorOperationsAndReadLimits(@TempDir Path tmp)
-      throws Exception {
+  void trustedWorkspaceRetainsPortableOperationsAndReadLimits(@TempDir Path tmp) throws Exception {
     var workspace = new WorkspaceRoot(tmp, false);
     var directory = tmp.resolve("created/nested");
     workspace.createDirectories(directory);
@@ -418,19 +417,6 @@ final class LinuxFilesTest {
     assertThrows(IOException.class, () -> workspace.deleteFile(directory));
     workspace.deleteFile(file);
     assertFalse(Files.exists(file));
-  }
-
-  @Test
-  void trustedWorkspaceCreatesDirectoriesWhereAnInRootLinkLeads(@TempDir Path tmp)
-      throws Exception {
-    var root = Files.createDirectory(tmp.resolve("ws"));
-    var outside = Files.createDirectory(tmp.resolve("outside"));
-    Files.createSymbolicLink(root.resolve("ext"), outside);
-    var workspace = new WorkspaceRoot(root, false);
-
-    workspace.createDirectories(workspace.resolveSafe("ext/new/nested"));
-
-    assertTrue(Files.isDirectory(outside.resolve("new/nested"), LinkOption.NOFOLLOW_LINKS));
   }
 
   @Test
@@ -639,7 +625,9 @@ final class LinuxFilesTest {
       var root = Path.of(args[0]);
       if (args[1].equals("denied")) {
         assertThrows(UnsupportedOperationException.class, () -> WorkspaceRoot.of(root));
-        assertThrows(UnsupportedOperationException.class, () -> new WorkspaceRoot(root, false));
+        var trusted = new WorkspaceRoot(root, false);
+        assertThrows(
+            UnsupportedOperationException.class, () -> FileSystemMemoryBackend.of(trusted));
         return;
       }
       var workspace = WorkspaceRoot.of(root);
