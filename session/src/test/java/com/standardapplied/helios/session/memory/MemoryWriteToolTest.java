@@ -9,9 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
+import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -45,7 +48,7 @@ final class MemoryWriteToolTest {
     assertEquals("MemoryWrite", binding.name());
     assertEquals("MemoryWrite", MemoryWriteTool.NAME);
     assertEquals(
-        "/memories/x.md", binding.permissionKey(Map.of("path", "/memories/x.md")).canonicalArgs());
+        "/memories/x.md", keyOf(binding, Map.of("path", "/memories/x.md")).canonicalArgs());
   }
 
   // ── create ────────────────────────────────────────────────────────────────
@@ -349,5 +352,9 @@ final class MemoryWriteToolTest {
     var result = MemoryWriteTool.binding(backend).tool().execute(args, ToolContext.noop());
     assertEquals(success, result.succeeded(), result.output());
     assertEquals(output, result.output());
+  }
+
+  private static ToolPermissionKey keyOf(ToolBinding binding, Map<String, Object> args) {
+    return binding.canonicalize(new ToolCall("call-1", binding.name(), args)).key();
   }
 }

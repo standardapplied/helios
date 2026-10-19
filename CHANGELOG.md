@@ -610,6 +610,34 @@ stage and ends `NotFound`, as without a policy.
 | `PermissionDecision(effect, reason)`; deny reasons read `permission: deny rule for <tool>` | `PermissionDecision(effect, reason, rule)`; reasons name the tool, key and rule or default that decided, such as `deny rule Write(/etc/**) matched Write(/etc/passwd)` |
 | `Permission` accepted a rule of any effect in any list, and a match in `deny` denied whatever the rule's effect | a matched rule decides with its own effect, so the constructor throws `IllegalArgumentException` for a rule whose effect is not its list's |
 
+**A path tool's permission key is the canonical path it touches.** `Read`, `LS`, `Glob`, `Grep`,
+`MemoryRead` and `MemoryWrite` were keyed on the raw `path` argument but ran on a resolution of it,
+so a deny rule was bypassed by respelling the path. The permission stage now canonicalises every
+call of a registered tool, with or without a `Permission`: the path argument is replaced by its
+canonical spelling (`.` or `./a/b` in a workspace, `/memories/` or `/memories/a/b` in memory), a
+path that names no target is refused before any rule or approver sees it, the key is computed
+from the canonical call, and that call is the one announced, dispatched and shown to `PostToolUse`
+hooks; `PreToolUse` hooks still see the model's spelling. A tool resolves the canonical path again
+when it runs and fails if it no longer names the target that was authorised. Walking tools
+withhold entries their DENY rules match.
+
+| 2.x | 3.0 |
+|---|---|
+| `ToolBinding.permissionKey(Map)` | `ToolBinding.canonicalize(ToolCall)` → `CanonicalCall(call, key)` |
+| `DefaultPermissionEvaluator.authorize(ToolCall)` | `authorize(ToolBinding.CanonicalCall)`, deciding on the canonical call's key |
+| `LoopCollaborators.authorization` is a `Function<ToolCall, PermissionDecision>` | `Function<ToolBinding.CanonicalCall, PermissionDecision>`; the permission stage canonicalises every call of a registered tool, with or without a `Permission` |
+| `LoopCollaborators(hooks, toolDispatch, authorization, steeringQueue, eventSink, hookContextFactory, clock)` | adds the required `Predicate<ToolPermissionKey> withholding`, set with `Builder.withWithholding` |
+| Path tools key on the raw `path` argument | keys are canonical: `.`, `./a/b`, `/memories/a/b`; a trusted workspace's outside target by its absolute real path |
+| A rule glob is matched as written, whatever it could match | a rule for a path tool whose glob can never match a canonical key fails `AgentSession.create` |
+| `X/**` does not match `X`; `/**/` needs one segment | `X/**` matches `X`; `/**/` and a leading `**/` match zero segments |
+| `Read`/`LS`/`Glob`/`Grep` re-resolve the raw path when they run | they run on the authorised canonical path and fail when it no longer resolves to itself |
+| A non-string `path` is treated as missing (`"."` for `LS`, `Glob`, `Grep`) | refused |
+| `Permission.defaultInWorkspace()` asks for `Write`, `Edit`, `MultiEdit` | those rules are removed |
+| `Glob`, `Grep`, `LS` and `MemoryRead` `list` return every entry below their path | they withhold entries their own DENY rules match (and, for `Grep`, which returns contents, `Read`'s), never descend into a denied directory, and end with `[withheld by permission policy: <n>]` |
+| `new ToolContext(SessionContext, CancellationToken, Duration)` | `ToolContext(SessionContext, CancellationToken, Duration, Predicate<String> withheld)`; `ToolContext.noop()` withholds nothing |
+| `ToolDispatch.dispatch(ToolCall, CancellationToken, Duration, Duration)` | `dispatch(ToolCall, CancellationToken, Duration, Duration, Predicate<String> withheld)` |
+| A permission-key extractor that throws is refused as `permission key of <tool> failed: <class>: <message>` | refused before authorization as `<tool>: <message>` |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
@@ -711,6 +739,17 @@ stage and ends `NotFound`, as without a policy.
   approver the session wires over `AgentSession.answer`, under a fresh question id per request, so
   an answer resolves one call only. `PermissionDecision.rule()` is the rule that decided;
   `withSecretRegistry` takes the registry whose secrets no permission key may carry.
+
+- **`PathSpace`, `ToolBinding.PathArgument`, `ToolBinding.Builder.withPathArgument`,
+  `WorkspaceRoot.canonical`, `WorkspaceRoot.spell`, `WorkspaceRoot.resolveCanonical`,
+  `session.tools.Withholding`, `ToolContext.withholds`, `DefaultPermissionEvaluator.denies`,
+  `ToolBinding.PathArgument.withDenyRulesOf`, `LoopCollaborators.withholding`,
+  `LoopCollaborators.Builder.withWithholding`.** A `PathSpace` defines a path argument's canonical
+  spelling (`canonical`), says whether a rule glob can match one (`admits`) and gives a sample
+  (`example`); `WorkspaceRoot` is the workspace's, and memory has its own. A binding declares its
+  path argument with `PathArgument.required(name, space)` or `optional(name, default, space)`.
+  `Withholding` is the one filter a walking tool applies to each entry, through the call's
+  `ToolContext.withholds`.
 
 ### Fixed
 
@@ -832,6 +871,10 @@ stage and ends `NotFound`, as without a policy.
   `java.lang.reflect` denied, a reference to `java.lang.reflect.Method` was labelled with either
   package depending on the JVM run. It is now labelled with the most specific one,
   `deniedPackages:java.lang.reflect`.
+
+- **A deny rule on a path was bypassed by spelling the path differently (`secrets/key`,
+  `docs/../secrets/key`, an absolute path, a symlink), by swapping a symlink in after approval, or
+  by searching or listing from a directory above it (`Grep .`, `LS .`).**
 
 ### Security
 

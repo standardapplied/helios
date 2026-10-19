@@ -78,13 +78,13 @@ final class ToolAuthorizationTest {
   }
 
   private ToolOutcome outcomeOf(
-      Function<ToolCall, PermissionDecision> authorization, Hook... hooks) {
+      Function<ToolBinding.CanonicalCall, PermissionDecision> authorization, Hook... hooks) {
     var model = ScriptedModel.newBuilder().withToolCallsTurn(WRITE).withTextTurn("done").build();
     loop.run(model, writeTool(), authorization, UserMessage.text("write"), hooks);
     return loop.first(QueryEvent.ToolResult.class).result().outcome();
   }
 
-  private Function<ToolCall, PermissionDecision> asking(
+  private Function<ToolBinding.CanonicalCall, PermissionDecision> asking(
       Permission permission, ToolApprover approver) {
     return DefaultPermissionEvaluator.newBuilder(permission, writeTool())
             .withApprover(
@@ -96,7 +96,7 @@ final class ToolAuthorizationTest {
         ::authorize;
   }
 
-  private Function<ToolCall, PermissionDecision> askRule(ToolApprover approver) {
+  private Function<ToolBinding.CanonicalCall, PermissionDecision> askRule(ToolApprover approver) {
     return asking(
         new Permission(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()), approver);
   }
@@ -113,7 +113,7 @@ final class ToolAuthorizationTest {
 
   @Test
   void aCheckThatThrowsRefusesTheCall() {
-    Function<ToolCall, PermissionDecision> throwing =
+    Function<ToolBinding.CanonicalCall, PermissionDecision> throwing =
         call -> {
           throw new IllegalStateException("policy store down");
         };

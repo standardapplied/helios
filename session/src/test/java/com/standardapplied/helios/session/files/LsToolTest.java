@@ -9,12 +9,18 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
+import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -109,8 +115,8 @@ final class LsToolTest {
   void permissionKeyCarriesPath(@TempDir Path tmp) throws IOException {
     Files.createDirectory(tmp.resolve("src"));
     var binding = LsTool.binding(WorkspaceRoot.of(tmp));
-    assertEquals("src", binding.permissionKey(Map.of("path", "src")).canonicalArgs());
-    assertEquals(".", binding.permissionKey(Map.of()).canonicalArgs());
+    assertEquals("./src", keyOf(binding, Map.of("path", "src")).canonicalArgs());
+    assertEquals(".", keyOf(binding, Map.of()).canonicalArgs());
   }
 
   @Test
@@ -131,5 +137,26 @@ final class LsToolTest {
   @Test
   void rejectsNullWorkspace() {
     assertThrows(NullPointerException.class, () -> LsTool.binding(null));
+  }
+
+  private static ToolPermissionKey keyOf(ToolBinding binding, Map<String, Object> args) {
+    return binding.canonicalize(new ToolCall("call-1", binding.name(), args)).key();
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void aLinkWhoseTargetCannotBeResolvedIsKeyedByItsOwnPath(@TempDir Path tmp) throws IOException {
+    Files.createSymbolicLink(tmp.resolve("dangling"), tmp.resolve("gone"));
+    Files.writeString(tmp.resolve("kept.txt"), "k", StandardCharsets.UTF_8);
+    var context =
+        new ToolContext(
+            SessionContext.forTesting("ls"),
+            new CancellationToken(),
+            Duration.ofMinutes(1),
+            "./dangling"::equals);
+
+    var result = LsTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of(), context);
+
+    assertEquals("kept.txt\n[withheld by permission policy: 1]\n", result.output());
   }
 }

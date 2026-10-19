@@ -9,10 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
+import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -204,9 +207,8 @@ final class GlobToolTest {
   @Test
   void permissionKeyCarriesPath(@TempDir Path tmp) {
     var binding = GlobTool.binding(WorkspaceRoot.of(tmp));
-    assertEquals(
-        "src", binding.permissionKey(Map.of("pattern", "*", "path", "src")).canonicalArgs());
-    assertEquals(".", binding.permissionKey(Map.of("pattern", "*")).canonicalArgs());
+    assertEquals("./src", keyOf(binding, Map.of("pattern", "*", "path", "src")).canonicalArgs());
+    assertEquals(".", keyOf(binding, Map.of("pattern", "*")).canonicalArgs());
   }
 
   @Test
@@ -266,10 +268,16 @@ final class GlobToolTest {
     Files.writeString(tmp.resolve("a.md"), "x", StandardCharsets.UTF_8);
     var call = new CancellationToken();
     call.cancel("stop");
-    var ctx = new ToolContext(SessionContext.forTesting("cancelled"), call, Duration.ofMinutes(1));
+    var ctx =
+        new ToolContext(
+            SessionContext.forTesting("cancelled"), call, Duration.ofMinutes(1), key -> false);
     var result =
         GlobTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "*.md"), ctx);
     assertTrue(result.succeeded(), result.output());
     assertEquals("", result.output());
+  }
+
+  private static ToolPermissionKey keyOf(ToolBinding binding, Map<String, Object> args) {
+    return binding.canonicalize(new ToolCall("call-1", binding.name(), args)).key();
   }
 }

@@ -4,9 +4,14 @@
  */
 package com.standardapplied.helios.session.tools;
 
+import com.standardapplied.helios.core.common.Validate;
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.Tool;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -19,22 +24,30 @@ import java.util.function.Predicate;
  * lives in this wrapper. When core Tool gets migrated to an interface in a future cleanup, this
  * binding collapses into the interface itself.
  *
+ * <p>A path tool declares its {@link PathArgument}: {@link #canonicalize} replaces the argument's
+ * value with its {@link PathSpace#canonical canonical} spelling ({@code .} or {@code ./a/b} in a
+ * workspace, {@code /memories/} or {@code /memories/a/b} in memory), and the permission key is
+ * computed from that canonical call, so the key names the target the tool runs on.
+ *
  * <p>Construct via {@link #newBuilder(Tool)}; the builder requires the tool and a category, and
- * defaults the permission-key extractor to {@code ToolPermissionKey.of(tool.name())} and the
- * visibility predicate to "always visible".
+ * defaults the permission-key extractor to {@code ToolPermissionKey.of(tool.name())}, or to the
+ * canonical path when a path argument is declared, and the visibility predicate to "always
+ * visible".
  *
  * @param tool the underlying core tool; non-null
  * @param category the tool's classification axis; non-null
- * @param permissionKeyExtractor function from invocation arguments to the canonical permission key;
+ * @param permissionKeyExtractor function from the canonical call's arguments to the permission key;
  *     non-null
  * @param visibility predicate deciding whether the tool is advertised to the model for a given
  *     turn; non-null
+ * @param pathArgument the argument naming the path the tool touches, if any; non-null
  */
 public record ToolBinding(
     Tool tool,
     ToolCategory category,
     Function<Map<String, Object>, ToolPermissionKey> permissionKeyExtractor,
-    Predicate<ToolVisibilityContext> visibility) {
+    Predicate<ToolVisibilityContext> visibility,
+    Optional<PathArgument> pathArgument) {
 
   /**
    * Canonical constructor.
@@ -46,6 +59,7 @@ public record ToolBinding(
     Objects.requireNonNull(category, "category must not be null");
     Objects.requireNonNull(permissionKeyExtractor, "permissionKeyExtractor must not be null");
     Objects.requireNonNull(visibility, "visibility must not be null");
+    Objects.requireNonNull(pathArgument, "pathArgument must not be null");
   }
 
   /**
@@ -58,16 +72,23 @@ public record ToolBinding(
   }
 
   /**
-   * Compute the permission key for an invocation.
+   * The call as it runs and the permission key it is authorised on. Without a path argument the
+   * call is unchanged. With one, the argument's value, or its default when absent or empty, is
+   * replaced by its canonical spelling, and the key is computed from that canonical call.
    *
-   * @param arguments the call arguments; non-null
-   * @return the canonical permission key
-   * @throws NullPointerException if {@code arguments} is null
+   * @param call the call as the {@code PreToolUse} hooks left it; non-null
+   * @return the canonical call and its key
+   * @throws NullPointerException if {@code call} is null, or the extractor returns null
+   * @throws IllegalArgumentException if a required path argument is absent or empty, or the path
+   *     argument is not a string
+   * @throws RuntimeException whatever the path space throws for a path that names no target
    */
-  public ToolPermissionKey permissionKey(Map<String, Object> arguments) {
-    Objects.requireNonNull(arguments, "arguments must not be null");
-    var key = permissionKeyExtractor.apply(arguments);
-    return Objects.requireNonNull(key, "permissionKeyExtractor returned null");
+  public CanonicalCall canonicalize(ToolCall call) {
+    Objects.requireNonNull(call, "call must not be null");
+    var canonical = pathArgument.map(path -> path.canonicalize(call)).orElse(call);
+    var key = permissionKeyExtractor.apply(canonical.arguments());
+    return new CanonicalCall(
+        canonical, Objects.requireNonNull(key, "permissionKeyExtractor returned null"));
   }
 
   /**
@@ -93,6 +114,100 @@ public record ToolBinding(
     return new Builder(tool);
   }
 
+  /**
+   * A call as it runs, with the permission key it is authorised on.
+   *
+   * @param call the call with its path argument, if any, canonical; non-null
+   * @param key the permission key computed from {@code call}; non-null
+   */
+  public record CanonicalCall(ToolCall call, ToolPermissionKey key) {
+
+    /**
+     * Canonical constructor.
+     *
+     * @throws NullPointerException if either argument is null
+     */
+    public CanonicalCall {
+      Objects.requireNonNull(call, "call must not be null");
+      Objects.requireNonNull(key, "key must not be null");
+    }
+  }
+
+  /**
+   * The argument naming the path a tool touches.
+   *
+   * @param name the argument's name; non-blank
+   * @param defaultValue the path used when the argument is absent or empty; empty when the argument
+   *     is required; non-null
+   * @param space the namespace the path names a target in; non-null
+   * @param denyRulesOf the other tools whose DENY rules also withhold the entries a walk below this
+   *     path returns; non-null
+   */
+  public record PathArgument(
+      String name, Optional<String> defaultValue, PathSpace space, Set<String> denyRulesOf) {
+
+    /**
+     * Canonical constructor; copies {@code denyRulesOf}.
+     *
+     * @throws NullPointerException if any argument is null
+     * @throws IllegalArgumentException if {@code name} is blank
+     */
+    public PathArgument {
+      Validate.notBlank("name", name);
+      Objects.requireNonNull(defaultValue, "defaultValue must not be null");
+      Objects.requireNonNull(space, "space must not be null");
+      denyRulesOf = Set.copyOf(denyRulesOf);
+    }
+
+    /**
+     * A path argument the call must carry.
+     *
+     * @param name the argument's name; non-blank
+     * @param space the namespace it names a target in; non-null
+     * @return the argument
+     */
+    public static PathArgument required(String name, PathSpace space) {
+      return new PathArgument(name, Optional.empty(), space, Set.of());
+    }
+
+    /**
+     * A path argument that takes {@code defaultValue} when absent or empty.
+     *
+     * @param name the argument's name; non-blank
+     * @param defaultValue the path used in its absence; non-null
+     * @param space the namespace it names a target in; non-null
+     * @return the argument
+     */
+    public static PathArgument optional(String name, String defaultValue, PathSpace space) {
+      return new PathArgument(name, Optional.of(defaultValue), space, Set.of());
+    }
+
+    /**
+     * This argument, with the tools whose DENY rules also withhold what a walk below it returns.
+     *
+     * @param toolNames the tools' names; non-null
+     * @return a new argument
+     */
+    public PathArgument withDenyRulesOf(String... toolNames) {
+      return new PathArgument(name, defaultValue, space, Set.of(toolNames));
+    }
+
+    private ToolCall canonicalize(ToolCall call) {
+      var value = call.arguments().get(name);
+      var requested =
+          value == null || "".equals(value)
+              ? defaultValue.orElseThrow(
+                  () -> new IllegalArgumentException("'" + name + "' is required"))
+              : value;
+      if (!(requested instanceof String path)) {
+        throw new IllegalArgumentException("'" + name + "' must be a string");
+      }
+      var arguments = new LinkedHashMap<>(call.arguments());
+      arguments.put(name, space.canonical(path));
+      return new ToolCall(call.id(), call.name(), arguments);
+    }
+  }
+
   /** Mutable builder for {@link ToolBinding}. */
   public static final class Builder {
 
@@ -100,10 +215,10 @@ public record ToolBinding(
     private ToolCategory category;
     private Function<Map<String, Object>, ToolPermissionKey> permissionKeyExtractor;
     private Predicate<ToolVisibilityContext> visibility = ctx -> true;
+    private Optional<PathArgument> pathArgument = Optional.empty();
 
     private Builder(Tool tool) {
       this.tool = Objects.requireNonNull(tool, "tool must not be null");
-      this.permissionKeyExtractor = args -> ToolPermissionKey.of(tool.name());
     }
 
     /**
@@ -119,8 +234,9 @@ public record ToolBinding(
     }
 
     /**
-     * Set the permission-key extractor. Defaults to {@code args -> ToolPermissionKey.of(name)}
-     * which returns the tool name with empty canonical args.
+     * Set the permission-key extractor, applied to the canonical call's arguments. Defaults to
+     * {@code args -> ToolPermissionKey.of(name)}, the tool name with empty canonical args, or with
+     * a {@link #withPathArgument path argument} to the argument's canonical path.
      *
      * @param extractor non-null function
      * @return this builder
@@ -145,6 +261,19 @@ public record ToolBinding(
     }
 
     /**
+     * Declare the argument naming the path the tool touches; see {@link ToolBinding#canonicalize}.
+     *
+     * @param pathArgument non-null argument
+     * @return this builder
+     * @throws NullPointerException if {@code pathArgument} is null
+     */
+    public Builder withPathArgument(PathArgument pathArgument) {
+      this.pathArgument =
+          Optional.of(Objects.requireNonNull(pathArgument, "pathArgument must not be null"));
+      return this;
+    }
+
+    /**
      * Build the immutable binding.
      *
      * @return the binding
@@ -154,7 +283,16 @@ public record ToolBinding(
       if (category == null) {
         throw new IllegalStateException("category is required");
       }
-      return new ToolBinding(tool, category, permissionKeyExtractor, visibility);
+      var extractor = permissionKeyExtractor == null ? defaultExtractor() : permissionKeyExtractor;
+      return new ToolBinding(tool, category, extractor, visibility, pathArgument);
+    }
+
+    private Function<Map<String, Object>, ToolPermissionKey> defaultExtractor() {
+      var name = tool.name();
+      return pathArgument
+          .<Function<Map<String, Object>, ToolPermissionKey>>map(
+              path -> args -> new ToolPermissionKey(name, (String) args.get(path.name())))
+          .orElse(args -> ToolPermissionKey.of(name));
     }
   }
 }

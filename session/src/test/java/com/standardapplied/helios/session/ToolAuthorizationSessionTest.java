@@ -76,10 +76,7 @@ final class ToolAuthorizationSessionTest {
     var run = run(options, write("/tmp/a"));
 
     assertEquals(
-        new ToolOutcome.Rejected(
-            "Permission",
-            "permission key of Write failed: java.lang.IllegalStateException: no path"),
-        run.onlyResult().outcome());
+        new ToolOutcome.Rejected("Permission", "Write: no path"), run.onlyResult().outcome());
     assertEquals(List.of(), executed);
   }
 
@@ -155,8 +152,7 @@ final class ToolAuthorizationSessionTest {
 
   // ── a refusal's diagnostic ───────────────────────────────────────────────
 
-  private static final String KEY_FAILED =
-      "permission key of Write failed: java.lang.IllegalStateException: ";
+  private static final String KEY_FAILED = "Write: ";
 
   /** A run whose {@code Write} key throws {@code message}, with {@link #SECRET} registered. */
   private WriteToolSessions.Run keyThrowing(String message) {

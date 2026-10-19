@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session.files;
 
 import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.session.tools.Withholding;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Path;
@@ -16,6 +17,9 @@ import java.nio.file.attribute.BasicFileAttributes;
  * WorkspaceRoot#walkFileTree(Path, java.nio.file.FileVisitor)}. Hidden directories below the start
  * are pruned, only regular files within the size cap reach the per-file action, unreadable entries
  * are skipped, and the walk stops on cancellation or once the actions have produced the result cap.
+ * A directory below the start or a regular file whose canonical key the call's {@link Withholding}
+ * withholds is skipped, a directory without being read; links and special files are skipped before
+ * that check, so they are never counted.
  */
 final class WorkspaceWalk extends SimpleFileVisitor<Path> {
 
@@ -34,21 +38,27 @@ final class WorkspaceWalk extends SimpleFileVisitor<Path> {
     int visit(Path file, BasicFileAttributes attrs, int remaining);
   }
 
+  private final WorkspaceRoot workspace;
   private final Path start;
   private final CancellationToken cancellation;
+  private final Withholding withholding;
   private final int maxResults;
   private final long maxFileBytes;
   private final FileAction action;
   private int results;
 
   private WorkspaceWalk(
+      WorkspaceRoot workspace,
       Path start,
       CancellationToken cancellation,
+      Withholding withholding,
       int maxResults,
       long maxFileBytes,
       FileAction action) {
+    this.workspace = workspace;
     this.start = start;
     this.cancellation = cancellation;
+    this.withholding = withholding;
     this.maxResults = maxResults;
     this.maxFileBytes = maxFileBytes;
     this.action = action;
@@ -60,6 +70,7 @@ final class WorkspaceWalk extends SimpleFileVisitor<Path> {
    * @param workspace the confining workspace
    * @param start a resolved directory
    * @param cancellation stops the walk when cancelled
+   * @param withholding the call's filter of denied entries
    * @param maxResults result cap; positive
    * @param maxFileBytes files larger than this are skipped
    * @param action applied to each regular file within the cap
@@ -70,11 +81,14 @@ final class WorkspaceWalk extends SimpleFileVisitor<Path> {
       WorkspaceRoot workspace,
       Path start,
       CancellationToken cancellation,
+      Withholding withholding,
       int maxResults,
       long maxFileBytes,
       FileAction action)
       throws IOException {
-    var walk = new WorkspaceWalk(start, cancellation, maxResults, maxFileBytes, action);
+    var walk =
+        new WorkspaceWalk(
+            workspace, start, cancellation, withholding, maxResults, maxFileBytes, action);
     workspace.walkFileTree(start, walk);
     return walk.results;
   }
@@ -84,10 +98,12 @@ final class WorkspaceWalk extends SimpleFileVisitor<Path> {
     if (cancellation.isCancelled()) {
       return FileVisitResult.TERMINATE;
     }
-    if (!dir.equals(start) && dir.getFileName().toString().startsWith(".")) {
-      return FileVisitResult.SKIP_SUBTREE;
+    if (dir.equals(start)) {
+      return FileVisitResult.CONTINUE;
     }
-    return FileVisitResult.CONTINUE;
+    return dir.getFileName().toString().startsWith(".") || withheld(dir)
+        ? FileVisitResult.SKIP_SUBTREE
+        : FileVisitResult.CONTINUE;
   }
 
   @Override
@@ -95,11 +111,15 @@ final class WorkspaceWalk extends SimpleFileVisitor<Path> {
     if (cancellation.isCancelled()) {
       return FileVisitResult.TERMINATE;
     }
-    if (!attrs.isRegularFile() || attrs.size() > maxFileBytes) {
+    if (!attrs.isRegularFile() || attrs.size() > maxFileBytes || withheld(file)) {
       return FileVisitResult.CONTINUE;
     }
     results += action.visit(file, attrs, maxResults - results);
     return results >= maxResults ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
+  }
+
+  private boolean withheld(Path entry) {
+    return withholding.withholds(workspace.spell(entry));
   }
 
   @Override

@@ -14,7 +14,7 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolArgs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
+import com.standardapplied.helios.session.tools.Withholding;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -39,6 +39,11 @@ import java.util.Objects;
  *
  * <p>Hidden directories (names starting with {@code "."}) are pruned during traversal except for
  * the root itself. The total result count is capped at {@code 1000} to bound output size.
+ *
+ * <p>The {@code path} is the canonical one the call was authorised on ({@link
+ * WorkspaceRoot#resolveCanonical(String)}). A file or directory below it that a {@code Glob} DENY
+ * rule matches is withheld, a directory without being read, and the output ends with {@code
+ * [withheld by permission policy: <count>]}.
  */
 public final class GlobTool {
 
@@ -88,7 +93,7 @@ public final class GlobTool {
             .build();
     return ToolBinding.newBuilder(tool)
         .withCategory(ToolCategory.SEARCH)
-        .withPermissionKeyExtractor(args -> new ToolPermissionKey(NAME, ToolArgs.pathArg(args)))
+        .withPathArgument(ToolBinding.PathArgument.optional("path", ".", workspace))
         .build();
   }
 
@@ -102,17 +107,19 @@ public final class GlobTool {
 
   private static ToolResult glob(ToolContext ctx, WorkspaceRoot workspace, GlobRequest request) {
     try {
-      var root = workspace.resolveSafe(request.path());
+      var root = workspace.resolveCanonical(request.path());
       if (!workspace.attributes(root).isDirectory()) {
         return ToolResult.failure("Glob: not a directory: " + workspace.relativize(root));
       }
       var matcher = GlobMatchers.compile(root.getFileSystem(), request.pattern());
       var hits = new ArrayList<Match>();
+      var withholding = Withholding.of(ctx);
       var count =
           WorkspaceWalk.run(
               workspace,
               root,
               ctx.cancellation(),
+              withholding,
               MAX_RESULTS,
               Long.MAX_VALUE,
               (file, attrs, remaining) -> {
@@ -123,7 +130,7 @@ public final class GlobTool {
                     new Match(workspace.relativize(file), attrs.lastModifiedTime().toMillis()));
                 return 1;
               });
-      return ToolResult.success(format(hits, count >= MAX_RESULTS));
+      return ToolResult.success(format(hits, count >= MAX_RESULTS) + withholding.note());
     } catch (WorkspaceRoot.WorkspaceEscapeException e) {
       return ToolResult.failure("Glob: " + e.getMessage());
     } catch (IllegalArgumentException e) {

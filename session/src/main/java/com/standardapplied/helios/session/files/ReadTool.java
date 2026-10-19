@@ -15,7 +15,6 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolArgs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.IOException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -32,7 +31,10 @@ import java.util.Objects;
  * <h2>Arguments</h2>
  *
  * <ul>
- *   <li>{@code path} (required) — workspace-relative or absolute path.
+ *   <li>{@code path} (required) — workspace-relative or absolute path. The session authorises the
+ *       call on its canonical spelling ({@code ./a/b}) and runs the tool on that spelling, which
+ *       {@link WorkspaceRoot#resolveCanonical(String)} refuses if it no longer names the target
+ *       that was authorised.
  *   <li>{@code offset} (optional integer; default 1) — 1-based line at which text output begins.
  *       Ignored for image / PDF attachments.
  *   <li>{@code limit} (optional integer; default {@value #DEFAULT_LIMIT}) — maximum number of lines
@@ -175,8 +177,7 @@ public final class ReadTool {
             .build();
     return ToolBinding.newBuilder(tool)
         .withCategory(ToolCategory.READ)
-        .withPermissionKeyExtractor(
-            args -> new ToolPermissionKey(NAME, ToolArgs.stringArg(args, "path")))
+        .withPathArgument(ToolBinding.PathArgument.required("path", workspace))
         .build();
   }
 
@@ -189,7 +190,7 @@ public final class ReadTool {
     }
     Path resolved;
     try {
-      resolved = workspace.resolveSafe(pathArg);
+      resolved = workspace.resolveCanonical(pathArg);
     } catch (WorkspaceRoot.WorkspaceEscapeException e) {
       return ToolResult.failure("Read: " + e.getMessage());
     }

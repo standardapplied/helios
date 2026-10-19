@@ -9,17 +9,23 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
+import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -178,9 +184,8 @@ final class GrepToolTest {
   @Test
   void permissionKeyCarriesPath(@TempDir Path tmp) {
     var binding = GrepTool.binding(WorkspaceRoot.of(tmp));
-    assertEquals(
-        "src", binding.permissionKey(Map.of("pattern", "x", "path", "src")).canonicalArgs());
-    assertEquals(".", binding.permissionKey(Map.of("pattern", "x")).canonicalArgs());
+    assertEquals("./src", keyOf(binding, Map.of("pattern", "x", "path", "src")).canonicalArgs());
+    assertEquals(".", keyOf(binding, Map.of("pattern", "x")).canonicalArgs());
   }
 
   @Test
@@ -270,18 +275,24 @@ final class GrepToolTest {
 
   @Test
   @DisabledOnOs(OS.WINDOWS)
-  void symlinkedSearchRootInsideWorkspaceIsSearchedAtItsRealPath(@TempDir Path tmp)
+  void aSymlinkedSearchRootIsSearchedAtItsCanonicalPathAndRefusedThroughTheLink(@TempDir Path tmp)
       throws IOException {
     var ws = WorkspaceRoot.of(tmp);
     Files.createDirectories(ws.root().resolve("real"));
     Files.writeString(ws.root().resolve("real/a.txt"), "hello\n", StandardCharsets.UTF_8);
     Files.createSymbolicLink(ws.root().resolve("alias"), ws.root().resolve("real"));
-    var result =
-        GrepTool.binding(ws)
-            .tool()
-            .execute(Map.of("pattern", "hello", "path", "alias"), ToolContext.noop());
-    assertTrue(result.succeeded(), result.output());
-    assertEquals("real/a.txt:1:hello\n", result.output());
+    var tool = GrepTool.binding(ws).tool();
+
+    var canonical =
+        tool.execute(Map.of("pattern", "hello", "path", ws.canonical("alias")), ToolContext.noop());
+    assertEquals("real/a.txt:1:hello\n", canonical.output());
+
+    var throughTheLink =
+        tool.execute(Map.of("pattern", "hello", "path", "alias"), ToolContext.noop());
+    assertEquals(
+        "Grep: path is not canonical or changed after it was authorised: alias now resolves to"
+            + " ./real",
+        throughTheLink.output());
   }
 
   @Test
@@ -318,7 +329,9 @@ final class GrepToolTest {
     Files.writeString(tmp.resolve("a.txt"), "hit\n", StandardCharsets.UTF_8);
     var call = new CancellationToken();
     call.cancel("stop");
-    var ctx = new ToolContext(SessionContext.forTesting("cancelled"), call, Duration.ofMinutes(1));
+    var ctx =
+        new ToolContext(
+            SessionContext.forTesting("cancelled"), call, Duration.ofMinutes(1), key -> false);
     var result =
         GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "hit"), ctx);
     assertTrue(result.succeeded(), result.output());
@@ -351,6 +364,72 @@ final class GrepToolTest {
       assertEquals("a.txt:1:hit\n", result.output());
     } finally {
       Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rw-------"));
+    }
+  }
+
+  private static ToolPermissionKey keyOf(ToolBinding binding, Map<String, Object> args) {
+    return binding.canonicalize(new ToolCall("call-1", binding.name(), args)).key();
+  }
+
+  private static ToolContext withholding(Predicate<String> withheld) {
+    return new ToolContext(
+        SessionContext.forTesting("withholding"),
+        new CancellationToken(),
+        Duration.ofMinutes(1),
+        withheld);
+  }
+
+  @Test
+  void aWithheldDirectoryIsNeverDescendedInto(@TempDir Path tmp) throws IOException {
+    Files.createDirectories(tmp.resolve("secrets/sub"));
+    Files.writeString(tmp.resolve("secrets/key"), "TOPSECRET\n", StandardCharsets.UTF_8);
+    Files.writeString(tmp.resolve("secrets/sub/c.txt"), "TOPSECRET\n", StandardCharsets.UTF_8);
+    Files.writeString(tmp.resolve("a.txt"), "TOP\n", StandardCharsets.UTF_8);
+    var asked = new CopyOnWriteArrayList<String>();
+
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(
+                Map.of("pattern", "TOP", "path", "."),
+                withholding(
+                    key -> {
+                      asked.add(key);
+                      return key.equals("./secrets");
+                    }));
+
+    assertEquals("a.txt:1:TOP\n[withheld by permission policy: 1]\n", result.output());
+    assertEquals(List.of("./a.txt", "./secrets"), asked.stream().sorted().toList());
+  }
+
+  @Test
+  void theWithheldLineFollowsTheTruncationMarker(@TempDir Path tmp) throws IOException {
+    Files.createDirectories(tmp.resolve("first"));
+    Files.createDirectories(tmp.resolve("second"));
+    var firstListed = firstListedDirectory(tmp);
+    var other = firstListed.equals("first") ? "second" : "first";
+    Files.writeString(tmp.resolve(firstListed + "/denied.txt"), "hit\n", StandardCharsets.UTF_8);
+    Files.writeString(
+        tmp.resolve(other + "/big.txt"), "hit\n".repeat(1001), StandardCharsets.UTF_8);
+
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "hit"), withholding(key -> key.equals("./" + firstListed)));
+
+    assertTrue(
+        result
+            .output()
+            .endsWith(
+                "big.txt:1000:hit\n[truncated at 1000 matches]\n"
+                    + "[withheld by permission policy: 1]\n"),
+        result.output());
+  }
+
+  /** The directory of {@code dir} that a walk of it visits first. */
+  private static String firstListedDirectory(Path dir) throws IOException {
+    try (var entries = Files.newDirectoryStream(dir)) {
+      return entries.iterator().next().getFileName().toString();
     }
   }
 }

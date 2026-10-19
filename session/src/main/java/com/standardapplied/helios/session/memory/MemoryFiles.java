@@ -52,15 +52,11 @@ final class MemoryFiles {
    *     traverses a symlink
    */
   Path resolve(String path) {
-    Objects.requireNonNull(path, "path must not be null");
-    if (!path.startsWith(PREFIX)) {
-      throw new IllegalArgumentException("path must start with " + PREFIX + ", got '" + path + "'");
-    }
-    var rel = path.substring(PREFIX.length());
-    if (rel.isEmpty()) {
+    var canonical = MemoryPaths.INSTANCE.canonical(path);
+    if (canonical.equals(PREFIX)) {
       throw new IllegalArgumentException("path must name a file under " + PREFIX);
     }
-    return confine(path, rel);
+    return confine(path, canonical);
   }
 
   /**
@@ -74,11 +70,7 @@ final class MemoryFiles {
   List<String> list(String prefix) throws IOException {
     Objects.requireNonNull(prefix, "prefix must not be null");
     var normalisedPrefix = prefix.isEmpty() ? PREFIX : prefix;
-    if (!normalisedPrefix.startsWith(PREFIX)) {
-      throw new IllegalArgumentException(
-          "prefix must start with " + PREFIX + ", got '" + prefix + "'");
-    }
-    var start = confine(normalisedPrefix, normalisedPrefix.substring(PREFIX.length()));
+    var start = confine(normalisedPrefix, MemoryPaths.INSTANCE.canonical(normalisedPrefix));
     BasicFileAttributes attributes;
     try {
       attributes = files.attributes(start);
@@ -151,11 +143,12 @@ final class MemoryFiles {
     files.deleteFile(resolved);
   }
 
-  private Path confine(String path, String rel) {
-    var lexical = root.resolve(rel).normalize();
-    if (!lexical.startsWith(root)) {
-      throw new IllegalArgumentException("path escapes memory root: " + path);
-    }
+  /**
+   * The on-disk location of a canonical memory path, which must canonicalise to exactly its lexical
+   * location: memory's re-resolution of the path it was authorised on.
+   */
+  private Path confine(String path, String canonical) {
+    var lexical = root.resolve(canonical.substring(PREFIX.length()));
     var resolved = files.resolveSafe(lexical.toString());
     if (!resolved.equals(lexical)) {
       throw new IllegalArgumentException("path traverses a symlink inside memory: " + path);
