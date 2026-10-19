@@ -198,7 +198,7 @@ final class ToolApprovalSessionTest {
       var terminal = Await.value("the session to end", session.result());
       events.awaitDone();
       return new Unanswered(
-          new WriteToolSessions.Run(events, terminal), answer(session, questionId, "Allow"));
+          new WriteToolSessions.Run(events, model, terminal), answer(session, questionId, "Allow"));
     }
   }
 

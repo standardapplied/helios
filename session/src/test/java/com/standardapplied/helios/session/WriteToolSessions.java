@@ -30,8 +30,8 @@ final class WriteToolSessions {
   /** Every call the {@code Write} tool executed, by its arguments. */
   final List<Map<String, Object>> executed = new CopyOnWriteArrayList<>();
 
-  /** What a run emitted and how it ended. */
-  record Run(CollectingSubscriber events, ResultMessage terminal) {
+  /** What a run emitted, the model it ran on, and how it ended. */
+  record Run(CollectingSubscriber events, ScriptedModel model, ResultMessage terminal) {
 
     ToolResult onlyResult() {
       var results = events.eventsOf(QueryEvent.ToolResult.class);
@@ -95,7 +95,7 @@ final class WriteToolSessions {
       session.send(UserMessage.text("go"));
       var terminal = Await.value("the session to end", session.result());
       events.awaitDone();
-      return new Run(events, terminal);
+      return new Run(events, model, terminal);
     }
   }
 }
