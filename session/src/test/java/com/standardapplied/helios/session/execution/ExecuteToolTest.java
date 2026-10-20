@@ -138,6 +138,16 @@ final class ExecuteToolTest {
   }
 
   @Test
+  void permissionKeyNamesARuntimeThatIsNoRuntimeConstantUnknown() {
+    assertEquals(
+        "UNKNOWN/ls",
+        ExecuteTool.permissionKey(Map.of("runtime", "zsh", "script", "ls")).canonicalArgs());
+    assertEquals(
+        "UNKNOWN/ls",
+        ExecuteTool.permissionKey(Map.of("runtime", 7, "script", "ls")).canonicalArgs());
+  }
+
+  @Test
   void permissionKeyHandlesBlankScript() {
     var key = ExecuteTool.permissionKey(Map.of("runtime", "BASH", "script", " \n "));
     assertEquals("BASH/", key.canonicalArgs());

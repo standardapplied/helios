@@ -136,6 +136,16 @@ class SecretRegistryTest {
   }
 
   @Test
+  void registerRefusesAValueThatStartsOrEndsWithASpace() {
+    var registry = new SecretRegistry();
+    for (var value : new String[] {" token-12345678", "token-12345678 "}) {
+      var ex = assertThrows(IllegalArgumentException.class, () -> registry.register("X", value));
+      assertEquals("Secret 'X' must not start or end with a space", ex.getMessage());
+    }
+    assertEquals(0, registry.size());
+  }
+
+  @Test
   void registerAcceptsPrintableAsciiWithCommonSymbols() {
     // Sanity check the inverse: every byte in the legal range registers cleanly. Covers the symbol
     // characters Jackson does NOT escape: =-_./+:@#$%& etc., plus spaces.
