@@ -35,6 +35,11 @@ class RedactionResultTest {
   }
 
   @Test
+  void aTextThatEndsInAPairAcrossTheBoundIsKeptWhole() {
+    assertEquals("rrr😀", result("rrr😀").truncated(4).text());
+  }
+
+  @Test
   void aCutKeepsTheRedactionCounts() {
     var secrets = new SecretRegistry();
     secrets.register("TOKEN", "tok-0123456789");
