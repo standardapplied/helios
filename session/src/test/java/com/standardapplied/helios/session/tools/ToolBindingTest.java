@@ -15,6 +15,7 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -361,8 +362,12 @@ final class ToolBindingTest {
 
   @Test
   void pathArgumentRejectsABlankName() {
-    assertThrows(
-        IllegalArgumentException.class, () -> ToolBinding.PathArgument.required(" ", DOTTED));
+    assertEquals(
+        "name must not be blank",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ToolBinding.PathArgument.required(" ", DOTTED))
+            .getMessage());
   }
 
   @Test
@@ -376,6 +381,19 @@ final class ToolBindingTest {
         assertThrows(
             NullPointerException.class, () -> ToolBinding.PathArgument.required("path", null));
     assertEquals("space must not be null", noSpace.getMessage());
+    var noContentRulesOf =
+        assertThrows(
+            NullPointerException.class,
+            () -> new ToolBinding.PathArgument("path", Optional.empty(), DOTTED, null));
+    assertEquals("contentRulesOf must not be null", noContentRulesOf.getMessage());
+  }
+
+  @Test
+  void pathArgumentKeepsTheContentRulesOfItWasBuiltWith() {
+    var names = new HashSet<>(Set.of("Read"));
+    var path = new ToolBinding.PathArgument("path", Optional.empty(), DOTTED, names);
+    names.add("LS");
+    assertEquals(Set.of("Read"), path.contentRulesOf());
   }
 
   @Test

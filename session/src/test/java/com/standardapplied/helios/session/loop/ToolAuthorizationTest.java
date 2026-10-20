@@ -3,6 +3,9 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
@@ -11,6 +14,7 @@ import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
@@ -28,6 +32,9 @@ import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -36,6 +43,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * The permission stage between the {@code PreToolUse} hooks and dispatch, run through the loop: it
@@ -168,6 +176,54 @@ final class ToolAuthorizationTest {
   }
 
   @Test
+  void theApproverIsAskedAboutTheCanonicalCallThatRuns(@TempDir Path tmp) throws IOException {
+    Files.createDirectory(tmp.resolve("docs"));
+    var write =
+        Tool.newBuilder()
+            .withName("Write")
+            .withDescription("write")
+            .withExecutor(
+                (args, ctx) -> {
+                  executed.add(args);
+                  return ToolResult.success("wrote");
+                })
+            .build();
+    var tools =
+        new ToolRegistry(
+            List.of(
+                ToolBinding.newBuilder(write)
+                    .withCategory(ToolCategory.WRITE)
+                    .withPathArgument(
+                        ToolBinding.PathArgument.required("path", WorkspaceRoot.of(tmp)))
+                    .build()));
+    var askDocs = PermissionRule.withGlob(PermissionEffect.ASK, "Write", "./docs/**");
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(new ToolCall("c1", "Write", Map.of("path", "docs/../docs/a.txt")))
+            .withTextTurn("done")
+            .build();
+
+    loop.run(
+        model,
+        tools,
+        DefaultPermissionEvaluator.newBuilder(
+                    new Permission(PermissionMode.DEFAULT, List.of(), List.of(askDocs), List.of()),
+                    tools)
+                .withApprover(
+                    request -> {
+                      requests.add(request);
+                      return PermissionDecision.allow("reviewed");
+                    })
+                .build()
+            ::authorize,
+        UserMessage.text("write"));
+
+    var canonical = new ToolCall("c1", "Write", Map.of("path", "./docs/a.txt"));
+    assertEquals(List.of(canonical), requests.stream().map(ApprovalRequest::call).toList());
+    assertEquals(List.of(canonical.arguments()), executed);
+  }
+
+  @Test
   void theApproversDenyRefusesWithItsReason() {
     assertEquals(
         new ToolOutcome.Rejected("Permission", "no"),
@@ -256,6 +312,27 @@ final class ToolAuthorizationTest {
         outcome);
     assertEquals(List.of(true), interruptedAfterRefusal);
     assertEquals(List.of(), executed);
+  }
+
+  // ── a call naming no registered tool ─────────────────────────────────────
+
+  @Test
+  void aCallNamingNoRegisteredToolSkipsTheStageAndWithholdsNothing() {
+    var call = new ToolCall("c9", "Missing", Map.of("path", "../outside"));
+
+    var verdict =
+        ToolAuthorization.admit(
+            writeTool(),
+            canonical -> {
+              throw new AssertionError("authorization must not run");
+            },
+            key -> Optional.of(PermissionRule.any(PermissionEffect.DENY, key.toolName())),
+            new SecretRegistry(),
+            call);
+
+    var admitted = assertInstanceOf(ToolAuthorization.Admitted.class, verdict);
+    assertSame(call, admitted.call());
+    assertFalse(admitted.withheld().test("./secrets"));
   }
 
   // ── diagnostics ──────────────────────────────────────────────────────────

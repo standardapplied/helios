@@ -186,6 +186,16 @@ final class ToolDispatchTest {
     assertEquals("stopGrace must not be null", grace.getMessage());
   }
 
+  @Test
+  void dispatchRejectsANullWithheldBeforeLookingTheCallUp() {
+    var d = fixture.dispatcher();
+    var c = call("nope");
+    var token = new CancellationToken();
+    var ex =
+        assertThrows(NullPointerException.class, () -> d.dispatch(c, token, NEVER, NEVER, null));
+    assertEquals("withheld must not be null", ex.getMessage());
+  }
+
   @ParameterizedTest
   @ValueSource(longs = {0, -1})
   void dispatchRejectsANonPositiveTimeout(long millis) {
@@ -273,6 +283,24 @@ final class ToolDispatchTest {
             NEVER,
             key -> false);
     assertEquals(ToolResult.success("echoed: hello"), result);
+  }
+
+  @Test
+  void theToolWithholdsWhatTheDispatchedPredicateWithholds() {
+    var d =
+        fixture.dispatcher(
+            binding(
+                "walk",
+                ToolCategory.SEARCH,
+                (args, ctx) ->
+                    ToolResult.success(
+                        Stream.of("./docs", "./secrets")
+                            .filter(key -> !ctx.withholds(key))
+                            .toList()
+                            .toString())));
+    var result =
+        d.dispatch(call("walk"), new CancellationToken(), NEVER, NEVER, "./secrets"::equals);
+    assertEquals(ToolResult.success("[./docs]"), result);
   }
 
   @Test

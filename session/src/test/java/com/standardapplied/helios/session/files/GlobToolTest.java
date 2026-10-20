@@ -203,21 +203,6 @@ final class GlobToolTest {
   }
 
   @Test
-  void aLinkedRootIsRefusedForTheCanonicalPathItResolvesTo(@TempDir Path tmp) throws IOException {
-    var ws = WorkspaceRoot.of(tmp);
-    Files.createDirectories(ws.root().resolve("real"));
-    Files.createSymbolicLink(ws.root().resolve("alias"), ws.root().resolve("real"));
-    var result =
-        GlobTool.binding(ws)
-            .tool()
-            .execute(Map.of("pattern", "*", "path", "alias"), ToolContext.noop());
-    assertEquals(
-        "Glob: path is not canonical or changed after it was authorised: alias now resolves to"
-            + " ./real",
-        result.output());
-  }
-
-  @Test
   void permissionKeyCarriesPath(@TempDir Path tmp) {
     var binding = GlobTool.binding(WorkspaceRoot.of(tmp));
     assertEquals("./src", keyOf(binding, Map.of("pattern", "*", "path", "src")).canonicalArgs());
@@ -288,5 +273,27 @@ final class GlobToolTest {
         GlobTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "*.md"), ctx);
     assertTrue(result.succeeded(), result.output());
     assertEquals("", result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void aSymlinkedRootIsGlobbedAtItsCanonicalPathAndRefusedThroughTheLink(@TempDir Path tmp)
+      throws IOException {
+    var ws = WorkspaceRoot.of(tmp);
+    Files.createDirectories(ws.root().resolve("real"));
+    Files.writeString(ws.root().resolve("real/a.txt"), "a", StandardCharsets.UTF_8);
+    Files.createSymbolicLink(ws.root().resolve("alias"), ws.root().resolve("real"));
+    var tool = GlobTool.binding(ws).tool();
+
+    var canonical =
+        tool.execute(Map.of("pattern", "*.txt", "path", ws.canonical("alias")), ToolContext.noop());
+    assertEquals("real/a.txt\n", canonical.output());
+
+    var throughTheLink =
+        tool.execute(Map.of("pattern", "*.txt", "path", "alias"), ToolContext.noop());
+    assertEquals(
+        "Glob: path is not canonical or changed after it was authorised: alias now resolves to"
+            + " ./real",
+        throughTheLink.output());
   }
 }

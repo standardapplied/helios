@@ -47,6 +47,9 @@ final class MemoryWriteToolTest {
     assertEquals("MemoryWrite", MemoryWriteTool.NAME);
     assertEquals(
         "/memories/x.md", keyOf(binding, Map.of("path", "/memories/x.md")).canonicalArgs());
+    assertEquals(
+        "/memories/locked/a.md",
+        keyOf(binding, Map.of("path", "/memories/x/../locked/./a.md")).canonicalArgs());
   }
 
   // ── create ────────────────────────────────────────────────────────────────
