@@ -92,10 +92,12 @@ final class WriteToolSessions {
     return run(model, options.withModel(model), reactions);
   }
 
-  /**
-   * Runs a session of {@code options}, which already hold {@code model}, reacting to each event it
-   * emits.
-   */
+  /** Runs a session of {@code options}, which already hold {@code model}. */
+  static Run run(ScriptedModel model, SessionOptions.Builder options) {
+    return run(model, options, session -> event -> {});
+  }
+
+  /** As {@link #run(ScriptedModel, SessionOptions.Builder)}, reacting to each event it emits. */
   static Run run(
       ScriptedModel model,
       SessionOptions.Builder options,

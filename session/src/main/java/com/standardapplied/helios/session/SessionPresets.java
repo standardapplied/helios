@@ -18,9 +18,7 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
+import java.util.stream.Stream;
 
 /**
  * Curated {@link SessionOptions.Builder} factories for the session shapes most callers want, each
@@ -33,12 +31,9 @@ import java.util.Objects;
  *     .build();
  * }</pre>
  *
- * <p>{@link #minimal} sets only the model; {@link #readOnly} adds the read tools under {@link
- * Permission#planMode()}; {@link #workspace} adds filesystem memory under {@link
- * Permission#defaultInWorkspace()}; {@link #openEnded} adds {@code Execute} through an explicit
- * {@link ExecutionProvider}. The session registers {@code MemoryRead} and {@code MemoryWrite}
- * itself whenever a memory backend is set. A root that must be trusted or curated is wired by hand
- * through {@link SessionOptions.Builder#withTools} on that root.
+ * <p>The session registers {@code MemoryRead} and {@code MemoryWrite} itself whenever a memory
+ * backend is set. A root that must be trusted or curated is wired by hand through {@link
+ * SessionOptions.Builder#withTools} on that root.
  */
 public final class SessionPresets {
 
@@ -65,11 +60,8 @@ public final class SessionPresets {
    * @throws NullPointerException if any argument is null
    */
   public static SessionOptions.Builder readOnly(Model model, Path root) {
-    Objects.requireNonNull(model, "model must not be null");
-    Objects.requireNonNull(root, "root must not be null");
-    var workspace = WorkspaceRoot.of(root);
     return minimal(model)
-        .withTools(new ToolRegistry(readTools(workspace)))
+        .withTools(tools(WorkspaceRoot.of(root)))
         .withPermission(Permission.planMode());
   }
 
@@ -84,10 +76,7 @@ public final class SessionPresets {
    * @throws NullPointerException if any argument is null
    */
   public static SessionOptions.Builder workspace(Model model, Path root) {
-    Objects.requireNonNull(model, "model must not be null");
-    Objects.requireNonNull(root, "root must not be null");
-    var workspace = WorkspaceRoot.of(root);
-    return withMemory(model, workspace, readTools(workspace));
+    return inWorkspace(minimal(model), WorkspaceRoot.of(root));
   }
 
   /**
@@ -102,28 +91,25 @@ public final class SessionPresets {
    */
   public static SessionOptions.Builder openEnded(
       Model model, Path root, ExecutionProvider provider) {
-    Objects.requireNonNull(model, "model must not be null");
-    Objects.requireNonNull(root, "root must not be null");
-    Objects.requireNonNull(provider, "provider must not be null");
-    var workspace = WorkspaceRoot.of(root);
-    var tools = new ArrayList<>(readTools(workspace));
-    tools.add(ExecuteTool.binding(provider));
-    return withMemory(model, workspace, tools).withExecutionProvider(provider);
+    return inWorkspace(minimal(model), WorkspaceRoot.of(root), ExecuteTool.binding(provider))
+        .withExecutionProvider(provider);
   }
 
-  private static SessionOptions.Builder withMemory(
-      Model model, WorkspaceRoot workspace, List<ToolBinding> tools) {
-    return minimal(model)
-        .withTools(new ToolRegistry(tools))
+  private static SessionOptions.Builder inWorkspace(
+      SessionOptions.Builder options, WorkspaceRoot workspace, ToolBinding... extraTools) {
+    return options
+        .withTools(tools(workspace, extraTools))
         .withPermission(Permission.defaultInWorkspace())
         .withMemoryBackend(FileSystemMemoryBackend.of(workspace));
   }
 
-  private static List<ToolBinding> readTools(WorkspaceRoot workspace) {
-    return List.of(
-        ReadTool.binding(workspace, InMemoryFileTracker.create()),
-        GlobTool.binding(workspace),
-        GrepTool.binding(workspace),
-        LsTool.binding(workspace));
+  private static ToolRegistry tools(WorkspaceRoot workspace, ToolBinding... extraTools) {
+    var readTools =
+        Stream.of(
+            ReadTool.binding(workspace, InMemoryFileTracker.create()),
+            GlobTool.binding(workspace),
+            GrepTool.binding(workspace),
+            LsTool.binding(workspace));
+    return new ToolRegistry(Stream.concat(readTools, Stream.of(extraTools)).toList());
   }
 }
