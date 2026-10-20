@@ -28,6 +28,9 @@ final class ToolAuthorization {
 
   static final int MAX_REASON_CHARS = 1024;
 
+  /** The predicate of a call that withholds nothing. */
+  static final Predicate<String> NOTHING_WITHHELD = key -> false;
+
   private static final Set<PermissionEffect> OWN_RULES = Set.of(PermissionEffect.DENY);
   private static final Set<PermissionEffect> CONTENT_RULES =
       Set.of(PermissionEffect.DENY, PermissionEffect.ASK);
@@ -74,7 +77,7 @@ final class ToolAuthorization {
       ToolCall call) {
     var registered = tools.get(call.name());
     if (registered.isEmpty()) {
-      return new Admitted(call, key -> false);
+      return new Admitted(call, NOTHING_WITHHELD);
     }
     var binding = registered.orElseThrow();
     ToolBinding.CanonicalCall canonical;

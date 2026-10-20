@@ -53,7 +53,6 @@ final class ToolRound {
 
   private static final String PRE_TOOL_USE = "PreToolUseHook";
   private static final String POST_TOOL_USE = "PostToolUseHook";
-  private static final Predicate<String> NOTHING_WITHHELD = key -> false;
 
   /**
    * The call to run after {@code PreToolUse}, the result standing in for its dispatch, and what was
@@ -110,7 +109,7 @@ final class ToolRound {
                 finalCall,
                 ToolResult.rejected(hookName, "hook injected a user message"),
                 Map.of(),
-                NOTHING_WITHHELD);
+                ToolAuthorization.NOTHING_WITHHELD);
           }
           default -> authorize(state, finalCall);
         };
@@ -209,7 +208,10 @@ final class ToolRound {
             by,
             text));
     return new PlannedCall(
-        call, ToolResult.rejected(by, text), diagnostic.counts(), NOTHING_WITHHELD);
+        call,
+        ToolResult.rejected(by, text),
+        diagnostic.counts(),
+        ToolAuthorization.NOTHING_WITHHELD);
   }
 
   private ToolResult dispatch(SessionState state, PlannedCall planned, SessionLimits limits) {

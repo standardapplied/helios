@@ -73,6 +73,16 @@ final class WorkspaceCanonicalPathTest {
   }
 
   @Test
+  void dotDotIsResolvedLexicallyInAnAbsolutePathAsInARelativeOne() throws IOException {
+    Files.createSymbolicLink(root.resolve("up"), Files.createDirectory(tmp.resolve("outside")));
+    Files.createDirectories(tmp.resolve("docs"));
+    Files.writeString(tmp.resolve("docs/a.txt"), "outside", StandardCharsets.UTF_8);
+
+    assertEquals("./docs/a.txt", workspace.canonical("up/../docs/a.txt"));
+    assertEquals("./docs/a.txt", workspace.canonical(root + "/up/../docs/a.txt"));
+  }
+
+  @Test
   void eachEscapeIsRefusedWithItsMessage() throws IOException {
     Files.createSymbolicLink(root.resolve("dangling"), root.resolve("gone"));
     Files.createSymbolicLink(root.resolve("loop"), root.resolve("loop"));
@@ -98,6 +108,9 @@ final class WorkspaceCanonicalPathTest {
     assertEquals(".", workspace.spell(root));
     assertEquals("./docs/a.txt", workspace.spell(root.resolve("docs/a.txt")));
     assertEquals(tmp.resolve("x").toString(), workspace.spell(tmp.resolve("x")));
+    assertEquals(
+        "resolved must not be null",
+        assertThrows(NullPointerException.class, () -> workspace.spell(null)).getMessage());
   }
 
   // ── resolveCanonical ─────────────────────────────────────────────────────
@@ -126,18 +139,22 @@ final class WorkspaceCanonicalPathTest {
         refused.getMessage());
   }
 
+  private String refusedOnResolve(String canonical) {
+    return assertThrows(
+            WorkspaceRoot.WorkspaceEscapeException.class,
+            () -> workspace.resolveCanonical(canonical))
+        .getMessage();
+  }
+
   @Test
   void resolveCanonicalRefusesWhatCanonicalRefuses() throws IOException {
     Files.createSymbolicLink(root.resolve("dangling"), root.resolve("gone"));
-    assertThrows(
-        WorkspaceRoot.WorkspaceEscapeException.class,
-        () -> workspace.resolveCanonical("../outside"));
-    assertThrows(
-        WorkspaceRoot.WorkspaceEscapeException.class,
-        () -> workspace.resolveCanonical("./dangling"));
-    assertThrows(
-        WorkspaceRoot.WorkspaceEscapeException.class,
-        () -> workspace.resolveCanonical(tmp.toString()));
+    assertEquals("path escapes workspace root: ../outside", refusedOnResolve("../outside"));
+    assertTrue(
+        refusedOnResolve("./dangling")
+            .startsWith("path traverses a dangling or looping symlink: ./dangling: "));
+    assertEquals(
+        "path escapes workspace root via symlink: " + tmp, refusedOnResolve(tmp.toString()));
   }
 
   // ── trusted workspace ────────────────────────────────────────────────────
@@ -173,14 +190,15 @@ final class WorkspaceCanonicalPathTest {
   // ── admits ───────────────────────────────────────────────────────────────
 
   @ParameterizedTest
-  @ValueSource(strings = {".", "./**", "./secrets/**", "./**/secrets/**", "**", "**/x.*", "./*"})
+  @ValueSource(
+      strings = {".", "./**", "./secrets/**", "./**/secrets/**", "**", "**/x.*", "**.java", "./*"})
   void aGlobAnchoredAtTheRootWithProperSegmentsIsAdmitted(String glob) {
     assertTrue(workspace.admits(glob));
   }
 
   @ParameterizedTest
   @ValueSource(
-      strings = {"secrets/**", "./a/../b", "./docs/", "./a/./b", ".//a", "/abs/**", "*", "a"})
+      strings = {"secrets/**", "./a/../b", "./docs/", "./a/./b", ".//a", "/abs/**", "*", "a", "/"})
   void aGlobNoCanonicalPathCanMatchIsNotAdmitted(String glob) {
     assertFalse(workspace.admits(glob));
   }

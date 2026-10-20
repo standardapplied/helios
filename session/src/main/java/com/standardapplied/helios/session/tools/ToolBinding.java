@@ -156,7 +156,8 @@ public record ToolBinding(
       Validate.notBlank("name", name);
       Objects.requireNonNull(defaultValue, "defaultValue must not be null");
       Objects.requireNonNull(space, "space must not be null");
-      contentRulesOf = Set.copyOf(contentRulesOf);
+      contentRulesOf =
+          Set.copyOf(Objects.requireNonNull(contentRulesOf, "contentRulesOf must not be null"));
     }
 
     /**

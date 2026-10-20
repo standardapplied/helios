@@ -134,6 +134,20 @@ final class WithheldEntriesTest {
   }
 
   @Test
+  void aLinkIsSkippedBeforeTheCheckSoItsOwnDeniedPathIsNotCounted() {
+    var permission =
+        policy(
+            PermissionMode.DEFAULT,
+            PermissionRule.withGlob(PermissionEffect.DENY, GlobTool.NAME, "./docs/leak.txt"));
+
+    var glob = runTool(permission, GlobTool.NAME, Map.of("pattern", "**"));
+
+    assertEquals(
+        List.of("docs/a.txt", "secrets/b.txt", "secrets/key", "secrets/sub/c.txt"),
+        glob.lines().sorted().toList());
+  }
+
+  @Test
   void aMemoryListingWithholdsDeniedEntries() throws IOException {
     sessions.write(".agent/memory/locked/a.md", SECRET);
     sessions.write(".agent/memory/notes.md", "notes");
@@ -174,6 +188,18 @@ final class WithheldEntriesTest {
             grepTop());
 
     assertEquals(ONE_WITHHELD, out);
+  }
+
+  @Test
+  void aSessionWithoutAPolicyWithholdsNothing() {
+    var grep = output(run(sessions.withoutPolicy(), call(GrepTool.NAME, grepTop())));
+
+    assertEquals(
+        List.of(
+            "secrets/b.txt:1:TOPSECRET",
+            "secrets/key:1:TOPSECRET",
+            "secrets/sub/c.txt:1:TOPSECRET"),
+        grep.lines().sorted().toList());
   }
 
   // ── a content walk obeys Read's deny and ask rules; a name walk does not ──

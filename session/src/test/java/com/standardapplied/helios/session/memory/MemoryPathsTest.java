@@ -26,7 +26,8 @@ final class MemoryPathsTest {
     "/memories//a//b.md, /memories/a/b.md",
     "/memories/./locked/a.md, /memories/locked/a.md",
     "/memories/x/../locked/a.md, /memories/locked/a.md",
-    "/memories/x/.., /memories/"
+    "/memories/x/.., /memories/",
+    "/memories/a/b/../c.md, /memories/a/c.md"
   })
   void everySpellingOfAMemoryPathIsCanonicalisedToOne(String requested, String canonical) {
     assertEquals(canonical, PATHS.canonical(requested));
@@ -59,7 +60,9 @@ final class MemoryPathsTest {
 
   @Test
   void canonicalRejectsNull() {
-    assertThrows(NullPointerException.class, () -> PATHS.canonical(null));
+    assertEquals(
+        "requested must not be null",
+        assertThrows(NullPointerException.class, () -> PATHS.canonical(null)).getMessage());
   }
 
   @ParameterizedTest
