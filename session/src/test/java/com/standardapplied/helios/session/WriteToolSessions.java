@@ -88,15 +88,19 @@ final class WriteToolSessions {
       SessionOptions.Builder options,
       Function<AgentSession, Consumer<QueryEvent>> reactions,
       ToolCall... calls) {
-    return run(answering(calls), options, reactions);
+    var model = answering(calls);
+    return run(model, options.withModel(model), reactions);
   }
 
-  /** Runs a session of {@code options} on {@code model}, reacting to each event it emits. */
+  /**
+   * Runs a session of {@code options}, which already hold {@code model}, reacting to each event it
+   * emits.
+   */
   static Run run(
       ScriptedModel model,
       SessionOptions.Builder options,
       Function<AgentSession, Consumer<QueryEvent>> reactions) {
-    try (var session = AgentSession.create(options.withModel(model).build())) {
+    try (var session = AgentSession.create(options.build())) {
       var events = new CollectingSubscriber(reactions.apply(session));
       session.events().subscribe(events);
       session.send(UserMessage.text("go"));
