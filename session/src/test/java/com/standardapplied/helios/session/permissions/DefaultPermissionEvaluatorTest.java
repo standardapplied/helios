@@ -18,8 +18,6 @@ import com.standardapplied.helios.session.ask.AskUserQuestionOption;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.ask.QuestionGateway;
-import com.standardapplied.helios.session.execution.ExecuteTool;
-import com.standardapplied.helios.session.execution.NoopExecutionProvider;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
@@ -89,7 +87,7 @@ final class DefaultPermissionEvaluatorTest {
     return DefaultPermissionEvaluator.newBuilder(
             rules(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()),
             tools(pathKeyed("Write", ToolCategory.WRITE)))
-        .withApprover(approver, Object::toString)
+        .withApprover(approver)
         .build();
   }
 
@@ -123,18 +121,8 @@ final class DefaultPermissionEvaluatorTest {
     var b =
         DefaultPermissionEvaluator.newBuilder(
             Permission.defaultInWorkspace(), ToolRegistry.empty());
-    var ex = assertThrows(NullPointerException.class, () -> b.withApprover(null, Object::toString));
+    var ex = assertThrows(NullPointerException.class, () -> b.withApprover(null));
     assertEquals("approver must not be null", ex.getMessage());
-  }
-
-  @Test
-  void builderRejectsNullArgumentWriter() {
-    var b =
-        DefaultPermissionEvaluator.newBuilder(
-            Permission.defaultInWorkspace(), ToolRegistry.empty());
-    ToolApprover approver = request -> PermissionDecision.allow("ok");
-    var ex = assertThrows(NullPointerException.class, () -> b.withApprover(approver, null));
-    assertEquals("argumentWriter must not be null", ex.getMessage());
   }
 
   @Test
@@ -189,8 +177,7 @@ final class DefaultPermissionEvaluatorTest {
                 request -> {
                   requests.add(request);
                   return PermissionDecision.deny("no");
-                },
-                Object::toString)
+                })
             .withSecretRegistry(secrets)
             .build();
     var call = writeCall("secretXvalue");
@@ -201,52 +188,11 @@ final class DefaultPermissionEvaluatorTest {
         List.of(
             new ApprovalRequest(
                 call.call(),
-                "{path=secretXvalue}",
+                "{\"path\":\"secretXvalue\"}",
                 new ToolPermissionKey("Write", "secretXvalue"),
                 ToolCategory.WRITE,
                 Optional.of(askSecret),
                 "ask rule Write(<redacted:PASSWORD>) matched Write(secretXvalue)")),
-        requests);
-  }
-
-  @Test
-  void anAskOnExecuteReachesTheApproverWithTheWholeScriptAndTheWrittenArguments() {
-    var secrets = new SecretRegistry();
-    secrets.register("API_KEY", "key-0123456789");
-    var requests = new ArrayList<ApprovalRequest>();
-    var execute = ExecuteTool.binding(NoopExecutionProvider.INSTANCE);
-    var e =
-        DefaultPermissionEvaluator.newBuilder(
-                Permission.empty(PermissionMode.DEFAULT), tools(execute))
-            .withApprover(
-                request -> {
-                  requests.add(request);
-                  return PermissionDecision.deny("no");
-                },
-                args -> "written " + args.get("environment"))
-            .withSecretRegistry(secrets)
-            .build();
-    var call =
-        new ToolCall(
-            "c",
-            "Execute",
-            Map.of(
-                "runtime", "bash",
-                "script", " ls;\nrm -rf ~/ ",
-                "environment", Map.of("TOKEN", "key-0123456789")));
-
-    e.authorize(execute.canonicalize(call));
-
-    var key = new ToolPermissionKey("Execute", "BASH/ls;\nrm -rf ~/");
-    assertEquals(
-        List.of(
-            new ApprovalRequest(
-                call,
-                "written {TOKEN=<redacted:API_KEY>}",
-                key,
-                ToolCategory.EXECUTION,
-                Optional.empty(),
-                "default-ask on EXECUTION (Execute(BASH/ls;\nrm -rf ~/))")),
         requests);
   }
 
@@ -262,27 +208,14 @@ final class DefaultPermissionEvaluatorTest {
             request -> {
               requests.add(request);
               return PermissionDecision.deny("no");
-            },
-            args -> "a".repeat(1020) + "key-0123456789")
+            })
         .withSecretRegistry(secrets)
         .build()
-        .authorize(writeCall("/tmp/a"));
+        .authorize(writeCall("/tmp/" + "a".repeat(1006) + "key-0123456789"));
 
-    assertEquals("a".repeat(1020) + "<red… [14 more chars]", requests.getFirst().arguments());
-  }
-
-  @Test
-  void anArgumentWriterReturningNullFailsTheAuthorization() {
-    var e =
-        DefaultPermissionEvaluator.newBuilder(
-                rules(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()),
-                tools(pathKeyed("Write", ToolCategory.WRITE)))
-            .withApprover(request -> PermissionDecision.allow("ok"), args -> null)
-            .build();
-    var call = writeCall("/tmp/a");
-
-    var ex = assertThrows(NullPointerException.class, () -> e.authorize(call));
-    assertEquals("argument writer returned null", ex.getMessage());
+    assertEquals(
+        "{\"path\":\"/tmp/" + "a".repeat(1006) + "<red… [16 more chars]",
+        requests.getFirst().arguments());
   }
 
   @Test
@@ -574,7 +507,7 @@ final class DefaultPermissionEvaluatorTest {
     var question = gateway.asked.getFirst();
     assertTrue(question.questionId().startsWith("perm-"));
     assertEquals("Permission", question.header());
-    assertEquals("Allow Write(/tmp/a)?\n\nArguments: {path=/tmp/a}", question.question());
+    assertEquals("Allow Write(/tmp/a)?\n\nArguments: {\"path\":\"/tmp/a\"}", question.question());
     assertEquals(
         List.of(
             new AskUserQuestionOption("Allow", "ask rule Write(/tmp/**) matched Write(/tmp/a)"),
@@ -598,7 +531,7 @@ final class DefaultPermissionEvaluatorTest {
     var gateway = new AnsweringGateway("Deny");
     DefaultPermissionEvaluator.newBuilder(
             Permission.empty(PermissionMode.DEFAULT), tools(binding("Fetch", ToolCategory.NETWORK)))
-        .withApprover(ToolApprover.askingUser(gateway), Object::toString)
+        .withApprover(ToolApprover.askingUser(gateway))
         .build()
         .authorize(call("Fetch"));
 

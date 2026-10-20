@@ -605,7 +605,7 @@ stage and ends `NotFound`, as without a policy.
 | A `PreToolUseHook` that throws or returns `null` is `Continue` | it refuses the call, `Rejected(by = the hook)`, with reason `hook threw <exception class>: <message>` or `hook returned null`, logged at `WARNING` with the exception class alone; later `PreToolUse` hooks do not run |
 | The first `PreToolUse` `MutateArgs` ends the chain | it passes the new arguments to the next hook; `Block`, `Inject` and `Stop` end the chain |
 | `HookRegistry.firePreToolUse` returns `HookDecision` | returns `PreToolUseResult(call, mutations, decision)` |
-| `DefaultPermissionEvaluator.Builder.withQuestionGateway(QuestionGateway)` | `withApprover(ToolApprover, Function<Map<String, Object>, String> argumentWriter)`, the writer rendering a call's arguments as compact JSON for the approval; `ToolApprover.askingUser(gateway)` is the old prompt |
+| `DefaultPermissionEvaluator.Builder.withQuestionGateway(QuestionGateway)` | `withApprover(ToolApprover)`; `ToolApprover.askingUser(gateway)` is the old prompt |
 | `new DefaultPermissionEvaluator(permission, tools)` | `DefaultPermissionEvaluator.newBuilder(permission, tools).build()`, with `withSecretRegistry` for the registry that redacts an approval's reason |
 | `DefaultPermissionEvaluator` implements `PreToolUseHook`: `beforeTool`, `priority()`, `name()`, `Builder.withPriority(int)` | `authorize(ToolCall)` returns an `ALLOW` or `DENY` `PermissionDecision`; no priority, since no hook runs after it |
 | `PermissionDecision(effect, reason)`; deny reasons read `permission: deny rule for <tool>` | `PermissionDecision(effect, reason, rule)`; reasons name the tool, key and rule or default that decided, such as `deny rule Write(/etc/**) matched Write(/etc/passwd)` |
@@ -741,6 +741,9 @@ explicit allow rules.
   `Redirect.NORMAL`, which never follows `https` to `http`, and the 10-second connect timeout of
   `create(...)`. It takes no `ModelConfig`, so no configured key or header reaches it, and an
   architecture rule allows it only in `helios-onnx`. `create(...)` still never follows a redirect.
+- **`JsonSnapshot.write(Map)`.** Writes a JSON object of `JsonSnapshot`'s values as compact JSON,
+  keys in the map's order, escaping in strings exactly what RFC 8259 requires; an approval's
+  arguments are written through it.
 - **`RedactionResult.truncated(int maxChars)`.** Cuts a redacted text after `maxChars` characters,
   never inside a surrogate pair, with a `… [<n> more chars]` note, keeping the redaction counts.
   Redacting before the cut means a secret the cut falls across is never partly shown. A refusal's

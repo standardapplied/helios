@@ -16,6 +16,7 @@ import java.util.Objects;
 import java.util.SequencedMap;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Deep, unmodifiable snapshots of a JSON object held as Java values, the shape of a tool call's
@@ -90,6 +91,20 @@ public final class JsonSnapshot {
     var snapshot = new JsonSnapshot(Validate.notBlank("name", name));
     snapshot.count();
     return snapshot.object(Objects.requireNonNull(object, name + " must not be null"), 1);
+  }
+
+  /**
+   * {@code object} as compact JSON, keys in the map's order. A string escapes exactly what RFC 8259
+   * requires: {@code "}, {@code \} and U+0000 to U+001F.
+   *
+   * @param object the object; non-null, holding only JSON values
+   * @return the JSON text
+   * @throws NullPointerException if {@code object} is null
+   * @throws IllegalArgumentException if {@code object} holds a value that is not a JSON value
+   * @throws ClassCastException if {@code object} holds an object with a key that is not a String
+   */
+  public static String write(Map<String, ?> object) {
+    return Writer.json(Objects.requireNonNull(object, "object must not be null"));
   }
 
   private Object value(Object value, int depth) {
@@ -195,5 +210,49 @@ public final class JsonSnapshot {
       }
     }
     return new IllegalArgumentException(where + " " + problem);
+  }
+
+  private static final class Writer {
+
+    private static String json(Object value) {
+      return switch (value) {
+        case null -> "null";
+        case String string -> quote(string);
+        case Boolean _, Byte _, Short _, Integer _, Long _, BigInteger _, BigDecimal _ ->
+            value.toString();
+        case Double number when Double.isFinite(number) -> value.toString();
+        case Float number when Float.isFinite(number) -> value.toString();
+        case Map<?, ?> object ->
+            object.entrySet().stream()
+                .map(entry -> quote((String) entry.getKey()) + ":" + json(entry.getValue()))
+                .collect(Collectors.joining(",", "{", "}"));
+        case List<?> array ->
+            array.stream().map(Writer::json).collect(Collectors.joining(",", "[", "]"));
+        default ->
+            throw new IllegalArgumentException(
+                "object holds "
+                    + (value instanceof Number ? value : "a " + value.getClass().getName())
+                    + "; "
+                    + JSON_VALUES);
+      };
+    }
+
+    private static String quote(String string) {
+      var json = new StringBuilder(string.length() + 2).append('"');
+      for (var i = 0; i < string.length(); i++) {
+        var c = string.charAt(i);
+        switch (c) {
+          case '"' -> json.append("\\\"");
+          case '\\' -> json.append("\\\\");
+          case '\b' -> json.append("\\b");
+          case '\f' -> json.append("\\f");
+          case '\n' -> json.append("\\n");
+          case '\r' -> json.append("\\r");
+          case '\t' -> json.append("\\t");
+          default -> json.append(c < 0x20 ? "\\u%04x".formatted((int) c) : String.valueOf(c));
+        }
+      }
+      return json.append('"').toString();
+    }
   }
 }

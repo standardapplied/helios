@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.core.events;
 
+import com.standardapplied.helios.core.common.JsonSnapshot;
 import java.util.Map;
 
 /**
@@ -12,22 +13,10 @@ final class JsonText {
 
   private JsonText() {}
 
+  /** {@code s} as a JSON string, escaped by {@link JsonSnapshot#write} so escaping exists once. */
   static String quote(String s) {
-    var sb = new StringBuilder(s.length() + 2).append('"');
-    for (var i = 0; i < s.length(); i++) {
-      var c = s.charAt(i);
-      switch (c) {
-        case '"' -> sb.append("\\\"");
-        case '\\' -> sb.append("\\\\");
-        case '\b' -> sb.append("\\b");
-        case '\f' -> sb.append("\\f");
-        case '\n' -> sb.append("\\n");
-        case '\r' -> sb.append("\\r");
-        case '\t' -> sb.append("\\t");
-        default -> sb.append(c < 0x20 ? String.format("\\u%04x", (int) c) : String.valueOf(c));
-      }
-    }
-    return sb.append('"').toString();
+    var object = JsonSnapshot.write(Map.of("", s));
+    return object.substring("{\"\":".length(), object.length() - 1);
   }
 
   static String number(double value) {

@@ -350,6 +350,29 @@ class JsonSnapshotTest {
     return object;
   }
 
+  @Test
+  void writesCompactJsonInTheMapsOrderEscapingWhatRfc8259Requires() {
+    var object = new LinkedHashMap<String, Object>();
+    object.put("s", "q\" b\\ n\n c\u0001 é\u2028");
+    object.put(
+        "n", Arrays.asList(null, true, 1, 2L, 1.5, 2.5f, BigInteger.TEN, new BigDecimal("1.0")));
+    object.put("o", Map.of("k", List.of()));
+
+    assertEquals(
+        "{\"s\":\"q\\\" b\\\\ n\\n c\\u0001 é\u2028\","
+            + "\"n\":[null,true,1,2,1.5,2.5,10,1.0],\"o\":{\"k\":[]}}",
+        JsonSnapshot.write(object));
+  }
+
+  @Test
+  void writeRefusesAValueOutsideTheJsonValues() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> JsonSnapshot.write(Map.of("a", List.of(Double.NaN))));
+    assertEquals("object holds NaN; " + jsonValues(), ex.getMessage());
+  }
+
   private static String jsonValues() {
     return "a JSON value is null, a Boolean, a String, a Byte, Short, Integer, Long, BigInteger or"
         + " BigDecimal, a finite Float or Double, a List, or a Map with String keys";
