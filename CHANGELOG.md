@@ -647,8 +647,8 @@ matching script (e.g. `BASH_FUNC_ls%%` in `environment`), and `*` matches `;`, s
 | Before | 3.0 |
 |---|---|
 | `Execute(BASH/rm)` matched the key `BASH/rm`, the first token alone | it matches only the script `rm`; the key of `ls; rm -rf ~/` is `BASH/ls; rm -rf ~/`, not `BASH/ls;`. A glob such as `Execute(BASH/**rm **)` catches more spellings, not every one (see above) |
-| `ApprovalRequest(call, key, category, rule, reason)` | `ApprovalRequest(call, arguments, key, category, rule, reason)`: `arguments` is display text, the call's arguments as compact JSON with every session secret redacted, cut at 1024 characters; `call` is still the exact call that runs |
-| The human approver asks `Allow <tool>(<key>)?` | it asks `Allow <tool>(<key>)?`, a blank line, then `Arguments: <arguments>` |
+| `ApprovalRequest(call, key, category, rule, reason)` | `ApprovalRequest(call, arguments, key, category, rule, reason)`: `arguments` is display text, the call's arguments as compact JSON with every session secret redacted, its line separators and format characters escaped, cut at 1024 characters with a line `Arguments cut: <n> more chars not shown`; `call` is still the exact call that runs |
+| The human approver asks `Allow <tool>(<key>)?` | it asks `Allow <tool>(<key>)?`, a blank line, then `Arguments: <arguments>`; the key, and the reason describing `Allow`, show with `\`, controls, line separators and format characters (bidi overrides, zero-width characters) escaped, cut at 1024 characters, so a script cannot fake a line of the question |
 | `SecretRegistry.register` accepts a value that starts or ends with a space | refuses it as `Secret '<name>' must not start or end with a space`, since a stripped key would cut that space |
 
 ### Added
@@ -747,8 +747,9 @@ matching script (e.g. `BASH_FUNC_ls%%` in `environment`), and `*` matches `;`, s
 - **`JsonSnapshot.write(Map)`.** Writes a JSON object of `JsonSnapshot`'s values as compact JSON,
   keys in the map's order, escaping in strings exactly what RFC 8259 requires; an approval's
   arguments are written through it.
-- **`RedactionResult.truncated(int maxChars)`.** Cuts a redacted text after `maxChars` characters,
-  never inside a surrogate pair, with a `… [<n> more chars]` note, keeping the redaction counts.
+- **`RedactionResult.truncated(int maxChars, String note)`.** Cuts a redacted text to at most
+  `maxChars` characters, never inside a surrogate pair, then appends `note` formatted with how many
+  were cut, keeping the redaction counts.
   Redacting before the cut means a secret the cut falls across is never partly shown. A refusal's
   reason and an approval's arguments are both bounded through it.
 - **`ToolApprover`, `ApprovalRequest`, `PermissionDecision.rule()`, `PermissionDecision.byRule` and

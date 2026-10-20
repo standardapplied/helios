@@ -149,6 +149,6 @@ final class ToolAuthorization {
    * each secret redacted.
    */
   static RedactionResult diagnostic(SecretRegistry secrets, String reason) {
-    return secrets.redactor().redact(reason).truncated(MAX_REASON_CHARS);
+    return secrets.redactor().redact(reason).truncated(MAX_REASON_CHARS, "… [%d more chars]");
   }
 }
