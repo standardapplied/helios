@@ -14,7 +14,12 @@ import java.util.Optional;
  * approved, after every {@code PreToolUse} hook, and why the policy asked. An approval answers this
  * request only; any other call, however small the difference, is a request of its own.
  *
+ * <p>{@code call} is the exact call that runs; {@code arguments} only displays it, so an approver
+ * that decides on the arguments reads them from {@code call}.
+ *
  * @param call the final, immutable call; non-null
+ * @param arguments display text of the call's arguments: compact JSON with every session secret
+ *     redacted, cut after 1024 characters with a note of how many were cut; non-null
  * @param key the call's permission key; non-null
  * @param category the tool's category; non-null
  * @param rule the ask rule that matched, empty when the mode or category default asked; non-null
@@ -22,6 +27,7 @@ import java.util.Optional;
  */
 public record ApprovalRequest(
     ToolCall call,
+    String arguments,
     ToolPermissionKey key,
     ToolCategory category,
     Optional<PermissionRule> rule,
@@ -35,6 +41,7 @@ public record ApprovalRequest(
    */
   public ApprovalRequest {
     Objects.requireNonNull(call, "call must not be null");
+    Objects.requireNonNull(arguments, "arguments must not be null");
     Objects.requireNonNull(key, "key must not be null");
     Objects.requireNonNull(category, "category must not be null");
     Objects.requireNonNull(rule, "rule must not be null");

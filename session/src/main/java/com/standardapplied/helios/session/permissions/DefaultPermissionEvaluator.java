@@ -13,9 +13,11 @@ import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 /**
@@ -44,7 +46,8 @@ import java.util.stream.Stream;
  * an ASK with no {@link ToolApprover} are each denied. A key carrying a session secret never
  * reaches it: the session's permission stage refuses that call first, with or without a policy. An
  * ASK goes to the approver with an {@link ApprovalRequest} for this call, its reason redacted
- * through the {@link SecretRegistry} since a rule's pattern may hold a secret the key does not; see
+ * through the {@link SecretRegistry} since a rule's pattern may hold a secret the key does not, and
+ * its arguments written as JSON by the argument writer, redacted and cut after 1024 characters; see
  * {@link ToolApprover} for how its answer is read.
  *
  * <p>{@link #decidingRule} answers which rule decides a key alone, if one does; tools that walk
@@ -61,19 +64,22 @@ import java.util.stream.Stream;
  */
 public final class DefaultPermissionEvaluator {
 
+  private static final int MAX_ARGUMENT_CHARS = 1024;
+
   private final Permission permission;
   private final ToolRegistry tools;
   private final RuleMatcher matcher;
   private final Optional<ToolApprover> approver;
+  private final Function<Map<String, Object>, String> argumentWriter;
   private final SecretRegistry secrets;
 
-  private DefaultPermissionEvaluator(
-      Permission permission, ToolRegistry tools, ToolApprover approver, SecretRegistry secrets) {
-    this.permission = permission;
-    this.tools = tools;
+  private DefaultPermissionEvaluator(Builder builder) {
+    this.permission = builder.permission;
+    this.tools = builder.tools;
     this.matcher = new RuleMatcher();
-    this.approver = Optional.ofNullable(approver);
-    this.secrets = secrets;
+    this.approver = Optional.ofNullable(builder.approver);
+    this.argumentWriter = builder.argumentWriter;
+    this.secrets = builder.secrets;
   }
 
   /**
@@ -81,7 +87,7 @@ public final class DefaultPermissionEvaluator {
    *
    * <pre>{@code
    * var eval = DefaultPermissionEvaluator.newBuilder(perm, tools)
-   *     .withApprover(ToolApprover.askingUser(gateway))
+   *     .withApprover(ToolApprover.askingUser(gateway), mapper::writeValueAsString)
    *     .withSecretRegistry(sessionContext.secrets())
    *     .build();
    * }</pre>
@@ -111,7 +117,7 @@ public final class DefaultPermissionEvaluator {
    *
    * @param canonical the final call, canonicalised, and its key; non-null
    * @return an {@link PermissionEffect#ALLOW} or {@link PermissionEffect#DENY} decision
-   * @throws NullPointerException if {@code canonical} is null
+   * @throws NullPointerException if {@code canonical} is null, or the argument writer returns null
    */
   public PermissionDecision authorize(ToolBinding.CanonicalCall canonical) {
     Objects.requireNonNull(canonical, "canonical must not be null");
@@ -130,16 +136,23 @@ public final class DefaultPermissionEvaluator {
     if (decision.effect() != PermissionEffect.ASK) {
       return decision;
     }
-    var reason = secrets.redactor().redact(decision.reason()).text();
-    return approve(new ApprovalRequest(call, key, category, decision.rule(), reason));
+    var redactor = secrets.redactor();
+    var reason = redactor.redact(decision.reason()).text();
+    if (approver.isEmpty()) {
+      return PermissionDecision.deny("no approver for " + reason);
+    }
+    var arguments =
+        Objects.requireNonNull(
+            argumentWriter.apply(call.arguments()), "argument writer returned null");
+    var shown = redactor.redact(arguments).truncated(MAX_ARGUMENT_CHARS).text();
+    return approve(
+        approver.orElseThrow(),
+        new ApprovalRequest(call, shown, key, category, decision.rule(), reason));
   }
 
-  private PermissionDecision approve(ApprovalRequest request) {
-    if (approver.isEmpty()) {
-      return PermissionDecision.deny("no approver for " + request.reason());
-    }
+  private static PermissionDecision approve(ToolApprover approver, ApprovalRequest request) {
     try {
-      var answer = approver.orElseThrow().approve(request);
+      var answer = approver.approve(request);
       if (answer == null) {
         return PermissionDecision.deny("approver returned null for " + request.reason());
       }
@@ -271,6 +284,7 @@ public final class DefaultPermissionEvaluator {
     private final Permission permission;
     private final ToolRegistry tools;
     private ToolApprover approver;
+    private Function<Map<String, Object>, String> argumentWriter;
     private SecretRegistry secrets = new SecretRegistry();
 
     private Builder(Permission permission, ToolRegistry tools) {
@@ -279,20 +293,26 @@ public final class DefaultPermissionEvaluator {
     }
 
     /**
-     * Wire the {@link ToolApprover} that decides ASK calls; without one, ASK refuses.
+     * Wire the {@link ToolApprover} that decides ASK calls, and the writer that renders a call's
+     * arguments as compact JSON for its {@link ApprovalRequest#arguments}; without an approver, ASK
+     * refuses.
      *
      * @param approver the approver; non-null
+     * @param argumentWriter writes a call's arguments as compact JSON, never null; non-null
      * @return this builder
-     * @throws NullPointerException if {@code approver} is null
+     * @throws NullPointerException if either argument is null
      */
-    public Builder withApprover(ToolApprover approver) {
+    public Builder withApprover(
+        ToolApprover approver, Function<Map<String, Object>, String> argumentWriter) {
       this.approver = Objects.requireNonNull(approver, "approver must not be null");
+      this.argumentWriter =
+          Objects.requireNonNull(argumentWriter, "argumentWriter must not be null");
       return this;
     }
 
     /**
-     * Set the secrets an approval reason redacts; defaults to a new empty registry. Pass the
-     * session's registry.
+     * Set the secrets an approval's reason and arguments redact; defaults to a new empty registry.
+     * Pass the session's registry.
      *
      * @param secrets the secret registry; non-null
      * @return this builder
@@ -314,7 +334,7 @@ public final class DefaultPermissionEvaluator {
       Stream.of(permission.deny(), permission.allow(), permission.ask())
           .flatMap(List::stream)
           .forEach(this::requireMatchable);
-      return new DefaultPermissionEvaluator(permission, tools, approver, secrets);
+      return new DefaultPermissionEvaluator(this);
     }
 
     /**

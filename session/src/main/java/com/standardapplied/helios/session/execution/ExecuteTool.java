@@ -47,9 +47,14 @@ import java.util.concurrent.ExecutionException;
  *   <li>{@code stdin} (optional, string) — stdin content to feed the child.
  * </ul>
  *
- * <p>Classified under {@link ToolCategory#EXECUTION}. The permission key carries {@code
- * <RUNTIME>/<first-token>} so deny rules can target specific runtime+binary pairs (e.g. {@code
- * withGlob(DENY, "Execute", "BASH/rm")}).
+ * <p>Classified under {@link ToolCategory#EXECUTION}. The permission key is {@code
+ * <RUNTIME>/<script>}: the runtime upper-cased ({@code UNKNOWN} when missing) and the whole script,
+ * stripped, so a rule's glob matches the script text, every line of it (e.g. {@code withGlob(DENY,
+ * "Execute", "BASH/**rm **")}). A pattern cannot stop a command the script spells differently
+ * ({@code r''m}, a variable, a here-document), so a deny rule is a guard rail, not a control: real
+ * control is {@code ASK}, whose approval prompt shows the call's arguments, or {@code LOCKED_DOWN}
+ * with explicit allow rules. A script that carries a registered secret's value is refused before
+ * any rule or approver sees its key.
  *
  * <p>Spec: §11 + §8.3.
  */
@@ -145,27 +150,7 @@ public final class ExecuteTool {
     var runtimeArg = ToolArgs.stringArg(args, "runtime");
     var script = ToolArgs.stringArg(args, "script");
     var runtime = Strings.isBlank(runtimeArg) ? "UNKNOWN" : runtimeArg.toUpperCase(Locale.ROOT);
-    var firstToken = firstToken(script);
-    var canonical = runtime + "/" + firstToken;
-    return new ToolPermissionKey(NAME, canonical);
-  }
-
-  private static String firstToken(String script) {
-    if (Strings.isBlank(script)) {
-      return "";
-    }
-    var trimmed = script.strip();
-    var idx = indexOfWhitespace(trimmed);
-    return idx < 0 ? trimmed : trimmed.substring(0, idx);
-  }
-
-  private static int indexOfWhitespace(String s) {
-    for (var i = 0; i < s.length(); i++) {
-      if (Character.isWhitespace(s.charAt(i))) {
-        return i;
-      }
-    }
-    return -1;
+    return new ToolPermissionKey(NAME, runtime + "/" + script.strip());
   }
 
   private static ToolResult execute(

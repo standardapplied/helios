@@ -24,7 +24,8 @@
  * com.standardapplied.helios.session.permissions.ToolApprover}, by default {@link
  * com.standardapplied.helios.session.permissions.ToolApprover#askingUser} over the session's {@link
  * com.standardapplied.helios.session.ask.QuestionGateway}. With no approver, ASK refuses. Build
- * with {@code DefaultPermissionEvaluator.newBuilder(perm, tools).withApprover(approver) .build()}.
+ * with {@code DefaultPermissionEvaluator.newBuilder(perm, tools).withApprover(approver,
+ * argumentWriter).build()}, the writer rendering a call's arguments as JSON for the approver.
  *
  * <p>Two curated policies live as static factories on {@code Permission}: {@code
  * defaultInWorkspace()} (reads + memory allowed, writes / edit / execute asked) and {@code
