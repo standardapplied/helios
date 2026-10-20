@@ -54,7 +54,10 @@ final class QuickStartsDocsTest {
                 "```"),
             "README.md:2: QuickStarts#minimal"),
         Arguments.of(
-            List.of("Intro", "```java", BLOCK, "```"),
+            List.of("Intro", "```java", "var model = model();", BLOCK, "```"),
+            "README.md:2: a SessionPresets block has no <!-- snippet: QuickStarts#<method> -->"),
+        Arguments.of(
+            List.of("- Intro", "  ```java ", "  " + BLOCK, "  ```"),
             "README.md:2: a SessionPresets block has no <!-- snippet: QuickStarts#<method> -->"),
         Arguments.of(
             List.of("<!-- snippet: QuickStarts#missing -->", "```java", BLOCK, "```"),
@@ -75,10 +78,13 @@ final class QuickStartsDocsTest {
   private static void check(String readme, List<String> lines, Map<String, List<String>> bodies) {
     var blocks = new ArrayList<Executable>();
     for (var start = 0; start < lines.size(); start++) {
-      if (lines.get(start).equals("```java")) {
+      if (lines.get(start).strip().equals("```java")) {
         var where = readme + ":" + (start + 1);
-        var end = lines.subList(start, lines.size()).indexOf("```") + start;
-        assertTrue(end > start, where + ": the block is never closed");
+        var end = start + 1;
+        while (end < lines.size() && !lines.get(end).strip().equals("```")) {
+          end++;
+        }
+        assertTrue(end < lines.size(), where + ": the block is never closed");
         var block = lines.subList(start + 1, end);
         var marker = MARKER.matcher(start == 0 ? "" : lines.get(start - 1));
         if (marker.matches()) {
