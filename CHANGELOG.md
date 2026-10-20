@@ -636,16 +636,17 @@ canonical call is the one keyed, announced, dispatched and shown to `PostToolUse
 
 **`Execute`'s permission key is the whole script, and the approval prompt shows the arguments.**
 The key was `<RUNTIME>/<first whitespace-delimited token of the script>`, so a rule saw only the
-first command. A rule now matches the whole script, stripped, every line included: a deny rule
-for `rm` becomes `Execute(BASH/**rm **)`. The runtime is the `Runtime` constant the argument
+first command. A rule now matches the whole script, stripped, every line included. The runtime is the `Runtime` constant the argument
 names, or `UNKNOWN` when it names none, a call `Execute` refuses to run. A script carrying a registered secret's value is refused
-as `permission key of Execute carries a secret` before any rule or approver sees it. A pattern
-cannot stop a command the script spells differently; real control is `ASK` or `LOCKED_DOWN` with
-explicit allow rules.
+as `permission key of Execute carries a secret` before any rule or approver sees it. A deny glob
+is a guard rail: `BASH/**rm **` misses `rm<TAB>-rf` and `r''m`, and matches `echo farm `. An
+allow rule admits whatever `environment`, `args`, `stdin` and `workingDirectory` come with a
+matching script (e.g. `BASH_FUNC_ls%%` in `environment`), and `*` matches `;`, so allow rules on
+`Execute` are not a sandbox. Real control is `ASK`, whose prompt shows every argument.
 
 | Before | 3.0 |
 |---|---|
-| `Execute(BASH/rm)` | `Execute(BASH/**rm **)`; the key of `ls; rm -rf ~/` is `BASH/ls; rm -rf ~/`, not `BASH/ls;` |
+| `Execute(BASH/rm)` matched the key `BASH/rm`, the first token alone | it matches only the script `rm`; the key of `ls; rm -rf ~/` is `BASH/ls; rm -rf ~/`, not `BASH/ls;`. A glob such as `Execute(BASH/**rm **)` catches more spellings, not every one (see above) |
 | `ApprovalRequest(call, key, category, rule, reason)` | `ApprovalRequest(call, arguments, key, category, rule, reason)`: `arguments` is display text, the call's arguments as compact JSON with every session secret redacted, cut at 1024 characters; `call` is still the exact call that runs |
 | The human approver asks `Allow <tool>(<key>)?` | it asks `Allow <tool>(<key>)?`, a blank line, then `Arguments: <arguments>` |
 | `SecretRegistry.register` accepts a value that starts or ends with a space | refuses it as `Secret '<name>' must not start or end with a space`, since a stripped key would cut that space |
