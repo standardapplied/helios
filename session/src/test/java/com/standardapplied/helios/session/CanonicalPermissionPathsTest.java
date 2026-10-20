@@ -161,15 +161,20 @@ final class CanonicalPermissionPathsTest {
   // ── a path that names no target is refused before authorization ──────────
 
   private Object spelled(Object path) {
-    return path instanceof String s ? s.replace("<outside>", outside.toString()) : path;
+    return path instanceof String s
+        ? s.replace("<outside>", outside.toString()).replace("<root>", sessions.root.toString())
+        : path;
   }
 
   static Stream<Arguments> unresolvablePaths() {
     return Stream.of(
         Arguments.of("../outside", "Read: path escapes workspace root: ../outside"),
         Arguments.of("<outside>/f", "Read: path escapes workspace root via symlink: <outside>/f"),
-        Arguments.of("dangling", "Read: path traverses a dangling or looping symlink: dangling: "),
-        Arguments.of("loop", "Read: path traverses a dangling or looping symlink: loop: "),
+        Arguments.of(
+            "dangling",
+            "Read: path traverses a dangling or looping symlink: dangling: <root>/dangling"),
+        Arguments.of(
+            "loop", "Read: path traverses a dangling or looping symlink: loop: <root>/loop…"),
         Arguments.of("out/f", "Read: path escapes workspace root via symlink: out/f"),
         Arguments.of("missing/x", "Read: parent directory does not exist: ./missing/x"),
         Arguments.of("", "Read: 'path' is required"),
@@ -202,10 +207,19 @@ final class CanonicalPermissionPathsTest {
     assertEquals(0, sessions.readRuns.get());
   }
 
+  /**
+   * Asserts the run's call was refused by the permission stage with {@code message}, or, when it
+   * ends in {@code …}, with a reason the operating system's own text completes.
+   */
   private static void assertRefusedWith(String message, WriteToolSessions.Run run) {
     var outcome = (ToolOutcome.Rejected) run.onlyResult().outcome();
     assertEquals("Permission", outcome.by());
-    assertTrue(outcome.reason().startsWith(message), outcome.reason());
+    if (message.endsWith("…")) {
+      var prefix = message.substring(0, message.length() - 1);
+      assertTrue(outcome.reason().startsWith(prefix), outcome.reason());
+    } else {
+      assertEquals(message, outcome.reason());
+    }
     assertEquals(outcome.reason(), run.onlyBlock().reason());
   }
 
