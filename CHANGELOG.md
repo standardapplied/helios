@@ -648,7 +648,7 @@ matching script (e.g. `BASH_FUNC_ls%%` in `environment`), and `*` matches `;`, s
 |---|---|
 | `Execute(BASH/rm)` matched the key `BASH/rm`, the first token alone | it matches only the script `rm`; the key of `ls; rm -rf ~/` is `BASH/ls; rm -rf ~/`, not `BASH/ls;`. A glob such as `Execute(BASH/**rm **)` catches more spellings, not every one (see above) |
 | `ApprovalRequest(call, key, category, rule, reason)` | `ApprovalRequest(call, arguments, key, category, rule, reason)`: `arguments` is display text, the call's arguments as compact JSON with every session secret redacted, its line separators and format characters escaped, cut at 1024 characters with a line `Arguments cut: <n> more chars not shown`; `call` is still the exact call that runs |
-| The human approver asks `Allow <tool>(<key>)?` | it asks `Allow <tool>(<key>)?`, a blank line, then `Arguments: <arguments>`; the key, and the reason describing `Allow`, show with `\`, controls, line separators and format characters (bidi overrides, zero-width characters) escaped, cut at 1024 characters, so a script cannot fake a line of the question |
+| The human approver asks `Allow <tool>(<key>)?` | it asks `Allow <tool>(<key>)?`, a blank line, then `Arguments: <arguments>`; the key, and the reason describing `Allow`, show as JSON string text through `JsonSnapshot.escape` (`"`, `\`, controls, line separators and format characters such as bidi overrides and zero-width characters escaped), cut at 1024 characters, so a script cannot fake a line of the question |
 | `SecretRegistry.register` accepts a value that starts or ends with a space | refuses it as `Secret '<name>' must not start or end with a space`, since a stripped key would cut that space |
 
 ### Added
@@ -744,14 +744,16 @@ matching script (e.g. `BASH_FUNC_ls%%` in `environment`), and `*` matches `;`, s
   `Redirect.NORMAL`, which never follows `https` to `http`, and the 10-second connect timeout of
   `create(...)`. It takes no `ModelConfig`, so no configured key or header reaches it, and an
   architecture rule allows it only in `helios-onnx`. `create(...)` still never follows a redirect.
-- **`JsonSnapshot.write(Map)`.** Writes a JSON object of `JsonSnapshot`'s values as compact JSON,
-  keys in the map's order, escaping in strings exactly what RFC 8259 requires; an approval's
-  arguments are written through it.
-- **`RedactionResult.truncated(int maxChars, String note)`.** Cuts a redacted text to at most
-  `maxChars` characters, never inside a surrogate pair, then appends `note` formatted with how many
-  were cut, keeping the redaction counts.
+- **`JsonSnapshot.write(Map)` and `JsonSnapshot.escape(String)`.** `write` writes a JSON object of
+  `JsonSnapshot`'s values as compact JSON, keys in the map's order; an approval's arguments are
+  written through it. `escape` is the one JSON string escaping: what RFC 8259 requires plus the
+  line separators U+2028 and U+2029 and every format character, so the text shows what it holds.
+  Event JSON escapes its strings through it too, so an event now also shows line separators and
+  format characters as `\uXXXX`.
+- **`Strings.truncated(String text, int maxChars, String note)`.** Cuts a text to at most `maxChars`
+  characters, never inside a surrogate pair, then appends `note` formatted with how many were cut.
   Redacting before the cut means a secret the cut falls across is never partly shown. A refusal's
-  reason and an approval's arguments are both bounded through it.
+  reason, an approval's arguments and the approval prompt's key and reason are bounded through it.
 - **`ToolApprover`, `ApprovalRequest`, `PermissionDecision.rule()`, `PermissionDecision.byRule` and
   `DefaultPermissionEvaluator.Builder.withSecretRegistry`.** A `ToolApprover` decides a call the
   policy answered with ASK, from an `ApprovalRequest(call, arguments, key, category, rule, reason)`

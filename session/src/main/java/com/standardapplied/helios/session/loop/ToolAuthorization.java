@@ -4,6 +4,7 @@ package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.RedactionResult;
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
@@ -11,6 +12,7 @@ import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -149,6 +151,8 @@ final class ToolAuthorization {
    * each secret redacted.
    */
   static RedactionResult diagnostic(SecretRegistry secrets, String reason) {
-    return secrets.redactor().redact(reason).truncated(MAX_REASON_CHARS, "… [%d more chars]");
+    var redaction = secrets.redactor().redact(reason);
+    var cut = Strings.truncated(redaction.text(), MAX_REASON_CHARS, "… [%d more chars]");
+    return new RedactionResult(cut.getBytes(StandardCharsets.UTF_8), redaction.counts());
   }
 }

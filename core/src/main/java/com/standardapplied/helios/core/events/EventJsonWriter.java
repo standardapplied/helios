@@ -38,8 +38,8 @@ import java.util.UUID;
  * with the base fields, a {@code type} discriminator naming the subtype, then variant-specific
  * fields written by that subtype's encoder. Full encoding keeps content for replay; metadata-only
  * encoding keeps identifiers, counts and outcomes. Numbers are emitted as their canonical Java
- * string (finite values only); strings are escaped per RFC 8259; maps are encoded as objects with
- * string keys and best-effort {@code toString()} for non-primitive Object values.
+ * string (finite values only); strings are escaped by {@code JsonSnapshot.escape}; maps are encoded
+ * as objects with string keys and best-effort {@code toString()} for non-primitive Object values.
  */
 final class EventJsonWriter {
 

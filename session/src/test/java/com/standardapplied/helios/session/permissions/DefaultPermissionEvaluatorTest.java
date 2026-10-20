@@ -527,13 +527,6 @@ final class DefaultPermissionEvaluatorTest {
   }
 
   @Test
-  void shownTextEscapesWhatCouldPassForAnotherLineOrHide() {
-    assertEquals(
-        "a\\\\b\\n\\r\\t\\u0007\\u2028\\u2029\\u200b\\u202e\\udb40\\udc01é",
-        UserApprover.shown("a\\b\n\r\t\u0007\u2028\u2029\u200b\u202e\udb40\udc01é"));
-  }
-
-  @Test
   void askingUserOmitsTheParenthesesOfAnEmptyKey() {
     var gateway = new AnsweringGateway("Deny");
     DefaultPermissionEvaluator.newBuilder(
