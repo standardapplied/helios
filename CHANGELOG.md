@@ -636,13 +636,14 @@ canonical call is the one keyed, announced, dispatched and shown to `PostToolUse
 
 **`Execute`'s permission key is the whole script, and the approval prompt shows the arguments.**
 The key was `<RUNTIME>/<first whitespace-delimited token of the script>`, so a rule saw only the
-first command. A rule now matches the whole script, stripped, every line included. The runtime is the `Runtime` constant the argument
-names, or `UNKNOWN` when it names none, a call `Execute` refuses to run. A script carrying a registered secret's value is refused
-as `permission key of Execute carries a secret` before any rule or approver sees it. A deny glob
-is a guard rail: `BASH/**rm **` misses `rm<TAB>-rf` and `r''m`, and matches `echo farm `. An
-allow rule admits whatever `environment`, `args`, `stdin` and `workingDirectory` come with a
-matching script (e.g. `BASH_FUNC_ls%%` in `environment`), and `*` matches `;`, so allow rules on
-`Execute` are not a sandbox. Real control is `ASK`, whose prompt shows every argument.
+first command. A rule now matches the whole script, stripped, every line included. The runtime is
+the `Runtime` constant the argument names, or `UNKNOWN` when it names none, a call `Execute` refuses
+to run. A script carrying a registered secret's value is refused as `permission key of Execute
+carries a secret` before any rule or approver sees it. A deny glob is a guard rail: `BASH/**rm **`
+misses `rm<TAB>-rf` and `r''m`, and matches `echo farm `. An allow rule admits whatever
+`environment`, `args`, `stdin` and `workingDirectory` come with a matching script (e.g.
+`BASH_FUNC_ls%%` in `environment`), and `*` matches `;`, so allow rules on `Execute` are not a
+sandbox. Real control is `ASK`, whose prompt shows every argument.
 
 | Before | 3.0 |
 |---|---|
