@@ -46,8 +46,9 @@ import java.util.stream.Stream;
  * reaches it: the session's permission stage refuses that call first, with or without a policy. An
  * ASK goes to the approver with an {@link ApprovalRequest} for this call, its reason redacted
  * through the {@link SecretRegistry} since a rule's pattern may hold a secret the key does not, and
- * its arguments as compact JSON ({@link JsonSnapshot#write}), redacted and cut after 1024
- * characters; see {@link ToolApprover} for how its answer is read.
+ * its arguments as compact JSON ({@link JsonSnapshot#write}), redacted, escaped and cut after 1024
+ * characters (see {@link ApprovalRequest#arguments}); see {@link ToolApprover} for how its answer
+ * is read.
  *
  * <p>{@link #decidingRule} answers which rule decides a key alone, if one does; tools that walk
  * below their authorised path withhold every entry their own DENY rules, or the DENY and ASK rules
@@ -62,8 +63,6 @@ import java.util.stream.Stream;
  * Immutable. Safe to share across sessions when the approver is.
  */
 public final class DefaultPermissionEvaluator {
-
-  private static final int MAX_ARGUMENT_CHARS = 1024;
 
   private final Permission permission;
   private final ToolRegistry tools;
@@ -137,7 +136,10 @@ public final class DefaultPermissionEvaluator {
     var redactor = secrets.redactor();
     var reason = redactor.redact(decision.reason()).text();
     var arguments =
-        redactor.redact(JsonSnapshot.write(call.arguments())).truncated(MAX_ARGUMENT_CHARS).text();
+        redactor
+            .redact(UserApprover.escaped(JsonSnapshot.write(call.arguments()), true))
+            .truncated(UserApprover.MAX_SHOWN_CHARS, "\nArguments cut: %d more chars not shown")
+            .text();
     return approve(new ApprovalRequest(call, arguments, key, category, decision.rule(), reason));
   }
 

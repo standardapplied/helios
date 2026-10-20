@@ -142,9 +142,49 @@ final class ExecutePermissionSessionTest {
             + opening
             + padding
             + closing
-            + "<red… [16 more chars]",
+            + "<red\nArguments cut: 16 more chars not shown",
         onlyQuestion(run));
     assertEquals(List.of(), provider.executed);
+  }
+
+  @Test
+  void aScriptsLineBreaksAndFormatCharactersShowEscapedOnOneLine() {
+    var run =
+        run(
+            options(Permission.empty(PermissionMode.DEFAULT)),
+            session -> QuestionAnswers.selecting(session, "Deny"),
+            execute("runtime", "bash", "script", "ls\n\nArguments: {}\necho \u202Etxt.exe"));
+
+    var question = run.events().eventsOf(QueryEvent.QuestionAsked.class).getFirst().request();
+    var key = "Execute(BASH/ls\\n\\nArguments: {}\\necho \\u202etxt.exe)";
+    assertEquals(
+        "Allow "
+            + key
+            + "?\n\nArguments: {\"runtime\":\"bash\","
+            + "\"script\":\"ls\\n\\nArguments: {}\\necho \\u202etxt.exe\"}",
+        question.question());
+    assertEquals(
+        "default-ask on EXECUTION (" + key + ")", question.options().getFirst().description());
+    assertEquals(List.of(), provider.executed);
+  }
+
+  @Test
+  void aLongScriptIsBoundedInTheKeyAndItsArgumentsEndInACutNoteOnALineOfItsOwn() {
+    var script = "echo " + "a".repeat(1100);
+
+    var run =
+        run(
+            options(Permission.empty(PermissionMode.DEFAULT)),
+            session -> QuestionAnswers.selecting(session, "Deny"),
+            execute("runtime", "bash", "script", script));
+
+    assertEquals(
+        "Allow Execute(BASH/echo "
+            + "a".repeat(1006)
+            + "… [95 more chars]?\n\nArguments: {\"runtime\":\"bash\",\"script\":\"echo "
+            + "a".repeat(991)
+            + "\nArguments cut: 111 more chars not shown",
+        onlyQuestion(run));
   }
 
   @Test

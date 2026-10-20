@@ -214,7 +214,7 @@ final class DefaultPermissionEvaluatorTest {
         .authorize(writeCall("/tmp/" + "a".repeat(1006) + "key-0123456789"));
 
     assertEquals(
-        "{\"path\":\"/tmp/" + "a".repeat(1006) + "<red… [16 more chars]",
+        "{\"path\":\"/tmp/" + "a".repeat(1006) + "<red\nArguments cut: 16 more chars not shown",
         requests.getFirst().arguments());
   }
 
@@ -524,6 +524,13 @@ final class DefaultPermissionEvaluatorTest {
 
     assertEquals(2, gateway.asked.size());
     assertNotEquals(gateway.asked.get(0).questionId(), gateway.asked.get(1).questionId());
+  }
+
+  @Test
+  void shownTextEscapesWhatCouldPassForAnotherLineOrHide() {
+    assertEquals(
+        "a\\\\b\\n\\r\\t\\u0007\\u2028\\u2029\\u200b\\u202e\\udb40\\udc01é",
+        UserApprover.shown("a\\b\n\r\t\u0007\u2028\u2029\u200b\u202e\udb40\udc01é"));
   }
 
   @Test

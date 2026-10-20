@@ -19,7 +19,8 @@ import java.util.Optional;
  *
  * @param call the final, immutable call; non-null
  * @param arguments display text of the call's arguments: compact JSON with every session secret
- *     redacted, cut after 1024 characters with a note of how many were cut; non-null
+ *     redacted and its line separators and format characters escaped, cut after 1024 characters
+ *     with a line {@code Arguments cut: <n> more chars not shown}; non-null
  * @param key the call's permission key; non-null
  * @param category the tool's category; non-null
  * @param rule the ask rule that matched, empty when the mode or category default asked; non-null
