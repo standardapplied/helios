@@ -218,6 +218,15 @@ final class WorkspaceCanonicalPathTest {
   }
 
   @ParameterizedTest
+  @ValueSource(strings = {"st*r", "q?m"})
+  void aTrustedWorkspaceAdmitsAnAbsoluteGlobWhoseRootSpellingHasAWildcard(String name)
+      throws IOException {
+    var wild = Files.createDirectory(tmp.resolve(name)).toRealPath();
+
+    assertTrue(new WorkspaceRoot(wild, false).admits(wild + "/a"));
+  }
+
+  @ParameterizedTest
   @ValueSource(strings = {"<root>", "<root>/**", "<root>/secrets/*", "<root>/a?/b"})
   void aTrustedWorkspaceRefusesAnAbsoluteGlobInsideItsRootSpelledRelative(String glob) {
     assertFalse(new WorkspaceRoot(root, false).admits(glob.replace("<root>", root.toString())));
