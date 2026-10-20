@@ -25,8 +25,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
@@ -46,9 +44,6 @@ final class SessionPresetsTest {
 
   @TempDir Path root;
 
-  private static final Function<AgentSession, Consumer<QueryEvent>> NO_REACTIONS =
-      session -> event -> {};
-
   private Path note() {
     return root.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR).resolve("note.md");
   }
@@ -57,7 +52,7 @@ final class SessionPresetsTest {
   void minimalAnswersATextTurn() {
     var model = ScriptedModel.newBuilder().withTextTurn("hello").build();
 
-    var run = run(model, SessionPresets.minimal(model), NO_REACTIONS);
+    var run = run(model, SessionPresets.minimal(model));
 
     assertEquals("hello", assertInstanceOf(ResultMessage.Success.class, run.terminal()).result());
   }
@@ -67,7 +62,7 @@ final class SessionPresetsTest {
     Files.writeString(root.resolve("notes.txt"), "preset content", StandardCharsets.UTF_8);
     var model = answering(new ToolCall("c1", "Read", Map.of("path", "notes.txt")));
 
-    var run = run(model, SessionPresets.readOnly(model, root), NO_REACTIONS);
+    var run = run(model, SessionPresets.readOnly(model, root));
 
     assertInstanceOf(ResultMessage.Success.class, run.terminal());
     assertTrue(
@@ -80,7 +75,7 @@ final class SessionPresetsTest {
   void readOnlyRegistersNoMemoryTools() {
     var model = answering(WRITE_NOTE);
 
-    var run = run(model, SessionPresets.readOnly(model, root), NO_REACTIONS);
+    var run = run(model, SessionPresets.readOnly(model, root));
 
     assertEquals(new ToolOutcome.NotFound(), run.onlyResult().outcome());
     assertFalse(Files.exists(note()));
@@ -90,7 +85,7 @@ final class SessionPresetsTest {
   void workspaceWritesAMemoryNote() throws IOException {
     var model = answering(WRITE_NOTE);
 
-    var run = run(model, SessionPresets.workspace(model, root), NO_REACTIONS);
+    var run = run(model, SessionPresets.workspace(model, root));
 
     assertInstanceOf(ResultMessage.Success.class, run.terminal());
     assertEquals("remember this", Files.readString(note(), StandardCharsets.UTF_8));

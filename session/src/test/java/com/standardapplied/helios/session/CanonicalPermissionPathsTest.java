@@ -327,7 +327,7 @@ final class CanonicalPermissionPathsTest {
     sessions.write("src/Foo.java", "class Foo {}");
     var model = answering(read("src/Foo.java"));
 
-    var run = run(model, SessionPresets.readOnly(model, sessions.root), session -> event -> {});
+    var run = run(model, SessionPresets.readOnly(model, sessions.root));
 
     assertEquals(new ToolOutcome.Succeeded(), run.onlyResult().outcome());
     assertTrue(output(run).contains("class Foo {}"), output(run));
