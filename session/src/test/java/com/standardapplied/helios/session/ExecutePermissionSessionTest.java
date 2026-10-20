@@ -7,14 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.execution.ExecuteTool;
-import com.standardapplied.helios.session.execution.ExecutionCapabilities;
-import com.standardapplied.helios.session.execution.ExecutionProvider;
-import com.standardapplied.helios.session.execution.ExecutionRequest;
-import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
@@ -22,14 +16,10 @@ import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolRegistry;
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 
@@ -43,31 +33,14 @@ final class ExecutePermissionSessionTest {
   private static final String SECRET = "key-0123456789";
   private static final String DANGEROUS = "ls; rm -rf ~/";
 
-  private final List<ExecutionRequest> executed = new CopyOnWriteArrayList<>();
+  private final RecordingProvider provider = new RecordingProvider(new CopyOnWriteArrayList<>());
   private final SecretRegistry secrets = new SecretRegistry();
 
   ExecutePermissionSessionTest() {
     secrets.register("API_KEY", SECRET);
   }
 
-  private final class RecordingProvider implements ExecutionProvider {
-
-    @Override
-    public ExecutionCapabilities capabilities() {
-      return ExecutionCapabilities.newBuilder().withSupportedRuntimes(Set.of(Runtime.BASH)).build();
-    }
-
-    @Override
-    public CompletionStage<ExecutionResult> execute(
-        SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
-      executed.add(request);
-      return CompletableFuture.completedFuture(
-          new ExecutionResult(0, "ran", "", Duration.ofMillis(1), false));
-    }
-  }
-
   private SessionOptions.Builder options(Permission permission) {
-    var provider = new RecordingProvider();
     return SessionOptions.newBuilder()
         .withTools(new ToolRegistry(List.of(ExecuteTool.binding(provider))))
         .withExecutionProvider(provider)
@@ -106,7 +79,7 @@ final class ExecutePermissionSessionTest {
         new ToolOutcome.Rejected(
             "Permission", "deny rule Execute(BASH/**rm **) matched Execute(BASH/ls; rm -rf ~/)"),
         run.onlyResult().outcome());
-    assertEquals(List.of(), executed);
+    assertEquals(List.of(), provider.executed);
   }
 
   @Test
@@ -121,8 +94,8 @@ final class ExecutePermissionSessionTest {
         "Allow Execute(BASH/ls; rm -rf ~/)?\n\nArguments:"
             + " {\"runtime\":\"bash\",\"script\":\"ls; rm -rf ~/\",\"stdin\":\"y\"}",
         onlyQuestion(run));
-    assertEquals(1, executed.size());
-    var request = executed.getFirst();
+    assertEquals(1, provider.executed.size());
+    var request = provider.executed.getFirst();
     assertEquals(
         List.of(Runtime.BASH, DANGEROUS, Optional.of("y")),
         List.of(request.runtime(), request.script(), request.stdin()));
@@ -140,7 +113,7 @@ final class ExecutePermissionSessionTest {
         "Allow Execute(BASH/env)?\n\nArguments: {\"runtime\":\"bash\",\"script\":\"env\","
             + "\"environment\":{\"TOKEN\":\"<redacted:API_KEY>\"}}",
         onlyQuestion(run));
-    assertEquals(Map.of("TOKEN", SECRET), executed.getFirst().environment());
+    assertEquals(Map.of("TOKEN", SECRET), provider.executed.getFirst().environment());
   }
 
   @Test
@@ -165,7 +138,7 @@ final class ExecutePermissionSessionTest {
             + closing
             + "<red… [16 more chars]",
         onlyQuestion(run));
-    assertEquals(List.of(), executed);
+    assertEquals(List.of(), provider.executed);
   }
 
   @Test
@@ -180,7 +153,7 @@ final class ExecutePermissionSessionTest {
         new ToolOutcome.Rejected("Permission", "permission key of Execute carries a secret"),
         run.onlyResult().outcome());
     assertEquals(List.of(), run.events().eventsOf(QueryEvent.QuestionAsked.class));
-    assertEquals(List.of(), executed);
+    assertEquals(List.of(), provider.executed);
   }
 
   @Test
@@ -197,6 +170,6 @@ final class ExecutePermissionSessionTest {
         new ToolOutcome.Rejected("Permission", "permission key of Execute carries a secret"),
         run.onlyResult().outcome());
     assertEquals(List.of(), run.events().eventsOf(QueryEvent.QuestionAsked.class));
-    assertEquals(List.of(), executed);
+    assertEquals(List.of(), provider.executed);
   }
 }

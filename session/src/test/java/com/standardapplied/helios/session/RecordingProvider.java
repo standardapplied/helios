@@ -8,20 +8,27 @@ import com.standardapplied.helios.session.execution.ExecutionCapabilities;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
 import com.standardapplied.helios.session.execution.ExecutionRequest;
 import com.standardapplied.helios.session.execution.ExecutionResult;
+import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
+import java.time.Duration;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /**
  * Records the session start and end it sees, and does what the test sets for each: by default it
- * accepts, and its end appends {@code "onSessionEnd"} to the order it was given.
+ * accepts, and its end appends {@code "onSessionEnd"} to the order it was given. It runs {@code
+ * BASH} by recording each request and answering exit code 0.
  */
 final class RecordingProvider implements ExecutionProvider {
 
   final AtomicInteger starts = new AtomicInteger();
   final AtomicInteger ends = new AtomicInteger();
+  final List<ExecutionRequest> executed = new CopyOnWriteArrayList<>();
   volatile SessionContext context;
   Supplier<SessionStartOutcome> start = SessionStartOutcome::accept;
   Runnable end;
@@ -32,7 +39,7 @@ final class RecordingProvider implements ExecutionProvider {
 
   @Override
   public ExecutionCapabilities capabilities() {
-    return ExecutionCapabilities.newBuilder().build();
+    return ExecutionCapabilities.newBuilder().withSupportedRuntimes(Set.of(Runtime.BASH)).build();
   }
 
   @Override
@@ -51,6 +58,8 @@ final class RecordingProvider implements ExecutionProvider {
   @Override
   public CompletionStage<ExecutionResult> execute(
       SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
-    throw new UnsupportedOperationException("not used");
+    executed.add(request);
+    return CompletableFuture.completedFuture(
+        new ExecutionResult(0, "ran", "", Duration.ofMillis(1), false));
   }
 }

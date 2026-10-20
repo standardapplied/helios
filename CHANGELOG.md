@@ -749,10 +749,11 @@ explicit allow rules.
   `DefaultPermissionEvaluator.Builder.withSecretRegistry`.** A `ToolApprover` decides a call the
   policy answered with ASK, from an `ApprovalRequest(call, arguments, key, category, rule, reason)`
   for the final immutable call, whose `rule` is the ask rule that matched (empty when a mode or
-  category default asked) and whose `arguments` display the call, redacted and bounded. Only its `ALLOW` admits the call. `ToolApprover.askingUser(gateway)` is the human
-  approver the session wires over `AgentSession.answer`, under a fresh question id per request, so
-  an answer resolves one call only. `PermissionDecision.rule()` is the rule that decided;
-  `withSecretRegistry` takes the registry that redacts an approval's reason.
+  category default asked) and whose `arguments` display the call, redacted and bounded. Only its
+  `ALLOW` admits the call. `ToolApprover.askingUser(gateway)` is the human approver the session
+  wires over `AgentSession.answer`, under a fresh question id per request, so an answer resolves one
+  call only. `PermissionDecision.rule()` is the rule that decided; `withSecretRegistry` takes the
+  registry that redacts an approval's reason and arguments.
 - **`PathSpace`, `ToolBinding.PathArgument`, `ToolBinding.Builder.withPathArgument`,
   `WorkspaceRoot.canonical`, `WorkspaceRoot.spell`, `WorkspaceRoot.resolveCanonical`,
   `session.tools.Withholding`, `ToolContext.withholds`, `DefaultPermissionEvaluator.decidingRule`,
