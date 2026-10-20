@@ -409,7 +409,7 @@ final class FileSystemMemoryBackendTest {
     assertThrows(RuntimeException.class, () -> backend.create("/memories/../../new.txt", "x"));
     assertThrows(RuntimeException.class, () -> backend.list("/memories/.."));
     assertThrows(
-        RuntimeException.class, () -> backend.view("/memories/" + tmp.resolve("project.txt")));
+        NoSuchFileException.class, () -> backend.view("/memories/" + tmp.resolve("project.txt")));
     assertFalse(Files.exists(tmp.resolve("new.txt")));
     assertEquals("real", backend.view("/memories/real.md"));
   }

@@ -3,7 +3,6 @@
 package com.standardapplied.helios.session;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
-import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.ask.QuestionGateway;
@@ -19,10 +18,13 @@ import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.memory.MemoryWriteTool;
 import com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
+import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.permissions.ToolApprover;
 import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.ArrayList;
+import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 
@@ -31,7 +33,8 @@ import java.util.function.Function;
  * tool dispatch, the hooks, the permission stage, the loop collaborators and the turn runner. The
  * permission stage is the {@link DefaultPermissionEvaluator} of the session's {@link
  * com.standardapplied.helios.session.permissions.Permission}, asking the user through the session's
- * questions, or admits every call when the session has none. It acquires nothing, so a failure here
+ * questions, with the rules that decide a key withholding what walking tools return; with no
+ * permission it admits every call and withholds nothing. It acquires nothing, so a failure here
  * leaves only what the caller acquired to release.
  */
 final class SessionWiring {
@@ -53,12 +56,20 @@ final class SessionWiring {
     var toolDispatch =
         new ToolDispatch(sessionContext, combinedTools, options.concurrency(), scheduler, ending);
     var model = options.model();
+    var evaluator = evaluator(options, combinedTools, pendingQuestions, sessionContext.secrets());
     var collaborators =
         LoopCollaborators.newBuilder()
             .withHooks(new HookRegistry(options.hooks()))
             .withToolDispatch(toolDispatch)
             .withAuthorization(
-                authorization(options, combinedTools, pendingQuestions, sessionContext.secrets()))
+                evaluator
+                    .<Function<ToolBinding.CanonicalCall, PermissionDecision>>map(e -> e::authorize)
+                    .orElse(canonical -> NO_POLICY))
+            .withDecidingRule(
+                evaluator
+                    .<Function<ToolPermissionKey, Optional<PermissionRule>>>map(
+                        e -> e::decidingRule)
+                    .orElse(key -> Optional.empty()))
             .withSteeringQueue(steeringQueue)
             .withEventSink(events::emit)
             .withHookContextFactory(
@@ -82,17 +93,20 @@ final class SessionWiring {
         options.contextCompactor());
   }
 
-  private static Function<ToolCall, PermissionDecision> authorization(
+  /**
+   * The evaluator of the session's permission, empty without one; building it refuses a rule no
+   * canonical path can match.
+   */
+  private static Optional<DefaultPermissionEvaluator> evaluator(
       SessionOptions options, ToolRegistry tools, QuestionGateway gateway, SecretRegistry secrets) {
-    if (options.permission().isEmpty()) {
-      return call -> NO_POLICY;
-    }
-    var evaluator =
-        DefaultPermissionEvaluator.newBuilder(options.permission().orElseThrow(), tools)
-            .withApprover(ToolApprover.askingUser(gateway))
-            .withSecretRegistry(secrets)
-            .build();
-    return evaluator::authorize;
+    return options
+        .permission()
+        .map(
+            permission ->
+                DefaultPermissionEvaluator.newBuilder(permission, tools)
+                    .withApprover(ToolApprover.askingUser(gateway))
+                    .withSecretRegistry(secrets)
+                    .build());
   }
 
   private static ToolRegistry withBuiltins(

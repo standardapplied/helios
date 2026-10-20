@@ -67,7 +67,14 @@ final class LoopFixture implements AutoCloseable {
   /** Collaborators that admit every call and emit into {@link #events}, on this fixture's clock. */
   LoopCollaborators collaborators(HookRegistry hooks, ToolDispatch dispatch, SteeringQueue queue) {
     return new LoopCollaborators(
-        hooks, dispatch, Authorizations.ADMIT_ALL, queue, events::add, this::hookContext, clock);
+        hooks,
+        dispatch,
+        Authorizations.ADMIT_ALL,
+        Authorizations.NO_RULE,
+        queue,
+        events::add,
+        this::hookContext,
+        clock);
   }
 
   /** A runner of {@code model} with no costs and no output schema. */

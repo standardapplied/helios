@@ -155,7 +155,9 @@ final class ToolDispatchTest {
   void dispatchRejectsNullCall() {
     var d = fixture.dispatcher();
     var token = new CancellationToken();
-    var ex = assertThrows(NullPointerException.class, () -> d.dispatch(null, token, NEVER, NEVER));
+    var ex =
+        assertThrows(
+            NullPointerException.class, () -> d.dispatch(null, token, NEVER, NEVER, key -> false));
     assertEquals("call must not be null", ex.getMessage());
   }
 
@@ -163,7 +165,9 @@ final class ToolDispatchTest {
   void dispatchRejectsNullCancellation() {
     var d = fixture.dispatcher();
     var c = call("read");
-    var ex = assertThrows(NullPointerException.class, () -> d.dispatch(c, null, NEVER, NEVER));
+    var ex =
+        assertThrows(
+            NullPointerException.class, () -> d.dispatch(c, null, NEVER, NEVER, key -> false));
     assertEquals("cancellation must not be null", ex.getMessage());
   }
 
@@ -172,10 +176,24 @@ final class ToolDispatchTest {
     var d = fixture.dispatcher();
     var c = call("read");
     var token = new CancellationToken();
-    var timeout = assertThrows(NullPointerException.class, () -> d.dispatch(c, token, null, NEVER));
-    var grace = assertThrows(NullPointerException.class, () -> d.dispatch(c, token, NEVER, null));
+    var timeout =
+        assertThrows(
+            NullPointerException.class, () -> d.dispatch(c, token, null, NEVER, key -> false));
+    var grace =
+        assertThrows(
+            NullPointerException.class, () -> d.dispatch(c, token, NEVER, null, key -> false));
     assertEquals("timeout must not be null", timeout.getMessage());
     assertEquals("stopGrace must not be null", grace.getMessage());
+  }
+
+  @Test
+  void dispatchRejectsANullWithheldBeforeLookingTheCallUp() {
+    var d = fixture.dispatcher();
+    var c = call("nope");
+    var token = new CancellationToken();
+    var ex =
+        assertThrows(NullPointerException.class, () -> d.dispatch(c, token, NEVER, NEVER, null));
+    assertEquals("withheld must not be null", ex.getMessage());
   }
 
   @ParameterizedTest
@@ -186,7 +204,9 @@ final class ToolDispatchTest {
     var token = new CancellationToken();
     var timeout = Duration.ofMillis(millis);
     var ex =
-        assertThrows(IllegalArgumentException.class, () -> d.dispatch(c, token, timeout, NEVER));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> d.dispatch(c, token, timeout, NEVER, key -> false));
     assertEquals("timeout must be strictly positive, got " + timeout, ex.getMessage());
   }
 
@@ -197,7 +217,9 @@ final class ToolDispatchTest {
     var c = call("read");
     var token = new CancellationToken();
     var grace = Duration.ofMillis(millis);
-    var ex = assertThrows(IllegalArgumentException.class, () -> d.dispatch(c, token, NEVER, grace));
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> d.dispatch(c, token, NEVER, grace, key -> false));
     assertEquals("stopGrace must be strictly positive, got " + grace, ex.getMessage());
   }
 
@@ -214,7 +236,10 @@ final class ToolDispatchTest {
 
   @Test
   void unknownToolReturnsNotFound() {
-    var result = fixture.dispatcher().dispatch(call("nope"), new CancellationToken(), NEVER, NEVER);
+    var result =
+        fixture
+            .dispatcher()
+            .dispatch(call("nope"), new CancellationToken(), NEVER, NEVER, key -> false);
     assertEquals(ToolResult.notFound("nope"), result);
   }
 
@@ -231,7 +256,9 @@ final class ToolDispatchTest {
     token.cancel("user-stop");
     var c = call("echo");
 
-    var ex = assertThrows(CancellationException.class, () -> d.dispatch(c, token, NEVER, NEVER));
+    var ex =
+        assertThrows(
+            CancellationException.class, () -> d.dispatch(c, token, NEVER, NEVER, key -> false));
 
     assertEquals("user-stop", ex.getMessage());
     assertEquals(0, runs.get());
@@ -250,8 +277,30 @@ final class ToolDispatchTest {
                 (args, ctx) -> ToolResult.success("echoed: " + args.get("v"))));
     var result =
         d.dispatch(
-            new ToolCall("c", "echo", Map.of("v", "hello")), new CancellationToken(), NEVER, NEVER);
+            new ToolCall("c", "echo", Map.of("v", "hello")),
+            new CancellationToken(),
+            NEVER,
+            NEVER,
+            key -> false);
     assertEquals(ToolResult.success("echoed: hello"), result);
+  }
+
+  @Test
+  void theToolWithholdsWhatTheDispatchedPredicateWithholds() {
+    var d =
+        fixture.dispatcher(
+            binding(
+                "walk",
+                ToolCategory.SEARCH,
+                (args, ctx) ->
+                    ToolResult.success(
+                        Stream.of("./docs", "./secrets")
+                            .filter(key -> !ctx.withholds(key))
+                            .toList()
+                            .toString())));
+    var result =
+        d.dispatch(call("walk"), new CancellationToken(), NEVER, NEVER, "./secrets"::equals);
+    assertEquals(ToolResult.success("[./docs]"), result);
   }
 
   @Test
@@ -259,7 +308,7 @@ final class ToolDispatchTest {
     var d =
         fixture.dispatcher(
             binding("bad", ToolCategory.READ, (args, ctx) -> ToolResult.failure("intentional")));
-    var result = d.dispatch(call("bad"), new CancellationToken(), NEVER, NEVER);
+    var result = d.dispatch(call("bad"), new CancellationToken(), NEVER, NEVER, key -> false);
     assertEquals(ToolResult.failure("intentional"), result);
   }
 
@@ -277,7 +326,7 @@ final class ToolDispatchTest {
                 }));
     var token = new CancellationToken();
 
-    d.dispatch(call("look"), token, NEVER, NEVER);
+    d.dispatch(call("look"), token, NEVER, NEVER, key -> false);
 
     var ctx = seen.get();
     assertSame(CTX, ctx.sessionContext());
@@ -300,7 +349,8 @@ final class ToolDispatchTest {
     var c = call("boom");
     var token = new CancellationToken();
 
-    var thrown = assertThrows(AssertionError.class, () -> d.dispatch(c, token, NEVER, NEVER));
+    var thrown =
+        assertThrows(AssertionError.class, () -> d.dispatch(c, token, NEVER, NEVER, key -> false));
 
     assertSame(sentinel, thrown);
   }
@@ -370,7 +420,7 @@ final class ToolDispatchTest {
     var d =
         fixture.dispatcher(
             binding("echo", ToolCategory.READ, (args, ctx) -> ToolResult.success("x")));
-    d.dispatch(call("echo"), new CancellationToken(), NEVER, NEVER);
+    d.dispatch(call("echo"), new CancellationToken(), NEVER, NEVER, key -> false);
     awaitIdle(d);
     assertEquals(
         ConcurrencyLimits.defaults().maxConcurrentToolCalls(), d.availableToolCallPermits());
@@ -780,7 +830,9 @@ final class ToolDispatchTest {
         .forEach(
             i -> {
               var task =
-                  new FutureTask<>(() -> d.dispatch(call(names.get(i % 3)), session, NEVER, NEVER));
+                  new FutureTask<>(
+                      () ->
+                          d.dispatch(call(names.get(i % 3)), session, NEVER, NEVER, key -> false));
               Thread.ofVirtual().start(task);
               tasks.add(task);
             });

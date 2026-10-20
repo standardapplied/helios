@@ -179,7 +179,7 @@ final class PermissionTypesTest {
     var p = Permission.defaultInWorkspace();
     assertEquals(PermissionMode.DEFAULT, p.mode());
     assertEquals(6, p.allow().size());
-    assertEquals(4, p.ask().size());
+    assertEquals(List.of(PermissionRule.any(PermissionEffect.ASK, "Execute")), p.ask());
     assertTrue(p.deny().isEmpty());
   }
 

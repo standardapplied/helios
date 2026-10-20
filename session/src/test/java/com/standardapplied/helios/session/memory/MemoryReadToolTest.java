@@ -4,6 +4,8 @@
  */
 package com.standardapplied.helios.session.memory;
 
+import static com.standardapplied.helios.session.test.BindingCalls.keyOf;
+import static com.standardapplied.helios.session.test.BindingCalls.withholding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -50,7 +52,7 @@ final class MemoryReadToolTest {
     assertEquals("MemoryRead", binding.name());
     assertEquals("MemoryRead", MemoryReadTool.NAME);
     assertEquals(
-        "/memories/x.md", binding.permissionKey(Map.of("path", "/memories/x.md")).canonicalArgs());
+        "/memories/x.md", keyOf(binding, Map.of("path", "/memories/x.md")).canonicalArgs());
   }
 
   @Test
@@ -112,5 +114,30 @@ final class MemoryReadToolTest {
   @Test
   void rejectsNullBackend() {
     assertThrows(NullPointerException.class, () -> MemoryReadTool.binding(null));
+  }
+
+  @Test
+  void aListingWithEveryEntryWithheldIsEmptyThenNoted(@TempDir Path tmp) throws IOException {
+    var backend = seeded(tmp, "locked.md", "locked");
+    var context = withholding("/memories/locked.md"::equals);
+
+    var result =
+        MemoryReadTool.binding(backend)
+            .tool()
+            .execute(Map.of("path", "/memories/", "list", true), context);
+
+    assertEquals("(empty)\n[withheld by permission policy: 1]\n", result.output());
+  }
+
+  @Test
+  void aListedEntryIsCheckedUnderTheKeyItsOwnReadHas(@TempDir Path tmp) throws IOException {
+    var backend = seeded(tmp, "locked\\private/key.md", "locked");
+    var binding = MemoryReadTool.binding(backend);
+    var readKey = keyOf(binding, Map.of("path", "/memories/locked\\private/key.md"));
+    var context = withholding(readKey.canonicalArgs()::equals);
+
+    var result = binding.tool().execute(Map.of("path", "/memories/", "list", true), context);
+
+    assertEquals("(empty)\n[withheld by permission policy: 1]\n", result.output());
   }
 }

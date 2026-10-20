@@ -1,0 +1,136 @@
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
+
+package com.standardapplied.helios.session;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.files.GlobTool;
+import com.standardapplied.helios.session.files.GrepTool;
+import com.standardapplied.helios.session.files.InMemoryFileTracker;
+import com.standardapplied.helios.session.files.LsTool;
+import com.standardapplied.helios.session.files.ReadTool;
+import com.standardapplied.helios.session.files.WorkspaceRoot;
+import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
+import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.permissions.PermissionEffect;
+import com.standardapplied.helios.session.permissions.PermissionMode;
+import com.standardapplied.helios.session.permissions.PermissionRule;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolRegistry;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
+
+/**
+ * Sessions over the path tools ({@code Read}, {@code LS}, {@code Glob}, {@code Grep} and memory) on
+ * a strict workspace holding {@code secrets/key} ({@code TOPSECRET}), {@code docs/a.txt} and {@code
+ * link -> secrets}, with {@code Read}'s executor wrapped to count its runs.
+ */
+final class PathToolSessions {
+
+  static final String SECRET = "TOPSECRET";
+
+  final Path root;
+  final WorkspaceRoot workspace;
+  final AtomicInteger readRuns = new AtomicInteger();
+
+  PathToolSessions(Path dir) throws IOException {
+    root = dir.toRealPath();
+    write("secrets/key", SECRET);
+    write("docs/a.txt", "alpha");
+    Files.createSymbolicLink(root.resolve("link"), root.resolve("secrets"));
+    workspace = WorkspaceRoot.of(root);
+  }
+
+  /** Writes {@code content} at {@code relative}, creating its parents. */
+  void write(String relative, String content) throws IOException {
+    var file = root.resolve(relative);
+    Files.createDirectories(file.getParent());
+    Files.writeString(file, content, StandardCharsets.UTF_8);
+  }
+
+  /** The workspace path tools, {@code Read} counting its runs. */
+  ToolRegistry tools(WorkspaceRoot on) {
+    return new ToolRegistry(
+        List.of(
+            countingRuns(ReadTool.binding(on, InMemoryFileTracker.create())),
+            LsTool.binding(on),
+            GlobTool.binding(on),
+            GrepTool.binding(on)));
+  }
+
+  private ToolBinding countingRuns(ToolBinding read) {
+    var tool = read.tool();
+    var counted =
+        new Tool(
+            tool.name(),
+            tool.description(),
+            tool.parameters(),
+            (args, ctx) -> {
+              readRuns.incrementAndGet();
+              return tool.executor().execute(args, ctx);
+            },
+            tool.idempotent());
+    return new ToolBinding(
+        counted,
+        read.category(),
+        read.permissionKeyExtractor(),
+        read.visibility(),
+        read.pathArgument());
+  }
+
+  /** Options of a session holding the path tools and memory under {@code permission}. */
+  SessionOptions.Builder options(Permission permission) {
+    return withoutPolicy().withPermission(permission);
+  }
+
+  /** Options of a session holding the path tools and memory with no permission policy. */
+  SessionOptions.Builder withoutPolicy() {
+    return SessionOptions.newBuilder()
+        .withTools(tools(workspace))
+        .withMemoryBackend(FileSystemMemoryBackend.of(workspace));
+  }
+
+  /** A policy of {@code mode} holding {@code rules}, each in the list of its effect. */
+  static Permission policy(PermissionMode mode, PermissionRule... rules) {
+    return new Permission(
+        mode,
+        byEffect(rules, PermissionEffect.ALLOW),
+        byEffect(rules, PermissionEffect.ASK),
+        byEffect(rules, PermissionEffect.DENY));
+  }
+
+  private static List<PermissionRule> byEffect(PermissionRule[] rules, PermissionEffect effect) {
+    return Stream.of(rules).filter(rule -> rule.effect() == effect).toList();
+  }
+
+  static ToolCall call(String tool, Map<String, Object> args) {
+    return new ToolCall("c1", tool, args);
+  }
+
+  static ToolCall read(String path) {
+    return call(ReadTool.NAME, Map.of("path", path));
+  }
+
+  /** The output of the run's only tool result. */
+  static String output(WriteToolSessions.Run run) {
+    return run.onlyResult().output();
+  }
+
+  /** Asserts that no event of the run carries {@link #SECRET}. */
+  static void assertNoSecretEmitted(WriteToolSessions.Run run) {
+    assertEquals(
+        List.of(),
+        run.events().events().stream()
+            .map(Object::toString)
+            .filter(event -> event.contains(SECRET))
+            .toList());
+  }
+}

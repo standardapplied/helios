@@ -78,7 +78,8 @@ class CommandGrantTest {
     return new ToolContext(
         new SessionContext("grant-session", new CancellationToken(), Clock.systemUTC(), secrets),
         new CancellationToken(),
-        NEVER_REACHED);
+        NEVER_REACHED,
+        key -> false);
   }
 
   /** A tool context for a session that uses the grant's own registry. */

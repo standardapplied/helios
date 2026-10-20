@@ -19,6 +19,15 @@ import java.util.stream.Stream;
  * win first; then {@link PermissionMode#BYPASS_PERMISSIONS} short-circuits to ALLOW; then explicit
  * ALLOW rules; then explicit ASK rules; then the category-based default policy.
  *
+ * <p>A path tool's rule matches its canonical path ({@code .} or {@code ./a/b} in a workspace,
+ * {@code /memories/} or {@code /memories/a/b} in memory), however the model spelled it; see {@link
+ * RuleMatcher} for the glob dialect. A DENY rule also withholds the entries a walking tool ({@code
+ * Glob}, {@code Grep}, {@code LS}, a {@code MemoryRead} listing) would return below its path, and a
+ * {@code Read} DENY or ASK rule that decides a file withholds it from {@code Grep}, without asking.
+ * The allow that admitted a walk's start covers what it finds except what these rules withhold; a
+ * mode or category default, such as {@link PermissionMode#LOCKED_DOWN}'s, is not a rule and
+ * withholds nothing.
+ *
  * @param mode the coarse policy lever; non-null
  * @param allow rules that, on match, allow the call; non-null
  * @param ask rules that, on match, ask the user for confirmation; non-null
@@ -70,9 +79,10 @@ public record Permission(
   }
 
   /**
-   * The canonical "interactive workspace" preset: reads, listings, searches, and memory I/O are
-   * allowed silently against {@code ./**}; writes, edits, and execution are asked. No explicit
-   * denies — users add their own.
+   * The canonical "interactive workspace" preset: reads, listings and searches are allowed silently
+   * on {@code ./**}, which matches every canonical workspace path, the root {@code .} included, and
+   * memory I/O on {@code /memories/**}; execution is asked, and every other write by its category
+   * default. No explicit denies — users add their own.
    *
    * @return a fresh preset
    */
@@ -86,11 +96,7 @@ public record Permission(
             PermissionRule.withGlob(PermissionEffect.ALLOW, "Grep", "./**"),
             PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryRead", "/memories/**"),
             PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryWrite", "/memories/**")),
-        List.of(
-            PermissionRule.withGlob(PermissionEffect.ASK, "Write", "./**"),
-            PermissionRule.withGlob(PermissionEffect.ASK, "Edit", "./**"),
-            PermissionRule.withGlob(PermissionEffect.ASK, "MultiEdit", "./**"),
-            PermissionRule.any(PermissionEffect.ASK, "Execute")),
+        List.of(PermissionRule.any(PermissionEffect.ASK, "Execute")),
         List.of());
   }
 

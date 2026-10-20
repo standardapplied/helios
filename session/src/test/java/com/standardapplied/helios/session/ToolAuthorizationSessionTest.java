@@ -76,10 +76,7 @@ final class ToolAuthorizationSessionTest {
     var run = run(options, write("/tmp/a"));
 
     assertEquals(
-        new ToolOutcome.Rejected(
-            "Permission",
-            "permission key of Write failed: java.lang.IllegalStateException: no path"),
-        run.onlyResult().outcome());
+        new ToolOutcome.Rejected("Permission", "Write: no path"), run.onlyResult().outcome());
     assertEquals(List.of(), executed);
   }
 
@@ -113,15 +110,18 @@ final class ToolAuthorizationSessionTest {
     assertEquals(List.of(), executed);
   }
 
-  @Test
-  void aPermissionKeyCarryingASecretIsRefusedBeforeAnyoneIsAskedAboutIt() {
+  @ParameterizedTest(name = "the secret in its tool name: {0}")
+  @ValueSource(booleans = {false, true})
+  void aPermissionKeyCarryingASecretIsRefusedBeforeAnyoneIsAskedAboutIt(boolean inToolName) {
     var secrets = new SecretRegistry();
     secrets.register("TOKEN", SECRET);
+    var key =
+        inToolName
+            ? new ToolPermissionKey(SECRET, "/tmp/a")
+            : new ToolPermissionKey("Write", SECRET);
     var options =
         SessionOptions.newBuilder()
-            .withTools(
-                new ToolRegistry(
-                    List.of(sessions.writeTool(args -> new ToolPermissionKey("Write", SECRET)))))
+            .withTools(new ToolRegistry(List.of(sessions.writeTool(args -> key))))
             .withPermission(Permission.empty(PermissionMode.DEFAULT))
             .withSecretRegistry(secrets);
 
@@ -155,8 +155,7 @@ final class ToolAuthorizationSessionTest {
 
   // ── a refusal's diagnostic ───────────────────────────────────────────────
 
-  private static final String KEY_FAILED =
-      "permission key of Write failed: java.lang.IllegalStateException: ";
+  private static final String KEY_FAILED = "Write: ";
 
   /** A run whose {@code Write} key throws {@code message}, with {@link #SECRET} registered. */
   private WriteToolSessions.Run keyThrowing(String message) {

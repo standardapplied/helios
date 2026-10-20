@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.ask;
 
+import static com.standardapplied.helios.session.test.BindingCalls.keyOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -40,8 +41,8 @@ final class AskUserQuestionToolTest {
     assertEquals("AskUserQuestion", binding.name());
     assertEquals("AskUserQuestion", AskUserQuestionTool.NAME);
     assertEquals(ToolCategory.CONTROL, binding.category());
-    assertEquals("AskUserQuestion", binding.permissionKey(Map.of()).toolName());
-    assertEquals("", binding.permissionKey(Map.of()).canonicalArgs());
+    assertEquals("AskUserQuestion", keyOf(binding, Map.of()).toolName());
+    assertEquals("", keyOf(binding, Map.of()).canonicalArgs());
   }
 
   @Test

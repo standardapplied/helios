@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.files;
 
+import static com.standardapplied.helios.session.test.BindingCalls.keyOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -204,9 +205,8 @@ final class GlobToolTest {
   @Test
   void permissionKeyCarriesPath(@TempDir Path tmp) {
     var binding = GlobTool.binding(WorkspaceRoot.of(tmp));
-    assertEquals(
-        "src", binding.permissionKey(Map.of("pattern", "*", "path", "src")).canonicalArgs());
-    assertEquals(".", binding.permissionKey(Map.of("pattern", "*")).canonicalArgs());
+    assertEquals("./src", keyOf(binding, Map.of("pattern", "*", "path", "src")).canonicalArgs());
+    assertEquals(".", keyOf(binding, Map.of("pattern", "*")).canonicalArgs());
   }
 
   @Test
@@ -266,10 +266,34 @@ final class GlobToolTest {
     Files.writeString(tmp.resolve("a.md"), "x", StandardCharsets.UTF_8);
     var call = new CancellationToken();
     call.cancel("stop");
-    var ctx = new ToolContext(SessionContext.forTesting("cancelled"), call, Duration.ofMinutes(1));
+    var ctx =
+        new ToolContext(
+            SessionContext.forTesting("cancelled"), call, Duration.ofMinutes(1), key -> false);
     var result =
         GlobTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "*.md"), ctx);
     assertTrue(result.succeeded(), result.output());
     assertEquals("", result.output());
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void aSymlinkedRootIsGlobbedAtItsCanonicalPathAndRefusedThroughTheLink(@TempDir Path tmp)
+      throws IOException {
+    var ws = WorkspaceRoot.of(tmp);
+    Files.createDirectories(ws.root().resolve("real"));
+    Files.writeString(ws.root().resolve("real/a.txt"), "a", StandardCharsets.UTF_8);
+    Files.createSymbolicLink(ws.root().resolve("alias"), ws.root().resolve("real"));
+    var tool = GlobTool.binding(ws).tool();
+
+    var canonical =
+        tool.execute(Map.of("pattern", "*.txt", "path", ws.canonical("alias")), ToolContext.noop());
+    assertEquals("real/a.txt\n", canonical.output());
+
+    var throughTheLink =
+        tool.execute(Map.of("pattern", "*.txt", "path", "alias"), ToolContext.noop());
+    assertEquals(
+        "Glob: path is not canonical or changed after it was authorised: alias now resolves to"
+            + " ./real",
+        throughTheLink.output());
   }
 }
