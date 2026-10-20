@@ -254,16 +254,13 @@ final class SessionSecretRedactionTest {
   void theReadOnlyPresetsReadAndGrepReturnRedactedText(@TempDir Path root) throws IOException {
     Files.writeString(
         root.resolve("config.txt"), "user=alice\napi_key=" + SECRET + "\n", StandardCharsets.UTF_8);
-    var options =
-        SessionOptions.newBuilder()
-            .withPreset(SessionPresets.readOnly(root))
-            .withSecretRegistry(registryWithSecret());
     var model =
         calling(
             List.of(
                 List.of(
                     new ToolCall("c1", "Read", Map.of("path", "config.txt")),
                     new ToolCall("c2", "Grep", Map.of("pattern", "api_key")))));
+    var options = SessionPresets.readOnly(model, root).withSecretRegistry(registryWithSecret());
 
     var run = run(options, model);
 

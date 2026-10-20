@@ -457,23 +457,6 @@ public record SessionOptions(
     }
 
     /**
-     * Apply a {@link SessionPreset} to this builder. The preset's {@code apply} function receives
-     * this builder, layers configuration onto it, and returns it for chaining. Multiple presets
-     * stack associatively — later {@code withPreset(...)} calls overwrite earlier ones when they
-     * touch the same field.
-     *
-     * @param preset the preset to apply; non-null
-     * @return the builder returned by the preset (usually this one)
-     * @throws NullPointerException if {@code preset} is null or if it returns a null builder
-     */
-    public Builder withPreset(SessionPreset preset) {
-      Objects.requireNonNull(preset, "preset must not be null");
-      var next = preset.apply(this);
-      Objects.requireNonNull(next, "preset must return a non-null builder");
-      return next;
-    }
-
-    /**
      * Build the immutable record.
      *
      * @return the options

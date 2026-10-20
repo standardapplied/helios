@@ -4,256 +4,192 @@
  */
 package com.standardapplied.helios.session;
 
+import static com.standardapplied.helios.session.WriteToolSessions.answering;
+import static com.standardapplied.helios.session.WriteToolSessions.run;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.common.CostCalculator;
-import com.standardapplied.helios.core.model.BlockingModel;
-import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.execution.ExecuteTool;
-import com.standardapplied.helios.session.execution.LocalProcessExecutionProvider;
-import com.standardapplied.helios.session.execution.NoopExecutionProvider;
-import com.standardapplied.helios.session.files.WorkspaceRoot;
-import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionMode;
+import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
+import com.standardapplied.helios.session.test.QuestionAnswers;
+import com.standardapplied.helios.session.tools.ToolRegistry;
+import com.standardapplied.helios.testing.ScriptedModel;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
+/** Each preset builds options from which a real session runs the tools it promises. */
 final class SessionPresetsTest {
 
-  private static Model stubModel() {
-    return new BlockingModel() {
-      @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        return Response.newBuilder().withContent("x").build();
-      }
+  private static final ToolCall WRITE_NOTE =
+      new ToolCall(
+          "c1",
+          "MemoryWrite",
+          Map.of("op", "create", "path", "/memories/note.md", "content", "remember this"));
 
-      @Override
-      public String id() {
-        return "stub";
-      }
+  @TempDir Path root;
 
-      @Override
-      public String provider() {
-        return "stub";
-      }
-    };
-  }
-
-  private static SessionOptions.Builder seed() {
-    return SessionOptions.newBuilder().withModel(stubModel());
-  }
-
-  private static SessionOptions build(SessionPreset preset) {
-    return seed().withPreset(preset).build();
-  }
-
-  private static Set<String> toolNames(SessionOptions opts) {
-    return opts.tools().bindings().stream()
-        .map(b -> b.tool().name())
-        .collect(Collectors.toUnmodifiableSet());
-  }
-
-  // ── minimal ─────────────────────────────────────────────────────────────
-
-  @Test
-  void minimalAppliesNoConfiguration() {
-    var opts = build(SessionPresets.minimal());
-    assertEquals("stub", opts.model().id());
-    assertTrue(opts.tools().bindings().isEmpty(), "no tools by default");
-    assertTrue(opts.permission().isEmpty(), "no permission policy by default");
-    assertTrue(opts.memoryBackend().isEmpty(), "no memory backend by default");
-    assertSame(CostCalculator.ZERO, opts.costCalculator());
+  private Path note() {
+    return root.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR).resolve("note.md");
   }
 
   @Test
-  void minimalIsIdentityOnTheBuilder() {
-    var builder = seed();
-    var same = builder.withPreset(SessionPresets.minimal());
-    assertSame(builder, same);
+  void minimalAnswersATextTurn() {
+    var model = ScriptedModel.newBuilder().withTextTurn("hello").build();
+
+    var run = run(model, SessionPresets.minimal(model));
+
+    assertEquals("hello", assertInstanceOf(ResultMessage.Success.class, run.terminal()).result());
+  }
+
+  static Stream<Arguments> memoryPresets() {
+    return Stream.of(
+        preset("workspace", SessionPresets::workspace),
+        preset(
+            "openEnded",
+            (model, root) ->
+                SessionPresets.openEnded(
+                    model, root, new RecordingProvider(new CopyOnWriteArrayList<>()))));
+  }
+
+  static Stream<Arguments> rootedPresets() {
+    return Stream.concat(Stream.of(preset("readOnly", SessionPresets::readOnly)), memoryPresets());
+  }
+
+  private static Arguments preset(
+      String name, BiFunction<Model, Path, SessionOptions.Builder> options) {
+    return Arguments.of(name, options);
+  }
+
+  @ParameterizedTest(name = "{0} reads the root through Read, Glob, Grep and LS")
+  @MethodSource("rootedPresets")
+  void aRootedPresetReadsTheRootThroughEachReadTool(
+      String preset, BiFunction<Model, Path, SessionOptions.Builder> options) throws IOException {
+    Files.writeString(root.resolve("notes.txt"), "preset content", StandardCharsets.UTF_8);
+    var model =
+        answering(
+            new ToolCall("c1", "Read", Map.of("path", "notes.txt")),
+            new ToolCall("c2", "Glob", Map.of("pattern", "*.txt")),
+            new ToolCall("c3", "Grep", Map.of("pattern", "preset content")),
+            new ToolCall("c4", "LS", Map.of()));
+
+    var run = run(model, options.apply(model, root));
+
+    assertInstanceOf(ResultMessage.Success.class, run.terminal());
+    assertTrue(
+        model.calls().get(1).stream()
+            .anyMatch(m -> m.content() != null && m.content().contains("preset content")),
+        () -> "second call: " + model.calls().get(1));
+    var outputs =
+        run.events().eventsOf(QueryEvent.ToolResult.class).stream()
+            .collect(Collectors.toMap(r -> r.call().name(), r -> r.result().output()));
+    assertTrue(outputs.get("Read").contains("preset content"), outputs::toString);
+    for (var tool : List.of("Glob", "Grep", "LS")) {
+      assertTrue(outputs.get(tool).contains("notes.txt"), outputs::toString);
+    }
   }
 
   @Test
-  void minimalComposesWithBuilderChaining() {
-    var custom = CostCalculator.staticTable(Map.of());
-    var opts = seed().withPreset(SessionPresets.minimal()).withCostCalculator(custom).build();
-    assertSame(custom, opts.costCalculator());
-  }
+  void readOnlyDeniesAWriteWithoutAsking() {
+    var sessions = new WriteToolSessions();
+    var model = answering(WriteToolSessions.write("notes.txt"));
 
-  // ── readOnly ────────────────────────────────────────────────────────────
+    var run =
+        run(
+            model,
+            SessionPresets.readOnly(model, root)
+                .withTools(new ToolRegistry(List.of(sessions.writeTool()))),
+            session -> QuestionAnswers.selecting(session, "Allow"));
 
-  @Test
-  void readOnlyWiresReadInspectionTools(@TempDir Path tmp) {
-    var opts = build(SessionPresets.readOnly(tmp));
-    assertEquals(Set.of("Read", "Glob", "Grep", "LS"), toolNames(opts));
-  }
-
-  @Test
-  void readOnlyUsesPlanModePermission(@TempDir Path tmp) {
-    var opts = build(SessionPresets.readOnly(tmp));
-    var perm = opts.permission().orElseThrow();
-    assertEquals(PermissionMode.PLAN, perm.mode());
+    assertInstanceOf(ResultMessage.Success.class, run.terminal());
+    assertEquals(List.of(), run.events().eventsOf(QueryEvent.QuestionAsked.class));
+    assertEquals(List.of(), sessions.executed);
   }
 
   @Test
-  void readOnlyHasNoMemoryBackend(@TempDir Path tmp) {
-    var opts = build(SessionPresets.readOnly(tmp));
-    assertTrue(opts.memoryBackend().isEmpty());
+  void readOnlyRegistersNoMemoryTools() {
+    var model = answering(WRITE_NOTE);
+
+    var run = run(model, SessionPresets.readOnly(model, root));
+
+    assertEquals(new ToolOutcome.NotFound(), run.onlyResult().outcome());
+    assertFalse(Files.exists(note()));
+  }
+
+  @ParameterizedTest(name = "{0} writes a memory note under the root")
+  @MethodSource("memoryPresets")
+  void aMemoryPresetWritesANoteUnderTheRoot(
+      String preset, BiFunction<Model, Path, SessionOptions.Builder> options) throws IOException {
+    var model = answering(WRITE_NOTE);
+
+    var run = run(model, options.apply(model, root));
+
+    assertInstanceOf(ResultMessage.Success.class, run.terminal());
+    assertEquals("remember this", Files.readString(note(), StandardCharsets.UTF_8));
   }
 
   @Test
-  void readOnlyPathOverloadDelegatesToWorkspaceOverload(@TempDir Path tmp) {
-    var ws = WorkspaceRoot.of(tmp);
-    var fromPath = build(SessionPresets.readOnly(tmp));
-    var fromWorkspace = build(SessionPresets.readOnly(ws));
-    assertEquals(toolNames(fromPath), toolNames(fromWorkspace));
-    assertEquals(
-        fromPath.permission().orElseThrow().mode(),
-        fromWorkspace.permission().orElseThrow().mode());
+  void openEndedExecutesThroughTheProviderOnceAllowed() {
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
+    var model =
+        answering(
+            new ToolCall("c1", ExecuteTool.NAME, Map.of("runtime", "bash", "script", "echo hi")));
+
+    var run =
+        run(
+            model,
+            SessionPresets.openEnded(model, root, provider),
+            session -> QuestionAnswers.selecting(session, "Allow"));
+
+    assertInstanceOf(ResultMessage.Success.class, run.terminal());
+    assertEquals(1, run.events().eventsOf(QueryEvent.QuestionAsked.class).size());
+    assertEquals(1, provider.starts.get());
+    assertEquals(List.of("echo hi"), provider.executed.stream().map(r -> r.script()).toList());
   }
 
-  @Test
-  void readOnlyRejectsNullWorkspace() {
-    assertEquals(
-        "workspaceRoot must not be null",
-        assertThrows(NullPointerException.class, () -> SessionPresets.readOnly((Path) null))
-            .getMessage());
-    assertEquals(
-        "workspace must not be null",
-        assertThrows(
-                NullPointerException.class, () -> SessionPresets.readOnly((WorkspaceRoot) null))
-            .getMessage());
+  static Stream<Arguments> nullArguments() {
+    var model = ScriptedModel.newBuilder().withTextTurn("unused").build();
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
+    var root = Path.of(".");
+    return Stream.of(
+        nullArgument("minimal", "model", () -> SessionPresets.minimal(null)),
+        nullArgument("readOnly", "model", () -> SessionPresets.readOnly(null, root)),
+        nullArgument("readOnly", "root", () -> SessionPresets.readOnly(model, null)),
+        nullArgument("workspace", "model", () -> SessionPresets.workspace(null, root)),
+        nullArgument("workspace", "root", () -> SessionPresets.workspace(model, null)),
+        nullArgument("openEnded", "model", () -> SessionPresets.openEnded(null, root, provider)),
+        nullArgument("openEnded", "root", () -> SessionPresets.openEnded(model, null, provider)),
+        nullArgument("openEnded", "provider", () -> SessionPresets.openEnded(model, root, null)));
   }
 
-  @Test
-  void readOnlyComposesWithBuilderChaining(@TempDir Path tmp) {
-    var custom = CostCalculator.staticTable(Map.of());
-    var opts = seed().withPreset(SessionPresets.readOnly(tmp)).withCostCalculator(custom).build();
-    assertSame(custom, opts.costCalculator());
+  private static Arguments nullArgument(String preset, String argument, Executable call) {
+    return Arguments.of(preset, argument, call);
   }
 
-  // ── workspace ───────────────────────────────────────────────────────────
+  @ParameterizedTest(name = "{0} refuses a null {1}")
+  @MethodSource("nullArguments")
+  void aNullArgumentIsRefusedByName(String preset, String argument, Executable call) {
+    var thrown = assertThrows(NullPointerException.class, call);
 
-  @Test
-  void workspaceWiresReadToolsPlusMemoryWrite(@TempDir Path tmp) {
-    var opts = build(SessionPresets.workspace(tmp));
-    assertEquals(Set.of("Read", "Glob", "Grep", "LS", "MemoryWrite"), toolNames(opts));
-  }
-
-  @Test
-  void workspaceUsesDefaultInWorkspacePermission(@TempDir Path tmp) {
-    var opts = build(SessionPresets.workspace(tmp));
-    var perm = opts.permission().orElseThrow();
-    assertEquals(Permission.defaultInWorkspace().mode(), perm.mode());
-  }
-
-  @Test
-  void workspaceRegistersMemoryBackend(@TempDir Path tmp) {
-    var opts = build(SessionPresets.workspace(tmp));
-    assertTrue(opts.memoryBackend().isPresent());
-  }
-
-  @Test
-  void workspacePathOverloadDelegatesToWorkspaceOverload(@TempDir Path tmp) {
-    var ws = WorkspaceRoot.of(tmp);
-    var fromPath = build(SessionPresets.workspace(tmp));
-    var fromWorkspace = build(SessionPresets.workspace(ws));
-    assertEquals(toolNames(fromPath), toolNames(fromWorkspace));
-  }
-
-  @Test
-  void workspaceRejectsNullWorkspace() {
-    assertEquals(
-        "workspaceRoot must not be null",
-        assertThrows(NullPointerException.class, () -> SessionPresets.workspace((Path) null))
-            .getMessage());
-    assertEquals(
-        "workspace must not be null",
-        assertThrows(
-                NullPointerException.class, () -> SessionPresets.workspace((WorkspaceRoot) null))
-            .getMessage());
-  }
-
-  @Test
-  void workspaceComposesWithBuilderChaining(@TempDir Path tmp) {
-    var custom = CostCalculator.staticTable(Map.of());
-    var opts = seed().withPreset(SessionPresets.workspace(tmp)).withCostCalculator(custom).build();
-    assertSame(custom, opts.costCalculator());
-  }
-
-  @Test
-  void workspaceDefaultsExecutionProviderToNoop(@TempDir Path tmp) {
-    var opts = build(SessionPresets.workspace(tmp));
-    assertSame(NoopExecutionProvider.INSTANCE, opts.executionProvider());
-  }
-
-  // ── openEnded ───────────────────────────────────────────────────────────
-
-  @Test
-  void openEndedWiresExecuteToolAndProvider(@TempDir Path tmp) {
-    var provider = LocalProcessExecutionProvider.defaultPosix();
-    var opts = build(SessionPresets.openEnded(tmp, provider));
-    assertTrue(toolNames(opts).contains(ExecuteTool.NAME));
-    assertSame(provider, opts.executionProvider());
-    assertSame(PermissionMode.DEFAULT, opts.permission().orElseThrow().mode());
-  }
-
-  @Test
-  void openEndedPathOverloadDelegatesToWorkspaceOverload(@TempDir Path tmp) {
-    var provider = LocalProcessExecutionProvider.defaultPosix();
-    var ws = WorkspaceRoot.of(tmp);
-    var fromPath = build(SessionPresets.openEnded(tmp, provider));
-    var fromWorkspace = build(SessionPresets.openEnded(ws, provider));
-    assertEquals(toolNames(fromPath), toolNames(fromWorkspace));
-  }
-
-  @Test
-  void openEndedRejectsNullArguments(@TempDir Path tmp) {
-    var provider = LocalProcessExecutionProvider.defaultPosix();
-    assertEquals(
-        "workspaceRoot must not be null",
-        assertThrows(
-                NullPointerException.class, () -> SessionPresets.openEnded((Path) null, provider))
-            .getMessage());
-    assertEquals(
-        "workspace must not be null",
-        assertThrows(
-                NullPointerException.class,
-                () -> SessionPresets.openEnded((WorkspaceRoot) null, provider))
-            .getMessage());
-    assertEquals(
-        "executionProvider must not be null",
-        assertThrows(NullPointerException.class, () -> SessionPresets.openEnded(tmp, null))
-            .getMessage());
-  }
-
-  // ── composition ─────────────────────────────────────────────────────────
-
-  @Test
-  void presetsStackAssociativelyWithUserPresets(@TempDir Path tmp) {
-    SessionPreset userPreset = b -> b.withSessionId("explicit");
-    var opts = seed().withPreset(SessionPresets.workspace(tmp)).withPreset(userPreset).build();
-    assertEquals("explicit", opts.sessionId());
-    assertTrue(toolNames(opts).contains("MemoryWrite"));
-  }
-
-  @Test
-  void laterPresetOverridesEarlierOnSameField(@TempDir Path tmp) {
-    var opts =
-        seed()
-            .withPreset(SessionPresets.readOnly(tmp))
-            .withPreset(b -> b.withPermission(Permission.defaultInWorkspace()))
-            .build();
-    assertEquals(Permission.defaultInWorkspace().mode(), opts.permission().orElseThrow().mode());
+    assertEquals(argument + " must not be null", thrown.getMessage());
   }
 }
