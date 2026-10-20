@@ -99,8 +99,7 @@ final class ToolAuthorizationTest {
                 request -> {
                   requests.add(request);
                   return approver.approve(request);
-                },
-                Object::toString)
+                })
             .build()
         ::authorize;
   }
@@ -168,7 +167,7 @@ final class ToolAuthorizationTest {
         List.of(
             new ApprovalRequest(
                 finalCall,
-                "{path=/tmp/b}",
+                "{\"path\":\"/tmp/b\"}",
                 new ToolPermissionKey("Write", "/tmp/b"),
                 ToolCategory.WRITE,
                 Optional.of(ASK_WRITE),
@@ -215,8 +214,7 @@ final class ToolAuthorizationTest {
                     request -> {
                       requests.add(request);
                       return PermissionDecision.allow("reviewed");
-                    },
-                    Object::toString)
+                    })
                 .build()
             ::authorize,
         UserMessage.text("write"));

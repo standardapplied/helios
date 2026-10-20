@@ -104,7 +104,7 @@ final class SessionWiring {
         .map(
             permission ->
                 DefaultPermissionEvaluator.newBuilder(permission, tools)
-                    .withApprover(ToolApprover.askingUser(gateway), SessionJson::write)
+                    .withApprover(ToolApprover.askingUser(gateway))
                     .withSecretRegistry(secrets)
                     .build());
   }
