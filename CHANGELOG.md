@@ -605,7 +605,7 @@ stage and ends `NotFound`, as without a policy.
 | A `PreToolUseHook` that throws or returns `null` is `Continue` | it refuses the call, `Rejected(by = the hook)`, with reason `hook threw <exception class>: <message>` or `hook returned null`, logged at `WARNING` with the exception class alone; later `PreToolUse` hooks do not run |
 | The first `PreToolUse` `MutateArgs` ends the chain | it passes the new arguments to the next hook; `Block`, `Inject` and `Stop` end the chain |
 | `HookRegistry.firePreToolUse` returns `HookDecision` | returns `PreToolUseResult(call, mutations, decision)` |
-| `DefaultPermissionEvaluator.Builder.withQuestionGateway(QuestionGateway)` | `withApprover(ToolApprover)`; `ToolApprover.askingUser(gateway)` is the old prompt |
+| `DefaultPermissionEvaluator.Builder.withQuestionGateway(QuestionGateway)` | `withApprover(ToolApprover, Function<Map<String, Object>, String> argumentWriter)`, the writer rendering a call's arguments as compact JSON for the approval; `ToolApprover.askingUser(gateway)` is the old prompt |
 | `new DefaultPermissionEvaluator(permission, tools)` | `DefaultPermissionEvaluator.newBuilder(permission, tools).build()`, with `withSecretRegistry` for the registry that redacts an approval's reason |
 | `DefaultPermissionEvaluator` implements `PreToolUseHook`: `beforeTool`, `priority()`, `name()`, `Builder.withPriority(int)` | `authorize(ToolCall)` returns an `ALLOW` or `DENY` `PermissionDecision`; no priority, since no hook runs after it |
 | `PermissionDecision(effect, reason)`; deny reasons read `permission: deny rule for <tool>` | `PermissionDecision(effect, reason, rule)`; reasons name the tool, key and rule or default that decided, such as `deny rule Write(/etc/**) matched Write(/etc/passwd)` |
@@ -633,6 +633,20 @@ canonical call is the one keyed, announced, dispatched and shown to `PostToolUse
 | `new ToolContext(SessionContext, CancellationToken, Duration)` | `ToolContext(SessionContext, CancellationToken, Duration, Predicate<String> withheld)`; `ToolContext.noop()` withholds nothing |
 | `ToolDispatch.dispatch(ToolCall, CancellationToken, Duration, Duration)` | `dispatch(ToolCall, CancellationToken, Duration, Duration, Predicate<String> withheld)` |
 | A permission-key extractor that throws is refused as `permission key of <tool> failed: <class>: <message>` under a `Permission`, and is never called without one | refused before authorization as `<tool>: <message>`, with or without a `Permission` |
+
+**`Execute`'s permission key is the whole script, and the approval prompt shows the arguments.**
+The key was `<RUNTIME>/<first whitespace-delimited token of the script>`, so a rule saw only the
+first command. A rule now matches the whole script, stripped, every line included: a deny rule
+for `rm` becomes `Execute(BASH/**rm **)`. A script carrying a registered secret's value is refused
+as `permission key of Execute carries a secret` before any rule or approver sees it. A pattern
+cannot stop a command the script spells differently; real control is `ASK` or `LOCKED_DOWN` with
+explicit allow rules.
+
+| Before | 3.0 |
+|---|---|
+| `Execute(BASH/rm)` | `Execute(BASH/**rm **)`; the key of `ls; rm -rf ~/` is `BASH/ls; rm -rf ~/`, not `BASH/ls;` |
+| `ApprovalRequest(call, key, category, rule, reason)` | `ApprovalRequest(call, arguments, key, category, rule, reason)`: `arguments` is display text, the call's arguments as compact JSON with every session secret redacted, cut at 1024 characters; `call` is still the exact call that runs |
+| The human approver asks `Allow <tool>(<key>)?` | it asks `Allow <tool>(<key>)?`, a blank line, then `Arguments: <arguments>` |
 
 ### Added
 
@@ -727,11 +741,15 @@ canonical call is the one keyed, announced, dispatched and shown to `PostToolUse
   `Redirect.NORMAL`, which never follows `https` to `http`, and the 10-second connect timeout of
   `create(...)`. It takes no `ModelConfig`, so no configured key or header reaches it, and an
   architecture rule allows it only in `helios-onnx`. `create(...)` still never follows a redirect.
+- **`RedactionResult.truncated(int maxChars)`.** Cuts a redacted text after `maxChars` characters,
+  never inside a surrogate pair, with a `… [<n> more chars]` note, keeping the redaction counts.
+  Redacting before the cut means a secret the cut falls across is never partly shown. A refusal's
+  reason and an approval's arguments are both bounded through it.
 - **`ToolApprover`, `ApprovalRequest`, `PermissionDecision.rule()`, `PermissionDecision.byRule` and
   `DefaultPermissionEvaluator.Builder.withSecretRegistry`.** A `ToolApprover` decides a call the
-  policy answered with ASK, from an `ApprovalRequest(call, key, category, rule, reason)` for the
-  final immutable call, whose `rule` is the ask rule that matched (empty when a mode or category
-  default asked). Only its `ALLOW` admits the call. `ToolApprover.askingUser(gateway)` is the human
+  policy answered with ASK, from an `ApprovalRequest(call, arguments, key, category, rule, reason)`
+  for the final immutable call, whose `rule` is the ask rule that matched (empty when a mode or
+  category default asked) and whose `arguments` display the call, redacted and bounded. Only its `ALLOW` admits the call. `ToolApprover.askingUser(gateway)` is the human
   approver the session wires over `AgentSession.answer`, under a fresh question id per request, so
   an answer resolves one call only. `PermissionDecision.rule()` is the rule that decided;
   `withSecretRegistry` takes the registry that redacts an approval's reason.
@@ -875,6 +893,12 @@ canonical call is the one keyed, announced, dispatched and shown to `PostToolUse
   differently (`secrets/key`, `docs/../secrets/key`, an absolute path, a symlink), by swapping a
   symlink in after approval, or by searching or listing from a directory above it (`Grep .`,
   `LS .`). Path tools now key on the canonical path they touch (see Breaking).
+- **A deny rule on `Execute` no longer misses every command after the first, and the approval
+  prompt shows what runs.** `Execute` was keyed on the script's first token, so with deny
+  `Execute(BASH/rm)` the script `ls; rm -rf ~/` was keyed `BASH/ls;`, no rule matched, and the
+  user was asked `Allow Execute(BASH/ls;)?` without seeing the script; `Allow` ran all of it. The
+  key is now the whole script and the question shows the call's arguments, redacted and bounded
+  (see Breaking).
 - **A deny rule no longer misses a key that holds a line break.** `RuleMatcher` compiled a rule's `*`
   and `**` to a pattern whose `.` did not match a line terminator, so a deny rule missed a key
   holding one: `Write(/etc/**)` did not match `Write(/etc/cron.d/x\ny)`, and the mode's default,

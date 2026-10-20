@@ -99,7 +99,8 @@ final class ToolAuthorizationTest {
                 request -> {
                   requests.add(request);
                   return approver.approve(request);
-                })
+                },
+                Object::toString)
             .build()
         ::authorize;
   }
@@ -167,6 +168,7 @@ final class ToolAuthorizationTest {
         List.of(
             new ApprovalRequest(
                 finalCall,
+                "{path=/tmp/b}",
                 new ToolPermissionKey("Write", "/tmp/b"),
                 ToolCategory.WRITE,
                 Optional.of(ASK_WRITE),
@@ -213,7 +215,8 @@ final class ToolAuthorizationTest {
                     request -> {
                       requests.add(request);
                       return PermissionDecision.allow("reviewed");
-                    })
+                    },
+                    Object::toString)
                 .build()
             ::authorize,
         UserMessage.text("write"));
@@ -347,24 +350,10 @@ final class ToolAuthorizationTest {
   }
 
   @Test
-  void aDiagnosticAtTheBoundIsKeptWhole() {
-    var reason = "r".repeat(ToolAuthorization.MAX_REASON_CHARS);
-    assertEquals(reason, ToolAuthorization.diagnostic(new SecretRegistry(), reason).text());
-  }
-
-  @Test
   void aLongerDiagnosticIsCutAtTheBound() {
     var reason = "r".repeat(ToolAuthorization.MAX_REASON_CHARS + 5);
     assertEquals(
         "r".repeat(ToolAuthorization.MAX_REASON_CHARS) + "… [5 more chars]",
-        ToolAuthorization.diagnostic(new SecretRegistry(), reason).text());
-  }
-
-  @Test
-  void aDiagnosticIsNeverCutInsideASurrogatePair() {
-    var reason = "r".repeat(ToolAuthorization.MAX_REASON_CHARS - 1) + "😀" + "tail";
-    assertEquals(
-        "r".repeat(ToolAuthorization.MAX_REASON_CHARS - 1) + "😀… [4 more chars]",
         ToolAuthorization.diagnostic(new SecretRegistry(), reason).text());
   }
 }

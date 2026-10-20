@@ -29,4 +29,26 @@ public record RedactionResult(byte[] bytes, Map<String, Integer> counts) {
     }
     return total;
   }
+
+  /**
+   * This result with its text cut after {@code maxChars} characters, never inside a surrogate pair,
+   * and a note of how many were cut; this result itself when the text is no longer. A secret the
+   * cut falls across was redacted before the cut, so no part of it is shown. The counts are kept.
+   *
+   * @param maxChars the characters kept; positive
+   * @return the bounded result
+   * @throws IllegalArgumentException if {@code maxChars} is not positive
+   */
+  public RedactionResult truncated(int maxChars) {
+    if (maxChars <= 0) {
+      throw new IllegalArgumentException("maxChars must be positive: " + maxChars);
+    }
+    var text = text();
+    if (text.length() <= maxChars) {
+      return this;
+    }
+    var end = text.offsetByCodePoints(0, text.codePointCount(0, maxChars));
+    var cut = text.substring(0, end) + "… [" + (text.length() - end) + " more chars]";
+    return new RedactionResult(cut.getBytes(StandardCharsets.UTF_8), counts);
+  }
 }

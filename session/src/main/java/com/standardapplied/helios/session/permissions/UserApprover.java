@@ -10,8 +10,10 @@ import java.util.List;
 
 /**
  * The {@link ToolApprover} that asks the user through a {@link QuestionGateway}; see {@link
- * ToolApprover#askingUser}. Each request gets its own question id, so an answer resolves one call:
- * a response to another question id, or one that selects other than exactly one option, denies it.
+ * ToolApprover#askingUser}. The question names the call by its permission key and shows its
+ * arguments, redacted and bounded, so the user sees what runs, not only what the rules saw. Each
+ * request gets its own question id, so an answer resolves one call: a response to another question
+ * id, or one that selects other than exactly one option, denies it.
  */
 record UserApprover(QuestionGateway gateway) implements ToolApprover {
 
@@ -25,7 +27,7 @@ record UserApprover(QuestionGateway gateway) implements ToolApprover {
         new AskUserQuestionRequest(
             "perm-" + Ids.newId(),
             "Permission",
-            "Allow " + action + "?",
+            "Allow " + action + "?\n\nArguments: " + request.arguments(),
             List.of(
                 new AskUserQuestionOption(ALLOW_LABEL, request.reason()),
                 new AskUserQuestionOption(DENY_LABEL, "Refuse this tool call")),

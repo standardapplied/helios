@@ -132,7 +132,7 @@ final class CanonicalKeyPolicyTest {
         PermissionRule.any(PermissionEffect.DENY, "Read"),
         PermissionRule.withGlob(PermissionEffect.DENY, "MemoryRead", "/memories/"),
         PermissionRule.withGlob(PermissionEffect.DENY, "MemoryRead", "**"),
-        PermissionRule.withGlob(PermissionEffect.DENY, "Execute", "BASH/rm"),
+        PermissionRule.withGlob(PermissionEffect.DENY, "Execute", "BASH/**rm **"),
         PermissionRule.withGlob(PermissionEffect.DENY, "Unregistered", "anything"));
   }
 

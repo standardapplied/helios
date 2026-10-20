@@ -27,7 +27,8 @@ public interface ToolApprover {
 
   /**
    * The human approver: asks through {@code gateway} with header {@code Permission}, question
-   * {@code Allow <tool>(<key>)?} and options {@code Allow} / {@code Deny}, under a fresh {@code
+   * {@code Allow <tool>(<key>)?}, a blank line and {@code Arguments: <arguments>} (see {@link
+   * ApprovalRequest#arguments}), and options {@code Allow} / {@code Deny}, under a fresh {@code
    * perm-} question id per request. A response to that question selecting only {@code Allow}
    * (case-insensitive) allows the call; any other answer, a response to another question or one
    * selecting more than one option denies it.

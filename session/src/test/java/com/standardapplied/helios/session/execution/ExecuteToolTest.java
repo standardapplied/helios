@@ -106,27 +106,46 @@ final class ExecuteToolTest {
   // ── permission key ───────────────────────────────────────────────────────
 
   @Test
-  void permissionKeyEncodesRuntimeAndFirstToken() {
-    var key = ExecuteTool.permissionKey(Map.of("runtime", "bash", "script", "rm -rf /tmp/foo"));
+  void permissionKeyEncodesRuntimeAndTheWholeScript() {
+    var key = ExecuteTool.permissionKey(Map.of("runtime", "bash", "script", "ls; rm -rf ~/"));
     assertEquals(ExecuteTool.NAME, key.toolName());
-    assertEquals("BASH/rm", key.canonicalArgs());
+    assertEquals("BASH/ls; rm -rf ~/", key.canonicalArgs());
   }
 
   @Test
-  void permissionKeyHandlesSingleTokenScript() {
-    var key = ExecuteTool.permissionKey(Map.of("runtime", "BASH", "script", "true"));
-    assertEquals("BASH/true", key.canonicalArgs());
+  void permissionKeyKeepsEveryLineOfAMultiLineScript() {
+    var key =
+        ExecuteTool.permissionKey(Map.of("runtime", "BASH", "script", "cd /tmp\nrm -rf x\r\nls"));
+    assertEquals("BASH/cd /tmp\nrm -rf x\r\nls", key.canonicalArgs());
+  }
+
+  @Test
+  void permissionKeyStripsLeadingAndTrailingWhitespaceOnly() {
+    var key = ExecuteTool.permissionKey(Map.of("runtime", "BASH", "script", " \n\t echo  hi \n "));
+    assertEquals("BASH/echo  hi", key.canonicalArgs());
   }
 
   @Test
   void permissionKeyHandlesMissingRuntime() {
     var key = ExecuteTool.permissionKey(Map.of("script", "echo hi"));
-    assertEquals("UNKNOWN/echo", key.canonicalArgs());
+    assertEquals("UNKNOWN/echo hi", key.canonicalArgs());
+  }
+
+  @Test
+  void permissionKeyHandlesBlankRuntime() {
+    var key = ExecuteTool.permissionKey(Map.of("runtime", " ", "script", "echo hi"));
+    assertEquals("UNKNOWN/echo hi", key.canonicalArgs());
   }
 
   @Test
   void permissionKeyHandlesBlankScript() {
-    var key = ExecuteTool.permissionKey(Map.of("runtime", "BASH", "script", ""));
+    var key = ExecuteTool.permissionKey(Map.of("runtime", "BASH", "script", " \n "));
+    assertEquals("BASH/", key.canonicalArgs());
+  }
+
+  @Test
+  void permissionKeyHandlesMissingScript() {
+    var key = ExecuteTool.permissionKey(Map.of("runtime", "BASH"));
     assertEquals("BASH/", key.canonicalArgs());
   }
 

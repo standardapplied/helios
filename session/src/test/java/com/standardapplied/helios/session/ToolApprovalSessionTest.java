@@ -57,7 +57,7 @@ final class ToolApprovalSessionTest {
 
     var request = run.events().eventsOf(QueryEvent.QuestionAsked.class).getFirst().request();
     assertEquals("Permission", request.header());
-    assertEquals("Allow Write(/tmp/a)?", request.question());
+    assertEquals("Allow Write(/tmp/a)?\n\nArguments: {\"path\":\"/tmp/a\"}", request.question());
     assertEquals(
         List.of("Allow", "Deny"),
         request.options().stream().map(AskUserQuestionOption::label).toList());
