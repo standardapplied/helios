@@ -338,6 +338,23 @@ final class ToolAuthorizationTest {
     assertFalse(admitted.withheld().test("./secrets"));
   }
 
+  @Test
+  void onlyExecutesScriptIsCheckedForASecretBeyondTheKey() {
+    var secrets = new SecretRegistry();
+    secrets.register("TOKEN", "tok-0123456789");
+    var call = new ToolCall("c1", "Write", Map.of("path", "/tmp/a", "script", "tok-0123456789"));
+
+    var verdict =
+        ToolAuthorization.admit(
+            writeTool(),
+            canonical -> PermissionDecision.allow("ok"),
+            key -> Optional.empty(),
+            secrets,
+            call);
+
+    assertEquals(call, assertInstanceOf(ToolAuthorization.Admitted.class, verdict).call());
+  }
+
   // ── diagnostics ──────────────────────────────────────────────────────────
 
   @Test
