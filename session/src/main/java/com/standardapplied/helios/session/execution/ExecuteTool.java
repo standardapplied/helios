@@ -5,7 +5,6 @@
 package com.standardapplied.helios.session.execution;
 
 import com.standardapplied.helios.core.common.Result;
-import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolContext;
@@ -48,13 +47,14 @@ import java.util.concurrent.ExecutionException;
  * </ul>
  *
  * <p>Classified under {@link ToolCategory#EXECUTION}. The permission key is {@code
- * <RUNTIME>/<script>}: the runtime upper-cased ({@code UNKNOWN} when missing) and the whole script,
- * stripped, so a rule's glob matches the script text, every line of it (e.g. {@code withGlob(DENY,
- * "Execute", "BASH/**rm **")}). A pattern cannot stop a command the script spells differently
- * ({@code r''m}, a variable, a here-document), so a deny rule is a guard rail, not a control: real
- * control is {@code ASK}, whose approval prompt shows the call's arguments, or {@code LOCKED_DOWN}
- * with explicit allow rules. A script that carries a registered secret's value is refused before
- * any rule or approver sees its key.
+ * <RUNTIME>/<script>}: the {@link Runtime} constant the {@code runtime} argument names ({@code
+ * UNKNOWN} when it names none, a call refused when it runs) and the whole script, stripped, so a
+ * rule's glob matches the script text, every line of it (e.g. {@code withGlob(DENY, "Execute",
+ * "BASH/**rm **")}). A pattern cannot stop a command the script spells differently ({@code r''m}, a
+ * variable, a here-document), so a deny rule is a guard rail, not a control: real control is {@code
+ * ASK}, whose approval prompt shows the call's arguments, or {@code LOCKED_DOWN} with explicit
+ * allow rules. A script that carries a registered secret's value is refused before any rule or
+ * approver sees its key.
  *
  * <p>Spec: §11 + §8.3.
  */
@@ -147,10 +147,17 @@ public final class ExecuteTool {
   }
 
   static ToolPermissionKey permissionKey(Map<String, Object> args) {
-    var runtimeArg = ToolArgs.stringArg(args, "runtime");
     var script = ToolArgs.stringArg(args, "script");
-    var runtime = Strings.isBlank(runtimeArg) ? "UNKNOWN" : runtimeArg.toUpperCase(Locale.ROOT);
-    return new ToolPermissionKey(NAME, runtime + "/" + script.strip());
+    return new ToolPermissionKey(
+        NAME, runtime(ToolArgs.stringArg(args, "runtime")) + "/" + script.strip());
+  }
+
+  private static String runtime(String argument) {
+    try {
+      return Runtime.valueOf(argument.toUpperCase(Locale.ROOT)).name();
+    } catch (IllegalArgumentException e) {
+      return "UNKNOWN";
+    }
   }
 
   private static ToolResult execute(

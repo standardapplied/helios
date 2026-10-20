@@ -32,6 +32,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  *       would survive verbatim in any downstream JSON column the redactor scrubs post-serialise.
  *       Refusing JSON-unsafe bytes at registration makes byte-level redaction provably safe in both
  *       pre-serialise and post-serialise call sites.
+ *   <li>Values must not start or end with a space. A key or text that is stripped, such as {@code
+ *       Execute}'s permission key, would cut that space and no longer hold the whole secret.
  * </ul>
  */
 public final class SecretRegistry {
@@ -52,7 +54,8 @@ public final class SecretRegistry {
    * @param value the secret value
    * @throws IllegalArgumentException if name is blank, value is null, value is shorter than {@link
    *     #MIN_SECRET_LENGTH}, or value contains any character outside JSON-safe printable ASCII
-   *     ({@code [0x20, 0x7E]} excluding {@code "} and {@code \})
+   *     ({@code [0x20, 0x7E]} excluding {@code "} and {@code \}), or value starts or ends with a
+   *     space
    */
   public void register(String name, String value) {
     validate(name, value);
@@ -79,6 +82,10 @@ public final class SecretRegistry {
     }
     for (var i = 0; i < value.length(); i++) {
       validateCharacter(name, value.charAt(i), i);
+    }
+    if (value.startsWith(" ") || value.endsWith(" ")) {
+      throw new IllegalArgumentException(
+          "Secret '%s' must not start or end with a space".formatted(name));
     }
   }
 

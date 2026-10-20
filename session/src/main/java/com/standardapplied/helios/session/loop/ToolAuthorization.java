@@ -5,11 +5,9 @@ package com.standardapplied.helios.session.loop;
 import com.standardapplied.helios.core.common.RedactionResult;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionRule;
-import com.standardapplied.helios.session.tools.ToolArgs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -60,8 +58,8 @@ final class ToolAuthorization {
    * Decide {@code call}: canonicalise it through its binding, whether or not a policy is set, and
    * authorise the canonical call. A call {@code tools} binds no tool for is admitted unchanged and
    * dispatch answers it {@code NotFound}, policy or none. A call whose canonicalisation throws, or
-   * whose key, or {@code Execute} script, carries a secret of {@code secrets}, is refused before
-   * {@code authorization} sees it, so no approval prompt or event shows the secret.
+   * whose key carries a secret of {@code secrets}, is refused before {@code authorization} sees it,
+   * so no approval prompt or event shows the secret.
    *
    * @param tools the registry dispatch looks the call up in
    * @param authorization the session's permission check of a canonical call
@@ -88,23 +86,12 @@ final class ToolAuthorization {
       return new Refused(call.name() + ": " + e.getMessage());
     }
     var key = canonical.key();
-    if (secrets.leaks(key.toolName())
-        || secrets.leaks(key.canonicalArgs())
-        || leaksInExecuteScript(secrets, canonical.call())) {
+    if (secrets.leaks(key.toolName()) || secrets.leaks(key.canonicalArgs())) {
       return new Refused("permission key of " + call.name() + " carries a secret");
     }
     return refusal(authorization, canonical)
         .<Verdict>map(Refused::new)
         .orElseGet(() -> new Admitted(canonical.call(), withheld(binding, decidingRule)));
-  }
-
-  /**
-   * {@code Execute}'s key strips its script, which can cut the whitespace a secret ends or starts
-   * with, so the script it was keyed from is checked whole.
-   */
-  private static boolean leaksInExecuteScript(SecretRegistry secrets, ToolCall call) {
-    return ExecuteTool.NAME.equals(call.name())
-        && secrets.leaks(ToolArgs.stringArg(call.arguments(), "script"));
   }
 
   private static Optional<String> refusal(
