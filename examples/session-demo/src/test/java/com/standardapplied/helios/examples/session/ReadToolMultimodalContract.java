@@ -11,7 +11,6 @@ import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
-import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.SessionPresets;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.files.InMemoryFileTracker;
@@ -72,10 +71,8 @@ abstract class ReadToolMultimodalContract {
     try (var model = createModel(ToolChoice.any());
         var session =
             AgentSession.create(
-                SessionOptions.newBuilder()
-                    .withPreset(SessionPresets.readOnly(workspace))
+                SessionPresets.readOnly(model, workspace)
                     .withTools(new ToolRegistry(List.of(read)))
-                    .withModel(model)
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
                     .build())) {
       var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
