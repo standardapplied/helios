@@ -71,7 +71,7 @@ public final class JsonSnapshot {
   private final String name;
   private final Deque<Object> path = new ArrayDeque<>();
   private final Set<Object> open = Collections.newSetFromMap(new IdentityHashMap<>());
-  private int values;
+  private int values = 1;
 
   private JsonSnapshot(String name) {
     this.name = name;
@@ -89,13 +89,12 @@ public final class JsonSnapshot {
    */
   public static SequencedMap<String, Object> ofObject(String name, Map<?, ?> object) {
     var snapshot = new JsonSnapshot(Validate.notBlank("name", name));
-    snapshot.count();
     return snapshot.object(Objects.requireNonNull(object, name + " must not be null"), 1);
   }
 
   /**
-   * {@code object} as compact JSON, keys in the map's order. A string escapes exactly what RFC 8259
-   * requires: {@code "}, {@code \} and U+0000 to U+001F.
+   * {@code object} as compact JSON, keys in the map's order, every string escaped by {@link
+   * #escape}.
    *
    * @param object the object; non-null, holding only JSON values
    * @return the JSON text
@@ -107,8 +106,25 @@ public final class JsonSnapshot {
     return Writer.json(Objects.requireNonNull(object, "object must not be null"));
   }
 
+  /**
+   * {@code text} as the inside of a JSON string, without the quotes. It escapes what RFC 8259
+   * requires, {@code "}, {@code \} and every control character, plus the line separators U+2028 and
+   * U+2029 and every format character (a bidi override, a zero-width character), so the text shows
+   * what it holds: {@code \b}, {@code \f}, {@code \n}, {@code \r} and {@code \t} by name, any other
+   * as a lowercase {@code \}{@code uXXXX} for each of its UTF-16 units.
+   *
+   * @param text the text; non-null
+   * @return the escaped text
+   * @throws NullPointerException if {@code text} is null
+   */
+  public static String escape(String text) {
+    return text.codePoints().mapToObj(Writer::escape).collect(Collectors.joining());
+  }
+
   private Object value(Object value, int depth) {
-    count();
+    if (++values > MAX_VALUES) {
+      throw new IllegalArgumentException(name + " holds more than " + MAX_VALUES + " values");
+    }
     return switch (value) {
       case null -> null;
       case String string when string.length() > MAX_STRING_LENGTH ->
@@ -194,12 +210,6 @@ public final class JsonSnapshot {
     }
   }
 
-  private void count() {
-    if (++values > MAX_VALUES) {
-      throw new IllegalArgumentException(name + " holds more than " + MAX_VALUES + " values");
-    }
-  }
-
   private IllegalArgumentException rejected(String problem) {
     var where = new StringBuilder(name);
     for (var step : path) {
@@ -237,22 +247,30 @@ public final class JsonSnapshot {
       };
     }
 
+    private static String escape(int c) {
+      return switch (c) {
+        case '"' -> "\\\"";
+        case '\\' -> "\\\\";
+        case '\b' -> "\\b";
+        case '\f' -> "\\f";
+        case '\n' -> "\\n";
+        case '\r' -> "\\r";
+        case '\t' -> "\\t";
+        default ->
+            Character.isISOControl(c)
+                    || c == '\u2028'
+                    || c == '\u2029'
+                    || Character.getType(c) == Character.FORMAT
+                ? Character.toString(c)
+                    .chars()
+                    .mapToObj(unit -> "\\u%04x".formatted(unit))
+                    .collect(Collectors.joining())
+                : Character.toString(c);
+      };
+    }
+
     private static String quote(String string) {
-      var json = new StringBuilder(string.length() + 2).append('"');
-      for (var i = 0; i < string.length(); i++) {
-        var c = string.charAt(i);
-        switch (c) {
-          case '"' -> json.append("\\\"");
-          case '\\' -> json.append("\\\\");
-          case '\b' -> json.append("\\b");
-          case '\f' -> json.append("\\f");
-          case '\n' -> json.append("\\n");
-          case '\r' -> json.append("\\r");
-          case '\t' -> json.append("\\t");
-          default -> json.append(c < 0x20 ? "\\u%04x".formatted((int) c) : String.valueOf(c));
-        }
-      }
-      return json.append('"').toString();
+      return '"' + JsonSnapshot.escape(string) + '"';
     }
   }
 }

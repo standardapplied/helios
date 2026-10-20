@@ -6,17 +6,15 @@ import com.standardapplied.helios.core.common.JsonSnapshot;
 import java.util.Map;
 
 /**
- * JSON text for single values: RFC 8259 string escaping, finite numbers in their canonical Java
- * form, and objects whose values are written as booleans, numbers or strings.
+ * JSON text for single values: strings escaped by {@link JsonSnapshot#escape}, finite numbers in
+ * their canonical Java form, and objects whose values are written as booleans, numbers or strings.
  */
 final class JsonText {
 
   private JsonText() {}
 
-  /** {@code s} as a JSON string, escaped by {@link JsonSnapshot#write} so escaping exists once. */
   static String quote(String s) {
-    var object = JsonSnapshot.write(Map.of("", s));
-    return object.substring("{\"\":".length(), object.length() - 1);
+    return "\"" + JsonSnapshot.escape(s) + "\"";
   }
 
   static String number(double value) {

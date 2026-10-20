@@ -359,9 +359,16 @@ class JsonSnapshotTest {
     object.put("o", Map.of("k", List.of()));
 
     assertEquals(
-        "{\"s\":\"q\\\" b\\\\ n\\n c\\u0001 é\u2028\","
+        "{\"s\":\"q\\\" b\\\\ n\\n c\\u0001 é\\u2028\","
             + "\"n\":[null,true,1,2,1.5,2.5,10,1.0],\"o\":{\"k\":[]}}",
         JsonSnapshot.write(object));
+  }
+
+  @Test
+  void escapeShowsEveryControlLineSeparatorAndFormatCharacter() {
+    assertEquals(
+        "\\\"a\\\\b\\b\\f\\n\\r\\t\\u0007\\u007f\\u2028\\u2029\\u200b\\u202e\\udb40\\udc01é😀",
+        JsonSnapshot.escape("\"a\\b\b\f\n\r\t\u0007\u007f\u2028\u2029\u200b\u202e\udb40\udc01é😀"));
   }
 
   @Test

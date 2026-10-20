@@ -8,11 +8,15 @@ package com.standardapplied.helios.core.common;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class StringsTest {
 
@@ -109,5 +113,30 @@ class StringsTest {
   void renderWithNullValues() {
     var template = "Hello {name}";
     assertEquals(template, Strings.render(template, null));
+  }
+
+  @Test
+  void aTextAtTheBoundIsKeptWhole() {
+    var whole = "r".repeat(8);
+    assertSame(whole, Strings.truncated(whole, 8, "… [%d more chars]"));
+  }
+
+  @Test
+  void aLongerTextIsCutAtTheBoundWithItsNoteOfWhatWasCut() {
+    assertEquals("r".repeat(8) + "\ncut 5", Strings.truncated("r".repeat(13), 8, "\ncut %d"));
+  }
+
+  @Test
+  void aCutAcrossASurrogatePairKeepsAtMostTheBound() {
+    assertEquals("rrr… [6 more chars]", Strings.truncated("rrr😀tail", 4, "… [%d more chars]"));
+    assertEquals("rrr… [2 more chars]", Strings.truncated("rrr😀", 4, "… [%d more chars]"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, -1})
+  void aBoundThatKeepsNothingIsRejected(int maxChars) {
+    var ex =
+        assertThrows(IllegalArgumentException.class, () -> Strings.truncated("r", maxChars, "%d"));
+    assertEquals("maxChars must be positive: " + maxChars, ex.getMessage());
   }
 }

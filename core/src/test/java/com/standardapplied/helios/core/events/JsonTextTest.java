@@ -20,6 +20,11 @@ class JsonTextTest {
   }
 
   @Test
+  void aStringShowsItsLineSeparatorsAndFormatCharactersEscaped() {
+    assertEquals("\"a\\u2028b\\u202ec\"", JsonText.quote("a\u2028b\u202ec"));
+  }
+
+  @Test
   void anObjectWithNoFieldsIsEmpty() {
     assertEquals("{}", new JsonObjectWriter().toString());
   }

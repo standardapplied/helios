@@ -6,6 +6,7 @@ package com.standardapplied.helios.session.permissions;
 
 import com.standardapplied.helios.core.common.JsonSnapshot;
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.session.tools.PathSpace;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolBinding.PathArgument;
@@ -63,6 +64,8 @@ import java.util.stream.Stream;
  * Immutable. Safe to share across sessions when the approver is.
  */
 public final class DefaultPermissionEvaluator {
+
+  private static final int MAX_ARGUMENT_CHARS = 1024;
 
   private final Permission permission;
   private final ToolRegistry tools;
@@ -136,10 +139,10 @@ public final class DefaultPermissionEvaluator {
     var redactor = secrets.redactor();
     var reason = redactor.redact(decision.reason()).text();
     var arguments =
-        redactor
-            .redact(UserApprover.escaped(JsonSnapshot.write(call.arguments()), true))
-            .truncated(UserApprover.MAX_SHOWN_CHARS, "\nArguments cut: %d more chars not shown")
-            .text();
+        Strings.truncated(
+            redactor.redact(JsonSnapshot.write(call.arguments())).text(),
+            MAX_ARGUMENT_CHARS,
+            "\nArguments cut: %d more chars not shown");
     return approve(new ApprovalRequest(call, arguments, key, category, decision.rule(), reason));
   }
 
