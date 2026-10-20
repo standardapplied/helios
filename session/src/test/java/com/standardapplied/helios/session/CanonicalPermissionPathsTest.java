@@ -7,6 +7,7 @@ import static com.standardapplied.helios.session.PathToolSessions.call;
 import static com.standardapplied.helios.session.PathToolSessions.output;
 import static com.standardapplied.helios.session.PathToolSessions.policy;
 import static com.standardapplied.helios.session.PathToolSessions.read;
+import static com.standardapplied.helios.session.WriteToolSessions.answering;
 import static com.standardapplied.helios.session.WriteToolSessions.run;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -324,9 +325,9 @@ final class CanonicalPermissionPathsTest {
   @Test
   void aReadOnlySessionReadsAFileByItsCanonicalPath() throws IOException {
     sessions.write("src/Foo.java", "class Foo {}");
-    var options = SessionOptions.newBuilder().withPreset(SessionPresets.readOnly(sessions.root));
+    var model = answering(read("src/Foo.java"));
 
-    var run = run(options, read("src/Foo.java"));
+    var run = run(model, SessionPresets.readOnly(model, sessions.root), session -> event -> {});
 
     assertEquals(new ToolOutcome.Succeeded(), run.onlyResult().outcome());
     assertTrue(output(run).contains("class Foo {}"), output(run));

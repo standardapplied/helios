@@ -240,11 +240,12 @@ not use.
 
 `AgentSession` is a long-lived object that runs an agent loop on a virtual thread. `send` messages, `subscribe` to events, `interrupt` mid-turn, `runBlocking` for synchronous results. This is the shape that shows up in production: multi-turn tool use, mid-run user steering, permission gates, observability.
 
+<!-- snippet: QuickStarts#workspaceSession -->
 ```java
-try (var session = AgentSession.create(
-    SessionPresets.workspace(model, Path.of("/path/to/repo")).build())) {
-  var terminal = session.runBlocking(UserMessage.text(
-      "Summarise the public API of the session module."));
+try (var session =
+    AgentSession.create(SessionPresets.workspace(model, Path.of("/path/to/repo")).build())) {
+  var terminal =
+      session.runBlocking(UserMessage.text("Summarise the public API of the session module."));
   System.out.println(((ResultMessage.Success) terminal).result());
 }
 ```
@@ -267,11 +268,12 @@ See [Sessions](#sessions-helios-session) below.
 - `answer(qid, response)` — resolve a pending `AskUserQuestion`.
 - `close()` — `AutoCloseable`; cancels the loop and never throws, whatever a cancellation callback does. A started session's loop runs the teardown and `close()` returns at once; for a session whose loop never started, `close()` runs the teardown on the caller's thread, so it can block for up to the teardown graces below. Every end of a session runs one bounded teardown before the result settles: cancel the session's token (its callbacks on a thread of their own) and wait for live tool calls, `onSessionEnd`, scheduler shutdown, publisher drain, each wait bounded by `SessionLimits.teardownGrace` (5 s). A tool that ignores both its token and interruption may still run, and its effects land, after the result settles; it is logged as still running.
 
-`SessionPresets` ships three curated `SessionOptions.Builder` factories:
+`SessionPresets` ships four curated factories, each returning a `SessionOptions.Builder` that already holds the model:
 
 - `minimal(model)` — model only, defaults for everything else.
 - `readOnly(model, root)` — `Read` / `Glob` / `Grep` / `LS` rooted at the workspace, gated by `Permission.planMode()`.
-- `workspace(model, root)` — same read tools plus `MemoryWrite` plus `Permission.defaultInWorkspace()` (reads + memory allowed, writes / edit / execute asked).
+- `workspace(model, root)` — same read tools plus a `FileSystemMemoryBackend` (the session registers `MemoryRead` and `MemoryWrite` for it) plus `Permission.defaultInWorkspace()` (reads + memory allowed, writes / edit / execute asked).
+- `openEnded(model, root, provider)` — `workspace` plus `Execute` through the given `ExecutionProvider`; `defaultInWorkspace()` asks before each execution.
 
 Stream events for a live UI:
 
@@ -312,6 +314,7 @@ Override head/tail policy via the Builder, swap the whole compactor through `Ses
 
 `Model` is `AutoCloseable` and holds long-lived resources (HTTP connection pool, file descriptors). **Build it once at app startup, share across many sessions, close once at app shutdown.** The component that constructs a `Model` owns its lifecycle — a session does NOT close its `Model` because closing one model would break sibling sessions sharing it.
 
+<!-- snippet: QuickStarts#sharedModel -->
 ```java
 try (var model = new AnthropicProvider().create(modelId, config)) {
   for (var request : requests) {

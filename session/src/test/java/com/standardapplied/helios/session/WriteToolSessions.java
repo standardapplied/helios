@@ -88,7 +88,14 @@ final class WriteToolSessions {
       SessionOptions.Builder options,
       Function<AgentSession, Consumer<QueryEvent>> reactions,
       ToolCall... calls) {
-    var model = ScriptedModel.newBuilder().withToolCallsTurn(calls).withTextTurn("done").build();
+    return run(answering(calls), options, reactions);
+  }
+
+  /** Runs a session of {@code options} on {@code model}, reacting to each event it emits. */
+  static Run run(
+      ScriptedModel model,
+      SessionOptions.Builder options,
+      Function<AgentSession, Consumer<QueryEvent>> reactions) {
     try (var session = AgentSession.create(options.withModel(model).build())) {
       var events = new CollectingSubscriber(reactions.apply(session));
       session.events().subscribe(events);
@@ -97,5 +104,10 @@ final class WriteToolSessions {
       events.awaitDone();
       return new Run(events, model, terminal);
     }
+  }
+
+  /** A model that makes {@code calls} in one turn, then answers {@code done}. */
+  static ScriptedModel answering(ToolCall... calls) {
+    return ScriptedModel.newBuilder().withToolCallsTurn(calls).withTextTurn("done").build();
   }
 }

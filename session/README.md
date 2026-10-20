@@ -47,17 +47,19 @@ requires com.standardapplied.helios.anthropic;
 
 ## Quickstart — minimal session
 
+<!-- snippet: QuickStarts#minimalSession -->
 ```java
-var model = new AnthropicProvider().create(
-    AnthropicModelId.CLAUDE_SONNET_4_6.id(),
-    ModelConfig.of(System.getenv("ANTHROPIC_API_KEY")));
+var model =
+    new AnthropicProvider()
+        .create(
+            AnthropicModelId.CLAUDE_SONNET_4_6.id(),
+            ModelConfig.of(System.getenv("ANTHROPIC_API_KEY")));
 
-try (var session = AgentSession.create(
-    SessionPresets.minimal(model).build())) {
+try (var session = AgentSession.create(SessionPresets.minimal(model).build())) {
   var terminal = session.runBlocking(UserMessage.text("What is the capital of France?"));
   switch (terminal) {
     case ResultMessage.Success s -> System.out.println(s.result());
-    case ResultMessage other     -> System.err.println("non-Success: " + other);
+    case ResultMessage other -> System.err.println("non-Success: " + other);
   }
 }
 ```
@@ -68,24 +70,25 @@ guarantees the session's runtime (publisher, executor, in-flight tools) is shut 
 
 ## Workspace agent — file tools + permissions + memory
 
+<!-- snippet: QuickStarts#workspaceSession -->
 ```java
-try (var session = AgentSession.create(
-    SessionPresets.workspace(model, Path.of("/path/to/repo"))
-        .build())) {
-  var terminal = session.runBlocking(UserMessage.text(
-      "Summarise the public API of the session module."));
+try (var session =
+    AgentSession.create(SessionPresets.workspace(model, Path.of("/path/to/repo")).build())) {
+  var terminal =
+      session.runBlocking(UserMessage.text("Summarise the public API of the session module."));
   System.out.println(((ResultMessage.Success) terminal).result());
 }
 ```
 
 The `workspace` preset wires:
 - `Read`, `Glob`, `Grep`, `LS` file tools rooted at the workspace,
-- `MemoryWrite` + auto-registered `MemoryRead` against `FileSystemMemoryBackend` under the
-  workspace,
+- a `FileSystemMemoryBackend` under the workspace, for which the session registers `MemoryRead`
+  and `MemoryWrite`,
 - `Permission.defaultInWorkspace()` — reads + memory allowed, writes / edit / execute asked.
 
-`SessionPresets.readOnly(model, root)` is the same shape minus memory-write and gated by
-`Permission.planMode()` for purely read-only inspection.
+`SessionPresets.readOnly(model, root)` is the same shape without memory, gated by
+`Permission.planMode()` for purely read-only inspection. `SessionPresets.openEnded(model, root,
+provider)` adds `Execute` through the given `ExecutionProvider`, asked before each run.
 
 ## Streaming events
 
@@ -117,18 +120,20 @@ Javadoc](src/main/java/com/standardapplied/helios/session/QueryEvent.java) — c
 
 ## Cost tracking + budget cap
 
+<!-- snippet: QuickStarts#budgetCap -->
 ```java
-var pricing = Map.of(
-    "claude-sonnet-4-6", CostCalculator.Pricing.ofUsdPerMillion(3.0, 15.0));
-var limits = SessionLimits.newBuilder()
-    .withMaxBudgetMicroUsd(5 * CostEstimate.MICRO_USD_PER_USD)  // $5
-    .build();
+var pricing = Map.of("claude-sonnet-4-6", CostCalculator.Pricing.ofUsdPerMillion(3.0, 15.0));
+var limits =
+    SessionLimits.newBuilder()
+        .withMaxBudgetMicroUsd(5 * CostEstimate.MICRO_USD_PER_USD) // $5
+        .build();
 
-try (var session = AgentSession.create(
-    SessionPresets.workspace(model, root)
-        .withCostCalculator(CostCalculator.staticTable(pricing))
-        .withLimits(limits)
-        .build())) {
+try (var session =
+    AgentSession.create(
+        SessionPresets.workspace(model, root)
+            .withCostCalculator(CostCalculator.staticTable(pricing))
+            .withLimits(limits)
+            .build())) {
   var terminal = session.runBlocking(UserMessage.text("..."));
   if (terminal instanceof ResultMessage.ErrorMaxBudgetUsd b) {
     System.out.println("Budget exceeded at " + (b.microUsdSpent() / 1_000_000.0) + " USD");
@@ -141,18 +146,18 @@ turn, no FP drift. `CostCalculator.ZERO` is the default; cost tracking is opt-in
 
 ## Permissions
 
+<!-- snippet: QuickStarts#permissions -->
 ```java
-var policy = new Permission(
-    PermissionMode.DEFAULT,
-    List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "./src/**")),         // allow
-    List.of(PermissionRule.withGlob(PermissionEffect.ASK, "MemoryWrite", "/memories/**")),  // ask
-    List.of(PermissionRule.withGlob(PermissionEffect.DENY, "Read", "**/secrets.*")));     // deny
+var policy =
+    new Permission(
+        PermissionMode.DEFAULT,
+        List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "./src/**")),
+        List.of(PermissionRule.withGlob(PermissionEffect.ASK, "MemoryWrite", "/memories/**")),
+        List.of(PermissionRule.withGlob(PermissionEffect.DENY, "Read", "**/secrets.*")));
 
-try (var session = AgentSession.create(
-    SessionPresets.workspace(model, root)
-        .withPermission(policy)
-        .build())) {
-  // ...
+try (var session =
+    AgentSession.create(SessionPresets.workspace(model, root).withPermission(policy).build())) {
+  session.runBlocking(UserMessage.text("Summarise the public API under src."));
 }
 ```
 
@@ -188,18 +193,18 @@ Nine phase-specific hook surfaces — `OnUserMessageHook`, `PreModelTurnHook`,
 `MutateArgs` / `MutateHistory` / `MutateText` / `MutateResult` / `Block` / `Inject` / `Stop`).
 Example: deny a tool call from a hook regardless of policy.
 
+<!-- snippet: QuickStarts#hooks -->
 ```java
-PreToolUseHook denyShell = (call, ctx) -> {
-  if (call.name().equals("Execute")) {
-    return HookOutcome.block("Execute disabled in this deployment");
-  }
-  return HookOutcome.cont();
-};
+PreToolUseHook denyShell =
+    (call, ctx) -> {
+      if (call.name().equals("Execute")) {
+        return HookOutcome.block("Execute disabled in this deployment");
+      }
+      return HookOutcome.cont();
+    };
 
-var session = AgentSession.create(
-    SessionPresets.workspace(model, root)
-        .withHook(denyShell)
-        .build());
+var session =
+    AgentSession.create(SessionPresets.workspace(model, root).withHook(denyShell).build());
 ```
 
 Hook outcomes that drop a message (`OnUserMessageHook.Block`) emit
@@ -240,25 +245,29 @@ returns the history unchanged — compaction failure never crashes the loop.
 
 Three library-user tiers of control:
 
+<!-- snippet: QuickStarts#compaction -->
 ```java
 // 1) Default — DropMiddleToolResultsCompactor bound to the session's model
 var session = AgentSession.create(SessionPresets.workspace(model, repo).build());
 
 // 2) BYO compactor — Letta-style, vector-recall, custom head/tail policy, etc.
-var custom = DropMiddleToolResultsCompactor.newBuilder(cheapHaikuModel)
-    .withHeadPreserved(5)
-    .withTailPreserved(30)
-    .withSummaryPrompt("Summarise focusing on file edits and unresolved questions.")
-    .withSummaryTimeout(Duration.ofSeconds(30))  // bound the summary call
-    .build();
-var session2 = AgentSession.create(
-    SessionPresets.workspace(model, repo).withContextCompactor(custom).build());
+var custom =
+    DropMiddleToolResultsCompactor.newBuilder(cheapHaikuModel)
+        .withHeadPreserved(5)
+        .withTailPreserved(30)
+        .withSummaryPrompt("Summarise focusing on file edits and unresolved questions.")
+        .withSummaryTimeout(Duration.ofSeconds(30)) // bound the summary call
+        .build();
+var session2 =
+    AgentSession.create(
+        SessionPresets.workspace(model, repo).withContextCompactor(custom).build());
 
 // 3) Opt out wholesale — long sessions overflow naturally with an ErrorDuringExecution
-var session3 = AgentSession.create(
-    SessionPresets.workspace(model, repo)
-        .withContextCompactor(ContextCompactor.disabled())
-        .build());
+var session3 =
+    AgentSession.create(
+        SessionPresets.workspace(model, repo)
+            .withContextCompactor(ContextCompactor.disabled())
+            .build());
 ```
 
 For ad-hoc, hook-driven rewrites (no `ContextCompactor` subclass), register a

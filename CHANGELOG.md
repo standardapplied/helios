@@ -125,7 +125,7 @@ remove the per-call working directory before they release the concurrency permit
 | `TraceBuilder.span(name, kind)`, `SpanBuilder.span(name, kind)`, `SpanContainer.span(name, kind)` | `withChildSpan(name, kind)` |
 | `DurableResumeScanner.Builder.register(agentId, resolver)`, `registerAgent(...)`, `registerWorkflow(...)` | `withResolver(agentId, resolver)`, `withAgent(...)`, `withWorkflow(...)` |
 | `ScriptedModel.Builder.thenText(...)`, `thenToolCalls(...)`, `thenRefusal(text)` (each appends the next turn) | `withTextTurn(...)`, `withToolCallsTurn(...)`, `withRefusalTurn(text)` (each still appends the next turn) |
-| `SessionOptions.Builder.apply(preset)` | `withPreset(preset)` |
+| `SessionOptions.Builder.apply(preset)` | removed with `SessionPreset`; see "A preset takes the model and a path" below |
 | `DurabilityCoordinator.journalStart(...)`, `journalTerminal(...)`, `journalTerminalFailure(...)`, `inflightFor(runId)`, `markInflightFailed(...)` | `new ToolCallJournaling(durability)` with `start(...)`, `complete(...)`, `fail(...)`, `inflight(runId)`, `markInflightFailed(...)`; `DurabilityCoordinator` keeps the run lifecycle, and journal warnings log under `com.standardapplied.helios.core.runtime.ToolCallJournaling` |
 
 **A model streams one way: a lazy, cancellable `Flow.Publisher<ModelChunk>`.** `Model`'s default
@@ -652,6 +652,22 @@ sandbox. Real control is `ASK`, whose prompt shows every argument.
 | The human approver asks `Allow <tool>(<key>)?` | it asks `Allow <tool>(<key>)?`, a blank line, then `Arguments: <arguments>`; the key, and the reason describing `Allow`, show as JSON string text through `JsonSnapshot.escape` (`"`, `\`, controls, line separators and format characters such as bidi overrides and zero-width characters escaped), cut at 1024 characters, so a script cannot fake a line of the question |
 | `SecretRegistry.register` accepts a value that starts or ends with a space | refuses it as `Secret '<name>' must not start or end with a space`, since a stripped key would cut that space |
 
+**A preset takes the model and a path and returns a `SessionOptions.Builder`.** `SessionPreset`
+and `SessionOptions.Builder.withPreset` are removed: presets only called setters, so a later one
+replaced an earlier one, and stacking them bought nothing. Each `SessionPresets` factory now
+returns a builder that already holds the model and throws `NullPointerException` naming a null
+argument. The presets no longer register `MemoryWrite` themselves; the session registers
+`MemoryRead` and `MemoryWrite` whenever a memory backend is set (see Fixed).
+
+| Before | 3.0 |
+|---|---|
+| `withPreset(SessionPresets.minimal())` | `SessionPresets.minimal(model)`, or `SessionOptions.newBuilder().withModel(model)` |
+| `withModel(model).withPreset(SessionPresets.readOnly(path))`, `workspace(path)`, `openEnded(path, provider)` | `SessionPresets.readOnly(model, path)`, `workspace(model, path)`, `openEnded(model, path, provider)` |
+| `SessionPresets.readOnly(WorkspaceRoot)`, for a trusted root (`new WorkspaceRoot(path, false)`) or another curated root | `SessionOptions.newBuilder().withModel(model).withTools(new ToolRegistry(List.of(ReadTool.binding(root, InMemoryFileTracker.create()), GlobTool.binding(root), GrepTool.binding(root), LsTool.binding(root)))).withPermission(Permission.planMode())` |
+| `SessionPresets.workspace(WorkspaceRoot)` | the same four bindings, `.withPermission(Permission.defaultInWorkspace()).withMemoryBackend(FileSystemMemoryBackend.of(root))` |
+| `SessionPresets.openEnded(WorkspaceRoot, ExecutionProvider)` | the `workspace` wiring above with `ExecuteTool.binding(provider)` added to the bindings, plus `.withExecutionProvider(provider)` |
+| A custom `SessionPreset` (`b -> b.withHook(hook)`) | an ordinary method that takes and returns a `SessionOptions.Builder` |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
@@ -779,6 +795,15 @@ sandbox. Real control is `ASK`, whose prompt shows every argument.
 
 ### Fixed
 
+- **A session from `SessionPresets.workspace` or `openEnded` failed to start.** Both presets
+  registered `MemoryWrite` and set a memory backend, for which the session registers `MemoryRead`
+  and `MemoryWrite` itself, so every `AgentSession.create` threw `IllegalArgumentException:
+  duplicate tool name in registry: MemoryWrite`. The presets now leave the memory tools to the
+  session, and `SessionPresetsTest` runs a real session from every preset.
+- **The README quick starts did not compile.** They called a preset API that did not exist. Every
+  `java` block in `README.md` and `session/README.md` that calls `SessionPresets` is now the body
+  of a method in `examples/session-demo`'s `QuickStarts`, which the build compiles, and
+  `QuickStartsDocsTest` fails when a block and its method differ.
 - **A stream idle timeout under a second was reported as "0s".** The message rounded the timeout
   down to whole seconds; it now gives milliseconds: `Stream idle timeout: no data received for 50 ms`.
 - **`Execute` on the JShell runtime ignored its time budget; every snippet stopped at 30 seconds.**
