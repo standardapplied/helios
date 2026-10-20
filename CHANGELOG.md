@@ -799,7 +799,7 @@ argument. The presets no longer register `MemoryWrite` themselves; the session r
   registered `MemoryWrite` and set a memory backend, for which the session registers `MemoryRead`
   and `MemoryWrite` itself, so every `AgentSession.create` threw `IllegalArgumentException:
   duplicate tool name in registry: MemoryWrite`. The presets now leave the memory tools to the
-  session, and `SessionPresetsTest` runs a real session from every preset.
+  session.
 - **The README quick starts did not compile.** They called a preset API that did not exist. Every
   `java` block in `README.md` and `session/README.md` that calls `SessionPresets` is now the body
   of a method in `examples/session-demo`'s `QuickStarts`, which the build compiles, and
