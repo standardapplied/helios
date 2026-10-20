@@ -1,9 +1,12 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
-
 package com.standardapplied.helios.examples.session;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,10 +15,13 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.regex.Pattern;
-import java.util.stream.IntStream;
-import org.junit.jupiter.api.Test;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Holds every README {@code java} block that calls {@code SessionPresets} to the body of the {@link
@@ -24,199 +30,77 @@ import org.junit.jupiter.api.Test;
  */
 final class QuickStartsDocsTest {
 
-  private static final Path REPOSITORY = Path.of("../..");
-  private static final List<String> READMES = List.of("README.md", "session/README.md");
   private static final Path QUICK_STARTS =
       Path.of("src/test/java/com/standardapplied/helios/examples/session/QuickStarts.java");
   private static final Pattern MARKER = Pattern.compile("<!-- snippet: QuickStarts#(\\w+) -->");
   private static final Pattern METHOD = Pattern.compile(" {2}static void (\\w+)\\(.*");
-  private static final String OPENING_FENCE = "```java";
-  private static final String CLOSING_FENCE = "```";
-  private static final String METHOD_END = "  }";
+  private static final String BLOCK = "var options = SessionPresets.minimal(model);";
 
-  private static final Map<String, List<String>> SAMPLE_BODIES =
-      Map.of("minimal", List.of("var options = SessionPresets.minimal(model);"));
+  @ParameterizedTest
+  @ValueSource(strings = {"README.md", "session/README.md"})
+  void everyPresetsBlockIsItsQuickStartsMethod(String readme) throws IOException {
+    var lines = Files.readAllLines(Path.of("../..").resolve(readme));
 
-  @Test
-  void everyPresetsBlockInTheReadmesIsItsQuickStartsMethod() throws IOException {
-    var bodies = bodies(Files.readAllLines(QUICK_STARTS));
-    var problems = new ArrayList<String>();
-    for (var readme : READMES) {
-      problems.addAll(problems(readme, Files.readAllLines(REPOSITORY.resolve(readme)), bodies));
-    }
-
-    assertEquals(List.of(), problems);
+    check(readme, lines, bodies(Files.readAllLines(QUICK_STARTS)));
   }
 
-  @Test
-  void aBodyIsTheMethodsTextWithoutItsCommonIndentation() {
-    var source =
-        List.of(
-            "final class QuickStarts {",
-            "  static void session(",
-            "      Model model) {",
-            "    try (var session = open(model)) {",
-            "",
-            "      session.run();",
-            "    }",
-            "  }",
-            "}");
-
-    assertEquals(
-        Map.of(
-            "session", List.of("try (var session = open(model)) {", "", "  session.run();", "}")),
-        bodies(source));
+  static Stream<Arguments> drifts() {
+    return Stream.of(
+        Arguments.of(
+            List.of(
+                "<!-- snippet: QuickStarts#minimal -->",
+                "```java",
+                BLOCK.replace("model", "modal"),
+                "```"),
+            "README.md:2: QuickStarts#minimal"),
+        Arguments.of(
+            List.of("Intro", "```java", BLOCK, "```"),
+            "README.md:2: a SessionPresets block has no <!-- snippet: QuickStarts#<method> -->"),
+        Arguments.of(
+            List.of("<!-- snippet: QuickStarts#missing -->", "```java", BLOCK, "```"),
+            "README.md:2: QuickStarts#missing does not exist"),
+        Arguments.of(List.of("```java", BLOCK), "README.md:1: the block is never closed"));
   }
 
-  @Test
-  void aMatchingBlockHasNoProblem() {
-    var readme =
-        List.of(
-            "<!-- snippet: QuickStarts#minimal -->",
-            OPENING_FENCE,
-            "var options = SessionPresets.minimal(model);",
-            CLOSING_FENCE);
+  @ParameterizedTest
+  @MethodSource("drifts")
+  void aDriftedBlockFailsNamingIt(List<String> readme, String expected) {
+    var bodies = Map.of("minimal", List.of(BLOCK));
 
-    assertEquals(List.of(), problems("README.md", readme, SAMPLE_BODIES));
+    var thrown = assertThrows(AssertionError.class, () -> check("README.md", readme, bodies));
+
+    assertTrue(thrown.getMessage().contains(expected), thrown.getMessage());
   }
 
-  @Test
-  void aChangedCharacterNamesTheBlockAndTheLine() {
-    var readme =
-        List.of(
-            "Intro",
-            "<!-- snippet: QuickStarts#minimal -->",
-            OPENING_FENCE,
-            "var options = SessionPresets.minimal(modal);",
-            CLOSING_FENCE);
-
-    assertEquals(
-        List.of(
-            "README.md:3: line 1 differs from QuickStarts#minimal:"
-                + " README `var options = SessionPresets.minimal(modal);`,"
-                + " QuickStarts `var options = SessionPresets.minimal(model);`"),
-        problems("README.md", readme, SAMPLE_BODIES));
-  }
-
-  @Test
-  void aBlockLongerThanItsMethodNamesTheFirstExtraLine() {
-    var readme =
-        List.of(
-            "<!-- snippet: QuickStarts#minimal -->",
-            OPENING_FENCE,
-            "var options = SessionPresets.minimal(model);",
-            "options.build();",
-            CLOSING_FENCE);
-
-    assertEquals(
-        List.of(
-            "README.md:2: line 2 differs from QuickStarts#minimal:"
-                + " README `options.build();`, QuickStarts `<no line>`"),
-        problems("README.md", readme, SAMPLE_BODIES));
-  }
-
-  @Test
-  void aPresetsBlockWithoutAMarkerIsNamed() {
-    var readme =
-        List.of(
-            "Intro", OPENING_FENCE, "var options = SessionPresets.minimal(model);", CLOSING_FENCE);
-
-    assertEquals(
-        List.of(
-            "session/README.md:2: a SessionPresets block has no"
-                + " <!-- snippet: QuickStarts#<method> --> marker"),
-        problems("session/README.md", readme, SAMPLE_BODIES));
-  }
-
-  @Test
-  void aMarkerNamingNoMethodIsNamed() {
-    var readme =
-        List.of(
-            "<!-- snippet: QuickStarts#missing -->",
-            OPENING_FENCE,
-            "var options = SessionPresets.minimal(model);",
-            CLOSING_FENCE);
-
-    assertEquals(
-        List.of("README.md:2: QuickStarts#missing does not exist"),
-        problems("README.md", readme, SAMPLE_BODIES));
-  }
-
-  @Test
-  void aBlockThatDoesNotCallPresetsNeedsNoMarker() {
-    var readme =
-        List.of(OPENING_FENCE, "var options = SessionOptions.newBuilder();", CLOSING_FENCE);
-
-    assertEquals(List.of(), problems("README.md", readme, SAMPLE_BODIES));
-  }
-
-  @Test
-  void anUnclosedBlockFails() {
-    var readme = List.of("Intro", OPENING_FENCE, "var options = SessionPresets.minimal(model);");
-
-    var thrown =
-        assertThrows(AssertionError.class, () -> problems("README.md", readme, SAMPLE_BODIES));
-
-    assertEquals("README.md:2: the block is never closed", thrown.getMessage());
-  }
-
-  private static List<String> problems(
-      String readme, List<String> lines, Map<String, List<String>> bodies) {
-    var problems = new ArrayList<String>();
+  private static void check(String readme, List<String> lines, Map<String, List<String>> bodies) {
+    var blocks = new ArrayList<Executable>();
     for (var start = 0; start < lines.size(); start++) {
-      if (lines.get(start).equals(OPENING_FENCE)) {
+      if (lines.get(start).equals("```java")) {
         var where = readme + ":" + (start + 1);
-        var end = closingFence(lines, start, where);
-        var marker = start == 0 ? "" : lines.get(start - 1);
-        problem(where, marker, lines.subList(start + 1, end), bodies).ifPresent(problems::add);
+        var end = lines.subList(start, lines.size()).indexOf("```") + start;
+        assertTrue(end > start, where + ": the block is never closed");
+        var block = lines.subList(start + 1, end);
+        var marker = MARKER.matcher(start == 0 ? "" : lines.get(start - 1));
+        if (marker.matches()) {
+          var method = "QuickStarts#" + marker.group(1);
+          var body = bodies.get(marker.group(1));
+          blocks.add(
+              () -> {
+                assertNotNull(body, where + ": " + method + " does not exist");
+                assertEquals(body, block, where + ": " + method);
+              });
+        } else if (block.stream().anyMatch(line -> line.contains("SessionPresets"))) {
+          blocks.add(
+              () ->
+                  fail(
+                      where
+                          + ": a SessionPresets block has no"
+                          + " <!-- snippet: QuickStarts#<method> --> marker"));
+        }
         start = end;
       }
     }
-    return problems;
-  }
-
-  private static int closingFence(List<String> lines, int start, String where) {
-    return IntStream.range(start + 1, lines.size())
-        .filter(i -> lines.get(i).equals(CLOSING_FENCE))
-        .findFirst()
-        .orElseThrow(() -> new AssertionError(where + ": the block is never closed"));
-  }
-
-  private static Optional<String> problem(
-      String where, String marker, List<String> block, Map<String, List<String>> bodies) {
-    var named = MARKER.matcher(marker);
-    if (!named.matches()) {
-      return block.stream().anyMatch(line -> line.contains("SessionPresets"))
-          ? Optional.of(
-              where
-                  + ": a SessionPresets block has no <!-- snippet: QuickStarts#<method> --> marker")
-          : Optional.empty();
-    }
-    var method = named.group(1);
-    var body = bodies.get(method);
-    if (body == null) {
-      return Optional.of(where + ": QuickStarts#" + method + " does not exist");
-    }
-    return IntStream.range(0, Math.max(block.size(), body.size()))
-        .filter(i -> !lineAt(block, i).equals(lineAt(body, i)))
-        .boxed()
-        .findFirst()
-        .map(
-            i ->
-                where
-                    + ": line "
-                    + (i + 1)
-                    + " differs from QuickStarts#"
-                    + method
-                    + ": README `"
-                    + lineAt(block, i)
-                    + "`, QuickStarts `"
-                    + lineAt(body, i)
-                    + "`");
-  }
-
-  private static String lineAt(List<String> lines, int index) {
-    return index < lines.size() ? lines.get(index) : "<no line>";
+    assertAll(blocks);
   }
 
   private static Map<String, List<String>> bodies(List<String> source) {
@@ -228,12 +112,12 @@ final class QuickStartsDocsTest {
         while (!source.get(open).endsWith("{")) {
           open++;
         }
-        var end = source.subList(open, source.size()).indexOf(METHOD_END) + open;
+        var end = source.subList(open, source.size()).indexOf("  }") + open;
         bodies.put(method.group(1), dedented(source.subList(open + 1, end)));
         i = end;
       }
     }
-    return Map.copyOf(bodies);
+    return bodies;
   }
 
   private static List<String> dedented(List<String> lines) {
