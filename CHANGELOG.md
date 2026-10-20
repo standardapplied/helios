@@ -592,7 +592,8 @@ permission evaluator was an ordinary `PreToolUse` hook, so a throwing permission
 a `MutateArgs` from a hook ordered before or after it, got a denied call executed; a `WRITE` tool
 ran under `LOCKED_DOWN`. Every call now runs the `PreToolUse` chain, then authorization of the
 final immutable call, then dispatch of that same call. Only an `ALLOW` admits it; anything else,
-including a failure and a permission key carrying a secret of the session's `SecretRegistry`, is
+including a failure and a permission key carrying a secret of the session's `SecretRegistry`
+(refused with or without a `Permission`), is
 `ToolOutcome.Rejected("Permission", reason)` with a `ToolBlocked` event. That reason and a hook's
 `Block` reason are redacted through the session's `SecretRegistry` and cut at 1024 characters; an
 `ApprovalRequest`'s reason is redacted too, but not cut. A call naming no registered tool skips the
@@ -605,10 +606,33 @@ stage and ends `NotFound`, as without a policy.
 | The first `PreToolUse` `MutateArgs` ends the chain | it passes the new arguments to the next hook; `Block`, `Inject` and `Stop` end the chain |
 | `HookRegistry.firePreToolUse` returns `HookDecision` | returns `PreToolUseResult(call, mutations, decision)` |
 | `DefaultPermissionEvaluator.Builder.withQuestionGateway(QuestionGateway)` | `withApprover(ToolApprover)`; `ToolApprover.askingUser(gateway)` is the old prompt |
-| `new DefaultPermissionEvaluator(permission, tools)` | `DefaultPermissionEvaluator.newBuilder(permission, tools).build()`, with `withSecretRegistry` for the registry whose secrets no key may carry |
+| `new DefaultPermissionEvaluator(permission, tools)` | `DefaultPermissionEvaluator.newBuilder(permission, tools).build()`, with `withSecretRegistry` for the registry that redacts an approval's reason |
 | `DefaultPermissionEvaluator` implements `PreToolUseHook`: `beforeTool`, `priority()`, `name()`, `Builder.withPriority(int)` | `authorize(ToolCall)` returns an `ALLOW` or `DENY` `PermissionDecision`; no priority, since no hook runs after it |
 | `PermissionDecision(effect, reason)`; deny reasons read `permission: deny rule for <tool>` | `PermissionDecision(effect, reason, rule)`; reasons name the tool, key and rule or default that decided, such as `deny rule Write(/etc/**) matched Write(/etc/passwd)` |
 | `Permission` accepted a rule of any effect in any list, and a match in `deny` denied whatever the rule's effect | a matched rule decides with its own effect, so the constructor throws `IllegalArgumentException` for a rule whose effect is not its list's |
+
+**A path tool's permission key is the canonical path it touches.** `Read`, `LS`, `Glob`, `Grep`,
+`MemoryRead` and `MemoryWrite` were keyed on the raw `path` argument but ran on a resolution of it.
+The permission stage now canonicalises every call of a registered tool, with or without a
+`Permission`: a path that names no target is refused before any rule or approver sees it, and the
+canonical call is the one keyed, announced, dispatched and shown to `PostToolUse` hooks;
+`PreToolUse` hooks still see the model's spelling.
+
+| 2.x | 3.0 |
+|---|---|
+| `ToolBinding.permissionKey(Map)` | `ToolBinding.canonicalize(ToolCall)` → `CanonicalCall(call, key)` |
+| `DefaultPermissionEvaluator.authorize(ToolCall)` | `authorize(ToolBinding.CanonicalCall)`, deciding on the canonical call's key |
+| `LoopCollaborators(hooks, toolDispatch, authorization, steeringQueue, eventSink, hookContextFactory, clock)`, `authorization` a `Function<ToolCall, PermissionDecision>` | `authorization` is a `Function<ToolBinding.CanonicalCall, PermissionDecision>`, followed by the required `Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule`, set with `Builder.withDecidingRule` |
+| Path tools key on the raw `path` argument | keys are canonical: `.`, `./a/b`, `/memories/a/b`; a trusted workspace's outside target by its absolute real path |
+| A rule glob is matched as written, whatever it could match | a rule for a path tool whose glob can never match a canonical key fails `AgentSession.create` |
+| `X/**` does not match `X`; `/**/` needs one segment | `X/**` matches `X`; `/**/` and a leading `**/` match zero segments |
+| `Read`/`LS`/`Glob`/`Grep` re-resolve the raw path when they run | they run on the authorised canonical path and fail when it no longer resolves to itself |
+| A non-string `path`, JSON `null` included, is treated as missing (`"."` for `LS`, `Glob`, `Grep`) | refused |
+| `Permission.defaultInWorkspace()` asks for `Write`, `Edit`, `MultiEdit` | those rules are removed |
+| `Glob`, `Grep`, `LS` and `MemoryRead` `list` return every entry below their path | they withhold entries their own DENY rules match (and, for `Grep`, which returns contents, entries a `Read` DENY or ASK rule decides, without asking), never descend into a withheld directory, and end with `[withheld by permission policy: <n>]` |
+| `new ToolContext(SessionContext, CancellationToken, Duration)` | `ToolContext(SessionContext, CancellationToken, Duration, Predicate<String> withheld)`; `ToolContext.noop()` withholds nothing |
+| `ToolDispatch.dispatch(ToolCall, CancellationToken, Duration, Duration)` | `dispatch(ToolCall, CancellationToken, Duration, Duration, Predicate<String> withheld)` |
+| A permission-key extractor that throws is refused as `permission key of <tool> failed: <class>: <message>` under a `Permission`, and is never called without one | refused before authorization as `<tool>: <message>`, with or without a `Permission` |
 
 ### Added
 
@@ -710,7 +734,19 @@ stage and ends `NotFound`, as without a policy.
   default asked). Only its `ALLOW` admits the call. `ToolApprover.askingUser(gateway)` is the human
   approver the session wires over `AgentSession.answer`, under a fresh question id per request, so
   an answer resolves one call only. `PermissionDecision.rule()` is the rule that decided;
-  `withSecretRegistry` takes the registry whose secrets no permission key may carry.
+  `withSecretRegistry` takes the registry that redacts an approval's reason.
+- **`PathSpace`, `ToolBinding.PathArgument`, `ToolBinding.Builder.withPathArgument`,
+  `WorkspaceRoot.canonical`, `WorkspaceRoot.spell`, `WorkspaceRoot.resolveCanonical`,
+  `session.tools.Withholding`, `ToolContext.withholds`, `DefaultPermissionEvaluator.decidingRule`,
+  `ToolBinding.PathArgument.withContentRulesOf`, `LoopCollaborators.decidingRule`,
+  `LoopCollaborators.Builder.withDecidingRule`.** A `PathSpace` defines a path argument's canonical
+  spelling (`canonical`), says whether a rule glob can match one (`admits`) and gives a sample
+  (`example`); `WorkspaceRoot` is the workspace's, and memory has its own. A binding declares its
+  path argument with `PathArgument.required(name, space)` or `optional(name, default, space)`.
+  `Withholding` is the one filter a walking tool applies to each entry, through the call's
+  `ToolContext.withholds`; `decidingRule` is the rule that decides a key in `evaluate`'s order, and
+  `withContentRulesOf` names the tools whose content a walk returns (`Read` for `Grep`), whose DENY
+  and ASK rules then withhold its entries.
 
 ### Fixed
 
@@ -835,6 +871,10 @@ stage and ends `NotFound`, as without a policy.
 
 ### Security
 
+- **A deny rule on a path can no longer be bypassed.** It was bypassed by spelling the path
+  differently (`secrets/key`, `docs/../secrets/key`, an absolute path, a symlink), by swapping a
+  symlink in after approval, or by searching or listing from a directory above it (`Grep .`,
+  `LS .`). Path tools now key on the canonical path they touch (see Breaking).
 - **A deny rule no longer misses a key that holds a line break.** `RuleMatcher` compiled a rule's `*`
   and `**` to a pattern whose `.` did not match a line terminator, so a deny rule missed a key
   holding one: `Write(/etc/**)` did not match `Write(/etc/cron.d/x\ny)`, and the mode's default,

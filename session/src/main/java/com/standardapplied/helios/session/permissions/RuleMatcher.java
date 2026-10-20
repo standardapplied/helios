@@ -18,20 +18,32 @@ import java.util.regex.Pattern;
  * {@code argPattern} is absent OR the pattern's glob matches the key's canonical args. The first
  * matching rule wins.
  *
- * <p>Glob syntax: {@code *} matches a single path segment, {@code **} matches any number of
- * segments (including zero), {@code ?} matches a single non-slash character, all other characters
- * are literal; a wildcard matches line terminators like any other character. This is the standard
- * subset of {@code java.nio.file.PathMatcher} glob syntax; we re-implement here to avoid the {@code
- * Path}-based matcher's filesystem dependence — the canonical args we match against are plain
- * strings, not real paths.
+ * <p>A path tool's key is its canonical path ({@code .} or {@code ./a/b} in a workspace, {@code
+ * /memories/} or {@code /memories/a/b} in memory), so a glob is written in that spelling. Glob
+ * syntax:
+ *
+ * <ul>
+ *   <li>a trailing {@code /**} matches the path before it and everything below it: {@code ./**}
+ *       matches {@code .}, and {@code ./secrets/**} matches {@code ./secrets} and {@code
+ *       ./secrets/key};
+ *   <li>{@code /**}{@code /} and a leading {@code **}{@code /} match zero or more whole segments:
+ *       {@code ./**}{@code /secrets/**} matches {@code ./secrets/key} and {@code ./a/secrets/key};
+ *   <li>any other {@code **} matches any characters, {@code /} included;
+ *   <li>{@code *} matches any characters but {@code /}, and {@code ?} one such character;
+ *   <li>every other character, brackets and braces included, is literal.
+ * </ul>
+ *
+ * <p>A wildcard matches line terminators like any other character. The matching works on plain
+ * strings, not on the filesystem, so a glob names real paths: one written through a symlink, such
+ * as {@code ./link/**}, never matches, since a canonical path never goes through one.
  *
  * <h2>Thread-safety</h2>
  *
- * Stateless. Safe to share.
+ * Thread-safe: its only state is a concurrent cache of compiled globs. Safe to share.
  */
 public final class RuleMatcher {
 
-  private static final ConcurrentHashMap<String, Pattern> PATTERN_CACHE = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<String, Pattern> patterns = new ConcurrentHashMap<>();
 
   /** Default constructor. */
   public RuleMatcher() {}
@@ -75,45 +87,51 @@ public final class RuleMatcher {
     return globMatches(rule.argPattern().orElseThrow(), key.canonicalArgs());
   }
 
-  /**
-   * Convert a glob to a regex and test. Visible package-private so {@link
-   * DefaultPermissionEvaluator} can re-use the same matching when computing the diagnostic reason.
-   */
-  static boolean globMatches(String glob, String input) {
-    return PATTERN_CACHE
+  /** Whether {@code glob} matches {@code input}, compiling each glob once per matcher. */
+  private boolean globMatches(String glob, String input) {
+    return patterns
         .computeIfAbsent(glob, g -> Pattern.compile(globToRegex(g), Pattern.DOTALL))
         .matcher(input)
         .matches();
   }
 
   /**
-   * Convert a glob pattern to a regex. Supports {@code *}, {@code **}, {@code ?}; escapes other
-   * regex meta-characters.
+   * Convert a glob to a regex: {@code /**} ending a segment and a leading {@code **}{@code /} match
+   * zero or more whole segments, any other {@code **} matches any characters, {@code *} and {@code
+   * ?} match within a segment, and every other code point is literal.
    */
-  static String globToRegex(String glob) {
+  private static String globToRegex(String glob) {
     var out = new StringBuilder();
-    out.append('^');
-    int i = 0;
+    var i = 0;
+    while (glob.startsWith("**/", i)) {
+      out.append("(.*/)?");
+      i += 3;
+    }
     while (i < glob.length()) {
-      char c = glob.charAt(i);
-      if (c == '*' && i + 1 < glob.length() && glob.charAt(i + 1) == '*') {
+      if (glob.startsWith("/**", i) && endsSegment(glob, i + 3)) {
+        out.append("(/.*)?");
+        i += 3;
+      } else if (glob.startsWith("**", i)) {
         out.append(".*");
         i += 2;
-      } else if (c == '*') {
-        out.append("[^/]*");
-        i++;
-      } else if (c == '?') {
-        out.append("[^/]");
-        i++;
-      } else if ("\\.[]{}()+-^$|".indexOf(c) >= 0) {
-        out.append('\\').append(c);
-        i++;
       } else {
-        out.append(c);
-        i++;
+        var codePoint = glob.codePointAt(i);
+        out.append(literalOrWildcard(codePoint));
+        i += Character.charCount(codePoint);
       }
     }
-    out.append('$');
     return out.toString();
+  }
+
+  private static boolean endsSegment(String glob, int index) {
+    return index == glob.length() || glob.charAt(index) == '/';
+  }
+
+  private static String literalOrWildcard(int codePoint) {
+    return switch (codePoint) {
+      case '*' -> "[^/]*";
+      case '?' -> "[^/]";
+      default -> Pattern.quote(Character.toString(codePoint));
+    };
   }
 }

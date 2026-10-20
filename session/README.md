@@ -144,9 +144,9 @@ turn, no FP drift. `CostCalculator.ZERO` is the default; cost tracking is opt-in
 ```java
 var policy = new Permission(
     PermissionMode.DEFAULT,
-    List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "./src/**")),  // allow
-    List.of(PermissionRule.any(PermissionEffect.ASK, "Edit")),                     // ask
-    List.of(PermissionRule.withGlob(PermissionEffect.DENY, "Read", "**/secrets.*")));  // deny
+    List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "./src/**")),         // allow
+    List.of(PermissionRule.withGlob(PermissionEffect.ASK, "MemoryWrite", "/memories/**")),  // ask
+    List.of(PermissionRule.withGlob(PermissionEffect.DENY, "Read", "**/secrets.*")));     // deny
 
 try (var session = AgentSession.create(
     SessionPresets.workspace(model, root)
@@ -160,6 +160,25 @@ Rule order: **deny → bypass-shortcut → allow → ask → default-by-category
 through the session's `QuestionGateway` and surface as an `AskUserQuestion` prompt the host
 answers via `session.answer(questionId, response)`. `SessionPresets.workspace(...)` ships
 `Permission.defaultInWorkspace()`; `SessionPresets.readOnly(...)` ships `Permission.planMode()`.
+
+A path tool's key is the canonical path it touches, however the model spelled it: `.` or `./a/b`
+in the workspace (`secrets/key`, `docs/../secrets/key`, an absolute path and a symlink to it are
+all `./secrets/key`), `/memories/` or `/memories/a/b` in memory. A path that names no target is
+refused before any rule is evaluated, and the tool runs on the path that was authorised. Globs
+match that spelling: a trailing `/**` matches the path before it and everything below it (`./**`
+matches `.`), `/**/` and a leading `**/` match zero or more segments, `*` and `?` stay within a
+segment. Rules name real paths: a rule written through a symlink, such as `./link/**`, never
+matches, since a key never goes through one, and creation cannot detect that. A rule for a path tool
+that no canonical path can match, such as `Read("secrets/**")`, fails `AgentSession.create`. A call
+whose key carries a registered secret is refused, with or without a policy. `Glob`, `Grep`, `LS`
+and a `MemoryRead` listing withhold every entry below their path that one of their own DENY rules
+matches (for `Grep`, which returns contents, also every entry a `Read` DENY or ASK rule decides,
+without asking), never descend into a withheld directory, and end with
+`[withheld by permission policy: <n>]`. The allow that admitted a walk's start covers what it finds
+except what those rules withhold; a mode or category default, such as `LOCKED_DOWN`'s deny, is not
+a rule and withholds nothing. Memory is its own namespace: a memory call is authorised by
+`MemoryRead`/`MemoryWrite` rules on its `/memories/...` key, and a `Read` rule over the directory
+backing a filesystem memory store does not apply to it.
 
 ## Hooks
 

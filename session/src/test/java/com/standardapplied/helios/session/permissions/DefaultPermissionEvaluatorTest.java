@@ -68,12 +68,14 @@ final class DefaultPermissionEvaluatorTest {
     return new Permission(mode, allow, ask, deny);
   }
 
-  private static ToolCall call(String name) {
-    return new ToolCall("c", name, Map.of());
+  private static ToolBinding.CanonicalCall call(String name) {
+    return new ToolBinding.CanonicalCall(
+        new ToolCall("c", name, Map.of()), ToolPermissionKey.of(name));
   }
 
-  private static ToolCall writeCall(String path) {
-    return new ToolCall("c", "Write", Map.of("path", path));
+  private static ToolBinding.CanonicalCall writeCall(String path) {
+    return new ToolBinding.CanonicalCall(
+        new ToolCall("c", "Write", Map.of("path", path)), new ToolPermissionKey("Write", path));
   }
 
   private static DefaultPermissionEvaluator evaluator(Permission permission, ToolRegistry tools) {
@@ -162,62 +164,6 @@ final class DefaultPermissionEvaluatorTest {
   }
 
   @Test
-  void aPermissionKeyThatThrowsDeniesTheCall() {
-    var throwing =
-        ToolBinding.newBuilder(tool("Write"))
-            .withCategory(ToolCategory.WRITE)
-            .withPermissionKeyExtractor(
-                args -> {
-                  throw new IllegalArgumentException("bad path");
-                })
-            .build();
-    var e = evaluator(Permission.empty(PermissionMode.BYPASS_PERMISSIONS), tools(throwing));
-    assertEquals(
-        PermissionDecision.deny(
-            "permission key of Write failed: java.lang.IllegalArgumentException: bad path"),
-        e.authorize(call("Write")));
-  }
-
-  @Test
-  void aPermissionKeyCarryingASecretIsDeniedBeforeTheApproverIsAsked() {
-    var secrets = new SecretRegistry();
-    secrets.register("TOKEN", "test-registered-secret-123");
-    var requests = new ArrayList<ApprovalRequest>();
-    var e =
-        DefaultPermissionEvaluator.newBuilder(
-                rules(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()),
-                tools(pathKeyed("Write", ToolCategory.WRITE)))
-            .withApprover(
-                request -> {
-                  requests.add(request);
-                  return PermissionDecision.allow("approved");
-                })
-            .withSecretRegistry(secrets)
-            .build();
-
-    assertEquals(
-        PermissionDecision.deny("permission key of Write carries a secret"),
-        e.authorize(writeCall("/tmp/test-registered-secret-123")));
-    assertEquals(List.of(), requests);
-  }
-
-  @Test
-  void aPermissionKeyCarryingASecretIsDeniedWhereThePolicyWouldAllowIt() {
-    var secrets = new SecretRegistry();
-    secrets.register("TOKEN", "test-registered-secret-123");
-    var e =
-        DefaultPermissionEvaluator.newBuilder(
-                Permission.empty(PermissionMode.BYPASS_PERMISSIONS),
-                tools(pathKeyed("Write", ToolCategory.WRITE)))
-            .withSecretRegistry(secrets)
-            .build();
-
-    assertEquals(
-        PermissionDecision.deny("permission key of Write carries a secret"),
-        e.authorize(writeCall("/tmp/test-registered-secret-123")));
-  }
-
-  @Test
   void anAskRulePatternCarryingASecretReachesTheApproverRedactedWithTheRuleIntact() {
     var secrets = new SecretRegistry();
     secrets.register("PASSWORD", "secret*value");
@@ -241,7 +187,7 @@ final class DefaultPermissionEvaluatorTest {
     assertEquals(
         List.of(
             new ApprovalRequest(
-                call,
+                call.call(),
                 new ToolPermissionKey("Write", "secretXvalue"),
                 ToolCategory.WRITE,
                 Optional.of(askSecret),
@@ -250,27 +196,7 @@ final class DefaultPermissionEvaluatorTest {
   }
 
   @Test
-  void aNullPermissionKeyDeniesTheCall() {
-    var nullKey =
-        ToolBinding.newBuilder(tool("Write"))
-            .withCategory(ToolCategory.WRITE)
-            .withPermissionKeyExtractor(args -> null)
-            .build();
-    var e = evaluator(Permission.empty(PermissionMode.BYPASS_PERMISSIONS), tools(nullKey));
-    assertEquals(
-        PermissionDecision.deny(
-            "permission key of Write failed: java.lang.NullPointerException:"
-                + " permissionKeyExtractor returned null"),
-        e.authorize(call("Write")));
-  }
-
-  @Test
   void aPermissionKeyNamingAnotherToolDeniesTheCall() {
-    var impostor =
-        ToolBinding.newBuilder(tool("Write"))
-            .withCategory(ToolCategory.WRITE)
-            .withPermissionKeyExtractor(args -> new ToolPermissionKey("Read", "/etc"))
-            .build();
     var e =
         evaluator(
             rules(
@@ -278,10 +204,28 @@ final class DefaultPermissionEvaluatorTest {
                 List.of(PermissionRule.any(PermissionEffect.ALLOW, "Read")),
                 List.of(),
                 List.of()),
-            tools(impostor));
+            tools(binding("Write", ToolCategory.WRITE)));
+    var impostor =
+        new ToolBinding.CanonicalCall(call("Write").call(), new ToolPermissionKey("Read", "/etc"));
     assertEquals(
         PermissionDecision.deny("permission key of Write names another tool: Read(/etc)"),
-        e.authorize(call("Write")));
+        e.authorize(impostor));
+  }
+
+  @Test
+  void authorizeDecidesOnTheKeyItIsHandedNotOneRecomputedFromTheArguments() {
+    var deny = PermissionRule.withGlob(PermissionEffect.DENY, "Read", "./secrets/**");
+    var e =
+        evaluator(
+            rules(PermissionMode.DEFAULT, List.of(), List.of(), List.of(deny)),
+            tools(pathKeyed("Read", ToolCategory.READ)));
+    var handed =
+        new ToolBinding.CanonicalCall(
+            new ToolCall("c", "Read", Map.of("path", "./docs/a.txt")),
+            new ToolPermissionKey("Read", "./secrets/key"));
+    assertEquals(
+        PermissionDecision.byRule(deny, "deny rule Read(./secrets/**) matched Read(./secrets/key)"),
+        e.authorize(handed));
   }
 
   // ── rules ────────────────────────────────────────────────────────────────
@@ -411,6 +355,51 @@ final class DefaultPermissionEvaluatorTest {
             tools(binding("Read", ToolCategory.READ), binding("Execute", ToolCategory.EXECUTION)));
     assertEquals(PermissionEffect.ALLOW, e.authorize(call("Execute")).effect());
     assertEquals(PermissionEffect.DENY, e.authorize(call("Read")).effect());
+  }
+
+  // ── decidingRule ─────────────────────────────────────────────────────────
+
+  private static final PermissionRule DENY_SECRETS =
+      PermissionRule.withGlob(PermissionEffect.DENY, "Grep", "./secrets/**");
+  private static final PermissionRule ALLOW_PUBLIC =
+      PermissionRule.withGlob(PermissionEffect.ALLOW, "Grep", "./docs/public/**");
+  private static final PermissionRule ASK_DOCS =
+      PermissionRule.withGlob(PermissionEffect.ASK, "Grep", "./docs/**");
+
+  private static DefaultPermissionEvaluator grepRules(PermissionMode mode) {
+    return evaluator(
+        rules(mode, List.of(ALLOW_PUBLIC), List.of(ASK_DOCS), List.of(DENY_SECRETS)),
+        tools(binding("Grep", ToolCategory.SEARCH)));
+  }
+
+  private static ToolPermissionKey grep(String path) {
+    return new ToolPermissionKey("Grep", path);
+  }
+
+  @Test
+  void theDecidingRuleIsTheRuleEvaluateDecidesBy() {
+    var e = grepRules(PermissionMode.DEFAULT);
+
+    assertEquals(Optional.of(DENY_SECRETS), e.decidingRule(grep("./secrets/key")));
+    assertEquals(Optional.of(ALLOW_PUBLIC), e.decidingRule(grep("./docs/public/a.txt")));
+    assertEquals(Optional.of(ASK_DOCS), e.decidingRule(grep("./docs/a.txt")));
+    assertEquals(Optional.empty(), e.decidingRule(grep("./src/a.txt")));
+    assertEquals(Optional.empty(), e.decidingRule(new ToolPermissionKey("Read", "./secrets/key")));
+  }
+
+  @Test
+  void underBypassPermissionsOnlyADenyRuleDecides() {
+    var e = grepRules(PermissionMode.BYPASS_PERMISSIONS);
+
+    assertEquals(Optional.of(DENY_SECRETS), e.decidingRule(grep("./secrets/key")));
+    assertEquals(Optional.empty(), e.decidingRule(grep("./docs/public/a.txt")));
+    assertEquals(Optional.empty(), e.decidingRule(grep("./docs/a.txt")));
+  }
+
+  @Test
+  void decidingRuleRejectsANullKey() {
+    var e = evaluator(Permission.defaultInWorkspace(), tools());
+    assertThrows(NullPointerException.class, () -> e.decidingRule(null));
   }
 
   // ── category defaults per mode ───────────────────────────────────────────

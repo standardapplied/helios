@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session.files;
 
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.session.tools.PathSpace;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -57,7 +58,17 @@ import java.util.Objects;
  *
  * <p>{@code confineSymlinks=false} is the explicitly weaker trusted-workspace mode: paths are still
  * canonicalised (so the open primitives keep working no-follow) but the canonical result may lie
- * anywhere a symlink points, including outside the root. It is never the default.
+ * anywhere a symlink points, including outside the root. Its I/O is portable and not
+ * race-resistant: a concurrent writer that swaps in a symlink after a path was canonicalised, or
+ * after a walked entry was checked against the permission policy, can redirect it. It is never the
+ * default.
+ *
+ * <p>As the {@link PathSpace} of the path tools, it spells every target canonically ({@link
+ * #canonical(String)}): {@code .} for the root, {@code ./a/b} below it, with no {@code .}, {@code
+ * ..} or empty segment and no trailing {@code /}; in a trusted workspace a target that an in-root
+ * symlink leads outside the root is spelled by its absolute real path. A tool's permission key is
+ * that spelling, and the tool resolves it again with {@link #resolveCanonical(String)}, which fails
+ * if it no longer names the target that was authorised.
  *
  * <p>{@code root} is canonicalised at construction time, so {@link #root()} can be compared safely;
  * a root reached through a symlinked ancestor (e.g. {@code /tmp} on macOS) is accepted and reported
@@ -67,7 +78,7 @@ import java.util.Objects;
  * @param confineSymlinks when {@code true}, every canonicalised path is required to stay under the
  *     root; when {@code false}, only the lexical check bounds the request
  */
-public record WorkspaceRoot(Path root, boolean confineSymlinks) {
+public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathSpace {
 
   /**
    * Canonical constructor; canonicalises {@code root}.
@@ -121,6 +132,115 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
    *     traverses a symlink that leads outside the root
    */
   public Path resolveSafe(String requested) {
+    var resolved = lexical(requested);
+    var canonical = canonicalise(resolved, requested);
+    if (!resolved.startsWith(root) && !canonical.startsWith(root)) {
+      throw new WorkspaceEscapeException("path escapes workspace root: " + requested);
+    }
+    return canonical;
+  }
+
+  /**
+   * The canonical spelling of the target {@link #resolveSafe(String)} resolves {@code requested}
+   * to: {@code .} for the root, {@code ./a/b} below it, or, in a trusted workspace, the absolute
+   * real path of a target outside the root. A missing leaf is resolvable; a missing parent is not.
+   * The spelling of a target inside the root is its own canonical spelling; an outside one is not,
+   * since only a symlink inside the root leads there.
+   *
+   * @param requested the path as the model spelled it; non-null
+   * @return the canonical spelling
+   * @throws WorkspaceEscapeException if {@link #resolveSafe(String)} refuses {@code requested}, or
+   *     its parent directory does not exist
+   */
+  @Override
+  public String canonical(String requested) {
+    var resolved = resolveSafe(requested);
+    var parent = resolved.getParent();
+    if (parent != null && !Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)) {
+      throw new WorkspaceEscapeException("parent directory does not exist: " + spell(resolved));
+    }
+    return spell(resolved);
+  }
+
+  /**
+   * The canonical spelling of a resolved path: {@code .} for the root, {@code ./a/b} below it, the
+   * absolute path itself outside it.
+   *
+   * @param resolved an absolute, normalised path; non-null
+   * @return its spelling
+   */
+  public String spell(Path resolved) {
+    var relative = relativize(resolved);
+    return resolved.startsWith(root) && !resolved.equals(root) ? "./" + relative : relative;
+  }
+
+  /**
+   * Resolve a canonical path the way it was authorised, refusing it when it no longer resolves to
+   * itself: its lexical location is canonicalised again, and any difference, such as a symlink
+   * swapped in after authorisation, fails. In a trusted workspace an absolute path outside the root
+   * is accepted when it is its own real path.
+   *
+   * @param canonical a spelling returned by {@link #canonical(String)}; non-null
+   * @return the resolved path, equal to the lexical location of {@code canonical}
+   * @throws WorkspaceEscapeException if {@code canonical} escapes the root, traverses a dangling or
+   *     looping symlink, or now resolves to another target
+   */
+  public Path resolveCanonical(String canonical) {
+    var lexical = lexical(canonical);
+    var resolved = canonicalise(lexical, canonical);
+    if (!resolved.equals(lexical)) {
+      throw new WorkspaceEscapeException(
+          "path is not canonical or changed after it was authorised: "
+              + canonical
+              + " now resolves to "
+              + spell(resolved));
+    }
+    return resolved;
+  }
+
+  /**
+   * Whether {@code glob} can match a canonical spelling of this workspace: its first segment is
+   * {@code .}, starts with {@code **}, or, in a trusted workspace only, is empty (an absolute path
+   * whose literal part does not lie at or under the root, which is spelled relative), and no later
+   * segment is empty, {@code .} or {@code ..}.
+   *
+   * @param glob a rule's glob; non-null
+   * @return whether a canonical spelling can match it
+   */
+  @Override
+  public boolean admits(String glob) {
+    var first = glob.split("/", -1)[0];
+    var anchored =
+        first.equals(".")
+            || first.startsWith("**")
+            || (first.isEmpty() && !confineSymlinks && !matchesOnlyInRoot(glob));
+    return anchored && PathSpace.laterSegmentsProper(glob);
+  }
+
+  /** Whether every path the absolute {@code glob} can match lies at or under the root, if any. */
+  private boolean matchesOnlyInRoot(String glob) {
+    var wildcard = Math.min(indexOrEnd(glob, '*'), indexOrEnd(glob, '?'));
+    var literal =
+        wildcard == glob.length() ? glob : glob.substring(0, glob.lastIndexOf('/', wildcard));
+    try {
+      return Path.of(literal).startsWith(root);
+    } catch (InvalidPathException unspellable) {
+      return true;
+    }
+  }
+
+  private static int indexOrEnd(String text, char c) {
+    var index = text.indexOf(c);
+    return index < 0 ? text.length() : index;
+  }
+
+  @Override
+  public String example() {
+    return "./src/Main.java";
+  }
+
+  /** {@code requested} made absolute and normalised; a relative path must stay under the root. */
+  private Path lexical(String requested) {
     Objects.requireNonNull(requested, "requested must not be null");
     if (Strings.isBlank(requested)) {
       throw new WorkspaceEscapeException("path must not be blank");
@@ -131,16 +251,14 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) {
     } catch (InvalidPathException e) {
       throw new WorkspaceEscapeException("invalid path: " + e.getMessage());
     }
-    Path resolved =
-        candidate.isAbsolute() ? candidate.normalize() : root.resolve(candidate).normalize();
-    if (!candidate.isAbsolute() && !resolved.startsWith(root)) {
+    if (candidate.isAbsolute()) {
+      return candidate.normalize();
+    }
+    var resolved = root.resolve(candidate).normalize();
+    if (!resolved.startsWith(root)) {
       throw new WorkspaceEscapeException("path escapes workspace root: " + requested);
     }
-    var canonical = canonicalise(resolved, requested);
-    if (!resolved.startsWith(root) && !canonical.startsWith(root)) {
-      throw new WorkspaceEscapeException("path escapes workspace root: " + requested);
-    }
-    return canonical;
+    return resolved;
   }
 
   private Path canonicalise(Path resolved, String requested) {

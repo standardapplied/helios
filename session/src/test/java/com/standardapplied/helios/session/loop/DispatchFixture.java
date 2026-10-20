@@ -91,7 +91,8 @@ final class DispatchFixture implements AutoCloseable {
         new FutureTask<>(
             () -> {
               try {
-                return new Ending(d.dispatch(call, token, timeout, stopGrace), null, false);
+                return new Ending(
+                    d.dispatch(call, token, timeout, stopGrace, key -> false), null, false);
               } catch (RuntimeException e) {
                 return new Ending(null, e, Thread.currentThread().isInterrupted());
               }

@@ -8,6 +8,7 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 /**
  * Per-invocation context handed to a {@link ToolExecutor}. Carries the {@link SessionContext} for
@@ -23,6 +24,10 @@ import java.util.Objects;
  * shape their work — e.g. stop a tree walk early — but they do not need to enforce it; missing the
  * deadline is not a correctness bug, only an efficiency one.
  *
+ * <p>{@link #withholds(String)} says whether the session's policy withholds an entry a tool walks
+ * to below its authorised path, by the entry's canonical permission key; a tool that walks a
+ * subtree skips such an entry.
+ *
  * <p>Use {@link #noop()} for call sites that don't have a real session (tests, direct library use).
  * The noop session id is the fixed string {@code "noop-session"} so providers that key by session
  * id behave deterministically in tests.
@@ -36,13 +41,17 @@ import java.util.Objects;
  * @param cancellation the call's cancellation token; non-null
  * @param deadline the window the dispatcher allows the call before cancelling it; non-null and
  *     non-negative
+ * @param withheld true for the canonical key of an entry the call must not return; non-null
  */
 public record ToolContext(
-    SessionContext sessionContext, CancellationToken cancellation, Duration deadline) {
+    SessionContext sessionContext,
+    CancellationToken cancellation,
+    Duration deadline,
+    Predicate<String> withheld) {
 
   private static final SessionContext NOOP_SESSION = SessionContext.forTesting("noop-session");
   private static final ToolContext NOOP =
-      new ToolContext(NOOP_SESSION, NOOP_SESSION.cancellation(), Duration.ofDays(1));
+      new ToolContext(NOOP_SESSION, NOOP_SESSION.cancellation(), Duration.ofDays(1), key -> false);
 
   /**
    * Canonical constructor.
@@ -57,11 +66,22 @@ public record ToolContext(
     if (deadline.isNegative()) {
       throw new IllegalArgumentException("deadline must not be negative, got " + deadline);
     }
+    Objects.requireNonNull(withheld, "withheld must not be null");
+  }
+
+  /**
+   * Whether the call must not return the entry with canonical key {@code canonicalKey}.
+   *
+   * @param canonicalKey the entry's canonical permission key; non-null
+   * @return {@code true} when the session's policy withholds it
+   */
+  public boolean withholds(String canonicalKey) {
+    return withheld.test(canonicalKey);
   }
 
   /**
    * The shared "no real context" instance — fresh never-cancelled token, system clock, generous
-   * deadline. Use for tests and direct library callers that don't have a session.
+   * deadline, nothing withheld. Use for tests and direct library callers that don't have a session.
    *
    * @return a stable noop context
    */

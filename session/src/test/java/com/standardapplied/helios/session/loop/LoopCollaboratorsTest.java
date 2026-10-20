@@ -55,6 +55,7 @@ final class LoopCollaboratorsTest {
                     null,
                     dispatch,
                     Authorizations.ADMIT_ALL,
+                    Authorizations.NO_RULE,
                     queue,
                     events::add,
                     contextFactory,
@@ -72,6 +73,7 @@ final class LoopCollaboratorsTest {
                     hooks,
                     null,
                     Authorizations.ADMIT_ALL,
+                    Authorizations.NO_RULE,
                     queue,
                     events::add,
                     contextFactory,
@@ -86,8 +88,33 @@ final class LoopCollaboratorsTest {
             NullPointerException.class,
             () ->
                 new LoopCollaborators(
-                    hooks, dispatch, null, queue, events::add, contextFactory, CLOCK));
+                    hooks,
+                    dispatch,
+                    null,
+                    Authorizations.NO_RULE,
+                    queue,
+                    events::add,
+                    contextFactory,
+                    CLOCK));
     assertEquals("authorization must not be null", ex.getMessage());
+  }
+
+  @Test
+  void nullWithholdingRejected() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new LoopCollaborators(
+                    hooks,
+                    dispatch,
+                    Authorizations.ADMIT_ALL,
+                    null,
+                    queue,
+                    events::add,
+                    contextFactory,
+                    CLOCK));
+    assertEquals("decidingRule must not be null", ex.getMessage());
   }
 
   @Test
@@ -100,6 +127,7 @@ final class LoopCollaboratorsTest {
                     hooks,
                     dispatch,
                     Authorizations.ADMIT_ALL,
+                    Authorizations.NO_RULE,
                     null,
                     events::add,
                     contextFactory,
@@ -114,7 +142,14 @@ final class LoopCollaboratorsTest {
             NullPointerException.class,
             () ->
                 new LoopCollaborators(
-                    hooks, dispatch, Authorizations.ADMIT_ALL, queue, null, contextFactory, CLOCK));
+                    hooks,
+                    dispatch,
+                    Authorizations.ADMIT_ALL,
+                    Authorizations.NO_RULE,
+                    queue,
+                    null,
+                    contextFactory,
+                    CLOCK));
     assertEquals("eventSink must not be null", ex.getMessage());
   }
 
@@ -125,7 +160,14 @@ final class LoopCollaboratorsTest {
             NullPointerException.class,
             () ->
                 new LoopCollaborators(
-                    hooks, dispatch, Authorizations.ADMIT_ALL, queue, events::add, null, CLOCK));
+                    hooks,
+                    dispatch,
+                    Authorizations.ADMIT_ALL,
+                    Authorizations.NO_RULE,
+                    queue,
+                    events::add,
+                    null,
+                    CLOCK));
     assertEquals("hookContextFactory must not be null", ex.getMessage());
   }
 
@@ -139,6 +181,7 @@ final class LoopCollaboratorsTest {
                     hooks,
                     dispatch,
                     Authorizations.ADMIT_ALL,
+                    Authorizations.NO_RULE,
                     queue,
                     events::add,
                     contextFactory,
@@ -153,6 +196,7 @@ final class LoopCollaboratorsTest {
             .withHooks(hooks)
             .withToolDispatch(dispatch)
             .withAuthorization(Authorizations.ADMIT_ALL)
+            .withDecidingRule(Authorizations.NO_RULE)
             .withSteeringQueue(queue)
             .withEventSink(events::add)
             .withHookContextFactory(contextFactory)
@@ -162,6 +206,7 @@ final class LoopCollaboratorsTest {
     assertSame(hooks, collaborators.hooks());
     assertSame(dispatch, collaborators.toolDispatch());
     assertSame(Authorizations.ADMIT_ALL, collaborators.authorization());
+    assertSame(Authorizations.NO_RULE, collaborators.decidingRule());
     assertSame(queue, collaborators.steeringQueue());
     assertSame(contextFactory, collaborators.hookContextFactory());
     assertSame(CLOCK, collaborators.clock());
@@ -174,6 +219,7 @@ final class LoopCollaboratorsTest {
             .withHooks(hooks)
             .withToolDispatch(dispatch)
             .withAuthorization(Authorizations.ADMIT_ALL)
+            .withDecidingRule(Authorizations.NO_RULE)
             .withSteeringQueue(queue)
             .withEventSink(events::add)
             .withHookContextFactory(contextFactory)
@@ -194,7 +240,14 @@ final class LoopCollaboratorsTest {
   void hookContextAndEmitterUseTheSharedFactoryAndSink() {
     var collaborators =
         new LoopCollaborators(
-            hooks, dispatch, Authorizations.ADMIT_ALL, queue, events::add, contextFactory, CLOCK);
+            hooks,
+            dispatch,
+            Authorizations.ADMIT_ALL,
+            Authorizations.NO_RULE,
+            queue,
+            events::add,
+            contextFactory,
+            CLOCK);
     var state = new SessionState("sess-collab", new CancellationToken(), CLOCK);
 
     assertEquals("sess-collab", collaborators.hookContext(state).sessionId());

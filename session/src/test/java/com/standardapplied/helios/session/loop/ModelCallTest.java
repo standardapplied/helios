@@ -88,6 +88,7 @@ final class ModelCallTest {
             HookRegistry.empty(),
             dispatch,
             Authorizations.ADMIT_ALL,
+            Authorizations.NO_RULE,
             queue,
             sink,
             s ->

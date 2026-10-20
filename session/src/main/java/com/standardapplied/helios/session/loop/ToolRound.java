@@ -13,6 +13,7 @@ import com.standardapplied.helios.session.permissions.Permission;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 /**
  * Runs the tool calls of one model turn serially: runs the {@code PreToolUse} chain, authorizes the
@@ -35,11 +36,14 @@ import java.util.Map;
  *       a {@link ToolResult#rejected rejected} result; {@code Inject} queues a synthetic user
  *       message and substitutes a rejected result; {@code Stop} terminates; with none of the three,
  *       the final call goes to authorization.
- *   <li><b>Authorization</b>: a refusal emits {@link QueryEvent.ToolBlocked} and substitutes a
- *       rejected result by {@link Permission#NAME}; an admitted call emits {@link
- *       QueryEvent.ToolUse} and is dispatched. A call naming no registered tool skips the stage,
- *       and dispatch answers it {@code NotFound}. A refusal's reason and a hook's {@code Block}
- *       reason are redacted and bounded by {@link ToolAuthorization#diagnostic}.
+ *   <li><b>Authorization</b>: the call's path argument is canonicalised and the canonical call
+ *       authorised; a refusal emits {@link QueryEvent.ToolBlocked} and substitutes a rejected
+ *       result by {@link Permission#NAME}; an admitted call emits {@link QueryEvent.ToolUse} with
+ *       the canonical call, which is dispatched with what its policy withholds and which {@code
+ *       PostToolUse} hooks and the {@link QueryEvent.ToolResult} see. A call naming no registered
+ *       tool skips the stage, and dispatch answers it {@code NotFound}. A refusal's reason and a
+ *       hook's {@code Block} reason are redacted and bounded by {@link
+ *       ToolAuthorization#diagnostic}.
  *   <li><b>PostToolUse</b>: {@code MutateResult} rewrites the tool result's output and keeps its
  *       outcome, since a hook changes what the model reads, not what happened; {@code Inject}
  *       queues a synthetic user message; {@code Stop} appends the result and terminates.
@@ -55,7 +59,10 @@ final class ToolRound {
    * redacted from that result's reason.
    */
   private record PlannedCall(
-      ToolCall call, ToolResult substitute, Map<String, Integer> redactions) {}
+      ToolCall call,
+      ToolResult substitute,
+      Map<String, Integer> redactions,
+      Predicate<String> withheld) {}
 
   private final LoopCollaborators collaborators;
   private final EventEmitter emitter;
@@ -99,14 +106,15 @@ final class ToolRound {
           case HookOutcome.Inject inject -> {
             effects.inject(state, hookName, PRE_TOOL_USE, inject);
             yield new PlannedCall(
-                finalCall, ToolResult.rejected(hookName, "hook injected a user message"), Map.of());
+                finalCall,
+                ToolResult.rejected(hookName, "hook injected a user message"),
+                Map.of(),
+                ToolAuthorization.NOTHING_WITHHELD);
           }
           default -> authorize(state, finalCall);
         };
     var result =
-        planned.substitute() == null
-            ? dispatch(state, planned.call(), limits)
-            : planned.substitute();
+        planned.substitute() == null ? dispatch(state, planned, limits) : planned.substitute();
     return afterTool(
         state, planned.call(), emitRedacted(state, planned.call(), result, planned.redactions()));
   }
@@ -164,17 +172,27 @@ final class ToolRound {
    * QueryEvent.ToolUse}.
    */
   private PlannedCall authorize(SessionState state, ToolCall call) {
-    var refusal =
-        ToolAuthorization.refusal(
-            collaborators.toolDispatch().registry(), collaborators.authorization(), call);
-    if (refusal.isPresent()) {
-      return block(state, call, Permission.NAME, refusal.orElseThrow());
-    }
-    emitter.emit(
-        state,
-        new QueryEvent.ToolUse(
-            state.sessionId(), state.currentTurnIndex(), collaborators.clock().instant(), call));
-    return new PlannedCall(call, null, Map.of());
+    var verdict =
+        ToolAuthorization.admit(
+            collaborators.toolDispatch().registry(),
+            collaborators.authorization(),
+            collaborators.decidingRule(),
+            collaborators.secrets(),
+            call);
+    return switch (verdict) {
+      case ToolAuthorization.Refused refused ->
+          block(state, call, Permission.NAME, refused.reason());
+      case ToolAuthorization.Admitted admitted -> {
+        emitter.emit(
+            state,
+            new QueryEvent.ToolUse(
+                state.sessionId(),
+                state.currentTurnIndex(),
+                collaborators.clock().instant(),
+                admitted.call()));
+        yield new PlannedCall(admitted.call(), null, Map.of(), admitted.withheld());
+      }
+    };
   }
 
   private PlannedCall block(SessionState state, ToolCall call, String by, String reason) {
@@ -189,17 +207,25 @@ final class ToolRound {
             call,
             by,
             text));
-    return new PlannedCall(call, ToolResult.rejected(by, text), diagnostic.counts());
+    return new PlannedCall(
+        call,
+        ToolResult.rejected(by, text),
+        diagnostic.counts(),
+        ToolAuthorization.NOTHING_WITHHELD);
   }
 
-  private ToolResult dispatch(SessionState state, ToolCall call, SessionLimits limits) {
+  private ToolResult dispatch(SessionState state, PlannedCall planned, SessionLimits limits) {
     try {
       return collaborators
           .toolDispatch()
           .dispatch(
-              call, state.cancellation(), limits.toolTimeoutDefault(), limits.toolStopGrace());
+              planned.call(),
+              state.cancellation(),
+              limits.toolTimeoutDefault(),
+              limits.toolStopGrace(),
+              planned.withheld());
     } catch (RuntimeException e) {
-      return ToolResult.threw(call.name(), e);
+      return ToolResult.threw(planned.call().name(), e);
     }
   }
 

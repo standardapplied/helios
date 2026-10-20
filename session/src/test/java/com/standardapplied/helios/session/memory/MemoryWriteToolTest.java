@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.memory;
 
+import static com.standardapplied.helios.session.test.BindingCalls.keyOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -45,7 +46,10 @@ final class MemoryWriteToolTest {
     assertEquals("MemoryWrite", binding.name());
     assertEquals("MemoryWrite", MemoryWriteTool.NAME);
     assertEquals(
-        "/memories/x.md", binding.permissionKey(Map.of("path", "/memories/x.md")).canonicalArgs());
+        "/memories/x.md", keyOf(binding, Map.of("path", "/memories/x.md")).canonicalArgs());
+    assertEquals(
+        "/memories/locked/a.md",
+        keyOf(binding, Map.of("path", "/memories/x/../locked/./a.md")).canonicalArgs());
   }
 
   // ── create ────────────────────────────────────────────────────────────────

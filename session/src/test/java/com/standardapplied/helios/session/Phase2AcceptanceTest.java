@@ -87,7 +87,7 @@ final class Phase2AcceptanceTest {
             List.of(),
             List.of(),
             List.of(
-                new PermissionRule(PermissionEffect.DENY, "Read", Optional.of("sensitive.txt"))));
+                new PermissionRule(PermissionEffect.DENY, "Read", Optional.of("./sensitive.txt"))));
 
     // Five-turn script: Grep → Read(allowed) → Read(denied) → AskUserQuestion → final STOP.
     var grepCall = new ToolCall("c1", GrepTool.NAME, Map.of("pattern", "TARGET"));
@@ -162,7 +162,8 @@ final class Phase2AcceptanceTest {
       assertNotNull(blocked, "expected the deny rule to surface a ToolBlocked event");
       assertEquals("Read", blocked.call().name());
       assertEquals("Permission", blocked.hookName());
-      assertEquals("deny rule Read(sensitive.txt) matched Read(sensitive.txt)", blocked.reason());
+      assertEquals(
+          "deny rule Read(./sensitive.txt) matched Read(./sensitive.txt)", blocked.reason());
 
       // Verify a QuestionAsked event surfaced.
       var question = findEvent(sub.events(), QueryEvent.QuestionAsked.class);

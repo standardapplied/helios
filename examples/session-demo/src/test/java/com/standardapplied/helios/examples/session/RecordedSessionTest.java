@@ -164,7 +164,7 @@ final class RecordedSessionTest {
     var grep = output(replay, GrepTool.NAME, "reactor");
     assertTrue(grep.contains("patterns.md"), grep);
     assertFalse(grep.contains("misc.md"), grep);
-    var config = output(replay, ReadTool.NAME, "config.yaml");
+    var config = output(replay, ReadTool.NAME, "./config.yaml");
     assertTrue(config.contains("<redacted:OPENAI_KEY>"), config);
     replay.bodies().forEach(body -> assertFalse(body.contains(SECRET)));
     assertTrue(sentBase64Of(replay, SampleDocuments.pixelPng()));

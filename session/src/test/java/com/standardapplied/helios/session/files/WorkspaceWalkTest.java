@@ -7,6 +7,8 @@ package com.standardapplied.helios.session.files;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.tool.ToolContext;
+import com.standardapplied.helios.session.tools.Withholding;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -35,6 +37,7 @@ final class WorkspaceWalkTest {
             workspace,
             workspace.root(),
             cancellation,
+            Withholding.of(ToolContext.noop()),
             10,
             Long.MAX_VALUE,
             (file, attrs, remaining) -> {
@@ -61,6 +64,7 @@ final class WorkspaceWalkTest {
             workspace,
             workspace.root(),
             new CancellationToken(),
+            Withholding.of(ToolContext.noop()),
             3,
             Long.MAX_VALUE,
             (file, attrs, remaining) -> {
@@ -86,6 +90,7 @@ final class WorkspaceWalkTest {
         workspace,
         workspace.root(),
         new CancellationToken(),
+        Withholding.of(ToolContext.noop()),
         10,
         1,
         (file, attrs, remaining) -> {
@@ -112,6 +117,7 @@ final class WorkspaceWalkTest {
           workspace,
           workspace.root(),
           new CancellationToken(),
+          Withholding.of(ToolContext.noop()),
           10,
           Long.MAX_VALUE,
           (file, attrs, remaining) -> {
@@ -136,6 +142,7 @@ final class WorkspaceWalkTest {
         workspace,
         workspace.resolveSafe(".config"),
         new CancellationToken(),
+        Withholding.of(ToolContext.noop()),
         10,
         Long.MAX_VALUE,
         (file, attrs, remaining) -> {

@@ -74,7 +74,7 @@ final class HookLoop implements AutoCloseable {
   ResultMessage run(
       Model model,
       ToolRegistry tools,
-      Function<ToolCall, PermissionDecision> authorization,
+      Function<ToolBinding.CanonicalCall, PermissionDecision> authorization,
       UserMessage message,
       Hook... hooks) {
     var queue = new SteeringQueue(8);
@@ -84,6 +84,7 @@ final class HookLoop implements AutoCloseable {
             new HookRegistry(List.of(hooks)),
             fixture.dispatch(tools),
             authorization,
+            Authorizations.NO_RULE,
             queue,
             fixture.events::add,
             fixture::hookContext,

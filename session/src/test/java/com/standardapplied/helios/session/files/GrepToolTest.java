@@ -4,6 +4,8 @@
  */
 package com.standardapplied.helios.session.files;
 
+import static com.standardapplied.helios.session.test.BindingCalls.keyOf;
+import static com.standardapplied.helios.session.test.BindingCalls.withholding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -14,12 +16,16 @@ import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -178,9 +184,8 @@ final class GrepToolTest {
   @Test
   void permissionKeyCarriesPath(@TempDir Path tmp) {
     var binding = GrepTool.binding(WorkspaceRoot.of(tmp));
-    assertEquals(
-        "src", binding.permissionKey(Map.of("pattern", "x", "path", "src")).canonicalArgs());
-    assertEquals(".", binding.permissionKey(Map.of("pattern", "x")).canonicalArgs());
+    assertEquals("./src", keyOf(binding, Map.of("pattern", "x", "path", "src")).canonicalArgs());
+    assertEquals(".", keyOf(binding, Map.of("pattern", "x")).canonicalArgs());
   }
 
   @Test
@@ -270,18 +275,24 @@ final class GrepToolTest {
 
   @Test
   @DisabledOnOs(OS.WINDOWS)
-  void symlinkedSearchRootInsideWorkspaceIsSearchedAtItsRealPath(@TempDir Path tmp)
+  void aSymlinkedSearchRootIsSearchedAtItsCanonicalPathAndRefusedThroughTheLink(@TempDir Path tmp)
       throws IOException {
     var ws = WorkspaceRoot.of(tmp);
     Files.createDirectories(ws.root().resolve("real"));
     Files.writeString(ws.root().resolve("real/a.txt"), "hello\n", StandardCharsets.UTF_8);
     Files.createSymbolicLink(ws.root().resolve("alias"), ws.root().resolve("real"));
-    var result =
-        GrepTool.binding(ws)
-            .tool()
-            .execute(Map.of("pattern", "hello", "path", "alias"), ToolContext.noop());
-    assertTrue(result.succeeded(), result.output());
-    assertEquals("real/a.txt:1:hello\n", result.output());
+    var tool = GrepTool.binding(ws).tool();
+
+    var canonical =
+        tool.execute(Map.of("pattern", "hello", "path", ws.canonical("alias")), ToolContext.noop());
+    assertEquals("real/a.txt:1:hello\n", canonical.output());
+
+    var throughTheLink =
+        tool.execute(Map.of("pattern", "hello", "path", "alias"), ToolContext.noop());
+    assertEquals(
+        "Grep: path is not canonical or changed after it was authorised: alias now resolves to"
+            + " ./real",
+        throughTheLink.output());
   }
 
   @Test
@@ -318,7 +329,9 @@ final class GrepToolTest {
     Files.writeString(tmp.resolve("a.txt"), "hit\n", StandardCharsets.UTF_8);
     var call = new CancellationToken();
     call.cancel("stop");
-    var ctx = new ToolContext(SessionContext.forTesting("cancelled"), call, Duration.ofMinutes(1));
+    var ctx =
+        new ToolContext(
+            SessionContext.forTesting("cancelled"), call, Duration.ofMinutes(1), key -> false);
     var result =
         GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "hit"), ctx);
     assertTrue(result.succeeded(), result.output());
@@ -351,6 +364,122 @@ final class GrepToolTest {
       assertEquals("a.txt:1:hit\n", result.output());
     } finally {
       Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rw-------"));
+    }
+  }
+
+  @Test
+  void aWithheldDirectoryIsNeverDescendedInto(@TempDir Path tmp) throws IOException {
+    Files.createDirectories(tmp.resolve("secrets/sub"));
+    Files.writeString(tmp.resolve("secrets/key"), "TOPSECRET\n", StandardCharsets.UTF_8);
+    Files.writeString(tmp.resolve("secrets/sub/c.txt"), "TOPSECRET\n", StandardCharsets.UTF_8);
+    Files.writeString(tmp.resolve("a.txt"), "TOP\n", StandardCharsets.UTF_8);
+    var asked = new CopyOnWriteArrayList<String>();
+
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(
+                Map.of("pattern", "TOP", "path", "."),
+                withholding(
+                    key -> {
+                      asked.add(key);
+                      return key.equals("./secrets");
+                    }));
+
+    assertEquals("a.txt:1:TOP\n[withheld by permission policy: 1]\n", result.output());
+    assertEquals(List.of("./a.txt", "./secrets"), asked.stream().sorted().toList());
+  }
+
+  @Test
+  void aWithheldFileCountsWhateverItsSize(@TempDir Path tmp) throws IOException {
+    Files.writeString(tmp.resolve("small.txt"), "TOPSECRET\n", StandardCharsets.UTF_8);
+    Files.writeString(
+        tmp.resolve("large.txt"), "TOPSECRET\n".repeat(200_000), StandardCharsets.UTF_8);
+
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "TOP"), withholding(key -> true));
+
+    assertEquals("[withheld by permission policy: 2]\n", result.output());
+  }
+
+  @Test
+  void theWithheldLineFollowsTheTruncationMarker(@TempDir Path tmp) throws IOException {
+    Files.createDirectories(tmp.resolve("first"));
+    Files.createDirectories(tmp.resolve("second"));
+    var firstListed = firstListedDirectory(tmp);
+    var other = firstListed.equals("first") ? "second" : "first";
+    Files.writeString(tmp.resolve(firstListed + "/denied.txt"), "hit\n", StandardCharsets.UTF_8);
+    Files.writeString(
+        tmp.resolve(other + "/big.txt"), "hit\n".repeat(1001), StandardCharsets.UTF_8);
+
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "hit"), withholding(key -> key.equals("./" + firstListed)));
+
+    assertTrue(
+        result
+            .output()
+            .endsWith(
+                "big.txt:1000:hit\n[truncated at 1000 matches]\n"
+                    + "[withheld by permission policy: 1]\n"),
+        result.output());
+  }
+
+  @Test
+  void aWalkDoesNotFollowADirectorySwappedAfterItsCheck(@TempDir Path tmp) throws IOException {
+    assertEquals(
+        "[withheld by permission policy: 1]\n", grepSwappingPublicAfterChecking(tmp, "./public"));
+  }
+
+  @Test
+  void aWalkDoesNotReadAFileWhoseDirectoryIsSwappedAfterItsCheck(@TempDir Path tmp)
+      throws IOException {
+    assertEquals(
+        "[withheld by permission policy: 1]\n",
+        grepSwappingPublicAfterChecking(tmp, "./public/key"));
+  }
+
+  /**
+   * Greps a workspace holding {@code public/key} and a withheld {@code secrets/key}, moving {@code
+   * public} out of the workspace for a link to {@code secrets} as soon as {@code trigger} has been
+   * checked.
+   */
+  private static String grepSwappingPublicAfterChecking(Path tmp, String trigger)
+      throws IOException {
+    var root = Files.createDirectories(tmp.resolve("ws"));
+    Files.createDirectories(root.resolve("public"));
+    Files.createDirectories(root.resolve("secrets"));
+    Files.writeString(root.resolve("public/key"), "SAFE\n", StandardCharsets.UTF_8);
+    Files.writeString(root.resolve("secrets/key"), "TOPSECRET\n", StandardCharsets.UTF_8);
+    Predicate<String> withheld =
+        key -> {
+          if (key.equals(trigger)) {
+            swap(root.resolve("public"), tmp.resolve("moved"), root.resolve("secrets"));
+          }
+          return key.equals("./secrets");
+        };
+    return GrepTool.binding(WorkspaceRoot.of(root))
+        .tool()
+        .execute(Map.of("pattern", "[A-Z]", "path", "."), withholding(withheld))
+        .output();
+  }
+
+  private static void swap(Path directory, Path aside, Path linkTarget) {
+    try {
+      Files.move(directory, aside);
+      Files.createSymbolicLink(directory, linkTarget);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  /** The directory of {@code dir} that a walk of it visits first. */
+  private static String firstListedDirectory(Path dir) throws IOException {
+    try (var entries = Files.newDirectoryStream(dir)) {
+      return entries.iterator().next().getFileName().toString();
     }
   }
 }

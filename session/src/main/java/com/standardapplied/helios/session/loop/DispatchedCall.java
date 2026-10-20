@@ -19,6 +19,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -84,12 +85,13 @@ final class DispatchedCall {
       SessionContext session,
       CancellationToken parent,
       Duration timeout,
+      Predicate<String> withheld,
       CategoryPermits permits,
       Set<Live> liveCalls,
       SessionEnding ending) {
     this.binding = binding;
     this.call = call;
-    this.context = new ToolContext(session, token, timeout);
+    this.context = new ToolContext(session, token, timeout, withheld);
     this.parent = parent;
     this.timeout = timeout;
     this.deadline = System.nanoTime() + TimeUnit.NANOSECONDS.convert(timeout);
