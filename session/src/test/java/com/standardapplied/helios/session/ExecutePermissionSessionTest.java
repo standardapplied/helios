@@ -94,11 +94,17 @@ final class ExecutePermissionSessionTest {
         "Allow Execute(BASH/ls; rm -rf ~/)?\n\nArguments:"
             + " {\"runtime\":\"bash\",\"script\":\"ls; rm -rf ~/\",\"stdin\":\"y\"}",
         onlyQuestion(run));
+    assertEquals(new ToolOutcome.Succeeded(), run.onlyResult().outcome());
     assertEquals(1, provider.executed.size());
     var request = provider.executed.getFirst();
     assertEquals(
-        List.of(Runtime.BASH, DANGEROUS, Optional.of("y")),
-        List.of(request.runtime(), request.script(), request.stdin()));
+        List.of(Runtime.BASH, DANGEROUS, List.of(), Map.of(), Optional.of("y")),
+        List.of(
+            request.runtime(),
+            request.script(),
+            request.args(),
+            request.environment(),
+            request.stdin()));
   }
 
   @Test
