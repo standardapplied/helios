@@ -311,30 +311,37 @@ final class PermissionTypesTest {
         "call must not be null",
         assertThrows(
                 NullPointerException.class,
-                () -> new ApprovalRequest(null, KEY, write, none, "asked"))
+                () -> new ApprovalRequest(null, "{}", KEY, write, none, "asked"))
+            .getMessage());
+    assertEquals(
+        "arguments must not be null",
+        assertThrows(
+                NullPointerException.class,
+                () -> new ApprovalRequest(CALL, null, KEY, write, none, "asked"))
             .getMessage());
     assertEquals(
         "key must not be null",
         assertThrows(
                 NullPointerException.class,
-                () -> new ApprovalRequest(CALL, null, write, none, "asked"))
+                () -> new ApprovalRequest(CALL, "{}", null, write, none, "asked"))
             .getMessage());
     assertEquals(
         "category must not be null",
         assertThrows(
                 NullPointerException.class,
-                () -> new ApprovalRequest(CALL, KEY, null, none, "asked"))
+                () -> new ApprovalRequest(CALL, "{}", KEY, null, none, "asked"))
             .getMessage());
     assertEquals(
         "rule must not be null",
         assertThrows(
                 NullPointerException.class,
-                () -> new ApprovalRequest(CALL, KEY, write, null, "asked"))
+                () -> new ApprovalRequest(CALL, "{}", KEY, write, null, "asked"))
             .getMessage());
     assertEquals(
         "reason must not be null",
         assertThrows(
-                NullPointerException.class, () -> new ApprovalRequest(CALL, KEY, write, none, null))
+                NullPointerException.class,
+                () -> new ApprovalRequest(CALL, "{}", KEY, write, none, null))
             .getMessage());
   }
 
@@ -344,7 +351,7 @@ final class PermissionTypesTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new ApprovalRequest(CALL, KEY, ToolCategory.WRITE, none, " "));
+            () -> new ApprovalRequest(CALL, "{}", KEY, ToolCategory.WRITE, none, " "));
     assertEquals("reason must not be blank", ex.getMessage());
   }
 }

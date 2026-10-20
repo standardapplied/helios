@@ -374,7 +374,7 @@ final class CanonicalPermissionPathsTest {
     var permission =
         policy(
             PermissionMode.DEFAULT,
-            PermissionRule.withGlob(PermissionEffect.DENY, "Execute", "BASH/rm"),
+            PermissionRule.withGlob(PermissionEffect.DENY, "Execute", "BASH/**rm **"),
             PermissionRule.withGlob(PermissionEffect.DENY, "Unregistered", "secrets/**"),
             PermissionRule.withGlob(PermissionEffect.DENY, "Read", "/etc/**"));
     var options =

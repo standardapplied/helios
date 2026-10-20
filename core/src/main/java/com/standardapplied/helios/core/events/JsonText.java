@@ -2,32 +2,19 @@
 
 package com.standardapplied.helios.core.events;
 
+import com.standardapplied.helios.core.common.JsonSnapshot;
 import java.util.Map;
 
 /**
- * JSON text for single values: RFC 8259 string escaping, finite numbers in their canonical Java
- * form, and objects whose values are written as booleans, numbers or strings.
+ * JSON text for single values: strings escaped by {@link JsonSnapshot#escape}, finite numbers in
+ * their canonical Java form, and objects whose values are written as booleans, numbers or strings.
  */
 final class JsonText {
 
   private JsonText() {}
 
   static String quote(String s) {
-    var sb = new StringBuilder(s.length() + 2).append('"');
-    for (var i = 0; i < s.length(); i++) {
-      var c = s.charAt(i);
-      switch (c) {
-        case '"' -> sb.append("\\\"");
-        case '\\' -> sb.append("\\\\");
-        case '\b' -> sb.append("\\b");
-        case '\f' -> sb.append("\\f");
-        case '\n' -> sb.append("\\n");
-        case '\r' -> sb.append("\\r");
-        case '\t' -> sb.append("\\t");
-        default -> sb.append(c < 0x20 ? String.format("\\u%04x", (int) c) : String.valueOf(c));
-      }
-    }
-    return sb.append('"').toString();
+    return "\"" + JsonSnapshot.escape(s) + "\"";
   }
 
   static String number(double value) {

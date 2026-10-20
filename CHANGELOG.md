@@ -634,6 +634,24 @@ canonical call is the one keyed, announced, dispatched and shown to `PostToolUse
 | `ToolDispatch.dispatch(ToolCall, CancellationToken, Duration, Duration)` | `dispatch(ToolCall, CancellationToken, Duration, Duration, Predicate<String> withheld)` |
 | A permission-key extractor that throws is refused as `permission key of <tool> failed: <class>: <message>` under a `Permission`, and is never called without one | refused before authorization as `<tool>: <message>`, with or without a `Permission` |
 
+**`Execute`'s permission key is the whole script, and the approval prompt shows the arguments.**
+The key was `<RUNTIME>/<first whitespace-delimited token of the script>`, so a rule saw only the
+first command. A rule now matches the whole script, stripped, every line included. The runtime is
+the `Runtime` constant the argument names, or `UNKNOWN` when it names none, a call `Execute` refuses
+to run. A script carrying a registered secret's value is refused as `permission key of Execute
+carries a secret` before any rule or approver sees it. A deny glob is a guard rail: `BASH/**rm **`
+misses `rm<TAB>-rf` and `r''m`, and matches `echo farm `. An allow rule admits whatever
+`environment`, `args`, `stdin` and `workingDirectory` come with a matching script (e.g.
+`BASH_FUNC_ls%%` in `environment`), and `*` matches `;`, so allow rules on `Execute` are not a
+sandbox. Real control is `ASK`, whose prompt shows every argument.
+
+| Before | 3.0 |
+|---|---|
+| `Execute(BASH/rm)` matched the key `BASH/rm`, the first token alone | it matches only the script `rm`; the key of `ls; rm -rf ~/` is `BASH/ls; rm -rf ~/`, not `BASH/ls;`. A glob such as `Execute(BASH/**rm **)` catches more spellings, not every one (see above) |
+| `ApprovalRequest(call, key, category, rule, reason)` | `ApprovalRequest(call, arguments, key, category, rule, reason)`: `arguments` is display text, the call's arguments as compact JSON with every session secret redacted, its line separators and format characters escaped, cut at 1024 characters with a line `Arguments cut: <n> more chars not shown`; `call` is still the exact call that runs |
+| The human approver asks `Allow <tool>(<key>)?` | it asks `Allow <tool>(<key>)?`, a blank line, then `Arguments: <arguments>`; the key, and the reason describing `Allow`, show as JSON string text through `JsonSnapshot.escape` (`"`, `\`, controls, line separators and format characters such as bidi overrides and zero-width characters escaped), cut at 1024 characters, so a script cannot fake a line of the question |
+| `SecretRegistry.register` accepts a value that starts or ends with a space | refuses it as `Secret '<name>' must not start or end with a space`, since a stripped key would cut that space |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
@@ -727,14 +745,25 @@ canonical call is the one keyed, announced, dispatched and shown to `PostToolUse
   `Redirect.NORMAL`, which never follows `https` to `http`, and the 10-second connect timeout of
   `create(...)`. It takes no `ModelConfig`, so no configured key or header reaches it, and an
   architecture rule allows it only in `helios-onnx`. `create(...)` still never follows a redirect.
+- **`JsonSnapshot.write(Map)` and `JsonSnapshot.escape(String)`.** `write` writes a JSON object of
+  `JsonSnapshot`'s values as compact JSON, keys in the map's order; an approval's arguments are
+  written through it. `escape` is the one JSON string escaping: what RFC 8259 requires plus the
+  line separators U+2028 and U+2029 and every format character, so the text shows what it holds.
+  Event JSON escapes its strings through it too, so an event now also shows line separators and
+  format characters as `\uXXXX`.
+- **`Strings.truncated(String text, int maxChars, String note)`.** Cuts a text to at most `maxChars`
+  characters, never inside a surrogate pair, then appends `note` formatted with how many were cut.
+  Redacting before the cut means a secret the cut falls across is never partly shown. A refusal's
+  reason, an approval's arguments and the approval prompt's key and reason are bounded through it.
 - **`ToolApprover`, `ApprovalRequest`, `PermissionDecision.rule()`, `PermissionDecision.byRule` and
   `DefaultPermissionEvaluator.Builder.withSecretRegistry`.** A `ToolApprover` decides a call the
-  policy answered with ASK, from an `ApprovalRequest(call, key, category, rule, reason)` for the
-  final immutable call, whose `rule` is the ask rule that matched (empty when a mode or category
-  default asked). Only its `ALLOW` admits the call. `ToolApprover.askingUser(gateway)` is the human
-  approver the session wires over `AgentSession.answer`, under a fresh question id per request, so
-  an answer resolves one call only. `PermissionDecision.rule()` is the rule that decided;
-  `withSecretRegistry` takes the registry that redacts an approval's reason.
+  policy answered with ASK, from an `ApprovalRequest(call, arguments, key, category, rule, reason)`
+  for the final immutable call, whose `rule` is the ask rule that matched (empty when a mode or
+  category default asked) and whose `arguments` display the call, redacted and bounded. Only its
+  `ALLOW` admits the call. `ToolApprover.askingUser(gateway)` is the human approver the session
+  wires over `AgentSession.answer`, under a fresh question id per request, so an answer resolves one
+  call only. `PermissionDecision.rule()` is the rule that decided; `withSecretRegistry` takes the
+  registry that redacts an approval's reason and arguments.
 - **`PathSpace`, `ToolBinding.PathArgument`, `ToolBinding.Builder.withPathArgument`,
   `WorkspaceRoot.canonical`, `WorkspaceRoot.spell`, `WorkspaceRoot.resolveCanonical`,
   `session.tools.Withholding`, `ToolContext.withholds`, `DefaultPermissionEvaluator.decidingRule`,
@@ -875,6 +904,12 @@ canonical call is the one keyed, announced, dispatched and shown to `PostToolUse
   differently (`secrets/key`, `docs/../secrets/key`, an absolute path, a symlink), by swapping a
   symlink in after approval, or by searching or listing from a directory above it (`Grep .`,
   `LS .`). Path tools now key on the canonical path they touch (see Breaking).
+- **A deny rule on `Execute` no longer misses every command after the first, and the approval
+  prompt shows what runs.** `Execute` was keyed on the script's first token, so with deny
+  `Execute(BASH/rm)` the script `ls; rm -rf ~/` was keyed `BASH/ls;`, no rule matched, and the
+  user was asked `Allow Execute(BASH/ls;)?` without seeing the script; `Allow` ran all of it. The
+  key is now the whole script and the question shows the call's arguments, redacted and bounded
+  (see Breaking).
 - **A deny rule no longer misses a key that holds a line break.** `RuleMatcher` compiled a rule's `*`
   and `**` to a pattern whose `.` did not match a line terminator, so a deny rule missed a key
   holding one: `Write(/etc/**)` did not match `Write(/etc/cron.d/x\ny)`, and the mode's default,
