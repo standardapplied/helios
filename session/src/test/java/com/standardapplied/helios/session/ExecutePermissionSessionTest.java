@@ -182,4 +182,21 @@ final class ExecutePermissionSessionTest {
     assertEquals(List.of(), run.events().eventsOf(QueryEvent.QuestionAsked.class));
     assertEquals(List.of(), executed);
   }
+
+  @Test
+  void aSecretWhoseEdgeWhitespaceTheKeyStripsStillRefusesTheCallWithoutAQuestion() {
+    secrets.register("PADDED", "token-0123456789 ");
+
+    var run =
+        run(
+            options(Permission.empty(PermissionMode.DEFAULT)),
+            session -> QuestionAnswers.selecting(session, "Allow"),
+            execute("runtime", "bash", "script", "echo token-0123456789 "));
+
+    assertEquals(
+        new ToolOutcome.Rejected("Permission", "permission key of Execute carries a secret"),
+        run.onlyResult().outcome());
+    assertEquals(List.of(), run.events().eventsOf(QueryEvent.QuestionAsked.class));
+    assertEquals(List.of(), executed);
+  }
 }
