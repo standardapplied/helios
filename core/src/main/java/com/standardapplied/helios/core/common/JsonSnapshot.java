@@ -16,6 +16,7 @@ import java.util.Objects;
 import java.util.SequencedMap;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Deep, unmodifiable snapshots of a JSON object held as Java values, the shape of a tool call's
@@ -70,7 +71,7 @@ public final class JsonSnapshot {
   private final String name;
   private final Deque<Object> path = new ArrayDeque<>();
   private final Set<Object> open = Collections.newSetFromMap(new IdentityHashMap<>());
-  private int values;
+  private int values = 1;
 
   private JsonSnapshot(String name) {
     this.name = name;
@@ -88,12 +89,42 @@ public final class JsonSnapshot {
    */
   public static SequencedMap<String, Object> ofObject(String name, Map<?, ?> object) {
     var snapshot = new JsonSnapshot(Validate.notBlank("name", name));
-    snapshot.count();
     return snapshot.object(Objects.requireNonNull(object, name + " must not be null"), 1);
   }
 
+  /**
+   * {@code object} as compact JSON, keys in the map's order, every string escaped by {@link
+   * #escape}.
+   *
+   * @param object the object; non-null, holding only JSON values
+   * @return the JSON text
+   * @throws NullPointerException if {@code object} is null
+   * @throws IllegalArgumentException if {@code object} holds a value that is not a JSON value
+   * @throws ClassCastException if {@code object} holds an object with a key that is not a String
+   */
+  public static String write(Map<String, ?> object) {
+    return Writer.json(Objects.requireNonNull(object, "object must not be null"));
+  }
+
+  /**
+   * {@code text} as the inside of a JSON string, without the quotes. It escapes what RFC 8259
+   * requires, {@code "}, {@code \} and every control character, plus the line separators U+2028 and
+   * U+2029 and every format character (a bidi override, a zero-width character), so the text shows
+   * what it holds: {@code \b}, {@code \f}, {@code \n}, {@code \r} and {@code \t} by name, any other
+   * as a lowercase {@code \}{@code uXXXX} for each of its UTF-16 units.
+   *
+   * @param text the text; non-null
+   * @return the escaped text
+   * @throws NullPointerException if {@code text} is null
+   */
+  public static String escape(String text) {
+    return text.codePoints().mapToObj(Writer::escape).collect(Collectors.joining());
+  }
+
   private Object value(Object value, int depth) {
-    count();
+    if (++values > MAX_VALUES) {
+      throw new IllegalArgumentException(name + " holds more than " + MAX_VALUES + " values");
+    }
     return switch (value) {
       case null -> null;
       case String string when string.length() > MAX_STRING_LENGTH ->
@@ -179,12 +210,6 @@ public final class JsonSnapshot {
     }
   }
 
-  private void count() {
-    if (++values > MAX_VALUES) {
-      throw new IllegalArgumentException(name + " holds more than " + MAX_VALUES + " values");
-    }
-  }
-
   private IllegalArgumentException rejected(String problem) {
     var where = new StringBuilder(name);
     for (var step : path) {
@@ -195,5 +220,57 @@ public final class JsonSnapshot {
       }
     }
     return new IllegalArgumentException(where + " " + problem);
+  }
+
+  private static final class Writer {
+
+    private static String json(Object value) {
+      return switch (value) {
+        case null -> "null";
+        case String string -> quote(string);
+        case Boolean _, Byte _, Short _, Integer _, Long _, BigInteger _, BigDecimal _ ->
+            value.toString();
+        case Double number when Double.isFinite(number) -> value.toString();
+        case Float number when Float.isFinite(number) -> value.toString();
+        case Map<?, ?> object ->
+            object.entrySet().stream()
+                .map(entry -> quote((String) entry.getKey()) + ":" + json(entry.getValue()))
+                .collect(Collectors.joining(",", "{", "}"));
+        case List<?> array ->
+            array.stream().map(Writer::json).collect(Collectors.joining(",", "[", "]"));
+        default ->
+            throw new IllegalArgumentException(
+                "object holds "
+                    + (value instanceof Number ? value : "a " + value.getClass().getName())
+                    + "; "
+                    + JSON_VALUES);
+      };
+    }
+
+    private static String escape(int c) {
+      return switch (c) {
+        case '"' -> "\\\"";
+        case '\\' -> "\\\\";
+        case '\b' -> "\\b";
+        case '\f' -> "\\f";
+        case '\n' -> "\\n";
+        case '\r' -> "\\r";
+        case '\t' -> "\\t";
+        default ->
+            Character.isISOControl(c)
+                    || c == '\u2028'
+                    || c == '\u2029'
+                    || Character.getType(c) == Character.FORMAT
+                ? Character.toString(c)
+                    .chars()
+                    .mapToObj(unit -> "\\u%04x".formatted(unit))
+                    .collect(Collectors.joining())
+                : Character.toString(c);
+      };
+    }
+
+    private static String quote(String string) {
+      return '"' + JsonSnapshot.escape(string) + '"';
+    }
   }
 }

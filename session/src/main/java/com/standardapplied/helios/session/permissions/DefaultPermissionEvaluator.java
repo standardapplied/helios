@@ -4,7 +4,9 @@
  */
 package com.standardapplied.helios.session.permissions;
 
+import com.standardapplied.helios.core.common.JsonSnapshot;
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.session.tools.PathSpace;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolBinding.PathArgument;
@@ -44,8 +46,10 @@ import java.util.stream.Stream;
  * an ASK with no {@link ToolApprover} are each denied. A key carrying a session secret never
  * reaches it: the session's permission stage refuses that call first, with or without a policy. An
  * ASK goes to the approver with an {@link ApprovalRequest} for this call, its reason redacted
- * through the {@link SecretRegistry} since a rule's pattern may hold a secret the key does not; see
- * {@link ToolApprover} for how its answer is read.
+ * through the {@link SecretRegistry} since a rule's pattern may hold a secret the key does not, and
+ * its arguments as compact JSON ({@link JsonSnapshot#write}), redacted, escaped and cut after 1024
+ * characters (see {@link ApprovalRequest#arguments}); see {@link ToolApprover} for how its answer
+ * is read.
  *
  * <p>{@link #decidingRule} answers which rule decides a key alone, if one does; tools that walk
  * below their authorised path withhold every entry their own DENY rules, or the DENY and ASK rules
@@ -60,6 +64,8 @@ import java.util.stream.Stream;
  * Immutable. Safe to share across sessions when the approver is.
  */
 public final class DefaultPermissionEvaluator {
+
+  private static final int MAX_ARGUMENT_CHARS = 1024;
 
   private final Permission permission;
   private final ToolRegistry tools;
@@ -130,8 +136,14 @@ public final class DefaultPermissionEvaluator {
     if (decision.effect() != PermissionEffect.ASK) {
       return decision;
     }
-    var reason = secrets.redactor().redact(decision.reason()).text();
-    return approve(new ApprovalRequest(call, key, category, decision.rule(), reason));
+    var redactor = secrets.redactor();
+    var reason = redactor.redact(decision.reason()).text();
+    var arguments =
+        Strings.truncated(
+            redactor.redact(JsonSnapshot.write(call.arguments())).text(),
+            MAX_ARGUMENT_CHARS,
+            "\nArguments cut: %d more chars not shown");
+    return approve(new ApprovalRequest(call, arguments, key, category, decision.rule(), reason));
   }
 
   private PermissionDecision approve(ApprovalRequest request) {
@@ -291,8 +303,8 @@ public final class DefaultPermissionEvaluator {
     }
 
     /**
-     * Set the secrets an approval reason redacts; defaults to a new empty registry. Pass the
-     * session's registry.
+     * Set the secrets an approval's reason and arguments redact; defaults to a new empty registry.
+     * Pass the session's registry.
      *
      * @param secrets the secret registry; non-null
      * @return this builder

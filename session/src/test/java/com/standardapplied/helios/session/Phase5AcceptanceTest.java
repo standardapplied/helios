@@ -109,13 +109,13 @@ final class Phase5AcceptanceTest {
     var model = executing(Map.of("runtime", "BASH", "script", "rm -rf /tmp/should-not-happen"));
     var permission =
         allowingExecute(
-            PermissionRule.withGlob(PermissionEffect.DENY, ExecuteTool.NAME, "BASH/rm"));
+            PermissionRule.withGlob(PermissionEffect.DENY, ExecuteTool.NAME, "BASH/**rm **"));
 
     var run = run("phase5-deny-", model, permission, "try a forbidden command");
 
     var blocked =
         run.events().eventsOf(QueryEvent.ToolBlocked.class).stream().findFirst().orElse(null);
-    assertNotNull(blocked, "expected Execute(BASH/rm) to be blocked by deny rule");
+    assertNotNull(blocked, "expected Execute(BASH/**rm **) to be blocked by deny rule");
     assertEquals(ExecuteTool.NAME, blocked.call().name());
   }
 

@@ -5,7 +5,6 @@
 package com.standardapplied.helios.session.execution;
 
 import com.standardapplied.helios.core.common.Result;
-import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolContext;
@@ -47,9 +46,16 @@ import java.util.concurrent.ExecutionException;
  *   <li>{@code stdin} (optional, string) — stdin content to feed the child.
  * </ul>
  *
- * <p>Classified under {@link ToolCategory#EXECUTION}. The permission key carries {@code
- * <RUNTIME>/<first-token>} so deny rules can target specific runtime+binary pairs (e.g. {@code
- * withGlob(DENY, "Execute", "BASH/rm")}).
+ * <p>Classified under {@link ToolCategory#EXECUTION}. The permission key is {@code
+ * <RUNTIME>/<script>}: the {@link Runtime} constant the {@code runtime} argument names ({@code
+ * UNKNOWN} when it names none, a call refused when it runs) and the whole script, stripped, so a
+ * rule's glob matches the script text, every line of it. A deny glob is a guard rail: {@code
+ * BASH/**rm **} misses {@code rm<TAB>-rf} and {@code r''m}, and matches {@code echo farm }. An
+ * allow rule admits whatever {@code environment}, {@code args}, {@code stdin} and {@code
+ * workingDirectory} come with a matching script (e.g. {@code BASH_FUNC_ls%%} in {@code
+ * environment}), and {@code *} matches {@code ;}, so allow rules on {@code Execute} are not a
+ * sandbox. Real control is {@code ASK}, whose prompt shows every argument. A script that carries a
+ * registered secret's value is refused before any rule or approver sees its key.
  *
  * <p>Spec: §11 + §8.3.
  */
@@ -142,30 +148,17 @@ public final class ExecuteTool {
   }
 
   static ToolPermissionKey permissionKey(Map<String, Object> args) {
-    var runtimeArg = ToolArgs.stringArg(args, "runtime");
     var script = ToolArgs.stringArg(args, "script");
-    var runtime = Strings.isBlank(runtimeArg) ? "UNKNOWN" : runtimeArg.toUpperCase(Locale.ROOT);
-    var firstToken = firstToken(script);
-    var canonical = runtime + "/" + firstToken;
-    return new ToolPermissionKey(NAME, canonical);
+    return new ToolPermissionKey(
+        NAME, runtime(ToolArgs.stringArg(args, "runtime")) + "/" + script.strip());
   }
 
-  private static String firstToken(String script) {
-    if (Strings.isBlank(script)) {
-      return "";
+  private static String runtime(String argument) {
+    try {
+      return Runtime.valueOf(argument.toUpperCase(Locale.ROOT)).name();
+    } catch (IllegalArgumentException e) {
+      return "UNKNOWN";
     }
-    var trimmed = script.strip();
-    var idx = indexOfWhitespace(trimmed);
-    return idx < 0 ? trimmed : trimmed.substring(0, idx);
-  }
-
-  private static int indexOfWhitespace(String s) {
-    for (var i = 0; i < s.length(); i++) {
-      if (Character.isWhitespace(s.charAt(i))) {
-        return i;
-      }
-    }
-    return -1;
   }
 
   private static ToolResult execute(

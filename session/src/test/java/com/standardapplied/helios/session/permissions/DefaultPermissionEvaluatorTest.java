@@ -188,11 +188,34 @@ final class DefaultPermissionEvaluatorTest {
         List.of(
             new ApprovalRequest(
                 call.call(),
+                "{\"path\":\"secretXvalue\"}",
                 new ToolPermissionKey("Write", "secretXvalue"),
                 ToolCategory.WRITE,
                 Optional.of(askSecret),
                 "ask rule Write(<redacted:PASSWORD>) matched Write(secretXvalue)")),
         requests);
+  }
+
+  @Test
+  void approvalArgumentsAreCutAtTheBoundAfterRedaction() {
+    var secrets = new SecretRegistry();
+    secrets.register("API_KEY", "key-0123456789");
+    var requests = new ArrayList<ApprovalRequest>();
+    DefaultPermissionEvaluator.newBuilder(
+            rules(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()),
+            tools(pathKeyed("Write", ToolCategory.WRITE)))
+        .withApprover(
+            request -> {
+              requests.add(request);
+              return PermissionDecision.deny("no");
+            })
+        .withSecretRegistry(secrets)
+        .build()
+        .authorize(writeCall("/tmp/" + "a".repeat(1006) + "key-0123456789"));
+
+    assertEquals(
+        "{\"path\":\"/tmp/" + "a".repeat(1006) + "<red\nArguments cut: 16 more chars not shown",
+        requests.getFirst().arguments());
   }
 
   @Test
@@ -484,7 +507,7 @@ final class DefaultPermissionEvaluatorTest {
     var question = gateway.asked.getFirst();
     assertTrue(question.questionId().startsWith("perm-"));
     assertEquals("Permission", question.header());
-    assertEquals("Allow Write(/tmp/a)?", question.question());
+    assertEquals("Allow Write(/tmp/a)?\n\nArguments: {\"path\":\"/tmp/a\"}", question.question());
     assertEquals(
         List.of(
             new AskUserQuestionOption("Allow", "ask rule Write(/tmp/**) matched Write(/tmp/a)"),
@@ -512,7 +535,7 @@ final class DefaultPermissionEvaluatorTest {
         .build()
         .authorize(call("Fetch"));
 
-    assertEquals("Allow Fetch?", gateway.asked.getFirst().question());
+    assertEquals("Allow Fetch?\n\nArguments: {}", gateway.asked.getFirst().question());
   }
 
   @Test
