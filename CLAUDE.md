@@ -451,7 +451,7 @@ every host call is a custom `HostFunction` registered through `ReplConfig.withHo
 
 ## Example modules
 
-- **`examples/session-demo`** — end-to-end `AgentSession` integration against Gemini with a real workspace. Validates the v2 session shape including `SessionPresets.readOnly(model, root)`, the streaming `QueryEvent` flow, and the typed `runBlocking` path. Every README `java` block that calls `SessionPresets` is a method of its test class `QuickStarts`, named by a `<!-- snippet: QuickStarts#<method> -->` marker above the block and held to it by `QuickStartsDocsTest`.
+- **`examples/session-demo`** — end-to-end `AgentSession` integration against Gemini with a real workspace. Validates the v2 session shape including `SessionPresets.readOnly(model, root)`, the streaming `QueryEvent` flow, and the typed `runBlocking` path. Every README `java` block that calls `SessionPresets` is a method of `QuickStarts` in its test sources, named by a `<!-- snippet: QuickStarts#<method> -->` marker above the block and held to it by `QuickStartsDocsTest`.
 The v1 example modules were deleted with the v1 core surface, and the preset demos with their presets in 3.0; none has a replacement yet.
 
 **Roadmap items tracked in `docs/specs/`** rather than in this file — keeps this README a description of what *is*, not a wish list.
