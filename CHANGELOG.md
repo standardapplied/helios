@@ -670,8 +670,7 @@ argument. The presets no longer register `MemoryWrite` themselves; the session r
 
 **A failed turn has no side effects, and the turn limit admits its last turn.** A turn runs the
 tool calls it emitted only when it ended in `TOOL_CALLS` or `STOP`; the calls of any other turn
-never run, emit no tool event and never reach the history. `StopClassifier` checks the turn limit
-only for a turn that would continue the loop.
+never run, emit no tool event and never reach the history.
 
 | Before | 3.0 |
 |---|---|
