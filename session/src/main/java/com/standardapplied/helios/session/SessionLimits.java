@@ -81,7 +81,9 @@ import java.util.OptionalLong;
  * rationale. Use {@link CostEstimate#MICRO_USD_PER_USD} to convert between full dollars and
  * micro-USD when wiring a budget.
  *
- * @param maxTurns hard ceiling on agent-loop iterations; must be positive
+ * @param maxTurns hard ceiling on agent-loop iterations: the session runs at most this many turns,
+ *     and ends in {@link ResultMessage.ErrorMaxTurns} when the last of them would continue; must be
+ *     positive
  * @param maxBudgetMicroUsd optional spend ceiling in micro-USD; if present, must be strictly
  *     positive
  * @param maxWallClock wall-clock ceiling from session start to terminal state; must be non-null and
