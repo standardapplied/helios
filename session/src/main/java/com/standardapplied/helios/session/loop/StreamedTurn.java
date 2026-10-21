@@ -39,7 +39,7 @@ record StreamedTurn(
    * exhausted. The recorded throwable is carried through unchanged so downstream consumers can walk
    * the full cause chain instead of seeing only the wrapper's message. When the stream failed, the
    * outcome's assistant content is the error's message redacted by {@code redactor}: it reaches the
-   * history, and so the model, when the failed stream had already completed a tool call.
+   * {@code PostModelTurn} hook.
    *
    * @param streamAttempts the attempt count to record; must be {@code >= 1}
    * @param redactor the session's secret redactor, applied to the error's message

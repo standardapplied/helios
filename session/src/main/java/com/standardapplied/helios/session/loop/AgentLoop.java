@@ -36,8 +36,9 @@ import java.util.Optional;
  *   <li>If the turn left a terminal value on {@link SessionState} (hook-driven stop), respect it.
  *       Otherwise hand the outcome to {@link StopClassifier}; if it returns terminal, fire {@link
  *       HookRegistry#firePreStop pre-stop hooks} — {@link HookOutcome.Inject Inject} cancels the
- *       termination and queues a synthetic user message; {@link HookOutcome.Stop Stop} overrides
- *       the success text; {@link HookOutcome.Continue Continue} confirms the stop.
+ *       termination and queues a synthetic user message, and the turn is classified again as one
+ *       with a message queued, so the session limits still apply; {@link HookOutcome.Stop Stop}
+ *       overrides the success text; {@link HookOutcome.Continue Continue} confirms the stop.
  *   <li>Otherwise iterate.
  * </ol>
  *
@@ -166,7 +167,11 @@ public final class AgentLoop {
     var hasQueuedMessages = collaborators.steeringQueue().size() > 0;
     return classifier
         .classify(state, limits, outcome, hasQueuedMessages)
-        .flatMap(verdict -> preStop.resolve(state, verdict, outcome))
+        .flatMap(
+            verdict ->
+                preStop
+                    .resolve(state, verdict, outcome)
+                    .or(() -> classifier.classify(state, limits, outcome, true)))
         .map(resolved -> terminate(state, resolved));
   }
 
