@@ -587,7 +587,7 @@ final class AgentLoopTest {
     queue.offer(UserMessage.text("third"));
     var replacement = List.of(Message.system("compacted system"), Message.user("merged turn"));
     PreModelTurnHook trimmer = (history, ctx) -> HookOutcome.mutateHistory(replacement);
-    var hookRegistry = new HookRegistry(List.of(trimmer));
+    var hookRegistry = new HookRegistry(List.of(trimmer), new SecretRegistry());
     var loop =
         buildLoopWithHooks(
             fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)),
@@ -904,7 +904,7 @@ final class AgentLoopTest {
             queue,
             trigger,
             compactor,
-            new HookRegistry(List.of(hook)))
+            new HookRegistry(List.of(hook), new SecretRegistry()))
         .run(freshState(), limits);
   }
 
@@ -979,7 +979,7 @@ final class AgentLoopTest {
           return CompactionResult.noOp(history);
         };
     PreCompactHook empty = (history, ctx) -> HookOutcome.mutateHistory(List.of());
-    var hookRegistry = new HookRegistry(List.of(empty));
+    var hookRegistry = new HookRegistry(List.of(empty), new SecretRegistry());
     buildLoopWithHooks(
             fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
             queue,

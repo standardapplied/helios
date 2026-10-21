@@ -7,6 +7,7 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.SerializedError;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import java.time.Duration;
 import java.util.Set;
@@ -234,7 +235,10 @@ final class DispatchedCall {
       ending.fail(e);
     } catch (Throwable e) {
       if (!answer.completeExceptionally(e)) {
-        LOGGER.log(Level.SEVERE, "tool '" + call.name() + "' threw after its call was answered", e);
+        LOGGER.log(
+            Level.SEVERE,
+            "tool '" + call.name() + "' threw after its call was answered",
+            SerializedError.redactedForLog(e, context.sessionContext().secrets().redactor()));
       }
     } finally {
       if (!tokenClaimed.compareAndSet(false, true)) {

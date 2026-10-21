@@ -27,6 +27,11 @@ import java.util.function.Predicate;
  * result's event also counts what was redacted from its reason. A {@code MutateResult} output is
  * new text and is redacted the same way.
  *
+ * <p>The call each {@link QueryEvent.ToolUse}, {@link QueryEvent.ToolMutated}, {@link
+ * QueryEvent.ToolBlocked} and {@link QueryEvent.ToolResult} carries, and a {@code ToolMutated}'s
+ * arguments, are {@linkplain RedactedArguments redacted} for the event alone; the call that is
+ * authorized, dispatched, passed to hooks and appended to the history keeps its arguments.
+ *
  * <p>An {@link Error} a tool threw leaves the round as itself and ends the session; no later call
  * of the round runs.
  *
@@ -136,7 +141,7 @@ final class ToolRound {
             state.sessionId(),
             state.currentTurnIndex(),
             collaborators.clock().instant(),
-            call,
+            shown(call),
             result,
             counts));
     return result;
@@ -152,16 +157,18 @@ final class ToolRound {
     for (var mutation : mutations) {
       var args = ((HookOutcome.MutateArgs) mutation.outcome()).args();
       emitter.emitHookFired(state, mutation.firingHookName(), PRE_TOOL_USE, "MutateArgs");
+      var redactor = collaborators.secrets().redactor();
+      var shownBefore = RedactedArguments.of(before, redactor);
       emitter.emit(
           state,
           new QueryEvent.ToolMutated(
               state.sessionId(),
               state.currentTurnIndex(),
               collaborators.clock().instant(),
-              before,
+              shownBefore,
               mutation.firingHookName(),
-              before.arguments(),
-              args));
+              shownBefore.arguments(),
+              RedactedArguments.of(args, redactor)));
       before = new ToolCall(before.id(), before.name(), args);
     }
   }
@@ -189,7 +196,7 @@ final class ToolRound {
                 state.sessionId(),
                 state.currentTurnIndex(),
                 collaborators.clock().instant(),
-                admitted.call()));
+                shown(admitted.call())));
         yield new PlannedCall(admitted.call(), null, Map.of(), admitted.withheld());
       }
     };
@@ -204,7 +211,7 @@ final class ToolRound {
             state.sessionId(),
             state.currentTurnIndex(),
             collaborators.clock().instant(),
-            call,
+            shown(call),
             by,
             text));
     return new PlannedCall(
@@ -212,6 +219,10 @@ final class ToolRound {
         ToolResult.rejected(by, text),
         diagnostic.counts(),
         ToolAuthorization.NOTHING_WITHHELD);
+  }
+
+  private ToolCall shown(ToolCall call) {
+    return RedactedArguments.of(call, collaborators.secrets().redactor());
   }
 
   private ToolResult dispatch(SessionState state, PlannedCall planned, SessionLimits limits) {

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -215,7 +216,8 @@ final class TurnOutcomesTest {
               return new HookOutcome.Continue();
             });
     var collaborators =
-        fixture.collaborators(new HookRegistry(registered), fixture.dispatch(tools), queue);
+        fixture.collaborators(
+            new HookRegistry(registered, new SecretRegistry()), fixture.dispatch(tools), queue);
     return fixture.loop(
         collaborators, model, TokenCounter.charBased(), ContextCompactor.disabled());
   }

@@ -116,6 +116,29 @@ public record SerializedError(
   }
 
   /**
+   * A copy of {@code throwable} to attach to a log record, with no registered secret in it: each
+   * level of its cause chain, bounded as {@link #of(Throwable)} bounds it, becomes a {@link
+   * Throwable} whose message is {@code <kind>: <message>} of that level {@linkplain
+   * #redactedBy(Redactor) redacted by} {@code redactor}, and whose stack frames are that level's
+   * original frames. Suppressed exceptions are not copied.
+   *
+   * @param throwable the throwable to log; non-null
+   * @param redactor the session's redactor; non-null
+   * @return the redacted copy
+   */
+  public static Throwable redactedForLog(Throwable throwable, Redactor redactor) {
+    return copy(of(throwable).redactedBy(redactor), throwable);
+  }
+
+  private static Throwable copy(SerializedError error, Throwable original) {
+    var cause = error.cause == null ? null : copy(error.cause, original.getCause());
+    var text = error.message.isEmpty() ? error.kind : error.kind + ": " + error.message;
+    var copy = new Throwable(text, cause);
+    copy.setStackTrace(original.getStackTrace());
+    return copy;
+  }
+
+  /**
    * Return a copy of this error with the stack-trace frame list stripped recursively across the
    * entire cause chain. Kind and message are preserved so consumers still see the error category
    * and human-readable description; only the internal class-and-file-line frames are removed.

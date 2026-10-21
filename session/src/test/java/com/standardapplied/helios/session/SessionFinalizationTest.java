@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
@@ -29,6 +30,7 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.test.LogCapture;
+import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -85,8 +87,10 @@ final class SessionFinalizationTest {
   }
 
   @Test
-  void aCancellationExceptionOnSessionEndThrowsIsLoggedAndTheResultStillSettles() {
-    var cleanup = new CancellationException("end cancelled");
+  void aCancellationExceptionOnSessionEndThrowsIsLoggedRedactedAndTheResultStillSettles() {
+    var secrets = new SecretRegistry();
+    secrets.register("API_KEY", "sk-test-0123456789abcdef");
+    var cleanup = new CancellationException("end cancelled for sk-test-0123456789abcdef");
     var provider = new RecordingProvider(order);
     provider.end =
         () -> {
@@ -94,15 +98,22 @@ final class SessionFinalizationTest {
         };
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
-        var session = AgentSession.create(withProvider(provider).build())) {
+        var session =
+            AgentSession.create(withProvider(provider).withSecretRegistry(secrets).build())) {
       session.send("go");
 
       assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
     }
     var warning = logged.getFirst();
     assertEquals(
-        List.of(Level.WARNING, "onSessionEnd threw — continuing shutdown", cleanup),
-        List.of(warning.getLevel(), warning.getMessage(), warning.getThrown()));
+        List.of(Level.WARNING, "onSessionEnd threw — continuing shutdown"),
+        List.of(warning.getLevel(), warning.getMessage()));
+    RedactedLogs.assertCopyOf(
+        cleanup,
+        warning.getThrown(),
+        List.of(
+            "java.util.concurrent.CancellationException: end cancelled for <redacted:API_KEY>"));
+    assertFalse(RedactedLogs.text(warning).contains("sk-test-0123456789abcdef"));
   }
 
   @Test

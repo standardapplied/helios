@@ -19,6 +19,7 @@ import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.test.LogCapture;
+import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -401,7 +402,7 @@ final class SessionStartTest {
             shortStart(),
             "onSessionEnd threw — continuing shutdown");
 
-    assertSame(failure, reported.getThrown());
+    RedactedLogs.assertCopyOf(failure, reported.getThrown());
   }
 
   @Test

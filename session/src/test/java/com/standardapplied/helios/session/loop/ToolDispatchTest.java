@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
@@ -29,6 +30,7 @@ import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.test.LogCapture;
+import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Duration;
@@ -761,9 +763,11 @@ final class ToolDispatchTest {
   }
 
   @Test
-  void aThrowableThatIsNoErrorThrownAfterTheCallWasAnsweredIsLogged() {
-    var late = new Throwable("late failure");
-    var d = fixture.dispatcher(binding("late", ToolCategory.READ, failsLate(late)));
+  void aThrowableThatIsNoErrorThrownAfterTheCallWasAnsweredIsLoggedRedacted() {
+    var secrets = new SecretRegistry();
+    secrets.register("API_KEY", "sk-test-0123456789abcdef");
+    var late = new Throwable("late failure", new IllegalStateException("sk-test-0123456789abcdef"));
+    var d = fixture.dispatcher(secrets, binding("late", ToolCategory.READ, failsLate(late)));
     var records = new CopyOnWriteArrayList<LogRecord>();
 
     try (var capture = LogCapture.of(DispatchedCall.class, records)) {
@@ -773,7 +777,13 @@ final class ToolDispatchTest {
     var logged = records.getFirst();
     assertEquals(Level.SEVERE, logged.getLevel());
     assertEquals("tool 'late' threw after its call was answered", logged.getMessage());
-    assertSame(late, logged.getThrown());
+    RedactedLogs.assertCopyOf(
+        late,
+        logged.getThrown(),
+        List.of(
+            "java.lang.Throwable: late failure",
+            "java.lang.IllegalStateException: <redacted:API_KEY>"));
+    assertFalse(RedactedLogs.text(logged).contains("sk-test-0123456789abcdef"));
   }
 
   @Test
