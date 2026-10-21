@@ -146,6 +146,19 @@ final class TurnOutcomesTest {
   }
 
   @Test
+  void aStopTurnWithToolCallsOnTheLastAllowedTurnRunsThemThenEndsAtTheLimit() {
+    var stopWithCall =
+        ModelStreams.of(
+            new ModelChunk.ToolUseStop(CALL),
+            new ModelChunk.MessageStop("STOP", Usage.of(3, 2), Map.of(), List.of()));
+
+    var terminal = run(streaming(stopWithCall), maxTurns(1));
+
+    assertEquals(1, assertInstanceOf(ResultMessage.ErrorMaxTurns.class, terminal).turnsUsed());
+    assertEquals(1, invocations.get());
+  }
+
+  @Test
   void aMessageQueuedDuringTheLastAllowedTurnEndsAtTheLimit() {
     var script = ScriptedModel.newBuilder().withTextTurn("partial").withTextTurn("never").build();
     var model = LoopModels.onEachCall(script, call -> queue.offer(UserMessage.text("more")));
