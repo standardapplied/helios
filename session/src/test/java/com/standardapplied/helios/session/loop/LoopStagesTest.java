@@ -82,7 +82,7 @@ final class LoopStagesTest {
             state.ending());
     var collaborators =
         new LoopCollaborators(
-            new HookRegistry(List.of(hooks)),
+            new HookRegistry(List.of(hooks), new SecretRegistry()),
             dispatch,
             Authorizations.ADMIT_ALL,
             Authorizations.NO_RULE,

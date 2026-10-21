@@ -386,7 +386,8 @@ public sealed interface QueryEvent
    * @param sessionId the session id
    * @param turnIndex the turn index in which the call was dispatched
    * @param timestamp the event timestamp
-   * @param call the assembled tool call; non-null
+   * @param call the assembled tool call, its arguments redacted against the session's secret
+   *     registry, in keys and in string values; non-null
    */
   record ToolUse(String sessionId, long turnIndex, Instant timestamp, ToolCall call)
       implements QueryEvent {
@@ -406,7 +407,8 @@ public sealed interface QueryEvent
    * @param sessionId the session id
    * @param turnIndex the turn index in which the call ran
    * @param timestamp the event timestamp
-   * @param call the originating call; non-null
+   * @param call the originating call, its arguments redacted against the session's secret registry,
+   *     in keys and in string values; non-null
    * @param result the tool result, its output redacted; non-null
    * @param redactions per secret name, how many occurrences the session's redaction of this result
    *     replaced, in encounter order; empty when none. Non-null, with no null key or value; copied
@@ -437,7 +439,8 @@ public sealed interface QueryEvent
    * @param sessionId the session id
    * @param turnIndex the turn index in which the block fired
    * @param timestamp the event timestamp
-   * @param call the call that was blocked; non-null
+   * @param call the call that was blocked, its arguments redacted against the session's secret
+   *     registry, in keys and in string values; non-null
    * @param hookName the name of the hook that blocked the call; non-null and non-blank
    * @param reason the reason the hook supplied; non-null and non-blank
    */
@@ -467,17 +470,19 @@ public sealed interface QueryEvent
   /**
    * A {@link com.standardapplied.helios.session.hooks.PreToolUseHook PreToolUseHook} mutated a tool
    * call's arguments. The next hook of the chain sees {@code inputAfter}; the last mutation's is
-   * what the call is authorized and dispatched with. Both maps are surfaced for auditability.
+   * what the call is authorized and dispatched with. Both maps are surfaced for auditability. The
+   * call and both maps have every registered secret of the session redacted, in keys and in string
+   * values.
    *
    * @param sessionId the session id
    * @param turnIndex the turn index in which the mutation fired
    * @param timestamp the event timestamp
-   * @param call the call as the hook received it; non-null
+   * @param call the call as the hook received it, redacted; non-null
    * @param hookName the name of the hook that mutated the input; non-null and non-blank
-   * @param inputBefore the arguments the hook received; non-null, a JSON object snapshotted as
+   * @param inputBefore the arguments the hook received, redacted; non-null, a JSON object
+   *     snapshotted as {@link JsonSnapshot} defines it
+   * @param inputAfter the replacement arguments, redacted; non-null, a JSON object snapshotted as
    *     {@link JsonSnapshot} defines it
-   * @param inputAfter the replacement arguments; non-null, a JSON object snapshotted as {@link
-   *     JsonSnapshot} defines it
    */
   record ToolMutated(
       String sessionId,
