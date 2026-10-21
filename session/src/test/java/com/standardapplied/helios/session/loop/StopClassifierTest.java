@@ -201,6 +201,25 @@ final class StopClassifierTest {
     assertEquals(2, t.turnsUsed());
   }
 
+  @Test
+  void turnThatEndsTheSessionOnTheLastAllowedTurnKeepsItsOwnTerminal() {
+    var s = state();
+    s.beginTurn();
+    var limits = SessionLimits.newBuilder().withMaxTurns(1).build();
+    var result = classifyNoError(s, limits, FinishReason.STOP, "x", false);
+    assertInstanceOf(ResultMessage.Success.class, result.orElseThrow());
+  }
+
+  @Test
+  void stopWithQueuedMessagesOnTheLastAllowedTurnProducesErrorMaxTurns() {
+    var s = state();
+    s.beginTurn();
+    var limits = SessionLimits.newBuilder().withMaxTurns(1).build();
+    var result = classifyNoError(s, limits, FinishReason.STOP, "x", true);
+    var t = assertInstanceOf(ResultMessage.ErrorMaxTurns.class, result.orElseThrow());
+    assertEquals(1, t.turnsUsed());
+  }
+
   // ── finish-reason branches ────────────────────────────────────────────────
 
   @Test

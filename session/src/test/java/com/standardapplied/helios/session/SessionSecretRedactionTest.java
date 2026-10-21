@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
@@ -30,6 +29,7 @@ import com.standardapplied.helios.session.execution.NoopExecutionProvider;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
+import com.standardapplied.helios.session.hooks.PostModelTurnHook;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.tools.ToolBinding;
@@ -362,26 +362,27 @@ final class SessionSecretRedactionTest {
   }
 
   @Test
-  void aStreamErrorAfterAToolCallReachesTheModelRedacted() {
+  void aFailedStreamsErrorTextReachesThePostModelTurnHookRedacted() {
+    var postModelTurn = new CopyOnWriteArrayList<String>();
     var model =
         ScriptedModel.newBuilder()
             .withStreamTurn(
-                ModelStreams.failing(
-                    new IllegalStateException("stream broke on " + SECRET),
-                    new ModelChunk.ToolUseStop(call("c1", "clean"))))
-            .withTextTurn("done")
+                ModelStreams.failing(new IllegalStateException("stream broke on " + SECRET)))
             .build();
     var options =
-        withTools(registryWithSecret(), tool("clean", (args, ctx) -> ToolResult.success("clean")));
+        SessionOptions.newBuilder()
+            .withSecretRegistry(registryWithSecret())
+            .withHook(
+                (PostModelTurnHook)
+                    (response, ctx) -> {
+                      postModelTurn.add(response.content());
+                      return new HookOutcome.Continue();
+                    });
 
     var run = run(options, model);
 
-    var assistant =
-        run.model().calls().get(1).stream()
-            .filter(m -> m.role() == Role.ASSISTANT)
-            .map(Message::content)
-            .toList();
-    assertEquals(List.of("stream broke on " + MARKER), assistant);
+    assertInstanceOf(ResultMessage.ErrorDuringExecution.class, run.result());
+    assertEquals(List.of("stream broke on " + MARKER), postModelTurn);
   }
 
   @Test

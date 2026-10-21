@@ -130,7 +130,7 @@ public final class TurnRunner {
 
     var streamOutcome = streamed.toOutcome(attempts.count(), collaborators.secrets().redactor());
     var toolCalls =
-        isRefused(streamOutcome.finishReason()) ? List.<ToolCall>of() : streamed.toolCalls();
+        endedCleanly(streamOutcome.finishReason()) ? streamed.toolCalls() : List.<ToolCall>of();
 
     if (!toolCalls.isEmpty()) {
       state
@@ -199,11 +199,12 @@ public final class TurnRunner {
   }
 
   /**
-   * Whether the provider declined the turn. Everything a refused turn produced before the refusal
-   * is incomplete output to discard, so tool calls it had already emitted never run.
+   * Whether the turn ended cleanly enough to run the tool calls it emitted. A turn that failed, was
+   * cancelled, lost its terminal event, was cut short or was refused leaves calls that may be
+   * incomplete, so they are discarded and the turn keeps its own outcome.
    */
-  private static boolean isRefused(FinishReason finishReason) {
-    return finishReason == FinishReason.REFUSAL || finishReason == FinishReason.CONTENT_FILTER;
+  private static boolean endedCleanly(FinishReason finishReason) {
+    return finishReason == FinishReason.TOOL_CALLS || finishReason == FinishReason.STOP;
   }
 
   private static TurnOutcome outcomeAfterTerminate(SessionState state) {
