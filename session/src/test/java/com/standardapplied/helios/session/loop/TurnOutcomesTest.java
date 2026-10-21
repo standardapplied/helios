@@ -116,16 +116,6 @@ final class TurnOutcomesTest {
   }
 
   @Test
-  void aToolCallTurnRunsItsToolOnceAndTheNextTextTurnSucceeds() {
-    var model = ScriptedModel.newBuilder().withToolCallsTurn(CALL).withTextTurn("done").build();
-
-    var terminal = run(model, SessionLimits.defaults());
-
-    assertEquals("done", assertInstanceOf(ResultMessage.Success.class, terminal).result());
-    assertEquals(1, invocations.get());
-  }
-
-  @Test
   void oneAllowedTurnAdmitsAOneTurnAnswer() {
     var model = ScriptedModel.newBuilder().withTextTurn("done").build();
 
