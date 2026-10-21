@@ -22,7 +22,10 @@ import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.hooks.Hook;
+import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -163,17 +166,29 @@ final class TurnOutcomesTest {
     assertEquals(1, script.calls().size());
   }
 
-  private ResultMessage run(Model model, SessionLimits limits) {
+  @Test
+  void aPreStopInjectOnTheLastAllowedTurnEndsAtTheLimit() {
+    var model = ScriptedModel.newBuilder().withTextTurn("draft").withTextTurn("never").build();
+    PreStopHook injector = (response, ctx) -> HookOutcome.inject("keep going");
+
+    var terminal = run(model, maxTurns(1), injector);
+
+    assertEquals(1, assertInstanceOf(ResultMessage.ErrorMaxTurns.class, terminal).turnsUsed());
+    assertEquals(1, model.calls().size());
+  }
+
+  private ResultMessage run(Model model, SessionLimits limits, Hook... hooks) {
     queue.offer(UserMessage.text("go"));
-    var terminal = loop(model).run(state, limits);
+    var terminal = loop(model, hooks).run(state, limits);
     var ended = (QueryEvent.LoopEnded) fixture.events.getLast();
     assertSame(terminal, ended.result());
     return terminal;
   }
 
-  private AgentLoop loop(Model model) {
+  private AgentLoop loop(Model model, Hook... hooks) {
     var tools = new ToolRegistry(List.of(recordingTool()));
-    var collaborators = fixture.collaborators(HookRegistry.empty(), fixture.dispatch(tools), queue);
+    var collaborators =
+        fixture.collaborators(new HookRegistry(List.of(hooks)), fixture.dispatch(tools), queue);
     return fixture.loop(
         collaborators, model, TokenCounter.charBased(), ContextCompactor.disabled());
   }

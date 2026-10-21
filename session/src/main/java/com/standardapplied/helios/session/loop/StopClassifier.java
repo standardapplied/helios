@@ -31,7 +31,6 @@ import java.util.Optional;
  *   <li>Cancellation — the session's {@link
  *       com.standardapplied.helios.core.runtime.CancellationToken CancellationToken} is signalled
  *       by a path other than wall-clock expiry (explicit {@code close()}, host-initiated cancel).
- *   <li>Turn ceiling — current turn index has reached {@code limits.maxTurns()}.
  *   <li>Refusal — the provider reported {@link FinishReason#CONTENT_FILTER} or {@link
  *       FinishReason#REFUSAL}.
  *   <li>Provider error — the provider reported {@link FinishReason#ERROR}.
