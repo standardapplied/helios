@@ -4,7 +4,6 @@ package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.standardapplied.helios.core.common.Redactor;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import java.math.BigDecimal;
@@ -20,10 +19,10 @@ final class RedactedArgumentsTest {
   private static final String SECRET = "sk-test-0123456789abcdef";
   private static final String MARKER = "<redacted:API_KEY>";
 
-  private static Redactor redactor() {
+  private static SecretRegistry secrets() {
     var secrets = new SecretRegistry();
     secrets.register("API_KEY", SECRET);
-    return secrets.redactor();
+    return secrets;
   }
 
   private static Map<String, Object> ordered(Object... keysAndValues) {
@@ -49,7 +48,7 @@ final class RedactedArgumentsTest {
             "none",
             null);
 
-    var redacted = RedactedArguments.of(arguments, redactor());
+    var redacted = RedactedArguments.of(arguments, secrets());
 
     var expectedArray = new ArrayList<>(Arrays.asList("x " + MARKER, 7, null));
     assertEquals(
@@ -70,7 +69,7 @@ final class RedactedArgumentsTest {
   void whereRedactingMakesTwoKeysEqualTheLaterEntryWins() {
     var arguments = ordered(SECRET, "first", MARKER, "second");
 
-    assertEquals(Map.of(MARKER, "second"), RedactedArguments.of(arguments, redactor()));
+    assertEquals(Map.of(MARKER, "second"), RedactedArguments.of(arguments, secrets()));
   }
 
   @Test
@@ -78,7 +77,6 @@ final class RedactedArgumentsTest {
     var call = new ToolCall("c1", "Write", Map.of("path", SECRET));
 
     assertEquals(
-        new ToolCall("c1", "Write", Map.of("path", MARKER)),
-        RedactedArguments.of(call, redactor()));
+        new ToolCall("c1", "Write", Map.of("path", MARKER)), RedactedArguments.of(call, secrets()));
   }
 }

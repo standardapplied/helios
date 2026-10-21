@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.Redactor;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,11 +18,15 @@ final class RedactedArguments {
 
   private RedactedArguments() {}
 
-  static ToolCall of(ToolCall call, Redactor redactor) {
-    return new ToolCall(call.id(), call.name(), of(call.arguments(), redactor));
+  static ToolCall of(ToolCall call, SecretRegistry secrets) {
+    return new ToolCall(call.id(), call.name(), of(call.arguments(), secrets));
   }
 
-  static Map<String, Object> of(Map<?, ?> arguments, Redactor redactor) {
+  static Map<String, Object> of(Map<?, ?> arguments, SecretRegistry secrets) {
+    return object(arguments, secrets.redactor());
+  }
+
+  private static Map<String, Object> object(Map<?, ?> arguments, Redactor redactor) {
     var redacted = new LinkedHashMap<String, Object>();
     arguments.forEach(
         (key, value) -> redacted.put(redactor.redact((String) key).text(), value(value, redactor)));
@@ -31,7 +36,7 @@ final class RedactedArguments {
   private static Object value(Object value, Redactor redactor) {
     return switch (value) {
       case String text -> redactor.redact(text).text();
-      case Map<?, ?> object -> of(object, redactor);
+      case Map<?, ?> object -> object(object, redactor);
       case List<?> array -> array.stream().map(element -> value(element, redactor)).toList();
       case null, default -> value;
     };
