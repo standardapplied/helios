@@ -141,7 +141,7 @@ final class ToolRound {
             state.sessionId(),
             state.currentTurnIndex(),
             collaborators.clock().instant(),
-            shown(call),
+            RedactedArguments.of(call, collaborators.secrets()),
             result,
             counts));
     return result;
@@ -157,8 +157,7 @@ final class ToolRound {
     for (var mutation : mutations) {
       var args = ((HookOutcome.MutateArgs) mutation.outcome()).args();
       emitter.emitHookFired(state, mutation.firingHookName(), PRE_TOOL_USE, "MutateArgs");
-      var redactor = collaborators.secrets().redactor();
-      var shownBefore = RedactedArguments.of(before, redactor);
+      var shownBefore = RedactedArguments.of(before, collaborators.secrets());
       emitter.emit(
           state,
           new QueryEvent.ToolMutated(
@@ -168,7 +167,7 @@ final class ToolRound {
               shownBefore,
               mutation.firingHookName(),
               shownBefore.arguments(),
-              RedactedArguments.of(args, redactor)));
+              RedactedArguments.of(args, collaborators.secrets())));
       before = new ToolCall(before.id(), before.name(), args);
     }
   }
@@ -196,7 +195,7 @@ final class ToolRound {
                 state.sessionId(),
                 state.currentTurnIndex(),
                 collaborators.clock().instant(),
-                shown(admitted.call())));
+                RedactedArguments.of(admitted.call(), collaborators.secrets())));
         yield new PlannedCall(admitted.call(), null, Map.of(), admitted.withheld());
       }
     };
@@ -211,7 +210,7 @@ final class ToolRound {
             state.sessionId(),
             state.currentTurnIndex(),
             collaborators.clock().instant(),
-            shown(call),
+            RedactedArguments.of(call, collaborators.secrets()),
             by,
             text));
     return new PlannedCall(
@@ -219,10 +218,6 @@ final class ToolRound {
         ToolResult.rejected(by, text),
         diagnostic.counts(),
         ToolAuthorization.NOTHING_WITHHELD);
-  }
-
-  private ToolCall shown(ToolCall call) {
-    return RedactedArguments.of(call, collaborators.secrets().redactor());
   }
 
   private ToolResult dispatch(SessionState state, PlannedCall planned, SessionLimits limits) {
