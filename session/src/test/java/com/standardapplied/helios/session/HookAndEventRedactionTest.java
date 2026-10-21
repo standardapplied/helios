@@ -5,10 +5,13 @@ package com.standardapplied.helios.session;
 import static com.standardapplied.helios.session.test.HookInputs.named;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import com.standardapplied.helios.core.common.JsonSnapshot;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
@@ -22,6 +25,8 @@ import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -205,5 +210,79 @@ final class HookAndEventRedactionTest {
         new ToolCall("c1", "Write", arguments("/etc/passwd", MARKER)), run.onlyBlock().call());
     toolEventsAsJson(run).forEach(event -> assertFalse(event.contains(SECRET), event));
     assertEquals(List.of(), sessions.executed);
+  }
+
+  // ── event copies of valid calls ───────────────────────────────────────────
+
+  /** A key at the limit that ends in {@code secret}, so redacting it overflows the limit. */
+  private static String keyEndingIn(String secret) {
+    return "k".repeat(JsonSnapshot.MAX_KEY_LENGTH - secret.length()) + secret;
+  }
+
+  private static SecretRegistry shortSecret() {
+    var secrets = new SecretRegistry();
+    secrets.register("API_KEY", "12345678");
+    return secrets;
+  }
+
+  @Test
+  void aCallWhoseRedactedKeyOverflowsTheLimitStillRuns() {
+    var arguments = Map.<String, Object>of("path", "/tmp/a", keyEndingIn("12345678"), 1);
+    var options = options().withSecretRegistry(shortSecret());
+
+    var run = WriteToolSessions.run(options, new ToolCall("c1", "Write", arguments));
+
+    assertInstanceOf(ResultMessage.Success.class, run.terminal());
+    assertEquals(List.of(arguments), sessions.executed);
+    var shown = run.events().eventsOf(QueryEvent.ToolUse.class).getFirst().call().arguments();
+    assertEquals(
+        ("k".repeat(JsonSnapshot.MAX_KEY_LENGTH - 8) + MARKER)
+                .substring(0, JsonSnapshot.MAX_KEY_LENGTH - 1)
+            + "…",
+        shown.keySet().stream().filter(key -> !"path".equals(key)).findFirst().orElseThrow());
+  }
+
+  @Test
+  void aSecretTheToolRegistersDoesNotCostTheCallItsResultEvent() {
+    var secrets = new SecretRegistry();
+    var tool =
+        Tool.newBuilder()
+            .withName("Register")
+            .withDescription("register")
+            .withExecutor(
+                (args, ctx) -> {
+                  secrets.register("API_KEY", "12345678");
+                  return ToolResult.success("registered");
+                })
+            .build();
+    var options =
+        SessionOptions.newBuilder()
+            .withSecretRegistry(secrets)
+            .withTools(
+                new ToolRegistry(
+                    List.of(ToolBinding.newBuilder(tool).withCategory(ToolCategory.READ).build())));
+    var call = new ToolCall("c1", "Register", Map.of(keyEndingIn("12345678"), 1));
+
+    var run = WriteToolSessions.run(options, call);
+
+    assertInstanceOf(ResultMessage.Success.class, run.terminal());
+    assertEquals("registered", run.onlyResult().output());
+  }
+
+  @Test
+  void anUnpairedSurrogateKeyIsShownAsTheToolReceivedIt() {
+    var arguments = new LinkedHashMap<String, Object>();
+    arguments.put("path", "/tmp/a");
+    arguments.put("\uD800", 1);
+    arguments.put("?", 2);
+
+    var run =
+        WriteToolSessions.run(
+            options().withSecretRegistry(new SecretRegistry()),
+            new ToolCall("c1", "Write", arguments));
+
+    assertEquals(List.of(arguments), sessions.executed);
+    assertEquals(
+        arguments, run.events().eventsOf(QueryEvent.ToolUse.class).getFirst().call().arguments());
   }
 }

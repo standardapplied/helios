@@ -3,7 +3,9 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import com.standardapplied.helios.core.common.JsonSnapshot;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import java.math.BigDecimal;
@@ -78,5 +80,43 @@ final class RedactedArgumentsTest {
 
     assertEquals(
         new ToolCall("c1", "Write", Map.of("path", MARKER)), RedactedArguments.of(call, secrets()));
+  }
+
+  @Test
+  void unpairedSurrogatesAreKeptSoDistinctKeysStayDistinct() {
+    var arguments =
+        ordered(
+            "a\uD800", 1, "a?", 2, "v", "\uDC00 " + SECRET + " \uD83D\uDE00" + SECRET + "\uD800");
+
+    assertEquals(
+        ordered(
+            "a\uD800", 1, "a?", 2, "v", "\uDC00 " + MARKER + " \uD83D\uDE00" + MARKER + "\uD800"),
+        RedactedArguments.of(arguments, secrets()));
+  }
+
+  @Test
+  void aKeyOrStringThatRedactionLengthensPastItsLimitIsCutToIt() {
+    var secrets = new SecretRegistry();
+    secrets.register("API_KEY", "12345678");
+    var key = "k".repeat(JsonSnapshot.MAX_KEY_LENGTH - 8);
+    var string = "s".repeat(JsonSnapshot.MAX_STRING_LENGTH - 8);
+    var fitting = "f".repeat(JsonSnapshot.MAX_KEY_LENGTH - MARKER.length());
+
+    var redacted =
+        RedactedArguments.of(
+            Map.of(key + "12345678", string + "12345678", fitting + "12345678", 1), secrets);
+
+    assertEquals(
+        Map.of(
+            cut(key + MARKER, JsonSnapshot.MAX_KEY_LENGTH),
+            cut(string + MARKER, JsonSnapshot.MAX_STRING_LENGTH),
+            fitting + MARKER,
+            1),
+        redacted);
+    assertFalse(redacted.toString().contains("12345678"));
+  }
+
+  private static String cut(String text, int limit) {
+    return text.substring(0, limit - 1) + "…";
   }
 }
