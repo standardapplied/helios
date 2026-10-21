@@ -102,9 +102,8 @@ final class TurnOutcomesTest {
   @Test
   void aTurnCancelledWhileItsStreamIsOpenRunsNoToolAndEndsCancelled() {
     var callDelivered = new CountDownLatch(1);
-    var loop = loop(streaming(openAfterCall(callDelivered)));
-    queue.offer(UserMessage.text("go"));
-    var run = new FutureTask<>(() -> loop.run(state, SessionLimits.defaults()));
+    var model = streaming(openAfterCall(callDelivered));
+    var run = new FutureTask<>(() -> run(model, SessionLimits.defaults()));
     Thread.ofVirtual().start(run);
 
     Await.latch("the stream to deliver its tool call", callDelivered);
