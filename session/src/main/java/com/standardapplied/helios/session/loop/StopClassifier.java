@@ -40,10 +40,13 @@ import java.util.Optional;
  *       re-issue loop where the model keeps hitting the same cap until {@code maxTurns} elapses.
  *   <li>Natural completion — the provider reported {@link FinishReason#STOP} and no further user
  *       messages are queued.
+ *   <li>Turn ceiling — the turn would continue the loop ({@link FinishReason#TOOL_CALLS}, or {@link
+ *       FinishReason#STOP} with messages queued) and the current turn index has reached {@code
+ *       limits.maxTurns()}. So {@code maxTurns = N} admits N model turns, and a turn that ends the
+ *       session on its own keeps its own terminal on the last of them.
  * </ol>
  *
- * <p>Any other outcome returns {@link Optional#empty()}, signalling the loop to continue (currently
- * only {@link FinishReason#TOOL_CALLS}).
+ * <p>Any other outcome returns {@link Optional#empty()}, signalling the loop to continue.
  *
  * <p>Every {@link SerializedError} an error terminal carries has the messages of its chain redacted
  * against the session's secret registry.
@@ -88,7 +91,6 @@ public final class StopClassifier {
     Objects.requireNonNull(state, "state must not be null");
     Objects.requireNonNull(limits, "limits must not be null");
     Objects.requireNonNull(outcome, "outcome must not be null");
-    var assistantContent = outcome.assistantContent();
     if (state.elapsed().compareTo(limits.maxWallClock()) > 0) {
       return Optional.of(
           new ResultMessage.ErrorMaxWallClock(
@@ -116,16 +118,16 @@ public final class StopClassifier {
               state.elapsed()));
     }
 
-    if (state.currentTurnIndex() >= limits.maxTurns()) {
-      return Optional.of(
-          new ResultMessage.ErrorMaxTurns(
-              state.sessionId(),
-              Math.toIntExact(state.currentTurnIndex()),
-              state.totals().usage(),
-              state.totals().cost(),
-              state.elapsed()));
-    }
+    return byFinishReason(state, outcome, hasPendingMessages).or(() -> turnCeiling(state, limits));
+  }
 
+  /**
+   * The terminal a turn's own ending implies, or empty when the turn would continue the loop: a
+   * {@link FinishReason#TOOL_CALLS} turn, or a {@link FinishReason#STOP} turn with messages queued.
+   */
+  private Optional<ResultMessage> byFinishReason(
+      SessionState state, TurnOutcome outcome, boolean hasPendingMessages) {
+    var assistantContent = outcome.assistantContent();
     return switch (outcome.finishReason()) {
       case CONTENT_FILTER, REFUSAL -> Optional.of(buildRefusal(state, outcome));
       case ERROR ->
@@ -159,6 +161,20 @@ public final class StopClassifier {
                   state.elapsed()));
       case TOOL_CALLS -> Optional.empty();
     };
+  }
+
+  /** {@link ResultMessage.ErrorMaxTurns} when continuing would start a turn past the limit. */
+  private static Optional<ResultMessage> turnCeiling(SessionState state, SessionLimits limits) {
+    if (state.currentTurnIndex() < limits.maxTurns()) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new ResultMessage.ErrorMaxTurns(
+            state.sessionId(),
+            Math.toIntExact(state.currentTurnIndex()),
+            state.totals().usage(),
+            state.totals().cost(),
+            state.elapsed()));
   }
 
   /**

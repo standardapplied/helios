@@ -668,6 +668,16 @@ argument. The presets no longer register `MemoryWrite` themselves; the session r
 | `SessionPresets.openEnded(WorkspaceRoot, ExecutionProvider)` | the `workspace` wiring above with `ExecuteTool.binding(provider)` added to the bindings, plus `.withExecutionProvider(provider)` |
 | A custom `SessionPreset` (`b -> b.withHook(hook)`) | an ordinary method that takes and returns a `SessionOptions.Builder` |
 
+**A failed turn has no side effects, and the turn limit admits its last turn.** A turn runs the
+tool calls it emitted only when it ended in `TOOL_CALLS` or `STOP`; the calls of any other turn
+never run, emit no tool event and never reach the history. `StopClassifier` checks the turn limit
+only for a turn that would continue the loop.
+
+| Before | 3.0 |
+|---|---|
+| `maxTurns = N` reported a session that answered on turn N as `ErrorMaxTurns` | `maxTurns = N` allows N turns; a session that needs turn N+1 ends in `ErrorMaxTurns` |
+| A turn that ended in `ERROR`, `LENGTH` or by cancellation ran the tool calls it emitted and continued as a `TOOL_CALLS` turn | it runs none of them and ends with its own error terminal (`ErrorDuringExecution`, `ErrorTransientStream` or `Cancelled`) |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
