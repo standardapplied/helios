@@ -140,8 +140,8 @@ public sealed interface ResultMessage
   }
 
   /**
-   * The session terminated because the {@code maxTurns} ceiling was reached without the model
-   * producing a stop.
+   * The session terminated because it needed a turn past the {@code maxTurns} ceiling: its last
+   * allowed turn would have continued the loop (tool calls, or a message queued for another turn).
    *
    * @param sessionId the session's id
    * @param turnsUsed turns consumed before termination
