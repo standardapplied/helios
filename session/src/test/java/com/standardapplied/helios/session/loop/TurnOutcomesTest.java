@@ -11,6 +11,7 @@ import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
@@ -25,6 +26,7 @@ import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.hooks.PostModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
@@ -32,8 +34,10 @@ import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
@@ -55,6 +59,7 @@ final class TurnOutcomesTest {
   private final LoopFixture fixture = new LoopFixture(SID, Instant.parse("2026-10-21T08:00:00Z"));
   private final SteeringQueue queue = new SteeringQueue(8);
   private final AtomicInteger invocations = new AtomicInteger();
+  private final List<Response> modelTurns = new CopyOnWriteArrayList<>();
   private final SessionState state = fixture.state();
 
   @AfterEach
@@ -202,8 +207,15 @@ final class TurnOutcomesTest {
 
   private AgentLoop loop(Model model, Hook... hooks) {
     var tools = new ToolRegistry(List.of(recordingTool()));
+    var registered = new ArrayList<Hook>(List.of(hooks));
+    registered.add(
+        (PostModelTurnHook)
+            (response, ctx) -> {
+              modelTurns.add(response);
+              return new HookOutcome.Continue();
+            });
     var collaborators =
-        fixture.collaborators(new HookRegistry(List.of(hooks)), fixture.dispatch(tools), queue);
+        fixture.collaborators(new HookRegistry(registered), fixture.dispatch(tools), queue);
     return fixture.loop(
         collaborators, model, TokenCounter.charBased(), ContextCompactor.disabled());
   }
@@ -225,6 +237,10 @@ final class TurnOutcomesTest {
         fixture.events.stream()
             .noneMatch(e -> e instanceof QueryEvent.ToolUse || e instanceof QueryEvent.ToolResult),
         "a discarded call emits no tool event");
+    assertEquals(
+        List.of(List.of()),
+        modelTurns.stream().map(Response::toolCalls).toList(),
+        "a discarded call never reaches the PostModelTurn hook");
     assertTrue(
         state.history().snapshot().stream().noneMatch(Message::hasToolCalls),
         "a discarded call never reaches the history");
