@@ -983,8 +983,9 @@ never run, emit no tool event and never reach the history.
   even for a call refused because its key carried one. Each of those records now attaches a copy of
   the exception whose every message is redacted against the session's registry and whose stack
   frames are the original's, and those events carry the arguments with every registered secret
-  redacted, in keys and in string values at any depth. The tool, the hooks and the history still
-  see the arguments unredacted.
+  redacted, in keys and in string values at any depth; a key or string that redaction lengthens
+  past its `JsonSnapshot` limit is cut to it, ending in `…`, so the event never fails the call. The
+  tool, the hooks and the history still see the arguments unredacted.
 
 - **`helios-persistence` resolves the PostgreSQL JDBC driver `org.postgresql:postgresql` 42.7.12
   (was 42.7.7).** 42.7.7 is inside the affected range of two pgJDBC advisories:
