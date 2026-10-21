@@ -166,7 +166,11 @@ public final class AgentLoop {
     var hasQueuedMessages = collaborators.steeringQueue().size() > 0;
     return classifier
         .classify(state, limits, outcome, hasQueuedMessages)
-        .flatMap(verdict -> preStop.resolve(state, verdict, outcome))
+        .flatMap(
+            verdict ->
+                preStop
+                    .resolve(state, verdict, outcome)
+                    .or(() -> classifier.classify(state, limits, outcome, true)))
         .map(resolved -> terminate(state, resolved));
   }
 
