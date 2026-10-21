@@ -6,6 +6,7 @@ import static com.standardapplied.helios.session.WriteToolSessions.run;
 import static com.standardapplied.helios.session.WriteToolSessions.write;
 import static com.standardapplied.helios.session.test.HookInputs.named;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
@@ -21,12 +22,14 @@ import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.LogCapture;
+import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -314,9 +317,10 @@ final class ToolAuthorizationSessionTest {
   }
 
   @Test
-  void aGuardThatThrowsASecretLogsOnlyItsExceptionClass() {
+  void aGuardThatThrowsASecretLogsARedactedCopyOfItsException() {
     var secrets = new SecretRegistry();
     secrets.register("TOKEN", SECRET);
+    var failure = new IllegalStateException("guard saw " + SECRET);
     var options =
         options(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))
             .withSecretRegistry(secrets)
@@ -325,7 +329,7 @@ final class ToolAuthorizationSessionTest {
                     "Guard",
                     100,
                     (call, ctx) -> {
-                      throw new IllegalStateException("guard saw " + SECRET);
+                      throw failure;
                     }));
     var logged = new CopyOnWriteArrayList<LogRecord>();
 
@@ -338,13 +342,18 @@ final class ToolAuthorizationSessionTest {
         new ToolOutcome.Rejected(
             "Guard", "hook threw java.lang.IllegalStateException: guard saw <redacted:TOKEN>"),
         run.onlyResult().outcome());
+    assertEquals(1, logged.size(), "log records");
+    var only = logged.getFirst();
     assertEquals(
         List.of(
-            "WARNING PreToolUse hook Guard threw java.lang.IllegalStateException; refusing the"
-                + " call null"),
-        logged.stream()
-            .map(r -> r.getLevel() + " " + r.getMessage() + " " + r.getThrown())
-            .toList());
+            Level.WARNING,
+            "PreToolUse hook Guard threw java.lang.IllegalStateException; refusing the call"),
+        List.of(only.getLevel(), only.getMessage()));
+    RedactedLogs.assertCopyOf(
+        failure,
+        only.getThrown(),
+        List.of("java.lang.IllegalStateException: guard saw <redacted:TOKEN>"));
+    assertFalse(RedactedLogs.text(only).contains(SECRET));
   }
 
   @Test

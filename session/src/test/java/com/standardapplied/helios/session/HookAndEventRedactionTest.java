@@ -132,37 +132,6 @@ final class HookAndEventRedactionTest {
             "java.lang.IllegalArgumentException: inner " + MARKER));
   }
 
-  @Test
-  void aGuardThatThrowsRefusesTheCallAndIsLoggedWithARedactedCopy() {
-    var failure = new IllegalStateException("guard saw " + SECRET);
-    PreToolUseHook guard =
-        named(
-            "Guard",
-            (call, ctx) -> {
-              throw failure;
-            });
-    var options = options().withHook(guard);
-
-    var logged = new ArrayList<LogRecord>();
-    WriteToolSessions.Run run;
-    try (var ignored = LogCapture.of(HookRegistry.class, logged)) {
-      run = WriteToolSessions.run(options, WriteToolSessions.write("/tmp/a"));
-    }
-
-    assertEquals(
-        ToolResult.rejected(
-            "Guard", "hook threw java.lang.IllegalStateException: guard saw " + MARKER),
-        run.onlyResult());
-    assertEquals(1, logged.size(), "log records");
-    var only = logged.getFirst();
-    assertEquals(
-        "PreToolUse hook Guard threw java.lang.IllegalStateException; refusing the call",
-        only.getMessage());
-    RedactedLogs.assertCopyOf(
-        failure, only.getThrown(), List.of("java.lang.IllegalStateException: guard saw " + MARKER));
-    assertFalse(RedactedLogs.text(only).contains(SECRET));
-  }
-
   // ── events ────────────────────────────────────────────────────────────────
 
   private static Map<String, Object> arguments(String path, String secret) {
