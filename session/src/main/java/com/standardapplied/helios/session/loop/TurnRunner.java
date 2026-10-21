@@ -132,22 +132,16 @@ public final class TurnRunner {
     var toolCalls =
         endedCleanly(streamOutcome.finishReason()) ? streamed.toolCalls() : List.<ToolCall>of();
 
-    if (!toolCalls.isEmpty()) {
+    if (streamOutcome.finishReason() != FinishReason.ERROR
+        && (!toolCalls.isEmpty() || !streamOutcome.assistantContent().isEmpty())) {
       state
           .history()
           .append(
               Message.assistant(
                   streamOutcome.assistantContent(), toolCalls, streamOutcome.metadata()));
-      if (toolRound.run(state, toolCalls, limits)) {
-        return turnEnded(state, outcomeAfterTerminate(state));
-      }
-    } else if (streamOutcome.finishReason() != FinishReason.ERROR
-        && !streamOutcome.assistantContent().isEmpty()) {
-      state
-          .history()
-          .append(
-              Message.assistant(
-                  streamOutcome.assistantContent(), List.of(), streamOutcome.metadata()));
+    }
+    if (!toolCalls.isEmpty() && toolRound.run(state, toolCalls, limits)) {
+      return turnEnded(state, outcomeAfterTerminate(state));
     }
     accounting.add(state, streamOutcome.usage());
     state.totals().accumulateCitations(streamed.citations());
