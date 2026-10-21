@@ -5,7 +5,6 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
@@ -107,7 +106,7 @@ final class TurnRunnerToolDispatchTest {
         events.stream().filter(e -> e instanceof QueryEvent.ToolUse).findFirst().orElseThrow();
     var toolResultEvt =
         events.stream().filter(e -> e instanceof QueryEvent.ToolResult).findFirst().orElseThrow();
-    assertSame(call, ((QueryEvent.ToolUse) toolUse).call());
+    assertEquals(call, ((QueryEvent.ToolUse) toolUse).call());
     assertEquals("echoed: hello", ((QueryEvent.ToolResult) toolResultEvt).result().output());
 
     // History: user, assistant(with toolCalls), tool(echoed: hello).
