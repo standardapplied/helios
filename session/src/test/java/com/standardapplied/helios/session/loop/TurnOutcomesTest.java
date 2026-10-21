@@ -89,6 +89,19 @@ final class TurnOutcomesTest {
   }
 
   @Test
+  void aContentFilteredTurnRunsNoToolAndEndsInARefusal() {
+    var filtered =
+        ModelStreams.of(
+            new ModelChunk.ToolUseStop(CALL),
+            new ModelChunk.MessageStop("CONTENT_FILTER", Usage.of(3, 2), Map.of(), List.of()));
+
+    var terminal = run(streaming(filtered), SessionLimits.defaults());
+
+    assertInstanceOf(ResultMessage.Refusal.class, terminal);
+    assertToolNeverRan();
+  }
+
+  @Test
   void aStreamWithoutItsMessageStopRunsNoToolAndEndsInError() {
     var unterminated = ModelStreams.of(new ModelChunk.ToolUseStop(CALL));
 
