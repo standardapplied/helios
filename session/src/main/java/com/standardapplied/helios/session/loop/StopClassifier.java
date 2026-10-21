@@ -41,8 +41,7 @@ import java.util.Optional;
  *       messages are queued.
  *   <li>Turn ceiling — the turn would continue the loop ({@link FinishReason#TOOL_CALLS}, or {@link
  *       FinishReason#STOP} with messages queued) and the current turn index has reached {@code
- *       limits.maxTurns()}. So {@code maxTurns = N} admits N model turns, and a turn that ends the
- *       session on its own keeps its own terminal on the last of them.
+ *       limits.maxTurns()}, so {@code maxTurns = N} admits N model turns.
  * </ol>
  *
  * <p>Any other outcome returns {@link Optional#empty()}, signalling the loop to continue.
