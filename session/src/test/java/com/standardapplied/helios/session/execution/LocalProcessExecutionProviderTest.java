@@ -154,7 +154,7 @@ final class LocalProcessExecutionProviderTest {
             .build();
     var runtimes = provider.supportedRuntimes();
     assertEquals("[BASH, SQL, NODE]", runtimes.toString());
-    assertThrows(UnsupportedOperationException.class, () -> runtimes.add(Runtime.PYTHON));
+    assertThrows(UnsupportedOperationException.class, () -> runtimes.remove(Runtime.BASH));
   }
 
   // ── RuntimeHandler.dashC ─────────────────────────────────────────────────
