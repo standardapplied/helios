@@ -5,6 +5,7 @@ package com.standardapplied.helios.session.loop;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
@@ -69,6 +70,20 @@ final class DispatchFixture implements AutoCloseable {
 
   ToolDispatch dispatcher(ToolBinding... bindings) {
     return dispatcher(ConcurrencyLimits.defaults(), bindings);
+  }
+
+  /**
+   * A dispatcher like {@link #dispatcher(ToolBinding...)} in a session redacting {@code secrets}.
+   */
+  ToolDispatch dispatcher(SecretRegistry secrets, ToolBinding... bindings) {
+    var session =
+        new SessionContext(CTX.sessionId(), new CancellationToken(), CTX.clock(), secrets);
+    return new ToolDispatch(
+        session,
+        new ToolRegistry(List.of(bindings)),
+        ConcurrencyLimits.defaults(),
+        scheduler,
+        ending);
   }
 
   static ToolBinding binding(String name, ToolCategory category, ToolExecutor executor) {

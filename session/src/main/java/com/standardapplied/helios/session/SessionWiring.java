@@ -59,7 +59,7 @@ final class SessionWiring {
     var evaluator = evaluator(options, combinedTools, pendingQuestions, sessionContext.secrets());
     var collaborators =
         LoopCollaborators.newBuilder()
-            .withHooks(new HookRegistry(options.hooks()))
+            .withHooks(new HookRegistry(options.hooks(), sessionContext.secrets()))
             .withToolDispatch(toolDispatch)
             .withAuthorization(
                 evaluator

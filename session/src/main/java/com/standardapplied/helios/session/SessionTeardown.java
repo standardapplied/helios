@@ -136,7 +136,10 @@ final class SessionTeardown {
                 executionProvider.onSessionEnd(sessionContext);
               } catch (Exception | Error e) {
                 if (!state.ending().failWith(e)) {
-                  LOGGER.log(Level.WARNING, "onSessionEnd threw — continuing shutdown", e);
+                  LOGGER.log(
+                      Level.WARNING,
+                      "onSessionEnd threw — continuing shutdown",
+                      SerializedError.redactedForLog(e, sessionContext.secrets().redactor()));
                   sessionEndFailure = (Exception) e;
                 }
               } finally {

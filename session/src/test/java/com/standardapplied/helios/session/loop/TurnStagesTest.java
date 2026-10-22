@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -69,7 +70,7 @@ final class TurnStagesTest {
             state.ending());
     var collaborators =
         new LoopCollaborators(
-            new HookRegistry(List.of(hooks)),
+            new HookRegistry(List.of(hooks), new SecretRegistry()),
             dispatch,
             Authorizations.ADMIT_ALL,
             Authorizations.NO_RULE,
