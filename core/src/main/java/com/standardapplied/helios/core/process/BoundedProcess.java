@@ -15,8 +15,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -111,16 +109,11 @@ public final class BoundedProcess implements AutoCloseable {
    */
   public ProcessOutcome await(CancellationToken cancellation) throws InterruptedException {
     Objects.requireNonNull(cancellation, "cancellation");
-    var ended = exitSignal();
     var registration =
-        cancellation.onCancel(
-            () -> {
-              kill();
-              ended.countDown();
-            });
+        cancellation.onCancel(() -> Thread.startVirtualThread(() -> tree.killAndReap(GRACE)));
     var settled = false;
     try {
-      var timedOut = !ended.await(timeout.toNanos(), TimeUnit.NANOSECONDS) && process.isAlive();
+      var timedOut = !process.waitFor(timeout.toNanos(), TimeUnit.NANOSECONDS);
       var killed = timedOut || cancellation.isCancelled();
       if (killed) {
         tree.killAndReap(GRACE);
@@ -139,26 +132,6 @@ public final class BoundedProcess implements AutoCloseable {
         tree.killAndReap(GRACE);
       }
     }
-  }
-
-  /**
-   * A latch counted down once the child exits. It waits on its own virtual thread rather than
-   * through {@link Process#onExit()}, which completes on the common pool and so arrives late, or
-   * not before the timeout, while that pool is busy. The latch can still lag the exit while every
-   * virtual-thread carrier is busy, so a timeout is confirmed against the child's own state.
-   * Nothing interrupts that thread; the {@link FutureTask} only carries the checked exception
-   * {@link Process#waitFor()} declares.
-   */
-  private CountDownLatch exitSignal() {
-    var ended = new CountDownLatch(1);
-    Thread.startVirtualThread(
-        new FutureTask<>(
-            () -> {
-              process.waitFor();
-              ended.countDown();
-              return null;
-            }));
-    return ended;
   }
 
   private ProcessOutcome outcome(int exitCode, boolean timedOut) {
