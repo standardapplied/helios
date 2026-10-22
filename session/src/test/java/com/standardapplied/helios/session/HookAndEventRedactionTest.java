@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
@@ -176,8 +177,16 @@ final class HookAndEventRedactionTest {
   }
 
   @Test
-  void toolCallEventsCarryRedactedArgumentsWhileTheToolAndTheHistorySeeThemWhole() {
-    var run = WriteToolSessions.run(options().withHook(relocating()), secretCall("/tmp/a"));
+  void toolCallEventsCarryRedactedArgumentsWhileTheToolTheHooksAndTheHistorySeeThemWhole() {
+    var afterTool = new CopyOnWriteArrayList<Map<String, Object>>();
+    PostToolUseHook recording =
+        (call, result, ctx) -> {
+          afterTool.add(call.arguments());
+          return HookOutcome.cont();
+        };
+    var options = options().withHook(relocating()).withHook(recording);
+
+    var run = WriteToolSessions.run(options, secretCall("/tmp/a"));
 
     var json = toolEventsAsJson(run);
     assertEquals(3, json.size(), "ToolMutated, ToolUse and ToolResult: " + json);
@@ -190,6 +199,7 @@ final class HookAndEventRedactionTest {
         new ToolCall("c1", "Write", arguments("/tmp/b", MARKER)),
         run.events().eventsOf(QueryEvent.ToolUse.class).getFirst().call());
     assertEquals(List.of(arguments("/tmp/b", SECRET)), sessions.executed);
+    assertEquals(sessions.executed, afterTool);
     var history =
         run.model().calls().get(1).stream()
             .filter(message -> message.toolCalls() != null && !message.toolCalls().isEmpty())
