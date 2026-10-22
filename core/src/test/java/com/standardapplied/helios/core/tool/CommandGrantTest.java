@@ -15,6 +15,7 @@ import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.PidFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -587,8 +588,7 @@ class CommandGrantTest {
                 tool.execute(
                     Map.of("args", List.of("-c", "echo $$ > pid; exec sleep 600")),
                     callIn(grant.secretRegistry(), token)));
-    Await.until("the child to start", () -> !recordedPid(tmp).isEmpty());
-    var child = ProcessHandle.of(Long.parseLong(recordedPid(tmp))).orElseThrow();
+    var child = PidFile.await("the child to start", tmp.resolve("pid"));
     try {
       token.cancel("test");
 
@@ -600,14 +600,6 @@ class CommandGrantTest {
           tool.execute(Map.of("args", List.of("-c", "echo again")), sessionOf(grant)).succeeded());
     } finally {
       child.destroyForcibly();
-    }
-  }
-
-  private static String recordedPid(Path dir) {
-    try {
-      return Files.readString(dir.resolve("pid")).strip();
-    } catch (IOException e) {
-      return "";
     }
   }
 

@@ -14,8 +14,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.PidFile;
 import com.standardapplied.helios.session.test.ExecutionCall;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -141,8 +141,7 @@ final class LocalProcessExecutionProviderRobustnessTest {
               provider,
               bash("trap '' TERM; echo $$ > pid; " + HANG).withWorkingDirectory(cwd).build(),
               token);
-      Await.until("the trap to be set", () -> !readPid(cwd).isEmpty());
-      var child = ProcessHandle.of(Long.parseLong(readPid(cwd))).orElseThrow();
+      var child = PidFile.await("the trap to be set", cwd.resolve("pid"));
       try {
         token.cancel("test-cancel");
 
@@ -178,28 +177,8 @@ final class LocalProcessExecutionProviderRobustnessTest {
         assertFalse(result.timedOut());
         assertEquals(0, provider.inflightCount());
       } finally {
-        destroyRecorded(cwd);
+        PidFile.destroy(cwd.resolve("pid"));
       }
-    }
-  }
-
-  private static void destroyRecorded(Path cwd) {
-    var pid = readPid(cwd);
-    if (!pid.isEmpty()) {
-      ProcessHandle.of(Long.parseLong(pid))
-          .ifPresent(
-              handle -> {
-                handle.destroyForcibly();
-                Await.value("the recorded process to end", handle.onExit());
-              });
-    }
-  }
-
-  private static String readPid(Path cwd) {
-    try {
-      return Files.readString(cwd.resolve("pid")).strip();
-    } catch (IOException e) {
-      return "";
     }
   }
 
@@ -298,15 +277,14 @@ final class LocalProcessExecutionProviderRobustnessTest {
                     .withWorkingDirectory(cwd)
                     .build(),
                 new CancellationToken());
-        Await.until("the grandchild's trap to be set", () -> !readPid(cwd).isEmpty());
-        var grandchild = ProcessHandle.of(Long.parseLong(readPid(cwd))).orElseThrow();
+        var grandchild = PidFile.await("the grandchild's trap to be set", cwd.resolve("pid"));
 
         provider.close();
 
         assertFalse(grandchild.isAlive());
         assertEquals(KILLED_BY_SIGTERM, Await.value("the reaped call", call).exitCode());
       } finally {
-        destroyRecorded(cwd);
+        PidFile.destroy(cwd.resolve("pid"));
       }
     }
   }

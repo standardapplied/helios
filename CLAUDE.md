@@ -121,7 +121,7 @@ A test passes or fails for the same reason on a machine a hundred times slower, 
 stalls for several seconds at any statement. The fixtures live in
 `com.standardapplied.helios.core.test` (core's test sources, shared through core's `test-jar`;
 the package must never exist in core's main code; session's equivalent is
-`com.standardapplied.helios.session.test`): `Await`, `Uninterruptible` (a hanging fixture's block until released), `LineSink`,
+`com.standardapplied.helios.session.test`): `Await`, `Uninterruptible` (a hanging fixture's block until released), `PidFile` (a process a child recorded with `echo $$ > pid`), `LineSink`,
 `FeedableInputStream`, `RecordingSubscriber` for a `Flow.Publisher`, and for HTTP clients `StubHttpServer`, `HeldSseServer`
 (a reply held open part by part, reporting when the client closes the connection) and `RedirectTrap`.
 
