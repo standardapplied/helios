@@ -7,11 +7,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 
 /**
  * Thread-safe capture of one process stream that keeps at most a fixed number of bytes, drops the
- * rest, and when it dropped anything trims a secret the cap cut through off what it kept and
- * appends a truncation marker.
+ * rest, and when it dropped anything, or stopped waiting for the stream's end, trims a secret the
+ * cut went through off what it kept and appends a truncation marker.
  */
 final class BoundedSink {
 
@@ -21,9 +22,17 @@ final class BoundedSink {
   private final ByteArrayOutputStream out = new ByteArrayOutputStream();
   private final int max;
   private boolean truncated;
+  private Thread drainer;
 
   BoundedSink(int max) {
     this.max = max;
+  }
+
+  /** A sink of at most {@code max} bytes that drains {@code in} on a virtual thread of its own. */
+  static BoundedSink draining(InputStream in, int max) {
+    var sink = new BoundedSink(max);
+    sink.drainer = Thread.startVirtualThread(() -> sink.drain(in));
+    return sink;
   }
 
   void drain(InputStream in) {
@@ -49,6 +58,21 @@ final class BoundedSink {
     if (toWrite < len) {
       truncated = true;
     }
+  }
+
+  /**
+   * Wait until the drain reaches the end of its stream or {@code deadline}, a {@link
+   * System#nanoTime()} value, passes. A drain still running then is abandoned: what the sink kept
+   * is marked as truncated.
+   */
+  void awaitEnd(long deadline) throws InterruptedException {
+    if (!drainer.join(Duration.ofNanos(Math.max(0, deadline - System.nanoTime())))) {
+      markTruncated();
+    }
+  }
+
+  private synchronized void markTruncated() {
+    truncated = true;
   }
 
   synchronized byte[] bytes(Redactor redactor) {

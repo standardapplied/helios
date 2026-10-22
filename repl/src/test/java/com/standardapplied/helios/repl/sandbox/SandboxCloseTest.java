@@ -18,11 +18,6 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.logging.Handler;
-import java.util.logging.Level;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -121,7 +116,7 @@ class SandboxCloseTest {
             StdoutCapture.of(transport),
             directories);
 
-    try (var log = new LogCapture()) {
+    try (var log = new LogCapture(JvmSandbox.class)) {
       sandbox.close();
 
       assertTrue(Thread.interrupted());
@@ -198,37 +193,6 @@ class SandboxCloseTest {
     @Override
     public boolean isAlive() {
       return child.isAlive();
-    }
-  }
-
-  /** The records {@link JvmSandbox}'s logger publishes while open, as "LEVEL message". */
-  private static final class LogCapture extends Handler implements AutoCloseable {
-    private static final Logger LOGGER = Logger.getLogger(JvmSandbox.class.getName());
-
-    private final List<String> records = new CopyOnWriteArrayList<>();
-    private final Level priorLevel = LOGGER.getLevel();
-
-    LogCapture() {
-      LOGGER.addHandler(this);
-      LOGGER.setLevel(Level.ALL);
-    }
-
-    List<String> records() {
-      return List.copyOf(records);
-    }
-
-    @Override
-    public void publish(LogRecord record) {
-      records.add(record.getLevel() + " " + record.getMessage());
-    }
-
-    @Override
-    public void flush() {}
-
-    @Override
-    public void close() {
-      LOGGER.removeHandler(this);
-      LOGGER.setLevel(priorLevel);
     }
   }
 }
