@@ -7,14 +7,21 @@ package com.standardapplied.helios.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.process.BinaryResolver;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.execution.ExecuteTool;
+import com.standardapplied.helios.session.execution.ExecutionProvider;
+import com.standardapplied.helios.session.execution.ExecutionRequest;
+import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.execution.LocalProcessExecutionProvider;
 import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.permissions.Permission;
@@ -29,6 +36,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -82,7 +90,7 @@ final class Phase5AcceptanceTest {
       String sessionPrefix,
       ScriptedModel model,
       Permission permission,
-      LocalProcessExecutionProvider provider) {
+      ExecutionProvider provider) {
     return SessionOptions.newBuilder()
         .withModel(model)
         .withSessionId(sessionPrefix + UUID.randomUUID())
@@ -181,6 +189,33 @@ final class Phase5AcceptanceTest {
           run.events().eventsOf(QueryEvent.ToolResult.class).stream().findFirst().orElseThrow();
       assertEquals(new ToolOutcome.TimedOut(limit), toolResult.result().outcome());
       assertEquals(0, provider.inflightCount());
+    }
+  }
+
+  /** An {@code Error} the provider throws ends the session as itself, through the tool worker. */
+  @Test
+  void anErrorTheProviderThrowsFailsTheResultAsItself() {
+    var failure = new AssertionError("provider failure");
+    var provider =
+        new ExecutionProvider() {
+          @Override
+          public Set<Runtime> supportedRuntimes() {
+            return Set.of(Runtime.BASH);
+          }
+
+          @Override
+          public ExecutionResult execute(
+              SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
+            throw failure;
+          }
+        };
+    var model = executing(Map.of("runtime", "BASH", "script", "true"));
+
+    try (var session =
+        AgentSession.create(options("phase5-error-", model, allowingExecute(), provider).build())) {
+      session.send("run it");
+
+      assertSame(failure, Await.failure("the result to fail", session.result()));
     }
   }
 
