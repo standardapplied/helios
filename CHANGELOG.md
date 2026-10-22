@@ -974,18 +974,12 @@ never run, emit no tool event and never reach the history.
   registry, a cut stream drops a trailing partial secret first, and `data` and the listener are gone
   (see Breaking).
 - **A registered secret no longer reaches a log handler through a hook's or a tool's failure, or an
-  event subscriber through a tool call's arguments.** `HookRegistry` attached a throwing hook's
-  exception, message and all, to its `WARNING` records, as did the `SEVERE` record of a tool that
-  threw after its call was answered and the `WARNING` of an `onSessionEnd` that threw; a probe's
-  `PostToolUseHook` exception carried the secret into the record. `ToolUse`, `ToolMutated`,
-  `ToolBlocked` and `ToolResult` carried the call's arguments as the model or a hook wrote them, so
-  a secret echoed into them reached the runtime's SSE stream, the console printer and audit sinks,
-  even for a call refused because its key carried one. Each of those records now attaches a copy of
-  the exception whose every message is redacted against the session's registry and whose stack
-  frames are the original's, and those events carry the arguments with every registered secret
-  redacted, in keys and in string values at any depth; a key or string that redaction lengthens
-  past its `JsonSnapshot` limit is cut to it, ending in `…`, so the event never fails the call. The
-  tool, the hooks and the history still see the arguments unredacted.
+  event subscriber through a tool call's arguments.** The `WARNING` of a throwing hook, the `SEVERE`
+  of a tool that threw after its call was answered and the `WARNING` of a throwing `onSessionEnd`
+  attached the raw exception; they now attach a copy whose messages are redacted and whose frames
+  are the original's. `ToolUse`, `ToolMutated`, `ToolBlocked` and `ToolResult` carried the arguments
+  as the model or a hook wrote them; they now carry them redacted, in keys and in string values at
+  any depth. The tool, the hooks and the history still see them unredacted.
 
 - **`helios-persistence` resolves the PostgreSQL JDBC driver `org.postgresql:postgresql` 42.7.12
   (was 42.7.7).** 42.7.7 is inside the affected range of two pgJDBC advisories:
