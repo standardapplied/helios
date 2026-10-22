@@ -415,8 +415,8 @@ class BoundedProcessTest {
   }
 
   /**
-   * Every virtual-thread carrier spins, so nothing can tell {@code await} of the exit before its
-   * timeout elapses: only the child's own state can say it was not timed out.
+   * Every virtual-thread carrier spins, so an exit that reached {@code await} through a virtual
+   * thread would arrive only after the timeout.
    */
   @Test
   void aChildThatHasExitedIsNotTimedOutWhileEveryCarrierIsBusy() throws Exception {
