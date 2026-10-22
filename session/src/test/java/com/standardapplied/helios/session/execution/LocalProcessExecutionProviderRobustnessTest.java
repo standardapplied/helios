@@ -157,8 +157,9 @@ final class LocalProcessExecutionProviderRobustnessTest {
   }
 
   /**
-   * The backgrounded descendant holds the child's stdin open without reading it, so the feeder
-   * blocks on the 512 KiB it cannot write; the call still returns once the child exits.
+   * The backgrounded descendant holds the child's stdin open without reading it. The child reads
+   * one byte before it exits, so the feeder is already blocked on the rest of the 512 KiB, which
+   * the JDK's close of stdin at the child's exit does not unblock; the call still returns.
    */
   @Test
   void aDescendantHoldingStdinUnreadDoesNotHoldUpTheCall(@TempDir Path cwd) {
@@ -168,7 +169,7 @@ final class LocalProcessExecutionProviderRobustnessTest {
         var result =
             run(
                 provider,
-                bash("sleep 600 <&0 >/dev/null 2>&1 & echo $! > pid")
+                bash("sleep 600 <&0 >/dev/null 2>&1 & echo $! > pid; head -c 1 >/dev/null")
                     .withWorkingDirectory(cwd)
                     .withStdin("x".repeat(512 * 1024))
                     .build());
