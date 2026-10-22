@@ -120,7 +120,7 @@ public final class BoundedProcess implements AutoCloseable {
             });
     var settled = false;
     try {
-      var timedOut = !ended.await(timeout.toNanos(), TimeUnit.NANOSECONDS);
+      var timedOut = !ended.await(timeout.toNanos(), TimeUnit.NANOSECONDS) && process.isAlive();
       var killed = timedOut || cancellation.isCancelled();
       if (killed) {
         tree.killAndReap(GRACE);
@@ -144,8 +144,10 @@ public final class BoundedProcess implements AutoCloseable {
   /**
    * A latch counted down once the child exits. It waits on its own virtual thread rather than
    * through {@link Process#onExit()}, which completes on the common pool and so arrives late, or
-   * not before the timeout, while that pool is busy. Nothing interrupts that thread; the {@link
-   * FutureTask} only carries the checked exception {@link Process#waitFor()} declares.
+   * not before the timeout, while that pool is busy. The latch can still lag the exit while every
+   * virtual-thread carrier is busy, so a timeout is confirmed against the child's own state.
+   * Nothing interrupts that thread; the {@link FutureTask} only carries the checked exception
+   * {@link Process#waitFor()} declares.
    */
   private CountDownLatch exitSignal() {
     var ended = new CountDownLatch(1);
