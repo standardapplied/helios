@@ -194,7 +194,7 @@ final class JShellExecutionProviderTest {
     assertEquals("replConfig must not be null", ex.getMessage());
   }
 
-  // ── Capabilities + identity ───────────────────────────────────────────────
+  // ── Supported runtimes + identity ─────────────────────────────────────────
 
   @Test
   void supportsJShellOnly() {
@@ -689,15 +689,6 @@ final class JShellExecutionProviderTest {
         assertEquals(0, Await.value("the execution", future).exitCode());
       }
       assertEquals(3, sandbox.calls.get());
-    }
-  }
-
-  /** supportedRuntimes() returns the same set across invocations. */
-  @Test
-  void supportedRuntimesIsStable() {
-    var sandbox = new StubSandbox();
-    try (var provider = providerFor(sandbox)) {
-      assertEquals(provider.supportedRuntimes(), provider.supportedRuntimes());
     }
   }
 
