@@ -422,6 +422,19 @@ final class LocalProcessExecutionProviderTest {
    */
   @Test
   void interruptWhileWaitingCancelsTheCallAndKillsTheChild(@TempDir Path tmp) {
+    assertInterruptKills(tmp, HANG);
+  }
+
+  /**
+   * A tool call's interrupt is the session's only stop for its child: once {@code execute} throws,
+   * nothing tracks the child, so a child that ignores SIGTERM must still be killed.
+   */
+  @Test
+  void interruptKillsAChildThatIgnoresSigterm(@TempDir Path tmp) {
+    assertInterruptKills(tmp, "trap '' TERM; " + HANG);
+  }
+
+  private static void assertInterruptKills(Path tmp, String script) {
     assumeBashAvailable();
     var pidFile = tmp.resolve("pid");
     var provider =
@@ -433,7 +446,7 @@ final class LocalProcessExecutionProviderTest {
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
-            .withScript("echo $$ > " + pidFile + "; " + HANG)
+            .withScript("echo $$ > " + pidFile + "; " + script)
             .withTimeout(BEYOND_HANG_GUARD)
             .build();
 
