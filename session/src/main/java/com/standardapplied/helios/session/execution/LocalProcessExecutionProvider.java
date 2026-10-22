@@ -18,7 +18,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
-import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -101,7 +100,6 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
   private static final String DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin";
 
   private final Map<Runtime, RuntimeHandler> handlers;
-  private final Set<Runtime> supportedRuntimes;
   private final Duration maxTimeout;
   private final String path;
   private final int maxOutputBytes;
@@ -109,11 +107,10 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
   private final InflightProcesses inflight;
 
   private LocalProcessExecutionProvider(Builder b) {
-    this.handlers = Map.copyOf(b.handlers);
+    this.handlers = Collections.unmodifiableMap(new EnumMap<>(b.handlers));
     this.path = b.path != null ? b.path : DEFAULT_PATH;
     this.maxOutputBytes = b.maxOutputBytes;
     this.concurrency = new Semaphore(b.maxConcurrent);
-    this.supportedRuntimes = Collections.unmodifiableSet(EnumSet.copyOf(b.handlers.keySet()));
     this.maxTimeout = b.maxTimeout;
     this.inflight = new InflightProcesses(b.registerShutdownHook);
   }
@@ -144,7 +141,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
 
   @Override
   public Set<Runtime> supportedRuntimes() {
-    return supportedRuntimes;
+    return handlers.keySet();
   }
 
   /**
@@ -167,7 +164,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
           "runtime "
               + request.runtime()
               + " is not supported by this provider (supported: "
-              + supportedRuntimes
+              + handlers.keySet()
               + ")");
     }
     var effectiveTimeout =
