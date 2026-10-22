@@ -979,7 +979,8 @@ never run, emit no tool event and never reach the history.
   `onSessionEnd` attached the raw exception; they now attach a copy whose messages are redacted and whose frames
   are the original's. `ToolUse`, `ToolMutated`, `ToolBlocked` and `ToolResult` carried the arguments
   as the model or a hook wrote them; they now carry them redacted, in keys and in string values at
-  any depth. The tool, the hooks and the history still see them unredacted.
+  any depth. The tool, its `PreToolUse` and `PostToolUse` hooks and the history
+  still see them unredacted.
 
 - **`helios-persistence` resolves the PostgreSQL JDBC driver `org.postgresql:postgresql` 42.7.12
   (was 42.7.7).** 42.7.7 is inside the affected range of two pgJDBC advisories:
