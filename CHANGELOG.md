@@ -449,15 +449,15 @@ one added to it as suppressed once; an `Error` recorded after the result settled
 `SEVERE` on the `AgentSessionImpl` logger. A loop thread that ended with an `Error` then throws the
 result's `Error` to its uncaught-exception handler; nothing promises that the JVM stops, the host
 decides. A thread the session does not own (a model publisher's worker after its stream ended) is
-outside the sink: its `Error` reaches that thread's uncaught-exception handler. Every end of a session, a natural one included, then runs
-one teardown in the reverse order of what the session acquired: it cancels the session, which
-cancels and interrupts every tool call still running, and waits for those calls to end; it calls
-`onSessionEnd` and waits for it to return; it shuts the scheduler down and waits for event
-subscribers to drain. Each wait is bounded by the new `SessionLimits.teardownGrace` (default 5 s,
-`Builder.withTeardownGrace`). A tool call or `onSessionEnd` still running when its wait ends is
-logged as a `WARNING` on the `AgentSessionImpl` logger and left running, never treated as ended: a
-tool that ignores both its token and interruption may still run, and its effects land, after the
-result settles.
+outside the sink: its `Error` reaches that thread's uncaught-exception handler. Every end of a
+session, a natural one included, then runs one teardown in the reverse order of what the session
+acquired: it cancels the session, which cancels and interrupts every tool call still running, and
+waits for those calls to end; it calls `onSessionEnd` and waits for it to return; it shuts the
+scheduler down and waits for event subscribers to drain. Each wait is bounded by the new
+`SessionLimits.teardownGrace` (default 5 s, `Builder.withTeardownGrace`). A tool call or
+`onSessionEnd` still running when its wait ends is logged as a `WARNING` on the `AgentSessionImpl`
+logger and left running, never treated as ended: a tool that ignores both its token and interruption
+may still run, and its effects land, after the result settles.
 
 | 2.x | 3.0 |
 |---|---|
@@ -921,15 +921,14 @@ tool call's own thread and must stop when that thread is interrupted or the call
   every JVM.** A record's schema properties, `JsonSchema.object()` builds, the provenance schemas,
   `Tool.parametersAsJsonSchema()`, tool-call and `MutateArgs` arguments,
   `Provenanced.provenanceByField()` and the REPL's bindings were frozen with `Map.copyOf`, and
-  OpenAI's strict-schema transform
-  rebuilt every map as a `HashMap`. Each now keeps declaration order (record components, builder
-  insertion, parameter lists, parsed JSON), so request bodies and messages to the
-  model are byte-identical across JVMs. This fixes prompt-cache misses across
+  OpenAI's strict-schema transform rebuilt every map as a `HashMap`. Each now keeps declaration
+  order (record components, builder insertion, parameter lists, parsed JSON), so request bodies and
+  messages to the model are byte-identical across JVMs. This fixes prompt-cache misses across
   restarts and across instances, and structured output generated out of its declared field order.
   `ExecutionProvider.supportedRuntimes()` of the built-in providers, which an `Execute` refusal
-  names, iterates in `Runtime` declaration order, and `ReplSession.calledHostFunctions()` is sorted by name. The
-  sandbox's `countBy` helper lists its keys in the order they first occur, the arguments of
-  `QueryEvent.ToolMutated` and `HeliosEvent.ToolCallStarted`, the attributes of
+  names, iterates in `Runtime` declaration order, and `ReplSession.calledHostFunctions()` is sorted
+  by name. The sandbox's `countBy` helper lists its keys in the order they first occur, the
+  arguments of `QueryEvent.ToolMutated` and `HeliosEvent.ToolCallStarted`, the attributes of
   `HeliosEvent.RunStarted` and the data of `HeliosEvent.Custom` keep their given order in the
   session stream and the JSONL event log, the runtime's `POST /sessions` and result bodies list
   their fields in a fixed order, and REPL bindings still reject a null name or repr.
