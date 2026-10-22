@@ -24,6 +24,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -410,6 +411,40 @@ class BoundedProcessTest {
       assertEquals(3, outcome.exitCode());
     } finally {
       release.countDown();
+    }
+  }
+
+  /**
+   * Every virtual-thread carrier spins, so nothing can tell {@code await} of the exit before its
+   * timeout elapses: only the child's own state can say it was not timed out.
+   */
+  @Test
+  void aChildThatHasExitedIsNotTimedOutWhileEveryCarrierIsBusy() throws Exception {
+    var carriers =
+        Integer.getInteger(
+            "jdk.virtualThreadScheduler.parallelism", Runtime.getRuntime().availableProcessors());
+    var busy = new CountDownLatch(carriers);
+    var released = new AtomicBoolean();
+    try (var process = bash("exit 3").withTimeout(SHORT).start()) {
+      process.stdin().close();
+      Await.termination("the child to exit", process.process());
+      for (var i = 0; i < carriers; i++) {
+        Thread.startVirtualThread(
+            () -> {
+              busy.countDown();
+              while (!released.get()) {
+                Thread.onSpinWait();
+              }
+            });
+      }
+      Await.latch("every carrier to be busy", busy);
+
+      var outcome = process.await(new CancellationToken());
+
+      assertFalse(outcome.timedOut());
+      assertEquals(3, outcome.exitCode());
+    } finally {
+      released.set(true);
     }
   }
 
