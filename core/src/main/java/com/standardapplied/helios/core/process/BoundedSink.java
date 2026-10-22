@@ -78,7 +78,7 @@ final class BoundedSink {
     if (Thread.interrupted()) {
       throw new InterruptedException("Interrupted while awaiting the end of a process stream");
     }
-    if (!drainer.join(Duration.ofNanos(Math.max(0, deadline - System.nanoTime())))) {
+    if (!drainer.join(Duration.ofNanos(deadline - System.nanoTime()))) {
       markTruncated();
     }
   }
