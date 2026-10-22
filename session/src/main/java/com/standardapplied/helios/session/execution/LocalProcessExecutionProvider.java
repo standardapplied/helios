@@ -85,7 +85,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <h2>Lifecycle</h2>
  *
- * The provider is {@link AutoCloseable}; {@link #close()} forcibly destroys every in-flight
+ * The provider is {@link AutoCloseable}; {@link #close()} kills and reaps every in-flight
  * subprocess and removes the JVM shutdown hook the constructor installed. The shutdown hook is
  * defense-in-depth: if the host JVM exits without calling {@code close()} (uncaught {@code Error},
  * {@code System.exit(...)}, OS signal), the hook still kills every child process so the host cannot
