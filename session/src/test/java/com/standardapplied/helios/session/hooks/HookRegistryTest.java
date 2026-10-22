@@ -7,10 +7,10 @@ package com.standardapplied.helios.session.hooks;
 import static com.standardapplied.helios.session.test.HookInputs.named;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Response;
@@ -20,6 +20,7 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.test.LogCapture;
+import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -43,11 +44,22 @@ final class HookRegistryTest {
         "sess", 0, new CancellationToken(), ScriptedModel.newBuilder().build());
   }
 
+  private static HookRegistry registry(List<? extends Hook> hooks) {
+    return new HookRegistry(hooks, new SecretRegistry());
+  }
+
   // ── construction ──────────────────────────────────────────────────────────
 
   @Test
+  void constructorRejectsNullSecrets() {
+    var hooks = List.<Hook>of();
+    var ex = assertThrows(NullPointerException.class, () -> new HookRegistry(hooks, null));
+    assertEquals("secrets must not be null", ex.getMessage());
+  }
+
+  @Test
   void constructorRejectsNullList() {
-    var ex = assertThrows(NullPointerException.class, () -> new HookRegistry(null));
+    var ex = assertThrows(NullPointerException.class, () -> registry(null));
     assertEquals("hooks must not be null", ex.getMessage());
   }
 
@@ -55,7 +67,7 @@ final class HookRegistryTest {
   void constructorRejectsListContainingNull() {
     var list = new ArrayList<Hook>();
     list.add(null);
-    var ex = assertThrows(NullPointerException.class, () -> new HookRegistry(list));
+    var ex = assertThrows(NullPointerException.class, () -> registry(list));
     assertEquals("hooks must not contain null", ex.getMessage());
   }
 
@@ -76,7 +88,7 @@ final class HookRegistryTest {
   @Test
   void constructorRejectsANullName() {
     var hooks = List.of(new NamedBy(() -> null));
-    var ex = assertThrows(NullPointerException.class, () -> new HookRegistry(hooks));
+    var ex = assertThrows(NullPointerException.class, () -> registry(hooks));
     assertEquals("hook " + NamedBy.class.getName() + " returned a null name", ex.getMessage());
   }
 
@@ -84,14 +96,14 @@ final class HookRegistryTest {
   @ValueSource(strings = {"", " \t"})
   void constructorRejectsABlankName(String name) {
     var hooks = List.of(new NamedBy(() -> name));
-    var ex = assertThrows(IllegalArgumentException.class, () -> new HookRegistry(hooks));
+    var ex = assertThrows(IllegalArgumentException.class, () -> registry(hooks));
     assertEquals("hook " + NamedBy.class.getName() + " returned a blank name", ex.getMessage());
   }
 
   @Test
   void constructorRejectsTheReservedNamePermission() {
     var hooks = List.of(new NamedBy(() -> "Permission"));
-    var ex = assertThrows(IllegalArgumentException.class, () -> new HookRegistry(hooks));
+    var ex = assertThrows(IllegalArgumentException.class, () -> registry(hooks));
     assertEquals(
         "hook " + NamedBy.class.getName() + " uses the reserved name Permission", ex.getMessage());
   }
@@ -105,7 +117,7 @@ final class HookRegistryTest {
                 () -> {
                   throw failure;
                 }));
-    assertSame(failure, assertThrows(IllegalStateException.class, () -> new HookRegistry(hooks)));
+    assertSame(failure, assertThrows(IllegalStateException.class, () -> registry(hooks)));
   }
 
   /** Blocks every call and rewrites every result, named {@code Gate} only on its first read. */
@@ -132,7 +144,7 @@ final class HookRegistryTest {
   @Test
   void aHookOfTwoPhasesHasItsNameReadOnceForBoth() {
     var gate = new TwoPhaseGate();
-    var registry = new HookRegistry(List.of(gate));
+    var registry = registry(List.of(gate));
     assertEquals("Gate", registry.firePreToolUse(CALL, ctx()).decision().firingHookName());
     assertEquals("Gate", registry.firePostToolUse(CALL, OK, ctx()).firingHookName());
     assertEquals(1, gate.reads.get());
@@ -150,7 +162,7 @@ final class HookRegistryTest {
     PreToolUseHook a = (call, ctx) -> HookOutcome.cont();
     PreToolUseHook b = (call, ctx) -> HookOutcome.cont();
     PostToolUseHook c = (call, result, ctx) -> HookOutcome.cont();
-    var registry = new HookRegistry(List.of(a, b, c));
+    var registry = registry(List.of(a, b, c));
     assertEquals(2, registry.countOf(PreToolUseHook.class));
     assertEquals(1, registry.countOf(PostToolUseHook.class));
     assertEquals(0, registry.countOf(PreModelTurnHook.class));
@@ -352,7 +364,7 @@ final class HookRegistryTest {
             return 30;
           }
         };
-    var registry = new HookRegistry(List.of(neverFiresHook, blockHook, continueHook));
+    var registry = registry(List.of(neverFiresHook, blockHook, continueHook));
     var decision = registry.firePreToolUse(CALL, ctx()).decision();
     assertInstanceOf(HookOutcome.Block.class, decision.outcome());
     assertEquals(List.of("continue", "block"), fired);
@@ -388,7 +400,7 @@ final class HookRegistryTest {
             return 50;
           }
         };
-    new HookRegistry(List.of(later, earlier)).firePreToolUse(CALL, ctx());
+    registry(List.of(later, earlier)).firePreToolUse(CALL, ctx());
     assertEquals(List.of("earlier", "later"), fired);
   }
 
@@ -402,7 +414,7 @@ final class HookRegistryTest {
           throw new RuntimeException("boom");
         };
     OnStreamEventHook other = (event, ctx) -> fired.add("other");
-    new HookRegistry(List.of(good, bad, other))
+    registry(List.of(good, bad, other))
         .fireOnStreamEvent(new QueryEvent.AssistantText("s", 1, Instant.now(), "x"), ctx());
     assertEquals(List.of("good", "bad", "other"), fired);
   }
@@ -418,7 +430,7 @@ final class HookRegistryTest {
             });
     PreToolUseHook later = (call, ctx) -> fired.add("later") ? HookOutcome.cont() : null;
 
-    var result = new HookRegistry(List.of(throwing, later)).firePreToolUse(CALL, ctx());
+    var result = registry(List.of(throwing, later)).firePreToolUse(CALL, ctx());
 
     assertEquals(
         HookDecision.of(
@@ -433,7 +445,7 @@ final class HookRegistryTest {
     PreToolUseHook nullReturn = named("Guard", (call, ctx) -> null);
     PreToolUseHook later = (call, ctx) -> fired.add("later") ? HookOutcome.cont() : null;
 
-    var result = new HookRegistry(List.of(nullReturn, later)).firePreToolUse(CALL, ctx());
+    var result = registry(List.of(nullReturn, later)).firePreToolUse(CALL, ctx());
 
     assertEquals(
         HookDecision.of("Guard", HookOutcome.block("hook returned null")), result.decision());
@@ -447,7 +459,7 @@ final class HookRegistryTest {
         (call, ctx) -> {
           throw failure;
         };
-    var registry = new HookRegistry(List.of(failing));
+    var registry = registry(List.of(failing));
     assertSame(
         failure, assertThrows(AssertionError.class, () -> registry.firePreToolUse(CALL, ctx())));
   }
@@ -471,7 +483,7 @@ final class HookRegistryTest {
               return HookOutcome.cont();
             });
 
-    var result = new HookRegistry(List.of(a, b, c)).firePreToolUse(CALL, ctx());
+    var result = registry(List.of(a, b, c)).firePreToolUse(CALL, ctx());
 
     assertEquals(List.of(Map.of("path", "a"), Map.of("path", "b")), seen);
     assertEquals(
@@ -494,7 +506,7 @@ final class HookRegistryTest {
           return HookOutcome.cont();
         };
 
-    var result = new HookRegistry(List.of(wrongPhase, recording)).firePreToolUse(CALL, ctx());
+    var result = registry(List.of(wrongPhase, recording)).firePreToolUse(CALL, ctx());
 
     assertEquals(List.of(CALL), seen);
     assertEquals(new PreToolUseResult(CALL, List.of(), HookDecision.proceed()), result);
@@ -505,7 +517,7 @@ final class HookRegistryTest {
     PreToolUseHook a = named("A", (call, ctx) -> HookOutcome.mutateArgs(Map.of("path", "a")));
     PreToolUseHook b = named("B", (call, ctx) -> HookOutcome.block("no"));
 
-    var result = new HookRegistry(List.of(a, b)).firePreToolUse(CALL, ctx());
+    var result = registry(List.of(a, b)).firePreToolUse(CALL, ctx());
 
     assertEquals(new ToolCall("c", "read", Map.of("path", "a")), result.call());
     assertEquals(HookDecision.of("B", HookOutcome.block("no")), result.decision());
@@ -516,7 +528,7 @@ final class HookRegistryTest {
   @Test
   void firePostToolUseDispatches() {
     PostToolUseHook hook = (call, result, ctx) -> HookOutcome.inject("more");
-    var decision = new HookRegistry(List.of(hook)).firePostToolUse(CALL, OK, ctx());
+    var decision = registry(List.of(hook)).firePostToolUse(CALL, OK, ctx());
     assertInstanceOf(HookOutcome.Inject.class, decision.outcome());
     assertEquals(hook.name(), decision.firingHookName());
   }
@@ -524,8 +536,7 @@ final class HookRegistryTest {
   @Test
   void firePreModelTurnDispatches() {
     PreModelTurnHook hook = (history, ctx) -> HookOutcome.stop("stopped");
-    var decision =
-        new HookRegistry(List.of(hook)).firePreModelTurn(List.of(Message.user("hi")), ctx());
+    var decision = registry(List.of(hook)).firePreModelTurn(List.of(Message.user("hi")), ctx());
     assertInstanceOf(HookOutcome.Stop.class, decision.outcome());
     assertEquals(hook.name(), decision.firingHookName());
   }
@@ -534,7 +545,7 @@ final class HookRegistryTest {
   void firePostModelTurnDispatches() {
     PostModelTurnHook hook = (response, ctx) -> HookOutcome.inject("retry");
     var resp = Response.newBuilder().withContent("x").withFinishReason(FinishReason.STOP).build();
-    var decision = new HookRegistry(List.of(hook)).firePostModelTurn(resp, ctx());
+    var decision = registry(List.of(hook)).firePostModelTurn(resp, ctx());
     assertInstanceOf(HookOutcome.Inject.class, decision.outcome());
   }
 
@@ -542,14 +553,14 @@ final class HookRegistryTest {
   void firePreStopDispatches() {
     PreStopHook hook = (response, ctx) -> HookOutcome.inject("not yet");
     var resp = Response.newBuilder().withContent("x").withFinishReason(FinishReason.STOP).build();
-    var decision = new HookRegistry(List.of(hook)).firePreStop(resp, ctx());
+    var decision = registry(List.of(hook)).firePreStop(resp, ctx());
     assertInstanceOf(HookOutcome.Inject.class, decision.outcome());
   }
 
   @Test
   void fireOnUserMessageDispatches() {
     OnUserMessageHook hook = (msg, ctx) -> HookOutcome.block("PII");
-    var decision = new HookRegistry(List.of(hook)).fireOnUserMessage(UserMessage.text("hi"), ctx());
+    var decision = registry(List.of(hook)).fireOnUserMessage(UserMessage.text("hi"), ctx());
     assertInstanceOf(HookOutcome.Block.class, decision.outcome());
     assertEquals(hook.name(), decision.firingHookName());
   }
@@ -589,14 +600,14 @@ final class HookRegistryTest {
             return name.get();
           }
         };
-    var registry = new HookRegistry(List.of(hook));
+    var registry = registry(List.of(hook));
 
     var logged = onlyWarning(() -> registry.firePreToolUse(CALL, ctx()));
 
     assertEquals(
         "PreToolUse hook Gate threw java.lang.IllegalStateException; refusing the call",
         logged.getMessage());
-    assertNull(logged.getThrown());
+    RedactedLogs.assertCopyOf(failure, logged.getThrown());
   }
 
   @Test
@@ -615,12 +626,12 @@ final class HookRegistryTest {
             return name.get();
           }
         };
-    var registry = new HookRegistry(List.of(hook));
+    var registry = registry(List.of(hook));
 
     var logged = onlyWarning(() -> registry.firePostToolUse(CALL, OK, ctx()));
 
     assertEquals("hook Gate threw; treating as Continue", logged.getMessage());
-    assertSame(failure, logged.getThrown());
+    RedactedLogs.assertCopyOf(failure, logged.getThrown());
   }
 
   @Test
@@ -638,7 +649,7 @@ final class HookRegistryTest {
             return name.get();
           }
         };
-    var registry = new HookRegistry(List.of(hook));
+    var registry = registry(List.of(hook));
 
     var logged = onlyWarning(() -> registry.firePostToolUse(CALL, OK, ctx()));
 
@@ -660,7 +671,7 @@ final class HookRegistryTest {
             return name.get();
           }
         };
-    var registry = new HookRegistry(List.of(hook));
+    var registry = registry(List.of(hook));
 
     var logged = onlyWarning(() -> registry.firePreToolUse(CALL, ctx()));
 
@@ -683,12 +694,12 @@ final class HookRegistryTest {
             return name.get();
           }
         };
-    var registry = new HookRegistry(List.of(hook));
+    var registry = registry(List.of(hook));
     var event = new QueryEvent.AssistantText("sess", 0, Instant.EPOCH, "x");
 
     var logged = onlyWarning(() -> registry.fireOnStreamEvent(event, ctx()));
 
     assertEquals("hook Gate threw on stream event", logged.getMessage());
-    assertSame(failure, logged.getThrown());
+    RedactedLogs.assertCopyOf(failure, logged.getThrown());
   }
 }

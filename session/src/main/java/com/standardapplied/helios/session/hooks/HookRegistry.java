@@ -4,12 +4,14 @@
  */
 package com.standardapplied.helios.session.hooks;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.SerializedError;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.permissions.Permission;
 import java.util.ArrayList;
@@ -38,12 +40,15 @@ import java.util.logging.Logger;
  * <p><b>{@code PreToolUse} hooks are guards and chain</b>, as {@link PreToolUseHook} describes;
  * {@link #firePreToolUse} returns the chain's {@link PreToolUseResult}. A guard that fails ends the
  * chain as a {@code Block} with reason {@code hook threw <exception class>: <message>} or {@code
- * hook returned null}, logged at {@code WARNING} with the exception class alone, since the message
- * may carry a secret that only the session redacts from the reason.
+ * hook returned null}, logged at {@code WARNING}.
  *
  * <p>In every other phase a hook that throws a {@link RuntimeException} or returns {@code null} is
  * treated as {@link HookOutcome.Continue} and logged at {@code WARNING}, so the next hook of the
  * phase runs — see spec §9.4. An {@link Error} escapes from every phase.
+ *
+ * <p>A log record of a hook that threw carries the exception's {@linkplain
+ * SerializedError#redactedForLog redacted copy}, never the exception itself, so no secret of the
+ * session's registry reaches a log handler.
  *
  * <h2>Thread-safety</h2>
  *
@@ -63,6 +68,7 @@ public final class HookRegistry {
   private final List<Registered<OnUserMessageHook>> onUserMessage;
   private final List<Registered<OnStreamEventHook>> onStreamEvent;
   private final Map<Class<? extends Hook>, List<?>> hooksByPhase;
+  private final SecretRegistry secrets;
 
   /** A hook with the name the registry read from it when it was built. */
   private record Registered<H extends Hook>(H hook, String name) {}
@@ -73,12 +79,15 @@ public final class HookRegistry {
    * exception it throws propagates unchanged.
    *
    * @param hooks the hooks; non-null but may be empty
-   * @throws NullPointerException if {@code hooks} is null, contains null elements, or holds a hook
-   *     whose name is null
+   * @param secrets the session's secret registry, which a logged hook failure is redacted against;
+   *     non-null
+   * @throws NullPointerException if {@code hooks} or {@code secrets} is null, {@code hooks}
+   *     contains null elements, or holds a hook whose name is null
    * @throws IllegalArgumentException if a hook's name is blank or {@link Permission#NAME}
    */
-  public HookRegistry(List<? extends Hook> hooks) {
+  public HookRegistry(List<? extends Hook> hooks, SecretRegistry secrets) {
     Objects.requireNonNull(hooks, "hooks must not be null");
+    this.secrets = Objects.requireNonNull(secrets, "secrets must not be null");
     var registered = hooks.stream().map(HookRegistry::register).toList();
     this.preToolUse = sortByPriority(registered, PreToolUseHook.class);
     this.postToolUse = sortByPriority(registered, PostToolUseHook.class);
@@ -103,12 +112,12 @@ public final class HookRegistry {
   }
 
   /**
-   * Empty registry — no hooks of any phase.
+   * Empty registry — no hooks of any phase, and an empty secret registry.
    *
    * @return a fresh empty registry
    */
   public static HookRegistry empty() {
-    return new HookRegistry(List.of());
+    return new HookRegistry(List.of(), new SecretRegistry());
   }
 
   private static Registered<Hook> register(Hook hook) {
@@ -172,8 +181,7 @@ public final class HookRegistry {
     return new PreToolUseResult(current, mutations, HookDecision.proceed());
   }
 
-  private static HookOutcome guard(
-      Registered<PreToolUseHook> registered, ToolCall call, HookContext ctx) {
+  private HookOutcome guard(Registered<PreToolUseHook> registered, ToolCall call, HookContext ctx) {
     try {
       var outcome = registered.hook().beforeTool(call, ctx);
       if (outcome == null) {
@@ -183,12 +191,14 @@ public final class HookRegistry {
       }
       return outcome;
     } catch (RuntimeException ex) {
-      LOGGER.warning(
+      LOGGER.log(
+          Level.WARNING,
           "PreToolUse hook "
               + registered.name()
               + " threw "
               + ex.getClass().getName()
-              + "; refusing the call");
+              + "; refusing the call",
+          redacted(ex));
       return HookOutcome.block("hook threw " + ex.getClass().getName() + ": " + ex.getMessage());
     }
   }
@@ -301,7 +311,8 @@ public final class HookRegistry {
       try {
         registered.hook().onEvent(event, ctx);
       } catch (RuntimeException ex) {
-        LOGGER.log(Level.WARNING, "hook " + registered.name() + " threw on stream event", ex);
+        LOGGER.log(
+            Level.WARNING, "hook " + registered.name() + " threw on stream event", redacted(ex));
       }
     }
   }
@@ -322,7 +333,7 @@ public final class HookRegistry {
     return HookDecision.proceed();
   }
 
-  private static <H extends Hook> HookOutcome safeFire(
+  private <H extends Hook> HookOutcome safeFire(
       Registered<H> registered, Function<H, HookOutcome> body) {
     try {
       var outcome = body.apply(registered.hook());
@@ -333,8 +344,15 @@ public final class HookRegistry {
       }
       return outcome;
     } catch (RuntimeException ex) {
-      LOGGER.log(Level.WARNING, "hook " + registered.name() + " threw; treating as Continue", ex);
+      LOGGER.log(
+          Level.WARNING,
+          "hook " + registered.name() + " threw; treating as Continue",
+          redacted(ex));
       return HookOutcome.cont();
     }
+  }
+
+  private Throwable redacted(RuntimeException ex) {
+    return SerializedError.redactedForLog(ex, secrets.redactor());
   }
 }

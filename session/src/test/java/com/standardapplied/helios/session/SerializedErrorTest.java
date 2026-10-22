@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.session.test.RedactedLogs;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -226,5 +227,50 @@ final class SerializedErrorTest {
             List.of("f1"),
             new SerializedError("inner", "saw <redacted:API_KEY>", List.of("f2"), null)),
         redacted);
+  }
+
+  @Test
+  void redactedForLogCopiesEachLevelWithItsClassItsRedactedMessageAndItsFrames() {
+    var secrets = new SecretRegistry();
+    secrets.register("API_KEY", "sk-test-0123456789abcdef");
+    var inner = new IllegalArgumentException("saw sk-test-0123456789abcdef");
+    var outer = new IllegalStateException("wrapped", inner);
+    outer.addSuppressed(new RuntimeException("sk-test-0123456789abcdef"));
+
+    var copy = SerializedError.redactedForLog(outer, secrets.redactor());
+
+    RedactedLogs.assertCopyOf(
+        outer,
+        copy,
+        List.of(
+            "java.lang.IllegalStateException: wrapped",
+            "java.lang.IllegalArgumentException: saw <redacted:API_KEY>"));
+    assertEquals(0, copy.getSuppressed().length, "suppressed exceptions are not copied");
+  }
+
+  @Test
+  void redactedForLogNamesALevelWithoutAMessageByItsClassAlone() {
+    var original = new IllegalStateException();
+
+    var copy = SerializedError.redactedForLog(original, new SecretRegistry().redactor());
+
+    RedactedLogs.assertCopyOf(original, copy, List.of("java.lang.IllegalStateException"));
+  }
+
+  @Test
+  void redactedForLogBoundsTheChainAsOfThrowableDoes() {
+    Throwable original = new RuntimeException("level-32");
+    for (int i = 31; i >= 0; i--) {
+      original = new RuntimeException("level-" + i, original);
+    }
+
+    var copy = SerializedError.redactedForLog(original, new SecretRegistry().redactor());
+
+    var levels = new ArrayList<String>();
+    for (var level = copy; level != null; level = level.getCause()) {
+      levels.add(level.getMessage());
+    }
+    assertEquals(17, levels.size(), "the root and 16 causes");
+    assertEquals("java.lang.RuntimeException: level-16", levels.getLast());
   }
 }

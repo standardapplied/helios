@@ -381,6 +381,7 @@ REPL's bindings listener is gone.
 |---|---|
 | Each component held its own `SecretRegistry`; sessions had none | `SessionOptions` gains a `secretRegistry` component and `Builder.withSecretRegistry(SecretRegistry)` (default: a new empty registry). `SessionContext` gains a `secrets` component, `SessionContext(sessionId, cancellation, clock, secrets)`; `SessionContext.forTesting` uses a new empty registry. Tools reach it as `ToolContext.sessionContext().secrets()` |
 | `StopClassifier()` | `StopClassifier(SecretRegistry)`: the session's registry, which its error terminals are redacted against |
+| `new HookRegistry(hooks)` | `new HookRegistry(hooks, secrets)`: the session's registry, which a logged hook failure is redacted against; `HookRegistry.empty()` uses an empty one |
 | `ReadTool.binding(workspace, tracker, Redactor)`, `GrepTool.binding(workspace, Redactor)` | removed; `ReadTool.binding(workspace, tracker)` and `GrepTool.binding(workspace)`, whose output the session redacts |
 | `LocalProcessExecutionProvider.defaultPosix(SecretRegistry)`, `Builder.withSecretRegistry`, `secretRegistry()` | `defaultPosix()`; the other two removed. Stdout and stderr are returned raw |
 | `JShellExecutionProvider.Builder.withSecretRegistry`, `secretRegistry()` | removed. Stdout and stderr are returned raw |
@@ -602,7 +603,7 @@ stage and ends `NotFound`, as without a policy.
 | 2.x | 3.0 |
 |---|---|
 | The permission evaluator is a `PreToolUseHook` at priority 50 | a fixed stage after every `PreToolUse` hook; its refusals carry the name `Permission`, which `HookRegistry` (and so `AgentSession.create`) rejects for a hook (`IllegalArgumentException`) |
-| A `PreToolUseHook` that throws or returns `null` is `Continue` | it refuses the call, `Rejected(by = the hook)`, with reason `hook threw <exception class>: <message>` or `hook returned null`, logged at `WARNING` with the exception class alone; later `PreToolUse` hooks do not run |
+| A `PreToolUseHook` that throws or returns `null` is `Continue` | it refuses the call, `Rejected(by = the hook)`, with reason `hook threw <exception class>: <message>` or `hook returned null`, logged at `WARNING` with the exception's redacted copy; later `PreToolUse` hooks do not run |
 | The first `PreToolUse` `MutateArgs` ends the chain | it passes the new arguments to the next hook; `Block`, `Inject` and `Stop` end the chain |
 | `HookRegistry.firePreToolUse` returns `HookDecision` | returns `PreToolUseResult(call, mutations, decision)` |
 | `DefaultPermissionEvaluator.Builder.withQuestionGateway(QuestionGateway)` | `withApprover(ToolApprover)`; `ToolApprover.askingUser(gateway)` is the old prompt |
@@ -972,6 +973,14 @@ never run, emit no tool event and never reach the history.
   received. The session now redacts every tool result and every error it reports against its one
   registry, a cut stream drops a trailing partial secret first, and `data` and the listener are gone
   (see Breaking).
+- **A registered secret no longer reaches a log handler through a hook's or a tool's failure, or an
+  event subscriber through a tool call's arguments.** The `WARNING` of a throwing hook or
+  `ContextCompactor`, the `SEVERE` of a tool that threw after its call was answered and the
+  `WARNING` of a throwing `onSessionEnd` attached the raw exception; they now attach a copy whose
+  messages are redacted and whose frames are the original's. `ToolUse`, `ToolMutated`, `ToolBlocked`
+  and `ToolResult` carried the arguments as the model or a hook wrote them; they now carry them
+  redacted, in keys and in string values at any depth. The tool, its `PreToolUse` and `PostToolUse`
+  hooks and the history still see them unredacted.
 
 - **`helios-persistence` resolves the PostgreSQL JDBC driver `org.postgresql:postgresql` 42.7.12
   (was 42.7.7).** 42.7.7 is inside the affected range of two pgJDBC advisories:

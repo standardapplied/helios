@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -103,7 +104,10 @@ final class EventEmitterTest {
     OnStreamEventHook hook = (ev, ctx) -> hookEvents.add(ev);
     var emitter =
         new EventEmitter(
-            sinkEvents::add, new HookRegistry(List.of(hook)), ctxFactory(stubModel()), CLOCK);
+            sinkEvents::add,
+            new HookRegistry(List.of(hook), new SecretRegistry()),
+            ctxFactory(stubModel()),
+            CLOCK);
     var state = newState();
     var event = new QueryEvent.AssistantText("sess-emit", 0L, FIXED, "hi");
     emitter.emit(state, event);

@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.session.loop;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -81,7 +82,7 @@ final class HookLoop implements AutoCloseable {
     queue.offer(message);
     var collaborators =
         new LoopCollaborators(
-            new HookRegistry(List.of(hooks)),
+            new HookRegistry(List.of(hooks), new SecretRegistry()),
             fixture.dispatch(tools),
             authorization,
             Authorizations.NO_RULE,
