@@ -20,6 +20,8 @@ import com.standardapplied.helios.repl.protocol.RpcError;
 import com.standardapplied.helios.repl.protocol.RpcMessage;
 import com.standardapplied.helios.session.test.LogCapture;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.UnixDomainSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -145,7 +147,7 @@ class SandboxPreludeInstallTest {
    * {@code create} throws, and its reader logs only while it is open.
    */
   @Test
-  void aFailedLaunchClosesItsChannelAndLeavesNothingBehind() throws IOException {
+  void aFailedLaunchClosesItsChannelAndLeavesNothingBehind() {
     var registry = new HostFunctionRegistry();
     registry.register(
         new HostFunction(
@@ -154,38 +156,54 @@ class SandboxPreludeInstallTest {
             List.of(HostParameter.required("com", ParameterType.STRING, "Hides a package.")),
             params -> null));
     var earlierChildren = livePids();
-    var earlierDirectories = sandboxDirectories();
-    var accepted = new CompletableFuture<SandboxRpc>();
+    var launched = new CompletableFuture<Launch>();
     var logged = new CopyOnWriteArrayList<LogRecord>();
     try (var ignored = LogCapture.of(RpcChannel.class, logged)) {
       var thrown =
           assertThrows(
-              ReplException.class, () -> JvmSandbox.create(CONFIG, registry, accepted::complete));
+              ReplException.class,
+              () ->
+                  JvmSandbox.create(
+                      CONFIG, registry, rpc -> launched.complete(Launch.of(rpc, earlierChildren))));
 
       assertTrue(
           thrown.getMessage().startsWith("Sandbox rejected custom host-function wrappers: ["),
           thrown.getMessage());
-      var channel = Await.value("the accepted connection", accepted).channel();
-      var closed = assertThrows(RpcChannel.RpcException.class, () -> channel.call("ping", null));
+      var launch = Await.value("the accepted connection", launched);
+      var closed =
+          assertThrows(RpcChannel.RpcException.class, () -> launch.channel().call("ping", null));
       assertEquals("Channel is closed", closed.getMessage());
       var messages = logged.stream().map(LogRecord::getMessage).toList();
       assertFalse(messages.contains("Reader loop error"), messages::toString);
-      assertEquals(earlierDirectories, sandboxDirectories());
+      assertTrue(
+          launch.directories().stream().noneMatch(Files::exists), launch.directories()::toString);
       Await.until(
           "the rejected sandbox's subprocess to end",
           () -> earlierChildren.containsAll(livePids()));
     }
   }
 
-  private static Set<Path> sandboxDirectories() throws IOException {
-    try (var entries = Files.list(Path.of(System.getProperty("java.io.tmpdir")))) {
-      return entries
-          .filter(
-              p -> {
-                var name = p.getFileName().toString();
-                return name.startsWith("helios-rpc-") || name.startsWith("helios-sandbox-cwd-");
-              })
-          .collect(Collectors.toSet());
+  /**
+   * A launch as its RPC connection was accepted: its channel, and the socket and working
+   * directories it made, read from the socket's address and from the new subprocess's working
+   * directory. Read from the launch itself, they are unaffected by other sandboxes on the host.
+   */
+  private record Launch(RpcChannel channel, List<Path> directories) {
+
+    static Launch of(SandboxRpc rpc, Set<Long> earlierChildren) {
+      try {
+        var socket = (UnixDomainSocketAddress) rpc.socket().getLocalAddress();
+        var child =
+            ProcessHandle.current()
+                .children()
+                .filter(handle -> !earlierChildren.contains(handle.pid()))
+                .findFirst()
+                .orElseThrow();
+        var working = Files.readSymbolicLink(Path.of("/proc", Long.toString(child.pid()), "cwd"));
+        return new Launch(rpc.channel(), List.of(socket.getPath().getParent(), working));
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
     }
   }
 
