@@ -63,9 +63,13 @@ final class BoundedSink {
   /**
    * Wait until the drain reaches the end of its stream or {@code deadline}, a {@link
    * System#nanoTime()} value, passes. A drain still running then is abandoned: what the sink kept
-   * is marked as truncated.
+   * is marked as truncated. An interrupt pending on entry throws even when the drain has already
+   * ended, so one that a reaping kept for the caller is not lost.
    */
   void awaitEnd(long deadline) throws InterruptedException {
+    if (Thread.interrupted()) {
+      throw new InterruptedException("Interrupted while awaiting the end of a process stream");
+    }
     if (!drainer.join(Duration.ofNanos(Math.max(0, deadline - System.nanoTime())))) {
       markTruncated();
     }
