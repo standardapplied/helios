@@ -422,7 +422,7 @@ final class LocalProcessExecutionProviderTest {
    */
   @Test
   void interruptWhileWaitingCancelsTheCallAndKillsTheChild(@TempDir Path tmp) {
-    assertInterruptKills(tmp, HANG);
+    assertInterruptKills(tmp, "echo $$ > %s; " + HANG);
   }
 
   /**
@@ -431,9 +431,16 @@ final class LocalProcessExecutionProviderTest {
    */
   @Test
   void interruptKillsAChildThatIgnoresSigterm(@TempDir Path tmp) {
-    assertInterruptKills(tmp, "trap '' TERM; " + HANG);
+    assertInterruptKills(tmp, "trap '' TERM; echo $$ > %s; " + HANG);
   }
 
+  /** The interrupt kills the child's own children too; killed alone, they would outlive it. */
+  @Test
+  void interruptKillsTheChildsDescendants(@TempDir Path tmp) {
+    assertInterruptKills(tmp, "sleep 600 & echo $! > %s; wait");
+  }
+
+  /** Interrupts a call of {@code script}, whose {@code %s} is the pid file of who must die. */
   private static void assertInterruptKills(Path tmp, String script) {
     assumeBashAvailable();
     var pidFile = tmp.resolve("pid");
@@ -446,7 +453,7 @@ final class LocalProcessExecutionProviderTest {
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
-            .withScript("echo $$ > " + pidFile + "; " + script)
+            .withScript(script.formatted(pidFile))
             .withTimeout(BEYOND_HANG_GUARD)
             .build();
 
