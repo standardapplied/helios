@@ -19,8 +19,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutionException;
 
 /**
  * Built-in {@code Execute} tool. Routes one execution request through the session's {@link
@@ -40,7 +38,7 @@ import java.util.concurrent.ExecutionException;
  *       directory. When absent, the provider supplies a per-call temp directory.
  *   <li>{@code timeoutSeconds} (optional, integer) — wall-clock budget for the invocation. When
  *       absent, defaults to the tool call's deadline ({@code SessionLimits.toolTimeoutDefault()}).
- *       The provider may further clamp against its capabilities.
+ *       The provider may further clamp it to its maximum.
  *   <li>{@code environment} (optional, object of string→string) — env vars injected into the child.
  *       Cannot leak the JVM environment because the provider clears it before injecting.
  *   <li>{@code stdin} (optional, string) — stdin content to feed the child.
@@ -122,8 +120,8 @@ public final class ExecuteTool {
                         .withType(ParameterType.INTEGER)
                         .withDescription(
                             "Wall-clock budget in seconds. Defaults to the session's per-tool"
-                                + " timeout; the provider may further clamp against its"
-                                + " capabilities.")
+                                + " timeout; the provider may further clamp it to its"
+                                + " maximum.")
                         .withRequired(false)
                         .build(),
                     ToolParameter.newBuilder()
@@ -172,33 +170,15 @@ public final class ExecuteTool {
 
   private static ToolResult dispatch(
       ExecutionProvider provider, ExecutionRequest request, ToolContext ctx) {
-    ExecutionResult result;
     try {
-      result =
-          provider
-              .execute(ctx.sessionContext(), request, ctx.cancellation())
-              .toCompletableFuture()
-              .get();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return ToolResult.failure("Execute: interrupted while waiting for provider");
-    } catch (ExecutionException | CompletionException e) {
-      var cause = e.getCause();
-      if (cause instanceof Error error) {
-        throw error;
-      }
-      if (cause instanceof CancellationException) {
-        return ToolResult.failure("Execute: cancelled");
-      }
-      var msg =
-          cause == null || cause.getMessage() == null
-              ? (cause == null ? e.getClass().getSimpleName() : cause.getClass().getSimpleName())
-              : cause.getMessage();
-      return ToolResult.failure("Execute: provider failed: " + msg);
+      var result = provider.execute(ctx.sessionContext(), request, ctx.cancellation());
+      return ToolResult.success(format(request.runtime(), result));
     } catch (CancellationException e) {
       return ToolResult.failure("Execute: cancelled");
+    } catch (RuntimeException e) {
+      var message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+      return ToolResult.failure("Execute: provider failed: " + message);
     }
-    return ToolResult.success(format(request.runtime(), result));
   }
 
   private static String format(Runtime runtime, ExecutionResult result) {

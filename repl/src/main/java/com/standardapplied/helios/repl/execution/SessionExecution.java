@@ -8,63 +8,44 @@ import com.standardapplied.helios.session.execution.ExecutionRequest;
 import com.standardapplied.helios.session.execution.ExecutionResult;
 import java.time.Duration;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Supplier;
 
 /**
- * One execute on a session's {@link ReplSession}, run on a virtual thread of its own because the
- * session blocks for the duration of the snippet. A cancellation that fires during the call closes
- * the session, killing its sandbox, and the call completes with a {@link CancellationException}; a
- * sandbox failure completes it with a refusal-shaped result the model can read.
+ * One execute on a session's {@link ReplSession}, run on the caller's thread, which the session
+ * blocks for the duration of the snippet. A cancellation that fires during the call, or an
+ * interrupt of the caller, closes the session, killing its sandbox, and the call throws a {@link
+ * CancellationException}, the interrupt status kept; a sandbox failure returns a refusal-shaped
+ * result the model can read.
  */
 final class SessionExecution {
 
   private SessionExecution() {}
 
-  /** Start running {@code request} on {@code session}. */
-  static CompletableFuture<ExecutionResult> start(
-      String sessionId,
+  /** Run {@code request} on {@code session} and return what the sandbox reported. */
+  static ExecutionResult run(
       ReplSession session,
       ExecutionRequest request,
       Duration timeout,
       CancellationToken cancellation) {
-    var future = new CompletableFuture<ExecutionResult>();
-    Thread.ofVirtual()
-        .name("helios-jshell-" + sessionId)
-        .start(() -> run(session, request, timeout, cancellation, future));
-    return future;
-  }
-
-  /** The refusal-shaped result for {@code request}, naming the provider and the runtime. */
-  static ExecutionResult refusal(ExecutionRequest request, String reason) {
-    return ExecutionResult.refusal(
-        "JShellExecutionProvider: " + reason + " (runtime=" + request.runtime() + ")");
-  }
-
-  private static void run(
-      ReplSession session,
-      ExecutionRequest request,
-      Duration timeout,
-      CancellationToken cancellation,
-      CompletableFuture<ExecutionResult> future) {
     var killed = new AtomicBoolean();
-    var killRegistration =
-        cancellation.onCancel(
-            () -> {
-              if (killed.compareAndSet(false, true)) {
-                SandboxPool.safeClose(session);
-              }
-            });
-    var startNanos = System.nanoTime();
+    Runnable kill =
+        () -> {
+          if (killed.compareAndSet(false, true)) {
+            SandboxPool.safeClose(session);
+          }
+        };
+    var killRegistration = cancellation.onCancel(kill);
     try {
-      var raw = session.execute(request.script(), timeout);
-      var elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
-      complete(future, cancellation, () -> sessionResult(raw, elapsed));
-    } catch (ReplException e) {
-      complete(future, cancellation, () -> failure(request, e));
-    } catch (Throwable t) {
-      future.completeExceptionally(t);
+      var result = attempt(session, request, timeout);
+      if (Thread.currentThread().isInterrupted()) {
+        kill.run();
+        throw new CancellationException("JShell snippet interrupted");
+      }
+      if (cancellation.isCancelled()) {
+        throw new CancellationException(
+            "JShell snippet cancelled: " + cancellation.reason().orElse(""));
+      }
+      return result;
     } finally {
       // Mark the kill callback inert regardless of outcome — the session is in a known post-call
       // state and a later token fire must not double-close. Also detach the callback from the
@@ -74,30 +55,25 @@ final class SessionExecution {
     }
   }
 
-  /** Complete with {@code result}, unless the call was cancelled while it ran. */
-  private static void complete(
-      CompletableFuture<ExecutionResult> future,
-      CancellationToken cancellation,
-      Supplier<ExecutionResult> result) {
-    if (cancellation.isCancelled()) {
-      future.completeExceptionally(
-          new CancellationException(
-              "JShell snippet cancelled: " + cancellation.reason().orElse("")));
-      return;
+  /** The refusal-shaped result for {@code request}, naming the provider and the runtime. */
+  static ExecutionResult refusal(ExecutionRequest request, String reason) {
+    return ExecutionResult.refusal(
+        "JShellExecutionProvider: " + reason + " (runtime=" + request.runtime() + ")");
+  }
+
+  private static ExecutionResult attempt(
+      ReplSession session, ExecutionRequest request, Duration timeout) {
+    var startNanos = System.nanoTime();
+    try {
+      var raw = session.execute(request.script(), timeout);
+      var elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
+      return new ExecutionResult(
+          raw.exitCode(), raw.stdout(), raw.stderr(), elapsed, raw.timedOut());
+    } catch (ReplException e) {
+      return refusal(
+          request,
+          "JShell execution failed: "
+              + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
     }
-    future.complete(result.get());
-  }
-
-  /** The session-level result of what the sandbox reported, taking {@code elapsed}. */
-  private static ExecutionResult sessionResult(
-      com.standardapplied.helios.repl.sandbox.ExecutionResult raw, Duration elapsed) {
-    return new ExecutionResult(raw.exitCode(), raw.stdout(), raw.stderr(), elapsed, raw.timedOut());
-  }
-
-  private static ExecutionResult failure(ExecutionRequest request, ReplException e) {
-    return refusal(
-        request,
-        "JShell execution failed: "
-            + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
   }
 }

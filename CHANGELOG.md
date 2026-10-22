@@ -448,9 +448,8 @@ call is made. The result settles with the first recorded `Error`, as the same in
 one added to it as suppressed once; an `Error` recorded after the result settled is logged at
 `SEVERE` on the `AgentSessionImpl` logger. A loop thread that ended with an `Error` then throws the
 result's `Error` to its uncaught-exception handler; nothing promises that the JVM stops, the host
-decides. A thread the session does not own (an execution provider's own after its tool call stopped
-waiting, a model publisher's worker after its stream ended) is outside the sink: its `Error` reaches
-that thread's uncaught-exception handler. Every end of a session, a natural one included, then runs
+decides. A thread the session does not own (a model publisher's worker after its stream ended) is
+outside the sink: its `Error` reaches that thread's uncaught-exception handler. Every end of a session, a natural one included, then runs
 one teardown in the reverse order of what the session acquired: it cancels the session, which
 cancels and interrupts every tool call still running, and waits for those calls to end; it calls
 `onSessionEnd` and waits for it to return; it shuts the scheduler down and waits for event
@@ -677,6 +676,20 @@ never run, emit no tool event and never reach the history.
 |---|---|
 | `maxTurns = N` reported a session that answered on turn N as `ErrorMaxTurns` | `maxTurns = N` allows N turns; a session that needs turn N+1 ends in `ErrorMaxTurns` |
 | A turn that ended in `ERROR`, `LENGTH` or by cancellation ran the tool calls it emitted and continued as a `TOOL_CALLS` turn | it runs none of them and ends with its own error terminal (`ErrorDuringExecution`, `ErrorTransientStream` or `Cancelled`) |
+
+**An `ExecutionProvider` declares its runtimes and executes on the tool call's thread.**
+`ExecutionCapabilities` advertised network and filesystem flags that nothing enforced, and its
+`maxTimeout` was read back only by the provider that set it. `execute` returned a future that its
+only caller, `Execute`, waited on at once, so each call took a second thread, and a provider that
+ignored its token ran on unseen after an interrupt made `Execute` return. `execute` now runs on the
+tool call's own thread and must stop when that thread is interrupted or the call's token fires.
+
+| 2.x | 3.0 |
+|---|---|
+| `ExecutionCapabilities` (record and builder), `ExecutionProvider.capabilities()` | `ExecutionProvider.supportedRuntimes()`; `maxTimeout` stays each provider's `Builder.withMaxTimeout` |
+| `LocalProcessExecutionProvider.Builder.withNetworkAllowed`, `withFilesystemWriteAllowed` | removed; they were never enforced. Isolate the host process yourself (container, VM) |
+| `JShellExecutionProvider.Builder.withNetworkAllowed`, `withFilesystemWriteAllowed` | removed; use `JvmSandboxConfig.Builder.withSandboxPolicy` (e.g. `SandboxPolicy.noEgress()`) |
+| `CompletionStage<ExecutionResult> execute(session, request, token)` | `ExecutionResult execute(session, request, token)`, run on the tool call's thread; it must stop on interrupt or cancellation, throwing `CancellationException` with the interrupt status kept, and a closed provider throws `IllegalStateException`. An interrupted JShell execute now closes its sandbox session, where it returned an RPC-failure result while the snippet ran on |
 
 ### Added
 
@@ -913,8 +926,8 @@ never run, emit no tool event and never reach the history.
   insertion, parameter lists, parsed JSON), so request bodies and messages to the
   model are byte-identical across JVMs. This fixes prompt-cache misses across
   restarts and across instances, and structured output generated out of its declared field order.
-  `ExecutionCapabilities.supportedRuntimes()`, which an `Execute` refusal names, iterates in
-  `Runtime` declaration order, and `ReplSession.calledHostFunctions()` is sorted by name. The
+  `ExecutionProvider.supportedRuntimes()` of the built-in providers, which an `Execute` refusal
+  names, iterates in `Runtime` declaration order, and `ReplSession.calledHostFunctions()` is sorted by name. The
   sandbox's `countBy` helper lists its keys in the order they first occur, the arguments of
   `QueryEvent.ToolMutated` and `HeliosEvent.ToolCallStarted`, the attributes of
   `HeliosEvent.RunStarted` and the data of `HeliosEvent.Custom` keep their given order in the

@@ -8,7 +8,6 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.repl.ReplConfig;
 import com.standardapplied.helios.repl.ReplSession;
-import com.standardapplied.helios.session.execution.ExecutionCapabilities;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
 import com.standardapplied.helios.session.execution.ExecutionRequest;
 import com.standardapplied.helios.session.execution.ExecutionResult;
@@ -17,8 +16,7 @@ import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -45,14 +43,22 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <h2>Cancellation</h2>
  *
- * The per-call {@link CancellationToken} fires when the surrounding {@code Execute} tool dispatch
- * is cancelled or times out. {@link ReplSession#execute} is synchronous and blocks the calling
- * virtual thread for the duration of the snippet; we register a {@code cancellation.onCancel} that
- * closes the {@code ReplSession} when cancellation fires, killing the sandbox subprocess and
- * causing the in-flight {@code execute} to throw. The session is then unavailable for further calls
- * and {@link #onSessionEnd} will be a no-op (the close already happened). Cancelling a single
- * execute kills the whole session by design — a JShell snippet that's wedged in a tight loop or
- * holding shared state can't be safely resumed without state corruption.
+ * {@link #execute} runs the snippet on the calling thread. The per-call {@link CancellationToken}
+ * fires when the surrounding {@code Execute} tool dispatch is cancelled or times out; when it
+ * fires, or the calling thread is interrupted, the provider closes the session's {@code
+ * ReplSession}, killing the sandbox subprocess, and {@code execute} throws a {@link
+ * CancellationException}, the interrupt status kept. The session is then unavailable for further
+ * calls. Cancelling a single execute kills the whole session by design — a JShell snippet that's
+ * wedged in a tight loop or holding shared state can't be safely resumed without state corruption.
+ * A request's timeout is clamped to {@link Builder#withMaxTimeout(Duration)}.
+ *
+ * <h2>Isolation</h2>
+ *
+ * The sandbox's controls are its {@link
+ * com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy}, set through {@link
+ * com.standardapplied.helios.repl.sandbox.JvmSandboxConfig.Builder#withSandboxPolicy}; {@link
+ * com.standardapplied.helios.repl.sandbox.policy.SandboxPolicy#noEgress()} is the preset for
+ * compute with no egress.
  *
  * <h2>Output redaction</h2>
  *
@@ -77,20 +83,14 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
   private static final Duration DEFAULT_MAX_TIMEOUT = Duration.ofMinutes(5);
 
   private final SandboxPool pool;
-  private final ExecutionCapabilities capabilities;
+  private final Duration maxTimeout;
   private final AtomicBoolean closed = new AtomicBoolean();
   private final Thread shutdownHook;
   private final boolean shutdownHookRegistered;
 
   private JShellExecutionProvider(Builder b) {
     this.pool = new SandboxPool(b.replConfig, b.startupSnippet, b.maxConcurrentSessions);
-    this.capabilities =
-        ExecutionCapabilities.newBuilder()
-            .withSupportedRuntimes(Set.of(Runtime.JSHELL))
-            .withNetworkAllowed(b.networkAllowed)
-            .withFilesystemWriteAllowed(b.filesystemWriteAllowed)
-            .withMaxTimeout(b.maxTimeout)
-            .build();
+    this.maxTimeout = b.maxTimeout;
     this.shutdownHook = new Thread(pool::close, "helios-jshell-shutdown");
     this.shutdownHookRegistered = b.registerShutdownHook;
     if (shutdownHookRegistered) {
@@ -121,8 +121,8 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
   }
 
   @Override
-  public ExecutionCapabilities capabilities() {
-    return capabilities;
+  public Set<Runtime> supportedRuntimes() {
+    return Set.of(Runtime.JSHELL);
   }
 
   /**
@@ -167,39 +167,39 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     pool.end(ctx.sessionId());
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @throws IllegalStateException if the provider is closed
+   */
   @Override
-  public CompletionStage<ExecutionResult> execute(
+  public ExecutionResult execute(
       SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
     Objects.requireNonNull(session, "session must not be null");
     Objects.requireNonNull(request, "request must not be null");
     Objects.requireNonNull(cancellation, "cancellation must not be null");
     if (closed.get()) {
-      return CompletableFuture.failedFuture(new IllegalStateException("provider is closed"));
+      throw new IllegalStateException("provider is closed");
     }
     if (request.runtime() != Runtime.JSHELL) {
-      return CompletableFuture.completedFuture(
-          SessionExecution.refusal(request, "runtime not supported"));
+      return SessionExecution.refusal(request, "runtime not supported");
     }
     var replSession = pool.session(session.sessionId());
     if (replSession == null) {
-      return CompletableFuture.completedFuture(
-          SessionExecution.refusal(
-              request,
-              "no JShell session registered for sessionId="
-                  + session.sessionId()
-                  + " — onSessionStart not called or already onSessionEnd'd"));
+      return SessionExecution.refusal(
+          request,
+          "no JShell session registered for sessionId="
+              + session.sessionId()
+              + " — onSessionStart not called or already onSessionEnd'd");
     }
-    var timeout =
-        request.timeout().compareTo(capabilities.maxTimeout()) > 0
-            ? capabilities.maxTimeout()
-            : request.timeout();
-    return SessionExecution.start(session.sessionId(), replSession, request, timeout, cancellation);
+    var timeout = request.timeout().compareTo(maxTimeout) > 0 ? maxTimeout : request.timeout();
+    return SessionExecution.run(replSession, request, timeout, cancellation);
   }
 
   /**
    * Forcibly close every live session and detach the JVM shutdown hook. Subsequent {@link
    * #onSessionStart} calls refuse with "provider is closed"; subsequent {@link #execute} calls
-   * complete exceptionally with {@link IllegalStateException}.
+   * throw {@link IllegalStateException}.
    */
   @Override
   public void close() {
@@ -222,8 +222,6 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     private ReplConfig replConfig;
     private int maxConcurrentSessions = DEFAULT_MAX_CONCURRENT_SESSIONS;
     private Duration maxTimeout = DEFAULT_MAX_TIMEOUT;
-    private boolean networkAllowed = false;
-    private boolean filesystemWriteAllowed = false;
     private boolean registerShutdownHook = true;
     private String startupSnippet;
 
@@ -259,9 +257,8 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
     }
 
     /**
-     * The longest budget an execute may ask for, advertised through {@link
-     * ExecutionCapabilities#maxTimeout()}. A request asking for more runs with this budget, and the
-     * sandbox stops the snippet when its budget is spent. Defaults to 5 minutes.
+     * The longest budget an execute may ask for. A request asking for more runs with this budget,
+     * and the sandbox stops the snippet when its budget is spent. Defaults to 5 minutes.
      *
      * @param maxTimeout strictly positive duration
      * @return this builder
@@ -273,29 +270,6 @@ public final class JShellExecutionProvider implements ExecutionProvider, AutoClo
             "maxTimeout must be strictly positive, got " + maxTimeout);
       }
       this.maxTimeout = maxTimeout;
-      return this;
-    }
-
-    /**
-     * Network capability flag. Informational; JShell sandbox enforcement happens at the sandbox
-     * level. Defaults to {@code false}.
-     *
-     * @param allowed whether the sandbox can reach networks
-     * @return this builder
-     */
-    public Builder withNetworkAllowed(boolean allowed) {
-      this.networkAllowed = allowed;
-      return this;
-    }
-
-    /**
-     * Filesystem-write capability flag. Informational. Defaults to {@code false}.
-     *
-     * @param allowed whether the sandbox can write files
-     * @return this builder
-     */
-    public Builder withFilesystemWriteAllowed(boolean allowed) {
-      this.filesystemWriteAllowed = allowed;
       return this;
     }
 

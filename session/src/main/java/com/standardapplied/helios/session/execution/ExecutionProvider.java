@@ -6,7 +6,9 @@ package com.standardapplied.helios.session.execution;
 
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
-import java.util.concurrent.CompletionStage;
+import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.Future;
 
 /**
  * Dispatch surface the {@code Execute} tool calls into to actually run a request. Implementations
@@ -17,9 +19,10 @@ import java.util.concurrent.CompletionStage;
  * helios-repl}).
  *
  * <p>One {@code Execute} tool dispatches every runtime — providers route by {@link
- * ExecutionRequest#runtime()}. A provider must declare its supported runtimes via {@link
- * #capabilities()}; the {@code Execute} tool refuses requests for unsupported runtimes before
- * calling {@link #execute}.
+ * ExecutionRequest#runtime()}. A provider declares its runtimes through {@link
+ * #supportedRuntimes()}; the {@code Execute} tool refuses a request for any other runtime before
+ * calling {@link #execute}. Each provider enforces its own isolation and clamps a request's timeout
+ * to its own maximum.
  *
  * <h2>Session lifecycle</h2>
  *
@@ -37,35 +40,32 @@ import java.util.concurrent.CompletionStage;
  *
  * <h2>Dispatch contract</h2>
  *
- * {@link #execute} is asynchronous so providers that block on I/O (Incus boot, JDBC, subprocess
- * wait) need not pin a thread. The returned {@link CompletionStage} must complete with a non-null
- * {@link ExecutionResult}; exceptional completion is acceptable for unrecoverable provider errors
- * (e.g. the binary isn't installed) and the {@code Execute} tool surfaces them as tool-failures.
- * The {@link CancellationToken} is cooperative — providers should call {@link
- * CancellationToken#throwIfCancelled()} at safe points (before fork, between drain rounds) so a
- * session shutdown halts the in-flight work promptly.
+ * {@link #execute} runs on the calling thread, the tool call's own, and returns its result. It must
+ * stop its work, and return or throw, when that thread is interrupted or the call's {@link
+ * CancellationToken} fires; it then throws {@link CancellationException}, keeping the thread's
+ * interrupt status. A provider that waits on a future of its own waits with {@link Future#get()},
+ * never {@link java.util.concurrent.CompletableFuture#join()}, which ignores interrupts. A provider
+ * that ignores both holds the tool call past its stop grace: the call is reported {@code
+ * ToolOutcome.Unknown} and the session refuses later tool calls until it ends.
  *
  * <p>Implementations are non-sealed: customers will plug their own (Incus, custom remote runners),
  * so the surface stays open for extension.
  *
  * <h2>Thread-safety</h2>
  *
- * Providers must be safe for concurrent calls — the session loop is fully serial today, but the
- * surrounding {@link com.standardapplied.helios.session.tools.ToolCategory#EXECUTION EXECUTION}
- * category has its own dedicated concurrency cap in {@link
- * com.standardapplied.helios.session.ConcurrencyLimits}, and future loops may dispatch parallel
- * execute tool calls. The lifecycle methods are invoked once per session each; multiple sessions
- * may invoke them concurrently against a shared provider.
+ * Providers must be safe for concurrent calls; one provider may serve many sessions at once. The
+ * lifecycle methods are invoked once per session each; multiple sessions may invoke them
+ * concurrently against a shared provider.
  */
 public interface ExecutionProvider {
 
   /**
-   * Capabilities advertised by this provider. Stable for the lifetime of the provider — providers
-   * should compute this once at construction and return a constant.
+   * The runtimes this provider runs. Stable for the lifetime of the provider; the {@code Execute}
+   * tool refuses any other runtime before calling {@link #execute}.
    *
-   * @return non-null capabilities record
+   * @return non-null set of runtimes
    */
-  ExecutionCapabilities capabilities();
+  Set<Runtime> supportedRuntimes();
 
   /**
    * Called once per session, before the agent loop starts. The provider may use this to allocate
@@ -103,10 +103,10 @@ public interface ExecutionProvider {
   }
 
   /**
-   * Execute one request. The returned future must complete with a non-null {@link ExecutionResult}
-   * for any reasonably-handled outcome (success, non-zero exit, timeout, refused runtime). Throw
-   * exceptionally only when the provider itself is broken (binary missing, internal misconfig); the
-   * {@code Execute} tool surfaces those as tool failures.
+   * Execute one request on the calling thread. Returns a non-null {@link ExecutionResult} for every
+   * handled outcome (success, non-zero exit, timeout, refusal). Throws a {@link RuntimeException}
+   * only when the provider itself is broken (binary missing, closed provider); the {@code Execute}
+   * tool reports it as a tool failure.
    *
    * @param session the session this call belongs to; the same {@link SessionContext} previously
    *     passed to {@link #onSessionStart}. Providers route per-session state by {@link
@@ -117,8 +117,10 @@ public interface ExecutionProvider {
    *     invocation is cancelled (e.g. tool-dispatch timeout); the session token fires when the
    *     entire session is shutting down. Most providers register cleanup against the session token
    *     in {@link #onSessionStart} and the call token here in {@link #execute}. Non-null
-   * @return a completion stage that yields the result
+   * @return the result
+   * @throws CancellationException when the calling thread is interrupted or {@code cancellation}
+   *     fires; the thread's interrupt status is kept
    */
-  CompletionStage<ExecutionResult> execute(
+  ExecutionResult execute(
       SessionContext session, ExecutionRequest request, CancellationToken cancellation);
 }

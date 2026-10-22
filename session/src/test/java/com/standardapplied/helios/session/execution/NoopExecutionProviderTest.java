@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import java.time.Duration;
-import java.util.concurrent.ExecutionException;
 import org.junit.jupiter.api.Test;
 
 final class NoopExecutionProviderTest {
@@ -26,22 +25,15 @@ final class NoopExecutionProviderTest {
   }
 
   @Test
-  void capabilitiesAdvertiseEmptyRuntimes() {
-    var caps = NoopExecutionProvider.INSTANCE.capabilities();
-    assertTrue(caps.supportedRuntimes().isEmpty());
-    assertFalse(caps.networkAllowed());
-    assertFalse(caps.filesystemWriteAllowed());
+  void supportsNoRuntime() {
+    assertTrue(NoopExecutionProvider.INSTANCE.supportedRuntimes().isEmpty());
   }
 
   @Test
-  void executeReturnsRefusalResult() throws ExecutionException, InterruptedException {
+  void executeReturnsRefusalResult() {
     var request =
         ExecutionRequest.newBuilder().withRuntime(Runtime.PYTHON).withScript("print('hi')").build();
-    var future =
-        NoopExecutionProvider.INSTANCE
-            .execute(CTX, request, new CancellationToken())
-            .toCompletableFuture();
-    var result = future.get();
+    var result = NoopExecutionProvider.INSTANCE.execute(CTX, request, new CancellationToken());
     assertEquals(-1, result.exitCode());
     assertEquals("", result.stdout());
     assertTrue(result.stderr().contains("execution is disabled"));

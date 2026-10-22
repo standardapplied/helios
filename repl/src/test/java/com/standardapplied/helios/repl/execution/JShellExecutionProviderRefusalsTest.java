@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.runtime.CancellationToken;
@@ -18,6 +19,7 @@ import com.standardapplied.helios.repl.sandbox.Sandbox;
 import com.standardapplied.helios.repl.sandbox.SandboxFactory;
 import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
+import com.standardapplied.helios.session.test.ExecutionCall;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
@@ -157,13 +159,11 @@ class JShellExecutionProviderRefusalsTest {
     provider.close();
 
     assertEquals("provider is closed", refusal(provider.onSessionStart(ctx("s"))));
+    var c = ctx("s");
+    var request = request(Runtime.JSHELL);
+    var token = new CancellationToken();
     var failure =
-        Await.failure(
-            "the execution on a closed provider",
-            provider
-                .execute(ctx("s"), request(Runtime.JSHELL), new CancellationToken())
-                .toCompletableFuture());
-    assertInstanceOf(IllegalStateException.class, failure);
+        assertThrows(IllegalStateException.class, () -> provider.execute(c, request, token));
     assertEquals("provider is closed", failure.getMessage());
   }
 
@@ -203,21 +203,21 @@ class JShellExecutionProviderRefusalsTest {
   }
 
   @Test
-  void executeRunsOnAThreadNamedForTheSession() {
-    var threadName = new CompletableFuture<String>();
+  void executeRunsTheSnippetOnTheCallingThread() {
+    var snippetThread = new CompletableFuture<Thread>();
     try (var provider =
         provider(
             config(
                 code -> {
-                  threadName.complete(Thread.currentThread().getName());
+                  snippetThread.complete(Thread.currentThread());
                   return ok();
                 }),
             1)) {
       provider.onSessionStart(ctx("s"));
 
-      execute(provider, "s", request(Runtime.JSHELL));
+      provider.execute(ctx("s"), request(Runtime.JSHELL), new CancellationToken());
 
-      assertEquals("helios-jshell-s", threadName.join());
+      assertSame(Thread.currentThread(), snippetThread.getNow(null));
     }
   }
 
@@ -228,12 +228,11 @@ class JShellExecutionProviderRefusalsTest {
       var token = new CancellationToken();
       token.cancel("user stop");
 
+      var c = ctx("s");
+      var request = request(Runtime.JSHELL);
       var failure =
-          Await.failure(
-              "the cancelled execution",
-              provider.execute(ctx("s"), request(Runtime.JSHELL), token).toCompletableFuture());
+          assertThrows(CancellationException.class, () -> provider.execute(c, request, token));
 
-      assertInstanceOf(CancellationException.class, failure);
       assertEquals("JShell snippet cancelled: user stop", failure.getMessage());
     }
   }
@@ -303,7 +302,7 @@ class JShellExecutionProviderRefusalsTest {
       com.standardapplied.helios.session.execution.ExecutionRequest request) {
     return Await.value(
         "the execution",
-        provider.execute(ctx(sessionId), request, new CancellationToken()).toCompletableFuture());
+        ExecutionCall.start(provider, ctx(sessionId), request, new CancellationToken()).outcome());
   }
 
   private static com.standardapplied.helios.session.execution.ExecutionRequest request(
