@@ -68,6 +68,7 @@ final class JShellExecutionProviderTest {
     boolean runsUntilClosed = false;
     boolean failsWhenClosed = true;
     boolean throwOnExecute = false;
+    RuntimeException failureWhenInterrupted = new ReplException("sandbox interrupted mid-execute");
 
     void awaitExecuteEntered() {
       Await.latch("the snippet to enter the sandbox", executeEntered);
@@ -85,7 +86,7 @@ final class JShellExecutionProviderTest {
           closed.await();
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
-          throw new ReplException("sandbox interrupted mid-execute");
+          throw failureWhenInterrupted;
         }
         if (failsWhenClosed) {
           throw new ReplException("sandbox closed mid-execute");
@@ -569,6 +570,32 @@ final class JShellExecutionProviderTest {
       var failure = Await.failure("the interrupted execution", call.outcome());
       assertInstanceOf(CancellationException.class, failure);
       assertEquals("JShell snippet interrupted", failure.getMessage());
+      assertTrue(call.interruptedAtEnd(), "the interrupt status must be kept");
+      assertFalse(sandbox.isAlive(), "the session must have been killed");
+    }
+  }
+
+  /**
+   * A sandbox that answers the interrupt by throwing an unchecked exception of its own still has
+   * its session closed, and that exception reaches the caller with the interrupt status kept.
+   */
+  @Test
+  void interruptAnsweredByASandboxExceptionStillKillsSession() {
+    var sandbox = new StubSandbox();
+    sandbox.runsUntilClosed = true;
+    var stopped = new CancellationException("sandbox stopped");
+    sandbox.failureWhenInterrupted = stopped;
+    try (var provider = providerFor(sandbox)) {
+      var c = ctx("interrupt-thrown");
+      provider.onSessionStart(c);
+      var req =
+          ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("sleep").build();
+      var call = ExecutionCall.start(provider, c, req, new CancellationToken());
+      sandbox.awaitExecuteEntered();
+
+      call.thread().interrupt();
+
+      assertSame(stopped, Await.failure("the interrupted execution", call.outcome()));
       assertTrue(call.interruptedAtEnd(), "the interrupt status must be kept");
       assertFalse(sandbox.isAlive(), "the session must have been killed");
     }
