@@ -54,11 +54,7 @@ final class ExecuteArguments {
               + runtimeArg
               + "'. Expected one of: BASH, PYTHON, SQL, JSHELL, R, NODE, CUSTOM");
     }
-    // Capability pre-check: short-circuit before building a request and crossing the provider
-    // boundary when the provider has already declared the runtime as unsupported. Matches the
-    // ExecutionProvider class javadoc which promises this check happens before dispatch, and
-    // saves the provider an extra refusal-result construction.
-    var supported = provider.capabilities().supportedRuntimes();
+    var supported = provider.supportedRuntimes();
     if (!supported.contains(runtime)) {
       return new Result.Failure<>(
           "Execute: runtime '"

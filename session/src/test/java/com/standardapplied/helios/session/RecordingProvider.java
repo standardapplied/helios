@@ -4,7 +4,6 @@ package com.standardapplied.helios.session;
 
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
-import com.standardapplied.helios.session.execution.ExecutionCapabilities;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
 import com.standardapplied.helios.session.execution.ExecutionRequest;
 import com.standardapplied.helios.session.execution.ExecutionResult;
@@ -13,8 +12,6 @@ import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
@@ -38,8 +35,8 @@ final class RecordingProvider implements ExecutionProvider {
   }
 
   @Override
-  public ExecutionCapabilities capabilities() {
-    return ExecutionCapabilities.newBuilder().withSupportedRuntimes(Set.of(Runtime.BASH)).build();
+  public Set<Runtime> supportedRuntimes() {
+    return Set.of(Runtime.BASH);
   }
 
   @Override
@@ -56,10 +53,9 @@ final class RecordingProvider implements ExecutionProvider {
   }
 
   @Override
-  public CompletionStage<ExecutionResult> execute(
+  public ExecutionResult execute(
       SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
     executed.add(request);
-    return CompletableFuture.completedFuture(
-        new ExecutionResult(0, "ran", "", Duration.ofMillis(1), false));
+    return new ExecutionResult(0, "ran", "", Duration.ofMillis(1), false);
   }
 }

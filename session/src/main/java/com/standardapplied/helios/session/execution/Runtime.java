@@ -12,7 +12,7 @@ package com.standardapplied.helios.session.execution;
  * call arguments.
  *
  * <p>Spec: §11.1. Not all values are necessarily supported by every provider; a provider's {@link
- * ExecutionCapabilities#supportedRuntimes()} is the authoritative list at run time.
+ * ExecutionProvider#supportedRuntimes()} is the authoritative list at run time.
  */
 public enum Runtime {
   /** POSIX shell — Bash 3.2+ semantics, single-script via {@code -c}. */
