@@ -697,6 +697,7 @@ waiting thread kills and reaps the child and its descendants, forcibly after `Bo
 | 2.x | 3.0 |
 |---|---|
 | `BoundedProcess.await()`, which left the child running on interrupt | `BoundedProcess.await(CancellationToken)`; a child it killed reports exit code `-1` |
+| `BoundedProcess.kill()` sent `SIGTERM` and returned | kills forcibly what is alive after `GRACE` and returns once the tree has ended, at most two `GRACE`s later |
 
 ### Added
 
@@ -830,7 +831,8 @@ waiting thread kills and reaps the child and its descendants, forcibly after `Bo
   `LocalProcessExecutionProvider` waited forever; each stream now gets `BoundedProcess.GRACE` after
   the child exits and is then reported truncated. An interrupted or cancelled grant now kills and
   reaps its child (a cancelled one returns `Cancelled while invoking <name>`), and a descendant
-  that ignores `SIGTERM` is killed forcibly even when its parent died. A sandbox launch that fails
+  that ignores `SIGTERM` is killed forcibly even when its parent died, `LocalProcessExecutionProvider.close()`
+  included. A sandbox launch that fails
   after its RPC channel opens now closes the channel, kills the child's descendants and registers
   no shutdown hook.
 - **A session from `SessionPresets.workspace` or `openEnded` failed to start.** Both presets

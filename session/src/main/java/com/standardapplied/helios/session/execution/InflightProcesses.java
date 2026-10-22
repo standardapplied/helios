@@ -4,10 +4,10 @@
  */
 package com.standardapplied.helios.session.execution;
 
+import com.standardapplied.helios.core.process.BoundedProcess;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -25,7 +25,7 @@ final class InflightProcesses implements AutoCloseable {
 
   private static final java.lang.Runtime JVM = java.lang.Runtime.getRuntime();
 
-  private final Set<Process> inflight = ConcurrentHashMap.newKeySet();
+  private final Set<BoundedProcess> inflight = ConcurrentHashMap.newKeySet();
   private final AtomicBoolean closed = new AtomicBoolean();
   private final Thread shutdownHook = new Thread(this::reap, "helios-exec-shutdown");
   private final boolean shutdownHookRegistered;
@@ -45,7 +45,7 @@ final class InflightProcesses implements AutoCloseable {
     return inflight.size();
   }
 
-  void track(Process process) {
+  void track(BoundedProcess process) {
     inflight.add(process);
     // close() marks the set closed and then scans it once. A process added after that scan is
     // one close() never saw, so the call that tracks it reaps it here.
@@ -54,7 +54,7 @@ final class InflightProcesses implements AutoCloseable {
     }
   }
 
-  void untrack(Process process) {
+  void untrack(BoundedProcess process) {
     inflight.remove(process);
   }
 
@@ -74,21 +74,13 @@ final class InflightProcesses implements AutoCloseable {
   }
 
   private void reap() {
-    for (var p : List.copyOf(inflight)) {
+    for (var process : List.copyOf(inflight)) {
       try {
-        p.descendants().forEach(ProcessHandle::destroy);
-        p.destroy();
-        if (!p.waitFor(2, TimeUnit.SECONDS)) {
-          p.descendants().forEach(ProcessHandle::destroyForcibly);
-          p.destroyForcibly();
-          p.waitFor(1, TimeUnit.SECONDS);
-        }
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
+        process.kill();
       } catch (RuntimeException e) {
         LOGGER.log(Level.WARNING, "failed to reap subprocess on provider close", e);
       } finally {
-        inflight.remove(p);
+        inflight.remove(process);
       }
     }
   }
