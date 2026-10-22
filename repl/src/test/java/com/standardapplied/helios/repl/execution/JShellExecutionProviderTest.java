@@ -23,12 +23,13 @@ import com.standardapplied.helios.session.execution.ExecutionRequest;
 import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
+import com.standardapplied.helios.session.test.ExecutionCall;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -40,8 +41,13 @@ final class JShellExecutionProviderTest {
     return SessionContext.forTesting(id);
   }
 
-  private static ExecutionResult awaitExecution(CompletionStage<ExecutionResult> execution) {
-    return Await.value("the execution", execution.toCompletableFuture());
+  private static ExecutionResult awaitExecution(
+      JShellExecutionProvider provider,
+      SessionContext session,
+      ExecutionRequest request,
+      CancellationToken token) {
+    return Await.value(
+        "the execution", ExecutionCall.start(provider, session, request, token).outcome());
   }
 
   /**
@@ -62,6 +68,7 @@ final class JShellExecutionProviderTest {
     boolean runsUntilClosed = false;
     boolean failsWhenClosed = true;
     boolean throwOnExecute = false;
+    RuntimeException failureWhenInterrupted = new ReplException("sandbox interrupted mid-execute");
 
     void awaitExecuteEntered() {
       Await.latch("the snippet to enter the sandbox", executeEntered);
@@ -79,7 +86,7 @@ final class JShellExecutionProviderTest {
           closed.await();
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
-          throw new ReplException("sandbox interrupted mid-execute");
+          throw failureWhenInterrupted;
         }
         if (failsWhenClosed) {
           throw new ReplException("sandbox closed mid-execute");
@@ -174,15 +181,10 @@ final class JShellExecutionProviderTest {
             .withReplConfig(configWithSandbox(sandbox))
             .withMaxConcurrentSessions(2)
             .withMaxTimeout(Duration.ofMinutes(10))
-            .withNetworkAllowed(true)
-            .withFilesystemWriteAllowed(true)
             .withShutdownHook(false)
             .build()) {
-      assertEquals(Duration.ofMinutes(10), provider.capabilities().maxTimeout());
-      assertTrue(provider.capabilities().networkAllowed());
-      assertTrue(provider.capabilities().filesystemWriteAllowed());
-      assertTrue(provider.capabilities().supports(Runtime.JSHELL));
-      assertFalse(provider.capabilities().supports(Runtime.BASH));
+      assertEquals(2, provider.maxConcurrentSessions());
+      assertEquals(Set.of(Runtime.JSHELL), provider.supportedRuntimes());
     }
   }
 
@@ -192,14 +194,13 @@ final class JShellExecutionProviderTest {
     assertEquals("replConfig must not be null", ex.getMessage());
   }
 
-  // ── Capabilities + identity ───────────────────────────────────────────────
+  // ── Supported runtimes + identity ─────────────────────────────────────────
 
   @Test
-  void capabilitiesAdvertiseJShellOnly() {
+  void supportsJShellOnly() {
     var sandbox = new StubSandbox();
     try (var provider = providerFor(sandbox)) {
-      var caps = provider.capabilities();
-      assertEquals(Set.of(Runtime.JSHELL), caps.supportedRuntimes());
+      assertEquals(Set.of(Runtime.JSHELL), provider.supportedRuntimes());
     }
   }
 
@@ -349,7 +350,7 @@ final class JShellExecutionProviderTest {
               .withScript("var x = 1;")
               .withTimeout(Duration.ofSeconds(120))
               .build();
-      awaitExecution(provider.execute(c, req, new CancellationToken()));
+      awaitExecution(provider, c, req, new CancellationToken());
       assertEquals(Duration.ofSeconds(120), sandbox.lastTimeout.get());
     }
   }
@@ -371,7 +372,7 @@ final class JShellExecutionProviderTest {
               .withScript("var x = 1;")
               .withTimeout(Duration.ofSeconds(600))
               .build();
-      awaitExecution(provider.execute(c, req, new CancellationToken()));
+      awaitExecution(provider, c, req, new CancellationToken());
       assertEquals(Duration.ofSeconds(60), sandbox.lastTimeout.get());
     }
   }
@@ -388,7 +389,7 @@ final class JShellExecutionProviderTest {
               .withRuntime(Runtime.JSHELL)
               .withScript("var x = 1;")
               .build();
-      var result = awaitExecution(provider.execute(c, req, new CancellationToken()));
+      var result = awaitExecution(provider, c, req, new CancellationToken());
       assertEquals(0, result.exitCode());
       assertEquals("hello", result.stdout());
       assertEquals(1, sandbox.calls.get());
@@ -429,8 +430,8 @@ final class JShellExecutionProviderTest {
 
       var reqA = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("a").build();
       var reqB = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("b").build();
-      var rA = awaitExecution(provider.execute(cA, reqA, new CancellationToken()));
-      var rB = awaitExecution(provider.execute(cB, reqB, new CancellationToken()));
+      var rA = awaitExecution(provider, cA, reqA, new CancellationToken());
+      var rB = awaitExecution(provider, cB, reqB, new CancellationToken());
       assertEquals("alpha", rA.stdout());
       assertEquals("beta", rB.stdout());
       assertEquals(1, sandboxA.calls.get());
@@ -449,10 +450,25 @@ final class JShellExecutionProviderTest {
       for (var snippet : new String[] {"var x = 1;", "x + 2"}) {
         var req =
             ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript(snippet).build();
-        awaitExecution(provider.execute(c, req, new CancellationToken()));
+        awaitExecution(provider, c, req, new CancellationToken());
       }
       assertEquals(2, sandbox.calls.get());
       assertEquals("x + 2", sandbox.lastCode.get());
+    }
+  }
+
+  @Test
+  void executesOnASharedTokenLeaveNoCallbackOnIt() {
+    var sandbox = new StubSandbox();
+    try (var provider = providerFor(sandbox)) {
+      var c = ctx("shared-token");
+      provider.onSessionStart(c);
+      var token = new CancellationToken();
+      var req = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("x").build();
+      for (var i = 0; i < 3; i++) {
+        awaitExecution(provider, c, req, token);
+      }
+      assertEquals(0, token.activeCallbackCountForTests());
     }
   }
 
@@ -461,7 +477,7 @@ final class JShellExecutionProviderTest {
     var sandbox = new StubSandbox();
     try (var provider = providerFor(sandbox)) {
       var req = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("x").build();
-      var result = awaitExecution(provider.execute(ctx("ghost"), req, new CancellationToken()));
+      var result = awaitExecution(provider, ctx("ghost"), req, new CancellationToken());
       assertEquals(-1, result.exitCode());
       assertTrue(result.stderr().contains("no JShell session"));
     }
@@ -475,7 +491,7 @@ final class JShellExecutionProviderTest {
       provider.onSessionStart(c);
       var req =
           ExecutionRequest.newBuilder().withRuntime(Runtime.PYTHON).withScript("print(1)").build();
-      var result = awaitExecution(provider.execute(c, req, new CancellationToken()));
+      var result = awaitExecution(provider, c, req, new CancellationToken());
       assertEquals(-1, result.exitCode());
       assertTrue(result.stderr().contains("runtime not supported"));
     }
@@ -488,9 +504,10 @@ final class JShellExecutionProviderTest {
     provider.onSessionStart(ctx("temp"));
     provider.close();
     var req = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("x").build();
-    var future = provider.execute(ctx("temp"), req, new CancellationToken()).toCompletableFuture();
-    assertInstanceOf(
-        IllegalStateException.class, Await.failure("the execution on a closed provider", future));
+    var c = ctx("temp");
+    var token = new CancellationToken();
+    var failure = assertThrows(IllegalStateException.class, () -> provider.execute(c, req, token));
+    assertEquals("provider is closed", failure.getMessage());
   }
 
   @Test
@@ -516,7 +533,7 @@ final class JShellExecutionProviderTest {
       provider.onSessionStart(c);
       var req =
           ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("boom").build();
-      var future = provider.execute(c, req, new CancellationToken()).toCompletableFuture();
+      var future = ExecutionCall.start(provider, c, req, new CancellationToken()).outcome();
       var failure = Await.failure("the execution whose sandbox throws", future);
       assertInstanceOf(RuntimeException.class, failure);
       assertEquals("sandbox boom", failure.getMessage());
@@ -535,13 +552,66 @@ final class JShellExecutionProviderTest {
       var token = new CancellationToken();
       var req =
           ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("sleep").build();
-      var future = provider.execute(c, req, token).toCompletableFuture();
+      var future = ExecutionCall.start(provider, c, req, token).outcome();
       sandbox.awaitExecuteEntered();
 
       token.cancel("user-cancel");
 
       assertInstanceOf(
           CancellationException.class, Await.failure("the cancelled execution", future));
+      assertFalse(sandbox.isAlive(), "the session must have been killed");
+    }
+  }
+
+  /**
+   * Interrupting the calling thread while the snippet runs closes the session's sandbox, as a
+   * cancellation does, and the call throws with the interrupt status kept; the stub's snippet would
+   * otherwise run until its sandbox is closed.
+   */
+  @Test
+  void interruptDuringExecuteThrowsCancellationAndKillsSession() {
+    var sandbox = new StubSandbox();
+    sandbox.runsUntilClosed = true;
+    try (var provider = providerFor(sandbox)) {
+      var c = ctx("interrupt");
+      provider.onSessionStart(c);
+      var req =
+          ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("sleep").build();
+      var call = ExecutionCall.start(provider, c, req, new CancellationToken());
+      sandbox.awaitExecuteEntered();
+
+      call.thread().interrupt();
+
+      var failure = Await.failure("the interrupted execution", call.outcome());
+      assertInstanceOf(CancellationException.class, failure);
+      assertEquals("JShell snippet interrupted", failure.getMessage());
+      assertTrue(call.interruptedAtEnd(), "the interrupt status must be kept");
+      assertFalse(sandbox.isAlive(), "the session must have been killed");
+    }
+  }
+
+  /**
+   * A sandbox that answers the interrupt by throwing an unchecked exception of its own still has
+   * its session closed, and that exception reaches the caller with the interrupt status kept.
+   */
+  @Test
+  void interruptAnsweredByASandboxExceptionStillKillsSession() {
+    var sandbox = new StubSandbox();
+    sandbox.runsUntilClosed = true;
+    var stopped = new CancellationException("sandbox stopped");
+    sandbox.failureWhenInterrupted = stopped;
+    try (var provider = providerFor(sandbox)) {
+      var c = ctx("interrupt-thrown");
+      provider.onSessionStart(c);
+      var req =
+          ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("sleep").build();
+      var call = ExecutionCall.start(provider, c, req, new CancellationToken());
+      sandbox.awaitExecuteEntered();
+
+      call.thread().interrupt();
+
+      assertSame(stopped, Await.failure("the interrupted execution", call.outcome()));
+      assertTrue(call.interruptedAtEnd(), "the interrupt status must be kept");
       assertFalse(sandbox.isAlive(), "the session must have been killed");
     }
   }
@@ -621,42 +691,19 @@ final class JShellExecutionProviderTest {
     try (var provider = providerFor(sandbox)) {
       var c = ctx("concurrent");
       provider.onSessionStart(c);
-      var futures = new ArrayList<CompletionStage<ExecutionResult>>();
+      var futures = new ArrayList<CompletableFuture<ExecutionResult>>();
       for (var i = 0; i < 3; i++) {
-        var idx = i;
-        futures.add(
-            provider.execute(
-                c,
-                ExecutionRequest.newBuilder()
-                    .withRuntime(Runtime.JSHELL)
-                    .withScript("call-" + idx)
-                    .build(),
-                new CancellationToken()));
+        var request =
+            ExecutionRequest.newBuilder()
+                .withRuntime(Runtime.JSHELL)
+                .withScript("call-" + i)
+                .build();
+        futures.add(ExecutionCall.start(provider, c, request, new CancellationToken()).outcome());
       }
       for (var future : futures) {
-        assertEquals(0, awaitExecution(future).exitCode());
+        assertEquals(0, Await.value("the execution", future).exitCode());
       }
       assertEquals(3, sandbox.calls.get());
-    }
-  }
-
-  /** When the provider was built with shutdownHook=false, capabilities still expose JSHELL. */
-  @Test
-  void shutdownHookDisabledStillAdvertisesCapabilities() {
-    var sandbox = new StubSandbox();
-    try (var provider = providerFor(sandbox)) {
-      assertSame(Runtime.JSHELL, provider.capabilities().supportedRuntimes().iterator().next());
-    }
-  }
-
-  /** capabilities() returns a stable value across invocations. */
-  @Test
-  void capabilitiesIsStable() {
-    var sandbox = new StubSandbox();
-    try (var provider = providerFor(sandbox)) {
-      var a = provider.capabilities();
-      var b = provider.capabilities();
-      assertSame(a, b);
     }
   }
 
@@ -691,7 +738,7 @@ final class JShellExecutionProviderTest {
       var c = ctx("race");
       provider.onSessionStart(c);
       var req = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("x").build();
-      var future = provider.execute(c, req, token).toCompletableFuture();
+      var future = ExecutionCall.start(provider, c, req, token).outcome();
       sandbox.awaitExecuteEntered();
 
       token.cancel("while-running");
@@ -731,7 +778,7 @@ final class JShellExecutionProviderTest {
                 "the execute's thread", Await.value("the execute's thread", runThread));
           });
       var req = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("x").build();
-      var future = provider.execute(c, req, token).toCompletableFuture();
+      var future = ExecutionCall.start(provider, c, req, token).outcome();
       Await.value("the execute's thread", runThread);
 
       var canceller = Thread.ofPlatform().start(() -> token.cancel("late"));
@@ -758,7 +805,7 @@ final class JShellExecutionProviderTest {
       var req = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("x").build();
       token.cancel("ahead-of-time");
 
-      var future = provider.execute(c, req, token).toCompletableFuture();
+      var future = ExecutionCall.start(provider, c, req, token).outcome();
 
       assertInstanceOf(
           CancellationException.class, Await.failure("the pre-cancelled execution", future));
@@ -782,7 +829,7 @@ final class JShellExecutionProviderTest {
       var c = ctx("null-msg");
       provider.onSessionStart(c);
       var req = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("x").build();
-      var result = awaitExecution(provider.execute(c, req, new CancellationToken()));
+      var result = awaitExecution(provider, c, req, new CancellationToken());
       // No message → simple name surfaces; "ReplException" is the class name.
       assertTrue(
           result.stderr().contains("ReplException"),
@@ -795,7 +842,7 @@ final class JShellExecutionProviderTest {
   void createFactoryWiresDefaultProvider() {
     var sandbox = new StubSandbox();
     try (var provider = JShellExecutionProvider.create(configWithSandbox(sandbox))) {
-      assertTrue(provider.capabilities().supports(Runtime.JSHELL));
+      assertEquals(Set.of(Runtime.JSHELL), provider.supportedRuntimes());
       assertEquals(4, provider.maxConcurrentSessions());
     }
   }
@@ -809,7 +856,7 @@ final class JShellExecutionProviderTest {
       var c = ctx("repl-err");
       provider.onSessionStart(c);
       var req = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("x").build();
-      var future = provider.execute(c, req, new CancellationToken()).toCompletableFuture();
+      var future = ExecutionCall.start(provider, c, req, new CancellationToken()).outcome();
       sandbox.awaitExecuteEntered();
 
       sandbox.close();

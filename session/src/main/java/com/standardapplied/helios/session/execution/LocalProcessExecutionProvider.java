@@ -16,14 +16,14 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -60,6 +60,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       executionPermits} pool already gates the loop.
  * </ul>
  *
+ * <p>The provider does not isolate the network or the filesystem: a child reaches whatever the host
+ * process reaches. Isolate the host process itself (container, VM) where that matters.
+ *
+ * <h2>Dispatch</h2>
+ *
+ * {@link #execute(SessionContext, ExecutionRequest, CancellationToken) execute} runs on the
+ * caller's thread. Interrupting that thread, or cancelling the call's token, kills the child and
+ * its descendants and makes {@code execute} throw a {@link CancellationException}; a token fired
+ * while the call waits for a permit ends the wait the same way. A request's timeout is clamped to
+ * {@link Builder#withMaxTimeout(Duration)}.
+ *
  * <h2>Phase 5 scope</h2>
  *
  * The default factory {@link #defaultPosix()} wires {@link Runtime#BASH} (to {@code bash}) and
@@ -78,8 +89,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * defense-in-depth: if the host JVM exits without calling {@code close()} (uncaught {@code Error},
  * {@code System.exit(...)}, OS signal), the hook still kills every child process so the host cannot
  * leave orphaned subprocesses behind. After {@code close()}, calls to {@link
- * #execute(SessionContext, ExecutionRequest, CancellationToken) execute} complete exceptionally
- * with an {@link IllegalStateException}.
+ * #execute(SessionContext, ExecutionRequest, CancellationToken) execute} throw an {@link
+ * IllegalStateException}.
  */
 public final class LocalProcessExecutionProvider implements ExecutionProvider, AutoCloseable {
 
@@ -89,24 +100,18 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
   private static final String DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin";
 
   private final Map<Runtime, RuntimeHandler> handlers;
-  private final ExecutionCapabilities capabilities;
+  private final Duration maxTimeout;
   private final String path;
   private final int maxOutputBytes;
   private final Semaphore concurrency;
   private final InflightProcesses inflight;
 
   private LocalProcessExecutionProvider(Builder b) {
-    this.handlers = Map.copyOf(b.handlers);
+    this.handlers = Collections.unmodifiableMap(new EnumMap<>(b.handlers));
     this.path = b.path != null ? b.path : DEFAULT_PATH;
     this.maxOutputBytes = b.maxOutputBytes;
     this.concurrency = new Semaphore(b.maxConcurrent);
-    this.capabilities =
-        ExecutionCapabilities.newBuilder()
-            .withSupportedRuntimes(handlers.keySet())
-            .withNetworkAllowed(b.networkAllowed)
-            .withFilesystemWriteAllowed(b.filesystemWriteAllowed)
-            .withMaxTimeout(b.maxTimeout)
-            .build();
+    this.maxTimeout = b.maxTimeout;
     this.inflight = new InflightProcesses(b.registerShutdownHook);
   }
 
@@ -135,54 +140,39 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
   }
 
   @Override
-  public ExecutionCapabilities capabilities() {
-    return capabilities;
+  public Set<Runtime> supportedRuntimes() {
+    return handlers.keySet();
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @throws IllegalStateException if the provider is closed
+   */
   @Override
-  public CompletionStage<ExecutionResult> execute(
+  public ExecutionResult execute(
       SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
     Objects.requireNonNull(session, "session must not be null");
     Objects.requireNonNull(request, "request must not be null");
     Objects.requireNonNull(cancellation, "cancellation must not be null");
     if (inflight.isClosed()) {
-      return CompletableFuture.failedFuture(new IllegalStateException("provider is closed"));
+      throw new IllegalStateException("provider is closed");
     }
-    var future = new CompletableFuture<ExecutionResult>();
-    Thread.ofVirtual()
-        .name("helios-exec-" + session.sessionId() + "-" + request.runtime())
-        .start(
-            () -> {
-              try {
-                future.complete(runSync(session, request, cancellation));
-              } catch (CancellationException e) {
-                future.completeExceptionally(e);
-              } catch (Throwable t) {
-                future.completeExceptionally(t);
-              }
-            });
-    return future;
-  }
-
-  private ExecutionResult runSync(
-      SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
     var handler = handlers.get(request.runtime());
     if (handler == null) {
       return ExecutionResult.refusal(
           "runtime "
               + request.runtime()
               + " is not supported by this provider (supported: "
-              + capabilities.supportedRuntimes()
+              + handlers.keySet()
               + ")");
     }
     var effectiveTimeout =
-        request.timeout().compareTo(capabilities.maxTimeout()) > 0
-            ? capabilities.maxTimeout()
-            : request.timeout();
+        request.timeout().compareTo(maxTimeout) > 0 ? maxTimeout : request.timeout();
 
     cancellation.throwIfCancelled();
-    // Cancellation cannot directly unblock Semaphore.acquire() — wire it to interrupt the worker
-    // thread so a session shutdown during a permit wait propagates as InterruptedException.
+    // Cancellation cannot directly unblock Semaphore.acquire() — wire it to interrupt the calling
+    // thread so a cancellation during a permit wait propagates as InterruptedException.
     var worker = Thread.currentThread();
     var acquireDone = new AtomicBoolean();
     Runnable acquireInterruptCallback =
@@ -262,7 +252,10 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
       outcome = process.await();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      killCallback.run();
+      // SIGKILL, not the token's SIGTERM: the child is untracked once execute throws, and nothing
+      // is left waiting to escalate against one that ignores SIGTERM.
+      proc.descendants().forEach(ProcessHandle::destroyForcibly);
+      proc.destroyForcibly();
       stdinFeeder.join();
       inflight.untrack(proc);
       killRegistration.remove();
@@ -314,8 +307,8 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
   /**
    * Close the provider: destroy every in-flight subprocess and remove the JVM shutdown hook. After
    * close, future {@link #execute(SessionContext, ExecutionRequest, CancellationToken) execute}
-   * calls complete exceptionally with an {@link IllegalStateException}. Safe to call from any
-   * thread; subsequent calls are no-ops.
+   * calls throw an {@link IllegalStateException}. Safe to call from any thread; subsequent calls
+   * are no-ops.
    */
   @Override
   public void close() {
@@ -400,8 +393,6 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
     private int maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES;
     private int maxConcurrent = DEFAULT_MAX_CONCURRENT;
     private Duration maxTimeout = DEFAULT_MAX_TIMEOUT;
-    private boolean networkAllowed = true;
-    private boolean filesystemWriteAllowed = true;
     private boolean registerShutdownHook = true;
 
     private Builder() {}
@@ -471,30 +462,6 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
      */
     public Builder withMaxTimeout(Duration maxTimeout) {
       this.maxTimeout = Validate.positiveDuration("maxTimeout", maxTimeout);
-      return this;
-    }
-
-    /**
-     * Capability flag advertised through {@link ExecutionCapabilities#networkAllowed()}. The
-     * provider does not enforce this — it's informational metadata for hooks / consumers.
-     *
-     * @param networkAllowed whether child processes can reach networks
-     * @return this builder
-     */
-    public Builder withNetworkAllowed(boolean networkAllowed) {
-      this.networkAllowed = networkAllowed;
-      return this;
-    }
-
-    /**
-     * Capability flag advertised through {@link ExecutionCapabilities#filesystemWriteAllowed()}.
-     * Informational; the provider does not enforce filesystem isolation.
-     *
-     * @param filesystemWriteAllowed whether child processes can write files
-     * @return this builder
-     */
-    public Builder withFilesystemWriteAllowed(boolean filesystemWriteAllowed) {
-      this.filesystemWriteAllowed = filesystemWriteAllowed;
       return this;
     }
 

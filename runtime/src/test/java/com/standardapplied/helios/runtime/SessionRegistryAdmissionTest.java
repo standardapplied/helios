@@ -15,10 +15,10 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.runtime.SessionCapacityException.Scope;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.execution.ExecutionCapabilities;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
 import com.standardapplied.helios.session.execution.ExecutionRequest;
 import com.standardapplied.helios.session.execution.ExecutionResult;
+import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
@@ -26,8 +26,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -557,8 +557,8 @@ final class SessionRegistryAdmissionTest {
     private final CountDownLatch release = new CountDownLatch(1);
 
     @Override
-    public ExecutionCapabilities capabilities() {
-      return ExecutionCapabilities.newBuilder().build();
+    public Set<Runtime> supportedRuntimes() {
+      return Set.of();
     }
 
     @Override
@@ -574,7 +574,7 @@ final class SessionRegistryAdmissionTest {
     }
 
     @Override
-    public CompletionStage<ExecutionResult> execute(
+    public ExecutionResult execute(
         SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
       throw new AssertionError("not used");
     }

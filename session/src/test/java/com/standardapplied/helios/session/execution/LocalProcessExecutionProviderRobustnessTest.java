@@ -7,12 +7,14 @@ package com.standardapplied.helios.session.execution;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.session.test.ExecutionCall;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -154,6 +156,29 @@ final class LocalProcessExecutionProviderRobustnessTest {
     }
   }
 
+  @Test
+  void interruptWhilePermitWaitThrowsCancellationAndKeepsTheInterrupt() {
+    assumeBashAvailable();
+    try (var provider = testProvider(1)) {
+      var hold = new CancellationToken();
+      var holder = start(provider, bash(HANG).build(), hold);
+      awaitInflight(provider, 1);
+
+      var token = new CancellationToken();
+      var waiting = ExecutionCall.start(provider, CTX, bash("printf x").build(), token);
+      awaitPermitRequest(token);
+      waiting.thread().interrupt();
+
+      assertEquals(
+          "interrupted while acquiring permit for BASH",
+          cancellationMessage("the interrupted call to fail", waiting.outcome()));
+      assertTrue(waiting.interruptedAtEnd(), "the interrupt status must be kept");
+
+      hold.cancel("done");
+      cancellationMessage("the permit holder to fail", holder);
+    }
+  }
+
   // ── provider.close() reaps in-flight processes ──────────────────────────
 
   @Test
@@ -224,10 +249,10 @@ final class LocalProcessExecutionProviderRobustnessTest {
     assumeBashAvailable();
     var provider = testProvider();
     provider.close();
-    var call = start(provider, bash("true").build(), new CancellationToken());
-    assertTrue(call.isCompletedExceptionally());
-    var failure = Await.failure("the call on a closed provider to fail", call);
-    assertInstanceOf(IllegalStateException.class, failure);
+    var request = bash("true").build();
+    var token = new CancellationToken();
+    var failure =
+        assertThrows(IllegalStateException.class, () -> provider.execute(CTX, request, token));
     assertEquals("provider is closed", failure.getMessage());
   }
 
@@ -351,7 +376,7 @@ final class LocalProcessExecutionProviderRobustnessTest {
 
   private static CompletableFuture<ExecutionResult> start(
       LocalProcessExecutionProvider provider, ExecutionRequest request, CancellationToken token) {
-    return provider.execute(CTX, request, token).toCompletableFuture();
+    return ExecutionCall.start(provider, CTX, request, token).outcome();
   }
 
   private static ExecutionResult run(
@@ -496,9 +521,9 @@ final class LocalProcessExecutionProviderRobustnessTest {
     }
   }
 
-  /** Runtime handler throwing Error must surface through the future, not silently swallow. */
+  /** An {@code Error} from a runtime handler propagates from {@code execute} as itself. */
   @Test
-  void handlerThrowingErrorSurfacesThroughFuture() {
+  void anErrorFromAHandlerPropagatesFromExecute() {
     try (var provider =
         LocalProcessExecutionProvider.newBuilder()
             .withRuntime(
@@ -508,9 +533,11 @@ final class LocalProcessExecutionProviderRobustnessTest {
                 })
             .withShutdownHook(false)
             .build()) {
-      var call = start(provider, bash("x").build(), new CancellationToken());
-      assertInstanceOf(
-          OutOfMemoryError.class, Await.failure("the call with a failing handler to fail", call));
+      var request = bash("x").build();
+      var token = new CancellationToken();
+      var thrown =
+          assertThrows(OutOfMemoryError.class, () -> provider.execute(CTX, request, token));
+      assertEquals("synthetic", thrown.getMessage());
       assertEquals(0, provider.inflightCount());
     }
   }

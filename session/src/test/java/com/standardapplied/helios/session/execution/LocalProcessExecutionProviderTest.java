@@ -16,6 +16,7 @@ import com.standardapplied.helios.core.process.BinaryResolver;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.session.test.ExecutionCall;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,8 +24,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -125,14 +126,9 @@ final class LocalProcessExecutionProviderTest {
             .withMaxOutputBytes(8192)
             .withMaxConcurrent(2)
             .withMaxTimeout(Duration.ofSeconds(30))
-            .withNetworkAllowed(false)
-            .withFilesystemWriteAllowed(false)
             .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
             .build();
-    assertFalse(provider.capabilities().networkAllowed());
-    assertFalse(provider.capabilities().filesystemWriteAllowed());
-    assertEquals(Duration.ofSeconds(30), provider.capabilities().maxTimeout());
-    assertTrue(provider.capabilities().supports(Runtime.BASH));
+    assertEquals(Set.of(Runtime.BASH), provider.supportedRuntimes());
   }
 
   // ── defaultPosix factory ─────────────────────────────────────────────────
@@ -142,9 +138,23 @@ final class LocalProcessExecutionProviderTest {
     assumeBashAvailable();
     assumePythonAvailable();
     var provider = LocalProcessExecutionProvider.defaultPosix();
-    assertTrue(provider.capabilities().supports(Runtime.BASH));
-    assertTrue(provider.capabilities().supports(Runtime.PYTHON));
-    assertFalse(provider.capabilities().supports(Runtime.JSHELL));
+    assertEquals(List.of(Runtime.BASH, Runtime.PYTHON), List.copyOf(provider.supportedRuntimes()));
+  }
+
+  @Test
+  void supportedRuntimesIterateInDeclarationOrderAndAreUnmodifiable() {
+    assumeBashAvailable();
+    var bash = LocalProcessExecutionProvider.RuntimeHandler.dashC("bash");
+    var provider =
+        LocalProcessExecutionProvider.newBuilder()
+            .withRuntime(Runtime.NODE, bash)
+            .withRuntime(Runtime.BASH, bash)
+            .withRuntime(Runtime.SQL, bash)
+            .withShutdownHook(false)
+            .build();
+    var runtimes = provider.supportedRuntimes();
+    assertEquals("[BASH, SQL, NODE]", runtimes.toString());
+    assertThrows(UnsupportedOperationException.class, () -> runtimes.remove(Runtime.BASH));
   }
 
   // ── RuntimeHandler.dashC ─────────────────────────────────────────────────
@@ -242,7 +252,7 @@ final class LocalProcessExecutionProviderTest {
   }
 
   @Test
-  void executeClampsRequestTimeoutToCapabilitiesMax() {
+  void executeClampsRequestTimeoutToTheProvidersMaximum() {
     assumeBashAvailable();
     var provider =
         LocalProcessExecutionProvider.newBuilder()
@@ -299,7 +309,7 @@ final class LocalProcessExecutionProviderTest {
     var result =
         Await.value(
             "the cut execution",
-            provider.execute(session, req, new CancellationToken()).toCompletableFuture());
+            ExecutionCall.start(provider, session, req, new CancellationToken()).outcome());
 
     assertEquals("x".repeat(1014) + "\n[truncated: output exceeded cap]", result.stdout());
     assertEquals("tail sk-test-", result.stderr());
@@ -401,48 +411,62 @@ final class LocalProcessExecutionProviderTest {
             .withTimeout(Duration.ofSeconds(1))
             .build();
     var failure =
-        Await.failure(
-            "the pre-cancelled call to fail",
-            provider.execute(CTX, req, token).toCompletableFuture());
-    assertInstanceOf(CancellationException.class, failure);
+        assertThrows(CancellationException.class, () -> provider.execute(CTX, req, token));
     assertEquals("pre-acquired", failure.getMessage());
   }
 
   /**
-   * Interrupting the worker while it waits for the child is a cancellation: the child is killed and
-   * the call fails instead of returning a result. The handler hands the worker over, and the
+   * Interrupting the calling thread while it waits for the child is a cancellation: the child is
+   * killed and the call throws, its interrupt status kept, instead of returning a result. The
    * child's pid file shows it runs before the interrupt; it would otherwise run for ten minutes.
    */
   @Test
   void interruptWhileWaitingCancelsTheCallAndKillsTheChild(@TempDir Path tmp) {
+    assertInterruptKills(tmp, "echo $$ > %s; " + HANG);
+  }
+
+  /**
+   * A tool call's interrupt is the session's only stop for its child: once {@code execute} throws,
+   * nothing tracks the child, so a child that ignores SIGTERM must still be killed.
+   */
+  @Test
+  void interruptKillsAChildThatIgnoresSigterm(@TempDir Path tmp) {
+    assertInterruptKills(tmp, "trap '' TERM; echo $$ > %s; " + HANG);
+  }
+
+  /** The interrupt kills the child's own children too; killed alone, they would outlive it. */
+  @Test
+  void interruptKillsTheChildsDescendants(@TempDir Path tmp) {
+    assertInterruptKills(tmp, "sleep 600 & echo $! > %s; wait");
+  }
+
+  /** Interrupts a call of {@code script}, whose {@code %s} is the pid file of who must die. */
+  private static void assertInterruptKills(Path tmp, String script) {
     assumeBashAvailable();
-    var worker = new CompletableFuture<Thread>();
     var pidFile = tmp.resolve("pid");
-    LocalProcessExecutionProvider.RuntimeHandler handover =
-        request -> {
-          worker.complete(Thread.currentThread());
-          return LocalProcessExecutionProvider.RuntimeHandler.dashC("bash").buildArgv(request);
-        };
     var provider =
         LocalProcessExecutionProvider.newBuilder()
             .withMaxTimeout(BEYOND_HANG_GUARD)
-            .withRuntime(Runtime.BASH, handover)
+            .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
+            .withShutdownHook(false)
             .build();
     var req =
         ExecutionRequest.newBuilder()
             .withRuntime(Runtime.BASH)
-            .withScript("echo $$ > " + pidFile + "; " + HANG)
+            .withScript(script.formatted(pidFile))
             .withTimeout(BEYOND_HANG_GUARD)
             .build();
 
-    var call = provider.execute(CTX, req, new CancellationToken()).toCompletableFuture();
+    var call = ExecutionCall.start(provider, CTX, req, new CancellationToken());
     Await.until("the child to write its pid", () -> !readPid(pidFile).isEmpty());
     var child = ProcessHandle.of(Long.parseLong(readPid(pidFile))).orElseThrow();
-    Await.value("the worker", worker).interrupt();
+    call.thread().interrupt();
 
-    var failure = Await.failure("the interrupted call to fail", call);
+    var failure = Await.failure("the interrupted call to fail", call.outcome());
     assertInstanceOf(CancellationException.class, failure);
     assertEquals("interrupted while waiting for BASH process", failure.getMessage());
+    assertTrue(call.interruptedAtEnd());
+    assertEquals(0, provider.inflightCount());
     Await.until("the child to die", () -> !child.isAlive());
   }
 
@@ -510,7 +534,7 @@ final class LocalProcessExecutionProviderTest {
       LocalProcessExecutionProvider provider, ExecutionRequest request) {
     return Await.value(
         "the result of `" + request.script() + "`",
-        provider.execute(CTX, request, new CancellationToken()).toCompletableFuture());
+        ExecutionCall.start(provider, CTX, request, new CancellationToken()).outcome());
   }
 
   private static void assumeBashAvailable() {

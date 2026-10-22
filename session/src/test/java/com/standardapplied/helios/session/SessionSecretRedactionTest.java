@@ -21,11 +21,10 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.execution.ExecutionCapabilities;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
 import com.standardapplied.helios.session.execution.ExecutionRequest;
 import com.standardapplied.helios.session.execution.ExecutionResult;
-import com.standardapplied.helios.session.execution.NoopExecutionProvider;
+import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
@@ -45,7 +44,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletionStage;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -417,12 +416,12 @@ final class SessionSecretRedactionTest {
   private static final class RefusingProvider implements ExecutionProvider {
 
     @Override
-    public ExecutionCapabilities capabilities() {
-      return NoopExecutionProvider.INSTANCE.capabilities();
+    public Set<Runtime> supportedRuntimes() {
+      return Set.of();
     }
 
     @Override
-    public CompletionStage<ExecutionResult> execute(
+    public ExecutionResult execute(
         SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
       throw new UnsupportedOperationException("a refused session never executes");
     }
