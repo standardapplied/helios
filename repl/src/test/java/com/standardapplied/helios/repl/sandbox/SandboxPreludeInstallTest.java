@@ -3,6 +3,7 @@ package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,6 +18,7 @@ import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import com.standardapplied.helios.repl.protocol.RpcChannel;
 import com.standardapplied.helios.repl.protocol.RpcError;
 import com.standardapplied.helios.repl.protocol.RpcMessage;
+import com.standardapplied.helios.session.test.LogCapture;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.LogRecord;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -152,7 +156,8 @@ class SandboxPreludeInstallTest {
     var earlierChildren = livePids();
     var earlierDirectories = sandboxDirectories();
     var accepted = new CompletableFuture<SandboxRpc>();
-    try (var log = new LogCapture(RpcChannel.class)) {
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+    try (var ignored = LogCapture.of(RpcChannel.class, logged)) {
       var thrown =
           assertThrows(
               ReplException.class, () -> JvmSandbox.create(CONFIG, registry, accepted::complete));
@@ -163,9 +168,8 @@ class SandboxPreludeInstallTest {
       var channel = Await.value("the accepted connection", accepted).channel();
       var closed = assertThrows(RpcChannel.RpcException.class, () -> channel.call("ping", null));
       assertEquals("Channel is closed", closed.getMessage());
-      assertTrue(
-          log.records().stream().noneMatch(r -> r.endsWith(" Reader loop error")),
-          log.records()::toString);
+      var messages = logged.stream().map(LogRecord::getMessage).toList();
+      assertFalse(messages.contains("Reader loop error"), messages::toString);
       assertEquals(earlierDirectories, sandboxDirectories());
       Await.until(
           "the rejected sandbox's subprocess to end",
