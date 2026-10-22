@@ -8,7 +8,7 @@
  * user-supplied code in a controlled environment. The {@link
  * com.standardapplied.helios.session.execution.Runtime} enum names the language / shell flavour; an
  * {@link com.standardapplied.helios.session.execution.ExecutionProvider} declares which runtimes it
- * supports and executes a request asynchronously, returning an {@link
+ * supports and executes a request on the calling thread, returning an {@link
  * com.standardapplied.helios.session.execution.ExecutionResult} with stdout, stderr, exit code, and
  * a {@code timedOut} flag.
  *
