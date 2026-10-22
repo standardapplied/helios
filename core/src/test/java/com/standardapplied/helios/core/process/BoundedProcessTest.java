@@ -5,12 +5,12 @@ package com.standardapplied.helios.core.process;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -37,6 +37,7 @@ class BoundedProcessTest {
   private static final String BASH = "/bin/bash";
   private static final Duration NEVER_REACHED = Duration.ofMinutes(10);
   private static final Duration SHORT = Duration.ofMillis(300);
+  private static final String TRUNCATION_MARKER = "\n[truncated: output exceeded cap]";
 
   @BeforeAll
   static void requireBash() {
@@ -59,7 +60,7 @@ class BoundedProcessTest {
   private static ProcessOutcome run(BoundedProcess.Builder builder) throws Exception {
     try (var process = builder.start()) {
       process.stdin().close();
-      return process.await();
+      return process.await(new CancellationToken());
     }
   }
 
@@ -90,7 +91,7 @@ class BoundedProcessTest {
       try (var stdin = process.stdin()) {
         stdin.write("fed".getBytes(StandardCharsets.UTF_8));
       }
-      assertEquals("fed", text(process.await().stdout()));
+      assertEquals("fed", text(process.await(new CancellationToken()).stdout()));
     }
   }
 
@@ -99,7 +100,7 @@ class BoundedProcessTest {
     Path directory;
     try (var process = bash("pwd").withTempDirectoryPrefix("helios-bp-test-").start()) {
       process.stdin().close();
-      directory = Path.of(text(process.await().stdout()).strip());
+      directory = Path.of(text(process.await(new CancellationToken()).stdout()).strip());
       assertTrue(Files.isDirectory(directory));
       assertTrue(directory.getFileName().toString().startsWith("helios-bp-test-"));
     }
@@ -111,7 +112,7 @@ class BoundedProcessTest {
     Path directory;
     try (var process = bash("mkdir -p a/b && echo x > a/b/f && pwd").start()) {
       process.stdin().close();
-      directory = Path.of(text(process.await().stdout()).strip());
+      directory = Path.of(text(process.await(new CancellationToken()).stdout()).strip());
     }
     assertFalse(Files.exists(directory));
   }
@@ -194,7 +195,7 @@ class BoundedProcessTest {
       var child = ProcessHandle.of(Long.parseLong(readPid(tmp))).orElseThrow();
 
       process.kill();
-      var outcome = process.await();
+      var outcome = process.await(new CancellationToken());
 
       assertFalse(outcome.timedOut());
       Await.until("the descendant to die", () -> !child.isAlive());
@@ -202,9 +203,9 @@ class BoundedProcessTest {
   }
 
   /**
-   * The descendant inherits the child's stdout, so if it outlived the timeout the capture would
-   * wait for it: {@link BoundedProcess#await()} returning is the proof that the timeout ended it
-   * too. The timeout starts in {@code await()}, after the descendant is known to run.
+   * The descendant inherits the child's stdout and would hold the capture open if it outlived the
+   * timeout. The timeout starts in {@link BoundedProcess#await(CancellationToken)}, after the
+   * descendant is known to run.
    */
   @Test
   void timeoutEndsTheDescendantsHoldingTheOutput(@TempDir Path tmp) throws Exception {
@@ -217,7 +218,7 @@ class BoundedProcessTest {
       Await.until("the pid to be written", () -> !readPid(tmp).isEmpty());
       var child = ProcessHandle.of(Long.parseLong(readPid(tmp))).orElseThrow();
 
-      var outcome = process.await();
+      var outcome = process.await(new CancellationToken());
 
       assertTrue(outcome.timedOut());
       Await.until("the descendant to die", () -> !child.isAlive());
@@ -233,27 +234,184 @@ class BoundedProcessTest {
   }
 
   @Test
-  void interruptWhileAwaitingPropagatesAndLeavesTheProcessToTheCaller() throws Exception {
-    try (var process = bash("exec sleep 600").start()) {
+  void aBackgroundedDescendantHoldingTheOutputDoesNotHoldUpTheCall(@TempDir Path tmp)
+      throws Exception {
+    try (var process =
+        BoundedProcess.newBuilder(
+                List.of("/bin/sh", "-c", "sleep 600 & echo $! > child; echo started"))
+            .withWorkingDirectory(tmp)
+            .withTimeout(NEVER_REACHED)
+            .start()) {
       process.stdin().close();
-      var thrown = new CompletableFuture<Throwable>();
-      var waiter =
-          Thread.startVirtualThread(
-              () -> {
-                try {
-                  process.await();
-                  thrown.complete(null);
-                } catch (InterruptedException e) {
-                  thrown.complete(e);
-                }
+
+      var outcome = process.await(new CancellationToken());
+
+      assertEquals(0, outcome.exitCode());
+      assertEquals("started\n" + TRUNCATION_MARKER, text(outcome.stdout()));
+      assertTrue(outcome.stdoutTruncated());
+      assertFalse(outcome.timedOut());
+    } finally {
+      destroyRecorded(tmp);
+    }
+  }
+
+  @Test
+  void anInterruptedAwaitKillsTheChildAndKeepsTheInterruptStatus() throws Exception {
+    try (var process = bash("exec sleep 600").start()) {
+      var child = process.process().toHandle();
+      try {
+        process.stdin().close();
+
+        var interrupted = interruptAwaiting(process);
+
+        assertTrue(interrupted, "the interrupt status is set again");
+        Await.value("the killed child to end", child.onExit());
+      } finally {
+        child.destroyForcibly();
+      }
+    }
+  }
+
+  /**
+   * The interrupt status is already set when the reaping starts, so a reaping that an interrupt
+   * cuts short would never reach the forcible kill this child needs.
+   */
+  @Test
+  void anInterruptedAwaitForciblyKillsAChildIgnoringSigterm(@TempDir Path tmp) throws Exception {
+    try (var process =
+        bash("trap '' TERM; echo $$ > child; exec sleep 600").withWorkingDirectory(tmp).start()) {
+      var child = process.process().toHandle();
+      try {
+        process.stdin().close();
+        Await.until("SIGTERM to be ignored", () -> !readPid(tmp).isEmpty());
+
+        assertTrue(interruptAwaiting(process), "the interrupt status is set again");
+        Await.value("the forcibly killed child to end", child.onExit());
+      } finally {
+        child.destroyForcibly();
+      }
+    }
+  }
+
+  /**
+   * Interrupt a thread blocked in {@code await}; return whether its interrupt status was set when
+   * {@code await} threw.
+   */
+  private static boolean interruptAwaiting(BoundedProcess process) {
+    var interrupted = new CompletableFuture<Boolean>();
+    var waiter =
+        Thread.startVirtualThread(
+            () -> {
+              try {
+                process.await(new CancellationToken());
+                interrupted.completeExceptionally(new AssertionError("await returned"));
+              } catch (InterruptedException e) {
+                interrupted.complete(Thread.currentThread().isInterrupted());
+              }
+            });
+    waiter.interrupt();
+    return Await.value("the interrupted await", interrupted);
+  }
+
+  @Test
+  void cancellingTheTokenKillsTheChild() throws Exception {
+    try (var process = bash("exec sleep 600").start()) {
+      var child = process.process().toHandle();
+      try {
+        process.stdin().close();
+        var token = new CancellationToken();
+        var outcome = CompletableFuture.supplyAsync(() -> awaitUnchecked(process, token));
+
+        token.cancel("test");
+
+        var cancelled = Await.value("the cancelled await", outcome);
+        assertEquals(-1, cancelled.exitCode());
+        assertFalse(cancelled.timedOut());
+        Await.value("the killed child to end", child.onExit());
+        assertEquals(0, token.activeCallbackCountForTests());
+      } finally {
+        child.destroyForcibly();
+      }
+    }
+  }
+
+  @Test
+  void cancellingTheTokenForciblyKillsAChildIgnoringSigterm(@TempDir Path tmp) throws Exception {
+    try (var process =
+        bash("trap '' TERM; echo $$ > child; exec sleep 600").withWorkingDirectory(tmp).start()) {
+      var child = process.process().toHandle();
+      try {
+        process.stdin().close();
+        Await.until("SIGTERM to be ignored", () -> !readPid(tmp).isEmpty());
+        var token = new CancellationToken();
+        token.cancel("before the wait");
+
+        var outcome = process.await(token);
+
+        assertEquals(-1, outcome.exitCode());
+        assertFalse(outcome.timedOut());
+        Await.value("the forcibly killed child to end", child.onExit());
+      } finally {
+        child.destroyForcibly();
+      }
+    }
+  }
+
+  @Test
+  void aCompletedAwaitLeavesNoCallbackOnTheToken() throws Exception {
+    var token = new CancellationToken();
+    try (var process = bash("exit 0").start()) {
+      process.stdin().close();
+
+      assertEquals(0, process.await(token).exitCode());
+    }
+    assertEquals(0, token.activeCallbackCountForTests());
+  }
+
+  /**
+   * The grandchild ignores SIGTERM and the child dies of it, so the child's exit says nothing about
+   * the grandchild: only the forcible kill of the descendants captured before the first signal ends
+   * it.
+   */
+  @Test
+  void timeoutForciblyKillsADescendantIgnoringSigtermWhoseParentDied(@TempDir Path tmp)
+      throws Exception {
+    try (var process =
+        bash("(trap '' TERM; echo $BASHPID > child; exec sleep 600) & exec sleep 600")
+            .withWorkingDirectory(tmp)
+            .withTimeout(SHORT)
+            .start()) {
+      process.stdin().close();
+      Await.until("the grandchild to ignore SIGTERM", () -> !readPid(tmp).isEmpty());
+      var grandchild = ProcessHandle.of(Long.parseLong(readPid(tmp))).orElseThrow();
+
+      var outcome = process.await(new CancellationToken());
+
+      assertTrue(outcome.timedOut());
+      Await.value("the grandchild to end", grandchild.onExit());
+    } finally {
+      destroyRecorded(tmp);
+    }
+  }
+
+  private static ProcessOutcome awaitUnchecked(BoundedProcess process, CancellationToken token) {
+    try {
+      return process.await(token);
+    } catch (InterruptedException e) {
+      throw new AssertionError(e);
+    }
+  }
+
+  /** Forcibly end the process whose pid the test's fixture wrote, and wait for it to end. */
+  private static void destroyRecorded(Path dir) {
+    var pid = readPid(dir);
+    if (!pid.isEmpty()) {
+      ProcessHandle.of(Long.parseLong(pid))
+          .ifPresent(
+              handle -> {
+                handle.destroyForcibly();
+                Await.value("the recorded process to end", handle.onExit());
               });
-
-      waiter.interrupt();
-
-      assertInstanceOf(InterruptedException.class, Await.value("the interrupted await", thrown));
-      assertTrue(process.process().isAlive());
-      process.kill();
-      Await.termination("the killed process", process.process());
     }
   }
 
@@ -289,7 +447,7 @@ class BoundedProcessTest {
     Path directory;
     try (var process = bash(script).start()) {
       process.stdin().close();
-      directory = Path.of(text(process.await().stdout()).strip());
+      directory = Path.of(text(process.await(new CancellationToken()).stdout()).strip());
     }
     restoreAndRemove(directory);
   }

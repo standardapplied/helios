@@ -17,9 +17,13 @@ import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import com.standardapplied.helios.repl.protocol.RpcChannel;
 import com.standardapplied.helios.repl.protocol.RpcError;
 import com.standardapplied.helios.repl.protocol.RpcMessage;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -128,6 +132,57 @@ class SandboxPreludeInstallTest {
         thrown.getMessage());
     Await.until(
         "the rejected sandbox's subprocess to end", () -> earlierChildren.containsAll(livePids()));
+  }
+
+  /**
+   * A parameter named {@code com} hides the {@code com} package the wrapper body names, so the
+   * sandbox rejects the wrappers after the RPC channel is open. Closing the channel before its
+   * socket is what keeps its reader from logging the closed socket: the channel is closed once
+   * {@code create} throws, and its reader logs only while it is open.
+   */
+  @Test
+  void aFailedLaunchClosesItsChannelAndLeavesNothingBehind() throws IOException {
+    var registry = new HostFunctionRegistry();
+    registry.register(
+        new HostFunction(
+            "lookup",
+            "Looks a key up.",
+            List.of(HostParameter.required("com", ParameterType.STRING, "Hides a package.")),
+            params -> null));
+    var earlierChildren = livePids();
+    var earlierDirectories = sandboxDirectories();
+    var accepted = new CompletableFuture<SandboxRpc>();
+    try (var log = new LogCapture(RpcChannel.class)) {
+      var thrown =
+          assertThrows(
+              ReplException.class, () -> JvmSandbox.create(CONFIG, registry, accepted::complete));
+
+      assertTrue(
+          thrown.getMessage().startsWith("Sandbox rejected custom host-function wrappers: ["),
+          thrown.getMessage());
+      var channel = Await.value("the accepted connection", accepted).channel();
+      var closed = assertThrows(RpcChannel.RpcException.class, () -> channel.call("ping", null));
+      assertEquals("Channel is closed", closed.getMessage());
+      assertTrue(
+          log.records().stream().noneMatch(r -> r.endsWith(" Reader loop error")),
+          log.records()::toString);
+      assertEquals(earlierDirectories, sandboxDirectories());
+      Await.until(
+          "the rejected sandbox's subprocess to end",
+          () -> earlierChildren.containsAll(livePids()));
+    }
+  }
+
+  private static Set<Path> sandboxDirectories() throws IOException {
+    try (var entries = Files.list(Path.of(System.getProperty("java.io.tmpdir")))) {
+      return entries
+          .filter(
+              p -> {
+                var name = p.getFileName().toString();
+                return name.startsWith("helios-rpc-") || name.startsWith("helios-sandbox-cwd-");
+              })
+          .collect(Collectors.toSet());
+    }
   }
 
   private static Set<Long> livePids() {

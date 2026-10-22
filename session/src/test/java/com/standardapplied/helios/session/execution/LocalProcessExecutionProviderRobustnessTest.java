@@ -15,6 +15,7 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.test.ExecutionCall;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -126,6 +127,78 @@ final class LocalProcessExecutionProviderRobustnessTest {
           "execution of BASH cancelled: test-cancel",
           cancellationMessage("the cancelled call to fail", call));
       assertEquals(0, provider.inflightCount());
+    }
+  }
+
+  /** Once its trap is set the child ignores the token's SIGTERM; only the escalation ends it. */
+  @Test
+  void cancellationForciblyKillsAChildIgnoringSigterm(@TempDir Path cwd) {
+    assumeBashAvailable();
+    try (var provider = testProvider()) {
+      var token = new CancellationToken();
+      var call =
+          start(
+              provider,
+              bash("trap '' TERM; echo $$ > pid; " + HANG).withWorkingDirectory(cwd).build(),
+              token);
+      Await.until("the trap to be set", () -> !readPid(cwd).isEmpty());
+      var child = ProcessHandle.of(Long.parseLong(readPid(cwd))).orElseThrow();
+      try {
+        token.cancel("test-cancel");
+
+        assertEquals(
+            "execution of BASH cancelled: test-cancel",
+            cancellationMessage("the cancelled call to fail", call));
+        Await.value("the forcibly killed child to end", child.onExit());
+      } finally {
+        child.destroyForcibly();
+      }
+    }
+  }
+
+  /**
+   * The backgrounded descendant holds the child's stdin open without reading it, so the feeder
+   * blocks on the 512 KiB it cannot write; the call still returns once the child exits.
+   */
+  @Test
+  void aDescendantHoldingStdinUnreadDoesNotHoldUpTheCall(@TempDir Path cwd) {
+    assumeBashAvailable();
+    try (var provider = testProvider()) {
+      try {
+        var result =
+            run(
+                provider,
+                bash("sleep 600 <&0 >/dev/null 2>&1 & echo $! > pid")
+                    .withWorkingDirectory(cwd)
+                    .withStdin("x".repeat(512 * 1024))
+                    .build());
+
+        assertEquals(0, result.exitCode());
+        assertFalse(result.timedOut());
+        assertEquals(0, provider.inflightCount());
+      } finally {
+        destroyRecorded(cwd);
+      }
+    }
+  }
+
+  private static void destroyRecorded(Path cwd) {
+    var pid = readPid(cwd);
+    if (!pid.isEmpty()) {
+      ProcessHandle.of(Long.parseLong(pid))
+          .ifPresent(
+              handle -> {
+                handle.destroyForcibly();
+                Await.value("the recorded process to end", handle.onExit());
+              });
+    }
+  }
+
+  private static String readPid(Path cwd) {
+    try {
+      return Files.readString(cwd.resolve("pid")).strip();
+    } catch (IOException e) {
+      return "";
     }
   }
 

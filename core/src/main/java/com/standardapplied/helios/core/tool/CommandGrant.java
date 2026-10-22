@@ -10,6 +10,7 @@ import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.process.BinaryResolver;
 import com.standardapplied.helios.core.process.BoundedProcess;
 import com.standardapplied.helios.core.process.ProcessOutcome;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -22,6 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.Semaphore;
 import java.util.function.Function;
 
@@ -53,8 +55,8 @@ import java.util.function.Function;
  *   <li><b>Stdin is empty.</b> The child's stdin is closed immediately after fork.
  *   <li><b>Per-call jail by default.</b> If no working directory is set, a fresh temporary
  *       directory is created per call and removed on exit.
- *   <li><b>Process tree is reaped on timeout.</b> Descendants are destroyed alongside the direct
- *       child.
+ *   <li><b>Process tree is reaped on timeout, cancellation and interrupt.</b> Descendants are
+ *       destroyed alongside the direct child.
  * </ul>
  *
  * <h2>Typical use</h2>
@@ -157,11 +159,14 @@ public final class CommandGrant {
   /**
    * Invoke the bound binary with {@code userArgs}. The output is raw; the session redacts it.
    *
+   * @param cancellation the call's token; firing it kills the child
    * @throws RejectedException if argv validation fails or argv contains a registered secret
+   * @throws CancellationException if {@code cancellation} fired before the child ended on its own
    * @throws InterruptedException if the calling thread is interrupted while waiting
    * @throws IOException if the subprocess cannot be started
    */
-  InvocationResult invoke(List<String> userArgs) throws InterruptedException, IOException {
+  InvocationResult invoke(List<String> userArgs, CancellationToken cancellation)
+      throws InterruptedException, IOException {
     var argsList = List.copyOf(userArgs);
     checkArgs(argsList);
     if (!concurrency.tryAcquire()) {
@@ -169,7 +174,7 @@ public final class CommandGrant {
           "Concurrency limit reached for " + toolName + "; try again later");
     }
     try {
-      return run(argsList);
+      return run(argsList, cancellation);
     } finally {
       concurrency.release();
     }
@@ -191,7 +196,8 @@ public final class CommandGrant {
     }
   }
 
-  private InvocationResult run(List<String> userArgs) throws IOException, InterruptedException {
+  private InvocationResult run(List<String> userArgs, CancellationToken cancellation)
+      throws IOException, InterruptedException {
     var argv = new ArrayList<String>(userArgs.size() + 1);
     argv.add(binaryPath.toString());
     argv.addAll(userArgs);
@@ -206,7 +212,10 @@ public final class CommandGrant {
             .withSecretRegistry(secretRegistry)
             .start()) {
       process.stdin().close();
-      outcome = process.await();
+      outcome = process.await(cancellation);
+    }
+    if (!outcome.timedOut() && cancellation.isCancelled()) {
+      throw new CancellationException("invocation of " + toolName + " cancelled");
     }
     return new InvocationResult(
         outcome.exitCode(),

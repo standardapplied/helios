@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 /**
  * The model-facing side of a {@link CommandGrant}: one {@code args} array parameter in, the exit
@@ -56,14 +57,16 @@ record CommandGrantTool(CommandGrant grant, String description, boolean stderrTo
       }
       argv.add(s);
     }
-    return invoke(argv);
+    return invoke(argv, ctx);
   }
 
-  private ToolResult invoke(List<String> argv) {
+  private ToolResult invoke(List<String> argv, ToolContext ctx) {
     try {
-      return ToolResult.success(render(grant.invoke(argv)));
+      return ToolResult.success(render(grant.invoke(argv, ctx.cancellation())));
     } catch (RejectedException e) {
       return ToolResult.failure(e.getMessage());
+    } catch (CancellationException e) {
+      return ToolResult.failure("Cancelled while invoking " + grant.name());
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       return ToolResult.failure("Interrupted while invoking " + grant.name());

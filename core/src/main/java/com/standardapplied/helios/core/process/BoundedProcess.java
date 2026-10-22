@@ -3,6 +3,7 @@
 package com.standardapplied.helios.core.process;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
@@ -14,13 +15,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
  * One child process started from an explicit argv and environment, never through a shell, with its
  * stdout and stderr captured into bounded buffers, a timeout that kills the process and its
  * descendants, and a per-call working directory removed on {@link #close()}. A buffer cut at its
- * cap keeps no part of a registered secret the cut went through.
+ * cap keeps no part of a registered secret the cut went through. A descendant that detached from
+ * the child before the child exited cannot be found portably: it is not killed, and its output
+ * after {@link #GRACE} is dropped.
  *
  * <p>The child inherits nothing from the JVM's environment; it sees exactly the variables the
  * builder was given. Its stdin is left open for the caller, who closes it or feeds it through
@@ -29,11 +33,17 @@ import java.util.concurrent.TimeUnit;
  * <pre>{@code
  * try (var process = BoundedProcess.newBuilder(argv).withEnvironment(env).start()) {
  *   process.stdin().close();
- *   var outcome = process.await();
+ *   var outcome = process.await(cancellation);
  * }
  * }</pre>
  */
 public final class BoundedProcess implements AutoCloseable {
+
+  /**
+   * How long a killed process tree is given to end before it is killed forcibly, and how long each
+   * output stream is given to end once the child has exited.
+   */
+  public static final Duration GRACE = Duration.ofSeconds(2);
 
   private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
   private static final int DEFAULT_MAX_OUTPUT_BYTES = 50_000;
@@ -44,10 +54,9 @@ public final class BoundedProcess implements AutoCloseable {
   private final Duration timeout;
   private final SecretRegistry secrets;
   private final long startNanos;
+  private final ProcessTree tree;
   private final BoundedSink stdoutSink;
   private final BoundedSink stderrSink;
-  private final Thread stdoutDrain;
-  private final Thread stderrDrain;
 
   private BoundedProcess(Process process, Path ownedDirectory, Builder builder, long startNanos) {
     this.process = process;
@@ -55,10 +64,9 @@ public final class BoundedProcess implements AutoCloseable {
     this.timeout = builder.timeout;
     this.secrets = builder.secrets;
     this.startNanos = startNanos;
-    this.stdoutSink = new BoundedSink(builder.maxOutputBytes);
-    this.stderrSink = new BoundedSink(builder.maxOutputBytes);
-    this.stdoutDrain = Thread.startVirtualThread(() -> stdoutSink.drain(process.getInputStream()));
-    this.stderrDrain = Thread.startVirtualThread(() -> stderrSink.drain(process.getErrorStream()));
+    this.tree = new ProcessTree(process);
+    this.stdoutSink = BoundedSink.draining(process.getInputStream(), builder.maxOutputBytes);
+    this.stderrSink = BoundedSink.draining(process.getErrorStream(), builder.maxOutputBytes);
   }
 
   /**
@@ -84,30 +92,59 @@ public final class BoundedProcess implements AutoCloseable {
 
   /** Ask the child and every descendant to terminate. Safe to call from any thread, repeatedly. */
   public void kill() {
-    process.descendants().forEach(ProcessHandle::destroy);
-    process.destroy();
+    tree.kill();
   }
 
   /**
-   * Wait for the child to exit, killing it and its descendants once the timeout elapses, then wait
-   * for both output streams to be fully captured. A stream cut at the cap loses its trailing part
-   * of a secret registered in the builder's registry before its truncation marker.
+   * Wait for the child to exit, then up to {@link #GRACE} for each output stream to end. The child
+   * and its descendants are killed when the timeout elapses or {@code cancellation} fires, and on
+   * every exception while waiting; a killed tree still alive after {@link #GRACE} is killed
+   * forcibly. A stream cut at the cap, or still open after the grace, ends in a truncation marker
+   * and loses its trailing part of a secret registered in the builder's registry.
    *
-   * @return the exit code, captured output and timing
-   * @throws InterruptedException if the calling thread is interrupted while waiting; the child
-   *     keeps running, and the caller decides whether to {@link #kill()} it
+   * @param cancellation the call's token; firing it kills the child
+   * @return the exit code, or {@code -1} for a child this call killed, the captured output and
+   *     timing
+   * @throws InterruptedException if the calling thread is interrupted while waiting, once the child
+   *     and its descendants are killed and reaped; the interrupt status is set again
    */
-  public ProcessOutcome await() throws InterruptedException {
-    var timedOut = !process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-    if (timedOut) {
-      kill();
-      reapForcibly();
+  public ProcessOutcome await(CancellationToken cancellation) throws InterruptedException {
+    Objects.requireNonNull(cancellation, "cancellation");
+    var ended = new CountDownLatch(1);
+    process.onExit().thenRun(ended::countDown);
+    var registration =
+        cancellation.onCancel(
+            () -> {
+              kill();
+              ended.countDown();
+            });
+    var settled = false;
+    try {
+      var timedOut = !ended.await(timeout.toNanos(), TimeUnit.NANOSECONDS);
+      var killed = timedOut || cancellation.isCancelled();
+      if (killed) {
+        tree.killAndReap(GRACE);
+      }
+      var deadline = System.nanoTime() + GRACE.toNanos();
+      stdoutSink.awaitEnd(deadline);
+      stderrSink.awaitEnd(deadline);
+      settled = true;
+      return outcome(killed ? -1 : process.exitValue(), timedOut);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw e;
+    } finally {
+      registration.remove();
+      if (!settled) {
+        tree.killAndReap(GRACE);
+      }
     }
-    stdoutDrain.join();
-    stderrDrain.join();
+  }
+
+  private ProcessOutcome outcome(int exitCode, boolean timedOut) {
     var redactor = secrets.redactor();
     return new ProcessOutcome(
-        timedOut ? -1 : process.exitValue(),
+        exitCode,
         stdoutSink.bytes(redactor),
         stderrSink.bytes(redactor),
         timedOut,
@@ -121,14 +158,6 @@ public final class BoundedProcess implements AutoCloseable {
   public void close() {
     if (ownedDirectory != null) {
       deleteRecursively(ownedDirectory);
-    }
-  }
-
-  private void reapForcibly() throws InterruptedException {
-    if (!process.waitFor(2, TimeUnit.SECONDS)) {
-      process.descendants().forEach(ProcessHandle::destroyForcibly);
-      process.destroyForcibly();
-      process.waitFor(1, TimeUnit.SECONDS);
     }
   }
 
@@ -195,7 +224,10 @@ public final class BoundedProcess implements AutoCloseable {
       return this;
     }
 
-    /** How long {@link BoundedProcess#await()} lets the child run. Defaults to 30 seconds. */
+    /**
+     * How long {@link BoundedProcess#await(CancellationToken)} lets the child run. Defaults to 30
+     * seconds.
+     */
     public Builder withTimeout(Duration timeout) {
       if (timeout == null || timeout.isZero() || timeout.isNegative()) {
         throw new IllegalArgumentException("Timeout must be positive");

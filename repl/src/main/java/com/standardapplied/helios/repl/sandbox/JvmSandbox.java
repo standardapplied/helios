@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -147,6 +148,15 @@ public final class JvmSandbox implements Sandbox {
    * @return a running sandbox
    */
   static JvmSandbox create(JvmSandboxConfig config, HostFunctionRegistry registry) {
+    return create(config, registry, rpc -> {});
+  }
+
+  /**
+   * {@link #create(JvmSandboxConfig, HostFunctionRegistry)}, handing the RPC connection to {@code
+   * accepted} as soon as it is open; for tests of a launch that fails after it.
+   */
+  static JvmSandbox create(
+      JvmSandboxConfig config, HostFunctionRegistry registry, Consumer<SandboxRpc> accepted) {
     var acquired = new ArrayDeque<Runnable>();
     try {
       var directories = SandboxDirectories.create(config.workingDirectory());
@@ -156,7 +166,7 @@ public final class JvmSandbox implements Sandbox {
       try (var listener = SandboxRpc.listen(directories.socketPath())) {
         process =
             SandboxLauncher.start(config, directories.socketPath(), directories.workingDirectory());
-        acquired.push(process::destroyForcibly);
+        acquired.push(() -> SandboxLauncher.destroyTree(process));
         rpc =
             SandboxRpc.accept(
                 listener,
@@ -166,13 +176,14 @@ public final class JvmSandbox implements Sandbox {
                 config.callTimeout());
       }
       acquired.push(rpc::closeSocket);
+      acquired.push(rpc.channel()::close);
+      accepted.accept(rpc);
       var stdout = StdoutCapture.start(process);
       acquired.push(stdout::interrupt);
       var customPrelude = SandboxPrelude.synthesizeCustomWrappers(registry);
       registry.freeze();
-      var sandbox = new JvmSandbox(process, rpc, config, stdout, directories);
       rpc.installPrelude(customPrelude);
-      return sandbox;
+      return new JvmSandbox(process, rpc, config, stdout, directories);
     } catch (IOException e) {
       acquired.forEach(Runnable::run);
       throw new ReplException("Failed to start JVM sandbox subprocess", e);
