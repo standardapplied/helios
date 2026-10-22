@@ -7,6 +7,7 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.session.CompactionResult;
 import com.standardapplied.helios.session.ContextCompactor;
 import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.SerializedError;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.hooks.CompactionPayload;
 import com.standardapplied.helios.session.hooks.HookOutcome;
@@ -171,7 +172,9 @@ final class ContextCompaction {
     } catch (RuntimeException e) {
       if (!state.ending().failWith(e)) {
         LOGGER.log(
-            Level.WARNING, "context compactor threw; leaving history unchanged this turn", e);
+            Level.WARNING,
+            "context compactor threw; leaving history unchanged this turn",
+            SerializedError.redactedForLog(e, collaborators.secrets().redactor()));
       }
       return;
     }

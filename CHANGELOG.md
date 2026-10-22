@@ -974,9 +974,9 @@ never run, emit no tool event and never reach the history.
   registry, a cut stream drops a trailing partial secret first, and `data` and the listener are gone
   (see Breaking).
 - **A registered secret no longer reaches a log handler through a hook's or a tool's failure, or an
-  event subscriber through a tool call's arguments.** The `WARNING` of a throwing hook, the `SEVERE`
-  of a tool that threw after its call was answered and the `WARNING` of a throwing `onSessionEnd`
-  attached the raw exception; they now attach a copy whose messages are redacted and whose frames
+  event subscriber through a tool call's arguments.** The `WARNING` of a throwing hook or `ContextCompactor`,
+  the `SEVERE` of a tool that threw after its call was answered and the `WARNING` of a throwing
+  `onSessionEnd` attached the raw exception; they now attach a copy whose messages are redacted and whose frames
   are the original's. `ToolUse`, `ToolMutated`, `ToolBlocked` and `ToolResult` carried the arguments
   as the model or a hook wrote them; they now carry them redacted, in keys and in string values at
   any depth. The tool, the hooks and the history still see them unredacted.

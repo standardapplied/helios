@@ -19,6 +19,7 @@ import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
+import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
@@ -136,6 +137,34 @@ final class HookAndEventRedactionTest {
         List.of(
             "java.lang.IllegalStateException: outer",
             "java.lang.IllegalArgumentException: inner " + MARKER));
+  }
+
+  @Test
+  void aCompactorThatThrowsIsLoggedWithARedactedCopy() {
+    var failure = new IllegalStateException("cannot summarize " + SECRET);
+    var options =
+        options()
+            .withLimits(SessionLimits.newBuilder().withMaxContextTokens(100).build())
+            .withTokenCounter(messages -> 96L)
+            .withContextCompactor(
+                (history, state) -> {
+                  throw failure;
+                });
+    var logged = new ArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(AgentLoop.class, logged)) {
+      WriteToolSessions.run(options, WriteToolSessions.write("/tmp/a"));
+    }
+
+    assertFalse(logged.isEmpty(), "log records");
+    for (var record : logged) {
+      assertEquals(
+          "context compactor threw; leaving history unchanged this turn", record.getMessage());
+      RedactedLogs.assertCopyOf(
+          failure,
+          record.getThrown(),
+          List.of("java.lang.IllegalStateException: cannot summarize " + MARKER));
+    }
   }
 
   // ── events ────────────────────────────────────────────────────────────────
