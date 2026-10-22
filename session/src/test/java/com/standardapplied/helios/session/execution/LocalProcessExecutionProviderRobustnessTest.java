@@ -283,6 +283,35 @@ final class LocalProcessExecutionProviderRobustnessTest {
   }
 
   /**
+   * The grandchild ignores SIGTERM and the child dies of it, which re-parents the grandchild; the
+   * reaping still reaches it, forcibly, before {@code close()} returns.
+   */
+  @Test
+  void closeForciblyKillsADescendantIgnoringSigtermWhoseParentDied(@TempDir Path cwd) {
+    assumeBashAvailable();
+    try (var provider = testProvider()) {
+      try {
+        var call =
+            start(
+                provider,
+                bash("(trap '' TERM; echo $BASHPID > pid; exec sleep 600) & exec sleep 600")
+                    .withWorkingDirectory(cwd)
+                    .build(),
+                new CancellationToken());
+        Await.until("the grandchild's trap to be set", () -> !readPid(cwd).isEmpty());
+        var grandchild = ProcessHandle.of(Long.parseLong(readPid(cwd))).orElseThrow();
+
+        provider.close();
+
+        assertFalse(grandchild.isAlive());
+        assertEquals(KILLED_BY_SIGTERM, Await.value("the reaped call", call).exitCode());
+      } finally {
+        destroyRecorded(cwd);
+      }
+    }
+  }
+
+  /**
    * {@code close()} scans the in-flight set once. A call that passed its closed check before {@code
    * close()} and starts its process after that scan has to reap the process itself; the handler
    * closes the provider at exactly that point.

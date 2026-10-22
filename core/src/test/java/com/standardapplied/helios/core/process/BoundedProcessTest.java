@@ -486,29 +486,30 @@ class BoundedProcessTest {
   }
 
   /**
-   * The first kill captures the child's descendants before the grandchild exists. The child ignores
-   * SIGTERM, so the grandchild is still attached when the reaping signals again, and only the
-   * descendants visible at that moment reach it.
+   * The first signal captures the child's descendants before the grandchild exists. The child
+   * ignores SIGTERM, so the grandchild is still attached when the reaping signals again, and only
+   * the descendants visible at that moment reach it.
    */
   @Test
   void theReapingReachesADescendantStartedAfterTheFirstKill(@TempDir Path tmp) throws Exception {
     try (var process =
         bash("trap '' TERM; : > ready; read -r _; sleep 600 & echo $! > child; exec sleep 600")
             .withWorkingDirectory(tmp)
-            .withTimeout(SHORT)
             .start()) {
       var child = process.process().toHandle();
       try {
         Await.until("SIGTERM to be ignored", () -> Files.exists(tmp.resolve("ready")));
-        process.kill();
+        var tree = new ProcessTree(process.process());
+        tree.kill();
         try (var stdin = process.stdin()) {
           stdin.write('\n');
         }
         Await.until("the grandchild to start", () -> !readPid(tmp).isEmpty());
         var grandchild = ProcessHandle.of(Long.parseLong(readPid(tmp))).orElseThrow();
 
-        assertTrue(process.await(new CancellationToken()).timedOut());
-        Await.value("the grandchild to end", grandchild.onExit());
+        tree.killAndReap(BoundedProcess.GRACE);
+
+        assertFalse(grandchild.isAlive());
       } finally {
         child.destroyForcibly();
         destroyRecorded(tmp);

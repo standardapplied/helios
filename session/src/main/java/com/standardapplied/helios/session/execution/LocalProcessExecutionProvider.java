@@ -234,8 +234,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
 
   private ExecutionResult awaitProcess(
       ExecutionRequest request, BoundedProcess process, CancellationToken cancellation) {
-    var proc = process.process();
-    inflight.track(proc);
+    inflight.track(process);
     var stdinFeeder = StdinFeeder.start(process, request.stdin().orElse(null));
     ProcessOutcome outcome;
     try {
@@ -246,7 +245,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
           "interrupted while waiting for " + request.runtime() + " process");
     } finally {
       stdinFeeder.join();
-      inflight.untrack(proc);
+      inflight.untrack(process);
     }
     // If the token fired during execution and the process did NOT time out on its own, the
     // process was killed by cancellation — surface that as a CancellationException rather than a

@@ -79,7 +79,7 @@ public final class BoundedProcess implements AutoCloseable {
     return new Builder(argv);
   }
 
-  /** The running child, for callers that track in-flight processes. */
+  /** The running child. */
   public Process process() {
     return process;
   }
@@ -89,9 +89,13 @@ public final class BoundedProcess implements AutoCloseable {
     return process.getOutputStream();
   }
 
-  /** Ask the child and every descendant to terminate. Safe to call from any thread, repeatedly. */
+  /**
+   * Kill the child and every descendant, forcibly whatever is still alive after {@link #GRACE}, and
+   * return once they ended or another {@link #GRACE} passed. An interrupt does not cut the wait
+   * short; it is kept for the caller. Safe to call from any thread, repeatedly.
+   */
   public void kill() {
-    tree.kill();
+    tree.killAndReap(GRACE);
   }
 
   /**
@@ -109,14 +113,13 @@ public final class BoundedProcess implements AutoCloseable {
    */
   public ProcessOutcome await(CancellationToken cancellation) throws InterruptedException {
     Objects.requireNonNull(cancellation, "cancellation");
-    var registration =
-        cancellation.onCancel(() -> Thread.startVirtualThread(() -> tree.killAndReap(GRACE)));
+    var registration = cancellation.onCancel(() -> Thread.startVirtualThread(this::kill));
     var settled = false;
     try {
       var timedOut = !process.waitFor(timeout.toNanos(), TimeUnit.NANOSECONDS);
       var killed = timedOut || cancellation.isCancelled();
       if (killed) {
-        tree.killAndReap(GRACE);
+        kill();
       }
       var deadline = System.nanoTime() + GRACE.toNanos();
       stdoutSink.awaitEnd(deadline);
@@ -129,7 +132,7 @@ public final class BoundedProcess implements AutoCloseable {
     } finally {
       registration.remove();
       if (!settled) {
-        tree.killAndReap(GRACE);
+        kill();
       }
     }
   }
