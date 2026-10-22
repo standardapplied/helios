@@ -458,6 +458,21 @@ final class JShellExecutionProviderTest {
   }
 
   @Test
+  void executesOnASharedTokenLeaveNoCallbackOnIt() {
+    var sandbox = new StubSandbox();
+    try (var provider = providerFor(sandbox)) {
+      var c = ctx("shared-token");
+      provider.onSessionStart(c);
+      var token = new CancellationToken();
+      var req = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("x").build();
+      for (var i = 0; i < 3; i++) {
+        awaitExecution(provider, c, req, token);
+      }
+      assertEquals(0, token.activeCallbackCountForTests());
+    }
+  }
+
+  @Test
   void executeForUnknownSessionReturnsRefusal() throws Exception {
     var sandbox = new StubSandbox();
     try (var provider = providerFor(sandbox)) {
