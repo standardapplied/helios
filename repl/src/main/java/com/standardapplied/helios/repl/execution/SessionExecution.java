@@ -27,14 +27,14 @@ final class SessionExecution {
       ExecutionRequest request,
       Duration timeout,
       CancellationToken cancellation) {
-    var killed = new AtomicBoolean();
-    Runnable kill =
-        () -> {
-          if (killed.compareAndSet(false, true)) {
-            SandboxPool.safeClose(session);
-          }
-        };
-    var killRegistration = cancellation.onCancel(kill);
+    var callOver = new AtomicBoolean();
+    var killRegistration =
+        cancellation.onCancel(
+            () -> {
+              if (!callOver.get()) {
+                SandboxPool.safeClose(session);
+              }
+            });
     try {
       var result = attempt(session, request, timeout);
       if (Thread.currentThread().isInterrupted()) {
@@ -46,13 +46,11 @@ final class SessionExecution {
       }
       return result;
     } finally {
-      // An interrupted call kills the session on every exit, a sandbox's own exception included.
-      // The kill callback is then made inert and detached from the long-lived session token so a
-      // later fire cannot double-close and per-call references do not accumulate.
       if (Thread.currentThread().isInterrupted()) {
-        kill.run();
+        SandboxPool.safeClose(session);
       }
-      killed.set(true);
+      // A kill the token fires once the call is over leaves the session open for the next call.
+      callOver.set(true);
       killRegistration.remove();
     }
   }
