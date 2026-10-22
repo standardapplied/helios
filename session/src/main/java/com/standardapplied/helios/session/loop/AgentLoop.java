@@ -51,10 +51,10 @@ import java.util.Optional;
  *
  * <h2>Thread-safety</h2>
  *
- * One AgentLoop instance per session. {@link #run(SessionState, SessionLimits)} runs on a single
- * virtual thread. Shared collaborators ({@link TurnRunner}, {@link StopClassifier}, {@link
- * HookRegistry}) are reusable across sessions; per-session collaborators ({@link SessionState},
- * {@link SteeringQueue}, {@link ToolDispatch}) are owned by the caller.
+ * One AgentLoop instance per session, with collaborators built for that session: {@link
+ * StopClassifier} and {@link HookRegistry} hold its secret registry. {@link #run(SessionState,
+ * SessionLimits)} runs on a single virtual thread; {@link SessionState}, {@link SteeringQueue} and
+ * {@link ToolDispatch} are owned by the caller.
  */
 public final class AgentLoop {
 
