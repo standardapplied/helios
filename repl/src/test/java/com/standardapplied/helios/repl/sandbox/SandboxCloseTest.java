@@ -13,11 +13,14 @@ import com.standardapplied.helios.core.test.LineSink;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import com.standardapplied.helios.repl.protocol.RpcChannel;
+import com.standardapplied.helios.session.test.LogCapture;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -116,12 +119,14 @@ class SandboxCloseTest {
             StdoutCapture.of(transport),
             directories);
 
-    try (var log = new LogCapture(JvmSandbox.class)) {
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+    try (var ignored = LogCapture.of(JvmSandbox.class, logged)) {
       sandbox.close();
 
       assertTrue(Thread.interrupted());
       assertEquals(
-          List.of("FINE Interrupted while waiting for sandbox process to exit"), log.records());
+          List.of("FINE Interrupted while waiting for sandbox process to exit"),
+          logged.stream().map(r -> r.getLevel() + " " + r.getMessage()).toList());
     }
     Await.termination("the sandbox's subprocess", process);
     assertFalse(channel.isActive());
