@@ -33,6 +33,7 @@ import com.standardapplied.helios.session.hooks.PostCompactHook;
 import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.LogCapture;
+import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
@@ -178,7 +179,7 @@ final class LoopStagesTest {
     assertEquals(Level.WARNING, warning.getLevel());
     assertEquals(
         "context compactor threw; leaving history unchanged this turn", warning.getMessage());
-    assertSame(failure, warning.getThrown());
+    RedactedLogs.assertCopyOf(failure, warning.getThrown());
   }
 
   @Test
