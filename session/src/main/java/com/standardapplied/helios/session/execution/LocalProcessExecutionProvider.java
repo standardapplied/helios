@@ -252,7 +252,11 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
       outcome = process.await();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      killCallback.run();
+      killed.set(true);
+      // SIGKILL, not the token's SIGTERM: the child is untracked once execute throws, and nothing
+      // is left waiting to escalate against one that ignores SIGTERM.
+      proc.descendants().forEach(ProcessHandle::destroyForcibly);
+      proc.destroyForcibly();
       stdinFeeder.join();
       inflight.untrack(proc);
       killRegistration.remove();
