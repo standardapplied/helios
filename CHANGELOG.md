@@ -691,13 +691,12 @@ tool call's own thread and must stop when that thread is interrupted or the call
 | `JShellExecutionProvider.Builder.withNetworkAllowed`, `withFilesystemWriteAllowed` | removed; use `JvmSandboxConfig.Builder.withSandboxPolicy` (e.g. `SandboxPolicy.noEgress()`) |
 | `CompletionStage<ExecutionResult> execute(session, request, token)` | `ExecutionResult execute(session, request, token)`, run on the tool call's thread; it must stop on interrupt or cancellation, throwing `CancellationException` with the interrupt status kept, and a closed provider throws `IllegalStateException`. An interrupted JShell execute now closes its sandbox session, where it returned an RPC-failure result while the snippet ran on |
 
-**`BoundedProcess.await` takes the call's `CancellationToken`.** Firing the token, or interrupting
-the waiting thread, kills the child and its descendants and reaps them, killing forcibly whatever
-is still alive after `BoundedProcess.GRACE` (2 s).
+**`BoundedProcess.await` takes the call's `CancellationToken`.** Cancelling it or interrupting the
+waiting thread kills and reaps the child and its descendants, forcibly after `BoundedProcess.GRACE`.
 
 | 2.x | 3.0 |
 |---|---|
-| `BoundedProcess.await()`, which left the child running when the waiting thread was interrupted | `BoundedProcess.await(CancellationToken)`, which kills the child on cancel and on interrupt; a child it killed reports exit code `-1` |
+| `BoundedProcess.await()`, which left the child running on interrupt | `BoundedProcess.await(CancellationToken)`; a child it killed reports exit code `-1` |
 
 ### Added
 
@@ -827,15 +826,13 @@ is still alive after `BoundedProcess.GRACE` (2 s).
 ### Fixed
 
 - **A backgrounded child hung a command call, and an interrupted or cancelled grant left its child
-  running.** A process the child left behind (`server &`) held the output pipes, so `CommandGrant`
-  and `LocalProcessExecutionProvider` waited for it forever; each stream now gets
-  `BoundedProcess.GRACE` after the child exits and is then reported truncated. An interrupted
-  `CommandGrant` call returned while its child ran on in a deleted working directory, and a
-  cancelled one never reached its child; both now kill and reap it, and a cancelled call returns
-  `Cancelled while invoking <name>`. A descendant that ignored `SIGTERM` while its parent died of
-  it is now killed forcibly, on timeout, cancellation and interrupt alike. A sandbox launch that
-  failed after its RPC channel opened now closes the channel, kills the child's descendants and
-  registers no shutdown hook.
+  running.** A process left behind (`server &`) held the output pipes, so `CommandGrant` and
+  `LocalProcessExecutionProvider` waited forever; each stream now gets `BoundedProcess.GRACE` after
+  the child exits and is then reported truncated. An interrupted or cancelled grant now kills and
+  reaps its child (a cancelled one returns `Cancelled while invoking <name>`), and a descendant
+  that ignores `SIGTERM` is killed forcibly even when its parent died. A sandbox launch that fails
+  after its RPC channel opens now closes the channel, kills the child's descendants and registers
+  no shutdown hook.
 - **A session from `SessionPresets.workspace` or `openEnded` failed to start.** Both presets
   registered `MemoryWrite` and set a memory backend, for which the session registers `MemoryRead`
   and `MemoryWrite` itself, so every `AgentSession.create` threw `IllegalArgumentException:
