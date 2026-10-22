@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.PidFile;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -195,9 +196,7 @@ class BoundedProcessTest {
     try (var process =
         bash("sleep 600 & echo $! > child; wait").withWorkingDirectory(tmp).start()) {
       process.stdin().close();
-      Await.until("the descendant to start", () -> Files.exists(tmp.resolve("child")));
-      Await.until("the pid to be written", () -> !readPid(tmp).isEmpty());
-      var child = ProcessHandle.of(Long.parseLong(readPid(tmp))).orElseThrow();
+      var child = PidFile.await("the descendant to start", tmp.resolve("child"));
 
       process.kill();
       var outcome = process.await(new CancellationToken());
@@ -220,21 +219,12 @@ class BoundedProcessTest {
             .withTimeout(SHORT)
             .start()) {
       process.stdin().close();
-      Await.until("the pid to be written", () -> !readPid(tmp).isEmpty());
-      var child = ProcessHandle.of(Long.parseLong(readPid(tmp))).orElseThrow();
+      var child = PidFile.await("the descendant to start", tmp.resolve("child"));
 
       var outcome = process.await(new CancellationToken());
 
       assertTrue(outcome.timedOut());
       Await.until("the descendant to die", () -> !child.isAlive());
-    }
-  }
-
-  private static String readPid(Path dir) {
-    try {
-      return Files.readString(dir.resolve("child")).strip();
-    } catch (IOException e) {
-      return "";
     }
   }
 
@@ -269,7 +259,7 @@ class BoundedProcessTest {
       assertTrue(outcome.stdoutTruncated());
       assertFalse(outcome.timedOut());
     } finally {
-      destroyRecorded(tmp);
+      PidFile.destroy(tmp.resolve("child"));
     }
   }
 
@@ -301,7 +291,7 @@ class BoundedProcessTest {
       var child = process.process().toHandle();
       try {
         process.stdin().close();
-        Await.until("SIGTERM to be ignored", () -> !readPid(tmp).isEmpty());
+        PidFile.await("SIGTERM to be ignored", tmp.resolve("child"));
 
         var interrupted = interruptAwaiting(process);
 
@@ -364,7 +354,7 @@ class BoundedProcessTest {
       var child = process.process().toHandle();
       try {
         process.stdin().close();
-        Await.until("SIGTERM to be ignored", () -> !readPid(tmp).isEmpty());
+        PidFile.await("SIGTERM to be ignored", tmp.resolve("child"));
         var token = new CancellationToken();
         token.cancel("before the wait");
 
@@ -473,15 +463,14 @@ class BoundedProcessTest {
             .withTimeout(SHORT)
             .start()) {
       process.stdin().close();
-      Await.until("the grandchild to ignore SIGTERM", () -> !readPid(tmp).isEmpty());
-      var grandchild = ProcessHandle.of(Long.parseLong(readPid(tmp))).orElseThrow();
+      var grandchild = PidFile.await("the grandchild to ignore SIGTERM", tmp.resolve("child"));
 
       var outcome = process.await(new CancellationToken());
 
       assertTrue(outcome.timedOut());
       Await.value("the grandchild to end", grandchild.onExit());
     } finally {
-      destroyRecorded(tmp);
+      PidFile.destroy(tmp.resolve("child"));
     }
   }
 
@@ -504,15 +493,14 @@ class BoundedProcessTest {
         try (var stdin = process.stdin()) {
           stdin.write('\n');
         }
-        Await.until("the grandchild to start", () -> !readPid(tmp).isEmpty());
-        var grandchild = ProcessHandle.of(Long.parseLong(readPid(tmp))).orElseThrow();
+        var grandchild = PidFile.await("the grandchild to start", tmp.resolve("child"));
 
         tree.killAndReap(BoundedProcess.GRACE);
 
         assertFalse(grandchild.isAlive());
       } finally {
         child.destroyForcibly();
-        destroyRecorded(tmp);
+        PidFile.destroy(tmp.resolve("child"));
       }
     }
   }
@@ -522,19 +510,6 @@ class BoundedProcessTest {
       return process.await(token);
     } catch (InterruptedException e) {
       throw new AssertionError(e);
-    }
-  }
-
-  /** Forcibly end the process whose pid the test's fixture wrote, and wait for it to end. */
-  private static void destroyRecorded(Path dir) {
-    var pid = readPid(dir);
-    if (!pid.isEmpty()) {
-      ProcessHandle.of(Long.parseLong(pid))
-          .ifPresent(
-              handle -> {
-                handle.destroyForcibly();
-                Await.value("the recorded process to end", handle.onExit());
-              });
     }
   }
 
