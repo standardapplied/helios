@@ -38,6 +38,8 @@ class BoundedProcessTest {
   private static final Duration NEVER_REACHED = Duration.ofMinutes(10);
   private static final Duration SHORT = Duration.ofMillis(300);
   private static final String TRUNCATION_MARKER = "\n[truncated: output exceeded cap]";
+  private static final String TERM_DEAF_WITHOUT_OUTPUT =
+      "trap '' TERM; exec 1>&- 2>&-; echo $$ > child; exec sleep 600";
 
   @BeforeAll
   static void requireBash() {
@@ -264,7 +266,7 @@ class BoundedProcessTest {
 
         var interrupted = interruptAwaiting(process);
 
-        assertTrue(interrupted, "the interrupt status is set again");
+        assertTrue(interrupted.statusSet(), "the interrupt status is set again");
         Await.value("the killed child to end", child.onExit());
       } finally {
         child.destroyForcibly();
@@ -274,31 +276,34 @@ class BoundedProcessTest {
 
   /**
    * The interrupt status is already set when the reaping starts, so a reaping that an interrupt
-   * cuts short would never reach the forcible kill this child needs.
+   * cuts short would never reach the forcible kill this child needs. The child has closed its
+   * output, so no drain holds {@code await} until the forcible kill has taken effect.
    */
   @Test
   void anInterruptedAwaitForciblyKillsAChildIgnoringSigterm(@TempDir Path tmp) throws Exception {
-    try (var process =
-        bash("trap '' TERM; echo $$ > child; exec sleep 600").withWorkingDirectory(tmp).start()) {
+    try (var process = bash(TERM_DEAF_WITHOUT_OUTPUT).withWorkingDirectory(tmp).start()) {
       var child = process.process().toHandle();
       try {
         process.stdin().close();
         Await.until("SIGTERM to be ignored", () -> !readPid(tmp).isEmpty());
 
-        assertTrue(interruptAwaiting(process), "the interrupt status is set again");
-        Await.value("the forcibly killed child to end", child.onExit());
+        var interrupted = interruptAwaiting(process);
+
+        assertTrue(interrupted.statusSet(), "the interrupt status is set again");
+        assertFalse(interrupted.childAlive(), "await throws once the child has ended");
       } finally {
         child.destroyForcibly();
       }
     }
   }
 
-  /**
-   * Interrupt a thread blocked in {@code await}; return whether its interrupt status was set when
-   * {@code await} threw.
-   */
-  private static boolean interruptAwaiting(BoundedProcess process) {
-    var interrupted = new CompletableFuture<Boolean>();
+  /** What an {@code await} that threw {@link InterruptedException} left behind as it threw. */
+  private record Interrupted(boolean statusSet, boolean childAlive) {}
+
+  /** Interrupt a thread blocked in {@code await} and report the state it threw in. */
+  private static Interrupted interruptAwaiting(BoundedProcess process) {
+    var child = process.process().toHandle();
+    var interrupted = new CompletableFuture<Interrupted>();
     var waiter =
         Thread.startVirtualThread(
             () -> {
@@ -306,7 +311,8 @@ class BoundedProcessTest {
                 process.await(new CancellationToken());
                 interrupted.completeExceptionally(new AssertionError("await returned"));
               } catch (InterruptedException e) {
-                interrupted.complete(Thread.currentThread().isInterrupted());
+                interrupted.complete(
+                    new Interrupted(Thread.currentThread().isInterrupted(), child.isAlive()));
               }
             });
     waiter.interrupt();
@@ -335,10 +341,10 @@ class BoundedProcessTest {
     }
   }
 
+  /** The child has closed its output, so no drain holds {@code await} until the child has ended. */
   @Test
   void cancellingTheTokenForciblyKillsAChildIgnoringSigterm(@TempDir Path tmp) throws Exception {
-    try (var process =
-        bash("trap '' TERM; echo $$ > child; exec sleep 600").withWorkingDirectory(tmp).start()) {
+    try (var process = bash(TERM_DEAF_WITHOUT_OUTPUT).withWorkingDirectory(tmp).start()) {
       var child = process.process().toHandle();
       try {
         process.stdin().close();
@@ -350,7 +356,7 @@ class BoundedProcessTest {
 
         assertEquals(-1, outcome.exitCode());
         assertFalse(outcome.timedOut());
-        Await.value("the forcibly killed child to end", child.onExit());
+        assertFalse(child.isAlive(), "await returns once the child has ended");
       } finally {
         child.destroyForcibly();
       }

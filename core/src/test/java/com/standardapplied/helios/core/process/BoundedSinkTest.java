@@ -7,11 +7,14 @@ package com.standardapplied.helios.core.process;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.test.Await;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 
 class BoundedSinkTest {
@@ -26,6 +29,37 @@ class BoundedSinkTest {
     assertArrayEquals(
         "partial".getBytes(StandardCharsets.UTF_8), sink.bytes(new SecretRegistry().redactor()));
     assertFalse(sink.truncated());
+  }
+
+  /**
+   * A reaping that ran before the wait keeps its interrupt for the caller; an ended drain gives the
+   * wait nothing to block on, so only a check on entry passes the interrupt on.
+   */
+  @Test
+  void anInterruptPendingOnEntryThrowsEvenWhenTheDrainHasEnded() {
+    var drainer = new CompletableFuture<Thread>();
+    var sink = BoundedSink.draining(new EndingAt(drainer), 100);
+    Await.termination("the drain", Await.value("the drain to start", drainer));
+
+    Thread.currentThread().interrupt();
+
+    assertThrows(InterruptedException.class, () -> sink.awaitEnd(0));
+    assertFalse(sink.truncated());
+  }
+
+  /** An empty stream that reports the thread reading it. */
+  private static final class EndingAt extends InputStream {
+    private final CompletableFuture<Thread> reader;
+
+    EndingAt(CompletableFuture<Thread> reader) {
+      this.reader = reader;
+    }
+
+    @Override
+    public int read() {
+      reader.complete(Thread.currentThread());
+      return -1;
+    }
   }
 
   private static final class FailingAfter extends InputStream {

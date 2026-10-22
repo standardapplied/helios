@@ -28,13 +28,16 @@ final class ProcessTree {
   }
 
   /**
-   * Kill the tree, give it {@code grace} to end, then kill whatever of it is still alive forcibly.
-   * An interrupt does not cut the grace short; it is kept for the caller.
+   * Kill the tree, give it {@code grace} to end, then kill whatever of it is still alive forcibly
+   * and give that another {@code grace} to end. An interrupt does not cut either grace short; it is
+   * kept for the caller.
    */
   void killAndReap(Duration grace) {
     kill();
     if (!endWithin(members(), grace)) {
-      members().forEach(ProcessHandle::destroyForcibly);
+      var remaining = members();
+      remaining.forEach(ProcessHandle::destroyForcibly);
+      endWithin(remaining, grace);
     }
   }
 
