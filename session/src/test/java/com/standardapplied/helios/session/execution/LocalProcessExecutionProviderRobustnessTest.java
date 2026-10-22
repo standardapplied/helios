@@ -156,6 +156,29 @@ final class LocalProcessExecutionProviderRobustnessTest {
     }
   }
 
+  @Test
+  void interruptWhilePermitWaitThrowsCancellationAndKeepsTheInterrupt() {
+    assumeBashAvailable();
+    try (var provider = testProvider(1)) {
+      var hold = new CancellationToken();
+      var holder = start(provider, bash(HANG).build(), hold);
+      awaitInflight(provider, 1);
+
+      var token = new CancellationToken();
+      var waiting = ExecutionCall.start(provider, CTX, bash("printf x").build(), token);
+      awaitPermitRequest(token);
+      waiting.thread().interrupt();
+
+      assertEquals(
+          "interrupted while acquiring permit for BASH",
+          cancellationMessage("the interrupted call to fail", waiting.outcome()));
+      assertTrue(waiting.interruptedAtEnd(), "the interrupt status must be kept");
+
+      hold.cancel("done");
+      cancellationMessage("the permit holder to fail", holder);
+    }
+  }
+
   // ── provider.close() reaps in-flight processes ──────────────────────────
 
   @Test
