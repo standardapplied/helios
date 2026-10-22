@@ -22,6 +22,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ForkJoinPool;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -235,21 +237,34 @@ class BoundedProcessTest {
     }
   }
 
+  /**
+   * The child writes more than a pipe holds before it exits, so the drain is reading by then: the
+   * JDK closes a pipe whose drain has not begun when the child exits, even though a descendant
+   * still holds it.
+   */
   @Test
   void aBackgroundedDescendantHoldingTheOutputDoesNotHoldUpTheCall(@TempDir Path tmp)
       throws Exception {
+    var overPipeCapacity = 256 * 1024;
     try (var process =
         BoundedProcess.newBuilder(
-                List.of("/bin/sh", "-c", "sleep 600 & echo $! > child; echo started"))
+                List.of(
+                    "/bin/sh",
+                    "-c",
+                    "sleep 600 & echo $! > child; echo started; head -c "
+                        + overPipeCapacity
+                        + " /dev/zero"))
             .withWorkingDirectory(tmp)
             .withTimeout(NEVER_REACHED)
+            .withMaxOutputBytes(2 * overPipeCapacity)
             .start()) {
       process.stdin().close();
 
       var outcome = process.await(new CancellationToken());
 
       assertEquals(0, outcome.exitCode());
-      assertEquals("started\n" + TRUNCATION_MARKER, text(outcome.stdout()));
+      assertEquals(
+          "started\n" + "\0".repeat(overPipeCapacity) + TRUNCATION_MARKER, text(outcome.stdout()));
       assertTrue(outcome.stdoutTruncated());
       assertFalse(outcome.timedOut());
     } finally {
@@ -360,6 +375,41 @@ class BoundedProcessTest {
       } finally {
         child.destroyForcibly();
       }
+    }
+  }
+
+  /**
+   * {@link Process#onExit()} completes on the common pool, so with every worker busy an exit seen
+   * only through it is not seen before the timeout. The await runs on a virtual thread, not on the
+   * busy pool, and the pool is released only after the outcome arrives.
+   */
+  @Test
+  void aChildThatHasExitedIsSeenAtOnceWhileTheCommonPoolIsBusy() throws Exception {
+    var pool = ForkJoinPool.commonPool();
+    var busy = new CountDownLatch(pool.getParallelism());
+    var release = new CountDownLatch(1);
+    try (var process = bash("exit 3").start()) {
+      process.stdin().close();
+      Await.termination("the child to exit", process.process());
+      for (var i = 0; i < pool.getParallelism(); i++) {
+        pool.submit(
+            () -> {
+              busy.countDown();
+              release.await();
+              return null;
+            });
+      }
+      Await.latch("every common-pool worker to be busy", busy);
+      var awaited = new CompletableFuture<ProcessOutcome>();
+
+      Thread.startVirtualThread(
+          () -> awaited.complete(awaitUnchecked(process, new CancellationToken())));
+
+      var outcome = Await.value("the outcome of the exited child", awaited);
+      assertFalse(outcome.timedOut());
+      assertEquals(3, outcome.exitCode());
+    } finally {
+      release.countDown();
     }
   }
 

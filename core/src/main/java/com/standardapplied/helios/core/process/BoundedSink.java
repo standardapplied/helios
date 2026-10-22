@@ -35,12 +35,20 @@ final class BoundedSink {
     return sink;
   }
 
+  /**
+   * Holds {@code in}'s monitor from the first read to the end of the stream. When the child exits,
+   * the JDK's process reaper takes that monitor to keep what is buffered and close the pipe, though
+   * a descendant may still hold its write end; once this drain has begun, such a pipe stays open
+   * until it really ends or the drain is abandoned.
+   */
   void drain(InputStream in) {
     var buf = new byte[8192];
     try (in) {
-      int n;
-      while ((n = in.read(buf)) >= 0) {
-        write(buf, 0, n);
+      synchronized (in) {
+        int n;
+        while ((n = in.read(buf)) >= 0) {
+          write(buf, 0, n);
+        }
       }
     } catch (IOException ignored) {
       // The stream closes when the process terminates.
