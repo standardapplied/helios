@@ -20,8 +20,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CancellationException;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -34,8 +33,9 @@ final class ExecuteToolTest {
   private static class RecordingProvider implements ExecutionProvider {
     ExecutionRequest lastRequest;
     final ExecutionResult result;
-    boolean throwOnExecute;
+    RuntimeException throwing;
     Error failWith;
+    int calls;
     Set<Runtime> supportedRuntimes = EnumSet.allOf(Runtime.class);
 
     RecordingProvider(ExecutionResult result) {
@@ -43,24 +43,25 @@ final class ExecuteToolTest {
     }
 
     @Override
-    public ExecutionCapabilities capabilities() {
-      return ExecutionCapabilities.newBuilder().withSupportedRuntimes(supportedRuntimes).build();
+    public Set<Runtime> supportedRuntimes() {
+      return supportedRuntimes;
     }
 
     SessionContext lastSession;
 
     @Override
-    public CompletionStage<ExecutionResult> execute(
+    public ExecutionResult execute(
         SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
+      this.calls++;
       this.lastSession = session;
       this.lastRequest = request;
       if (failWith != null) {
-        return CompletableFuture.failedFuture(failWith);
+        throw failWith;
       }
-      if (throwOnExecute) {
-        return CompletableFuture.failedFuture(new RuntimeException("boom"));
+      if (throwing != null) {
+        throw throwing;
       }
-      return CompletableFuture.completedFuture(result);
+      return result;
     }
   }
 
@@ -182,13 +183,14 @@ final class ExecuteToolTest {
   @Test
   void unsupportedRuntimeShortCircuitsBeforeProviderDispatch() {
     var provider = new RecordingProvider(ok(""));
-    provider.supportedRuntimes = EnumSet.of(Runtime.BASH); // PYTHON not supported
+    provider.supportedRuntimes = Set.of(Runtime.BASH);
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "PYTHON", "script", "print('x')"), ctx());
     assertFalse(result.succeeded());
-    assertTrue(result.output().contains("not supported by this provider"));
-    org.junit.jupiter.api.Assertions.assertNull(
-        provider.lastRequest, "provider should not have been called");
+    assertEquals(
+        "Execute: runtime 'PYTHON' is not supported by this provider (supported: [BASH])",
+        result.output());
+    assertEquals(0, provider.calls);
   }
 
   @Test
@@ -357,18 +359,17 @@ final class ExecuteToolTest {
   // ── provider failure paths ───────────────────────────────────────────────
 
   @Test
-  void providerExceptionalCompletionReturnsToolFailure() {
+  void aProviderThatThrowsReturnsToolFailureNamingItsMessage() {
     var provider = new RecordingProvider(ok(""));
-    provider.throwOnExecute = true;
+    provider.throwing = new IllegalStateException("provider is closed");
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), ctx());
     assertFalse(result.succeeded());
-    assertTrue(result.output().contains("provider failed"));
-    assertTrue(result.output().contains("boom"));
+    assertEquals("Execute: provider failed: provider is closed", result.output());
   }
 
   @Test
-  void anErrorTheProviderFailedWithIsRethrownAsItself() {
+  void anErrorTheProviderThrowsIsRethrownAsItself() {
     var provider = new RecordingProvider(ok(""));
     provider.failWith = new AssertionError("host failure");
     var tool = ExecuteTool.binding(provider).tool();
@@ -393,42 +394,23 @@ final class ExecuteToolTest {
   }
 
   @Test
-  void providerFutureCompletedWithCancellationExceptionSurfacesAsCancelled() {
-    var provider =
-        new RecordingProvider(ok("")) {
-          @Override
-          public CompletionStage<ExecutionResult> execute(
-              SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
-            this.lastSession = session;
-            this.lastRequest = request;
-            return CompletableFuture.failedFuture(
-                new java.util.concurrent.CancellationException("cancelled-mid-flight"));
-          }
-        };
+  void aProviderThatThrowsCancellationExceptionSurfacesAsCancelled() {
+    var provider = new RecordingProvider(ok(""));
+    provider.throwing = new CancellationException("cancelled-mid-flight");
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), ctx());
     assertFalse(result.succeeded());
-    assertTrue(result.output().contains("Execute: cancelled"));
+    assertEquals("Execute: cancelled", result.output());
   }
 
   @Test
-  void providerFutureCompletedWithNullCauseExceptionSurfacesSimpleName() {
-    var provider =
-        new RecordingProvider(ok("")) {
-          @Override
-          public CompletionStage<ExecutionResult> execute(
-              SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
-            this.lastSession = session;
-            this.lastRequest = request;
-            // RuntimeException with null message — the formatter must fall back to the class's
-            // simple name rather than print "null".
-            return CompletableFuture.failedFuture(new RuntimeException((String) null));
-          }
-        };
+  void aProviderExceptionWithoutAMessageSurfacesItsSimpleName() {
+    var provider = new RecordingProvider(ok(""));
+    provider.throwing = new UnsupportedOperationException((String) null);
     var binding = ExecuteTool.binding(provider);
     var result = binding.tool().execute(Map.of("runtime", "BASH", "script", "x"), ctx());
     assertFalse(result.succeeded());
-    assertTrue(result.output().contains("RuntimeException"));
+    assertEquals("Execute: provider failed: UnsupportedOperationException", result.output());
   }
 
   @Test
@@ -505,11 +487,12 @@ final class ExecuteToolTest {
   @Test
   void unsupportedRuntimeIsRefusedBeforeTheScriptIsValidated() {
     var provider = new RecordingProvider(ok(""));
-    provider.supportedRuntimes = EnumSet.of(Runtime.PYTHON);
+    provider.supportedRuntimes = Set.of(Runtime.PYTHON);
     var result = ExecuteTool.binding(provider).tool().execute(Map.of("runtime", "bash"), ctx());
     assertEquals(
         "Execute: runtime 'BASH' is not supported by this provider (supported: [PYTHON])",
         result.output());
+    assertEquals(0, provider.calls);
   }
 
   @Test

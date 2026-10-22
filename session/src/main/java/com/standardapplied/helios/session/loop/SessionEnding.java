@@ -21,9 +21,8 @@ import java.util.logging.Logger;
  * compaction summary call, and {@code onSessionStart} and {@code onSessionEnd}. Recording an {@code
  * Error} cancels the session. The session settles its result by {@link #seal() sealing} the sink;
  * an {@code Error} recorded after that is logged at {@code SEVERE} and changes nothing. Threads the
- * session does not own, such as an execution provider's own after its tool call stopped waiting, or
- * a model publisher's worker after its stream ended, are outside it: their {@code Error}s reach
- * their thread's uncaught-exception handler. Safe for concurrent use.
+ * session does not own, such as a model publisher's worker after its stream ended, are outside it:
+ * their {@code Error}s reach their thread's uncaught-exception handler. Safe for concurrent use.
  */
 public final class SessionEnding {
 

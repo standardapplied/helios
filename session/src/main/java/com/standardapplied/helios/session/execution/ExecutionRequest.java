@@ -35,8 +35,7 @@ import java.util.Optional;
  *     invocation temp directory (matches {@code CommandGrant}'s default); when set, must be an
  *     existing directory that the provider is willing to enter
  * @param timeout wall-clock budget for the invocation, including process startup. Non-null,
- *     strictly positive; the provider may further clamp against {@link
- *     ExecutionCapabilities#maxTimeout()}
+ *     strictly positive; the provider may clamp it to its own maximum
  * @param environment additional environment variables for the child process. Non-null, defensively
  *     copied. Provider-imposed environment (e.g. {@code PATH}) is merged in; this map cannot leak
  *     the JVM-inherited environment because the provider {@link ProcessBuilder#environment()
