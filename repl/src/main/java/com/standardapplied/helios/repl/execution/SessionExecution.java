@@ -38,7 +38,6 @@ final class SessionExecution {
     try {
       var result = attempt(session, request, timeout);
       if (Thread.currentThread().isInterrupted()) {
-        kill.run();
         throw new CancellationException("JShell snippet interrupted");
       }
       if (cancellation.isCancelled()) {
@@ -47,9 +46,12 @@ final class SessionExecution {
       }
       return result;
     } finally {
-      // Mark the kill callback inert regardless of outcome — the session is in a known post-call
-      // state and a later token fire must not double-close. Also detach the callback from the
-      // long-lived session token's list so per-call references do not accumulate.
+      // An interrupted call kills the session on every exit, a sandbox's own exception included.
+      // The kill callback is then made inert and detached from the long-lived session token so a
+      // later fire cannot double-close and per-call references do not accumulate.
+      if (Thread.currentThread().isInterrupted()) {
+        kill.run();
+      }
       killed.set(true);
       killRegistration.remove();
     }
