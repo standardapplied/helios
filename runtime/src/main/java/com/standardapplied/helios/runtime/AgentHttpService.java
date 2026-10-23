@@ -178,19 +178,33 @@ public final class AgentHttpService implements HttpService {
     rules.delete("/sessions/{sessionId}", authenticated(owned(this::delete)));
   }
 
+  /**
+   * Run {@code handler} for an authenticated caller while it holds one of its principal's request
+   * slots, through any failure answer, even past its session's removal; answer {@code 429} without
+   * running it when the principal has none free.
+   */
   private Handler authenticated(CallerHandler handler) {
-    var limited = limited(handler);
     return (req, resp) -> {
       UnreadBodyGuard.apply(req, resp);
       var caller = gate.admit(req, resp);
       if (caller.isEmpty()) {
         return;
       }
+      var principal = caller.get().principal();
+      var admitted = false;
       try {
-        limited.handle(caller.get(), req, resp);
+        admitted = inFlight.tryAcquire(principal);
+        if (admitted) {
+          handler.handle(caller.get(), req, resp);
+        } else {
+          Overload.reject(resp, Status.TOO_MANY_REQUESTS_429, Overload.TOO_MANY_REQUESTS);
+        }
       } catch (RuntimeException e) {
         answerFailure(resp, e);
       } finally {
+        if (admitted) {
+          inFlight.release(principal);
+        }
         caller.get().release();
       }
     };
@@ -219,26 +233,6 @@ public final class AgentHttpService implements HttpService {
         return;
       }
       handler.handle(session.get(), caller, req, resp);
-    };
-  }
-
-  /**
-   * Answer {@code 429} without running {@code handler} when the caller's principal has all its
-   * requests in flight; otherwise hold one of its slots for as long as {@code handler} runs, even
-   * past its session's removal.
-   */
-  private CallerHandler limited(CallerHandler handler) {
-    return (caller, req, resp) -> {
-      var principal = caller.principal();
-      if (!inFlight.tryAcquire(principal)) {
-        Overload.reject(resp, Status.TOO_MANY_REQUESTS_429, Overload.TOO_MANY_REQUESTS);
-        return;
-      }
-      try {
-        handler.handle(caller, req, resp);
-      } finally {
-        inFlight.release(principal);
-      }
     };
   }
 

@@ -26,6 +26,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.JsonGenerator;
@@ -208,6 +211,31 @@ final class AgentHttpServiceRequestAdmissionTest {
   }
 
   @Test
+  void aFailedRequestHoldsItsSlotUntilItsFailureIsAnswered() {
+    var server =
+        harness.server(
+            SessionRegistry.newBuilder()
+                .withFactory(
+                    opts -> {
+                      throw new IllegalStateException("session store down");
+                    }),
+            AdmissionHarness.limits(1));
+    CompletableFuture<HttpResponse<String>> failed;
+    HttpResponse<String> whileAnswering;
+    try (var held = new HeldLog()) {
+      failed = harness.sendAsync(server, "POST", "/sessions", "alice");
+      Await.latch("the failure to be logged", held.logging);
+
+      whileAnswering = harness.send(server, "GET", result("missing"), "alice");
+    }
+    assertEquals(500, Await.value("the failure to be answered", failed).statusCode());
+
+    assertEquals(429, whileAnswering.statusCode());
+    assertRefused(whileAnswering, TOO_MANY_REQUESTS);
+    assertEquals(404, harness.sendAdmitted(server, "GET", result("missing"), "alice").statusCode());
+  }
+
+  @Test
   void aChunkedBodyIsRefused413AsSoonAsOneBytePastTheBoundArrives() throws IOException {
     var max = 32;
     var server = harness.server(harness.registry(), new RequestLimits(max, 32));
@@ -300,6 +328,33 @@ final class AgentHttpServiceRequestAdmissionTest {
 
   private static BodyPublisher chunked(byte[] body) {
     return BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(body));
+  }
+
+  /** Holds {@link AgentHttpService}'s failure log record, so its answer waits, until closed. */
+  private static final class HeldLog extends Handler implements AutoCloseable {
+
+    private final Logger logger = Logger.getLogger(AgentHttpService.class.getName());
+    private final CountDownLatch logging = new CountDownLatch(1);
+    private final CountDownLatch release = new CountDownLatch(1);
+
+    private HeldLog() {
+      logger.addHandler(this);
+    }
+
+    @Override
+    public void publish(LogRecord logRecord) {
+      logging.countDown();
+      Await.latch("the held failure to be released", release);
+    }
+
+    @Override
+    public void flush() {}
+
+    @Override
+    public void close() {
+      release.countDown();
+      logger.removeHandler(this);
+    }
   }
 
   /** A request body that marks its first read, then serves its bytes once released. */
