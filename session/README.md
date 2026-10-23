@@ -235,26 +235,28 @@ fill via a pluggable `TokenCounter` (default: `TokenCounter.charBased()`, a chea
   emits `QueryEvent.ContextEdited(removedBlocks, tokensBefore, tokensAfter)`. The warning flag
   resets so a future re-climb fires the watermark again.
 
-The default compactor — `DropMiddleToolResultsCompactor` — preserves the system prompt + opening
-turn (`headPreserved`, default 3), preserves the recent trajectory (`tailPreserved`, default 20),
-and replaces everything in between with a single user-role summary produced by one call against
-the session's `Model`. The compactor walks both slice boundaries to keep assistant `tool_call`
-messages with their matching `TOOL` responses — providers reject histories where these split.
-If no safe boundary exists, the summary call throws / times out / returns blank, the compactor
-returns the history unchanged — compaction failure never crashes the loop.
+The default compactor — `SummarizingCompactor` — keeps every leading system message and the
+pending user turn (the user messages after the last assistant turn), and replaces the rest of the
+conversation with one user-role summary, prefixed `SummarizingCompactor.SUMMARY_PREFIX`, produced
+by one call against the session's `Model`. No earlier assistant turn survives, so no reasoning a
+provider signed against the old conversation (Claude Fable 5.1, Opus 5.5 and Sonnet 5.5 bind each
+thinking block to its exact request prefix) is replayed, and no `tool_call` or `TOOL` message is
+left to pair: the result is valid for every provider. The agent continues from the summary alone,
+so the default prompt asks for the user's goal, the facts found, the decisions made, the open
+questions and the work left. It never compacts in the middle of a tool round. When the summary
+call throws, times out (default 60 s) or returns blank, the compactor returns the history
+unchanged — compaction failure never crashes the loop.
 
 Three library-user tiers of control:
 
 <!-- snippet: QuickStarts#compaction -->
 ```java
-// 1) Default — DropMiddleToolResultsCompactor bound to the session's model
+// 1) Default — SummarizingCompactor bound to the session's model
 var session = AgentSession.create(SessionPresets.workspace(model, repo).build());
 
-// 2) BYO compactor — Letta-style, vector-recall, custom head/tail policy, etc.
+// 2) BYO compactor — a cheaper summary model or prompt, or any ContextCompactor of your own
 var custom =
-    DropMiddleToolResultsCompactor.newBuilder(cheapHaikuModel)
-        .withHeadPreserved(5)
-        .withTailPreserved(30)
+    SummarizingCompactor.newBuilder(cheapHaikuModel)
         .withSummaryPrompt("Summarise focusing on file edits and unresolved questions.")
         .withSummaryTimeout(Duration.ofSeconds(30)) // bound the summary call
         .build();
