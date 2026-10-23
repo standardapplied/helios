@@ -121,7 +121,6 @@ final class SessionTeardownTest {
   }
 
   private ToolDispatch tools() {
-    return new ToolDispatch(
-        context, ToolRegistry.empty(), ConcurrencyLimits.defaults(), scheduler, state.ending());
+    return new ToolDispatch(context, ToolRegistry.empty(), state.ending());
   }
 }

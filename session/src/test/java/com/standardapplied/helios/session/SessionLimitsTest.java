@@ -35,18 +35,16 @@ final class SessionLimitsTest {
             32_000L,
             Duration.ofSeconds(30),
             StreamRetryPolicy.defaults(),
-            Duration.ofSeconds(7),
-            Duration.ofSeconds(2));
+            Duration.ofSeconds(7));
     assertEquals(50, l.maxTurns());
     assertEquals(OptionalLong.of(12_500_000L), l.maxBudgetMicroUsd());
     assertEquals(Duration.ofMinutes(30), l.maxWallClock());
     assertEquals(Duration.ofSeconds(45), l.toolTimeoutDefault());
-    assertEquals(Duration.ofSeconds(3), l.toolStopGrace());
+    assertEquals(Duration.ofSeconds(3), l.stopGrace());
     assertEquals(32_000L, l.maxContextTokens());
     assertEquals(Duration.ofSeconds(30), l.streamIdleTimeout());
     assertEquals(StreamRetryPolicy.defaults(), l.streamRetryPolicy());
     assertEquals(Duration.ofSeconds(7), l.startTimeout());
-    assertEquals(Duration.ofSeconds(2), l.teardownGrace());
   }
 
   @Test
@@ -56,12 +54,11 @@ final class SessionLimitsTest {
     assertTrue(d.maxBudgetMicroUsd().isEmpty());
     assertEquals(Duration.ofHours(1), d.maxWallClock());
     assertEquals(Duration.ofMinutes(2), d.toolTimeoutDefault());
-    assertEquals(Duration.ofSeconds(5), d.toolStopGrace());
+    assertEquals(Duration.ofSeconds(5), d.stopGrace());
     assertEquals(0L, d.maxContextTokens());
     assertEquals(Duration.ofSeconds(60), d.streamIdleTimeout());
     assertEquals(StreamRetryPolicy.defaults(), d.streamRetryPolicy());
     assertEquals(Duration.ofSeconds(60), d.startTimeout());
-    assertEquals(Duration.ofSeconds(5), d.teardownGrace());
   }
 
   @Test
@@ -181,27 +178,27 @@ final class SessionLimitsTest {
     assertTrue(ex.getMessage().startsWith("toolTimeoutDefault must be strictly positive"));
   }
 
-  // ── toolStopGrace ─────────────────────────────────────────────────────────
+  // ── stopGrace ─────────────────────────────────────────────────────────
 
   @Test
-  void toolStopGraceNullRejected() {
-    var b = SessionLimits.newBuilder().withToolStopGrace(null);
+  void stopGraceNullRejected() {
+    var b = SessionLimits.newBuilder().withStopGrace(null);
     var ex = assertThrows(NullPointerException.class, b::build);
-    assertEquals("toolStopGrace must not be null", ex.getMessage());
+    assertEquals("stopGrace must not be null", ex.getMessage());
   }
 
   @Test
-  void toolStopGraceZeroRejected() {
-    var b = SessionLimits.newBuilder().withToolStopGrace(Duration.ZERO);
+  void stopGraceZeroRejected() {
+    var b = SessionLimits.newBuilder().withStopGrace(Duration.ZERO);
     var ex = assertThrows(IllegalArgumentException.class, b::build);
-    assertEquals("toolStopGrace must be strictly positive, got PT0S", ex.getMessage());
+    assertEquals("stopGrace must be strictly positive, got PT0S", ex.getMessage());
   }
 
   @Test
-  void toolStopGraceNegativeRejected() {
-    var b = SessionLimits.newBuilder().withToolStopGrace(Duration.ofMillis(-1));
+  void stopGraceNegativeRejected() {
+    var b = SessionLimits.newBuilder().withStopGrace(Duration.ofMillis(-1));
     var ex = assertThrows(IllegalArgumentException.class, b::build);
-    assertEquals("toolStopGrace must be strictly positive, got PT-0.001S", ex.getMessage());
+    assertEquals("stopGrace must be strictly positive, got PT-0.001S", ex.getMessage());
   }
 
   // ── maxContextTokens ──────────────────────────────────────────────────────
@@ -236,14 +233,14 @@ final class SessionLimitsTest {
             .withMaxBudgetMicroUsd(5 * CostEstimate.MICRO_USD_PER_USD)
             .withMaxWallClock(Duration.ofMinutes(5))
             .withToolTimeoutDefault(Duration.ofSeconds(30))
-            .withToolStopGrace(Duration.ofSeconds(9))
+            .withStopGrace(Duration.ofSeconds(9))
             .withMaxContextTokens(50_000L)
             .build();
     assertEquals(10, l.maxTurns());
     assertEquals(OptionalLong.of(5_000_000L), l.maxBudgetMicroUsd());
     assertEquals(Duration.ofMinutes(5), l.maxWallClock());
     assertEquals(Duration.ofSeconds(30), l.toolTimeoutDefault());
-    assertEquals(Duration.ofSeconds(9), l.toolStopGrace());
+    assertEquals(Duration.ofSeconds(9), l.stopGrace());
     assertEquals(50_000L, l.maxContextTokens());
   }
 
@@ -268,9 +265,8 @@ final class SessionLimitsTest {
             .withMaxBudgetMicroUsd(2_500_000L)
             .withMaxWallClock(Duration.ofMinutes(15))
             .withToolTimeoutDefault(Duration.ofSeconds(20))
-            .withToolStopGrace(Duration.ofSeconds(1))
+            .withStopGrace(Duration.ofSeconds(1))
             .withStartTimeout(Duration.ofSeconds(4))
-            .withTeardownGrace(Duration.ofSeconds(9))
             .withMaxContextTokens(75_000L)
             .build();
     assertEquals(original, original.toBuilder().build());
@@ -293,7 +289,6 @@ final class SessionLimitsTest {
         maxContextTokens,
         Duration.ofSeconds(60),
         StreamRetryPolicy.defaults(),
-        fiveSec(),
         fiveSec());
   }
 
@@ -326,7 +321,6 @@ final class SessionLimitsTest {
                     1_000L,
                     Duration.ZERO,
                     StreamRetryPolicy.defaults(),
-                    fiveSec(),
                     fiveSec()));
     assertEquals("streamIdleTimeout must be strictly positive, got PT0S", ex.getMessage());
   }
@@ -345,7 +339,6 @@ final class SessionLimitsTest {
                 1_000L,
                 Duration.ofSeconds(-1),
                 StreamRetryPolicy.defaults(),
-                fiveSec(),
                 fiveSec()));
   }
 
@@ -363,7 +356,6 @@ final class SessionLimitsTest {
                 1_000L,
                 null,
                 StreamRetryPolicy.defaults(),
-                fiveSec(),
                 fiveSec()));
   }
 
@@ -390,7 +382,6 @@ final class SessionLimitsTest {
                     1_000L,
                     Duration.ofSeconds(60),
                     null,
-                    fiveSec(),
                     fiveSec()));
     assertEquals("streamRetryPolicy must not be null", ex.getMessage());
   }
@@ -425,35 +416,6 @@ final class SessionLimitsTest {
     assertEquals("startTimeout must not be null", ex.getMessage());
   }
 
-  // ── teardownGrace ─────────────────────────────────────────────────────────
-
-  @Test
-  void builderWithTeardownGrace() {
-    var l = SessionLimits.newBuilder().withTeardownGrace(Duration.ofMillis(250)).build();
-    assertEquals(Duration.ofMillis(250), l.teardownGrace());
-  }
-
-  @Test
-  void teardownGraceZeroRejected() {
-    var b = SessionLimits.newBuilder().withTeardownGrace(Duration.ZERO);
-    var ex = assertThrows(IllegalArgumentException.class, b::build);
-    assertEquals("teardownGrace must be strictly positive, got PT0S", ex.getMessage());
-  }
-
-  @Test
-  void teardownGraceNegativeRejected() {
-    var b = SessionLimits.newBuilder().withTeardownGrace(Duration.ofSeconds(-1));
-    var ex = assertThrows(IllegalArgumentException.class, b::build);
-    assertEquals("teardownGrace must be strictly positive, got PT-1S", ex.getMessage());
-  }
-
-  @Test
-  void teardownGraceNullRejected() {
-    var b = SessionLimits.newBuilder().withTeardownGrace(null);
-    var ex = assertThrows(NullPointerException.class, b::build);
-    assertEquals("teardownGrace must not be null", ex.getMessage());
-  }
-
   // ── duration bound ────────────────────────────────────────────────────────
 
   private static final Duration LONGEST = Duration.ofNanos(Long.MAX_VALUE);
@@ -466,20 +428,13 @@ final class SessionLimitsTest {
             "toolTimeoutDefault",
             SessionLimits.Builder::withToolTimeoutDefault,
             SessionLimits::toolTimeoutDefault),
-        duration(
-            "toolStopGrace",
-            SessionLimits.Builder::withToolStopGrace,
-            SessionLimits::toolStopGrace),
+        duration("stopGrace", SessionLimits.Builder::withStopGrace, SessionLimits::stopGrace),
         duration(
             "streamIdleTimeout",
             SessionLimits.Builder::withStreamIdleTimeout,
             SessionLimits::streamIdleTimeout),
         duration(
-            "startTimeout", SessionLimits.Builder::withStartTimeout, SessionLimits::startTimeout),
-        duration(
-            "teardownGrace",
-            SessionLimits.Builder::withTeardownGrace,
-            SessionLimits::teardownGrace));
+            "startTimeout", SessionLimits.Builder::withStartTimeout, SessionLimits::startTimeout));
   }
 
   private static Arguments duration(

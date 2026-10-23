@@ -559,14 +559,14 @@ final class SessionStartTest {
   private static SessionLimits shortStart() {
     return SessionLimits.newBuilder()
         .withStartTimeout(SHORT_START)
-        .withTeardownGrace(SHORT_START)
+        .withStopGrace(SHORT_START)
         .build();
   }
 
   private static SessionLimits shortStartSlowTeardown() {
     return SessionLimits.newBuilder()
         .withStartTimeout(SHORT_START)
-        .withTeardownGrace(NOT_REACHED)
+        .withStopGrace(NOT_REACHED)
         .build();
   }
 

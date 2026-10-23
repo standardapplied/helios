@@ -147,14 +147,14 @@ public interface AgentSession extends AutoCloseable {
    * after that, which may be after this returns. For a session whose loop never started, this call
    * runs the teardown itself, on the caller's thread, and returns once {@link #result()} completed,
    * with {@link ResultMessage.Cancelled} unless a host {@link Error} failed it: each of the
-   * teardown's waits below can hold the caller up to {@link SessionLimits#teardownGrace()}, and an
+   * teardown's waits below can hold the caller up to {@link SessionLimits#stopGrace()}, and an
    * interrupt of the caller ends those waits early, its interrupt status kept. A session whose
    * provider did not accept it at start completed its result then, and this call only cancels its
    * token.
    *
    * <p>The teardown runs on every end, a natural one included: it cancels the session's token,
    * which cancels and interrupts every tool call still running, and waits {@link
-   * SessionLimits#teardownGrace()} for the token's callbacks and then up to that grace for the tool
+   * SessionLimits#stopGrace()} for the token's callbacks and then up to that grace for the tool
    * calls to end; then it calls {@link
    * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd} on a thread of its
    * own and waits the same grace for it to return; then it shuts the session's scheduler down and

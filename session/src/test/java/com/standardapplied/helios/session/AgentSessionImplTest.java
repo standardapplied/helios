@@ -46,15 +46,15 @@ final class AgentSessionImplTest {
   private static final Clock CLOCK = Clock.fixed(FIXED, ZoneOffset.UTC);
 
   private static AgentSession buildSession(Model model) {
-    return buildSession(model, ConcurrencyLimits.defaults());
+    return buildSession(model, 256);
   }
 
-  private static AgentSession buildSession(Model model, ConcurrencyLimits concurrency) {
+  private static AgentSession buildSession(Model model, int maxQueuedUserMessages) {
     return AgentSession.create(
         SessionOptions.newBuilder()
             .withModel(model)
             .withSessionId(SID)
-            .withConcurrencyLimits(concurrency)
+            .withMaxQueuedUserMessages(maxQueuedUserMessages)
             .withClock(CLOCK)
             .build());
   }
@@ -188,11 +188,10 @@ final class AgentSessionImplTest {
 
   @Test
   void sendFullQueueThrows() throws Exception {
-    var tinyConcurrency = new ConcurrencyLimits(32, 4, 2, 2);
     var release = new CountDownLatch(1);
     var entered = new CountDownLatch(1);
     Model latched = latchedModel(entered, release, "ok");
-    var s = buildSession(latched, tinyConcurrency);
+    var s = buildSession(latched, 2);
     try {
       s.send(UserMessage.text("first"));
       Await.latch("the loop to reach chat()", entered);
@@ -209,11 +208,10 @@ final class AgentSessionImplTest {
 
   @Test
   void interruptOnFullQueueThrows() throws Exception {
-    var tinyConcurrency = new ConcurrencyLimits(32, 4, 2, 1);
     var release = new CountDownLatch(1);
     var entered = new CountDownLatch(1);
     Model latched = latchedModel(entered, release, "ok");
-    var s = buildSession(latched, tinyConcurrency);
+    var s = buildSession(latched, 1);
     try {
       s.send(UserMessage.text("first"));
       Await.latch("the loop to reach chat()", entered);

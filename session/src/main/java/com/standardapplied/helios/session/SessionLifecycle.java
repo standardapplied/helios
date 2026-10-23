@@ -64,7 +64,7 @@ final class SessionLifecycle {
             executionProvider,
             events,
             deadlineScheduler,
-            limits.teardownGrace());
+            limits.stopGrace());
     this.start =
         new SessionStart(
             state, sessionContext, executionProvider, () -> teardown.end(loop.toolDispatch()));

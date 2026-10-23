@@ -279,7 +279,7 @@ final class SessionFinalizationTest {
         SessionLimits.newBuilder()
             .withMaxWallClock(SHORT_GRACE)
             .withStreamIdleTimeout(NOT_REACHED)
-            .withTeardownGrace(NOT_REACHED)
+            .withStopGrace(NOT_REACHED)
             .build();
 
     try (var session =
@@ -447,7 +447,8 @@ final class SessionFinalizationTest {
   }
 
   @Test
-  void aRunThatEndsOnItsOwnEndsAnUnknownCallBeforeOnSessionEnd() {
+  void aRunThatEndsOnItsOwnCancelsAnUnknownCall() {
+    var toolEnded = new CountDownLatch(1);
     var tool =
         binding(
             "lingers",
@@ -455,20 +456,20 @@ final class SessionFinalizationTest {
               var sessionEnded = new CountDownLatch(1);
               ctx.sessionContext().cancellation().onCancel(sessionEnded::countDown);
               Uninterruptible.await(sessionEnded);
-              order.add("tool ended");
+              toolEnded.countDown();
               return ToolResult.success("late");
             });
     var limits =
         SessionLimits.newBuilder()
             .withToolTimeoutDefault(SHORT_GRACE)
-            .withToolStopGrace(SHORT_GRACE)
-            .withTeardownGrace(NOT_REACHED)
+            .withStopGrace(SHORT_GRACE)
             .build();
     var events = new CollectingSubscriber();
 
-    try (var session =
-        AgentSession.create(
-            callingTool(new RecordingProvider(order), tool).withLimits(limits).build())) {
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
+        var session =
+            AgentSession.create(
+                callingTool(new RecordingProvider(order), tool).withLimits(limits).build())) {
       session.events().subscribe(events);
       session.send("go");
 
@@ -476,7 +477,7 @@ final class SessionFinalizationTest {
     }
     var answered = events.eventsOf(QueryEvent.ToolResult.class).getFirst().result();
     assertInstanceOf(ToolOutcome.Unknown.class, answered.outcome());
-    assertEquals(List.of("tool ended", "onSessionEnd"), order);
+    Await.latch("the session's end to reach the unknown call", toolEnded);
   }
 
   @Test

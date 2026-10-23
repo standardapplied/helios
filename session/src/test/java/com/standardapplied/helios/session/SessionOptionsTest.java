@@ -37,6 +37,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 final class SessionOptionsTest {
 
@@ -98,7 +100,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -126,7 +128,7 @@ final class SessionOptionsTest {
                     null,
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -152,7 +154,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     null,
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -178,7 +180,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "   ",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -204,7 +206,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     null,
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -220,17 +222,18 @@ final class SessionOptionsTest {
     assertEquals("limits must not be null", ex.getMessage());
   }
 
-  @Test
-  void canonicalConstructorRejectsNullConcurrency() {
+  @ParameterizedTest
+  @ValueSource(ints = {0, -1})
+  void canonicalConstructorRejectsANonPositiveQueueCapacity(int capacity) {
     var ex =
         assertThrows(
-            NullPointerException.class,
+            IllegalArgumentException.class,
             () ->
                 new SessionOptions(
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    null,
+                    capacity,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -243,7 +246,7 @@ final class SessionOptionsTest {
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
                     new SecretRegistry()));
-    assertEquals("concurrency must not be null", ex.getMessage());
+    assertEquals("maxQueuedUserMessages must be positive, got " + capacity, ex.getMessage());
   }
 
   @Test
@@ -256,7 +259,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     null,
                     ToolRegistry.empty(),
                     List.of(),
@@ -282,7 +285,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     null,
                     List.of(),
@@ -308,7 +311,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     null,
@@ -334,7 +337,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -360,7 +363,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -386,7 +389,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -412,7 +415,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -438,7 +441,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -464,7 +467,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -490,7 +493,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -516,7 +519,7 @@ final class SessionOptionsTest {
                     stubModel(),
                     "sess",
                     SessionLimits.defaults(),
-                    ConcurrencyLimits.defaults(),
+                    256,
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
@@ -734,7 +737,7 @@ final class SessionOptionsTest {
     assertNotNull(opts.model());
     assertTrue(opts.sessionId().startsWith("sess-"));
     assertSame(SessionLimits.defaults(), opts.limits());
-    assertSame(ConcurrencyLimits.defaults(), opts.concurrency());
+    assertEquals(256, opts.maxQueuedUserMessages());
     assertNotNull(opts.clock());
   }
 
@@ -748,18 +751,17 @@ final class SessionOptionsTest {
             .withToolTimeoutDefault(Duration.ofSeconds(20))
             .withMaxContextTokens(64_000L)
             .build();
-    var customConcurrency = new ConcurrencyLimits(8, 2, 1, 32);
     var opts =
         SessionOptions.newBuilder()
             .withModel(stubModel())
             .withSessionId("explicit-id")
             .withLimits(customLimits)
-            .withConcurrencyLimits(customConcurrency)
+            .withMaxQueuedUserMessages(32)
             .withClock(fixed)
             .build();
     assertEquals("explicit-id", opts.sessionId());
     assertSame(customLimits, opts.limits());
-    assertSame(customConcurrency, opts.concurrency());
+    assertEquals(32, opts.maxQueuedUserMessages());
     assertSame(fixed, opts.clock());
   }
 
@@ -809,13 +811,14 @@ final class SessionOptionsTest {
     assertEquals("limits must not be null", ex.getMessage());
   }
 
-  @Test
-  void withConcurrencyLimitsRejectsNull() {
+  @ParameterizedTest
+  @ValueSource(ints = {0, -1})
+  void withMaxQueuedUserMessagesRejectsANonPositiveCapacity(int capacity) {
+    var builder = SessionOptions.newBuilder();
     var ex =
         assertThrows(
-            NullPointerException.class,
-            () -> SessionOptions.newBuilder().withConcurrencyLimits(null));
-    assertEquals("concurrency must not be null", ex.getMessage());
+            IllegalArgumentException.class, () -> builder.withMaxQueuedUserMessages(capacity));
+    assertEquals("maxQueuedUserMessages must be positive, got " + capacity, ex.getMessage());
   }
 
   @Test
@@ -900,7 +903,12 @@ final class SessionOptionsTest {
 
   @Test
   void toBuilderRoundTripsAllFields() {
-    var original = SessionOptions.newBuilder().withModel(stubModel()).withSessionId("orig").build();
+    var original =
+        SessionOptions.newBuilder()
+            .withModel(stubModel())
+            .withSessionId("orig")
+            .withMaxQueuedUserMessages(2)
+            .build();
     var copy = original.toBuilder().build();
     assertEquals(original, copy);
   }
