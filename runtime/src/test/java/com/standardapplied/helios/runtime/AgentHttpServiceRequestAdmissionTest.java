@@ -3,22 +3,20 @@
 package com.standardapplied.helios.runtime;
 
 import static com.standardapplied.helios.runtime.AdmissionHarness.BURST;
+import static com.standardapplied.helios.runtime.AdmissionHarness.TOO_MANY_REQUESTS;
 import static com.standardapplied.helios.runtime.AdmissionHarness.assertRefused;
+import static com.standardapplied.helios.runtime.AdmissionHarness.events;
 import static com.standardapplied.helios.runtime.AdmissionHarness.interrupt;
 import static com.standardapplied.helios.runtime.AdmissionHarness.messages;
 import static com.standardapplied.helios.runtime.AdmissionHarness.result;
 import static com.standardapplied.helios.runtime.AdmissionHarness.textBody;
-import static com.standardapplied.helios.runtime.ResponseBodies.afterReady;
-import static com.standardapplied.helios.runtime.ResponseBodies.rest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.ResultMessage;
-import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
 import java.net.http.HttpRequest.BodyPublisher;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
@@ -28,6 +26,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.JsonGenerator;
@@ -37,9 +38,9 @@ import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.StdSerializer;
 
 /**
- * Message bodies, steering-queue entries, event streams and result polls are each admitted against
- * their bound before any work, and a burst beyond the bound leaves exactly the bound held and the
- * counters reporting what was admitted and refused.
+ * Every authenticated request takes one of its principal's request slots before any work and holds
+ * it until it is answered, whatever the route; message bodies and steering-queue entries are
+ * bounded on top of that.
  */
 final class AgentHttpServiceRequestAdmissionTest {
 
@@ -55,9 +56,7 @@ final class AgentHttpServiceRequestAdmissionTest {
   @Test
   void aBodyOverTheBoundIsAnswered413BeforeAnythingIsQueued() {
     var max = 32;
-    var server =
-        harness.server(
-            harness.registry(), RequestLimits.newBuilder().withMaxRequestBytes(max).build());
+    var server = harness.server(harness.registry(), new RequestLimits(max, 32));
     var sessionId = harness.create(server, "alice");
     var overBound = textBody(max + 1);
 
@@ -114,61 +113,132 @@ final class AgentHttpServiceRequestAdmissionTest {
   }
 
   @Test
-  void uploadsBeyondThePrincipalsBoundAre429AndBeyondTheServicesAre503BeforeTheirBodyIsRead() {
+  void aPrincipalWithEveryRequestInFlightIsRefused429BeforeAnyWorkAndOthersAreNot() {
+    var server = harness.server(harness.registry(), 2);
+    var sessionId = harness.create(server, "alice");
+    var session = harness.sessions.get(sessionId);
+    harness.openEventsAdmitted(server, sessionId, "alice");
+    harness.openEventsAdmitted(server, sessionId, "alice");
+    var factoryRuns = harness.factoryRuns.get();
+
+    var stream =
+        Await.value(
+            "the third stream to be answered", harness.openEvents(server, sessionId, "alice"));
+    var message = harness.send(server, "POST", messages(sessionId), "alice");
+    var create = harness.send(server, "POST", "/sessions", "alice");
+    var bobs = harness.send(server, "POST", "/sessions", "bob");
+
+    assertEquals(429, stream.statusCode());
+    assertEquals(
+        Optional.of(Overload.RETRY_AFTER_SECONDS), stream.headers().firstValue("Retry-After"));
+    assertEquals(TOO_MANY_REQUESTS, ResponseBodies.text(stream.body()));
+    for (var refused : List.of(message, create)) {
+      assertEquals(429, refused.statusCode());
+      assertRefused(refused, TOO_MANY_REQUESTS);
+    }
+    assertEquals(0, session.queue.size());
+    assertEquals(2, session.subscribers.size());
+    assertEquals(factoryRuns + 1, harness.factoryRuns.get());
+    assertEquals(201, bobs.statusCode());
+
+    session.subscribers.getFirst().onComplete();
+
+    assertEquals(
+        202, harness.sendAdmitted(server, "POST", messages(sessionId), "alice").statusCode());
+    assertEquals(1, session.queue.size());
+  }
+
+  @Test
+  void anOpenStreamAndAWaitingPollShareTheSlotsOfEveryRoute() {
+    var server = harness.server(harness.registry(), 2);
+    var sessionId = harness.create(server, "alice");
+    var session = harness.sessions.get(sessionId);
+    var poll = waitingPoll(server, sessionId);
+    harness.openEventsAdmitted(server, sessionId, "alice");
+
+    var answers =
+        List.of(
+            harness.send(server, "POST", "/sessions", "alice"),
+            harness.send(server, "POST", messages(sessionId), "alice"),
+            harness.send(server, "POST", interrupt(sessionId), "alice"),
+            harness.send(server, "GET", events(sessionId), "alice"),
+            harness.send(server, "GET", result(sessionId), "alice"),
+            harness.send(server, "DELETE", "/sessions/" + sessionId, "alice"));
+
+    for (var refused : answers) {
+      assertEquals(429, refused.statusCode());
+      assertRefused(refused, TOO_MANY_REQUESTS);
+    }
+    assertEquals(0, session.queue.size());
+    assertEquals(0, session.closes.get());
+    assertEquals(1, harness.sessions.size());
+    session.terminate();
+    assertEquals(200, Await.value("the waiting poll to be answered", poll).statusCode());
+  }
+
+  @Test
+  void aRequestGivesItsSlotBackWhateverItIsAnswered() {
+    var server = harness.server(harness.registry(), new RequestLimits(64, 1));
+    var sessionId = harness.create(server, "alice");
+    var path = messages(sessionId);
+    harness.duringFactory.set(
+        () -> {
+          throw new IllegalStateException("options store down");
+        });
+    int factoryFailed;
+    try (var ignored = LogCapture.of(AgentHttpService.class)) {
+      factoryFailed = harness.sendAdmitted(server, "POST", "/sessions", "alice").statusCode();
+    }
+    harness.duringFactory.set(() -> {});
+
+    var statuses =
+        List.of(
+            factoryFailed,
+            harness.sendAdmitted(server, "GET", result("missing"), "alice").statusCode(),
+            post(server, path, textBody(65)),
+            post(server, path, "not json".getBytes(StandardCharsets.UTF_8)),
+            post(server, path, "{\"text\":\" \"}".getBytes(StandardCharsets.UTF_8)),
+            post(server, path, AdmissionHarness.BODY),
+            post(server, path, AdmissionHarness.BODY),
+            post(server, path, AdmissionHarness.BODY),
+            harness
+                .sendAdmitted(
+                    server, "GET", "/sessions/" + sessionId + "/result?timeout=0", "alice")
+                .statusCode(),
+            harness.sendAdmitted(server, "POST", "/sessions", "alice").statusCode());
+
+    assertEquals(List.of(500, 404, 413, 400, 400, 202, 202, 429, 204, 201), statuses);
+  }
+
+  @Test
+  void aFailedRequestHoldsItsSlotUntilItsFailureIsAnswered() {
     var server =
         harness.server(
-            harness.registry(),
-            RequestLimits.newBuilder()
-                .withMaxMessageUploads(3)
-                .withMaxMessageUploadsPerPrincipal(2)
-                .build());
-    var alice = harness.create(server, "alice");
-    var bob = harness.create(server, "bob");
-    var release = new CountDownLatch(1);
-    var aliceReading = new CountDownLatch(2);
-    var bobReading = new CountDownLatch(1);
-    var held =
-        List.of(
-            harness.upload(server, messages(alice), "alice", new HeldBody(aliceReading, release)),
-            harness.upload(server, interrupt(alice), "alice", new HeldBody(aliceReading, release)));
-    Await.latch("alice's two uploads to be read", aliceReading);
-    var bobHeld = harness.upload(server, messages(bob), "bob", new HeldBody(bobReading, release));
-    Await.latch("bob's upload to be read", bobReading);
+            SessionRegistry.newBuilder()
+                .withFactory(
+                    opts -> {
+                      throw new IllegalStateException("session store down");
+                    }),
+            AdmissionHarness.limits(1));
+    CompletableFuture<HttpResponse<String>> failed;
+    HttpResponse<String> whileAnswering;
+    try (var held = new HeldLog()) {
+      failed = harness.sendAsync(server, "POST", "/sessions", "alice");
+      Await.latch("the failure to be logged", held.logging);
 
-    var aliceUnread = new HeldBody(new CountDownLatch(1), release);
-    var aliceRefused =
-        Await.value(
-            "alice's third upload to be refused",
-            harness.upload(server, messages(alice), "alice", aliceUnread));
-    var bobUnread = new HeldBody(new CountDownLatch(1), release);
-    var bobRefused =
-        Await.value(
-            "bob's second upload to be refused",
-            harness.upload(server, messages(bob), "bob", bobUnread));
-
-    assertEquals(429, aliceRefused.statusCode());
-    assertRefused(aliceRefused, "{\"error\":\"too many message uploads in progress\"}");
-    assertEquals(503, bobRefused.statusCode());
-    assertRefused(bobRefused, "{\"error\":\"server at message upload capacity\"}");
-    assertEquals(1, aliceUnread.reading.getCount());
-    assertEquals(1, bobUnread.reading.getCount());
-    assertEquals(0, harness.sessions.get(alice).queue.size());
-
-    release.countDown();
-    for (var upload : List.of(held.get(0), held.get(1), bobHeld)) {
-      assertEquals(202, Await.value("a held upload to be queued", upload).statusCode());
+      whileAnswering = harness.send(server, "GET", result("missing"), "alice");
     }
-    assertEquals(2, harness.sessions.get(alice).queue.size());
-    assertEquals(202, harness.sendAdmitted(server, "POST", messages(bob), "bob").statusCode());
-    assertEquals(new AdmissionCounts(4, 2), server.counters().messages());
+    assertEquals(500, Await.value("the failure to be answered", failed).statusCode());
+
+    assertEquals(429, whileAnswering.statusCode());
+    assertRefused(whileAnswering, TOO_MANY_REQUESTS);
+    assertEquals(404, harness.sendAdmitted(server, "GET", result("missing"), "alice").statusCode());
   }
 
   @Test
   void aChunkedBodyIsRefused413AsSoonAsOneBytePastTheBoundArrives() throws IOException {
     var max = 32;
-    var server =
-        harness.server(
-            harness.registry(), RequestLimits.newBuilder().withMaxRequestBytes(max).build());
+    var server = harness.server(harness.registry(), new RequestLimits(max, 32));
     var sessionId = harness.create(server, "alice");
 
     try (var connection = RawConnection.open(server.port())) {
@@ -191,7 +261,7 @@ final class AgentHttpServiceRequestAdmissionTest {
   }
 
   @Test
-  void aResultPollThatFailsGivesItsAdmissionBack() {
+  void aResultPollThatFailsGivesItsSlotBack() {
     var failing =
         JsonMapper.builder()
             .addModule(
@@ -208,51 +278,16 @@ final class AgentHttpServiceRequestAdmissionTest {
                           }
                         }))
             .build();
-    var server =
-        harness.server(
-            harness.registry(),
-            RequestLimits.newBuilder()
-                .withMaxResultPollsPerSession(1)
-                .withMaxResultPollsPerPrincipal(1)
-                .withMaxResultPolls(1)
-                .build(),
-            failing);
+    var server = harness.server(harness.registry(), AdmissionHarness.limits(1), failing);
     var sessionId = harness.create(server, "alice");
     harness.sessions.get(sessionId).terminate();
 
     var statuses =
         List.of(
-            harness.send(server, "GET", result(sessionId), "alice").statusCode(),
-            harness.send(server, "GET", result(sessionId), "alice").statusCode());
+            harness.sendAdmitted(server, "GET", result(sessionId), "alice").statusCode(),
+            harness.sendAdmitted(server, "GET", result(sessionId), "alice").statusCode());
 
     assertEquals(List.of(500, 500), statuses);
-    assertEquals(new AdmissionCounts(2, 0), server.counters().resultPolls());
-  }
-
-  @Test
-  void anUploadGivesItsAdmissionBackWhateverItIsAnswered() {
-    var server =
-        harness.server(
-            harness.registry(),
-            RequestLimits.newBuilder()
-                .withMaxRequestBytes(64)
-                .withMaxMessageUploads(1)
-                .withMaxMessageUploadsPerPrincipal(1)
-                .build());
-    var sessionId = harness.create(server, "alice");
-    var path = messages(sessionId);
-
-    var statuses =
-        List.of(
-            post(server, path, textBody(65)),
-            post(server, path, "not json".getBytes(StandardCharsets.UTF_8)),
-            post(server, path, "{\"text\":\" \"}".getBytes(StandardCharsets.UTF_8)),
-            post(server, path, AdmissionHarness.BODY),
-            post(server, path, AdmissionHarness.BODY),
-            post(server, path, AdmissionHarness.BODY),
-            post(server, messages(harness.create(server, "alice")), AdmissionHarness.BODY));
-
-    assertEquals(List.of(413, 400, 400, 202, 202, 429, 202), statuses);
   }
 
   @Test
@@ -272,91 +307,17 @@ final class AgentHttpServiceRequestAdmissionTest {
     assertEquals(BURST - 2, statuses.stream().filter(status -> status == 429).count());
     assertRefused(interrupt, "{\"error\":\"session message queue full\"}");
     assertEquals(2, harness.sessions.get(sessionId).queue.size());
-    assertEquals(new AdmissionCounts(2, BURST - 1), server.counters().messages());
   }
 
-  @Test
-  void aBurstOfEventStreamsOpensUpToTheSessionsLimitAndFreesASlotWhenOneEnds() throws Exception {
-    var server = harness.server(harness.registry(), limits());
-    var sessionId = harness.create(server, "alice");
-    var session = harness.sessions.get(sessionId);
-
-    var streams = new ArrayList<CompletableFuture<HttpResponse<InputStream>>>();
-    for (var i = 0; i < BURST; i++) {
-      streams.add(harness.openEvents(server, sessionId, "alice"));
-    }
-    var open = new ArrayList<BufferedReader>();
-    for (var stream : streams) {
-      var resp = Await.value("an event stream to be answered", stream);
-      if (resp.statusCode() == 200) {
-        open.add(afterReady(resp));
-      } else {
-        assertEquals(429, resp.statusCode());
-        assertEquals(
-            Optional.of(Overload.RETRY_AFTER_SECONDS), resp.headers().firstValue("Retry-After"));
-        assertEquals(
-            "{\"error\":\"too many event streams on this session\"}",
-            ResponseBodies.text(resp.body()));
-      }
-    }
-
-    assertEquals(2, open.size());
-    assertEquals(2, session.subscribers.size());
-    assertEquals(new AdmissionCounts(2, BURST - 2), server.counters().eventStreams());
-
-    session.completeEvents();
-    for (var events : open) {
-      assertEquals(List.of(), rest(events));
-    }
-    harness.openEventsAdmitted(server, sessionId, "alice").body().close();
-  }
-
-  @Test
-  void aBurstOfResultPollsWaitsUpToTheSessionsLimitAndFreesASlotWhenAnswered() {
-    var server = harness.server(harness.registry(), limits());
-    var sessionId = harness.create(server, "alice");
-    var session = harness.sessions.get(sessionId);
-    var watchers = session.result.getNumberOfDependents();
-    var refused = new CountDownLatch(BURST - 2);
-
-    var polls = new ArrayList<CompletableFuture<HttpResponse<String>>>();
-    for (var i = 0; i < BURST; i++) {
-      var poll = harness.sendAsync(server, "GET", result(sessionId), "alice");
-      poll.thenAccept(
-          resp -> {
-            if (resp.statusCode() == 429) {
-              refused.countDown();
-            }
-          });
-      polls.add(poll);
-    }
-    Await.latch("every poll beyond the limit to be refused", refused);
+  /** Send a result poll of alice and return once it waits on the session's result. */
+  private CompletableFuture<HttpResponse<String>> waitingPoll(
+      RuntimeServer server, String sessionId) {
+    var result = harness.sessions.get(sessionId).result;
+    var watchers = result.getNumberOfDependents();
+    var poll = harness.sendAsync(server, "GET", result(sessionId), "alice");
     Await.until(
-        "the admitted polls to wait on the result",
-        () -> session.result.getNumberOfDependents() == watchers + 2);
-    assertEquals(new AdmissionCounts(2, BURST - 2), server.counters().resultPolls());
-
-    session.terminate();
-
-    var answered = 0;
-    for (var poll : polls) {
-      var resp = Await.value("a poll to be answered", poll);
-      if (resp.statusCode() == 200) {
-        answered++;
-      } else {
-        assertRefused(resp, "{\"error\":\"too many result polls on this session\"}");
-      }
-    }
-    assertEquals(2, answered);
-    assertEquals(200, harness.sendAdmitted(server, "GET", result(sessionId), "alice").statusCode());
-  }
-
-  private static String readLine(BufferedReader reader) {
-    try {
-      return reader.readLine();
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    }
+        "the poll to wait on the result", () -> result.getNumberOfDependents() == watchers + 1);
+    return poll;
   }
 
   private int post(RuntimeServer server, String path, byte[] body) {
@@ -365,15 +326,35 @@ final class AgentHttpServiceRequestAdmissionTest {
         .statusCode();
   }
 
-  private static RequestLimits limits() {
-    return RequestLimits.newBuilder()
-        .withMaxEventStreamsPerSession(2)
-        .withMaxResultPollsPerSession(2)
-        .build();
-  }
-
   private static BodyPublisher chunked(byte[] body) {
     return BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(body));
+  }
+
+  /** Holds {@link AgentHttpService}'s failure log record, so its answer waits, until closed. */
+  private static final class HeldLog extends Handler implements AutoCloseable {
+
+    private final Logger logger = Logger.getLogger(AgentHttpService.class.getName());
+    private final CountDownLatch logging = new CountDownLatch(1);
+    private final CountDownLatch release = new CountDownLatch(1);
+
+    private HeldLog() {
+      logger.addHandler(this);
+    }
+
+    @Override
+    public void publish(LogRecord logRecord) {
+      logging.countDown();
+      Await.latch("the held failure to be released", release);
+    }
+
+    @Override
+    public void flush() {}
+
+    @Override
+    public void close() {
+      release.countDown();
+      logger.removeHandler(this);
+    }
   }
 
   /** A request body that marks its first read, then serves its bytes once released. */
@@ -382,10 +363,6 @@ final class AgentHttpServiceRequestAdmissionTest {
     private final CountDownLatch reading;
     private final CountDownLatch release;
     private final InputStream bytes;
-
-    private HeldBody(CountDownLatch reading, CountDownLatch release) {
-      this(AdmissionHarness.BODY, reading, release);
-    }
 
     private HeldBody(byte[] bytes, CountDownLatch reading, CountDownLatch release) {
       this.bytes = new ByteArrayInputStream(bytes);

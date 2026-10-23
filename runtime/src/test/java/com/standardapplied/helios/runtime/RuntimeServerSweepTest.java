@@ -33,7 +33,7 @@ final class RuntimeServerSweepTest {
       SessionRegistry.newBuilder()
           .withFactory(opts -> new StubSession(opts.sessionId()))
           .withClock(this::instant)
-          .withTerminalRetention(RETENTION)
+          .withRetention(RETENTION)
           .build();
 
   @Test
@@ -64,7 +64,7 @@ final class RuntimeServerSweepTest {
       now.set(now.get().plus(RETENTION));
 
       Await.latch("the scheduled sweep to close the session", closed);
-      assertEquals(0, server.registry().size());
+      assertEquals(0, registry.size());
     }
     assertEquals(1, session.closes.get());
   }
@@ -98,7 +98,7 @@ final class RuntimeServerSweepTest {
       now.set(now.get().plus(RETENTION));
 
       Await.latch("the server's own registry to be swept", closed);
-      assertEquals(0, server.registry().size());
+      assertEquals(0, registry.size());
     }
   }
 

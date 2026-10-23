@@ -63,17 +63,20 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <h2>Admission</h2>
  *
- * Every request that would hold memory is admitted against a bound before the work starts, and a
- * refused one is answered at once, never queued. {@code POST /sessions} reserves capacity in the
- * {@link SessionRegistry} before the {@code optionsFactory} runs: a full cap of the caller's own is
- * {@code 429}, the registry's {@code 503}. A message or interrupt body over {@link
- * RequestLimits#maxRequestBytes()} is {@code 413}; a message or interrupt beyond the caller's own
- * concurrent uploads in {@link RequestLimits} is {@code 429}, beyond the service's {@code 503}; one
- * refused by a full steering queue is {@code 429}; an event stream or result poll beyond the
- * session's or the caller's own limit in {@link RequestLimits} is {@code 429}, beyond the service's
- * {@code 503}, and holds its admission until it is answered even if its session is deleted. Each
- * {@code 429} and {@code 503} has a fixed body and a {@code Retry-After} header; {@link
- * #counters()} reports what was admitted and refused.
+ * Every request is admitted against finite bounds before its work starts, and a refused one is
+ * answered at once, never queued. Once authenticated, a request takes one of its principal's {@link
+ * RequestLimits#maxConcurrentRequestsPerPrincipal()} slots before any session lookup or body read,
+ * and holds it until its handler returns: an event stream until it ends, a result poll until it is
+ * answered, even if the session is deleted meanwhile. A request beyond the principal's slots is
+ * {@code 429} {@code {"error":"too many requests in progress"}}. Open streams and waiting polls
+ * share these slots with every other route, so size them above a principal's peak open streams.
+ * {@code POST /sessions} then reserves capacity in the {@link SessionRegistry} before the {@code
+ * optionsFactory} runs: a full cap of the caller's own is {@code 429}, the registry's {@code 503}.
+ * A message or interrupt body over {@link RequestLimits#maxRequestBytes()} is {@code 413}; one
+ * refused by a full steering queue is {@code 429}. Each of these {@code 429} and {@code 503}
+ * answers has a fixed body and a {@code Retry-After} header. Across principals, bound the requests
+ * in flight with Helidon's own {@code maxConcurrentRequests} on the {@link
+ * io.helidon.webserver.WebServer}, as {@link RuntimeServer} does.
  *
  * <h2>Unread bodies</h2>
  *
@@ -114,8 +117,7 @@ public final class AgentHttpService implements HttpService {
   private final AuthenticationGate gate;
   private final ObjectMapper objectMapper;
   private final SteeringInput steering;
-  private final SessionSlots eventStreams;
-  private final SessionSlots resultPolls;
+  private final KeyedSlots<Principal> inFlight;
 
   /**
    * Build a service.
@@ -152,19 +154,8 @@ public final class AgentHttpService implements HttpService {
         ToolOutcomeSerializer.addTo(
             Objects.requireNonNull(objectMapper, "objectMapper must not be null"));
     Objects.requireNonNull(limits, "limits must not be null");
-    this.steering = new SteeringInput(limits, this.objectMapper);
-    this.eventStreams = SessionSlots.eventStreams(limits);
-    this.resultPolls = SessionSlots.resultPolls(limits);
-  }
-
-  /**
-   * What the service admitted and refused since it was built.
-   *
-   * @return a snapshot of the counters
-   */
-  public RuntimeCounters counters() {
-    return new RuntimeCounters(
-        creation.counts(), steering.counts(), eventStreams.counts(), resultPolls.counts());
+    this.steering = new SteeringInput(limits.maxRequestBytes(), this.objectMapper);
+    this.inFlight = new KeyedSlots<>(limits.maxConcurrentRequestsPerPrincipal());
   }
 
   @Override
@@ -176,21 +167,22 @@ public final class AgentHttpService implements HttpService {
         "/sessions/{sessionId}/events",
         authenticated(
             owned(
-                limited(
-                    eventStreams,
-                    (session, caller, req, resp) ->
-                        SessionEventStream.stream(session, resp, objectMapper, caller.ended())))));
+                (session, caller, req, resp) ->
+                    SessionEventStream.stream(session, resp, objectMapper, caller.ended()))));
     rules.get(
         "/sessions/{sessionId}/result",
         authenticated(
             owned(
-                limited(
-                    resultPolls,
-                    (session, caller, req, resp) ->
-                        ResultLongPoll.respond(session, req, resp, objectMapper, caller)))));
+                (session, caller, req, resp) ->
+                    ResultLongPoll.respond(session, req, resp, objectMapper, caller))));
     rules.delete("/sessions/{sessionId}", authenticated(owned(this::delete)));
   }
 
+  /**
+   * Run {@code handler} for an authenticated caller while it holds one of its principal's request
+   * slots, through any failure answer, even past its session's removal; answer {@code 429} without
+   * running it when the principal has none free.
+   */
   private Handler authenticated(CallerHandler handler) {
     return (req, resp) -> {
       UnreadBodyGuard.apply(req, resp);
@@ -198,11 +190,21 @@ public final class AgentHttpService implements HttpService {
       if (caller.isEmpty()) {
         return;
       }
+      var principal = caller.get().principal();
+      var admitted = false;
       try {
-        handler.handle(caller.get(), req, resp);
+        admitted = inFlight.tryAcquire(principal);
+        if (admitted) {
+          handler.handle(caller.get(), req, resp);
+        } else {
+          Overload.reject(resp, Status.TOO_MANY_REQUESTS_429, Overload.TOO_MANY_REQUESTS);
+        }
       } catch (RuntimeException e) {
         answerFailure(resp, e);
       } finally {
+        if (admitted) {
+          inFlight.release(principal);
+        }
         caller.get().release();
       }
     };
@@ -231,24 +233,6 @@ public final class AgentHttpService implements HttpService {
         return;
       }
       handler.handle(session.get(), caller, req, resp);
-    };
-  }
-
-  /**
-   * Answer the refusal without running {@code handler} when {@code slots} refuses the request;
-   * otherwise hold its admission for as long as {@code handler} runs, even past the session's
-   * removal.
-   */
-  private static SessionHandler limited(SessionSlots slots, SessionHandler handler) {
-    return (session, caller, req, resp) -> {
-      if (!slots.admit(session.sessionId(), caller.principal(), resp)) {
-        return;
-      }
-      try {
-        handler.handle(session, caller, req, resp);
-      } finally {
-        slots.release(session.sessionId(), caller.principal());
-      }
     };
   }
 

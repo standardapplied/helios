@@ -13,13 +13,13 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The registry's sessions by id, and the capacity they and the open reservations hold. Every change
- * to what is reserved, registered or active happens under the table's lock, so admission is atomic:
- * concurrent creates never pass a cap. Lookups read without the lock. The table never closes a
- * session; it returns the sessions it unregistered so the registry closes them outside the lock.
+ * to what is reserved, registered or terminal happens under the table's lock, so admission is
+ * atomic: concurrent creates never pass a cap. Lookups read without the lock. The table never
+ * closes a session; it returns the sessions it unregistered so the registry closes them outside the
+ * lock.
  *
- * <p>An unregistered session that has not reached its terminal result keeps its charge as an active
- * session: closing it only asks its loop to stop, so it is released when the result completes,
- * never before.
+ * <p>An unregistered session that has not reached its terminal result keeps its charge: closing it
+ * only asks its loop to stop, so it is released when the result completes, never before.
  */
 final class SessionTable {
 
@@ -29,29 +29,24 @@ final class SessionTable {
   private final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
   private final SessionQuota quota;
   private final InstantSource clock;
-  private final Duration terminalRetention;
-  private final Duration idleTimeout;
+  private final Duration retention;
 
-  SessionTable(
-      SessionQuota quota, InstantSource clock, Duration terminalRetention, Duration idleTimeout) {
+  SessionTable(SessionQuota quota, InstantSource clock, Duration retention) {
     this.quota = quota;
     this.clock = clock;
-    this.terminalRetention = terminalRetention;
-    this.idleTimeout = idleTimeout;
+    this.retention = retention;
   }
 
   /**
-   * Reserve one session for {@code owner}. When only a cap on sessions held stands in the way, the
-   * oldest terminal session of {@code owner} is unregistered to make room; another principal's
-   * session never is.
+   * Reserve one session for {@code owner}. When a cap stands in the way, the oldest terminal
+   * session of {@code owner} is unregistered to make room; another principal's session never is.
    *
    * @return the session evicted to make room, which the caller closes
    * @throws SessionCapacityException if a cap is reached and nothing of {@code owner} can make room
    */
   synchronized Optional<AgentSession> reserve(Principal owner) {
-    quota.requireActiveRoom(owner);
     var victim =
-        quota.sessionsFull(owner)
+        quota.full(owner)
             ? entries.values().stream().filter(entry -> entry.terminalOf(owner)).min(BY_TERMINATION)
             : Optional.<Entry>empty();
     victim.ifPresent(this::unregister);
@@ -61,7 +56,7 @@ final class SessionTable {
 
   /** Release a reservation of {@code owner} that never became a registered session. */
   synchronized void release(Principal owner) {
-    quota.release(owner, true);
+    quota.release(owner);
   }
 
   /**
@@ -80,10 +75,8 @@ final class SessionTable {
             (result, failure) -> {
               synchronized (this) {
                 entry.terminatedAt = clock.instant();
-                if (entries.get(id) == entry) {
-                  quota.terminated(owner);
-                } else {
-                  quota.release(owner, true);
+                if (entries.get(id) != entry) {
+                  quota.release(owner);
                 }
               }
             });
@@ -105,16 +98,13 @@ final class SessionTable {
   }
 
   /**
-   * Unregister every terminal session held past the terminal retention, and every session never
-   * started within the idle timeout of its registration. A started session that has not ended is
-   * kept, however old.
+   * Unregister every session not running for the retention: a terminal one measured from its end,
+   * one never started from its registration. A started session that has not ended is kept, however
+   * old.
    */
   synchronized List<AgentSession> removeExpired() {
     var now = clock.instant();
-    var expired =
-        entries.values().stream()
-            .filter(entry -> entry.expired(now, terminalRetention, idleTimeout))
-            .toList();
+    var expired = entries.values().stream().filter(entry -> entry.expired(now, retention)).toList();
     expired.forEach(this::unregister);
     return expired.stream().map(Entry::session).toList();
   }
@@ -133,7 +123,7 @@ final class SessionTable {
   private void unregister(Entry entry) {
     entries.remove(entry.id);
     if (entry.terminatedAt != null) {
-      quota.release(entry.owner, false);
+      quota.release(entry.owner);
     }
   }
 
@@ -164,12 +154,11 @@ final class SessionTable {
       return terminatedAt != null && owner.equals(principal);
     }
 
-    private boolean expired(Instant now, Duration terminalRetention, Duration idleTimeout) {
+    private boolean expired(Instant now, Duration retention) {
       if (terminatedAt != null) {
-        return Duration.between(terminatedAt, now).compareTo(terminalRetention) >= 0;
+        return Duration.between(terminatedAt, now).compareTo(retention) >= 0;
       }
-      return !session.isStarted()
-          && Duration.between(registeredAt, now).compareTo(idleTimeout) >= 0;
+      return !session.isStarted() && Duration.between(registeredAt, now).compareTo(retention) >= 0;
     }
   }
 }

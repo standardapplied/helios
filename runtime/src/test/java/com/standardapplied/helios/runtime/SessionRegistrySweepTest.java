@@ -17,16 +17,17 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link SessionRegistry#sweep()} on a hand-advanced clock: it reclaims terminal sessions past
- * their retention and sessions left unstarted past the idle timeout, and never a started session
- * that has not ended.
+ * {@link SessionRegistry#sweep()} on a hand-advanced clock: it reclaims a session not running once
+ * it has not been running for the retention, a terminal session from its end and one never started
+ * from its registration, and never a started session that has not ended.
  */
 final class SessionRegistrySweepTest {
 
   private static final Principal ALICE = new Principal("acme", "alice");
   private static final Principal EVE = new Principal("globex", "eve");
-  private static final Duration RETENTION = Duration.ofMinutes(10);
-  private static final Duration IDLE = Duration.ofMinutes(2);
+
+  /** The default retention. */
+  private static final Duration RETENTION = Duration.ofMinutes(15);
 
   private final AtomicReference<Instant> now =
       new AtomicReference<>(Instant.parse("2026-10-15T12:00:00Z"));
@@ -35,8 +36,6 @@ final class SessionRegistrySweepTest {
       SessionRegistry.newBuilder()
           .withFactory(opts -> new StubSession(opts.sessionId()))
           .withClock(now::get)
-          .withTerminalRetention(RETENTION)
-          .withIdleTimeout(IDLE)
           .withMaxSessions(3)
           .build();
 
@@ -76,11 +75,23 @@ final class SessionRegistrySweepTest {
   }
 
   @Test
-  void aSweepClosesSessionsLeftUnstartedPastTheIdleTimeout() {
+  void aNeverStartedSessionIsRetainedFromItsRegistration() {
+    var unstarted = create(ALICE);
+    advance(RETENTION.minusMillis(1));
+
+    assertEquals(0, registry.sweep());
+    advance(Duration.ofMillis(1));
+    assertEquals(1, registry.sweep());
+
+    assertEquals(1, unstarted.closes.get());
+  }
+
+  @Test
+  void aSweepClosesSessionsLeftUnstartedPastTheRetention() {
     var unstarted = create(ALICE);
     advance(Duration.ofMinutes(1));
     var younger = create(ALICE);
-    advance(IDLE.minusMinutes(1));
+    advance(RETENTION.minusMinutes(1));
 
     assertEquals(1, registry.sweep());
 
@@ -143,7 +154,7 @@ final class SessionRegistrySweepTest {
         };
     first.onClose = failing;
     second.onClose = failing;
-    advance(IDLE);
+    advance(RETENTION);
 
     try (var log = LogCapture.of(SessionRegistry.class)) {
       assertEquals(2, registry.sweep());
@@ -157,6 +168,26 @@ final class SessionRegistrySweepTest {
     create(EVE);
   }
 
+  @Test
+  void aConfiguredRetentionAppliesToTerminalAndNeverStartedSessionsAlike() {
+    var retention = Duration.ofMinutes(1);
+    var configured =
+        SessionRegistry.newBuilder()
+            .withFactory(opts -> new StubSession(opts.sessionId()))
+            .withClock(now::get)
+            .withRetention(retention)
+            .build();
+    var terminal = (StubSession) configured.create(options(), ALICE);
+    terminal.send(UserMessage.text("go"));
+    terminal.terminate();
+    configured.create(options(), ALICE);
+    advance(retention.minusMillis(1));
+
+    assertEquals(0, configured.sweep());
+    advance(Duration.ofMillis(1));
+    assertEquals(2, configured.sweep());
+  }
+
   private StubSession startedSession() {
     return startedSession(ALICE);
   }
@@ -168,13 +199,14 @@ final class SessionRegistrySweepTest {
   }
 
   private StubSession create(Principal owner) {
-    return (StubSession)
-        registry.create(
-            SessionOptions.newBuilder()
-                .withModel(ScriptedModel.newBuilder().withTextTurn("x").build())
-                .withSessionId("s" + ids.incrementAndGet())
-                .build(),
-            owner);
+    return (StubSession) registry.create(options(), owner);
+  }
+
+  private SessionOptions options() {
+    return SessionOptions.newBuilder()
+        .withModel(ScriptedModel.newBuilder().withTextTurn("x").build())
+        .withSessionId("s" + ids.incrementAndGet())
+        .build();
   }
 
   private void advance(Duration by) {

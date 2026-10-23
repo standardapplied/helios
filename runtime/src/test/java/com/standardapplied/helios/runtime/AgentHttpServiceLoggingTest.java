@@ -45,6 +45,7 @@ final class AgentHttpServiceLoggingTest {
 
   private final HttpClient http = HttpClient.newBuilder().connectTimeout(Await.HANG_GUARD).build();
   private final LogCapture log = LogCapture.of(AgentHttpService.class);
+  private final SessionRegistry registry = SessionRegistry.inMemory();
 
   @AfterEach
   void releaseTheLog() {
@@ -131,7 +132,7 @@ final class AgentHttpServiceLoggingTest {
       assertEquals(unavailable, throwing.body());
       assertEquals(503, answeringNull.statusCode());
       assertEquals(unavailable, answeringNull.body());
-      assertEquals(0, server.registry().size());
+      assertEquals(0, registry.size());
     }
     var failures = recordsStartingWith("authenticator");
     assertEquals(
@@ -170,11 +171,9 @@ final class AgentHttpServiceLoggingTest {
     assertEquals(Level.WARNING, logged.getLevel());
   }
 
-  private static RuntimeServer.Builder serverWithFactory(
+  private RuntimeServer.Builder serverWithFactory(
       Function<SessionRequest, SessionOptions> optionsFactory) {
-    return RuntimeServer.builder()
-        .withRegistry(SessionRegistry.inMemory())
-        .withOptionsFactory(optionsFactory);
+    return RuntimeServer.builder().withRegistry(registry).withOptionsFactory(optionsFactory);
   }
 
   private HttpResponse<String> createSession(RuntimeServer server, String authorization)
