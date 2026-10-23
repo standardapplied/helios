@@ -59,6 +59,9 @@ final class TokenWait {
   }
 
   private static boolean settles(Future<?> future, long nanos) throws InterruptedException {
+    if (Thread.interrupted()) {
+      throw new InterruptedException();
+    }
     try {
       future.get(nanos, TimeUnit.NANOSECONDS);
       return true;
