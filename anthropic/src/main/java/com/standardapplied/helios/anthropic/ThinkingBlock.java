@@ -41,11 +41,16 @@ record ThinkingBlock(String text, String signature) {
   }
 
   private static List<?> entries(String encoded) {
+    Object value;
     try {
-      return AnthropicJson.DEFAULT.readValue(encoded, List.class);
+      value = AnthropicJson.DEFAULT.readValue(encoded, Object.class);
     } catch (RuntimeException e) {
-      throw new AnthropicException(unreadable("is not a JSON array"), e);
+      throw new AnthropicException(unreadable("is not JSON"), e);
     }
+    if (!(value instanceof List<?> entries)) {
+      throw new AnthropicException(unreadable("is not a JSON array"));
+    }
+    return entries;
   }
 
   private static ThinkingBlock decode(Object entry) {
