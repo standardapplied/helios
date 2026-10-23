@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,6 +23,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.CountDownLatch;
@@ -149,6 +151,23 @@ final class DispatchedCallTest {
 
     Await.until("the worker to end", calls::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
+  }
+
+  @Test
+  void aCallLeavesItsLiveCallsOnlyOnceItsWorkHasEnded() {
+    var runningWhenRemoved = new CompletableFuture<Boolean>();
+    var calls =
+        new CopyOnWriteArraySet<DispatchedCall>() {
+          @Override
+          public boolean remove(Object call) {
+            runningWhenRemoved.complete(((DispatchedCall) call).isRunning());
+            return super.remove(call);
+          }
+        };
+
+    dispatched(NEVER, new CancellationToken(), calls, this::counting).start();
+
+    assertFalse(Await.value("the call to leave its live calls", runningWhenRemoved));
   }
 
   @Test
