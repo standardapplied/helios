@@ -138,6 +138,9 @@ class AnthropicMessagesTest {
   @ValueSource(
       strings = {
         "not-json",
+        "null",
+        "\"sig\"",
+        "7",
         "{\"text\":\"t\",\"signature\":\"sig\"}",
         "[\"sig\"]",
         "[{\"text\":\"t\"}]",
