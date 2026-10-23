@@ -5,6 +5,7 @@ package com.standardapplied.helios.session.loop;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.runtime.CancellationToken;
@@ -161,6 +162,20 @@ final class DispatchedCallTest {
 
     var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
     assertEquals("session closed", thrown.getMessage());
+  }
+
+  @Test
+  void aCallerInterruptedAfterTheToolAnsweredIsCancelledWithItsInterruptStatusKept() {
+    var dispatched = dispatched(NEVER);
+    dispatched.start();
+    Await.until("the worker to end", live::isEmpty);
+    assertEquals(1, runs.get(), "the tool ran and answered");
+
+    Thread.currentThread().interrupt();
+    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+
+    assertTrue(Thread.interrupted(), "the caller's interrupt status is kept");
+    assertEquals("interrupted waiting for tool t", thrown.getMessage());
   }
 
   @Test
