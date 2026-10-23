@@ -16,9 +16,9 @@ import java.util.Objects;
  *
  * <p>Carries the new history, the usage consumed by the compaction step itself, and the identifier
  * of the model the compactor invoked to spend that usage. Compactors that make a model call (e.g.
- * {@link DropMiddleToolResultsCompactor}) report the summary call's usage so the agent loop can
- * accumulate it into the session totals and apply the configured {@code CostCalculator} — without
- * this, compaction spend is invisible to {@code SessionLimits.maxBudgetMicroUsd} gating.
+ * {@link SummarizingCompactor}) report the summary call's usage so the agent loop can accumulate it
+ * into the session totals and apply the configured {@code CostCalculator} — without this,
+ * compaction spend is invisible to {@code SessionLimits.maxBudgetMicroUsd} gating.
  *
  * <p>The {@code modelId} is what lets the loop price compaction spend at the right rate. Pinning
  * compaction cost to the main session model would overcharge any deployment that wired a cheap

@@ -80,11 +80,10 @@ import java.util.Optional;
  *     compaction watermark. Defaults to {@link TokenCounter#charBased()} — wire a provider-specific
  *     tokenizer when accuracy matters more than the per-turn cost. Non-null
  * @param contextCompactor shrinks the conversation history when usage crosses {@code 0.95} of
- *     {@link SessionLimits#maxContextTokens()}. Defaults to a {@link
- *     DropMiddleToolResultsCompactor} bound to {@code model} — preserves the system prompt +
- *     opening turn + recent trajectory, summarises the middle. Library users can override via
- *     {@code Builder.withContextCompactor} or opt out wholesale with {@link
- *     ContextCompactor#disabled()}. Non-null
+ *     {@link SessionLimits#maxContextTokens()}. Defaults to a {@link SummarizingCompactor} bound to
+ *     {@code model} — keeps the system prompt and the pending user turn and replaces the rest with
+ *     one summary. Library users can override via {@code Builder.withContextCompactor} or opt out
+ *     wholesale with {@link ContextCompactor#disabled()}. Non-null
  * @param secretRegistry the secrets no tool output or session error text may carry. The session
  *     redacts every tool result once, before any event, hook or the model sees it, and the error
  *     text of every {@link SerializedError} it builds, each time against a fresh snapshot of this
@@ -427,9 +426,10 @@ public record SessionOptions(
     /**
      * Set the {@link ContextCompactor} the agent loop invokes when running history crosses {@code
      * 0.95} of {@link SessionLimits#maxContextTokens()}. If unset, the default is a {@link
-     * DropMiddleToolResultsCompactor} bound to the session's {@code model}. Pass {@link
+     * SummarizingCompactor} bound to the session's {@code model}. Pass {@link
      * ContextCompactor#disabled()} to opt out of automatic compaction wholesale; pass a custom
-     * implementation to override the head/tail policy or summarisation prompt.
+     * implementation, or a {@code SummarizingCompactor} built with another model or prompt, to
+     * override it.
      *
      * @param contextCompactor non-null compactor
      * @return this builder
@@ -470,7 +470,7 @@ public record SessionOptions(
       var compactor =
           contextCompactor != null
               ? contextCompactor
-              : DropMiddleToolResultsCompactor.newBuilder(model).build();
+              : SummarizingCompactor.newBuilder(model).build();
       return new SessionOptions(
           model,
           id,
