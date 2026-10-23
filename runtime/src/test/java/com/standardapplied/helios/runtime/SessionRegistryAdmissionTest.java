@@ -21,7 +21,6 @@ import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.testing.ScriptedModel;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -37,14 +36,15 @@ import java.util.logging.Level;
 import org.junit.jupiter.api.Test;
 
 /**
- * Admission in {@link SessionRegistry}: the four caps hold under concurrency, a reservation is
- * given back exactly once on every path, and room is made only from the requester's own terminal
+ * Admission in {@link SessionRegistry}: the two caps hold under concurrency, a reservation is given
+ * back exactly once on every path, and room is made only from the requester's own terminal
  * sessions.
  */
 final class SessionRegistryAdmissionTest {
 
   private static final Principal ALICE = new Principal("acme", "alice");
   private static final Principal EVE = new Principal("globex", "eve");
+  private static final Principal CAROL = new Principal("initech", "carol");
 
   private final AtomicReference<Instant> now =
       new AtomicReference<>(Instant.parse("2026-10-15T12:00:00Z"));
@@ -56,7 +56,7 @@ final class SessionRegistryAdmissionTest {
   void concurrentCreatesOfOnePrincipalNeverPassItsCapWhileFactoriesBlock() throws Exception {
     var outcome =
         createConcurrently(
-            stubs().withMaxActiveSessionsPerPrincipal(3), Collections.nCopies(7, ALICE), 3);
+            stubs().withMaxSessionsPerPrincipal(3), Collections.nCopies(7, ALICE), 3);
 
     assertEquals(3, outcome.created());
     assertEquals(Collections.nCopies(4, Scope.PRINCIPAL), outcome.refusals());
@@ -140,39 +140,25 @@ final class SessionRegistryAdmissionTest {
   // ── caps ─────────────────────────────────────────────────────────────────
 
   @Test
-  void aPrincipalAtItsCapLeavesTheRestOfTheServerToOthers() {
-    var registry = stubs().withMaxSessions(4).withMaxSessionsPerPrincipal(2).build();
-    create(registry, ALICE);
-    create(registry, ALICE);
+  void aPrincipalAtItsCapIsRefusedAndARegistryAtItsCapRefusesAnother() {
+    var registry = stubs().withMaxSessionsPerPrincipal(2).withMaxSessions(3).build();
+    startedSession(registry, ALICE);
+    startedSession(registry, ALICE);
 
-    var refused = assertThrows(SessionCapacityException.class, () -> create(registry, ALICE));
+    var principal = assertThrows(SessionCapacityException.class, () -> create(registry, ALICE));
     create(registry, EVE);
-    create(registry, EVE);
+    var server = assertThrows(SessionCapacityException.class, () -> create(registry, CAROL));
 
-    assertEquals(Scope.PRINCIPAL, refused.scope());
-    assertEquals("sessions of the principal at cap 2", refused.getMessage());
-    assertEquals(4, registry.size());
+    assertEquals(Scope.PRINCIPAL, principal.scope());
+    assertEquals("sessions of the principal at cap 2", principal.getMessage());
+    assertEquals(Scope.SERVER, server.scope());
+    assertEquals("sessions at cap 3", server.getMessage());
+    assertEquals(3, registry.size());
   }
 
   @Test
-  void anActiveCapRefusesEvenWhenATerminalSessionCouldBeEvicted() {
-    var registry =
-        stubs().withMaxActiveSessionsPerPrincipal(1).withMaxSessionsPerPrincipal(2).build();
-    var terminal = create(registry, ALICE);
-    terminal.terminate();
-    create(registry, ALICE);
-
-    var refused = assertThrows(SessionCapacityException.class, () -> create(registry, ALICE));
-
-    assertEquals(Scope.PRINCIPAL, refused.scope());
-    assertEquals("active sessions of the principal at cap 1", refused.getMessage());
-    assertEquals(0, terminal.closes.get());
-    assertEquals(2, registry.size());
-  }
-
-  @Test
-  void aPrincipalAtItsSessionCapIsRefusedTheSameWhateverOthersHoldActive() {
-    var registry = stubs().withMaxSessionsPerPrincipal(1).withMaxActiveSessions(2).build();
+  void aPrincipalAtItsCapIsRefusedTheSameWhateverOthersHold() {
+    var registry = stubs().withMaxSessionsPerPrincipal(1).withMaxSessions(2).build();
     create(registry, ALICE);
 
     var alone = assertThrows(SessionCapacityException.class, () -> create(registry, ALICE));
@@ -186,28 +172,69 @@ final class SessionRegistryAdmissionTest {
   }
 
   @Test
-  void theServersActiveCapRefusesAnotherPrincipal() {
-    var registry = stubs().withMaxActiveSessions(1).build();
-    create(registry, ALICE);
+  void byDefaultAPrincipalHoldsSixteenRunningSessions() {
+    var registry = stubs().build();
+    for (var i = 0; i < 16; i++) {
+      startedSession(registry, ALICE);
+    }
 
-    var refused = assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
+    var refused = assertThrows(SessionCapacityException.class, () -> create(registry, ALICE));
 
-    assertEquals(Scope.SERVER, refused.scope());
-    assertEquals("active sessions at cap 1", refused.getMessage());
+    assertEquals(Scope.PRINCIPAL, refused.scope());
+    assertEquals("sessions of the principal at cap 16", refused.getMessage());
   }
 
   @Test
-  void aTerminalSessionNoLongerCountsAsActive() {
-    var registry = stubs().withMaxActiveSessionsPerPrincipal(1).build();
-    create(registry, ALICE).terminate();
+  void byDefaultTheRegistryHoldsTwoHundredFiftySixSessions() {
+    var registry = stubs().build();
+    for (var i = 0; i < 16; i++) {
+      var tenant = new Principal("tenant-" + i, "user");
+      for (var j = 0; j < 16; j++) {
+        create(registry, tenant);
+      }
+    }
+
+    var refused = assertThrows(SessionCapacityException.class, () -> create(registry, ALICE));
+
+    assertEquals(Scope.SERVER, refused.scope());
+    assertEquals("sessions at cap 256", refused.getMessage());
+    assertEquals(256, registry.size());
+  }
+
+  // ── eviction ─────────────────────────────────────────────────────────────
+
+  @Test
+  void aCreateAtThePrincipalCapEvictsItsTerminalSessionAndKeepsItsRunningOne() {
+    var registry = stubs().withMaxSessionsPerPrincipal(2).build();
+    var terminal = startedSession(registry, ALICE);
+    terminal.terminate();
+    var running = startedSession(registry, ALICE);
+
+    var fresh = create(registry, ALICE);
+
+    assertEquals(1, terminal.closes.get());
+    assertTrue(registry.find(terminal.sessionId(), ALICE).isEmpty());
+    assertEquals(0, running.closes.get());
+    assertSame(running, registry.find(running.sessionId(), ALICE).orElseThrow());
+    assertSame(fresh, registry.find(fresh.sessionId(), ALICE).orElseThrow());
+  }
+
+  @Test
+  void aCreateAtTheRegistryCapEvictsTheOwnersOwnTerminalSession() {
+    var registry = stubs().withMaxSessions(2).build();
+    var terminal = create(registry, ALICE);
+    terminal.terminate();
+    var others = startedSession(registry, EVE);
 
     create(registry, ALICE);
 
+    assertEquals(1, terminal.closes.get());
+    assertEquals(0, others.closes.get());
     assertEquals(2, registry.size());
   }
 
   @Test
-  void aSessionAlreadyTerminalWhenRegisteredNeverCountsAsActive() {
+  void aSessionAlreadyTerminalWhenRegisteredMakesRoomForTheNext() {
     var registry =
         stubs()
             .withFactory(
@@ -216,30 +243,15 @@ final class SessionRegistryAdmissionTest {
                   session.terminate();
                   return session;
                 })
-            .withMaxActiveSessionsPerPrincipal(1)
+            .withMaxSessionsPerPrincipal(1)
             .build();
+    var first = create(registry, ALICE);
 
     create(registry, ALICE);
-    create(registry, ALICE);
 
-    assertEquals(2, registry.size());
+    assertEquals(1, first.closes.get());
+    assertEquals(1, registry.size());
   }
-
-  @Test
-  void closingATerminalSessionGivesBackItsPlaceButNoActiveRoom() {
-    var registry =
-        stubs().withMaxActiveSessionsPerPrincipal(1).withMaxSessionsPerPrincipal(3).build();
-    var terminal = create(registry, ALICE);
-    terminal.terminate();
-    create(registry, ALICE);
-
-    assertTrue(registry.close(terminal.sessionId(), ALICE));
-
-    var refused = assertThrows(SessionCapacityException.class, () -> create(registry, ALICE));
-    assertEquals("active sessions of the principal at cap 1", refused.getMessage());
-  }
-
-  // ── eviction ─────────────────────────────────────────────────────────────
 
   @Test
   void aCreateAtThePrincipalCapEvictsThatPrincipalsOldestTerminalSession() {
@@ -428,16 +440,15 @@ final class SessionRegistryAdmissionTest {
 
   @Test
   void aSessionClosedAtWorkKeepsItsCapacityUntilItsResultCompletes() {
-    var registry = stubs().withMaxSessions(1).withMaxActiveSessions(1).build();
-    var working = create(registry, ALICE);
-    working.send(UserMessage.text("go"));
+    var registry = stubs().withMaxSessions(1).build();
+    var working = startedSession(registry, ALICE);
 
     assertTrue(registry.close(working.sessionId(), ALICE));
 
     assertEquals(0, registry.size());
     assertTrue(registry.find(working.sessionId(), ALICE).isEmpty());
     var refused = assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
-    assertEquals("active sessions at cap 1", refused.getMessage());
+    assertEquals("sessions at cap 1", refused.getMessage());
 
     working.terminate();
 
@@ -447,7 +458,7 @@ final class SessionRegistryAdmissionTest {
 
   @Test
   void aSessionClosedAtWorkAndItsSuccessorUnderTheSameIdEachReleaseOnlyTheirOwnCharge() {
-    var registry = stubs().withMaxSessions(2).withMaxActiveSessions(2).build();
+    var registry = stubs().withMaxSessions(2).build();
     var options = options();
     var working = (StubSession) registry.create(options, ALICE);
     working.send(UserMessage.text("go"));
@@ -459,7 +470,7 @@ final class SessionRegistryAdmissionTest {
     assertSame(successor, registry.find(options.sessionId(), ALICE).orElseThrow());
     create(registry, EVE);
     var refused = assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
-    assertEquals("active sessions at cap 2", refused.getMessage());
+    assertEquals("sessions at cap 2", refused.getMessage());
     assertTrue(registry.close(options.sessionId(), ALICE));
     create(registry, EVE);
     assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
@@ -472,9 +483,7 @@ final class SessionRegistryAdmissionTest {
         SessionRegistry.newBuilder()
             .withClock(now::get)
             .withMaxSessions(1)
-            .withMaxActiveSessions(1)
             .withMaxSessionsPerPrincipal(1)
-            .withMaxActiveSessionsPerPrincipal(1)
             .build();
     var first = registry.create(withProvider(provider), ALICE);
     var closing = CompletableFuture.supplyAsync(() -> registry.close(first.sessionId(), ALICE));
@@ -484,7 +493,7 @@ final class SessionRegistryAdmissionTest {
       var refused =
           assertThrows(
               SessionCapacityException.class, () -> registry.create(withProvider(provider), ALICE));
-      assertEquals("active sessions of the principal at cap 1", refused.getMessage());
+      assertEquals("sessions of the principal at cap 1", refused.getMessage());
       assertFalse(first.result().isDone());
     } finally {
       provider.release.countDown();
@@ -514,17 +523,16 @@ final class SessionRegistryAdmissionTest {
 
   @Test
   void aPrincipalThatHoldsNothingMoreLeavesNoEntryBehind() {
-    var quota = new SessionQuota(4, 4, 2, 2);
+    var quota = new SessionQuota(4, 2);
     quota.reserve(ALICE);
     quota.reserve(ALICE);
     quota.reserve(EVE);
 
-    quota.terminated(ALICE);
-    quota.release(ALICE, false);
-    quota.release(ALICE, true);
+    quota.release(ALICE);
+    quota.release(ALICE);
 
     assertEquals(1, quota.principalsForTests());
-    quota.release(EVE, true);
+    quota.release(EVE);
     assertEquals(0, quota.principalsForTests());
   }
 
@@ -533,12 +541,17 @@ final class SessionRegistryAdmissionTest {
   private SessionRegistry.Builder stubs() {
     return SessionRegistry.newBuilder()
         .withFactory(opts -> new StubSession(opts.sessionId()))
-        .withClock(now::get)
-        .withTerminalRetention(Duration.ofDays(1));
+        .withClock(now::get);
   }
 
   private StubSession create(SessionRegistry registry, Principal owner) {
     return (StubSession) registry.create(options(), owner);
+  }
+
+  private StubSession startedSession(SessionRegistry registry, Principal owner) {
+    var session = create(registry, owner);
+    session.send(UserMessage.text("go"));
+    return session;
   }
 
   private SessionOptions withProvider(ExecutionProvider provider) {

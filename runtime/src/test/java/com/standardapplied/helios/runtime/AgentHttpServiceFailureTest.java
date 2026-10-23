@@ -131,7 +131,7 @@ final class AgentHttpServiceFailureTest {
 
   private static RuntimeServer server(Function<SessionOptions, AgentSession> sessions) {
     return RuntimeServer.builder()
-        .withRegistry(SessionRegistry.withFactory(sessions))
+        .withRegistry(SessionRegistry.newBuilder().withFactory(sessions).build())
         .withOptionsFactory(
             request ->
                 SessionOptions.newBuilder()

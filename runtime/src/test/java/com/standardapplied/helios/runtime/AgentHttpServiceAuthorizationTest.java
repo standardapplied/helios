@@ -77,13 +77,14 @@ final class AgentHttpServiceAuthorizationTest {
           new Authentication(ALICE, Duration.ofDays(1), CompletableFuture.completedFuture(null)));
   private final AtomicReference<String> hijackedId = new AtomicReference<>();
   private final AtomicReference<Runnable> duringFactory = new AtomicReference<>(() -> {});
+  private final SessionRegistry registry = SessionRegistry.inMemory();
   private RuntimeServer server;
 
   @BeforeEach
   void startServer() {
     server =
         RuntimeServer.builder()
-            .withRegistry(SessionRegistry.inMemory())
+            .withRegistry(registry)
             .withOptionsFactory(this::options)
             .withAuthenticator(new TestAuthenticator(this::authenticate))
             .build();
@@ -134,7 +135,7 @@ final class AgentHttpServiceAuthorizationTest {
 
     assertTrue(model.calls().isEmpty());
     assertEquals(0, toolRuns.get());
-    assertTrue(server.registry().find(sessionId, ALICE).isPresent());
+    assertTrue(registry.find(sessionId, ALICE).isPresent());
   }
 
   @Test
@@ -161,8 +162,8 @@ final class AgentHttpServiceAuthorizationTest {
 
     assertTrue(model.calls().isEmpty());
     assertEquals(0, toolRuns.get());
-    assertEquals(1, server.registry().size());
-    assertTrue(server.registry().find(sessionId, ALICE).isPresent());
+    assertEquals(1, registry.size());
+    assertTrue(registry.find(sessionId, ALICE).isPresent());
   }
 
   @Test
@@ -173,14 +174,14 @@ final class AgentHttpServiceAuthorizationTest {
     carolRevoked.complete(null);
 
     assertEquals("", events.awaitEnd());
-    var session = server.registry().find(sessionId, CAROL).orElseThrow();
+    var session = registry.find(sessionId, CAROL).orElseThrow();
     assertFalse(session.result().isDone());
   }
 
   @Test
   void revokingTheIdentityAnswersAPendingResultLongPollWith401() throws Exception {
     var sessionId = create("carol");
-    var result = server.registry().find(sessionId, CAROL).orElseThrow().result();
+    var result = registry.find(sessionId, CAROL).orElseThrow().result();
     var watchersBeforePoll = result.getNumberOfDependents();
     var poll =
         CompletableFuture.supplyAsync(
@@ -219,7 +220,7 @@ final class AgentHttpServiceAuthorizationTest {
         404, send("GET", "/sessions/" + sessionId + "/result?timeout=0", "bob").statusCode());
     assertEquals(
         204, send("GET", "/sessions/" + sessionId + "/result?timeout=0", "alice").statusCode());
-    assertEquals(1, server.registry().size());
+    assertEquals(1, registry.size());
   }
 
   @Test
@@ -259,7 +260,7 @@ final class AgentHttpServiceAuthorizationTest {
 
     assertUnauthenticated(resp, "create");
     assertTrue(carolRevoked.isDone());
-    assertEquals(0, server.registry().size());
+    assertEquals(0, registry.size());
   }
 
   private static void assertUnauthenticated(HttpResponse<String> resp, String context) {

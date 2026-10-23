@@ -43,13 +43,14 @@ final class ResultLongPollRevocationTest {
               new SimpleModule("revoke-while-serializing")
                   .addSerializer(ResultMessage.Success.class, new RevokingSerializer()))
           .build();
+  private final SessionRegistry registry = SessionRegistry.inMemory();
   private RuntimeServer server;
 
   @BeforeEach
   void startServer() {
     server =
         RuntimeServer.builder()
-            .withRegistry(SessionRegistry.inMemory())
+            .withRegistry(registry)
             .withOptionsFactory(
                 request ->
                     SessionOptions.newBuilder()
@@ -77,7 +78,7 @@ final class ResultLongPollRevocationTest {
     assertEquals(
         202,
         send("POST", "/sessions/" + sessionId + "/messages", "{\"text\":\"go\"}").statusCode());
-    var session = server.registry().find(sessionId, CAROL).orElseThrow();
+    var session = registry.find(sessionId, CAROL).orElseThrow();
     Await.value("the session's result", session.result());
 
     var resp = send("GET", "/sessions/" + sessionId + "/result?timeout=0", null);

@@ -4,7 +4,6 @@ package com.standardapplied.helios.runtime;
 
 import static com.standardapplied.helios.runtime.AdmissionHarness.assertRefused;
 import static com.standardapplied.helios.runtime.AdmissionHarness.result;
-import static com.standardapplied.helios.runtime.ResponseBodies.afterReady;
 import static com.standardapplied.helios.runtime.ResponseBodies.rest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -29,10 +28,10 @@ import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.StdSerializer;
 
 /**
- * An event stream or result poll holds its principal's and the service's admission until it ends,
- * even after its session is deleted and its session capacity reused, so creating and deleting
- * sessions never lifts the bounds. A revoked event stream holds its admission until the event it is
- * still serializing is done, so revoking credentials never lifts them either.
+ * An event stream or result poll holds its principal's request slot until it ends, even after its
+ * session is deleted, so creating and deleting sessions never lifts the bound. A revoked event
+ * stream holds its slot until the event it is still serializing is done, so revoking credentials
+ * never lifts it either.
  */
 final class AgentHttpServiceChurnAdmissionTest {
 
@@ -50,83 +49,43 @@ final class AgentHttpServiceChurnAdmissionTest {
   }
 
   @Test
-  void anEventStreamOfADeletedSessionStillCountsAgainstItsPrincipalAndTheService()
-      throws IOException {
-    var server =
-        harness.server(
-            oneSessionPerPrincipal(),
-            RequestLimits.newBuilder()
-                .withMaxEventStreams(2)
-                .withMaxEventStreamsPerPrincipal(1)
-                .build());
+  void anEventStreamOfADeletedSessionHoldsItsSlotUntilItEnds() {
+    var server = harness.server(harness.registry(), 2);
     var deleted = harness.create(server, "alice");
-    var held = afterReady(open(server, deleted, "alice"));
-    assertEquals(204, harness.send(server, "DELETE", path(deleted), "alice").statusCode());
-    var replacement = harness.create(server, "alice");
+    var held = harness.openEventsAdmitted(server, deleted, "alice");
+    delete(server, deleted);
 
-    var aliceRefused = open(server, replacement, "alice");
-    var bobs = open(server, harness.create(server, "bob"), "bob");
-    var carolRefused = open(server, harness.create(server, "carol"), "carol");
-
-    assertStreamRefused(aliceRefused, 429, "{\"error\":\"too many event streams open\"}");
-    assertStreamRefused(carolRefused, 503, "{\"error\":\"server at event stream capacity\"}");
-    assertEquals(new AdmissionCounts(2, 2), server.counters().eventStreams());
+    assertRefusedWhileHoldingOneMore(server);
 
     harness.sessions.get(deleted).completeEvents();
     assertEquals(List.of(), rest(held));
-    harness.openEventsAdmitted(server, replacement, "alice").body().close();
-    bobs.body().close();
+    assertEquals(201, harness.sendAdmitted(server, "POST", "/sessions", "alice").statusCode());
   }
 
   @Test
-  void aResultPollOfADeletedSessionStillCountsAgainstItsPrincipalAndTheService() {
+  void aResultPollOfADeletedSessionHoldsItsSlotUntilItIsAnswered() {
     var server =
         harness.server(
-            oneSessionPerPrincipal(),
-            RequestLimits.newBuilder()
-                .withMaxResultPolls(2)
-                .withMaxResultPollsPerPrincipal(1)
-                .build(),
-            held(ResultMessage.Cancelled.class));
+            harness.registry(), AdmissionHarness.limits(2), held(ResultMessage.Cancelled.class));
     var deleted = harness.create(server, "alice");
     var held = waitingPoll(server, deleted, "alice");
-    assertEquals(204, harness.send(server, "DELETE", path(deleted), "alice").statusCode());
+    delete(server, deleted);
     Await.latch("the cancelled result to be serialized", serializing);
-    var replacement = harness.create(server, "alice");
 
-    var aliceRefused = harness.send(server, "GET", result(replacement), "alice");
-    var bobs = waitingPoll(server, harness.create(server, "bob"), "bob");
-    var carolRefused =
-        harness.send(server, "GET", result(harness.create(server, "carol")), "carol");
-
-    assertEquals(429, aliceRefused.statusCode());
-    assertRefused(aliceRefused, "{\"error\":\"too many result polls waiting\"}");
-    assertEquals(503, carolRefused.statusCode());
-    assertRefused(carolRefused, "{\"error\":\"server at result poll capacity\"}");
-    assertEquals(new AdmissionCounts(2, 2), server.counters().resultPolls());
+    assertRefusedWhileHoldingOneMore(server);
 
     release.countDown();
     assertEquals(200, Await.value("the held poll to be answered", held).statusCode());
-    harness.sessions.get(replacement).terminate();
-    assertEquals(
-        200, harness.sendAdmitted(server, "GET", result(replacement), "alice").statusCode());
-    harness.sessions.values().forEach(StubSession::terminate);
-    assertEquals(200, Await.value("bob's poll to be answered", bobs).statusCode());
+    assertEquals(201, harness.sendAdmitted(server, "POST", "/sessions", "alice").statusCode());
   }
 
   @Test
   void aRevokedEventStreamKeepsItsAdmissionUntilTheEventItIsSerializingIsDone() throws IOException {
     var server =
         harness.server(
-            harness.registry(),
-            RequestLimits.newBuilder().withMaxEventStreamsPerSession(1).build(),
-            held(QueryEvent.AssistantText.class));
+            harness.registry(), AdmissionHarness.limits(1), held(QueryEvent.AssistantText.class));
     var sessionId = harness.create(server, "alice");
-    var revoked =
-        Await.value(
-            "the event stream to be answered",
-            harness.openEventsOnOwnConnection(server, sessionId, "alice"));
-    var events = afterReady(revoked);
+    var events = harness.openEventsOnOwnConnectionAdmitted(server, sessionId, "alice");
     var session = harness.sessions.get(sessionId);
     var delivery = CompletableFuture.runAsync(() -> session.subscribers.getFirst().onNext(EVENT));
     Await.latch("the event to be serialized", serializing);
@@ -136,11 +95,32 @@ final class AgentHttpServiceChurnAdmissionTest {
     var refused = open(server, sessionId, "alice");
 
     assertEquals(List.of(), streamed);
-    assertStreamRefused(refused, 429, "{\"error\":\"too many event streams on this session\"}");
+    assertStreamRefused(refused);
     assertFalse(delivery.isDone());
     release.countDown();
     Await.value("the held delivery to end", delivery);
-    harness.openEventsAdmitted(server, sessionId, "alice").body().close();
+    harness.openEventsAdmitted(server, sessionId, "alice").close();
+  }
+
+  /**
+   * With one of alice's two slots held by a request on a deleted session, hold the other with a
+   * stream on a new session and find her next request refused.
+   */
+  private void assertRefusedWhileHoldingOneMore(RuntimeServer server) {
+    var other = harness.create(server, "alice");
+    harness.openEventsAdmitted(server, other, "alice");
+
+    var refused = harness.send(server, "GET", result(other), "alice");
+
+    assertEquals(429, refused.statusCode());
+    assertRefused(refused, AdmissionHarness.TOO_MANY_REQUESTS);
+    harness.sessions.get(other).completeEvents();
+  }
+
+  private void delete(RuntimeServer server, String sessionId) {
+    assertEquals(
+        204,
+        harness.sendAdmitted(server, "DELETE", "/sessions/" + sessionId, "alice").statusCode());
   }
 
   private HttpResponse<InputStream> open(RuntimeServer server, String sessionId, String token) {
@@ -159,10 +139,6 @@ final class AgentHttpServiceChurnAdmissionTest {
     return poll;
   }
 
-  private SessionRegistry.Builder oneSessionPerPrincipal() {
-    return harness.registry().withMaxSessionsPerPrincipal(1);
-  }
-
   /** A mapper that holds the serialization of every {@code type} until {@link #release}. */
   private <T> JsonMapper held(Class<T> type) {
     return JsonMapper.builder()
@@ -170,15 +146,11 @@ final class AgentHttpServiceChurnAdmissionTest {
         .build();
   }
 
-  private static String path(String sessionId) {
-    return "/sessions/" + sessionId;
-  }
-
-  private static void assertStreamRefused(HttpResponse<InputStream> resp, int status, String body) {
-    assertEquals(status, resp.statusCode());
+  private static void assertStreamRefused(HttpResponse<InputStream> resp) {
+    assertEquals(429, resp.statusCode());
     assertEquals(
         Optional.of(Overload.RETRY_AFTER_SECONDS), resp.headers().firstValue("Retry-After"));
-    assertEquals(body, ResponseBodies.text(resp.body()));
+    assertEquals(AdmissionHarness.TOO_MANY_REQUESTS, ResponseBodies.text(resp.body()));
   }
 
   private final class HeldSerializer<T> extends StdSerializer<T> {

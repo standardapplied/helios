@@ -46,6 +46,12 @@ final class RuntimeServerRequestFramingTest {
 
   private static final int MAX_BODY = 64;
 
+  /**
+   * Requests of one principal in flight at a time: above one, so an earlier request whose slot is
+   * not yet given back never turns a later one into a refusal.
+   */
+  private static final int REQUESTS_PER_PRINCIPAL = 2;
+
   /** The most one read of Helidon's {@code PlainSocket} takes off the connection. */
   private static final int SERVER_READ_BUFFER = 8 * 1024;
 
@@ -59,10 +65,13 @@ final class RuntimeServerRequestFramingTest {
   private static final Header SMUGGLER =
       HeaderValues.create(TrustedProxyAuthenticator.DEFAULT_SUBJECT_HEADER, "smuggler");
 
+  private static final Principal ALICE = new Principal("acme", "alice");
+
   private static final Header CRASH = HeaderValues.create("X-Crash", "yes");
 
   private final AtomicInteger smuggledSeen = new AtomicInteger();
   private final List<RawConnection> heldUploads = new ArrayList<>();
+  private final SessionRegistry registry = registry();
   private final RuntimeServer server = server();
   private Map<String, String> sessions;
 
@@ -107,15 +116,10 @@ final class RuntimeServerRequestFramingTest {
                 "{\"error\":\"request body too large\"}",
                 t -> Upload.chunkedPastBound(messages(t.sessions.get("alice")), identity("alice"))),
             refusal(
-                "429 for an upload over the principal's bound",
+                "429 for a request over the principal's bound",
                 "HTTP/1.1 429 Too Many Requests",
-                "{\"error\":\"too many message uploads in progress\"}",
-                t -> t.holdingEveryUpload(messages(t.sessions.get("alice")), "alice")),
-            refusal(
-                "503 for an upload over the service's bound",
-                "HTTP/1.1 503 Service Unavailable",
-                "{\"error\":\"server at message upload capacity\"}",
-                t -> t.holdingEveryUpload(messages(t.sessions.get("carol")), "carol")),
+                "{\"error\":\"too many requests in progress\"}",
+                t -> t.holdingEveryRequest(messages(t.sessions.get("alice")), "alice")),
             answer(
                 "201 for a create that ignores its body",
                 "HTTP/1.1 201 Created",
@@ -166,38 +170,70 @@ final class RuntimeServerRequestFramingTest {
   @Test
   void aRequestSmuggledInTheBodyOfARefusedOneIsNeverRun() throws IOException {
     assertARequestSmuggledInARefusedBodyNeverRuns(server.port());
-    assertEquals(3, server.registry().size());
+    assertEquals(3, registry.size());
   }
 
   @Test
   void theServiceOnAServerWithoutTheGuardStillEndsTheConnectionsItsRoutesLeaveUnread()
       throws IOException {
-    var mapper = JsonMapper.builder().build();
-    var service =
-        new AgentHttpService(
-            registry(),
-            RuntimeServerRequestFramingTest::options,
-            authenticator(),
-            mapper,
-            "/v1",
-            RequestLimits.defaults());
-    var deployed =
-        WebServer.builder()
-            .host("127.0.0.1")
-            .port(0)
-            .featuresDiscoverServices(false)
-            .mediaContext(
-                mc ->
-                    mc.mediaSupportsDiscoverServices(false)
-                        .addMediaSupport(JacksonSupport.create(mapper)))
-            .routing((HttpRouting.Builder routing) -> routing.register("/v1", service))
-            .build()
-            .start();
+    var deployed = deploy(registry(), 64);
     try {
       assertARequestSmuggledInARefusedBodyNeverRuns(deployed.port());
     } finally {
       deployed.stop();
     }
+  }
+
+  @Test
+  void aServerAtHelidonsRequestCapAnswersOneMore503AndEndsItsConnection() throws IOException {
+    var own = registry();
+    var session = (StubSession) own.create(options(new SessionRequest("held", ALICE)), ALICE);
+    var deployed = deploy(own, 1);
+    try (var stream = RawConnection.open(deployed.port());
+        var refused = RawConnection.open(deployed.port())) {
+      stream.write(
+          "GET /v1/sessions/held/events HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+              + identity("alice")
+              + "\r\n");
+      assertEquals("HTTP/1.1 200 OK", stream.response().statusLine());
+      refused.write(
+          "GET /v1/sessions/held/result?timeout=0 HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+              + identity("alice")
+              + "\r\n");
+
+      var answer = refused.response();
+
+      assertEquals("HTTP/1.1 503 Service Unavailable", answer.statusLine());
+      assertEquals(-1, refused.next());
+      session.completeEvents();
+    } finally {
+      deployed.stop();
+    }
+  }
+
+  /** {@link AgentHttpService} over {@code registry} on a plain server without the guard. */
+  private WebServer deploy(SessionRegistry registry, int maxConcurrentRequests) {
+    var mapper = JsonMapper.builder().build();
+    var service =
+        new AgentHttpService(
+            registry,
+            RuntimeServerRequestFramingTest::options,
+            authenticator(),
+            mapper,
+            "/v1",
+            RequestLimits.defaults());
+    return WebServer.builder()
+        .host("127.0.0.1")
+        .port(0)
+        .maxConcurrentRequests(maxConcurrentRequests)
+        .featuresDiscoverServices(false)
+        .mediaContext(
+            mc ->
+                mc.mediaSupportsDiscoverServices(false)
+                    .addMediaSupport(JacksonSupport.create(mapper)))
+        .routing((HttpRouting.Builder routing) -> routing.register("/v1", service))
+        .build()
+        .start();
   }
 
   /** A body that is itself a request follows a {@code 401} sent before the body was asked for. */
@@ -369,43 +405,55 @@ final class RuntimeServerRequestFramingTest {
     return answer;
   }
 
-  /** Hold one upload each of alice and bob open, every one the service admits, then upload. */
-  private Upload holdingEveryUpload(String path, String principal) {
-    for (var holder : List.of("alice", "bob")) {
-      try {
-        var held = RawConnection.open(server.port());
-        heldUploads.add(held);
-        held.write(
-            "POST "
-                + messages(sessions.get(holder))
-                + " HTTP/1.1\r\nHost: 127.0.0.1\r\n"
-                + identity(holder)
-                + "Content-Type: application/json\r\nContent-Length: 2\r\n"
-                + "Expect: 100-continue\r\n\r\n");
-        assertEquals("HTTP/1.1 100 Continue", held.response().statusLine());
-      } catch (IOException e) {
-        throw new UncheckedIOException(e);
-      }
+  /** Hold uploads of {@code principal} open, every request its bound admits, then upload. */
+  private Upload holdingEveryRequest(String path, String principal) {
+    for (var i = 0; i < REQUESTS_PER_PRINCIPAL; i++) {
+      Await.until("an upload to be admitted and held", () -> heldUpload(principal));
     }
     return Upload.declared("POST", path, identity(principal));
   }
 
+  /**
+   * Start an upload of {@code principal} and keep it open once admitted. A request gives its slot
+   * back just after its answer is sent, so one sent as soon as the earlier answer arrived may still
+   * be refused.
+   */
+  private boolean heldUpload(String principal) {
+    try {
+      var held = RawConnection.open(server.port());
+      held.write(
+          "POST "
+              + messages(sessions.get(principal))
+              + " HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+              + identity(principal)
+              + "Content-Type: application/json\r\nContent-Length: 2\r\n"
+              + "Expect: 100-continue\r\n\r\n");
+      var answer = held.response();
+      if (answer.statusLine().equals("HTTP/1.1 100 Continue")) {
+        heldUploads.add(held);
+        return true;
+      }
+      held.close();
+      assertEquals("HTTP/1.1 429 Too Many Requests", answer.statusLine());
+      return false;
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
   private RuntimeServer server() {
     return RuntimeServer.builder()
-        .withRegistry(registry())
+        .withRegistry(registry)
         .withOptionsFactory(RuntimeServerRequestFramingTest::options)
-        .withRequestLimits(
-            RequestLimits.newBuilder()
-                .withMaxRequestBytes(MAX_BODY)
-                .withMaxMessageUploads(2)
-                .withMaxMessageUploadsPerPrincipal(1)
-                .build())
+        .withRequestLimits(new RequestLimits(MAX_BODY, REQUESTS_PER_PRINCIPAL))
         .withAuthenticator(authenticator())
         .build();
   }
 
   private static SessionRegistry registry() {
-    return SessionRegistry.withFactory(options -> new StubSession(options.sessionId(), 8));
+    return SessionRegistry.newBuilder()
+        .withFactory(options -> new StubSession(options.sessionId(), 8))
+        .build();
   }
 
   private static SessionOptions options(SessionRequest request) {

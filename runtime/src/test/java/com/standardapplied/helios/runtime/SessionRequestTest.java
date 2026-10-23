@@ -36,13 +36,14 @@ final class SessionRequestTest {
   private final Map<String, ScriptedModel> models = new ConcurrentHashMap<>();
   private final JsonMapper mapper = JsonMapper.builder().build();
   private final HttpClient http = HttpClient.newBuilder().connectTimeout(Await.HANG_GUARD).build();
+  private final SessionRegistry registry = SessionRegistry.inMemory();
   private RuntimeServer server;
 
   @BeforeEach
   void startServer() {
     server =
         RuntimeServer.builder()
-            .withRegistry(SessionRegistry.inMemory())
+            .withRegistry(registry)
             .withOptionsFactory(this::options)
             .withAuthenticator(new RevocableTokens())
             .build();
@@ -98,8 +99,7 @@ final class SessionRequestTest {
   private Message firstModelMessage(String sessionId, Principal owner) throws Exception {
     assertEquals(
         202, post("/sessions/" + sessionId + "/messages", owner, "{\"text\":\"go\"}").statusCode());
-    Await.value(
-        "the session's result", server.registry().find(sessionId, owner).orElseThrow().result());
+    Await.value("the session's result", registry.find(sessionId, owner).orElseThrow().result());
     return models.get(sessionId).calls().getFirst().getFirst();
   }
 

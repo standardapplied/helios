@@ -16,15 +16,11 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.tool.Tool;
-import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.SessionOptions;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import org.junit.jupiter.api.Test;
 
@@ -64,12 +60,6 @@ final class SessionRegistryTest {
   }
 
   @Test
-  void withFactoryRejectsNullFactory() {
-    var ex = assertThrows(NullPointerException.class, () -> SessionRegistry.withFactory(null));
-    assertEquals("factory must not be null", ex.getMessage());
-  }
-
-  @Test
   void createRegistersAndReturnsSession() {
     var registry = SessionRegistry.inMemory();
     var session = registry.create(optionsFor("s1"), OWNER);
@@ -99,7 +89,7 @@ final class SessionRegistryTest {
 
   @Test
   void createRejectsFactoryReturningNull() {
-    var registry = SessionRegistry.withFactory(opts -> null);
+    var registry = SessionRegistry.newBuilder().withFactory(opts -> null).build();
     var ex =
         assertThrows(
             NullPointerException.class, () -> registry.create(optionsFor("ignored"), OWNER));
@@ -193,7 +183,7 @@ final class SessionRegistryTest {
   @Test
   void anotherPrincipalCannotCloseTheSession() {
     var closes = new AtomicInteger();
-    var registry = SessionRegistry.withFactory(opts -> stub(opts, closes));
+    var registry = SessionRegistry.newBuilder().withFactory(opts -> stub(opts, closes)).build();
     registry.create(optionsFor("s1"), OWNER);
 
     assertFalse(registry.close("s1", SAME_TENANT));
@@ -238,7 +228,7 @@ final class SessionRegistryTest {
   @Test
   void duplicateIdClosesTheRejectedSession() {
     var closes = new AtomicInteger();
-    var registry = SessionRegistry.withFactory(opts -> stub(opts, closes));
+    var registry = SessionRegistry.newBuilder().withFactory(opts -> stub(opts, closes)).build();
     registry.create(optionsFor("s1"), OWNER);
     assertThrows(IllegalStateException.class, () -> registry.create(optionsFor("s1"), OWNER));
     // The freshly-built tracking session for the rejected duplicate should be closed once;
@@ -279,9 +269,7 @@ final class SessionRegistryTest {
     Map<String, IntConsumer> caps =
         Map.of(
             "maxSessions", b::withMaxSessions,
-            "maxActiveSessions", b::withMaxActiveSessions,
-            "maxSessionsPerPrincipal", b::withMaxSessionsPerPrincipal,
-            "maxActiveSessionsPerPrincipal", b::withMaxActiveSessionsPerPrincipal);
+            "maxSessionsPerPrincipal", b::withMaxSessionsPerPrincipal);
     caps.forEach(
         (name, setter) -> {
           for (var value : new int[] {0, -5}) {
@@ -292,111 +280,13 @@ final class SessionRegistryTest {
   }
 
   @Test
-  void builderRejectsEveryDurationThatIsNullOrNotPositive() {
+  void builderRejectsARetentionThatIsNullOrNotPositive() {
     var b = SessionRegistry.newBuilder();
-    Map<String, Consumer<Duration>> durations =
-        Map.of("terminalRetention", b::withTerminalRetention, "idleTimeout", b::withIdleTimeout);
-    durations.forEach(
-        (name, setter) -> {
-          var missing = assertThrows(NullPointerException.class, () -> setter.accept(null));
-          assertEquals(name + " must not be null", missing.getMessage());
-          for (var value : List.of(Duration.ZERO, Duration.ofSeconds(-1))) {
-            var ex = assertThrows(IllegalArgumentException.class, () -> setter.accept(value));
-            assertEquals(name + " must be positive, got " + value, ex.getMessage());
-          }
-        });
-  }
-
-  // ── Defaults ─────────────────────────────────────────────────────────────
-
-  @Test
-  void byDefaultAPrincipalHoldsSixteenActiveSessions() {
-    var registry = SessionRegistry.withFactory(opts -> new StubSession(opts.sessionId()));
-    createAll(registry, OWNER, 16);
-
-    var ex = assertThrows(SessionCapacityException.class, () -> create(registry, OWNER));
-
-    assertEquals(SessionCapacityException.Scope.PRINCIPAL, ex.scope());
-    assertEquals("active sessions of the principal at cap 16", ex.getMessage());
-  }
-
-  @Test
-  void byDefaultTheRegistryHoldsTwoHundredFiftySixActiveSessions() {
-    var registry = SessionRegistry.withFactory(opts -> new StubSession(opts.sessionId()));
-    for (var i = 0; i < 16; i++) {
-      createAll(registry, new Principal("tenant-" + i, "user"), 16);
-    }
-
-    var ex = assertThrows(SessionCapacityException.class, () -> create(registry, OWNER));
-
-    assertEquals(SessionCapacityException.Scope.SERVER, ex.scope());
-    assertEquals("active sessions at cap 256", ex.getMessage());
-  }
-
-  @Test
-  void byDefaultAPrincipalHoldsSixtyFourSessionsBeforeItsOldestTerminalIsEvicted() {
-    var registry = SessionRegistry.withFactory(opts -> new StubSession(opts.sessionId()));
-    var first = (StubSession) create(registry, OWNER);
-    first.terminate();
-    for (var i = 1; i < 64; i++) {
-      ((StubSession) create(registry, OWNER)).terminate();
-    }
-
-    create(registry, OWNER);
-
-    assertEquals(64, registry.size());
-    assertEquals(1, first.closes.get());
-  }
-
-  @Test
-  void byDefaultTheRegistryHoldsOneThousandTwentyFourSessions() {
-    var registry = SessionRegistry.withFactory(opts -> new StubSession(opts.sessionId()));
-    for (var i = 0; i < 16; i++) {
-      var tenant = new Principal("tenant-" + i, "user");
-      for (var j = 0; j < 64; j++) {
-        ((StubSession) create(registry, tenant)).terminate();
-      }
-    }
-
-    var ex = assertThrows(SessionCapacityException.class, () -> create(registry, OWNER));
-
-    assertEquals(SessionCapacityException.Scope.SERVER, ex.scope());
-    assertEquals("sessions at cap 1024", ex.getMessage());
-    assertEquals(1024, registry.size());
-  }
-
-  @Test
-  void byDefaultATerminalSessionIsRetainedFifteenMinutesAndAnUnstartedOneFive() {
-    var now = new AtomicReference<>(Instant.parse("2026-10-15T12:00:00Z"));
-    var registry =
-        SessionRegistry.newBuilder()
-            .withFactory(opts -> new StubSession(opts.sessionId()))
-            .withClock(now::get)
-            .build();
-    var terminal = (StubSession) create(registry, OWNER);
-    terminal.terminate();
-    create(registry, OWNER);
-
-    now.set(now.get().plus(Duration.ofMinutes(5)).minusMillis(1));
-    assertEquals(0, registry.sweep());
-    now.set(now.get().plusMillis(1));
-    assertEquals(1, registry.sweep());
-    now.set(now.get().plus(Duration.ofMinutes(10)).minusMillis(1));
-    assertEquals(0, registry.sweep());
-    now.set(now.get().plusMillis(1));
-    assertEquals(1, registry.sweep());
-    assertEquals(0, registry.size());
-  }
-
-  private static final AtomicInteger IDS = new AtomicInteger();
-
-  private static AgentSession create(SessionRegistry registry, Principal owner) {
-    return registry.create(optionsFor("s" + IDS.incrementAndGet()), owner);
-  }
-
-  private static void createAll(SessionRegistry registry, Principal owner, int count) {
-    for (var i = 0; i < count; i++) {
-      create(registry, owner);
+    var missing = assertThrows(NullPointerException.class, () -> b.withRetention(null));
+    assertEquals("retention must not be null", missing.getMessage());
+    for (var value : List.of(Duration.ZERO, Duration.ofSeconds(-1))) {
+      var ex = assertThrows(IllegalArgumentException.class, () -> b.withRetention(value));
+      assertEquals("retention must be positive, got " + value, ex.getMessage());
     }
   }
 

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.testing.ScriptedModel;
+import java.io.BufferedReader;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -25,6 +26,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -41,16 +43,8 @@ final class AdmissionHarness implements AutoCloseable {
   /** A message and interrupt body of 32 bytes. */
   static final byte[] BODY = textBody(32);
 
-  private static final List<Map<String, String>> CONCURRENCY_REFUSALS =
-      List.of(
-          Overload.TOO_MANY_UPLOADS,
-          Overload.SERVER_AT_UPLOAD_CAPACITY,
-          Overload.TOO_MANY_EVENT_STREAMS,
-          Overload.TOO_MANY_OPEN_EVENT_STREAMS,
-          Overload.SERVER_AT_EVENT_STREAM_CAPACITY,
-          Overload.TOO_MANY_RESULT_POLLS,
-          Overload.TOO_MANY_WAITING_RESULT_POLLS,
-          Overload.SERVER_AT_RESULT_POLL_CAPACITY);
+  /** The body of a request refused because its principal has every request slot in flight. */
+  static final String TOO_MANY_REQUESTS = "{\"error\":\"too many requests in progress\"}";
 
   final Map<String, StubSession> sessions = new ConcurrentHashMap<>();
   final AtomicReference<Runnable> duringFactory = new AtomicReference<>(() -> {});
@@ -80,20 +74,24 @@ final class AdmissionHarness implements AutoCloseable {
     return start(registry, builder -> builder.withRequestLimits(limits));
   }
 
+  RuntimeServer server(SessionRegistry.Builder registry, int requestsPerPrincipal) {
+    return server(registry, limits(requestsPerPrincipal));
+  }
+
   RuntimeServer server(SessionRegistry.Builder registry, RequestLimits limits, JsonMapper mapper) {
     return start(registry, builder -> builder.withRequestLimits(limits).withObjectMapper(mapper));
   }
 
   String create(RuntimeServer server, String token) {
-    var resp = send(server, "POST", "/sessions", token);
+    var resp = sendAdmitted(server, "POST", "/sessions", token);
     assertEquals(201, resp.statusCode(), resp::body);
     return (String) mapper.readValue(resp.body(), Map.class).get("sessionId");
   }
 
   /**
-   * Send until no concurrency bound refuses the request. A stream, poll or upload gives its
-   * admission back just after its response is sent, so a request sent as soon as the client has
-   * that response may still find the admission held.
+   * Send until the principal's request bound admits the request. A request gives its slot back just
+   * after its response is sent, so a request sent as soon as the client has that response may still
+   * find the slot held.
    */
   HttpResponse<String> sendAdmitted(
       RuntimeServer server, String method, String path, String token, BodyPublisher body) {
@@ -102,7 +100,7 @@ final class AdmissionHarness implements AutoCloseable {
         "the request to be admitted",
         () -> {
           answer.set(send(server, method, path, token, body));
-          return !isConcurrencyRefusal(answer.get().statusCode(), answer.get().body());
+          return !isRequestRefusal(answer.get().statusCode(), answer.get().body());
         });
     return answer.get();
   }
@@ -114,27 +112,38 @@ final class AdmissionHarness implements AutoCloseable {
   }
 
   /**
-   * Open {@code sessionId}'s event stream once no concurrency bound refuses it, and read its {@code
+   * Open {@code sessionId}'s event stream once the request bound admits it, and read its {@code
    * Ready} event, so the stream is subscribed and {@link #close()} ends it.
+   *
+   * @return the rest of the stream
    */
-  HttpResponse<InputStream> openEventsAdmitted(
+  BufferedReader openEventsAdmitted(RuntimeServer server, String sessionId, String token) {
+    return admitted(() -> openEvents(server, sessionId, token));
+  }
+
+  /**
+   * {@link #openEventsAdmitted} on a connection of its own, as {@link #openEventsOnOwnConnection}.
+   */
+  BufferedReader openEventsOnOwnConnectionAdmitted(
       RuntimeServer server, String sessionId, String token) {
+    return admitted(() -> openEventsOnOwnConnection(server, sessionId, token));
+  }
+
+  private BufferedReader admitted(Supplier<CompletableFuture<HttpResponse<InputStream>>> open) {
     var answer = new AtomicReference<HttpResponse<InputStream>>();
     Await.until(
         "the event stream to be admitted",
         () -> {
-          var resp =
-              Await.value("the event stream to be answered", openEvents(server, sessionId, token));
+          var resp = Await.value("the event stream to be answered", open.get());
           if (resp.statusCode() == 200) {
             answer.set(resp);
             return true;
           }
           var text = ResponseBodies.text(resp.body());
-          assertTrue(isConcurrencyRefusal(resp.statusCode(), text), text);
+          assertTrue(isRequestRefusal(resp.statusCode(), text), text);
           return false;
         });
-    ResponseBodies.afterReady(answer.get());
-    return answer.get();
+    return ResponseBodies.afterReady(answer.get());
   }
 
   HttpResponse<String> send(RuntimeServer server, String method, String path, String token) {
@@ -216,6 +225,11 @@ final class AdmissionHarness implements AutoCloseable {
         .getBytes(StandardCharsets.UTF_8);
   }
 
+  /** Limits with the default body bound and {@code requestsPerPrincipal} requests in flight. */
+  static RequestLimits limits(int requestsPerPrincipal) {
+    return new RequestLimits(RequestLimits.defaults().maxRequestBytes(), requestsPerPrincipal);
+  }
+
   /** Assert {@code resp} is a refusal with {@code body} and the retry guidance. */
   static void assertRefused(HttpResponse<String> resp, String body) {
     assertEquals(body, resp.body());
@@ -239,9 +253,8 @@ final class AdmissionHarness implements AutoCloseable {
     return "/sessions/" + sessionId + "/result?timeout=300";
   }
 
-  private boolean isConcurrencyRefusal(int status, String body) {
-    return (status == 429 || status == 503)
-        && CONCURRENCY_REFUSALS.stream().map(mapper::writeValueAsString).anyMatch(body::equals);
+  private static boolean isRequestRefusal(int status, String body) {
+    return status == 429 && body.equals(TOO_MANY_REQUESTS);
   }
 
   private static BodyPublisher defaultBody(String method) {
