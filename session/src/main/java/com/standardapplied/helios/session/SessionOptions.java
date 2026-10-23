@@ -28,11 +28,11 @@ import java.util.Optional;
  * Composition record bundling everything needed to construct an {@link AgentSession}.
  *
  * <p>Phase 1 carries the minimum set of fields the agent loop actually wires: the model, the
- * session id, the limits, the concurrency caps, and the clock. Subsequent phases extend the record
- * as their subsystems land — Phase 2 adds {@code tools} and {@code hooks}; Phase 3 adds {@code
- * workspace}; Phase 4 adds {@code memory}; Phase 5 adds {@code execution}; Phase 7 adds {@code
- * audit}; etc. Because v2 is clean-slate (no backwards-compat shims), the record's shape evolves
- * with the phases.
+ * session id, the limits, the steering queue's capacity, and the clock. Subsequent phases extend
+ * the record as their subsystems land — Phase 2 adds {@code tools} and {@code hooks}; Phase 3 adds
+ * {@code workspace}; Phase 4 adds {@code memory}; Phase 5 adds {@code execution}; Phase 7 adds
+ * {@code audit}; etc. Because v2 is clean-slate (no backwards-compat shims), the record's shape
+ * evolves with the phases.
  *
  * <p>Build via {@link #newBuilder()} or one of the {@link SessionPresets} factories — every
  * optional field has a sensible default, and {@code model} is the only required input. The
@@ -43,7 +43,9 @@ import java.util.Optional;
  * @param model the LLM the session loop drives; non-null
  * @param sessionId stable, non-blank session id; auto-generated UUID if not set on the builder
  * @param limits per-session ceilings; non-null
- * @param concurrency per-session concurrency caps; non-null
+ * @param maxQueuedUserMessages how many user messages {@link AgentSession#send} may queue before
+ *     the loop consumes them; a send beyond it throws {@link SteeringQueueFullException}; positive,
+ *     defaults to 256
  * @param clock time source supplying event timestamps and elapsed; non-null
  * @param tools the tool registry the loop advertises to the model and dispatches against; non-null,
  *     defaults to {@link ToolRegistry#empty()}
@@ -95,7 +97,7 @@ public record SessionOptions(
     Model model,
     String sessionId,
     SessionLimits limits,
-    ConcurrencyLimits concurrency,
+    int maxQueuedUserMessages,
     InstantSource clock,
     ToolRegistry tools,
     List<Hook> hooks,
@@ -113,7 +115,8 @@ public record SessionOptions(
    * Canonical constructor.
    *
    * @throws NullPointerException if any argument is null
-   * @throws IllegalArgumentException if {@code sessionId} is blank
+   * @throws IllegalArgumentException if {@code sessionId} is blank or {@code maxQueuedUserMessages}
+   *     is not positive
    */
   public SessionOptions {
     Objects.requireNonNull(model, "model must not be null");
@@ -122,7 +125,7 @@ public record SessionOptions(
       throw new IllegalArgumentException("sessionId must not be blank");
     }
     Objects.requireNonNull(limits, "limits must not be null");
-    Objects.requireNonNull(concurrency, "concurrency must not be null");
+    requirePositiveQueue(maxQueuedUserMessages);
     Objects.requireNonNull(clock, "clock must not be null");
     Objects.requireNonNull(tools, "tools must not be null");
     Objects.requireNonNull(hooks, "hooks must not be null");
@@ -136,6 +139,14 @@ public record SessionOptions(
     Objects.requireNonNull(tokenCounter, "tokenCounter must not be null");
     Objects.requireNonNull(contextCompactor, "contextCompactor must not be null");
     Objects.requireNonNull(secretRegistry, "secretRegistry must not be null");
+  }
+
+  private static int requirePositiveQueue(int maxQueuedUserMessages) {
+    if (maxQueuedUserMessages <= 0) {
+      throw new IllegalArgumentException(
+          "maxQueuedUserMessages must be positive, got " + maxQueuedUserMessages);
+    }
+    return maxQueuedUserMessages;
   }
 
   /**
@@ -158,7 +169,7 @@ public record SessionOptions(
         .withModel(model)
         .withSessionId(sessionId)
         .withLimits(limits)
-        .withConcurrencyLimits(concurrency)
+        .withMaxQueuedUserMessages(maxQueuedUserMessages)
         .withClock(clock)
         .withTools(tools)
         .withHooks(hooks)
@@ -183,7 +194,7 @@ public record SessionOptions(
     private Model model;
     private String sessionId;
     private SessionLimits limits = SessionLimits.defaults();
-    private ConcurrencyLimits concurrency = ConcurrencyLimits.defaults();
+    private int maxQueuedUserMessages = 256;
     private InstantSource clock = Clock.systemUTC();
     private ToolRegistry tools = ToolRegistry.empty();
     private final ArrayList<Hook> hooks = new ArrayList<>();
@@ -241,14 +252,15 @@ public record SessionOptions(
     }
 
     /**
-     * Set the concurrency caps. Defaults to {@link ConcurrencyLimits#defaults()}.
+     * Set how many user messages {@link AgentSession#send} may queue before the loop consumes them;
+     * a send beyond it throws {@link SteeringQueueFullException}. Defaults to 256.
      *
-     * @param concurrency non-null caps
+     * @param maxQueuedUserMessages positive capacity
      * @return this builder
-     * @throws NullPointerException if {@code concurrency} is null
+     * @throws IllegalArgumentException if {@code maxQueuedUserMessages} is not positive
      */
-    public Builder withConcurrencyLimits(ConcurrencyLimits concurrency) {
-      this.concurrency = Objects.requireNonNull(concurrency, "concurrency must not be null");
+    public Builder withMaxQueuedUserMessages(int maxQueuedUserMessages) {
+      this.maxQueuedUserMessages = requirePositiveQueue(maxQueuedUserMessages);
       return this;
     }
 
@@ -475,7 +487,7 @@ public record SessionOptions(
           model,
           id,
           limits,
-          concurrency,
+          maxQueuedUserMessages,
           clock,
           tools,
           hooks,

@@ -11,8 +11,6 @@ import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.ConcurrencyLimits;
-import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Duration;
 import java.util.List;
@@ -20,21 +18,14 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 /**
  * Synchronous tool dispatch surface. The agent loop calls {@link #dispatch(ToolCall,
- * CancellationToken, Duration, Duration, Predicate)} once per tool call the model emits; the
- * dispatcher looks the call up in its {@link ToolRegistry} and runs it as a {@link DispatchedCall}:
- * a virtual thread admitted by the per-{@link ToolCategory category} {@link CategoryPermits}, which
- * runs the tool, and the permit is given back when the call's work has ended.
- *
- * <p>{@link ToolCategory#WRITE} tool calls acquire from the {@code fileWritePermits} pool; {@link
- * ToolCategory#EXECUTION} calls acquire from the {@code executionPermits} pool; every other
- * category acquires from the general {@code toolCallPermits} pool. Sizes come from {@link
- * ConcurrencyLimits}.
+ * CancellationToken, Duration, Duration, Predicate)} once per tool call the model emits, one call
+ * at a time; the dispatcher looks the call up in its {@link ToolRegistry} and runs it as a {@link
+ * DispatchedCall} on a virtual thread of its own.
  *
  * <p>Unknown tool names return a {@link ToolResult#notFound(String) not-found} result; the agent
  * loop feeds that result back to the model so it can self-correct rather than crash.
@@ -45,20 +36,16 @@ import java.util.function.Predicate;
  *
  * <h2>Thread-safety</h2>
  *
- * Safe to share across the agent loop's threads: the permit pools share one lock and the set of
- * live calls is concurrent.
+ * The agent loop dispatches one call at a time; {@link #awaitLiveCalls(Duration)} may run on
+ * another thread, since the set of live calls is concurrent.
  */
 public final class ToolDispatch {
 
   private final SessionContext sessionContext;
   private final ToolRegistry registry;
-  private final ConcurrencyLimits limits;
-  private final CategoryPermits toolCallPermits;
-  private final CategoryPermits fileWritePermits;
-  private final CategoryPermits executionPermits;
-  private final ScheduledExecutorService scheduler;
-  private final Set<DispatchedCall.Live> liveCalls = ConcurrentHashMap.newKeySet();
+  private final Set<DispatchedCall> liveCalls = ConcurrentHashMap.newKeySet();
   private final SessionEnding ending;
+  private volatile DispatchedCall abandoned;
 
   /**
    * Build a dispatcher.
@@ -66,26 +53,13 @@ public final class ToolDispatch {
    * @param sessionContext per-session metadata stamped on every {@link ToolContext} built by this
    *     dispatcher; non-null
    * @param registry the bindings the dispatcher will look calls up against; non-null
-   * @param limits concurrency caps; non-null
-   * @param scheduler the session's scheduler, on which each call's deadline runs; non-null
    * @param ending the session's ending, which records every {@link Error} the work of a call
    *     throws, a callback on a call's own token included; non-null
    * @throws NullPointerException if any argument is null
    */
-  public ToolDispatch(
-      SessionContext sessionContext,
-      ToolRegistry registry,
-      ConcurrencyLimits limits,
-      ScheduledExecutorService scheduler,
-      SessionEnding ending) {
+  public ToolDispatch(SessionContext sessionContext, ToolRegistry registry, SessionEnding ending) {
     this.sessionContext = Objects.requireNonNull(sessionContext, "sessionContext must not be null");
     this.registry = Objects.requireNonNull(registry, "registry must not be null");
-    this.limits = Objects.requireNonNull(limits, "limits must not be null");
-    var scope = new CategoryPermits.Scope();
-    this.toolCallPermits = new CategoryPermits(limits.maxConcurrentToolCalls(), scope);
-    this.fileWritePermits = new CategoryPermits(limits.maxConcurrentFileWrites(), scope);
-    this.executionPermits = new CategoryPermits(limits.maxConcurrentExecutions(), scope);
-    this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
     this.ending = Objects.requireNonNull(ending, "ending must not be null");
   }
 
@@ -108,42 +82,6 @@ public final class ToolDispatch {
   }
 
   /**
-   * The concurrency caps in force.
-   *
-   * @return the limits record
-   */
-  public ConcurrencyLimits limits() {
-    return limits;
-  }
-
-  /**
-   * Permits of the general pool not held by a call whose work is still running.
-   *
-   * @return non-negative count
-   */
-  public int availableToolCallPermits() {
-    return toolCallPermits.available();
-  }
-
-  /**
-   * Permits of the file-write pool not held by a call whose work is still running.
-   *
-   * @return non-negative count
-   */
-  public int availableFileWritePermits() {
-    return fileWritePermits.available();
-  }
-
-  /**
-   * Permits of the execution pool not held by a call whose work is still running.
-   *
-   * @return non-negative count
-   */
-  public int availableExecutionPermits() {
-    return executionPermits.available();
-  }
-
-  /**
    * Wait up to {@code grace} for the work of every call still running to end: the calls whose
    * worker or token cancellation has not ended, including calls answered as {@link
    * ToolOutcome.Unknown}. Waiting cancels nothing; the session ends its calls by cancelling its
@@ -159,32 +97,37 @@ public final class ToolDispatch {
     var until = System.nanoTime() + TimeUnit.NANOSECONDS.convert(grace);
     return List.copyOf(liveCalls).stream()
         .filter(live -> !live.endsBy(until))
-        .map(DispatchedCall.Live::call)
+        .map(DispatchedCall::call)
         .toList();
+  }
+
+  /** Settle every live call's answer as its deadline does, for tests that fire deadlines. */
+  void expireLiveCalls() {
+    liveCalls.forEach(DispatchedCall::expire);
   }
 
   /**
    * Dispatch one tool call and wait for its answer. The call runs on its own cancellation token,
    * linked to {@code cancellation}, under one deadline, {@code timeout} from now, that covers the
-   * wait for a permit and the tool's run; past it, this method waits at most {@code stopGrace}. A
-   * tool not started by the deadline, or before {@code cancellation} fires, never starts. At the
-   * deadline the call's token is cancelled and its worker interrupted, and the call is:
+   * tool's start and run; past it, this method waits at most {@code stopGrace}. A tool not started
+   * by the deadline, or before {@code cancellation} fires, never starts. At the deadline the call's
+   * token is cancelled and its worker interrupted, and the call is:
    *
    * <ul>
    *   <li>{@link ToolOutcome.TimedOut} if the tool never started or stopped within {@code
    *       stopGrace};
    *   <li>{@link ToolOutcome.Unknown} if it still runs. Java cannot safely stop arbitrary code, so
-   *       it runs on and keeps its permit until it ends.
+   *       it runs on until it ends.
    * </ul>
    *
-   * <p>While a call whose category {@link ToolCategory#hasSideEffects has side effects} still runs
-   * after this method stopped waiting for it, at its deadline, on {@code cancellation} or on the
-   * calling thread's interrupt, every other call, of any category and including one already queued,
-   * is {@link ToolOutcome.Rejected rejected} by {@code ToolDispatch} at once, its tool never
-   * started, with the reason {@code tool '<name>' did not stop; no tool runs until it ends}. A call
-   * that only waits for room in its category still queues. The call's token is cancelled on a
-   * thread of its own, so a callback that blocks or throws holds up neither this method, the
-   * session's cancellation nor the interrupt. A tool's {@link Error} is rethrown as itself.
+   * <p>A call is abandoned when this method returns or throws while its work still runs: answered
+   * {@link ToolOutcome.Unknown}, or left on {@code cancellation} or on the calling thread's
+   * interrupt. While an abandoned call's work has not ended, every new call, of any category, is
+   * {@link ToolOutcome.Rejected rejected} by {@code ToolDispatch} at once, its tool never started,
+   * with the reason {@code tool '<name>' did not stop; no tool runs until it ends}, so a session
+   * leaks at most one call. The call's token is cancelled on a thread of its own, so a callback
+   * that blocks or throws holds up neither this method, the session's cancellation nor the
+   * interrupt. A tool's {@link Error} is rethrown as itself.
    *
    * @param call the call; non-null
    * @param cancellation the session's cancellation token; non-null
@@ -192,7 +135,7 @@ public final class ToolDispatch {
    * @param stopGrace how long to wait for a timed-out tool to stop; non-null, positive
    * @param withheld true for the canonical key of an entry the call must not return, handed to the
    *     tool through its {@link ToolContext}; non-null
-   * @return the tool's result, or a framework result on unknown tool or timeout
+   * @return the tool's result, or a framework result on unknown tool, refusal or timeout
    * @throws NullPointerException if any argument is null
    * @throws IllegalArgumentException if {@code timeout} or {@code stopGrace} is not positive
    * @throws Error the error the tool threw
@@ -216,6 +159,12 @@ public final class ToolDispatch {
     if (binding.isEmpty()) {
       return ToolResult.notFound(call.name());
     }
+    var stuck = abandoned;
+    if (stuck != null && stuck.isRunning()) {
+      return ToolResult.rejected(
+          ToolDispatch.class.getSimpleName(),
+          "tool '" + stuck.call().name() + "' did not stop; no tool runs until it ends");
+    }
     var dispatched =
         new DispatchedCall(
             binding.orElseThrow(),
@@ -224,19 +173,10 @@ public final class ToolDispatch {
             cancellation,
             timeout,
             withheld,
-            permitsFor(binding.orElseThrow().category()),
             liveCalls,
+            left -> abandoned = left,
             ending);
-    dispatched.start(scheduler);
+    dispatched.start();
     return dispatched.await(stopGrace);
-  }
-
-  /** The permit pool a call of {@code category} acquires from. */
-  CategoryPermits permitsFor(ToolCategory category) {
-    return switch (category) {
-      case WRITE -> fileWritePermits;
-      case EXECUTION -> executionPermits;
-      case READ, SEARCH, CONTROL, NETWORK, DELEGATION -> toolCallPermits;
-    };
   }
 }

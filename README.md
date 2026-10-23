@@ -266,7 +266,7 @@ See [Sessions](#sessions-helios-session) below.
 - `runBlocking(msg)` and `runBlocking(msg, OutputSchema)` — synchronous convenience for one-shot use.
 - `interrupt(reason)` — queue a synthetic mid-run user message.
 - `answer(qid, response)` — resolve a pending `AskUserQuestion`.
-- `close()` — `AutoCloseable`; cancels the loop and never throws, whatever a cancellation callback does. A started session's loop runs the teardown and `close()` returns at once; for a session whose loop never started, `close()` runs the teardown on the caller's thread, so it can block for up to the teardown graces below. Every end of a session runs one bounded teardown before the result settles: cancel the session's token (its callbacks on a thread of their own) and wait for live tool calls, `onSessionEnd`, scheduler shutdown, publisher drain, each wait bounded by `SessionLimits.teardownGrace` (5 s). A tool that ignores both its token and interruption may still run, and its effects land, after the result settles; it is logged as still running.
+- `close()` — `AutoCloseable`; cancels the loop and never throws, whatever a cancellation callback does. A started session's loop runs the teardown and `close()` returns at once; for a session whose loop never started, `close()` runs the teardown on the caller's thread, so it can block for up to the teardown graces below. Every end of a session runs one bounded teardown before the result settles: cancel the session's token (its callbacks on a thread of their own) and wait for live tool calls, `onSessionEnd`, scheduler shutdown, publisher drain, each wait bounded by `SessionLimits.stopGrace` (5 s). A tool that ignores both its token and interruption may still run, and its effects land, after the result settles; it is logged as still running.
 
 `SessionPresets` ships four curated factories, each returning a `SessionOptions.Builder` that already holds the model:
 
@@ -325,7 +325,7 @@ try (var model = new AnthropicProvider().create(modelId, config)) {
 } // HttpClient and connection pool released here
 ```
 
-`AgentSession` is `AutoCloseable` and owns its loop, per-session publisher executor, and any pending tool/question state. Always use try-with-resources; `close()` cancels the loop, and the result future settles once the teardown has run, each of its waits bounded by `SessionLimits.teardownGrace` (5 s).
+`AgentSession` is `AutoCloseable` and owns its loop, per-session publisher executor, and any pending tool/question state. Always use try-with-resources; `close()` cancels the loop, and the result future settles once the teardown has run, each of its waits bounded by `SessionLimits.stopGrace` (5 s).
 
 `ReplSession` is `AutoCloseable` and owns its sandbox subprocess. `JvmSandbox` also installs a JVM shutdown hook so a leaked sandbox is force-killed on host JVM exit. Both the explicit close and the shutdown hook snapshot the subprocess's descendants and forcibly destroy them before the parent — snippets that call `Runtime.exec(...)` cannot leave orphaned grandchildren past the sandbox lifetime.
 
@@ -341,7 +341,7 @@ var weatherTool = Tool.newBuilder()
     .build();
 ```
 
-`Tool.newBuilder().withIdempotent(true)` records that a tool is safe to repeat; the session loop does not read it, because it never retries a tool: `ToolDispatch` acquires the call's per-category permit, runs the tool once on a virtual thread bounded by the per-call timeout, and turns an unknown tool, a timeout or a thrown exception into a failed result the model sees.
+`Tool.newBuilder().withIdempotent(true)` records that a tool is safe to repeat; the session loop does not read it, because it never retries a tool: `ToolDispatch` runs the tool once on a virtual thread bounded by the per-call timeout, and turns an unknown tool, a timeout or a thrown exception into a failed result the model sees.
 
 ### CommandGrant — give the agent a CLI without giving it the secrets
 

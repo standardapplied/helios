@@ -55,10 +55,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li><b>Process tree reaped on timeout, cancellation and interrupt.</b> Descendants are
  *       destroyed alongside the direct child; one still alive {@link BoundedProcess#GRACE} after
  *       the kill is destroyed forcibly.
- *   <li><b>Concurrency-bounded.</b> Per-provider {@link Semaphore}; overflows wait rather than fail
- *       because the {@code Execute} tool's surrounding {@link
- *       com.standardapplied.helios.session.ConcurrencyLimits#maxConcurrentExecutions()
- *       executionPermits} pool already gates the loop.
+ *   <li><b>Concurrency-bounded.</b> Per-provider {@link Semaphore}; a call over the bound waits for
+ *       a permit rather than fail.
  * </ul>
  *
  * <p>The provider does not isolate the network or the filesystem: a child reaches whatever the host

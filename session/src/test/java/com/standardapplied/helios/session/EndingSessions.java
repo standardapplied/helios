@@ -57,11 +57,11 @@ final class EndingSessions {
   }
 
   static SessionLimits grace() {
-    return SessionLimits.newBuilder().withTeardownGrace(SHORT_GRACE).build();
+    return SessionLimits.newBuilder().withStopGrace(SHORT_GRACE).build();
   }
 
   static SessionLimits slowGrace() {
-    return SessionLimits.newBuilder().withTeardownGrace(NOT_REACHED).build();
+    return SessionLimits.newBuilder().withStopGrace(NOT_REACHED).build();
   }
 
   static ToolBinding binding(String name, ToolExecutor executor) {

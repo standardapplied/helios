@@ -15,9 +15,7 @@
  * <ul>
  *   <li>a {@link com.standardapplied.helios.session.tools.ToolCategory} ({@code READ} / {@code
  *       SEARCH} / {@code WRITE} / {@code EXECUTION} / {@code NETWORK} / {@code CONTROL} / {@code
- *       DELEGATION}) — drives the per-category concurrency caps in {@link
- *       com.standardapplied.helios.session.loop.ToolDispatch} and the default-by-category branch of
- *       the permission evaluator;
+ *       DELEGATION}) — drives the default-by-category branch of the permission evaluator;
  *   <li>an optional {@code permissionKey} extractor that derives a {@link
  *       com.standardapplied.helios.session.tools.ToolPermissionKey} from the call's arguments —
  *       lets glob rules like {@code "Edit:./src/**"} fire against the path arg of an edit call;

@@ -16,7 +16,6 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.MockModel;
 import com.standardapplied.helios.session.CompactionResult;
-import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.ContextCompactor;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
@@ -76,11 +75,7 @@ final class LoopStagesTest {
       Model model, TokenCounter counter, ContextCompactor compactor, Hook... hooks) {
     var dispatch =
         new ToolDispatch(
-            SessionContext.forTesting("sess-loop"),
-            ToolRegistry.empty(),
-            ConcurrencyLimits.defaults(),
-            scheduler,
-            state.ending());
+            SessionContext.forTesting("sess-loop"), ToolRegistry.empty(), state.ending());
     var collaborators =
         new LoopCollaborators(
             new HookRegistry(List.of(hooks), new SecretRegistry()),

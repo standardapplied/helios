@@ -14,7 +14,6 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.MockModel;
-import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
@@ -63,11 +62,7 @@ final class TurnStagesTest {
   private TurnRunner runner(Model model, Hook... hooks) {
     var dispatch =
         new ToolDispatch(
-            SessionContext.forTesting("sess-stages"),
-            ToolRegistry.empty(),
-            ConcurrencyLimits.defaults(),
-            scheduler,
-            state.ending());
+            SessionContext.forTesting("sess-stages"), ToolRegistry.empty(), state.ending());
     var collaborators =
         new LoopCollaborators(
             new HookRegistry(List.of(hooks), new SecretRegistry()),

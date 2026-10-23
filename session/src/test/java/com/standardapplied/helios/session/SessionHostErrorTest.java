@@ -445,10 +445,9 @@ final class SessionHostErrorTest {
     var limits =
         SessionLimits.newBuilder()
             .withToolTimeoutDefault(SHORT_GRACE)
-            .withToolStopGrace(SHORT_GRACE)
+            .withStopGrace(SHORT_GRACE)
             .withStreamIdleTimeout(NOT_REACHED)
             .withMaxWallClock(NOT_REACHED)
-            .withTeardownGrace(NOT_REACHED)
             .build();
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);

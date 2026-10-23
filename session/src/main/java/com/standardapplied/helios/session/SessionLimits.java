@@ -13,11 +13,11 @@ import java.util.OptionalLong;
 /**
  * Per-session ceilings the agent loop enforces.
  *
- * <p>Ten orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, tool stop grace, context
- * tokens, stream-idle timeout, stream-retry policy, start timeout, teardown grace — each mapping to
- * a distinct termination path, recovery or shutdown behaviour. Limits are immutable for the
- * lifetime of a session; runtime mutation would let a long-running session escape the contract its
- * caller saw at construction.
+ * <p>Nine orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, stop grace, context
+ * tokens, stream-idle timeout, stream-retry policy, start timeout — each mapping to a distinct
+ * termination path, recovery or shutdown behaviour. Limits are immutable for the lifetime of a
+ * session; runtime mutation would let a long-running session escape the contract its caller saw at
+ * construction.
  *
  * <p>Defaults track Helios production values:
  *
@@ -30,11 +30,19 @@ import java.util.OptionalLong;
  *       this window.
  *   <li>{@code toolTimeoutDefault}: 2 minutes — slow enough for compile-and-run flows, fast enough
  *       that a wedged tool doesn't burn the wall-clock budget.
- *   <li>{@code toolStopGrace}: 5 seconds — how long the loop waits, once a tool call has timed out
- *       and been cancelled and interrupted, for the tool to stop. A tool that stops in time is
- *       reported as {@link com.standardapplied.helios.core.tool.ToolOutcome.TimedOut}; one that
- *       does not as {@link com.standardapplied.helios.core.tool.ToolOutcome.Unknown}, and it keeps
- *       its category's capacity until it ends.
+ *   <li>{@code stopGrace}: 5 seconds — how long anything the session cancels is given to stop:
+ *       <ul>
+ *         <li>a tool call, once timed out, cancelled and interrupted: one that stops in time is
+ *             {@link com.standardapplied.helios.core.tool.ToolOutcome.TimedOut}, one that does not
+ *             {@link com.standardapplied.helios.core.tool.ToolOutcome.Unknown}, and until it ends
+ *             every later tool call of the session is rejected;
+ *         <li>each wait of the session's teardown: for the tool calls still running, cancelled
+ *             first, to end; for the execution provider's {@code onSessionEnd} to return; for event
+ *             subscribers to drain. A tool call or {@code onSessionEnd} still running when its wait
+ *             ends is logged as such and the teardown moves on, so the result settles; such a
+ *             tool's effects may land after it has;
+ *         <li>the cancel of a model stream's subscription.
+ *       </ul>
  *   <li>{@code maxContextTokens}: {@code 0} — sentinel meaning "auto, resolve from {@code
  *       Model.contextWindow()}". The agent loop picks an effective ceiling by reading the
  *       provider's documented window and subtracting a small output-token reservation; library
@@ -69,12 +77,6 @@ import java.util.OptionalLong;
  *       returned by then, like one the provider refuses, ends the session with {@link
  *       ResultMessage.ErrorProviderUnavailable}; an acceptance that comes later is ended with
  *       {@code onSessionEnd}.
- *   <li>{@code teardownGrace}: 5 seconds — how long each wait of the session's teardown lasts: for
- *       the tool calls still running, cancelled first, to end; for the execution provider's {@code
- *       onSessionEnd} to return; for event subscribers to drain. A tool call or {@code
- *       onSessionEnd} still running when its wait ends is logged as such and the teardown moves on,
- *       so the result settles; such a tool's effects may land after it has. A turn gives the model
- *       stream's subscription the same grace to cancel.
  * </ul>
  *
  * <p>Currency is integer micro-USD (Stripe-style fixed-precision). See {@link CostEstimate} for the
@@ -90,9 +92,10 @@ import java.util.OptionalLong;
  *     strictly positive
  * @param toolTimeoutDefault default per-tool execution timeout; must be non-null and strictly
  *     positive
- * @param toolStopGrace how long a timed-out tool call is given to stop before it is reported as
- *     {@link com.standardapplied.helios.core.tool.ToolOutcome.Unknown}; must be non-null and
- *     strictly positive
+ * @param stopGrace how long anything the session cancels is given to stop: a timed-out tool call
+ *     before it is reported as {@link com.standardapplied.helios.core.tool.ToolOutcome.Unknown},
+ *     each wait of the teardown, the cancel of a model stream; must be non-null and strictly
+ *     positive
  * @param maxContextTokens soft trigger for context compaction, measured as the {@link
  *     com.standardapplied.helios.core.context.TokenCounter}'s estimate of the <em>total tokens
  *     across every message in the conversation history so far</em> — cumulative, never per-turn.
@@ -105,20 +108,17 @@ import java.util.OptionalLong;
  *     com.standardapplied.helios.core.model.TransientStreamException}; non-null
  * @param startTimeout how long {@code onSessionStart} is waited for; must be non-null and strictly
  *     positive
- * @param teardownGrace how long each wait of the session's teardown lasts; must be non-null and
- *     strictly positive
  */
 public record SessionLimits(
     int maxTurns,
     OptionalLong maxBudgetMicroUsd,
     Duration maxWallClock,
     Duration toolTimeoutDefault,
-    Duration toolStopGrace,
+    Duration stopGrace,
     long maxContextTokens,
     Duration streamIdleTimeout,
     StreamRetryPolicy streamRetryPolicy,
-    Duration startTimeout,
-    Duration teardownGrace) {
+    Duration startTimeout) {
 
   private static final Duration MAX_DURATION = Duration.ofNanos(Long.MAX_VALUE);
 
@@ -132,8 +132,7 @@ public record SessionLimits(
           0L,
           Duration.ofSeconds(60),
           StreamRetryPolicy.defaults(),
-          Duration.ofSeconds(60),
-          Duration.ofSeconds(5));
+          Duration.ofSeconds(60));
 
   /**
    * Canonical constructor.
@@ -153,7 +152,7 @@ public record SessionLimits(
     }
     requirePositiveNanos("maxWallClock", maxWallClock);
     requirePositiveNanos("toolTimeoutDefault", toolTimeoutDefault);
-    requirePositiveNanos("toolStopGrace", toolStopGrace);
+    requirePositiveNanos("stopGrace", stopGrace);
     if (maxContextTokens < 0) {
       throw new IllegalArgumentException(
           "maxContextTokens must be non-negative, got " + maxContextTokens);
@@ -161,7 +160,6 @@ public record SessionLimits(
     requirePositiveNanos("streamIdleTimeout", streamIdleTimeout);
     Objects.requireNonNull(streamRetryPolicy, "streamRetryPolicy must not be null");
     requirePositiveNanos("startTimeout", startTimeout);
-    requirePositiveNanos("teardownGrace", teardownGrace);
   }
 
   private static void requirePositiveNanos(String name, Duration value) {
@@ -202,12 +200,11 @@ public record SessionLimits(
         .withMaxBudgetMicroUsd(maxBudgetMicroUsd)
         .withMaxWallClock(maxWallClock)
         .withToolTimeoutDefault(toolTimeoutDefault)
-        .withToolStopGrace(toolStopGrace)
+        .withStopGrace(stopGrace)
         .withMaxContextTokens(maxContextTokens)
         .withStreamIdleTimeout(streamIdleTimeout)
         .withStreamRetryPolicy(streamRetryPolicy)
-        .withStartTimeout(startTimeout)
-        .withTeardownGrace(teardownGrace);
+        .withStartTimeout(startTimeout);
   }
 
   /** Mutable builder for {@link SessionLimits}. */
@@ -217,12 +214,11 @@ public record SessionLimits(
     private OptionalLong maxBudgetMicroUsd = DEFAULTS.maxBudgetMicroUsd;
     private Duration maxWallClock = DEFAULTS.maxWallClock;
     private Duration toolTimeoutDefault = DEFAULTS.toolTimeoutDefault;
-    private Duration toolStopGrace = DEFAULTS.toolStopGrace;
+    private Duration stopGrace = DEFAULTS.stopGrace;
     private long maxContextTokens = DEFAULTS.maxContextTokens;
     private Duration streamIdleTimeout = DEFAULTS.streamIdleTimeout;
     private StreamRetryPolicy streamRetryPolicy = DEFAULTS.streamRetryPolicy;
     private Duration startTimeout = DEFAULTS.startTimeout;
-    private Duration teardownGrace = DEFAULTS.teardownGrace;
 
     private Builder() {}
 
@@ -282,14 +278,15 @@ public record SessionLimits(
     }
 
     /**
-     * Set how long a timed-out tool call is given to stop before it is reported as {@link
-     * com.standardapplied.helios.core.tool.ToolOutcome.Unknown}.
+     * Set how long anything the session cancels is given to stop: a timed-out tool call before it
+     * is reported as {@link com.standardapplied.helios.core.tool.ToolOutcome.Unknown}, each wait of
+     * the session's teardown, and the cancel of a model stream's subscription.
      *
-     * @param toolStopGrace strictly positive
+     * @param stopGrace strictly positive
      * @return this builder
      */
-    public Builder withToolStopGrace(Duration toolStopGrace) {
-      this.toolStopGrace = toolStopGrace;
+    public Builder withStopGrace(Duration stopGrace) {
+      this.stopGrace = stopGrace;
       return this;
     }
 
@@ -348,19 +345,6 @@ public record SessionLimits(
     }
 
     /**
-     * Set how long each wait of the session's teardown lasts: for the tool calls still running to
-     * end, for the execution provider's {@code onSessionEnd} to return, and for event subscribers
-     * to drain.
-     *
-     * @param teardownGrace strictly positive
-     * @return this builder
-     */
-    public Builder withTeardownGrace(Duration teardownGrace) {
-      this.teardownGrace = teardownGrace;
-      return this;
-    }
-
-    /**
      * Build the immutable record.
      *
      * @return the limits
@@ -371,12 +355,11 @@ public record SessionLimits(
           maxBudgetMicroUsd,
           maxWallClock,
           toolTimeoutDefault,
-          toolStopGrace,
+          stopGrace,
           maxContextTokens,
           streamIdleTimeout,
           streamRetryPolicy,
-          startTimeout,
-          teardownGrace);
+          startTimeout);
     }
   }
 }
