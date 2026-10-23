@@ -11,8 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.io.IOException;
@@ -21,10 +23,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -325,7 +330,7 @@ final class GrepToolTest {
   }
 
   @Test
-  void cancelledContextFindsNothing(@TempDir Path tmp) throws IOException {
+  void aCallCancelledBeforeTheWalkFails(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("a.txt"), "hit\n", StandardCharsets.UTF_8);
     var call = new CancellationToken();
     call.cancel("stop");
@@ -334,8 +339,68 @@ final class GrepToolTest {
             SessionContext.forTesting("cancelled"), call, Duration.ofMinutes(1), key -> false);
     var result =
         GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "hit"), ctx);
-    assertTrue(result.succeeded(), result.output());
-    assertEquals("", result.output());
+    assertFalse(result.succeeded());
+    assertEquals("Grep: cancelled", result.output());
+  }
+
+  @Test
+  void aCallCancelledWhileMatchingALineStopsTheMatchAndFails(@TempDir Path tmp) throws IOException {
+    Files.writeString(tmp.resolve("a.txt"), "a".repeat(100_000) + "\n", StandardCharsets.UTF_8);
+    var call = new CancellationToken();
+    var searching = new CountDownLatch(1);
+    var ctx =
+        new ToolContext(
+            SessionContext.forTesting("matching"),
+            call,
+            Duration.ofMinutes(1),
+            key -> {
+              searching.countDown();
+              return false;
+            });
+    var tool = GrepTool.binding(WorkspaceRoot.of(tmp)).tool();
+
+    var grep = new FutureTask<>(() -> tool.execute(Map.of("pattern", "(a+)+b"), ctx));
+    Thread.ofVirtual().start(grep);
+    Await.latch("the walk reached a.txt", searching);
+    call.cancel("deadline");
+
+    assertEquals("Grep: cancelled", Await.value("the cancelled grep", grep).output());
+  }
+
+  @Test
+  void aLongHitLineIsCutAtTheHitLineCap(@TempDir Path tmp) throws IOException {
+    var line = "needle" + "q".repeat(499_994);
+    Files.writeString(tmp.resolve("min.js"), line + "\n", StandardCharsets.UTF_8);
+
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp))
+            .tool()
+            .execute(Map.of("pattern", "needle"), ToolContext.noop());
+
+    assertEquals(
+        "min.js:1:" + line.substring(0, 2000) + " [line truncated to 2000 chars]\n",
+        result.output());
+  }
+
+  @Test
+  void aHitLineCutInsideASecretKeepsNoPartOfIt(@TempDir Path tmp) throws IOException {
+    var secret = "sk-test-0123456789abcdef";
+    var registry = new SecretRegistry();
+    registry.register("API_KEY", secret);
+    var kept = "needle" + "x".repeat(GrepTool.MAX_HIT_LINE_CHARS - 16);
+    Files.writeString(
+        tmp.resolve("long.txt"), kept + secret + "x".repeat(10_000) + "\n", StandardCharsets.UTF_8);
+    var ctx =
+        new ToolContext(
+            new SessionContext("grep-cut", new CancellationToken(), Clock.systemUTC(), registry),
+            new CancellationToken(),
+            Duration.ofMinutes(1),
+            key -> false);
+
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "needle"), ctx);
+
+    assertEquals("long.txt:1:" + kept + " [line truncated to 2000 chars]\n", result.output());
   }
 
   @Test

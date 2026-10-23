@@ -14,6 +14,7 @@ import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
+import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.test.SampleDocuments;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.io.IOException;
@@ -23,6 +24,8 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Assumptions;
@@ -206,8 +209,8 @@ final class ReadToolTest {
 
   @Test
   void perLineCapTruncatesLongLineWithMarker(@TempDir Path tmp) throws IOException {
-    // A pathological 2 MB single-line file (e.g. minified JSON) gets truncated at MAX_LINE_BYTES
-    // (1 MB) with an inline marker, instead of streaming the whole blob into the model context.
+    // A pathological single-line file (e.g. minified JSON) gets truncated at MAX_LINE_CHARS with
+    // an inline marker, instead of streaming the whole blob into the model context.
     var file = tmp.resolve("long-line.txt");
     Files.writeString(file, "a".repeat(1024 * 1024 + 100) + "\n", StandardCharsets.UTF_8);
     var result =
@@ -222,11 +225,10 @@ final class ReadToolTest {
 
   @Test
   void totalOutputBudgetTruncatesPathologicalFile(@TempDir Path tmp) throws IOException {
-    // Many short lines, total exceeding MAX_OUTPUT_BYTES (4 MB) but each under MAX_LINE_BYTES
-    // and total file under MAX_FILE_SIZE_BYTES. Without the total-bytes cap a per-line cap
-    // alone wouldn't save us. Cap kicks in mid-stream.
+    // Many short lines, total exceeding MAX_OUTPUT_CHARS but each under MAX_LINE_CHARS and total
+    // file under MAX_FILE_SIZE_BYTES. Without the total-chars cap a per-line cap alone wouldn't
+    // save us. Cap kicks in mid-stream.
     var file = tmp.resolve("many-lines.txt");
-    // 5 MB worth of 100-byte lines, well over the 4 MB output budget but under file-size cap.
     try (var out =
         new java.io.BufferedWriter(
             new java.io.OutputStreamWriter(Files.newOutputStream(file), StandardCharsets.UTF_8))) {
@@ -241,7 +243,7 @@ final class ReadToolTest {
             .tool()
             .execute(
                 Map.of("path", "many-lines.txt", "limit", 1_000_000),
-                ToolContext.noop()); // big limit so byte budget is the cap that fires
+                ToolContext.noop()); // big limit so the chars budget is the cap that fires
     assertTrue(result.succeeded(), result.output());
     assertTrue(result.output().contains("[truncated: total output exceeded"), result.output());
     assertTrue(result.output().contains("Grep"), result.output());
@@ -319,48 +321,41 @@ final class ReadToolTest {
   }
 
   @Test
-  void oversizedImageAttachmentIsRejectedAtImageCap(@TempDir Path tmp) throws IOException {
-    // Image just above MAX_IMAGE_BYTES (5 MB, Anthropic floor) — fails at the image-specific
-    // cap with a message that names Anthropic's limit and the recovery move (downsample /
-    // re-encode). Source-file size (~5.5 MB) is well under MAX_FILE_SIZE_BYTES so the
-    // image-specific cap is the one that fires.
-    var file = tmp.resolve("big.png");
-    var pngHeader = new byte[] {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
-    var filler = new byte[(int) ReadTool.MAX_IMAGE_BYTES]; // 5 MB + 8-byte header > 5 MB cap
-    try (var out = Files.newOutputStream(file)) {
-      out.write(pngHeader);
-      out.write(filler);
-    }
-    var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
-            .tool()
-            .execute(Map.of("path", "big.png"), ToolContext.noop());
-    assertFalse(result.succeeded(), result.output());
-    assertTrue(result.output().contains("exceeds inline attachment limit"), result.output());
-    assertTrue(
-        result.output().contains("downsample") || result.output().contains("Anthropic"),
-        "image rejection must name the Anthropic 5 MB constraint or the downsample remedy: "
-            + result.output());
+  void anImageOneByteOverItsCapIsRejectedNamingTheCap(@TempDir Path tmp) throws IOException {
+    Files.write(tmp.resolve("big.png"), png((int) ReadTool.MAX_IMAGE_BYTES + 1));
+
+    var result = read(tmp, "big.png");
+
+    assertEquals(
+        "Read: image/png file 'big.png' exceeds inline attachment limit of 7500000 bytes (was"
+            + " 7500001). The file is resent with every turn; route a file this large through a"
+            + " file-upload host tool.",
+        result.output());
   }
 
   @Test
-  void oversizedPdfAttachmentIsRejectedAtPdfCap(@TempDir Path tmp) throws IOException {
-    // PDF just above MAX_PDF_BYTES (20 MB) but below MAX_FILE_SIZE_BYTES (25 MB) — fails at the
-    // PDF-specific cap with a message pointing at the file-upload route.
-    var file = tmp.resolve("big.pdf");
-    try (var out = Files.newOutputStream(file)) {
-      out.write("%PDF-1.4\n".getBytes(StandardCharsets.UTF_8));
-      out.write(new byte[(int) ReadTool.MAX_PDF_BYTES + 1024]); // 20 MB + 1 KB > 20 MB cap
-    }
-    var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
-            .tool()
-            .execute(Map.of("path", "big.pdf"), ToolContext.noop());
-    assertFalse(result.succeeded(), result.output());
-    assertTrue(result.output().contains("exceeds inline attachment limit"), result.output());
-    assertTrue(
-        result.output().contains("file-upload"),
-        "PDF rejection must point at the file-upload route: " + result.output());
+  void aPdfAtItsCapIsAnAttachmentAndOneByteMoreIsRejected(@TempDir Path tmp) throws IOException {
+    Files.write(tmp.resolve("at-cap.pdf"), pdf((int) ReadTool.MAX_PDF_BYTES));
+    Files.write(tmp.resolve("over-cap.pdf"), pdf((int) ReadTool.MAX_PDF_BYTES + 1));
+
+    var atCap = read(tmp, "at-cap.pdf");
+    var overCap = read(tmp, "over-cap.pdf");
+
+    assertTrue(atCap.succeeded(), atCap.output());
+    assertEquals(ReadTool.MAX_PDF_BYTES, atCap.attachments().getFirst().data().length);
+    assertEquals(
+        "Read: application/pdf file 'over-cap.pdf' exceeds inline attachment limit of 18000000"
+            + " bytes (was 18000001). The file is resent with every turn; route a file this large"
+            + " through a file-upload host tool.",
+        overCap.output());
+  }
+
+  @Test
+  void theAttachmentCapsEncodeToAnthropicsLimits() {
+    assertEquals(
+        24_000_000, Base64.getEncoder().encode(new byte[(int) ReadTool.MAX_PDF_BYTES]).length);
+    assertEquals(
+        10_000_000, Base64.getEncoder().encode(new byte[(int) ReadTool.MAX_IMAGE_BYTES]).length);
   }
 
   @Test
@@ -368,11 +363,7 @@ final class ReadToolTest {
     // Exactly MAX_IMAGE_BYTES (5 MB) is the boundary — must succeed. Verifies the comparison is
     // strictly greater-than rather than greater-or-equal.
     var file = tmp.resolve("borderline.png");
-    var pngHeader = new byte[] {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
-    var totalSize = (int) ReadTool.MAX_IMAGE_BYTES;
-    var bytes = new byte[totalSize];
-    System.arraycopy(pngHeader, 0, bytes, 0, pngHeader.length);
-    Files.write(file, bytes);
+    Files.write(file, png((int) ReadTool.MAX_IMAGE_BYTES));
     var result =
         ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
             .tool()
@@ -604,7 +595,7 @@ final class ReadToolTest {
     var secret = "sk-test-0123456789abcdef";
     var registry = new SecretRegistry();
     registry.register("API_KEY", secret);
-    var kept = "x".repeat(ReadTool.MAX_LINE_BYTES - 10);
+    var kept = "x".repeat(ReadTool.MAX_LINE_CHARS - 10);
     Files.writeString(
         tmp.resolve("long.txt"), kept + secret + " tail\nshort sk-test-\n", StandardCharsets.UTF_8);
     var ctx =
@@ -624,23 +615,20 @@ final class ReadToolTest {
     assertEquals(
         String.format("%6d\t%s", 1, kept)
             + " [line truncated to "
-            + ReadTool.MAX_LINE_BYTES
-            + " bytes]",
+            + ReadTool.MAX_LINE_CHARS
+            + " chars]",
         lines[0]);
     assertEquals(String.format("%6d\t%s", 2, "short sk-test-"), lines[1]);
   }
 
   @Test
   void publicConstantsHaveTheDocumentedValues() {
-    // Pin the public surface so a refactor doesn't silently halve the caps. The split image vs
-    // PDF caps are deliberate: 5 MB images matches Anthropic's published per-image floor (the
-    // strictest provider); 20 MB PDFs is safe across all three providers' document channels.
     assertEquals(2000, ReadTool.DEFAULT_LIMIT);
     assertEquals(25L * 1024 * 1024, ReadTool.MAX_FILE_SIZE_BYTES);
-    assertEquals(1024 * 1024, ReadTool.MAX_LINE_BYTES);
-    assertEquals(4 * 1024 * 1024, ReadTool.MAX_OUTPUT_BYTES);
-    assertEquals(5L * 1024 * 1024, ReadTool.MAX_IMAGE_BYTES);
-    assertEquals(20L * 1024 * 1024, ReadTool.MAX_PDF_BYTES);
+    assertEquals(2000, ReadTool.MAX_LINE_CHARS);
+    assertEquals(60_000, ReadTool.MAX_OUTPUT_CHARS);
+    assertEquals(7_500_000, ReadTool.MAX_IMAGE_BYTES);
+    assertEquals(18_000_000, ReadTool.MAX_PDF_BYTES);
   }
 
   @Test
@@ -725,5 +713,88 @@ final class ReadToolTest {
     } finally {
       Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rw-------"));
     }
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void offsetAndLimitAreValidatedBeforeTheFileIsRead(@TempDir Path tmp) throws IOException {
+    var locked = Files.writeString(tmp.resolve("a.txt"), "x", StandardCharsets.UTF_8);
+    Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+    try {
+      Assumptions.assumeFalse(Files.isReadable(locked), "permissions are not enforced (root)");
+      var tool = ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create()).tool();
+
+      var offset = tool.execute(Map.of("path", "a.txt", "offset", 0), ToolContext.noop());
+      var limit = tool.execute(Map.of("path", "a.txt", "limit", 0), ToolContext.noop());
+
+      assertEquals("Read: 'offset' must be >= 1, got 0", offset.output());
+      assertEquals("Read: 'limit' must be >= 1, got 0", limit.output());
+    } finally {
+      Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rw-------"));
+    }
+  }
+
+  @Test
+  void aPageStopsAtTheCharsCapAndTheNextOffsetContinuesWhereItStopped(@TempDir Path tmp)
+      throws IOException {
+    var text = new StringBuilder();
+    for (var i = 1; text.length() < 200_000; i++) {
+      text.append(String.format("line %05d %s%n", i, "z".repeat(40)));
+    }
+    Files.writeString(tmp.resolve("long.txt"), text, StandardCharsets.UTF_8);
+
+    var first = read(tmp, "long.txt").output();
+    var marker = first.substring(first.lastIndexOf('['));
+    var content = first.substring(0, first.length() - marker.length());
+    var next = Integer.parseInt(marker.replaceAll("(?s).*Use offset=(\\d+) .*", "$1"));
+    var second = read(tmp, "long.txt", Map.of("offset", next)).output();
+
+    assertTrue(content.length() <= ReadTool.MAX_OUTPUT_CHARS, () -> "page of " + content.length());
+    assertTrue(marker.startsWith("[truncated: total output exceeded 60000 chars after "), marker);
+    assertTrue(
+        content.endsWith(
+            String.format("%6d\tline %05d ", next - 1, next - 1) + "z".repeat(40) + "\n"),
+        content);
+    assertTrue(second.startsWith(String.format("%6d\tline %05d ", next, next)), second);
+  }
+
+  @Test
+  void aFirstLineLongerThanThePageIsCutSoPagingAdvances(@TempDir Path tmp) throws IOException {
+    Files.writeString(
+        tmp.resolve("wide.txt"), "w".repeat(500_000) + "\nsecond\n", StandardCharsets.UTF_8);
+
+    var result = read(tmp, "wide.txt", Map.of("limit", 1));
+
+    assertEquals(
+        String.format("%6d\t%s [line truncated to 2000 chars]%n", 1, "w".repeat(2000))
+            + "[truncated at line 1; 1 lines emitted. Use offset=2 to continue, or Grep for a"
+            + " narrower target.]\n",
+        result.output());
+  }
+
+  private static ToolResult read(Path root, String path) {
+    return read(root, path, Map.of());
+  }
+
+  private static ToolResult read(Path root, String path, Map<String, Object> page) {
+    var args = new HashMap<String, Object>(page);
+    args.put("path", path);
+    return ReadTool.binding(WorkspaceRoot.of(root), InMemoryFileTracker.create())
+        .tool()
+        .execute(args, ToolContext.noop());
+  }
+
+  private static byte[] png(int size) {
+    var bytes = new byte[size];
+    var header = new byte[] {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    System.arraycopy(header, 0, bytes, 0, header.length);
+    return bytes;
+  }
+
+  private static byte[] pdf(int size) {
+    var bytes = new byte[size];
+    var header = "%PDF-1.4\n".getBytes(StandardCharsets.UTF_8);
+    System.arraycopy(header, 0, bytes, 0, header.length);
+    return bytes;
   }
 }

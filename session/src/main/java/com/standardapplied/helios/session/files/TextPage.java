@@ -15,10 +15,11 @@ import java.nio.file.Path;
 
 /**
  * {@link ReadTool}'s text path: one page of a file as line-numbered text. At most {@code limit}
- * lines starting at line {@code offset} are emitted, each capped at {@link ReadTool#MAX_LINE_BYTES}
- * and all of them together at {@link ReadTool#MAX_OUTPUT_BYTES}. Either cap appends a truncation
- * marker that teaches the model the next move, and the rest of the file is never read once a cap
- * fires. A line cut at its cap loses the start of a registered secret the cut went through.
+ * lines starting at line {@code offset} are emitted, each cut at {@link ReadTool#MAX_LINE_CHARS}
+ * and all of them together capped at {@link ReadTool#MAX_OUTPUT_CHARS}. Either page cap appends a
+ * truncation marker naming the {@code offset} to continue from, and the rest of the file is never
+ * read once a cap fires. A line cut at its cap loses the start of a registered secret the cut went
+ * through.
  */
 final class TextPage {
 
@@ -27,7 +28,7 @@ final class TextPage {
   private int linesEmitted;
   private long currentLine;
   private boolean truncatedByLines;
-  private boolean truncatedByBytes;
+  private boolean truncatedByChars;
   private boolean truncatedAnyLine;
 
   private TextPage(Redactor redactor) {
@@ -71,8 +72,8 @@ final class TextPage {
         return;
       }
       var entry = String.format("%6d\t%s%n", currentLine, capped(line));
-      if (out.length() + entry.length() > ReadTool.MAX_OUTPUT_BYTES) {
-        truncatedByBytes = true;
+      if (out.length() + entry.length() > ReadTool.MAX_OUTPUT_CHARS) {
+        truncatedByChars = true;
         return;
       }
       out.append(entry);
@@ -81,14 +82,27 @@ final class TextPage {
   }
 
   private String capped(String line) {
-    if (line.length() <= ReadTool.MAX_LINE_BYTES) {
+    truncatedAnyLine |= line.length() > ReadTool.MAX_LINE_CHARS;
+    return cut(line, ReadTool.MAX_LINE_CHARS, redactor);
+  }
+
+  /**
+   * Cut a line longer than {@code limit} to its first {@code limit} chars and a marker, dropping a
+   * trailing part of a registered secret from the kept text.
+   *
+   * @param line the line
+   * @param limit the most chars of the line kept
+   * @param redactor the session's secrets, whose start the cut must not keep
+   * @return the line itself if it fits, otherwise the cut line and the marker
+   */
+  static String cut(String line, int limit, Redactor redactor) {
+    if (line.length() <= limit) {
       return line;
     }
-    truncatedAnyLine = true;
-    return redactor.trimPartialSecret(line.substring(0, ReadTool.MAX_LINE_BYTES))
+    return redactor.trimPartialSecret(line.substring(0, limit))
         + " [line truncated to "
-        + ReadTool.MAX_LINE_BYTES
-        + " bytes]";
+        + limit
+        + " chars]";
   }
 
   private String withMarker() {
@@ -97,20 +111,26 @@ final class TextPage {
           .append(currentLine - 1)
           .append("; ")
           .append(linesEmitted)
-          .append(" lines emitted. Use offset=")
-          .append(currentLine)
-          .append(" to continue, or Grep for a narrower target.]\n");
-    } else if (truncatedByBytes) {
+          .append(" lines emitted.");
+      appendContinuation();
+    } else if (truncatedByChars) {
       out.append("[truncated: total output exceeded ")
-          .append(ReadTool.MAX_OUTPUT_BYTES)
-          .append(" bytes after ")
+          .append(ReadTool.MAX_OUTPUT_CHARS)
+          .append(" chars after ")
           .append(linesEmitted)
-          .append(" lines. Use Grep to locate the section you need.]\n");
+          .append(" lines.");
+      appendContinuation();
     } else if (truncatedAnyLine) {
       out.append("[note: at least one line exceeded ")
-          .append(ReadTool.MAX_LINE_BYTES)
-          .append(" bytes and was truncated mid-line.]\n");
+          .append(ReadTool.MAX_LINE_CHARS)
+          .append(" chars and was truncated mid-line.]\n");
     }
     return out.toString();
+  }
+
+  private void appendContinuation() {
+    out.append(" Use offset=")
+        .append(currentLine)
+        .append(" to continue, or Grep for a narrower target.]\n");
   }
 }

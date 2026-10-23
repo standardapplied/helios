@@ -48,15 +48,15 @@ import java.util.Objects;
  * <ul>
  *   <li>{@link #MAX_FILE_SIZE_BYTES} on the source file — pre-checked from the leaf's own
  *       (no-follow) attributes before any I/O. A 500 MB log fails before allocating a buffer.
- *   <li>{@link #MAX_LINE_BYTES} on each emitted line — a 100 MB single-line JSON gets truncated
- *       with a marker rather than blowing the model's context.
- *   <li>{@link #MAX_OUTPUT_BYTES} on the total output payload — the line cap is a ceiling, not a
- *       guarantee against pathological per-line growth.
+ *   <li>{@link #MAX_LINE_CHARS} on each emitted line — a single-line minified JSON is cut with a
+ *       marker rather than blowing the model's context.
+ *   <li>{@link #MAX_OUTPUT_CHARS} on the page — many short lines stop at a page that fits the
+ *       session's tool-result cap.
  * </ul>
  *
  * Text rendering streams through {@link java.io.BufferedReader} and stops at the first output cap
- * hit; fingerprinting separately reads the bounded source. The truncation marker explains what to
- * try next ("use {@code offset} to continue, or {@code Grep} for a narrower target").
+ * hit; fingerprinting separately reads the bounded source. The truncation marker names the {@code
+ * offset} to continue from. {@code offset} and {@code limit} are validated before the file is read.
  *
  * <h2>Multimodal dispatch</h2>
  *
@@ -68,8 +68,7 @@ import java.util.Objects;
  *       above.
  *   <li>{@code image/*} or {@code application/pdf} → {@link ToolResult#successWithAttachments
  *       attachment path}: the bytes ride as an {@link InlineFile} so the provider's native vision /
- *       PDF channel handles them. Images are capped at {@link #MAX_IMAGE_BYTES} (Anthropic's 5 MB
- *       per-image floor); PDFs are capped at the looser {@link #MAX_PDF_BYTES}.
+ *       PDF channel handles them, capped at {@link #MAX_IMAGE_BYTES} and {@link #MAX_PDF_BYTES}.
  *   <li>Any other binary (NUL byte in the first 8 KB and no recognised MIME) → fail fast with a
  *       message naming the detected type.
  * </ul>
@@ -87,49 +86,44 @@ public final class ReadTool {
   public static final int DEFAULT_LIMIT = 2000;
 
   /**
-   * Maximum source-file size accepted by the text path. 25 MB stays inside every supported
-   * provider's per-request limit (Anthropic 32 MB total request, Gemini 50 MB inline) with margin
-   * for base64 overhead and the assistant's own response. Attachment paths apply their own tighter
-   * caps; see {@link #MAX_IMAGE_BYTES} and {@link #MAX_PDF_BYTES}.
+   * Maximum source-file size the text path reads. It bounds that read, not a provider request: the
+   * page sent is capped by {@link #MAX_OUTPUT_CHARS}, and attachments by {@link #MAX_IMAGE_BYTES}
+   * and {@link #MAX_PDF_BYTES}.
    */
   public static final long MAX_FILE_SIZE_BYTES = 25L * 1024 * 1024;
 
   /**
-   * Maximum cap on a single emitted text line. A 1 MB minified-JSON-on-one-line file truncates to 1
-   * MB on that line rather than streaming the entire blob into the model context.
+   * Maximum chars of a single emitted text line; a longer line is cut with a marker. It stays far
+   * below {@link #MAX_OUTPUT_CHARS}, so every page holds at least one line and paging advances.
    */
-  public static final int MAX_LINE_BYTES = 1024 * 1024;
+  public static final int MAX_LINE_CHARS = 2000;
 
   /**
-   * Maximum cap on the total bytes of text output, summed across lines. Stops a degenerate file
-   * (millions of short lines) from blowing context even when each individual line is small.
+   * Maximum chars of a page of text output, summed across lines. A page always fits under the
+   * session's tool-result cap, so it keeps its {@code offset} continuation hint.
    */
-  public static final int MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+  public static final int MAX_OUTPUT_CHARS = 60_000;
 
   /**
-   * Maximum cap on a single image attachment. 5 MB matches Anthropic's published per-image limit
-   * (verified against {@code platform.claude.com/docs/en/build-with-claude/vision}), which is the
-   * strictest of the three providers Helios talks to — Gemini and OpenAI permit larger payloads but
-   * failing here with a clear message is better than racing the API to a cryptic 400. Deployers
-   * locked to a single looser-limit provider can fork {@link #binding} with an explicit override
-   * (the surface is a static field on purpose, mechanical to subclass).
+   * Maximum size of a single image attachment. Base64-encoded it is 10,000,000 bytes, Anthropic's
+   * per-image limit (<a href="https://platform.claude.com/docs/en/build-with-claude/vision">Vision,
+   * "Request limits"</a>).
    */
-  public static final long MAX_IMAGE_BYTES = 5L * 1024 * 1024;
+  public static final long MAX_IMAGE_BYTES = 7_500_000;
 
   /**
-   * Maximum cap on a single PDF attachment. 20 MB stays inside every published provider PDF inline
-   * limit (Anthropic 32 MB request budget; Gemini 50 MB per document). PDFs travel through the
-   * document content channel separate from images, so the higher cap is safe and useful — most
-   * agent workloads land here for technical papers and reports that exceed the image limit.
+   * Maximum size of a single PDF attachment. Base64-encoded it is 24,000,000 bytes, leaving
+   * 8,000,000 bytes of Anthropic's 32 MB request for the rest of the conversation (<a
+   * href="https://platform.claude.com/docs/en/build-with-claude/pdf-support">PDF support</a>).
    */
-  public static final long MAX_PDF_BYTES = 20L * 1024 * 1024;
+  public static final long MAX_PDF_BYTES = 18_000_000;
 
   private ReadTool() {}
 
   /**
    * Build a tool binding bound to the given workspace + tracker. The session redacts the text the
    * tool returns against its secret registry; attachments (images, PDFs) pass through unredacted. A
-   * line cut at {@link #MAX_LINE_BYTES} loses the start of a registered secret the cut went
+   * line cut at {@link #MAX_LINE_CHARS} loses the start of a registered secret the cut went
    * through, so the session's redaction cannot miss it.
    *
    * @param workspace the path-jail workspace; non-null
@@ -184,20 +178,25 @@ public final class ReadTool {
   private static ToolResult execute(
       ToolContext ctx, WorkspaceRoot workspace, FileTracker tracker, Map<String, Object> args) {
     ctx.cancellation().throwIfCancelled();
-    var pathArg = ToolArgs.stringArg(args, "path");
-    if (pathArg.isEmpty()) {
-      return ToolResult.failure("Read: missing required 'path' argument");
-    }
+    return switch (ReadRequest.parse(args)) {
+      case Result.Failure<ReadRequest> failure -> ToolResult.failure(failure.error());
+      case Result.Success<ReadRequest> request ->
+          resolve(workspace, tracker, ctx.sessionContext().secrets(), request.value());
+    };
+  }
+
+  private static ToolResult resolve(
+      WorkspaceRoot workspace, FileTracker tracker, SecretRegistry secrets, ReadRequest request) {
     Path resolved;
     try {
-      resolved = workspace.resolveCanonical(pathArg);
+      resolved = workspace.resolveCanonical(request.path());
     } catch (WorkspaceRoot.WorkspaceEscapeException e) {
       return ToolResult.failure("Read: " + e.getMessage());
     }
     return switch (regularFileSize(workspace, resolved)) {
       case Result.Failure<Long> failure -> ToolResult.failure(failure.error());
       case Result.Success<Long> size ->
-          read(workspace, tracker, ctx.sessionContext().secrets(), args, resolved, size.value());
+          read(workspace, tracker, secrets, request, resolved, size.value());
     };
   }
 
@@ -219,7 +218,7 @@ public final class ReadTool {
       WorkspaceRoot workspace,
       FileTracker tracker,
       SecretRegistry secrets,
-      Map<String, Object> args,
+      ReadRequest request,
       Path resolved,
       long size) {
     if (size > MAX_FILE_SIZE_BYTES) {
@@ -240,10 +239,10 @@ public final class ReadTool {
     if (mimeType.isPresent()) {
       return mimeType.get().channel() == MimeTypes.Channel.ATTACHMENT
           ? readAttachment(workspace, resolved, mimeType.get().name(), size)
-          : readText(workspace, resolved, args, secrets);
+          : TextPage.read(workspace, resolved, request.offset(), request.limit(), secrets);
     }
     if (MimeTypes.isLikelyText(workspace, resolved, MAX_FILE_SIZE_BYTES)) {
-      return readText(workspace, resolved, args, secrets);
+      return TextPage.read(workspace, resolved, request.offset(), request.limit(), secrets);
     }
     return ToolResult.failure(
         "Read: refusing to decode binary file as text (detected MIME unknown). Images and PDFs"
@@ -251,24 +250,11 @@ public final class ReadTool {
             + " extract the payload server-side before passing the bytes through.");
   }
 
-  private static ToolResult readText(
-      WorkspaceRoot workspace, Path file, Map<String, Object> args, SecretRegistry secrets) {
-    var offset = ToolArgs.intArg(args, "offset", 1);
-    var limit = ToolArgs.intArg(args, "limit", DEFAULT_LIMIT);
-    if (offset < 1) {
-      return ToolResult.failure("Read: 'offset' must be >= 1, got " + offset);
-    }
-    if (limit < 1) {
-      return ToolResult.failure("Read: 'limit' must be >= 1, got " + limit);
-    }
-    return TextPage.read(workspace, file, offset, limit, secrets);
-  }
-
   /**
    * Return the file as an {@link InlineFile} attachment so the provider's vision / PDF channel
-   * consumes it natively. Images apply {@link #MAX_IMAGE_BYTES} (Anthropic floor at 5 MB); PDFs
-   * apply the looser {@link #MAX_PDF_BYTES}. Rejection produces a clean message naming the limit
-   * and what to do next, rather than racing the API to a cryptic provider 400.
+   * consumes it natively. Images apply {@link #MAX_IMAGE_BYTES}, PDFs {@link #MAX_PDF_BYTES}.
+   * Rejection produces a clean message naming the limit and what to do next, rather than racing the
+   * API to a cryptic provider 413.
    */
   private static ToolResult readAttachment(
       WorkspaceRoot workspace, Path file, String mimeType, long size) {
@@ -284,11 +270,8 @@ public final class ReadTool {
               + limit
               + " bytes (was "
               + size
-              + "). "
-              + (mimeType.startsWith("image/")
-                  ? "Anthropic caps inline images at 5 MB; downsample / re-encode before "
-                      + "reading, or route through a file-upload host tool."
-                  : "Route through a file-upload host tool for PDFs this large."));
+              + "). The file is resent with every turn; route a file this large through a"
+              + " file-upload host tool.");
     }
     byte[] bytes;
     try {
@@ -307,5 +290,24 @@ public final class ReadTool {
             + size
             + " bytes). Inspect the attached content directly.";
     return ToolResult.successWithAttachments(note, List.of(InlineFile.of(bytes, mimeType)));
+  }
+
+  private record ReadRequest(String path, int offset, int limit) {
+
+    static Result<ReadRequest> parse(Map<String, Object> args) {
+      var path = ToolArgs.stringArg(args, "path");
+      if (path.isEmpty()) {
+        return new Result.Failure<>("Read: missing required 'path' argument");
+      }
+      var offset = ToolArgs.intArg(args, "offset", 1);
+      var limit = ToolArgs.intArg(args, "limit", DEFAULT_LIMIT);
+      if (offset < 1) {
+        return new Result.Failure<>("Read: 'offset' must be >= 1, got " + offset);
+      }
+      if (limit < 1) {
+        return new Result.Failure<>("Read: 'limit' must be >= 1, got " + limit);
+      }
+      return new Result.Success<>(new ReadRequest(path, offset, limit));
+    }
   }
 }
