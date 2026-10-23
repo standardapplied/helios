@@ -15,7 +15,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * The route behind {@code POST /sessions}: reserves capacity for the caller in the {@link
+ * The route behind {@code POST /sessions}: reserves session capacity for the caller in the {@link
  * SessionRegistry} before anything else, asks the options factory for the options of a freshly
  * generated session id owned by the caller ({@link SessionRequest}), and registers the session. A
  * refused reservation is answered {@code 429} or {@code 503} before the factory runs; a factory
@@ -33,7 +33,6 @@ final class SessionCreation {
   private final SessionRegistry registry;
   private final Function<SessionRequest, SessionOptions> optionsFactory;
   private final String eventsPathPrefix;
-  private final AdmissionCounter counter = new AdmissionCounter();
 
   SessionCreation(
       SessionRegistry registry,
@@ -50,11 +49,9 @@ final class SessionCreation {
     try {
       reservation = registry.reserve(caller.principal());
     } catch (SessionCapacityException e) {
-      counter.reject();
       Overload.reject(resp, e);
       return;
     }
-    counter.admit();
     try {
       register(reservation, caller, resp);
     } finally {
@@ -77,10 +74,6 @@ final class SessionCreation {
     created.put("sessionId", sessionId);
     created.put("eventsUrl", eventsPathPrefix + "/sessions/" + sessionId + "/events");
     resp.status(Status.CREATED_201).send(created);
-  }
-
-  AdmissionCounts counts() {
-    return counter.counts();
   }
 
   /** The options factory's options for {@code request}; empty, and logged, if it failed. */

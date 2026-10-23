@@ -19,7 +19,7 @@ import java.util.function.Function;
  * Thread-safe. Of concurrent {@code register} and {@code close} calls, the first spends the
  * reservation and the others find it spent.
  */
-public final class SessionReservation implements AutoCloseable {
+final class SessionReservation implements AutoCloseable {
 
   private final SessionTable table;
   private final Function<SessionOptions, AgentSession> factory;
@@ -44,7 +44,7 @@ public final class SessionReservation implements AutoCloseable {
    * @throws IllegalStateException if the reservation is already spent, or a session with the same
    *     id is already registered
    */
-  public AgentSession register(SessionOptions options) {
+  AgentSession register(SessionOptions options) {
     Objects.requireNonNull(options, "options must not be null");
     if (!spent.compareAndSet(false, true)) {
       throw new IllegalStateException("reservation already spent");

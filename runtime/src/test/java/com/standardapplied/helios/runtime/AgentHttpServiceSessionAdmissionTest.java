@@ -70,8 +70,7 @@ final class AgentHttpServiceSessionAdmissionTest {
     assertEquals(2, statuses.stream().filter(status -> status == 201).count());
     assertEquals(BURST - 2, statuses.stream().filter(status -> status == 503).count());
     assertEquals(2, harness.factoryRuns.get());
-    assertEquals(2, server.registry().size());
-    assertEquals(new AdmissionCounts(2, BURST - 2), server.counters().sessions());
+    assertEquals(2, harness.sessions.size());
   }
 
   @Test
@@ -88,9 +87,9 @@ final class AgentHttpServiceSessionAdmissionTest {
   }
 
   @Test
-  void aPrincipalAtItsCapIsAnsweredTheSameWhenAnotherFillsTheServersActiveCap() {
+  void aPrincipalAtItsCapIsAnsweredTheSameWhenAnotherFillsTheServersCap() {
     var server =
-        harness.server(harness.registry().withMaxSessionsPerPrincipal(1).withMaxActiveSessions(2));
+        harness.server(harness.registry().withMaxSessionsPerPrincipal(1).withMaxSessions(2));
     harness.create(server, "alice");
 
     var alone = harness.send(server, "POST", "/sessions", "alice");

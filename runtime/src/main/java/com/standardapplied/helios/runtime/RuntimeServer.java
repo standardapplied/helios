@@ -54,11 +54,12 @@ import tools.jackson.databind.json.JsonMapper;
  * has no unauthenticated mode; a deployer behind an authenticating proxy configures {@link
  * TrustedProxyAuthenticator}.
  *
- * <p>Requests are bounded by the {@link RequestLimits} set through {@link
- * Builder#withRequestLimits(RequestLimits)} (default {@link RequestLimits#defaults()}), sessions by
- * the registry's caps. The server calls {@link SessionRegistry#sweep()} every sweep interval
- * (default 30 seconds) on a virtual thread of its own, so terminal sessions past their retention
- * and sessions left unstarted are closed without a deployer's scheduler.
+ * <p>Requests are bounded per principal by the {@link RequestLimits} set through {@link
+ * Builder#withRequestLimits(RequestLimits)} (default {@link RequestLimits#defaults()}), and across
+ * principals to 512 in flight: Helidon answers one more {@code 503}, with its own body and no
+ * {@code Retry-After}, and closes its connection. Sessions are bounded by the registry's caps. The
+ * server calls {@link SessionRegistry#sweep()} every 30 seconds on a virtual thread of its own, so
+ * sessions not running past their retention are closed without a deployer's scheduler.
  *
  * <p>The server installs the {@link UnreadBodyGuard}: any answer, the service's or Helidon's own,
  * sent while the request's body is unread is written whole and then ends the connection, without
@@ -77,19 +78,16 @@ public final class RuntimeServer implements AutoCloseable {
 
   private static final Logger LOGGER = Logger.getLogger(RuntimeServer.class.getName());
 
+  private static final int MAX_CONCURRENT_REQUESTS = 512;
+
   private final WebServer webServer;
   private final SessionRegistry registry;
-  private final AgentHttpService service;
   private final ScheduledExecutorService sweeper;
 
   private RuntimeServer(
-      WebServer webServer,
-      SessionRegistry registry,
-      AgentHttpService service,
-      ScheduledExecutorService sweeper) {
+      WebServer webServer, SessionRegistry registry, ScheduledExecutorService sweeper) {
     this.webServer = webServer;
     this.registry = registry;
-    this.service = service;
     this.sweeper = sweeper;
   }
 
@@ -109,24 +107,6 @@ public final class RuntimeServer implements AutoCloseable {
    */
   public int port() {
     return webServer.port();
-  }
-
-  /**
-   * The registry of sessions the server is fronting.
-   *
-   * @return non-null registry
-   */
-  public SessionRegistry registry() {
-    return registry;
-  }
-
-  /**
-   * What the server admitted and refused since it started.
-   *
-   * @return a snapshot of the counters
-   */
-  public RuntimeCounters counters() {
-    return service.counters();
   }
 
   /** The configuration the server started with. Visible for tests. */
@@ -194,17 +174,10 @@ public final class RuntimeServer implements AutoCloseable {
     private int port = 0;
     private String host = DEFAULT_HOST;
     private Authenticator authenticator;
-    private HostResolver resolver = InetAddress::getByName;
     private RequestLimits requestLimits = RequestLimits.defaults();
     private Duration sweepInterval = Duration.ofSeconds(30);
 
     private Builder() {}
-
-    /** Resolve the host through {@code resolver} instead of the JDK, for tests. */
-    Builder withResolverForTests(HostResolver resolver) {
-      this.resolver = resolver;
-      return this;
-    }
 
     /**
      * Authenticate every request with {@code authenticator}.
@@ -295,15 +268,8 @@ public final class RuntimeServer implements AutoCloseable {
       return this;
     }
 
-    /**
-     * Sweep the registry every {@code sweepInterval}. Default 30 seconds.
-     *
-     * @param sweepInterval at least one millisecond
-     * @return this builder
-     * @throws NullPointerException if {@code sweepInterval} is null
-     * @throws IllegalArgumentException if {@code sweepInterval} is shorter than one millisecond
-     */
-    public Builder withSweepInterval(Duration sweepInterval) {
+    /** Sweep the registry every {@code sweepInterval}, at least one millisecond; for tests. */
+    Builder withSweepInterval(Duration sweepInterval) {
       Objects.requireNonNull(sweepInterval, "sweepInterval must not be null");
       if (sweepInterval.toMillis() < 1) {
         throw new IllegalArgumentException(
@@ -375,6 +341,7 @@ public final class RuntimeServer implements AutoCloseable {
           WebServer.builder()
               .address(bindAddress)
               .port(port)
+              .maxConcurrentRequests(MAX_CONCURRENT_REQUESTS)
               .featuresDiscoverServices(false)
               .mediaContext(
                   mc -> mc.mediaSupportsDiscoverServices(false).addMediaSupport(jacksonSupport))
@@ -383,7 +350,7 @@ public final class RuntimeServer implements AutoCloseable {
                       routing.addFeature(new UnreadBodyGuard()).register(routePrefix, service))
               .build()
               .start();
-      return new RuntimeServer(server, registry, service, startSweeper(registry, sweepInterval));
+      return new RuntimeServer(server, registry, startSweeper(registry, sweepInterval));
     }
 
     /**
@@ -426,16 +393,10 @@ public final class RuntimeServer implements AutoCloseable {
      */
     private InetAddress resolveHost() {
       try {
-        return resolver.resolve(host);
+        return InetAddress.getByName(host);
       } catch (UnknownHostException e) {
         throw new IllegalArgumentException("host " + host + " cannot be resolved", e);
       }
     }
-  }
-
-  /** Resolves a host name to the one address the server binds. */
-  @FunctionalInterface
-  interface HostResolver {
-    InetAddress resolve(String host) throws UnknownHostException;
   }
 }

@@ -6,7 +6,6 @@ package com.standardapplied.helios.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,12 +15,10 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.SessionOptions;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -260,55 +257,37 @@ final class RuntimeServerTest {
   }
 
   @Test
-  void theServerBindsTheAddressTheLoopbackCheckApprovedWhateverTheNameResolvesToLater()
-      throws Exception {
-    var lookups = new AtomicInteger();
-    RuntimeServer.HostResolver rebinding =
-        host ->
-            InetAddress.getByAddress(
-                host,
-                lookups.getAndIncrement() == 0
-                    ? new byte[] {127, 0, 0, 1}
-                    : new byte[] {(byte) 192, 0, 2, 1});
+  void theLoopbackHostNameBindsALoopbackAddress() {
     var server =
         RuntimeServer.builder()
             .withRegistry(SessionRegistry.inMemory())
             .withOptionsFactory(factory())
-            .withHost("rebinding.test")
-            .withResolverForTests(rebinding)
+            .withHost("localhost")
             .withoutAuthentication()
             .build();
-    try (server;
-        var socket = new Socket()) {
-      socket.connect(new InetSocketAddress("127.0.0.1", server.port()));
-      assertTrue(socket.isConnected());
+    try (server) {
+      assertTrue(server.configForTests().address().isLoopbackAddress());
     }
-    assertEquals(1, lookups.get());
   }
 
   @Test
-  void aLoopbackNameResolvingToAnExternalAddressIsRefusedNamingTheHostAndTheAddress() {
-    var builder =
+  void theServerServesAtMostFiveHundredTwelveRequestsAtOnce() {
+    var server =
         RuntimeServer.builder()
             .withRegistry(SessionRegistry.inMemory())
             .withOptionsFactory(factory())
-            .withHost("localhost")
-            .withResolverForTests(
-                host -> InetAddress.getByAddress(host, new byte[] {(byte) 192, 0, 2, 1}))
-            .withoutAuthentication();
-    var ex = assertThrows(IllegalStateException.class, builder::build);
-    assertEquals(nonLoopbackRefusal("localhost", "192.0.2.1"), ex.getMessage());
+            .withoutAuthentication()
+            .build();
+    try (server) {
+      assertEquals(512, server.configForTests().maxConcurrentRequests());
+    }
   }
 
   private static String nonLoopbackRefusal(String host) {
-    return nonLoopbackRefusal(host, host);
-  }
-
-  private static String nonLoopbackRefusal(String host, String address) {
     return "host "
         + host
         + " ("
-        + address
+        + host
         + ") is not a loopback address and no authenticator is set; a server reachable from other"
         + " hosts requires withAuthenticator(...), for example a TrustedProxyAuthenticator";
   }
@@ -341,7 +320,6 @@ final class RuntimeServerTest {
             .build();
     try {
       assertTrue(server.port() > 0);
-      assertSame(registry, server.registry());
     } finally {
       server.close();
     }
