@@ -24,14 +24,14 @@ import java.util.List;
  *       the next model turn will refuse the malformed history.
  * </ul>
  *
- * <p>The default ships {@link DropMiddleToolResultsCompactor}: preserve the system prompt + first
- * user turn, preserve the most recent trajectory, summarise the middle via a single model call.
+ * <p>The default ships {@link SummarizingCompactor}: keep the system prompt and the pending user
+ * turn, replace the rest of the conversation with one summary from a single model call.
  *
  * <h2>Three tiers of library-user control</h2>
  *
  * <ol>
- *   <li><b>Default</b> — do nothing; the session uses {@link DropMiddleToolResultsCompactor} bound
- *       to the same model as the conversation.
+ *   <li><b>Default</b> — do nothing; the session uses {@link SummarizingCompactor} bound to the
+ *       same model as the conversation.
  *   <li><b>BYO compactor</b> — pass a custom {@code ContextCompactor} to {@code
  *       SessionOptions.Builder.withContextCompactor(...)}.
  *   <li><b>BYO hook</b> — register a {@code PreModelTurnHook} returning {@code

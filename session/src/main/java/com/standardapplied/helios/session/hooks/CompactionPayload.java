@@ -5,7 +5,7 @@
 package com.standardapplied.helios.session.hooks;
 
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.session.DropMiddleToolResultsCompactor;
+import com.standardapplied.helios.session.SummarizingCompactor;
 import java.util.List;
 import java.util.Objects;
 
@@ -60,19 +60,17 @@ public record CompactionPayload(
   }
 
   /**
-   * The compactor's summary text, when {@link
-   * com.standardapplied.helios.session.DropMiddleToolResultsCompactor
-   * DropMiddleToolResultsCompactor} produced the result. Implementations follow the convention of
-   * placing the summary in a single user-role message at index {@code historyAfter.size() - tail -
-   * 1} prefixed with {@code "[Earlier context summary]\n"}; this accessor walks the after-history
-   * looking for that marker. Returns the empty string when no summary marker is found (e.g. a
-   * custom compactor that uses pure-trim semantics) — callers wanting compactor-agnostic detail
-   * read {@link #historyAfter()} directly.
+   * The compactor's summary text, when {@link SummarizingCompactor} produced the result.
+   * Implementations follow its convention of placing the summary in a single user-role message
+   * prefixed with {@link SummarizingCompactor#SUMMARY_PREFIX}; this accessor walks the
+   * after-history looking for that marker. Returns the empty string when no summary marker is found
+   * (e.g. a custom compactor that uses pure-trim semantics) — callers wanting compactor-agnostic
+   * detail read {@link #historyAfter()} directly.
    *
    * @return the summary body (without the prefix), or the empty string if absent
    */
   public String summary() {
-    var marker = DropMiddleToolResultsCompactor.SUMMARY_PREFIX;
+    var marker = SummarizingCompactor.SUMMARY_PREFIX;
     for (var m : historyAfter) {
       var content = m.content();
       if (content != null && content.startsWith(marker)) {

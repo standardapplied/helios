@@ -9,10 +9,10 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.ContextCompactor;
-import com.standardapplied.helios.session.DropMiddleToolResultsCompactor;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionPresets;
+import com.standardapplied.helios.session.SummarizingCompactor;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
@@ -117,14 +117,12 @@ final class QuickStarts {
   }
 
   static void compaction(Model model, Path repo, Model cheapHaikuModel) {
-    // 1) Default — DropMiddleToolResultsCompactor bound to the session's model
+    // 1) Default — SummarizingCompactor bound to the session's model
     var session = AgentSession.create(SessionPresets.workspace(model, repo).build());
 
-    // 2) BYO compactor — Letta-style, vector-recall, custom head/tail policy, etc.
+    // 2) BYO compactor — a cheaper summary model or prompt, or any ContextCompactor of your own
     var custom =
-        DropMiddleToolResultsCompactor.newBuilder(cheapHaikuModel)
-            .withHeadPreserved(5)
-            .withTailPreserved(30)
+        SummarizingCompactor.newBuilder(cheapHaikuModel)
             .withSummaryPrompt("Summarise focusing on file edits and unresolved questions.")
             .withSummaryTimeout(Duration.ofSeconds(30)) // bound the summary call
             .build();

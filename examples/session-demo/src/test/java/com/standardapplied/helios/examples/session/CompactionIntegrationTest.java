@@ -15,11 +15,11 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
 import com.standardapplied.helios.session.AgentSession;
-import com.standardapplied.helios.session.DropMiddleToolResultsCompactor;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.SummarizingCompactor;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
@@ -52,11 +52,11 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * Real-API integration test for context compaction against Gemini.
  *
- * <p>The unit tests in {@code DropMiddleToolResultsCompactorTest} prove the compactor's wire
- * mechanics against a mock {@code Model}. This test proves the harder claim: the compacted history
- * the loop ships ({@code head + summary + tail}) is something a real provider actually accepts on
- * the very next turn — tool-call/tool-result alignment, message-role ordering, and all the other
- * invariants that surface only in a live request.
+ * <p>The unit tests in {@code SummarizingCompactorTest} prove the compactor's wire mechanics
+ * against a mock {@code Model}. This test proves the harder claim: the compacted history the loop
+ * ships (the summary, then the pending user turn) is something a real provider actually accepts on
+ * the very next turn — message-role ordering and all the other invariants that surface only in a
+ * live request.
  *
  * <p>Strategy: drive a session past the {@code 0.95 × maxContextTokens} compaction watermark by
  * running a multi-turn tool-use loop, then assert that {@link QueryEvent.ContextEdited} fires AND
@@ -216,7 +216,7 @@ final class CompactionIntegrationTest {
 
   /**
    * Run {@link #NOTES_TASK} over a seeded workspace with {@code hooks} installed and a compactor
-   * that fires mid-run: each tool round adds two messages, and five messages cross the watermark.
+   * that fires mid-run: each tool round adds two messages, and three messages cross the watermark.
    */
   private static Run runNotesTask(Path tmp, List<Hook> hooks) throws IOException {
     seedFiles(tmp);
@@ -230,16 +230,10 @@ final class CompactionIntegrationTest {
                 GlobTool.binding(ws),
                 GrepTool.binding(ws)));
 
-    // Default head/tail 3/20 needs > 23 messages before any middle exists to summarise, a lot of
-    // live round-trips for one test; with 1/1 a 3+ message history already has a non-empty middle.
-    var compactor =
-        DropMiddleToolResultsCompactor.newBuilder(SUMMARY_MODEL)
-            .withHeadPreserved(1)
-            .withTailPreserved(1)
-            .build();
+    var compactor = SummarizingCompactor.newBuilder(SUMMARY_MODEL).build();
 
-    // At 100 tokens a message the 285-token watermark trips from three messages on, but head and
-    // tail of one leave no middle until the second tool round makes five.
+    // At 100 tokens a message the 285-token watermark trips from three messages on: the first tool
+    // round's user, assistant and tool messages become one summary.
     var limits = SessionLimits.newBuilder().withMaxContextTokens(300L).withMaxTurns(8).build();
 
     var options =
