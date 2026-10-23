@@ -404,6 +404,31 @@ final class GrepToolTest {
   }
 
   @Test
+  void aSecretRegisteredDuringTheWalkIsNotKeptInPartByALaterCut(@TempDir Path tmp)
+      throws IOException {
+    var secret = "sk-test-0123456789abcdef";
+    var registry = new SecretRegistry();
+    var kept = "needle" + "x".repeat(GrepTool.MAX_HIT_LINE_CHARS - 16);
+    Files.writeString(
+        tmp.resolve("long.txt"), kept + secret + "x".repeat(10_000) + "\n", StandardCharsets.UTF_8);
+    var ctx =
+        new ToolContext(
+            new SessionContext("grep-late", new CancellationToken(), Clock.systemUTC(), registry),
+            new CancellationToken(),
+            Duration.ofMinutes(1),
+            key -> {
+              registry.register("API_KEY", secret);
+              return false;
+            });
+
+    var result =
+        GrepTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("pattern", "needle"), ctx);
+
+    assertEquals("long.txt:1:" + kept + " [line truncated to 2000 chars]\n", result.output());
+    assertEquals(result.output(), registry.redactor().redact(result.output()).text());
+  }
+
+  @Test
   void invalidIncludePatternFails(@TempDir Path tmp) {
     var result =
         GrepTool.binding(WorkspaceRoot.of(tmp))

@@ -4,8 +4,8 @@
  */
 package com.standardapplied.helios.session.files;
 
-import com.standardapplied.helios.core.common.Redactor;
 import com.standardapplied.helios.core.common.Result;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.tool.ParameterType;
@@ -256,10 +256,10 @@ public final class GrepTool {
 
   private record Hit(String path, int lineNumber, String line) {}
 
-  private record LineSearch(Pattern regex, CancellationToken cancellation, Redactor redactor) {
+  private record LineSearch(Pattern regex, CancellationToken cancellation, SecretRegistry secrets) {
 
     LineSearch(Pattern regex, ToolContext ctx) {
-      this(regex, ctx.cancellation(), ctx.sessionContext().secrets().redactor());
+      this(regex, ctx.cancellation(), ctx.sessionContext().secrets());
     }
 
     boolean finds(String line) {
@@ -267,7 +267,7 @@ public final class GrepTool {
     }
 
     String kept(String line) {
-      return TextPage.cut(line, MAX_HIT_LINE_CHARS, redactor);
+      return TextPage.cut(line, MAX_HIT_LINE_CHARS, secrets);
     }
   }
 }

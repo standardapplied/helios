@@ -4,7 +4,6 @@
  */
 package com.standardapplied.helios.session.files;
 
-import com.standardapplied.helios.core.common.Redactor;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.io.BufferedReader;
@@ -23,7 +22,7 @@ import java.nio.file.Path;
  */
 final class TextPage {
 
-  private final Redactor redactor;
+  private final SecretRegistry secrets;
   private final StringBuilder out = new StringBuilder();
   private int linesEmitted;
   private long currentLine;
@@ -31,8 +30,8 @@ final class TextPage {
   private boolean truncatedByChars;
   private boolean truncatedAnyLine;
 
-  private TextPage(Redactor redactor) {
-    this.redactor = redactor;
+  private TextPage(SecretRegistry secrets) {
+    this.secrets = secrets;
   }
 
   /**
@@ -47,7 +46,7 @@ final class TextPage {
    */
   static ToolResult read(
       WorkspaceRoot workspace, Path file, int offset, int limit, SecretRegistry secrets) {
-    var page = new TextPage(secrets.redactor());
+    var page = new TextPage(secrets);
     try (var reader =
         new BufferedReader(
             new InputStreamReader(
@@ -83,23 +82,23 @@ final class TextPage {
 
   private String capped(String line) {
     truncatedAnyLine |= line.length() > ReadTool.MAX_LINE_CHARS;
-    return cut(line, ReadTool.MAX_LINE_CHARS, redactor);
+    return cut(line, ReadTool.MAX_LINE_CHARS, secrets);
   }
 
   /**
    * Cut a line longer than {@code limit} to its first {@code limit} chars and a marker, dropping a
-   * trailing part of a registered secret from the kept text.
+   * trailing part of a secret registered by the time of the cut from the kept text.
    *
    * @param line the line
    * @param limit the most chars of the line kept
-   * @param redactor the session's secrets, whose start the cut must not keep
+   * @param secrets the session's registry, whose secrets' start the cut must not keep
    * @return the line itself if it fits, otherwise the cut line and the marker
    */
-  static String cut(String line, int limit, Redactor redactor) {
+  static String cut(String line, int limit, SecretRegistry secrets) {
     if (line.length() <= limit) {
       return line;
     }
-    return redactor.trimPartialSecret(line.substring(0, limit))
+    return secrets.redactor().trimPartialSecret(line.substring(0, limit))
         + " [line truncated to "
         + limit
         + " chars]";
