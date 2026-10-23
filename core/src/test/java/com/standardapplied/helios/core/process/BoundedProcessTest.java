@@ -410,24 +410,11 @@ class BoundedProcessTest {
    */
   @Test
   void aChildThatHasExitedIsNotTimedOutWhileEveryCarrierIsBusy() throws Exception {
-    var carriers =
-        Integer.getInteger(
-            "jdk.virtualThreadScheduler.parallelism", Runtime.getRuntime().availableProcessors());
-    var busy = new CountDownLatch(carriers);
     var released = new AtomicBoolean();
     try (var process = bash("exit 3").withTimeout(SHORT).start()) {
       process.stdin().close();
       Await.termination("the child to exit", process.process());
-      for (var i = 0; i < carriers; i++) {
-        Thread.startVirtualThread(
-            () -> {
-              busy.countDown();
-              while (!released.get()) {
-                Thread.onSpinWait();
-              }
-            });
-      }
-      Await.latch("every carrier to be busy", busy);
+      occupyEveryCarrier(released);
 
       var outcome = process.await(new CancellationToken());
 
@@ -436,6 +423,48 @@ class BoundedProcessTest {
     } finally {
       released.set(true);
     }
+  }
+
+  /**
+   * Every virtual-thread carrier spins from before the child starts, so a cancel that only started
+   * a virtual thread would signal nothing until the timeout; the token's own thread signals the
+   * child.
+   */
+  @Test
+  void aCancelSignalsTheChildWhileEveryCarrierIsBusy() throws Exception {
+    var released = new AtomicBoolean();
+    var token = new CancellationToken();
+    try {
+      occupyEveryCarrier(released);
+      try (var process = bash("exec sleep 600").start()) {
+        process.stdin().close();
+        token.cancel("test");
+
+        var outcome = process.await(token);
+
+        assertFalse(outcome.timedOut());
+        assertEquals(-1, outcome.exitCode());
+      }
+    } finally {
+      released.set(true);
+    }
+  }
+
+  private static void occupyEveryCarrier(AtomicBoolean released) {
+    var carriers =
+        Integer.getInteger(
+            "jdk.virtualThreadScheduler.parallelism", Runtime.getRuntime().availableProcessors());
+    var busy = new CountDownLatch(carriers);
+    for (var i = 0; i < carriers; i++) {
+      Thread.startVirtualThread(
+          () -> {
+            busy.countDown();
+            while (!released.get()) {
+              Thread.onSpinWait();
+            }
+          });
+    }
+    Await.latch("every carrier to be busy", busy);
   }
 
   @Test

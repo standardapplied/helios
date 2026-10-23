@@ -113,7 +113,12 @@ public final class BoundedProcess implements AutoCloseable {
    */
   public ProcessOutcome await(CancellationToken cancellation) throws InterruptedException {
     Objects.requireNonNull(cancellation, "cancellation");
-    var registration = cancellation.onCancel(() -> Thread.startVirtualThread(this::kill));
+    var registration =
+        cancellation.onCancel(
+            () -> {
+              tree.kill();
+              Thread.startVirtualThread(this::kill);
+            });
     var settled = false;
     try {
       var timedOut = !process.waitFor(timeout.toNanos(), TimeUnit.NANOSECONDS);
