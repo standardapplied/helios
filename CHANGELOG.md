@@ -702,6 +702,20 @@ waiting thread kills and reaps the child and its descendants, forcibly after `Bo
 | `BoundedProcess.await()`, which left the child running on interrupt | `BoundedProcess.await(CancellationToken)`; a child it killed reports exit code `-1` |
 | `BoundedProcess.kill()` sent `SIGTERM` and returned | `kill()` also kills forcibly what is alive after `GRACE`, and returns once the tree has ended or a second `GRACE` passed |
 
+**The default compactor summarises the whole conversation.** `DropMiddleToolResultsCompactor`
+kept the first 3 and the last 20 messages around a summary of the middle. `SummarizingCompactor`
+keeps every leading system message and the pending user turn and replaces everything else with
+one summary message, prefixed `SummarizingCompactor.SUMMARY_PREFIX`, so no earlier assistant turn,
+tool call or tool result is replayed. It returns the history unchanged in the middle of a tool
+round. The default summary prompt asks for the user's goal, the facts found, the decisions made,
+the open questions and the work left, since the agent continues from the summary alone.
+
+| 2.x | 3.0 |
+|---|---|
+| `DropMiddleToolResultsCompactor` (with `withHeadPreserved`, `withTailPreserved`) | `SummarizingCompactor`: the whole conversation becomes one summary message; no head or tail is kept |
+| `DropMiddleToolResultsCompactor.SUMMARY_PREFIX` | `SummarizingCompactor.SUMMARY_PREFIX` (same text) |
+| `summaryModel()`, `headPreserved()`, `tailPreserved()`, `summaryTimeout()` accessors | removed; the builder's `newBuilder(model)`, `withSummaryPrompt`, `withSummaryTimeout` remain |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
@@ -829,6 +843,15 @@ waiting thread kills and reaps the child and its descendants, forcibly after `Bo
 
 ### Fixed
 
+- **Compaction broke sessions on models that bind thinking to the conversation.** The default
+  compactor kept the last 20 messages, whose thinking blocks were signed against the full history,
+  so Fable 5.1, Opus 5.5 and Sonnet 5.5 rejected the next request with a 400 and the session ended
+  in `ErrorDuringExecution`. The new default, `SummarizingCompactor`, carries no earlier assistant
+  turn.
+- **An unreadable Anthropic thinking value was sent as no thinking.** An assistant message whose
+  `anthropic.thinkingBlocks` cannot be read, or holds a block without a signature, now fails
+  before the request with an `AnthropicException` naming the key, instead of reaching the API
+  without its blocks.
 - **A backgrounded child hung a command call, and an interrupted or cancelled grant left its child
   running.** A process left behind (`server &`) held the output pipes, so `CommandGrant` and
   `LocalProcessExecutionProvider` waited forever; each stream now gets `BoundedProcess.GRACE` after
@@ -1138,9 +1161,9 @@ shims 2.x accumulated.
   constructor remains; record deconstruction patterns over `Refusal` need the extra binding.
 - `DropMiddleToolResultsCompactor` is not safe on Fable 5.1, Opus 5.5 or Sonnet 5.5 for Anthropic
   accounts created on or after 2026-08-31: those models bind each thinking block to the history
-  that produced it, and the first request after a compaction is rejected with a 400. Size
-  `SessionLimits.maxContextTokens` so compaction does not fire, or wire
-  `ContextCompactor.disabled()`. Changing the visible tool set mid-session has the same effect.
+  that produced it, and the first request after a compaction is rejected with a 400. 3.0 replaces
+  it with `SummarizingCompactor`, which carries no earlier assistant turn. Changing the visible
+  tool set mid-session has the same effect.
 
 ### Security
 

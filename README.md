@@ -306,9 +306,9 @@ The agent loop estimates context fill through a pluggable `TokenCounter` (defaul
 - **0.85** of `SessionLimits.maxContextTokens()` → emits `QueryEvent.ContextWarning(usagePct)` once.
 - **0.95** → invokes the configured `ContextCompactor`, swaps the returned history in, and emits `QueryEvent.ContextEdited(removedBlocks, tokensBefore, tokensAfter)`.
 
-The default `DropMiddleToolResultsCompactor` preserves the system prompt + opening turn and the most recent trajectory, summarising the middle via one model call. It walks slice boundaries to keep `tool_call`/`tool_result` pairs together (providers reject histories where these split). The summary call runs on a virtual thread under a configurable timeout (default 60s) and reports its `Usage` so spend gates through `SessionLimits.maxBudgetMicroUsd`.
+The default `SummarizingCompactor` keeps the system prompt and the pending user turn and replaces the rest of the conversation with one summary from one model call. No earlier assistant turn survives, so no reasoning a provider signed against the old conversation (Claude Fable 5.1, Opus 5.5, Sonnet 5.5) is replayed and no `tool_call`/`tool_result` pair is left to split; it never compacts in the middle of a tool round. The summary call runs on a virtual thread under a configurable timeout (default 60s) and reports its `Usage` so spend gates through `SessionLimits.maxBudgetMicroUsd`.
 
-Override head/tail policy via the Builder, swap the whole compactor through `SessionOptions.Builder.withContextCompactor(...)`, opt out with `ContextCompactor.disabled()`, or do ad-hoc rewrites by returning `HookOutcome.mutateHistory(rewritten)` from a `PreModelTurnHook`. See [`session/README.md`](session/README.md#context-compaction) for the full surface.
+Pick the summary model, prompt and timeout via `SummarizingCompactor.newBuilder(...)`, swap the whole compactor through `SessionOptions.Builder.withContextCompactor(...)`, opt out with `ContextCompactor.disabled()`, or do ad-hoc rewrites by returning `HookOutcome.mutateHistory(rewritten)` from a `PreModelTurnHook`. See [`session/README.md`](session/README.md#context-compaction) for the full surface.
 
 ## Resource Lifecycle
 

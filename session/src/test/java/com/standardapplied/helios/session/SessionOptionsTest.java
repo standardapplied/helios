@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -532,11 +533,9 @@ final class SessionOptionsTest {
   }
 
   @Test
-  void builderDefaultsContextCompactorToDropMiddle() {
+  void builderDefaultsContextCompactorToSummarizing() {
     var opts = SessionOptions.newBuilder().withModel(stubModel()).build();
-    assertNotNull(opts.contextCompactor());
-    // default is DropMiddleToolResultsCompactor — verify it's not the disabled singleton
-    assertNotSame(ContextCompactor.disabled(), opts.contextCompactor());
+    assertInstanceOf(SummarizingCompactor.class, opts.contextCompactor());
   }
 
   @Test

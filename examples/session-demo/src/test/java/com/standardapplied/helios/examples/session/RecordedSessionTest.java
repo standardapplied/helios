@@ -29,6 +29,7 @@ import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.SummarizingCompactor;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
@@ -48,12 +49,14 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Recorded live sessions replayed offline through the real provider clients and an {@code
@@ -72,8 +75,13 @@ import org.junit.jupiter.params.provider.ValueSource;
  *
  * <p>{@code gemini/sessions/file-tools} is a live gemini-3.5-flash file-tool session, recorded
  * 2026-10-09.
+ *
+ * <p>{@code anthropic/sessions/compaction} is a live claude-opus-5-5 {@link CompactingSession}
+ * under {@code Display.SUMMARY}, recorded 2026-10-23.
  */
 final class RecordedSessionTest {
+
+  private static final JsonMapper JSON = JsonMapper.builder().build();
 
   private static final String SECRET = "sk-test-CONFIDENTIAL-do-not-leak-789012";
 
@@ -116,6 +124,41 @@ final class RecordedSessionTest {
                     Collectors.mapping(QueryEvent.AssistantThinking::text, Collectors.joining())));
     assertEquals(2, notesByTurn.size());
     notesByTurn.values().forEach(notes -> assertFalse(notes.isBlank()));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void claudeCompactionAfterASignedThinkingTurnReplaysNoThinking() {
+    var replies =
+        Arrays.asList(
+            Golden.read("anthropic/sessions/compaction.sse").split(ModelHarness.NEXT_RESPONSE));
+    var run = new CompactingSession.Run[1];
+
+    var requests =
+        ModelHarness.exchange(
+            replies,
+            uri ->
+                new AnthropicProvider()
+                    .create(
+                        AnthropicModelId.CLAUDE_OPUS_5_5.id(),
+                        anthropicConfig(uri)
+                            .withReasoning(new Reasoning.Effort(Level.HIGH, Display.SUMMARY))
+                            .build(),
+                        CachePolicy.shortLived()),
+            model -> run[0] = CompactingSession.run(model));
+
+    assertInstanceOf(ResultMessage.Success.class, run[0].terminal());
+    assertTrue(run[0].compactedASignedThinkingTurn());
+    assertEquals(1, run[0].events().eventsOf(QueryEvent.ContextEdited.class).size());
+    assertEquals(3, requests.size());
+    var messages =
+        (List<Map<String, Object>>)
+            JSON.readValue(requests.getLast().body(), Map.class).get("messages");
+    assertEquals(1, messages.size());
+    var blocks = (List<Map<String, Object>>) messages.getFirst().get("content");
+    assertEquals(List.of("text"), blocks.stream().map(block -> block.get("type")).toList());
+    assertTrue(
+        ((String) blocks.getFirst().get("text")).startsWith(SummarizingCompactor.SUMMARY_PREFIX));
   }
 
   @Test

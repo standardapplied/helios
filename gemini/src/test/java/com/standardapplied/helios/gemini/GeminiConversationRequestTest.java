@@ -4,6 +4,7 @@ package com.standardapplied.helios.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -97,6 +98,34 @@ class GeminiConversationRequestTest extends ConversationRequestContract {
     assertEquals(2, requests.size());
     assertNotNull(continuation.get("previous_interaction_id"));
     assertEquals(system, continuation.get("system_instruction"));
+  }
+
+  /** The history {@code SummarizingCompactor} leaves: no assistant turn, so no interaction id. */
+  @Test
+  void aCompactedHistoryIsSentWholeWithoutAPreviousInteraction() {
+    var history =
+        new ArrayList<>(List.of(Message.system("sys"), Message.user("Weather in Paris?")));
+    var replies = List.of(Golden.read("gemini/streams/tool-calls.sse"), Golden.read(reply()));
+
+    var requests =
+        ModelHarness.exchange(
+            replies,
+            modelAt(),
+            model -> {
+              var first = model.chat(history, ConversationFixture.tools());
+              history.add(first.toMessage());
+              var compacted =
+                  List.of(
+                      Message.system("sys"),
+                      Message.user("[Earlier context summary]\nParis is 22C and sunny."));
+              assertNull(ContinuationPoint.find(compacted));
+              model.chat(compacted, ConversationFixture.tools());
+            });
+
+    var compactedRequest = parse(requests.getLast().body());
+    assertNull(compactedRequest.get("previous_interaction_id"));
+    assertEquals(
+        List.of("[Earlier context summary]\nParis is 22C and sunny."), turnTexts(compactedRequest));
   }
 
   @Override

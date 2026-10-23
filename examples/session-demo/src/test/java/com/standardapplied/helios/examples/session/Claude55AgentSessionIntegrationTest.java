@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.examples.session;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -72,6 +73,33 @@ final class Claude55AgentSessionIntegrationTest {
   @Test
   void sonnet55RunsTheToolLoopWithoutUpFrontThinking() {
     runMatchmaking(AnthropicModelId.CLAUDE_SONNET_5_5, new Reasoning.Off());
+  }
+
+  @Test
+  void opus55CompactsAfterASignedThinkingTurnAndTheNextRequestIsAccepted() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey(System.getenv("ANTHROPIC_API_KEY"))
+            .withReasoning(new Reasoning.Effort(Level.HIGH, Display.SUMMARY))
+            .withMaxOutputTokens(16_000)
+            .build();
+    try (var model =
+        new AnthropicProvider()
+            .create(AnthropicModelId.CLAUDE_OPUS_5_5.id(), config, CachePolicy.shortLived())) {
+      var run = CompactingSession.run(model);
+
+      assertTrue(
+          run.terminal() instanceof ResultMessage.Success
+              || run.terminal() instanceof ResultMessage.ErrorMaxTurns,
+          () -> "claude-opus-5-5 ended as " + run.terminal());
+      assertTrue(run.events().eventsOf(QueryEvent.Error.class).isEmpty());
+      assumeTrue(
+          run.compactedASignedThinkingTurn(),
+          "claude-opus-5-5 called no tool after a signed thinking block in its first turn;"
+              + " RecordedSessionTest#claudeCompactionAfterASignedThinkingTurnReplaysNoThinking"
+              + " covers the compaction");
+      assertEquals(1, run.events().eventsOf(QueryEvent.ContextEdited.class).size());
+    }
   }
 
   /**
