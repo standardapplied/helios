@@ -92,10 +92,8 @@ import java.util.OptionalLong;
  *     strictly positive
  * @param toolTimeoutDefault default per-tool execution timeout; must be non-null and strictly
  *     positive
- * @param stopGrace how long anything the session cancels is given to stop: a timed-out tool call
- *     before it is reported as {@link com.standardapplied.helios.core.tool.ToolOutcome.Unknown},
- *     each wait of the teardown, the cancel of a model stream; must be non-null and strictly
- *     positive
+ * @param stopGrace how long anything the session cancels is given to stop; must be non-null and
+ *     strictly positive
  * @param maxContextTokens soft trigger for context compaction, measured as the {@link
  *     com.standardapplied.helios.core.context.TokenCounter}'s estimate of the <em>total tokens
  *     across every message in the conversation history so far</em> — cumulative, never per-turn.
@@ -277,14 +275,7 @@ public record SessionLimits(
       return this;
     }
 
-    /**
-     * Set how long anything the session cancels is given to stop: a timed-out tool call before it
-     * is reported as {@link com.standardapplied.helios.core.tool.ToolOutcome.Unknown}, each wait of
-     * the session's teardown, and the cancel of a model stream's subscription.
-     *
-     * @param stopGrace strictly positive
-     * @return this builder
-     */
+    /** Set how long anything the session cancels is given to stop. */
     public Builder withStopGrace(Duration stopGrace) {
       this.stopGrace = stopGrace;
       return this;

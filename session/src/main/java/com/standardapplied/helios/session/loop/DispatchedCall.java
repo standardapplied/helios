@@ -161,7 +161,7 @@ final class DispatchedCall {
    * @return {@code true} if {@code future} settled
    * @throws CancellationException if the session's token is cancelled before this method returns
    */
-  private boolean settlesBy(Future<?> future, long until) throws InterruptedException {
+  private boolean settlesBy(CompletableFuture<?> future, long until) throws InterruptedException {
     var settled = TokenWait.settlesBy(future, parent, until);
     if (parent.isCancelled()) {
       var reason = parent.reason().orElseThrow();
