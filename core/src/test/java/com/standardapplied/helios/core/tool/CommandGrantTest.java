@@ -15,6 +15,7 @@ import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.PidFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -39,6 +40,7 @@ class CommandGrantTest {
   private static final Path PRINTENV;
   private static final Duration NEVER_REACHED = Duration.ofMinutes(10);
   private static final String SECRET = "sk-test-0123456789abcdef";
+  private static final CancellationToken NEVER_CANCELLED = new CancellationToken();
 
   /**
    * A command that cannot finish on its own: it marks its working directory once it runs, then
@@ -75,9 +77,17 @@ class CommandGrantTest {
 
   /** A tool context for a session whose registry is {@code secrets}. */
   private static ToolContext sessionWith(SecretRegistry secrets) {
+    return callIn(secrets, new CancellationToken());
+  }
+
+  /**
+   * A tool call whose token is {@code cancellation}, in a session whose registry is {@code
+   * secrets}.
+   */
+  private static ToolContext callIn(SecretRegistry secrets, CancellationToken cancellation) {
     return new ToolContext(
         new SessionContext("grant-session", new CancellationToken(), Clock.systemUTC(), secrets),
-        new CancellationToken(),
+        cancellation,
         NEVER_REACHED,
         key -> false);
   }
@@ -206,7 +216,8 @@ class CommandGrantTest {
                     + " printf %s \"tail $1\" >&2",
                 "BIN",
                 SECRET.substring(0, 8),
-                SECRET.substring(8)));
+                SECRET.substring(8)),
+            NEVER_CANCELLED);
 
     assertEquals("x".repeat(1014) + "\n[truncated: output exceeded cap]", result.stdout());
     assertEquals("tail sk-test-", result.stderr());
@@ -215,7 +226,7 @@ class CommandGrantTest {
   @Test
   void simpleEcho() throws Exception {
     var grant = bash().build();
-    var result = grant.invoke(List.of("-c", "echo hello"));
+    var result = grant.invoke(List.of("-c", "echo hello"), NEVER_CANCELLED);
     assertEquals(0, result.exitCode());
     assertEquals("hello\n", result.stdout());
     assertEquals("", result.stderr());
@@ -226,14 +237,14 @@ class CommandGrantTest {
   @Test
   void exitCodePreserved() throws Exception {
     var grant = bash().build();
-    var result = grant.invoke(List.of("-c", "exit 7"));
+    var result = grant.invoke(List.of("-c", "exit 7"), NEVER_CANCELLED);
     assertEquals(7, result.exitCode());
   }
 
   @Test
   void stderrCapturedSeparately() throws Exception {
     var grant = bash().build();
-    var result = grant.invoke(List.of("-c", "echo err 1>&2; echo out"));
+    var result = grant.invoke(List.of("-c", "echo err 1>&2; echo out"), NEVER_CANCELLED);
     assertEquals(0, result.exitCode());
     assertEquals("out\n", result.stdout());
     assertEquals("err\n", result.stderr());
@@ -242,7 +253,7 @@ class CommandGrantTest {
   @Test
   void envVarPassedToChild() throws Exception {
     var grant = bash().withEnv("GREETING", "hello1234").build();
-    var result = grant.invoke(List.of("-c", "echo $GREETING"));
+    var result = grant.invoke(List.of("-c", "echo $GREETING"), NEVER_CANCELLED);
     assertEquals(0, result.exitCode());
     assertEquals("hello1234\n", result.stdout());
   }
@@ -251,7 +262,7 @@ class CommandGrantTest {
   void jvmEnvNotInheritedByChild() throws Exception {
     assumeTrue(System.getenv("USER") != null, "USER env var required to assert non-inheritance");
     var grant = bash().build();
-    var result = grant.invoke(List.of("-c", "echo USER=${USER:-unset}"));
+    var result = grant.invoke(List.of("-c", "echo USER=${USER:-unset}"), NEVER_CANCELLED);
     assertEquals(0, result.exitCode());
     assertEquals("USER=unset\n", result.stdout());
   }
@@ -261,7 +272,7 @@ class CommandGrantTest {
     var grant = bash().withEnv("TOKEN", "supersecret123").build();
     assertThrows(
         CommandGrant.RejectedException.class,
-        () -> grant.invoke(List.of("-c", "echo prefix-supersecret123-suffix")));
+        () -> grant.invoke(List.of("-c", "echo prefix-supersecret123-suffix"), NEVER_CANCELLED));
   }
 
   @Test
@@ -271,21 +282,24 @@ class CommandGrantTest {
             .withArgValidator(
                 args -> args.size() < 2 ? Optional.of("need at least 2 args") : Optional.empty())
             .build();
-    var ex = assertThrows(CommandGrant.RejectedException.class, () -> grant.invoke(List.of("-c")));
+    var ex =
+        assertThrows(
+            CommandGrant.RejectedException.class,
+            () -> grant.invoke(List.of("-c"), NEVER_CANCELLED));
     assertTrue(ex.getMessage().contains("need at least 2"));
   }
 
   @Test
   void argValidatorAcceptanceAllows() throws Exception {
     var grant = bash().withArgValidator(args -> Optional.empty()).build();
-    var result = grant.invoke(List.of("-c", "echo ok"));
+    var result = grant.invoke(List.of("-c", "echo ok"), NEVER_CANCELLED);
     assertEquals(0, result.exitCode());
   }
 
   @Test
   void timeoutKillsProcessTree() throws Exception {
     var grant = bash().withTimeout(Duration.ofMillis(300)).build();
-    var result = grant.invoke(List.of("-c", "exec sleep 600"));
+    var result = grant.invoke(List.of("-c", "exec sleep 600"), NEVER_CANCELLED);
     assertTrue(result.timedOut());
     assertEquals(-1, result.exitCode());
   }
@@ -293,7 +307,8 @@ class CommandGrantTest {
   @Test
   void outputCapTruncatesAndMarks() throws Exception {
     var grant = bash().withMaxOutputBytes(2048).build();
-    var result = grant.invoke(List.of("-c", "head -c 100000 /dev/zero | tr '\\0' 'x'"));
+    var result =
+        grant.invoke(List.of("-c", "head -c 100000 /dev/zero | tr '\\0' 'x'"), NEVER_CANCELLED);
     assertTrue(result.truncated());
     assertTrue(result.stdout().contains("[truncated"));
     assertTrue(result.stdout().length() < 4096);
@@ -389,7 +404,7 @@ class CommandGrantTest {
   @Test
   void cwdSetExplicitlyHonored(@TempDir Path tmp) throws Exception {
     var grant = bash().withCwd(tmp).build();
-    var result = grant.invoke(List.of("-c", "pwd"));
+    var result = grant.invoke(List.of("-c", "pwd"), NEVER_CANCELLED);
     var expected = tmp.toRealPath().toString();
     assertTrue(
         result.stdout().trim().endsWith(expected) || result.stdout().trim().equals(expected),
@@ -399,7 +414,7 @@ class CommandGrantTest {
   @Test
   void perCallTempCwdCleanedUp() throws Exception {
     var grant = bash().build();
-    var result = grant.invoke(List.of("-c", "pwd && echo > marker"));
+    var result = grant.invoke(List.of("-c", "pwd && echo > marker"), NEVER_CANCELLED);
     assertEquals(0, result.exitCode());
     var tmpPathLine = result.stdout().split("\n")[0];
     var tmpPath = Path.of(tmpPathLine);
@@ -453,7 +468,7 @@ class CommandGrantTest {
   @Test
   void customPathRespected() throws Exception {
     var grant = bash().withPath("/usr/bin:/bin").build();
-    var result = grant.invoke(List.of("-c", "echo $PATH"));
+    var result = grant.invoke(List.of("-c", "echo $PATH"), NEVER_CANCELLED);
     assertEquals("/usr/bin:/bin\n", result.stdout());
   }
 
@@ -461,12 +476,14 @@ class CommandGrantTest {
   void concurrencyLimitOneEnforced(@TempDir Path tmp) throws Exception {
     var grant = bash().withMaxConcurrent(1).withCwd(tmp).withTimeout(NEVER_REACHED).build();
     try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-      var first = executor.submit(() -> grant.invoke(List.of("-c", RUN_UNTIL_RELEASED)));
+      var first =
+          executor.submit(() -> grant.invoke(List.of("-c", RUN_UNTIL_RELEASED), NEVER_CANCELLED));
       awaitStarted(tmp);
 
       var ex =
           assertThrows(
-              CommandGrant.RejectedException.class, () -> grant.invoke(List.of("-c", "echo hi")));
+              CommandGrant.RejectedException.class,
+              () -> grant.invoke(List.of("-c", "echo hi"), NEVER_CANCELLED));
       assertTrue(ex.getMessage().contains("Concurrency"));
 
       release(tmp);
@@ -477,7 +494,8 @@ class CommandGrantTest {
   @Test
   void argvNeverInheritsShellExpansion() throws Exception {
     var grant = bash().build();
-    var result = grant.invoke(List.of("-c", "echo \"$0 $1 $2\"", "BIN", "ONE", "TWO"));
+    var result =
+        grant.invoke(List.of("-c", "echo \"$0 $1 $2\"", "BIN", "ONE", "TWO"), NEVER_CANCELLED);
     assertEquals(0, result.exitCode());
     assertEquals("BIN ONE TWO\n", result.stdout());
   }
@@ -509,7 +527,9 @@ class CommandGrantTest {
   void stderrTruncatedAlone() throws Exception {
     var grant = bash().withMaxOutputBytes(1024).build();
     var result =
-        grant.invoke(List.of("-c", "head -c 100000 /dev/zero | tr '\\0' 'x' 1>&2; echo ok"));
+        grant.invoke(
+            List.of("-c", "head -c 100000 /dev/zero | tr '\\0' 'x' 1>&2; echo ok"),
+            NEVER_CANCELLED);
     assertTrue(result.truncated());
     assertEquals("ok\n", result.stdout());
   }
@@ -531,7 +551,7 @@ class CommandGrantTest {
   @Test
   void forciblyKilledProcessIgnoringSigterm() throws Exception {
     var grant = bash().withTimeout(Duration.ofMillis(300)).build();
-    var result = grant.invoke(List.of("-c", "trap '' TERM; exec sleep 600"));
+    var result = grant.invoke(List.of("-c", "trap '' TERM; exec sleep 600"), NEVER_CANCELLED);
     assertTrue(result.timedOut());
     assertEquals(-1, result.exitCode());
   }
@@ -555,6 +575,32 @@ class CommandGrantTest {
     release(tmp);
     assertFalse(interrupted.succeeded());
     assertTrue(interrupted.output().contains("Interrupted"));
+  }
+
+  @Test
+  void cancellingTheCallKillsTheChildAndFreesThePermit(@TempDir Path tmp) throws Exception {
+    var grant = bash().withMaxConcurrent(1).withCwd(tmp).withTimeout(NEVER_REACHED).build();
+    var tool = grant.toTool();
+    var token = new CancellationToken();
+    var result =
+        CompletableFuture.supplyAsync(
+            () ->
+                tool.execute(
+                    Map.of("args", List.of("-c", "echo $$ > pid; exec sleep 600")),
+                    callIn(grant.secretRegistry(), token)));
+    var child = PidFile.await("the child to start", tmp.resolve("pid"));
+    try {
+      token.cancel("test");
+
+      var cancelled = Await.value("the cancelled invocation", result);
+      assertFalse(cancelled.succeeded());
+      assertEquals("Cancelled while invoking bash", cancelled.output());
+      Await.value("the killed child to end", child.onExit());
+      assertTrue(
+          tool.execute(Map.of("args", List.of("-c", "echo again")), sessionOf(grant)).succeeded());
+    } finally {
+      child.destroyForcibly();
+    }
   }
 
   @Test

@@ -3,6 +3,7 @@ package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,9 +18,18 @@ import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import com.standardapplied.helios.repl.protocol.RpcChannel;
 import com.standardapplied.helios.repl.protocol.RpcError;
 import com.standardapplied.helios.repl.protocol.RpcMessage;
+import com.standardapplied.helios.session.test.LogCapture;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.UnixDomainSocketAddress;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.LogRecord;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -128,6 +138,73 @@ class SandboxPreludeInstallTest {
         thrown.getMessage());
     Await.until(
         "the rejected sandbox's subprocess to end", () -> earlierChildren.containsAll(livePids()));
+  }
+
+  /**
+   * A parameter named {@code com} hides the {@code com} package the wrapper body names, so the
+   * sandbox rejects the wrappers after the RPC channel is open. Closing the channel before its
+   * socket is what keeps its reader from logging the closed socket: the channel is closed once
+   * {@code create} throws, and its reader logs only while it is open.
+   */
+  @Test
+  void aFailedLaunchClosesItsChannelAndLeavesNothingBehind() {
+    var registry = new HostFunctionRegistry();
+    registry.register(
+        new HostFunction(
+            "lookup",
+            "Looks a key up.",
+            List.of(HostParameter.required("com", ParameterType.STRING, "Hides a package.")),
+            params -> null));
+    var earlierChildren = livePids();
+    var launched = new CompletableFuture<Launch>();
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+    try (var ignored = LogCapture.of(RpcChannel.class, logged)) {
+      var thrown =
+          assertThrows(
+              ReplException.class,
+              () ->
+                  JvmSandbox.create(
+                      CONFIG, registry, rpc -> launched.complete(Launch.of(rpc, earlierChildren))));
+
+      assertTrue(
+          thrown.getMessage().startsWith("Sandbox rejected custom host-function wrappers: ["),
+          thrown.getMessage());
+      var launch = Await.value("the accepted connection", launched);
+      var closed =
+          assertThrows(RpcChannel.RpcException.class, () -> launch.channel().call("ping", null));
+      assertEquals("Channel is closed", closed.getMessage());
+      var messages = logged.stream().map(LogRecord::getMessage).toList();
+      assertFalse(messages.contains("Reader loop error"), messages::toString);
+      assertTrue(
+          launch.directories().stream().noneMatch(Files::exists), launch.directories()::toString);
+      Await.until(
+          "the rejected sandbox's subprocess to end",
+          () -> earlierChildren.containsAll(livePids()));
+    }
+  }
+
+  /**
+   * A launch as its RPC connection was accepted: its channel, and the socket and working
+   * directories it made, read from the socket's address and from the new subprocess's working
+   * directory. Read from the launch itself, they are unaffected by other sandboxes on the host.
+   */
+  private record Launch(RpcChannel channel, List<Path> directories) {
+
+    static Launch of(SandboxRpc rpc, Set<Long> earlierChildren) {
+      try {
+        var socket = (UnixDomainSocketAddress) rpc.socket().getLocalAddress();
+        var child =
+            ProcessHandle.current()
+                .children()
+                .filter(handle -> !earlierChildren.contains(handle.pid()))
+                .findFirst()
+                .orElseThrow();
+        var working = Files.readSymbolicLink(Path.of("/proc", Long.toString(child.pid()), "cwd"));
+        return new Launch(rpc.channel(), List.of(socket.getPath().getParent(), working));
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
+    }
   }
 
   private static Set<Long> livePids() {

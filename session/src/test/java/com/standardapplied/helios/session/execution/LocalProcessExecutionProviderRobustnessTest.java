@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.PidFile;
 import com.standardapplied.helios.session.test.ExecutionCall;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -129,6 +130,58 @@ final class LocalProcessExecutionProviderRobustnessTest {
     }
   }
 
+  /** Once its trap is set the child ignores the token's SIGTERM; only the escalation ends it. */
+  @Test
+  void cancellationForciblyKillsAChildIgnoringSigterm(@TempDir Path cwd) {
+    assumeBashAvailable();
+    try (var provider = testProvider()) {
+      var token = new CancellationToken();
+      var call =
+          start(
+              provider,
+              bash("trap '' TERM; echo $$ > pid; " + HANG).withWorkingDirectory(cwd).build(),
+              token);
+      var child = PidFile.await("the trap to be set", cwd.resolve("pid"));
+      try {
+        token.cancel("test-cancel");
+
+        assertEquals(
+            "execution of BASH cancelled: test-cancel",
+            cancellationMessage("the cancelled call to fail", call));
+        Await.value("the forcibly killed child to end", child.onExit());
+      } finally {
+        child.destroyForcibly();
+      }
+    }
+  }
+
+  /**
+   * The backgrounded descendant holds the child's stdin open without reading it. The child reads
+   * one byte before it exits, so the feeder is already blocked on the rest of the 512 KiB, which
+   * the JDK's close of stdin at the child's exit does not unblock; the call still returns.
+   */
+  @Test
+  void aDescendantHoldingStdinUnreadDoesNotHoldUpTheCall(@TempDir Path cwd) {
+    assumeBashAvailable();
+    try (var provider = testProvider()) {
+      try {
+        var result =
+            run(
+                provider,
+                bash("sleep 600 <&0 >/dev/null 2>&1 & echo $! > pid; head -c 1 >/dev/null")
+                    .withWorkingDirectory(cwd)
+                    .withStdin("x".repeat(512 * 1024))
+                    .build());
+
+        assertEquals(0, result.exitCode());
+        assertFalse(result.timedOut());
+        assertEquals(0, provider.inflightCount());
+      } finally {
+        PidFile.destroy(cwd.resolve("pid"));
+      }
+    }
+  }
+
   // ── cancellation while waiting for a permit unblocks the acquire ────────
 
   @Test
@@ -204,6 +257,34 @@ final class LocalProcessExecutionProviderRobustnessTest {
         var result = Await.value("the result of a reaped call", call);
         assertEquals(KILLED_BY_SIGKILL, result.exitCode());
         assertFalse(result.timedOut());
+      }
+    }
+  }
+
+  /**
+   * The grandchild ignores SIGTERM and the child dies of it, which re-parents the grandchild; the
+   * reaping still reaches it, forcibly, before {@code close()} returns.
+   */
+  @Test
+  void closeForciblyKillsADescendantIgnoringSigtermWhoseParentDied(@TempDir Path cwd) {
+    assumeBashAvailable();
+    try (var provider = testProvider()) {
+      try {
+        var call =
+            start(
+                provider,
+                bash("(trap '' TERM; echo $BASHPID > pid; exec sleep 600) & exec sleep 600")
+                    .withWorkingDirectory(cwd)
+                    .build(),
+                new CancellationToken());
+        var grandchild = PidFile.await("the grandchild's trap to be set", cwd.resolve("pid"));
+
+        provider.close();
+
+        assertFalse(grandchild.isAlive());
+        assertEquals(KILLED_BY_SIGTERM, Await.value("the reaped call", call).exitCode());
+      } finally {
+        PidFile.destroy(cwd.resolve("pid"));
       }
     }
   }

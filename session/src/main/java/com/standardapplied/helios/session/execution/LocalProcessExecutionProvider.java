@@ -52,8 +52,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       session redacts the {@code Execute} tool's output against its secret registry. A stream cut
  *       at the output cap loses the start of a secret registered there that the cut went through,
  *       so the session's redaction cannot miss it.
- *   <li><b>Process tree reaped on timeout / cancellation.</b> Descendants are destroyed alongside
- *       the direct child.
+ *   <li><b>Process tree reaped on timeout, cancellation and interrupt.</b> Descendants are
+ *       destroyed alongside the direct child; one still alive {@link BoundedProcess#GRACE} after
+ *       the kill is destroyed forcibly.
  *   <li><b>Concurrency-bounded.</b> Per-provider {@link Semaphore}; overflows wait rather than fail
  *       because the {@code Execute} tool's surrounding {@link
  *       com.standardapplied.helios.session.ConcurrencyLimits#maxConcurrentExecutions()
@@ -84,7 +85,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <h2>Lifecycle</h2>
  *
- * The provider is {@link AutoCloseable}; {@link #close()} forcibly destroys every in-flight
+ * The provider is {@link AutoCloseable}; {@link #close()} kills and reaps every in-flight
  * subprocess and removes the JVM shutdown hook the constructor installed. The shutdown hook is
  * defense-in-depth: if the host JVM exits without calling {@code close()} (uncaught {@code Error},
  * {@code System.exit(...)}, OS signal), the hook still kills every child process so the host cannot
@@ -233,42 +234,19 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
 
   private ExecutionResult awaitProcess(
       ExecutionRequest request, BoundedProcess process, CancellationToken cancellation) {
-    var proc = process.process();
-    inflight.track(proc);
-    // Once-only kill: a successful exit removes the callback's effect so a later cancel after
-    // many calls does not iterate an ever-growing list of stale process refs and does not try to
-    // destroy an already-reaped process.
-    var killed = new AtomicBoolean();
-    Runnable killCallback =
-        () -> {
-          if (killed.compareAndSet(false, true)) {
-            process.kill();
-          }
-        };
-    var killRegistration = cancellation.onCancel(killCallback);
+    inflight.track(process);
     var stdinFeeder = StdinFeeder.start(process, request.stdin().orElse(null));
     ProcessOutcome outcome;
     try {
-      outcome = process.await();
+      outcome = process.await(cancellation);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      // SIGKILL, not the token's SIGTERM: the child is untracked once execute throws, and nothing
-      // is left waiting to escalate against one that ignores SIGTERM.
-      proc.descendants().forEach(ProcessHandle::destroyForcibly);
-      proc.destroyForcibly();
-      stdinFeeder.join();
-      inflight.untrack(proc);
-      killRegistration.remove();
       throw new CancellationException(
           "interrupted while waiting for " + request.runtime() + " process");
+    } finally {
+      stdinFeeder.join();
+      inflight.untrack(process);
     }
-    stdinFeeder.join();
-    inflight.untrack(proc);
-    // Mark the per-call kill callback inert so any later token cancellation does not retain or
-    // act on this now-reaped process, then detach from the (possibly long-lived) token's list so
-    // the callback reference does not accumulate across many calls.
-    killed.set(true);
-    killRegistration.remove();
     // If the token fired during execution and the process did NOT time out on its own, the
     // process was killed by cancellation — surface that as a CancellationException rather than a
     // misleading "normal exit 143" ExecutionResult. Timed-out runs still return a result
@@ -334,7 +312,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
 
     void join() {
       try {
-        thread.join();
+        thread.join(BoundedProcess.GRACE);
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
       }

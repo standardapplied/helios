@@ -16,8 +16,8 @@ import com.standardapplied.helios.core.process.BinaryResolver;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.PidFile;
 import com.standardapplied.helios.session.test.ExecutionCall;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -458,8 +458,7 @@ final class LocalProcessExecutionProviderTest {
             .build();
 
     var call = ExecutionCall.start(provider, CTX, req, new CancellationToken());
-    Await.until("the child to write its pid", () -> !readPid(pidFile).isEmpty());
-    var child = ProcessHandle.of(Long.parseLong(readPid(pidFile))).orElseThrow();
+    var child = PidFile.await("the child to write its pid", pidFile);
     call.thread().interrupt();
 
     var failure = Await.failure("the interrupted call to fail", call.outcome());
@@ -468,14 +467,6 @@ final class LocalProcessExecutionProviderTest {
     assertTrue(call.interruptedAtEnd());
     assertEquals(0, provider.inflightCount());
     Await.until("the child to die", () -> !child.isAlive());
-  }
-
-  private static String readPid(Path file) {
-    try {
-      return Files.readString(file).strip();
-    } catch (IOException e) {
-      return "";
-    }
   }
 
   @Test
