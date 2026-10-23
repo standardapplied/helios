@@ -47,6 +47,7 @@ final class AgentHttpServiceIntegrationTest {
   private static final Duration HTTP_TIMEOUT = Await.HANG_GUARD;
   private final JsonMapper mapper = JsonMapper.builder().build();
   private final HttpClient http = HttpClient.newBuilder().connectTimeout(HTTP_TIMEOUT).build();
+  private final SessionRegistry registry = SessionRegistry.inMemory();
 
   /** Default model used by tests — returns a fixed response on every chat call. */
   private static Model textModel(String reply) {
@@ -529,7 +530,7 @@ final class AgentHttpServiceIntegrationTest {
               .send(postJson(baseUrl(server) + "/sessions", Map.of()), BodyHandlers.ofString());
       assertEquals(500, resp.statusCode());
       assertEquals("{\"error\":\"session options factory failed\"}", resp.body());
-      assertEquals(0, server.registry().size());
+      assertEquals(0, registry.size());
     }
   }
 
@@ -547,7 +548,7 @@ final class AgentHttpServiceIntegrationTest {
               .send(postJson(baseUrl(server) + "/sessions", Map.of()), BodyHandlers.ofString());
       assertEquals(500, resp.statusCode());
       assertEquals("{\"error\":\"session options factory failed\"}", resp.body());
-      assertEquals(0, server.registry().size());
+      assertEquals(0, registry.size());
     }
   }
 
@@ -559,13 +560,13 @@ final class AgentHttpServiceIntegrationTest {
               .send(postJson(baseUrl(server) + "/sessions", Map.of()), BodyHandlers.ofString());
       assertEquals(500, resp.statusCode());
       assertEquals("{\"error\":\"session options factory failed\"}", resp.body());
-      assertEquals(0, server.registry().size());
+      assertEquals(0, registry.size());
     }
   }
 
-  private static RuntimeServer serverWithFactory(Function<SessionRequest, SessionOptions> factory) {
+  private RuntimeServer serverWithFactory(Function<SessionRequest, SessionOptions> factory) {
     return RuntimeServer.builder()
-        .withRegistry(SessionRegistry.inMemory())
+        .withRegistry(registry)
         .withOptionsFactory(factory)
         .withPort(0)
         .withoutAuthentication()

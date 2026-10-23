@@ -15,23 +15,19 @@ import java.util.function.BiConsumer;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * The work behind {@code POST .../messages} and {@code POST .../interrupt}: admits the upload
- * against the message-upload {@link ConcurrencyLimit} both routes share, reads the bounded JSON
- * body, takes one non-blank string field from it and hands it to the session's steering queue.
- * Answers {@code 202} once queued, {@code 429} or {@code 503} when the upload is refused, {@code
- * 413} or {@code 400} for the body, {@code 401} if the identity ended while the body uploaded,
- * {@code 429} when the queue is full and {@code 409} when the session can take no more messages.
+ * The work behind {@code POST .../messages} and {@code POST .../interrupt}: reads the JSON body
+ * within {@link RequestLimits#maxRequestBytes()}, takes one non-blank string field from it and
+ * hands it to the session's steering queue. Answers {@code 202} once queued, {@code 413} or {@code
+ * 400} for the body, {@code 401} if the identity ended while the body uploaded, {@code 429} when
+ * the queue is full and {@code 409} when the session can take no more messages.
  */
 final class SteeringInput {
 
-  private final AdmissionCounter counter = new AdmissionCounter();
-  private final ConcurrencyLimit uploads;
   private final int maxRequestBytes;
   private final ObjectMapper objectMapper;
 
-  SteeringInput(RequestLimits limits, ObjectMapper objectMapper) {
-    this.uploads = ConcurrencyLimit.messageUploads(limits);
-    this.maxRequestBytes = limits.maxRequestBytes();
+  SteeringInput(int maxRequestBytes, ObjectMapper objectMapper) {
+    this.maxRequestBytes = maxRequestBytes;
     this.objectMapper = objectMapper;
   }
 
@@ -46,38 +42,7 @@ final class SteeringInput {
     respond("reason", AgentSession::interrupt, session, caller, req, resp);
   }
 
-  AdmissionCounts counts() {
-    return counter.counts();
-  }
-
   private void respond(
-      String field,
-      BiConsumer<AgentSession, String> action,
-      AgentSession session,
-      Caller caller,
-      ServerRequest req,
-      ServerResponse resp) {
-    var admitted = false;
-    try {
-      admitted = uploads.admit(caller.principal(), resp);
-      if (admitted) {
-        readAndQueue(field, action, session, caller, req, resp);
-      }
-    } finally {
-      settle(caller.principal(), admitted);
-    }
-  }
-
-  /** Give back an admitted upload; count a refused one, even if refusing threw. */
-  private void settle(Principal principal, boolean admitted) {
-    if (admitted) {
-      uploads.release(principal);
-    } else {
-      counter.reject();
-    }
-  }
-
-  private void readAndQueue(
       String field,
       BiConsumer<AgentSession, String> action,
       AgentSession session,
@@ -99,14 +64,12 @@ final class SteeringInput {
     try {
       action.accept(session, text);
     } catch (SteeringQueueFullException e) {
-      counter.reject();
       Overload.reject(resp, Status.TOO_MANY_REQUESTS_429, Overload.QUEUE_FULL);
       return;
     } catch (IllegalStateException e) {
       resp.status(Status.CONFLICT_409).send(Map.of("error", e.getMessage()));
       return;
     }
-    counter.admit();
     resp.status(Status.ACCEPTED_202).send();
   }
 }

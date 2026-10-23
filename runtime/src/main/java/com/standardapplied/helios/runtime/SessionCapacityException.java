@@ -3,10 +3,11 @@
 package com.standardapplied.helios.runtime;
 
 /**
- * A session refused by {@link SessionRegistry#reserve(Principal)} because a session cap is reached
- * and no terminal session of the requesting principal could be evicted to make room. Nothing of the
- * session was allocated. {@link #scope()} says whose cap refused it, which is all a caller learns:
- * never which other principals hold sessions.
+ * A session refused by {@link
+ * SessionRegistry#create(com.standardapplied.helios.session.SessionOptions, Principal)} because a
+ * session cap is reached and no terminal session of the requesting principal could be evicted to
+ * make room. Nothing of the session was allocated. {@link #scope()} says whose cap refused it,
+ * which is all a caller learns: never which other principals hold sessions.
  */
 public final class SessionCapacityException extends IllegalStateException {
 
@@ -14,9 +15,9 @@ public final class SessionCapacityException extends IllegalStateException {
 
   /** Whose cap refused the session. */
   public enum Scope {
-    /** The requesting principal holds its maximum of sessions or active sessions. */
+    /** The requesting principal holds its maximum of sessions. */
     PRINCIPAL,
-    /** The registry holds its maximum of sessions or active sessions, across all principals. */
+    /** The registry holds its maximum of sessions, across all principals. */
     SERVER
   }
 
