@@ -716,6 +716,27 @@ the open questions and the work left, since the agent continues from the summary
 | `DropMiddleToolResultsCompactor.SUMMARY_PREFIX` | `SummarizingCompactor.SUMMARY_PREFIX` (same text) |
 | `summaryModel()`, `headPreserved()`, `tailPreserved()`, `summaryTimeout()` accessors | removed; the builder's `newBuilder(model)`, `withSummaryPrompt`, `withSummaryTimeout` remain |
 
+**`Read` and `Grep` bound what they build, and `Read`'s attachments fit Anthropic's request.** A
+`Read` page is at most 60,000 chars, so it fits under the session's tool-result cap and ends with
+the `offset` to continue from, whichever page cap stopped it. `Read` and `Grep` cut each line at
+2,000 chars through one shared cut, which keeps no part of a registered secret, so a line longer
+than that is read in parts through `Execute` (for example `cut -c`). `Read` validates `offset` and
+`limit` before it reads the file, for every file type. A PDF of 18,000,000 bytes is 24,000,000
+bytes base64-encoded, leaving 8,000,000 bytes of Anthropic's 32 MB request; an image of 7,500,000
+bytes is 10,000,000 bytes encoded, Anthropic's per-image limit. A larger attachment is refused with
+a message that names the cap and suggests a file-upload host tool. `Grep` matches through the
+call's cancellation token, so a backtracking pattern on a long line stops with its call, and a
+cancelled call fails with `Grep: cancelled` instead of returning what it found so far.
+
+| 2.x | 3.0 |
+|---|---|
+| `ReadTool.MAX_PDF_BYTES` = 20 MiB | 18,000,000 bytes |
+| `ReadTool.MAX_IMAGE_BYTES` = 5 MiB | 7,500,000 bytes |
+| `ReadTool.MAX_LINE_BYTES` (1 Mi), marker `[line truncated to <n> bytes]` | `ReadTool.MAX_LINE_CHARS` (2,000), marker `[line truncated to <n> chars]` |
+| `ReadTool.MAX_OUTPUT_BYTES` (4 Mi), marker ending `Use Grep to locate the section you need.` | `ReadTool.MAX_OUTPUT_CHARS` (60,000), marker ending `Use offset=<n> to continue, or Grep for a narrower target.` |
+| `Grep` returned each hit line whole | each hit line is cut at `GrepTool.MAX_HIT_LINE_CHARS` (2,000) |
+| A cancelled `Grep` returned the hits found before the cancellation | `ToolResult.failure("Grep: cancelled")` |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
