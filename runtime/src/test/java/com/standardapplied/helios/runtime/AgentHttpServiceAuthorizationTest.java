@@ -43,14 +43,13 @@ import tools.jackson.databind.json.JsonMapper;
  */
 final class AgentHttpServiceAuthorizationTest {
 
-  private static final Duration HTTP_TIMEOUT = Await.HANG_GUARD;
   private static final Principal ALICE = new Principal("acme", "alice");
   private static final Principal CAROL = new Principal("acme", "carol");
   private static final String NOT_FOUND = "{\"error\":\"session not found\"}";
   private static final String UNAUTHENTICATED = "{\"error\":\"unauthenticated\"}";
 
   private final JsonMapper mapper = JsonMapper.builder().build();
-  private final HttpClient http = HttpClient.newBuilder().connectTimeout(HTTP_TIMEOUT).build();
+  private final HttpClient http = HttpClient.newBuilder().connectTimeout(Await.HANG_GUARD).build();
   private final AtomicInteger toolRuns = new AtomicInteger();
   private final ScriptedModel model =
       ScriptedModel.newBuilder()
@@ -352,7 +351,7 @@ final class AgentHttpServiceAuthorizationTest {
     var builder =
         HttpRequest.newBuilder(
                 URI.create("http://127.0.0.1:" + server.port() + "/v1" + route.path()))
-            .timeout(HTTP_TIMEOUT)
+            .timeout(Await.HANG_GUARD)
             .method(
                 route.method(),
                 route.body() == null
