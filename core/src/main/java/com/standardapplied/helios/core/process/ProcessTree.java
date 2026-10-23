@@ -4,7 +4,7 @@ package com.standardapplied.helios.core.process;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -51,12 +51,27 @@ final class ProcessTree {
         .toList();
   }
 
-  /** {@link CompletableFuture#join()} is not cut short by an interrupt and keeps it set. */
+  /**
+   * Waits on this thread's own clock, not on a timer shared with the rest of the JVM, which a
+   * blocking callback elsewhere can hold up.
+   */
   private static boolean endWithin(List<ProcessHandle> handles, Duration grace) {
-    return CompletableFuture.allOf(
-            handles.stream().map(ProcessHandle::onExit).toArray(CompletableFuture<?>[]::new))
-        .thenApply(ended -> true)
-        .completeOnTimeout(false, grace.toNanos(), TimeUnit.NANOSECONDS)
-        .join();
+    var ended = new CountDownLatch(handles.size());
+    handles.forEach(handle -> handle.onExit().thenRun(ended::countDown));
+    var deadline = System.nanoTime() + grace.toNanos();
+    var interrupted = false;
+    try {
+      while (true) {
+        try {
+          return ended.await(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
+        } catch (InterruptedException e) {
+          interrupted = true;
+        }
+      }
+    } finally {
+      if (interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }
   }
 }
