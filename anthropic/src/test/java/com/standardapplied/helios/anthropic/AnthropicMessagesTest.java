@@ -6,15 +6,19 @@ import static com.standardapplied.helios.anthropic.AnthropicFixture.INTERLEAVED_
 import static com.standardapplied.helios.anthropic.AnthropicFixture.drainSseFixture;
 import static com.standardapplied.helios.anthropic.AnthropicFixture.requests;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.anthropic.api.ContentBlock;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class AnthropicMessagesTest {
 
@@ -68,18 +72,6 @@ class AnthropicMessagesTest {
     assertEquals("sig123", blocks.get(0).signature());
     assertEquals("text", blocks.get(1).type());
     assertEquals("Answer", blocks.get(1).text());
-  }
-
-  @Test
-  void convertAssistantMessageWithEmptyThinkingSignatureUsesString() {
-    var metadata =
-        Map.of(ThinkingBlock.THINKING_BLOCKS_KEY, "[{\"text\":\"unsigned\",\"signature\":\"\"}]");
-    var message = Message.assistant("Answer", List.of(), metadata);
-
-    var entry = AnthropicMessages.assistant(message);
-
-    assertEquals("assistant", entry.role());
-    assertEquals("Answer", entry.content());
   }
 
   @Test
@@ -142,11 +134,43 @@ class AnthropicMessagesTest {
         blocks.isEmpty(), "a 2.x conversation carrying only the single-block keys is not read");
   }
 
-  @Test
-  void decodeThinkingBlocksMalformedJsonYieldsNoBlocks() {
-    var blocks = ThinkingBlock.decodeAll(Map.of(ThinkingBlock.THINKING_BLOCKS_KEY, "not-json"));
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "not-json",
+        "{\"text\":\"t\",\"signature\":\"sig\"}",
+        "[\"sig\"]",
+        "[{\"text\":\"t\"}]",
+        "[{\"text\":\"t\",\"signature\":\"\"}]",
+        "[{\"text\":\"t\",\"signature\":7}]",
+        "[{\"text\":7,\"signature\":\"sig\"}]"
+      })
+  void anUnreadableThinkingValueFailsTheRequestBuild(String encoded) {
+    var message =
+        Message.newBuilder()
+            .withRole(Role.ASSISTANT)
+            .withContent("answer")
+            .withMetadata(Map.of(ThinkingBlock.THINKING_BLOCKS_KEY, encoded))
+            .build();
+    var conversation = List.of(Message.user("q"), message, Message.user("next"));
+    var builder =
+        requests(
+            AnthropicModelId.CLAUDE_OPUS_5_5, ModelConfig.newBuilder().withApiKey("k").build());
 
-    assertTrue(blocks.isEmpty());
+    var failure =
+        assertThrows(AnthropicException.class, () -> builder.build(conversation, List.of(), null));
+
+    assertTrue(
+        failure.getMessage().contains(ThinkingBlock.THINKING_BLOCKS_KEY), failure.getMessage());
+  }
+
+  @Test
+  void aSignedThinkingBlockWithoutTextDecodesToEmptyText() {
+    var blocks =
+        ThinkingBlock.decodeAll(
+            Map.of(ThinkingBlock.THINKING_BLOCKS_KEY, "[{\"signature\":\"sig-1\"}]"));
+
+    assertEquals(List.of(new ThinkingBlock("", "sig-1")), blocks);
   }
 
   @Test
