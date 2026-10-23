@@ -3,12 +3,9 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.runtime.CancellationToken;
-import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.function.LongSupplier;
 
 /**
@@ -53,42 +50,22 @@ final class TokenWait {
    *     {@code until} passed first
    * @throws InterruptedException if the waiting thread is interrupted
    */
-  static boolean settlesBy(Future<?> future, CancellationToken token, long until)
+  static boolean settlesBy(CompletableFuture<?> future, CancellationToken token, long until)
       throws InterruptedException {
-    return waitsWithin(nanos -> settles(future, nanos), token, () -> until - System.nanoTime());
-  }
-
-  private static boolean settles(Future<?> future, long nanos) throws InterruptedException {
-    if (Thread.interrupted()) {
-      throw new InterruptedException();
-    }
-    try {
-      future.get(nanos, TimeUnit.NANOSECONDS);
-      return true;
-    } catch (ExecutionException | CancellationException | TimeoutException e) {
-      return future.isDone();
-    }
+    var settled = new CountDownLatch(1);
+    future.whenComplete((result, failure) -> settled.countDown());
+    return opensBy(settled, token, until);
   }
 
   private static boolean opensWithin(
       CountDownLatch latch, CancellationToken token, LongSupplier remainingNanos)
       throws InterruptedException {
-    return waitsWithin(nanos -> latch.await(nanos, TimeUnit.NANOSECONDS), token, remainingNanos);
-  }
-
-  private static boolean waitsWithin(
-      Wait wait, CancellationToken token, LongSupplier remainingNanos) throws InterruptedException {
-    while (!wait.endsWithin(Math.clamp(remainingNanos.getAsLong(), 0L, CHECK_NANOS))) {
+    while (!latch.await(
+        Math.clamp(remainingNanos.getAsLong(), 0L, CHECK_NANOS), TimeUnit.NANOSECONDS)) {
       if (token.isCancelled() || remainingNanos.getAsLong() <= 0) {
         return false;
       }
     }
     return true;
-  }
-
-  /** One bounded wait for the event, {@code true} once it happened. */
-  @FunctionalInterface
-  private interface Wait {
-    boolean endsWithin(long nanos) throws InterruptedException;
   }
 }
