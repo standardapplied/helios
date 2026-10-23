@@ -242,8 +242,8 @@ final class DispatchedCall {
         tokenSettled.join();
       }
       parentLink.remove();
-      liveCalls.remove(this);
       ended.complete(null);
+      liveCalls.remove(this);
     }
   }
 }
