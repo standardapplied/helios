@@ -4,8 +4,10 @@
  */
 package com.standardapplied.helios.session.files;
 
+import com.standardapplied.helios.core.common.Redactor;
 import com.standardapplied.helios.core.common.Result;
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolContext;
@@ -27,6 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CancellationException;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -49,6 +52,10 @@ import java.util.regex.PatternSyntaxException;
  * <ul>
  *   <li>Per-file size cap: {@code 1 MiB}. Files larger than this are skipped.
  *   <li>Total result cap: {@code 1000} match lines.
+ *   <li>Per-line cap: {@value #MAX_HIT_LINE_CHARS} chars; a longer hit line is cut with a marker
+ *       and loses the start of a registered secret the cut went through.
+ *   <li>Cancellation: the call's token stops the walk and the pattern's match on a line; a
+ *       cancelled call fails with {@code Grep: cancelled}.
  *   <li>Binary detection: files with a NUL byte in the first 8 KiB are skipped.
  *   <li>Hidden directories ({@code ".git"} etc.) are pruned during traversal.
  *   <li>Only regular files are opened: symlinks, FIFOs and device files discovered during the walk
@@ -65,6 +72,9 @@ public final class GrepTool {
 
   /** The stable tool name advertised to the model. */
   public static final String NAME = "Grep";
+
+  /** Maximum chars of a hit line in the output; a longer line is cut with a marker. */
+  public static final int MAX_HIT_LINE_CHARS = 2000;
 
   private static final int MAX_MATCHES = 1000;
   private static final long MAX_FILE_BYTES = 1L * 1024 * 1024;
@@ -138,6 +148,7 @@ public final class GrepTool {
         return ToolResult.failure("Grep: not a directory: " + workspace.relativize(root));
       }
       var include = request.includeMatcher(root.getFileSystem());
+      var search = new LineSearch(request.regex(), ctx);
       var hits = new ArrayList<Hit>();
       var withholding = Withholding.of(ctx);
       var count =
@@ -150,9 +161,12 @@ public final class GrepTool {
               MAX_FILE_BYTES,
               (file, attrs, remaining) ->
                   include.matches(file.getFileName())
-                      ? searchFile(workspace, file, request.regex(), remaining, hits)
+                      ? searchFile(workspace, file, search, remaining, hits)
                       : 0);
+      ctx.cancellation().throwIfCancelled();
       return ToolResult.success(format(hits, count >= MAX_MATCHES) + withholding.note());
+    } catch (CancellationException e) {
+      return ToolResult.failure("Grep: cancelled");
     } catch (WorkspaceRoot.WorkspaceEscapeException e) {
       return ToolResult.failure("Grep: " + e.getMessage());
     } catch (IllegalArgumentException e) {
@@ -165,7 +179,7 @@ public final class GrepTool {
   }
 
   private static int searchFile(
-      WorkspaceRoot workspace, Path file, Pattern regex, int remaining, List<Hit> hits) {
+      WorkspaceRoot workspace, Path file, LineSearch search, int remaining, List<Hit> hits) {
     byte[] bytes;
     try (var in = workspace.newInputStream(file, MAX_FILE_BYTES)) {
       bytes = in.readAllBytes();
@@ -185,8 +199,8 @@ public final class GrepTool {
       String line;
       while (found < remaining && (line = reader.readLine()) != null) {
         lineNumber++;
-        if (regex.matcher(line).find()) {
-          hits.add(new Hit(path, lineNumber, line));
+        if (search.finds(line)) {
+          hits.add(new Hit(path, lineNumber, search.kept(line)));
           found++;
         }
       }
@@ -241,4 +255,19 @@ public final class GrepTool {
   }
 
   private record Hit(String path, int lineNumber, String line) {}
+
+  private record LineSearch(Pattern regex, CancellationToken cancellation, Redactor redactor) {
+
+    LineSearch(Pattern regex, ToolContext ctx) {
+      this(regex, ctx.cancellation(), ctx.sessionContext().secrets().redactor());
+    }
+
+    boolean finds(String line) {
+      return regex.matcher(new CancellableLine(line, cancellation)).find();
+    }
+
+    String kept(String line) {
+      return TextPage.cut(line, MAX_HIT_LINE_CHARS, redactor);
+    }
+  }
 }
