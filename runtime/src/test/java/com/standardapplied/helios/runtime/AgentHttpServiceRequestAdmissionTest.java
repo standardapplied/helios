@@ -13,7 +13,6 @@ import static com.standardapplied.helios.runtime.AdmissionHarness.textBody;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.session.ResultMessage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -31,11 +30,6 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import tools.jackson.core.JsonGenerator;
-import tools.jackson.databind.SerializationContext;
-import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.module.SimpleModule;
-import tools.jackson.databind.ser.std.StdSerializer;
 
 /**
  * Every authenticated request takes one of its principal's request slots before any work and holds
@@ -45,6 +39,9 @@ import tools.jackson.databind.ser.std.StdSerializer;
 final class AgentHttpServiceRequestAdmissionTest {
 
   private static final String TOO_LARGE = "{\"error\":\"request body too large\"}";
+
+  /** Helidon refuses a body declared over its {@code maxPayloadSize} before routing, bodiless. */
+  private static final String HELIDONS_EMPTY_BODY = "";
 
   private final AdmissionHarness harness = new AdmissionHarness();
 
@@ -68,10 +65,12 @@ final class AgentHttpServiceRequestAdmissionTest {
         harness.send(
             server, "POST", interrupt(sessionId), "alice", BodyPublishers.ofByteArray(overBound));
 
-    for (var resp : List.of(declared, chunked, interrupt)) {
-      assertEquals(413, resp.statusCode());
-      assertEquals(TOO_LARGE, resp.body());
-    }
+    assertEquals(
+        List.of(413, 413, 413),
+        List.of(declared, chunked, interrupt).stream().map(HttpResponse::statusCode).toList());
+    assertEquals(HELIDONS_EMPTY_BODY, declared.body());
+    assertEquals(TOO_LARGE, chunked.body());
+    assertEquals(HELIDONS_EMPTY_BODY, interrupt.body());
     var session = harness.sessions.get(sessionId);
     assertEquals(0, session.queue.size());
     var atBound =
@@ -105,7 +104,7 @@ final class AgentHttpServiceRequestAdmissionTest {
             BodyPublishers.ofByteArray(textBody(max)));
 
     assertEquals(413, refused.statusCode());
-    assertEquals(TOO_LARGE, refused.body());
+    assertEquals(HELIDONS_EMPTY_BODY, refused.body());
     assertEquals(Optional.empty(), refused.headers().firstValue("Retry-After"));
     assertEquals(1, overBound.reading.getCount());
     assertEquals(202, atBound.statusCode());
@@ -262,25 +261,9 @@ final class AgentHttpServiceRequestAdmissionTest {
 
   @Test
   void aResultPollThatFailsGivesItsSlotBack() {
-    var failing =
-        JsonMapper.builder()
-            .addModule(
-                new SimpleModule()
-                    .addSerializer(
-                        ResultMessage.Success.class,
-                        new StdSerializer<>(ResultMessage.Success.class) {
-                          @Override
-                          public void serialize(
-                              ResultMessage.Success value,
-                              JsonGenerator gen,
-                              SerializationContext ctxt) {
-                            throw new IllegalStateException("serializer failed");
-                          }
-                        }))
-            .build();
-    var server = harness.server(harness.registry(), AdmissionHarness.limits(1), failing);
+    var server = harness.server(harness.registry(), AdmissionHarness.limits(1));
     var sessionId = harness.create(server, "alice");
-    harness.sessions.get(sessionId).terminate();
+    harness.sessions.get(sessionId).resultFailure = new IllegalStateException("result failed");
 
     var statuses =
         List.of(

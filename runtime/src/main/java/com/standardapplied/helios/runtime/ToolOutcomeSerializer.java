@@ -12,7 +12,7 @@ import tools.jackson.databind.ser.std.StdSerializer;
 /**
  * Writes a {@link ToolOutcome} as an object holding its {@code kind}, the record's simple name, and
  * the record's components, e.g. {@code {"kind":"TimedOut","limit":"PT1M"}}. Core stays free of
- * Jackson, so the runtime adds this serializer to whatever mapper it is given.
+ * Jackson, so the runtime adds this serializer to its one fixed mapper, {@link JsonBody#MAPPER}.
  */
 final class ToolOutcomeSerializer extends StdSerializer<ToolOutcome> {
 

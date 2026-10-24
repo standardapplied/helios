@@ -42,6 +42,6 @@ final class Overload {
   /** Refuse with {@code status}, {@code body} and the retry guidance. */
   static void reject(ServerResponse resp, Status status, Map<String, String> body) {
     resp.header(HeaderNames.RETRY_AFTER, RETRY_AFTER_SECONDS);
-    resp.status(status).send(body);
+    JsonBody.send(resp, status, body);
   }
 }

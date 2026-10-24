@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * A gate refuses an authenticator whose challenge is invalid and sends the one it validated, and an
@@ -104,7 +103,6 @@ final class AuthenticationGateTest {
           throw new AssertionError("no session is created");
         },
         new TestAuthenticator(request -> Optional.empty(), challenge),
-        JsonMapper.builder().build(),
         "/v1",
         RequestLimits.defaults());
   }

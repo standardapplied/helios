@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.QueryEvent;
-import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionOptions;
 import io.helidon.http.HeaderNames;
 import io.helidon.http.sse.SseEvent;
@@ -95,10 +94,18 @@ final class AgentHttpServiceLoggingTest {
   @Test
   void aFailedResultIsLoggedAsAWarningWithTheFailure() {
     var failure = new IllegalStateException("backend exploded");
-    var future = new CompletableFuture<ResultMessage>();
-    future.completeExceptionally(failure);
+    var session = new StubSession(SESSION_ID);
+    session.result.completeExceptionally(failure);
 
-    ResultLongPoll.awaitResult(future, new CompletableFuture<>(), 5L, SESSION_ID);
+    ResultLongPoll.respond(
+        session,
+        ServerStubs.request("timeout=5"),
+        new ServerStubs.RecordingResponse().response,
+        JsonBody.MAPPER,
+        new AuthenticationGate.Caller(
+            new Principal("acme", "alice"),
+            new CompletableFuture<>(),
+            new Challenge(TestAuthenticator.CHALLENGE)));
 
     var logged = onlyRecordForTheSession();
     assertEquals(Level.WARNING, logged.getLevel());

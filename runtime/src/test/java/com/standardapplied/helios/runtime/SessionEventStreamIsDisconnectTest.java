@@ -10,87 +10,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.helidon.webserver.CloseConnectionException;
 import io.helidon.webserver.ServerConnectionException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.SocketException;
 import org.junit.jupiter.api.Test;
 
-/** Unit tests for the package-private {@link SessionEventStream#isDisconnect(Throwable)} helper. */
+/**
+ * {@link SessionEventStream#isDisconnect(Throwable)} decides by Helidon's typed signal alone, found
+ * anywhere in the cause chain; a socket failure's message decides nothing.
+ */
 final class SessionEventStreamIsDisconnectTest {
-
-  @Test
-  void brokenPipeSocketExceptionIsDisconnect() {
-    assertTrue(SessionEventStream.isDisconnect(new SocketException("Broken pipe")));
-  }
-
-  @Test
-  void connectionResetSocketExceptionIsDisconnect() {
-    assertTrue(SessionEventStream.isDisconnect(new SocketException("Connection reset by peer")));
-  }
-
-  @Test
-  void socketClosedSocketExceptionIsDisconnect() {
-    assertTrue(SessionEventStream.isDisconnect(new SocketException("Socket closed")));
-  }
-
-  @Test
-  void brokenPipeIoExceptionIsDisconnect() {
-    assertTrue(SessionEventStream.isDisconnect(new IOException("Broken pipe writing response")));
-  }
-
-  @Test
-  void connectionResetIoExceptionIsDisconnect() {
-    assertTrue(SessionEventStream.isDisconnect(new IOException("Connection reset")));
-  }
-
-  @Test
-  void socketClosedIoExceptionIsDisconnect() {
-    assertTrue(SessionEventStream.isDisconnect(new IOException("Socket closed for stream")));
-  }
-
-  @Test
-  void unrelatedRuntimeExceptionIsNotDisconnect() {
-    assertFalse(SessionEventStream.isDisconnect(new RuntimeException("model boom")));
-  }
-
-  @Test
-  void socketExceptionWithNullMessageIsNotDisconnect() {
-    assertFalse(SessionEventStream.isDisconnect(new SocketException()));
-  }
-
-  @Test
-  void socketExceptionWithUnrelatedMessageIsNotDisconnect() {
-    assertFalse(SessionEventStream.isDisconnect(new SocketException("Permission denied")));
-  }
-
-  @Test
-  void ioExceptionWithNullMessageIsNotDisconnect() {
-    assertFalse(SessionEventStream.isDisconnect(new IOException()));
-  }
-
-  @Test
-  void ioExceptionWithUnrelatedMessageIsNotDisconnect() {
-    assertFalse(SessionEventStream.isDisconnect(new IOException("Disk full")));
-  }
-
-  @Test
-  void nestedCauseIsExamined() {
-    var inner = new SocketException("Broken pipe");
-    var outer = new RuntimeException("wrapper", inner);
-    assertTrue(SessionEventStream.isDisconnect(outer));
-  }
-
-  @Test
-  void deeplyNestedNonDisconnectReturnsFalse() {
-    var outer = new RuntimeException("a", new RuntimeException("b", new RuntimeException("c")));
-    assertFalse(SessionEventStream.isDisconnect(outer));
-  }
-
-  @Test
-  void nullCauseStopsTraversal() {
-    var ex = new RuntimeException("no cause");
-    assertFalse(SessionEventStream.isDisconnect(ex));
-  }
-
-  // ── Helidon typed disconnect signal (Phase C #17) ────────────────────────
 
   @Test
   void closeConnectionExceptionIsDisconnect() {
@@ -99,7 +27,6 @@ final class SessionEventStreamIsDisconnectTest {
 
   @Test
   void serverConnectionExceptionIsDisconnect() {
-    // ServerConnectionException extends CloseConnectionException.
     var ex = new ServerConnectionException("peer closed", new IOException("EOF"));
     assertTrue(SessionEventStream.isDisconnect(ex));
   }
@@ -107,7 +34,34 @@ final class SessionEventStreamIsDisconnectTest {
   @Test
   void closeConnectionExceptionWrappedInRuntimeIsDisconnect() {
     var inner = new CloseConnectionException("peer closed");
-    var outer = new RuntimeException("sink emit failed", inner);
+    assertTrue(SessionEventStream.isDisconnect(new RuntimeException("sink emit failed", inner)));
+  }
+
+  @Test
+  void closeConnectionExceptionWrappedInUncheckedIoIsDisconnect() {
+    var inner = new CloseConnectionException("peer closed");
+    var outer = new UncheckedIOException("write failed", new IOException("wrapped", inner));
     assertTrue(SessionEventStream.isDisconnect(outer));
+  }
+
+  @Test
+  void brokenPipeIoExceptionIsNotDisconnect() {
+    assertFalse(SessionEventStream.isDisconnect(new IOException("Broken pipe")));
+  }
+
+  @Test
+  void connectionResetSocketExceptionIsNotDisconnect() {
+    assertFalse(SessionEventStream.isDisconnect(new SocketException("Connection reset")));
+  }
+
+  @Test
+  void unrelatedRuntimeExceptionIsNotDisconnect() {
+    assertFalse(SessionEventStream.isDisconnect(new RuntimeException("model boom")));
+  }
+
+  @Test
+  void aCauseChainEndingInNullStops() {
+    var outer = new RuntimeException("a", new RuntimeException("b", new RuntimeException("c")));
+    assertFalse(SessionEventStream.isDisconnect(outer));
   }
 }

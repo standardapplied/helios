@@ -54,8 +54,10 @@ final class SteeringInput {
       return;
     }
     if (!(body.get().get(field) instanceof String text) || Strings.isBlank(text)) {
-      resp.status(Status.BAD_REQUEST_400)
-          .send(Map.of("error", "'" + field + "' field must be a non-blank string"));
+      JsonBody.send(
+          resp,
+          Status.BAD_REQUEST_400,
+          Map.of("error", "'" + field + "' field must be a non-blank string"));
       return;
     }
     if (caller.answeredAsEnded(resp)) {
@@ -67,7 +69,7 @@ final class SteeringInput {
       Overload.reject(resp, Status.TOO_MANY_REQUESTS_429, Overload.QUEUE_FULL);
       return;
     } catch (IllegalStateException e) {
-      resp.status(Status.CONFLICT_409).send(Map.of("error", e.getMessage()));
+      JsonBody.send(resp, Status.CONFLICT_409, Map.of("error", e.getMessage()));
       return;
     }
     resp.status(Status.ACCEPTED_202).send();

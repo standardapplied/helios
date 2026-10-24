@@ -12,7 +12,6 @@ import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -43,110 +42,80 @@ final class ResultLongPoll {
   /** Hard cap on the long-poll timeout so one request cannot pin a server thread indefinitely. */
   static final long MAX_RESULT_TIMEOUT_SECONDS = 300L;
 
+  private static final Map<String, String> INTERRUPTED =
+      Map.of("error", "request interrupted while waiting for session result");
+
+  private static final Map<String, String> ABNORMAL =
+      Map.of("error", "session terminated abnormally");
+
   private ResultLongPoll() {}
 
   /**
-   * Answer the long-poll for {@code session}'s terminal result.
+   * Answer the long-poll for {@code session}'s terminal result. The wait also watches a future of
+   * its own, {@code answered}, completed once the wait is over: completing it unhooks the {@code
+   * anyOf} relay from the session's and the identity's futures, so a timed-out poll leaves nothing
+   * watching either.
    *
    * @param session the session whose result is awaited; non-null
    * @param req the request carrying the optional {@code timeout} query parameter; non-null
    * @param resp the response the outcome is sent on; non-null
-   * @param objectMapper serializes the outcome's body; non-null
+   * @param mapper serializes the result's body; non-null
    * @param caller the admitted caller, whose identity may end while the poll waits; non-null
    */
   static void respond(
       AgentSession session,
       ServerRequest req,
       ServerResponse resp,
-      ObjectMapper objectMapper,
+      ObjectMapper mapper,
       Caller caller) {
     var timeoutSeconds = parseResultTimeoutSeconds(req.query().first("timeout").orElse(null));
-    var awaited =
-        awaitResult(session.result(), caller.ended(), timeoutSeconds, session.sessionId());
-    if (caller.answeredAsEnded(resp)) {
-      return;
-    }
-    var outcome = awaited.orElseThrow();
-    if (outcome.body() == null) {
-      resp.status(outcome.status()).send();
-      return;
-    }
-    var body = objectMapper.writeValueAsBytes(outcome.body());
-    if (caller.answeredAsEnded(resp)) {
-      return;
-    }
-    resp.headers().setIfAbsent(HeaderValues.CONTENT_TYPE_JSON);
-    resp.status(outcome.status()).send(body);
-  }
-
-  /**
-   * Outcome of a long-poll wait on a session's terminal future, captured as an HTTP {@link Status}
-   * + optional body. {@code null} body produces a body-less response (used for the {@code 204 No
-   * Content} timeout case).
-   */
-  record Outcome(Status status, Object body) {}
-
-  /**
-   * Wait up to {@code timeoutSeconds} for {@code future} to complete and translate the result into
-   * an HTTP status + body. Package-private so unit tests can exercise the catch paths ({@link
-   * InterruptedException} / {@link ExecutionException}) that are awkward to reach from a black-box
-   * HTTP test.
-   *
-   * @param future the session's result future; non-null
-   * @param identityEnded completes when the caller's identity ends; non-null
-   * @param timeoutSeconds non-negative wait budget
-   * @param sessionIdForLog session id used only for the WARNING log on execution failure
-   * @return outcome to translate to the HTTP response; empty once the identity has ended, whatever
-   *     the result
-   */
-  static Optional<Outcome> awaitResult(
-      CompletableFuture<ResultMessage> future,
-      CompletableFuture<Void> identityEnded,
-      long timeoutSeconds,
-      String sessionIdForLog) {
+    var result = session.result();
     var answered = new CompletableFuture<Void>();
-    var first = CompletableFuture.anyOf(future, identityEnded, answered);
+    var timedOut = false;
+    var interrupted = false;
     try {
-      first.get(timeoutSeconds, TimeUnit.SECONDS);
+      CompletableFuture.anyOf(result, caller.ended(), answered)
+          .get(timeoutSeconds, TimeUnit.SECONDS);
     } catch (TimeoutException e) {
-      return Optional.of(new Outcome(Status.NO_CONTENT_204, null));
+      timedOut = true;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return Optional.of(
-          new Outcome(
-              Status.SERVICE_UNAVAILABLE_503,
-              Map.of("error", "request interrupted while waiting for session result")));
-    } catch (ExecutionException e) {
-      return settled(future, identityEnded, sessionIdForLog);
+      interrupted = true;
+    } catch (ExecutionException ignored) {
     } finally {
       answered.complete(null);
     }
-    return settled(future, identityEnded, sessionIdForLog);
-  }
-
-  private static Optional<Outcome> settled(
-      CompletableFuture<ResultMessage> future,
-      CompletableFuture<Void> identityEnded,
-      String sessionIdForLog) {
-    if (identityEnded.isDone()) {
-      return Optional.empty();
+    if (caller.answeredAsEnded(resp)) {
+      return;
     }
+    if (timedOut) {
+      resp.status(Status.NO_CONTENT_204).send();
+      return;
+    }
+    if (interrupted) {
+      JsonBody.send(resp, Status.SERVICE_UNAVAILABLE_503, INTERRUPTED);
+      return;
+    }
+    ResultMessage terminal;
     try {
-      return Optional.of(success(future.join()));
+      terminal = result.join();
     } catch (CompletionException | CancellationException e) {
       LOGGER.log(
-          Level.WARNING, "session " + sessionIdForLog + " result future failed exceptionally", e);
-      return Optional.of(
-          new Outcome(
-              Status.INTERNAL_SERVER_ERROR_500, Map.of("error", "session terminated abnormally")));
+          Level.WARNING,
+          "session " + session.sessionId() + " result future failed exceptionally",
+          e);
+      JsonBody.send(resp, Status.INTERNAL_SERVER_ERROR_500, ABNORMAL);
+      return;
     }
-  }
-
-  private static Outcome success(ResultMessage terminal) {
     var body = new LinkedHashMap<String, Object>();
     body.put("type", terminal.getClass().getSimpleName());
     body.put("result", terminal);
-    return new Outcome(Status.OK_200, body);
+    var json = mapper.writeValueAsBytes(body);
+    if (caller.answeredAsEnded(resp)) {
+      return;
+    }
+    resp.header(HeaderValues.CONTENT_TYPE_JSON);
+    resp.status(Status.OK_200).send(json);
   }
 
   /**
