@@ -547,7 +547,7 @@ instead call `withoutAuthentication()`. There is no unauthenticated external bin
 | 2.x | 3.0 |
 |---|---|
 | `RuntimeServer.Builder.build()` served unauthenticated on any host | `build()` throws `IllegalStateException` unless `withAuthenticator(...)` or, for a loopback host only, `withoutAuthentication()` was called; a non-loopback host without an authenticator is refused with a message naming the host and the address it resolved to. The host is resolved once and the server binds that address. An unresolvable host throws `IllegalArgumentException` |
-| `new AgentHttpService(registry, optionsFactory, objectMapper, eventsPathPrefix)` | `new AgentHttpService(registry, optionsFactory, authenticator, objectMapper, eventsPathPrefix, limits)`, whose `limits` is a `RequestLimits(maxRequestBytes, maxConcurrentRequestsPerPrincipal)` (`RequestLimits.defaults()`: 256 KiB and 32), and whose `optionsFactory` is a `Function<SessionRequest, SessionOptions>` given the generated session id and the creating `Principal`; there is no unauthenticated `AgentHttpService` |
+| `new AgentHttpService(registry, optionsFactory, objectMapper, eventsPathPrefix)` | `new AgentHttpService(registry, optionsFactory, authenticator, eventsPathPrefix, limits)`, with no `ObjectMapper` (the wire format is fixed, see below), whose `limits` is a `RequestLimits(maxRequestBytes, maxConcurrentRequestsPerPrincipal)` (`RequestLimits.defaults()`: 256 KiB and 32), and whose `optionsFactory` is a `Function<SessionRequest, SessionOptions>` given the generated session id and the creating `Principal`; there is no unauthenticated `AgentHttpService` |
 | `RuntimeServer.Builder.withOptionsFactory(Function<String, SessionOptions>)` | `withOptionsFactory(Function<SessionRequest, SessionOptions>)`; `SessionRequest(sessionId, owner)` gives the factory the principal that will own the session, so it can configure a session per tenant or subject |
 | Any request reached any session by id | `401 {"error":"unauthenticated"}`, every one with `WWW-Authenticate` set to `Authenticator.challenge()`, for a missing, malformed, expired, revoked or forged credential, `503 {"error":"authentication unavailable"}` when the authenticator throws (logged by exception type only), `404 {"error":"session not found"}` for another principal's session |
 | An SSE stream and a result long poll outlived the client's credential | an identity holds for `Authentication.lifetime()` or until `Authentication.revoked()` completes; then an open SSE stream closes without a further event, a pending long poll, or one whose result is still serializing, answers `401`, and a message or interrupt whose body upload, or a create whose options factory, outlived the identity answers `401` and does nothing. `revoked` is a `CompletableFuture<Void>` that a verifier shares across every authentication of one credential; a request watches it only while it runs |
@@ -567,7 +567,7 @@ bounded number in all. Every refusal is immediate, with a fixed body; the runtim
 
 | 2.x | 3.0 |
 |---|---|
-| No session, body or request limit by default; a full registry, an evicted session of another owner or a full steering queue answered `500` or `409` | Defaults: 16 sessions per principal and 256 per registry, finished ones included (`SessionRegistry.Builder.withMaxSessionsPerPrincipal`, `withMaxSessions`); a session not running, terminal or never started, kept 15 minutes (`withRetention`); request bodies up to 256 KiB and 32 requests in flight per principal on every route, open event streams and waiting result polls included (`RequestLimits(maxRequestBytes, maxConcurrentRequestsPerPrincipal)`, through `RuntimeServer.Builder.withRequestLimits` or the new last `AgentHttpService` constructor argument); 512 requests in flight per `RuntimeServer`, one more answered by Helidon's own `503`, without `Retry-After`, and its connection closed (on a `WebServer` of your own, Helidon's `maxConcurrentRequests`); the sweep runs every 30 seconds. A create over a principal's cap answers `429 {"error":"session quota reached"}`, over the registry's `503 {"error":"server at session capacity"}`, whatever other principals hold; a request beyond the principal's requests in flight `429 {"error":"too many requests in progress"}` before any session lookup or body read, its slot held until the response ends even if its session is deleted, and by a revoked stream until its event delivery under way finishes; a full steering queue `429 {"error":"session message queue full"}`, where it was `409`; a body over the bound `413 {"error":"request body too large"}`. A deleted session that is still at work keeps its capacity until its loop stops |
+| No session, body or request limit by default; a full registry, an evicted session of another owner or a full steering queue answered `500` or `409` | Defaults: 16 sessions per principal and 256 per registry, finished ones included (`SessionRegistry.Builder.withMaxSessionsPerPrincipal`, `withMaxSessions`); a session not running, terminal or never started, kept 15 minutes (`withRetention`); request bodies up to 256 KiB and 32 requests in flight per principal on every route, open event streams and waiting result polls included (`RequestLimits(maxRequestBytes, maxConcurrentRequestsPerPrincipal)`, through `RuntimeServer.Builder.withRequestLimits` or the new last `AgentHttpService` constructor argument); 512 requests in flight per `RuntimeServer`, one more answered by Helidon's own `503`, without `Retry-After`, and its connection closed (on a `WebServer` of your own, Helidon's `maxConcurrentRequests`); the sweep runs every 30 seconds. A create over a principal's cap answers `429 {"error":"session quota reached"}`, over the registry's `503 {"error":"server at session capacity"}`, whatever other principals hold; a request beyond the principal's requests in flight `429 {"error":"too many requests in progress"}` before any session lookup or body read, its slot held until the response ends even if its session is deleted, and by a revoked stream until its event delivery under way finishes; a full steering queue `429 {"error":"session message queue full"}`, where it was `409`; a body over the bound `413` (its body below). A deleted session that is still at work keeps its capacity until its loop stops |
 | `SessionRegistry.create` checked `withMaxSessions` outside any lock, so concurrent creates passed it, and evicted the oldest terminal session of any owner | `create(options, owner)` takes capacity atomically before the factory runs and gives it back if the factory fails or the id is a duplicate; there is no public reservation. A refusal throws `SessionCapacityException`, whose `scope()` is `PRINCIPAL` or `SERVER` |
 | `SessionRegistry.withFactory(Function)` | `SessionRegistry.newBuilder().withFactory(f).build()` |
 | `RuntimeServer.registry()` | removed; keep the `SessionRegistry` you passed to `withRegistry` |
@@ -577,17 +577,30 @@ bounded number in all. Every refusal is immediate, with a fixed body; the runtim
 | `AgentSession.close()` on a session never started completed `result()` before `ExecutionProvider.onSessionEnd` ran | `result()` completes after `onSessionEnd` returns, as after a run, so a registry that frees capacity on the result never frees it while the provider still holds the session |
 | `AgentSession` had no way to tell an unused session from a working one | `AgentSession.isStarted()`; an implementation outside Helios adds it |
 
-**A request answered with its body unread ends its connection.** On a kept-alive HTTP/1.1
-connection Helidon either drained a body the route had refused, outside every bound, or, when the
-client sent `Expect: 100-continue` and no `100 Continue` went out, parsed the bytes the client sent
-next as a new request: a request smuggled in a refused one's body ran with identity headers of the
-client's choosing, which a `TrustedProxyAuthenticator` behind a streaming proxy would trust. The new
-`runtime.UnreadBodyGuard` closes the connection after any such answer, once the response is written
-and flushed, and reads nothing further.
+**No body byte is ever parsed as a request.** On a kept-alive HTTP/1.1 connection Helidon either
+drained a body the route had refused, outside every bound, or, when the client sent `Expect:
+100-continue` and no `100 Continue` went out, parsed the bytes the client sent next as a new
+request: a request smuggled in a refused one's body ran with identity headers of the client's
+choosing, which a `TrustedProxyAuthenticator` behind a streaming proxy would trust. Helios's own
+refusals now answer without reading the body and close the connection. `RuntimeServer` sets
+Helidon's `maxPayloadSize(maxRequestBytes)` and `Http1Config.continueImmediately(true)`, and a
+host's own `WebServer` that mounts `AgentHttpService` must set both.
 
 | 2.x | 3.0 |
 |---|---|
-| A `401`, `404`, `413`, `429` or `503` answered before the body was read, a `201` for a create that sent a body, Helidon's own answer to an unmatched path or to an exception escaping a route, all kept the connection alive and drained or re-parsed the unread body | each is written whole with `Connection: close` and then the connection ends; a client sends its next request on a new connection. A request whose body was read to its end, or that has none, keeps its connection. `RuntimeServer` installs the guard and `AgentHttpService` applies it to its own routes; a `WebServer` of your own adds `routing.addFeature(new UnreadBodyGuard())` for Helidon's own answers. An exception escaping a route is answered by the guard through Helidon's `DirectHandlers`, with the same status, headers and message; one that is not an `HttpException` is `500 Internal Server Error` |
+| A `401`, `404`, `413`, `429` or `503` answered before the body was read, a fixed `500`, or a `201` for a create that sent a body, kept the connection alive and drained or re-parsed the unread body | each is written whole with `Connection: close` and then the connection ends, on any server; a client sends its next request on a new connection. A request whose body was read to its end, or that has none, keeps its connection |
+| Helidon's own answer to an unmatched path, to an `Error` a route lets escape, or a route that sent nothing, drained the body without bound, or, after `Expect: 100-continue`, parsed it as the next request | on a `RuntimeServer`, and on a `WebServer` with both settings, Helidon reads at most `maxRequestBytes` of the body before it answers; the `404` and `500` then keep the connection. Every request sent with `Expect: 100-continue` gets `100 Continue` at once, so its body is always framed as a body. An escaping `Error` is Helidon's `500 Internal Server Error`, quoting its message only with `ErrorHandling.includeEntity` (off by default) |
+| A body of any declared length reached the route | a body declared over `maxRequestBytes` is Helidon's `413`, with Helidon's empty body and `Connection: close`, before routing and authentication, and none of it is read; a chunked body is refused as soon as it passes the bound, `413 {"error":"request body too large"}` |
+
+**Helios routes write their own JSON.** Every body is a Helios record or a JSON value, written
+with one fixed mapper, so `AgentHttpService` works on any Helidon `WebServer` with no media support
+registered; mounted on a plain server it used to answer every request `415`.
+
+| 2.x | 3.0 |
+|---|---|
+| `JacksonSupport`, `JacksonRuntimeException` | removed. Helios routes write their own JSON. A host's own routes that used `JacksonSupport` copy it, or write bytes with their own Jackson 3 `ObjectMapper` (Helidon's `helidon-http-media-jackson` supports Jackson 2 only) |
+| `RuntimeServer.Builder.withObjectMapper(ObjectMapper)` | removed. The wire format is fixed: camelCase record component names and a `ToolOutcome`'s `kind` discriminator, as before with the default mapper |
+| A body honoured an `Accept` charset | every body is UTF-8 |
 
 **Every hook has a non-blank name, checked when the session is built.** `Hook.name()` promised a
 non-blank name and nothing held a hook to it: an anonymous hook's default name was empty, so its
@@ -1039,10 +1052,12 @@ cancelled call fails with `Grep: cancelled` instead of returning what it found s
   body's bytes as the next request, so a body smuggled a request even without `Expect:
   100-continue`. 4.5.4 is the first release that flushes such a response and ends the connection;
   4.5.5 is the latest 4.x release and also stops trusting a client's own `X-Forwarded-For` and
-  `X-Forwarded-Port` on a PROXY-protocol listener. `UnreadBodyGuard` relies on the 4.5.4 behaviour;
-  an application that pins its own Helidon must move to 4.5.4 or later. Helidon 4.5.5 still parses
-  the body of an `Expect: 100-continue` request answered without a `100 Continue` as a new request
-  when the connection stays open, which the guard prevents by closing it.
+  `X-Forwarded-Port` on a PROXY-protocol listener. `AgentHttpService`'s close of a connection whose
+  body it left unread relies on the 4.5.4 behaviour; an application that pins its own Helidon must
+  move to 4.5.4 or later. Helidon 4.5.5 and 4.5.6 still reset the connection after an `Expect:
+  100-continue` request answered without a `100 Continue`, so its body is parsed as a new request;
+  `Http1Config.continueImmediately(true)`, which `RuntimeServer` sets, prevents it by sending
+  `100 Continue` at once.
 - **A registered secret no longer reaches the model or the session's events through paths 2.x left
   unredacted.** In 2.x each component redacted only when handed its own registry, so a registered
   value leaked through: `Read` and `Grep` built by `SessionPresets` (no redactor); every custom
