@@ -267,10 +267,15 @@ final class SessionFinalizationTest {
                 new StreamRetryPolicy(2, Backoff.fixed(Duration.ofHours(1)), 0.0))
             .build();
     var session = AgentSession.create(withProvider(provider, model).withLimits(limits).build());
-    provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
+    var token = provider.context.cancellation();
+    token.onCancel(() -> Uninterruptible.await(released));
+    var armed = token.activeCallbackCountForTests();
     var retried = opensOn(session, QueryEvent.TurnRetried.class);
     session.send("go");
     Await.latch("the turn to be retried", retried);
+    Await.until(
+        "the back-off to wait on the session's token",
+        () -> token.activeCallbackCountForTests() == armed + 1);
 
     session.close();
 
