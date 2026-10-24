@@ -8,6 +8,7 @@ import com.standardapplied.helios.runtime.AuthenticationGate.Caller;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionOptions;
+import io.helidon.http.HeaderValues;
 import io.helidon.http.HttpException;
 import io.helidon.http.Status;
 import io.helidon.webserver.http.Handler;
@@ -20,7 +21,6 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import tools.jackson.databind.ObjectMapper;
 
 /**
  * Helidon {@link HttpService} that exposes one {@link SessionRegistry}'s sessions over HTTP. The
@@ -78,17 +78,29 @@ import tools.jackson.databind.ObjectMapper;
  * in flight with Helidon's own {@code maxConcurrentRequests} on the {@link
  * io.helidon.webserver.WebServer}, as {@link RuntimeServer} does.
  *
+ * <h2>JSON</h2>
+ *
+ * Helios writes its own JSON with one fixed mapper, always UTF-8. Mount the service on any Helidon
+ * {@link io.helidon.webserver.WebServer}; no media support is needed.
+ *
  * <h2>Unread bodies</h2>
  *
- * Every route applies the {@link UnreadBodyGuard}: an answer sent while the request's body is not
- * read to its end, such as a {@code 401}, {@code 404}, {@code 413}, {@code 429} or {@code 503}
- * refused before the body, or a {@code 201} for a create that sent one, is written whole and then
- * ends the connection, so nothing the client sends after it is drained or run as a request. On a
- * {@link io.helidon.webserver.WebServer} of your own, also install the guard on its routing ({@code
- * routing.addFeature(new UnreadBodyGuard())}) so Helidon's own answers there, an unmatched path or
- * an exception a route lets escape, are covered too; {@link RuntimeServer} does. The guard needs
- * Helidon 4.5.4 or later, the first to end the connection after a {@code Connection: close}
- * response.
+ * A Helios refusal answers without reading the body and closes the connection: an answer sent while
+ * the request's body is not read to its end, such as a {@code 401}, {@code 404}, {@code 413},
+ * {@code 429} or {@code 503} refused before the body, a fixed {@code 500}, or a {@code 201} for a
+ * create that sent one, carries {@code Connection: close}, and Helidon (4.5.4 or later) writes it
+ * whole and ends the connection, so nothing the client sends after it is read or run as a request.
+ * Closing a connection whose body is unread makes the operating system reset it, discarding
+ * response bytes not yet sent, so a large answer, or one whose packet is lost, can arrive cut
+ * short; each of Helios's refusals fits in one packet.
+ *
+ * <p>Helidon's own answers on the same server, an unmatched path or an {@code Error} a route lets
+ * escape, are Helidon's to frame. {@link RuntimeServer} sets Helidon's {@code
+ * maxPayloadSize(maxRequestBytes)} and {@code Http1Config.continueImmediately(true)}, and so must a
+ * {@link io.helidon.webserver.WebServer} of your own that mounts this service. Then no body byte is
+ * ever parsed as a request, and Helidon's own answers read at most {@code maxRequestBytes} of a
+ * body. Without them, a request sent with {@code Expect: 100-continue} to an unmatched path has its
+ * body parsed as the next request.
  *
  * <p>The {@code optionsFactory} is the seam through which deployments choose how a new session is
  * configured: it is given a {@link SessionRequest} of the generated session id and the {@link
@@ -115,7 +127,6 @@ public final class AgentHttpService implements HttpService {
   private final SessionRegistry registry;
   private final SessionCreation creation;
   private final AuthenticationGate gate;
-  private final ObjectMapper objectMapper;
   private final SteeringInput steering;
   private final KeyedSlots<Principal> inFlight;
 
@@ -127,8 +138,6 @@ public final class AgentHttpService implements HttpService {
    *     the creating principal, to a fully-configured {@link SessionOptions} for that id; non-null
    * @param authenticator verifies every request's identity; non-null, with a valid {@link
    *     Authenticator#challenge()}
-   * @param objectMapper mapper for request/response bodies; non-null. The service uses a copy that
-   *     also writes {@link com.standardapplied.helios.core.tool.ToolOutcome}
    * @param eventsPathPrefix prefix used to build the {@code eventsUrl} returned by {@code POST
    *     /sessions} (e.g. {@code "/v1"}); non-null
    * @param limits bounds on each request; non-null
@@ -140,7 +149,6 @@ public final class AgentHttpService implements HttpService {
       SessionRegistry registry,
       Function<SessionRequest, SessionOptions> optionsFactory,
       Authenticator authenticator,
-      ObjectMapper objectMapper,
       String eventsPathPrefix,
       RequestLimits limits) {
     this.registry = Objects.requireNonNull(registry, "registry must not be null");
@@ -150,11 +158,8 @@ public final class AgentHttpService implements HttpService {
             Objects.requireNonNull(optionsFactory, "optionsFactory must not be null"),
             Objects.requireNonNull(eventsPathPrefix, "eventsPathPrefix must not be null"));
     this.gate = new AuthenticationGate(authenticator);
-    this.objectMapper =
-        ToolOutcomeSerializer.addTo(
-            Objects.requireNonNull(objectMapper, "objectMapper must not be null"));
     Objects.requireNonNull(limits, "limits must not be null");
-    this.steering = new SteeringInput(limits.maxRequestBytes(), this.objectMapper);
+    this.steering = new SteeringInput(limits.maxRequestBytes(), JsonBody.MAPPER);
     this.inFlight = new KeyedSlots<>(limits.maxConcurrentRequestsPerPrincipal());
   }
 
@@ -168,24 +173,25 @@ public final class AgentHttpService implements HttpService {
         authenticated(
             owned(
                 (session, caller, req, resp) ->
-                    SessionEventStream.stream(session, resp, objectMapper, caller.ended()))));
+                    SessionEventStream.stream(session, resp, JsonBody.MAPPER, caller.ended()))));
     rules.get(
         "/sessions/{sessionId}/result",
         authenticated(
             owned(
                 (session, caller, req, resp) ->
-                    ResultLongPoll.respond(session, req, resp, objectMapper, caller))));
+                    ResultLongPoll.respond(session, req, resp, JsonBody.MAPPER, caller))));
     rules.delete("/sessions/{sessionId}", authenticated(owned(this::delete)));
   }
 
   /**
    * Run {@code handler} for an authenticated caller while it holds one of its principal's request
    * slots, through any failure answer, even past its session's removal; answer {@code 429} without
-   * running it when the principal has none free.
+   * running it when the principal has none free. Every answer that leaves the body unread closes
+   * the connection.
    */
   private Handler authenticated(CallerHandler handler) {
     return (req, resp) -> {
-      UnreadBodyGuard.apply(req, resp);
+      closeIfUnread(req, resp);
       var caller = gate.admit(req, resp);
       if (caller.isEmpty()) {
         return;
@@ -210,6 +216,16 @@ public final class AgentHttpService implements HttpService {
     };
   }
 
+  /** End the connection after {@code resp} if, when it is sent, {@code req}'s body is unread. */
+  private static void closeIfUnread(ServerRequest req, ServerResponse resp) {
+    resp.beforeSend(
+        () -> {
+          if (!req.content().consumed()) {
+            resp.header(HeaderValues.CONNECTION_CLOSE);
+          }
+        });
+  }
+
   /**
    * Answer a route that failed with a fixed {@code 500} and log the failure here, whatever error
    * handling the deployer's routing has, which may quote the exception's message (Helidon's {@code
@@ -222,14 +238,14 @@ public final class AgentHttpService implements HttpService {
       throw e;
     }
     LOGGER.log(Level.WARNING, "request failed", e);
-    resp.status(Status.INTERNAL_SERVER_ERROR_500).send(INTERNAL_ERROR);
+    JsonBody.send(resp, Status.INTERNAL_SERVER_ERROR_500, INTERNAL_ERROR);
   }
 
   private CallerHandler owned(SessionHandler handler) {
     return (caller, req, resp) -> {
       var session = registry.find(req.path().pathParameters().get("sessionId"), caller.principal());
       if (session.isEmpty()) {
-        resp.status(Status.NOT_FOUND_404).send(NOT_FOUND);
+        JsonBody.send(resp, Status.NOT_FOUND_404, NOT_FOUND);
         return;
       }
       handler.handle(session.get(), caller, req, resp);

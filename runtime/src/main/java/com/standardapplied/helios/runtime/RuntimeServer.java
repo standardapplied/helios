@@ -10,6 +10,7 @@ import io.helidon.webserver.WebServer;
 import io.helidon.webserver.WebServerConfig;
 import io.helidon.webserver.http.HttpRouting;
 import io.helidon.webserver.http.ServerRequest;
+import io.helidon.webserver.http1.Http1Config;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.time.Duration;
@@ -21,8 +22,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Programmatic Helidon SE {@link WebServer} wrapping an {@link AgentHttpService}. Designed for
@@ -61,14 +60,25 @@ import tools.jackson.databind.json.JsonMapper;
  * server calls {@link SessionRegistry#sweep()} every 30 seconds on a virtual thread of its own, so
  * sessions not running past their retention are closed without a deployer's scheduler.
  *
- * <p>The server installs the {@link UnreadBodyGuard}: any answer, the service's or Helidon's own,
- * sent while the request's body is unread is written whole and then ends the connection, without
- * reading further, so no byte sent after it is drained or parsed as a request. A request whose body
- * was read to its end, or that has none, keeps its connection.
+ * <p>The server sets two Helidon options, {@code maxPayloadSize(maxRequestBytes)} and {@code
+ * Http1Config.continueImmediately(true)}, so no body byte is ever parsed as a request: a body
+ * declared over {@link RequestLimits#maxRequestBytes()} is answered Helidon's {@code 413} before
+ * routing, unread, and every request sent with {@code Expect: 100-continue} gets {@code 100
+ * Continue} at once. The service's own refusals answer without reading the body and close the
+ * connection; Helidon's own answers, such as an unmatched path's {@code 404} or the {@code 500} for
+ * an {@code Error} a route lets escape, read at most {@code maxRequestBytes} of a body before
+ * answering. A request whose body was read to its end, or that has none, keeps its connection.
  *
  * <p>The server installs no Helidon feature discovered on the classpath, since a discovered feature
  * could mount routes the {@link Authenticator} never sees. To combine the runtime with Helidon
- * features, mount {@link AgentHttpService} on a {@link WebServer} of your own.
+ * features, mount {@link AgentHttpService} on a {@link WebServer} of your own, which must set both
+ * options:
+ *
+ * <pre>{@code
+ * WebServer.builder()
+ *     .maxPayloadSize(limits.maxRequestBytes())
+ *     .addProtocol(Http1Config.builder().continueImmediately(true).build())
+ * }</pre>
  *
  * <h2>Thread-safety</h2>
  *
@@ -169,7 +179,6 @@ public final class RuntimeServer implements AutoCloseable {
 
     private SessionRegistry registry;
     private Function<SessionRequest, SessionOptions> optionsFactory;
-    private ObjectMapper objectMapper;
     private String routePrefix = "/v1";
     private int port = 0;
     private String host = DEFAULT_HOST;
@@ -226,17 +235,6 @@ public final class RuntimeServer implements AutoCloseable {
     public Builder withOptionsFactory(Function<SessionRequest, SessionOptions> optionsFactory) {
       this.optionsFactory =
           Objects.requireNonNull(optionsFactory, "optionsFactory must not be null");
-      return this;
-    }
-
-    /**
-     * Override the default {@link JsonMapper}. Most callers should leave this alone.
-     *
-     * @param objectMapper non-null mapper
-     * @return this builder
-     */
-    public Builder withObjectMapper(ObjectMapper objectMapper) {
-      this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
       return this;
     }
 
@@ -332,22 +330,17 @@ public final class RuntimeServer implements AutoCloseable {
       }
       var bindAddress = resolveHost();
       requireAuthenticationFits(bindAddress);
-      var mapper = objectMapper != null ? objectMapper : JsonMapper.builder().build();
       var service =
-          new AgentHttpService(
-              registry, optionsFactory, authenticator, mapper, routePrefix, requestLimits);
-      var jacksonSupport = JacksonSupport.create(mapper);
+          new AgentHttpService(registry, optionsFactory, authenticator, routePrefix, requestLimits);
       var server =
           WebServer.builder()
               .address(bindAddress)
               .port(port)
               .maxConcurrentRequests(MAX_CONCURRENT_REQUESTS)
+              .maxPayloadSize(requestLimits.maxRequestBytes())
+              .addProtocol(Http1Config.builder().continueImmediately(true).build())
               .featuresDiscoverServices(false)
-              .mediaContext(
-                  mc -> mc.mediaSupportsDiscoverServices(false).addMediaSupport(jacksonSupport))
-              .routing(
-                  (HttpRouting.Builder routing) ->
-                      routing.addFeature(new UnreadBodyGuard()).register(routePrefix, service))
+              .routing((HttpRouting.Builder routing) -> routing.register(routePrefix, service))
               .build()
               .start();
       return new RuntimeServer(server, registry, startSweeper(registry, sweepInterval));

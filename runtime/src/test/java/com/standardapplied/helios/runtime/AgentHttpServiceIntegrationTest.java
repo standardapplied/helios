@@ -39,7 +39,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 final class AgentHttpServiceIntegrationTest {
@@ -127,7 +126,7 @@ final class AgentHttpServiceIntegrationTest {
   }
 
   @Test
-  void aToolOutcomeStreamsAsAnObjectThroughADeployerSuppliedMapper() throws Exception {
+  void aToolOutcomeStreamsAsAnObjectAndTheResultUsesCamelCaseComponentNames() throws Exception {
     var slow =
         Tool.newBuilder()
             .withName("slow")
@@ -136,7 +135,6 @@ final class AgentHttpServiceIntegrationTest {
     var server =
         RuntimeServer.builder()
             .withRegistry(SessionRegistry.inMemory())
-            .withObjectMapper(new ObjectMapper())
             .withOptionsFactory(
                 request ->
                     SessionOptions.newBuilder()
@@ -169,6 +167,18 @@ final class AgentHttpServiceIntegrationTest {
               "\"result\":{\"outcome\":{\"kind\":\"TimedOut\",\"limit\":\"PT1M\"},"
                   + "\"output\":\"tool 'slow' timed out after PT1M\""),
           toolResult.data);
+      var result =
+          http.send(
+              HttpRequest.newBuilder(URI.create(base + "/sessions/" + sessionId + "/result"))
+                  .timeout(HTTP_TIMEOUT)
+                  .build(),
+              BodyHandlers.ofString());
+      assertTrue(
+          result
+              .body()
+              .startsWith("{\"type\":\"Success\",\"result\":{\"sessionId\":\"" + sessionId),
+          result.body());
+      assertTrue(result.body().contains("\"usage\":{\"inputTokens\":"), result.body());
     }
   }
 

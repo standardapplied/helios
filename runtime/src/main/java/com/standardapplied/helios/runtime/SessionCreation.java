@@ -63,7 +63,7 @@ final class SessionCreation {
     var sessionId = "sess-" + Ids.newId();
     var options = options(new SessionRequest(sessionId, caller.principal()));
     if (options.isEmpty()) {
-      resp.status(Status.INTERNAL_SERVER_ERROR_500).send(FACTORY_FAILED);
+      JsonBody.send(resp, Status.INTERNAL_SERVER_ERROR_500, FACTORY_FAILED);
       return;
     }
     if (caller.answeredAsEnded(resp)) {
@@ -73,7 +73,7 @@ final class SessionCreation {
     var created = new LinkedHashMap<String, String>();
     created.put("sessionId", sessionId);
     created.put("eventsUrl", eventsPathPrefix + "/sessions/" + sessionId + "/events");
-    resp.status(Status.CREATED_201).send(created);
+    JsonBody.send(resp, Status.CREATED_201, created);
   }
 
   /** The options factory's options for {@code request}; empty, and logged, if it failed. */
