@@ -35,8 +35,8 @@ import java.util.logging.Logger;
  *
  * <ul>
  *   <li>A registration whose {@code onCancel} is ordered before the winning {@code cancel} fires
- *       exactly once, on the cancelling thread ({@link #cancelAsync}: on a thread of its own),
- *       unless its {@code remove()} is ordered in between.
+ *       exactly once, on the cancelling thread ({@link #cancelAsync}: on a virtual thread of its
+ *       own), unless its {@code remove()} is ordered in between.
  *   <li>A registration ordered after the winning {@code cancel} fires exactly once, immediately, on
  *       the registering thread.
  *   <li>A {@code remove()} ordered before the winning {@code cancel} guarantees the callback never
@@ -87,7 +87,9 @@ public final class CancellationToken {
    *
    * <p>The winning call claims every pending registration atomically with the state transition and
    * then runs the claimed callbacks on the calling thread, in registration order, outside the lock.
-   * The method returns only after all claimed callbacks have run.
+   * The method returns only after all claimed callbacks have run. A callback that blocks delays the
+   * later ones, so code whose callbacks may block cancels with {@link #cancelAsync}, as the session
+   * does.
    *
    * @param reason a human-readable reason for the cancellation
    * @return {@code true} if this call transitioned the token to cancelled; {@code false} if it was
@@ -107,15 +109,15 @@ public final class CancellationToken {
   }
 
   /**
-   * Signal cancellation as {@link #cancel(String)} does, but run the claimed callbacks on a virtual
-   * thread of their own. The token is cancelled when this returns; a callback that blocks or throws
-   * holds up only the returned future, never the caller. Each {@link Error} a callback throws is
-   * handed to {@code onError} as it is caught, on the callbacks' thread, and the remaining
-   * callbacks still run.
+   * Signal cancellation as {@link #cancel(String)} does, but run each claimed callback on a virtual
+   * thread of its own, concurrently and in no order. The token is cancelled when this returns; a
+   * callback that blocks or throws holds up only the returned future, never the caller nor another
+   * callback. Each {@link Error} a callback throws is handed to {@code onError} on that callback's
+   * thread. A caller that needs two steps in order registers one callback that does both.
    *
    * @param reason a human-readable reason for the cancellation
-   * @param onError receives each {@link Error} a claimed callback throws, in order; it must not
-   *     throw
+   * @param onError receives each {@link Error} a claimed callback throws, possibly concurrently; it
+   *     must not throw
    * @return a future that completes normally once every claimed callback has run; already complete
    *     if the token was already cancelled, whose callbacks the earlier call runs
    * @throws NullPointerException if {@code reason} or {@code onError} is null
@@ -127,19 +129,23 @@ public final class CancellationToken {
     if (claimed.isEmpty()) {
       return CompletableFuture.completedFuture(null);
     }
+    return CompletableFuture.allOf(
+        claimed.get().stream()
+            .map(registration -> fireAsync(registration, onError))
+            .toArray(CompletableFuture[]::new));
+  }
+
+  private CompletableFuture<Void> fireAsync(
+      CallbackRegistration registration, Consumer<Error> onError) {
     return CompletableFuture.runAsync(
-        () ->
-            claimed
-                .get()
-                .forEach(
-                    registration -> {
-                      try {
-                        fire(List.of(registration));
-                      } catch (Error e) {
-                        onError.accept(e);
-                      }
-                    }),
-        task -> Thread.ofVirtual().name("helios-cancellation-callbacks").start(task));
+        () -> {
+          try {
+            fire(List.of(registration));
+          } catch (Error e) {
+            onError.accept(e);
+          }
+        },
+        task -> Thread.ofVirtual().name("helios-cancellation-callback").start(task));
   }
 
   /**

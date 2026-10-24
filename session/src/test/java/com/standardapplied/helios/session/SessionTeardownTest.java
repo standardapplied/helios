@@ -60,10 +60,10 @@ final class SessionTeardownTest {
         .cancellation()
         .onCancel(
             () -> {
+              observeWhenEnded(Thread.currentThread());
               Await.latch("the teardown releasing the scheduler", releasing);
               throw sentinel;
             });
-    context.cancellation().onCancel(observed::countDown);
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
       assertSame(sentinel, newTeardown(SHORT_GRACE).endAndSeal(tools()).orElseThrow());
@@ -76,13 +76,7 @@ final class SessionTeardownTest {
     var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
     provider.end =
         () -> {
-          var ending = Thread.currentThread();
-          Thread.ofVirtual()
-              .start(
-                  () -> {
-                    Await.termination("onSessionEnd's thread to end", ending);
-                    observed.countDown();
-                  });
+          observeWhenEnded(Thread.currentThread());
           Await.latch("the teardown releasing the scheduler", releasing);
           throw sentinel;
         };
@@ -90,6 +84,16 @@ final class SessionTeardownTest {
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
       assertSame(sentinel, newTeardown(provider, SHORT_GRACE).endAndSeal(tools()).orElseThrow());
     }
+  }
+
+  /** Open {@link #observed} once {@code thread} has handed its {@link Error} on and ended. */
+  private void observeWhenEnded(Thread thread) {
+    Thread.ofVirtual()
+        .start(
+            () -> {
+              Await.termination("the throwing thread to end", thread);
+              observed.countDown();
+            });
   }
 
   @Test
