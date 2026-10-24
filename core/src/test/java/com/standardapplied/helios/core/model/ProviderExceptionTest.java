@@ -63,7 +63,7 @@ final class ProviderExceptionTest {
 
   @Test
   void isRetryableCoversAllCases() {
-    assertTrue(new ProviderException("x", 0).isRetryable(), "network error");
+    assertFalse(new ProviderException("x", 0).isRetryable(), "protocol failure");
     assertTrue(new ProviderException("x", 408).isRetryable(), "request timeout");
     assertTrue(new ProviderException("x", 429).isRetryable(), "rate limit");
     assertTrue(new ProviderException("x", 529).isRetryable(), "overloaded");

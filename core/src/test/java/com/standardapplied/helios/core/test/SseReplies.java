@@ -18,14 +18,24 @@ public final class SseReplies {
    */
   public static Function<StubHttpServer.Request, StubHttpServer.Reply> inOrder(
       List<String> bodies) {
-    if (bodies.isEmpty()) {
-      throw new IllegalArgumentException("bodies must not be empty");
+    return inOrder(bodies.stream().map(SseReplies::stream).toArray(StubHttpServer.Reply[]::new));
+  }
+
+  /**
+   * Answers the n-th request with the n-th reply, and every request after the last reply with the
+   * last reply.
+   */
+  public static Function<StubHttpServer.Request, StubHttpServer.Reply> inOrder(
+      StubHttpServer.Reply... replies) {
+    if (replies.length == 0) {
+      throw new IllegalArgumentException("replies must not be empty");
     }
     var next = new AtomicInteger();
-    return request ->
-        new StubHttpServer.Reply(
-            200,
-            Map.of("Content-Type", "text/event-stream"),
-            bodies.get(Math.min(next.getAndIncrement(), bodies.size() - 1)));
+    return request -> replies[Math.min(next.getAndIncrement(), replies.length - 1)];
+  }
+
+  /** {@code 200} with {@code body} as an event stream. */
+  public static StubHttpServer.Reply stream(String body) {
+    return new StubHttpServer.Reply(200, Map.of("Content-Type", "text/event-stream"), body);
   }
 }

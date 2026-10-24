@@ -6,6 +6,7 @@ import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.provider.StreamErrorMessage;
 import com.standardapplied.helios.gemini.api.GeminiJson;
@@ -80,7 +81,12 @@ final class GeminiStreamParser implements SseReader.Parser {
             Objects.toString(code, null),
             Objects.toString(fields.get("message"), null));
     var statusCode = code instanceof Number number && number.intValue() > 0 ? number.intValue() : 0;
-    return failed(message, new GeminiException(message, statusCode));
+    var exception = new GeminiException(message, statusCode);
+    return failed(
+        message,
+        exception.isRetryable()
+            ? new TransientStreamException(message, exception, GeminiProvider.PROVIDER_NAME)
+            : exception);
   }
 
   private StreamEvent completed(InteractionResponse interaction) {

@@ -773,8 +773,22 @@ question, an execution) from that wait's own callback; the 10 ms poll of the tok
 | `cancelAsync` ran the claimed callbacks one after another on one thread, in registration order | each on its own virtual thread; register one callback for steps that must run in order |
 | `cancelAsync`'s `onError` received the callbacks' `Error`s in order, on one thread | possibly concurrently, from each callback's thread |
 
+**A retryable HTTP status at stream open is a `TransientStreamException`, and the session honours
+`Retry-After`.**
+
+| 2.x | 3.0 |
+|---|---|
+| A 408, 429 or 5xx (529 included) answer to a stream request was the provider's exception (`AnthropicException`, `GeminiException`, `OpenAIException`); `chat` threw it and a session ended in `ErrorDuringExecution` | a `TransientStreamException` whose cause is the provider's exception with the status; `chat` throws it, and a session retries the turn under `streamRetryPolicy`, ending in `ErrorTransientStream` when the attempts run out |
+| A Gemini in-stream `error` with a numeric 408, 429 or 5xx code was a `GeminiException` | a `TransientStreamException` whose cause is that `GeminiException` |
+| `ProviderException.isRetryable()` was `true` for status 0 | `false`: only 408, 429 and 500 or more are retryable |
+| `SseReader.open(client, request, idleTimeout, parser, failure)` | `SseReader.open(client, request, idleTimeout, parser, failure, providerName)` |
+
 ### Added
 
+- **`TransientStreamException(message, cause, providerName, retryAfter)` and `retryAfter()`;
+  `Backoff.maxDelay()`.** A `TransientStreamException` for a retryable status at stream open
+  carries the `Retry-After` seconds of the answer; `maxDelay()` is the longest delay a back-off
+  waits, `Fixed`'s `delay` or `Exponential`'s cap.
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
   (waits for an event under one 60-second hang guard), `LineSink` and `FeedableInputStream`, in
   `com.standardapplied.helios.core.test`, are what the Helios test suite uses instead of sleeps,
@@ -900,6 +914,10 @@ question, an execution) from that wait's own callback; the 10 ms poll of the tok
 
 ### Fixed
 
+- **A rate-limited or overloaded provider ended the session at once.** A 429, 503 or 529 at
+  stream open was never retried, and `Retry-After` was ignored. The session now retries it, and
+  waits the `Retry-After` seconds the provider sent, capped by the retry policy's maximum delay;
+  `TurnRetried.backoff` is the delay it waited.
 - **Compaction broke sessions on models that bind thinking to the conversation.** The default
   compactor kept the last 20 messages, whose thinking blocks were signed against the full history,
   so Fable 5.1, Opus 5.5 and Sonnet 5.5 rejected the next request with a 400 and the session ended

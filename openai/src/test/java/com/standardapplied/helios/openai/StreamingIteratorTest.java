@@ -267,7 +267,7 @@ class StreamingIteratorTest {
       assertTrue(iterator.hasNext());
       var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().contains("idle timeout"));
-      assertTrue(assertInstanceOf(OpenAIException.class, error.cause()).isRetryable());
+      assertFalse(assertInstanceOf(OpenAIException.class, error.cause()).isRetryable());
     }
   }
 

@@ -230,9 +230,10 @@ public sealed interface ResultMessage
   }
 
   /**
-   * The session terminated because a model stream was interrupted by a recoverable transport
-   * failure (socket reset, half-closed connection, idle-read timeout on a provider-classified
-   * retryable status such as 408 / 429 / 5xx) and the configured {@link
+   * The session terminated because a model stream failed with a {@link
+   * com.standardapplied.helios.core.model.TransientStreamException} (a transport failure such as a
+   * socket reset or a half-closed connection, a 408, 429 or 5xx answer to the stream request, or an
+   * error event the provider marks retryable mid-stream) and the configured {@link
    * com.standardapplied.helios.session.SessionLimits#streamRetryPolicy() streamRetryPolicy} budget
    * was exhausted without recovery.
    *
@@ -242,7 +243,8 @@ public sealed interface ResultMessage
    * originating throwable's full cause chain (kind = throwable class name, message, stack trace,
    * recursive {@code cause()}) via {@link SerializedError#of(Throwable)}, so deployers can
    * distinguish a TCP reset from an idle timeout from a half-closed framing error without string-
-   * matching the {@code message} field.
+   * matching the {@code message} field. For a retryable status its {@code cause()} is the
+   * provider's exception, whose message starts {@code API error (status <n>)}.
    *
    * @param sessionId the session's id
    * @param providerName the provider's short identifier carried from {@link

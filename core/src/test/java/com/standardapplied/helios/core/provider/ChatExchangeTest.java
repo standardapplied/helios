@@ -13,6 +13,7 @@ import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.HeldSseServer;
@@ -66,6 +67,25 @@ class ChatExchangeTest {
 
     assertEquals(own.getMessage(), error.message());
     assertSame(own, error.cause());
+    assertEquals(NOTHING, error.partial());
+  }
+
+  @Test
+  void aTransientFailureToOpenIsTheStreamsOneErrorEvent() {
+    var overloaded =
+        new TransientStreamException(
+            "API error (status 529): busy",
+            new ProviderException("API error (status 529): busy", 529),
+            "acme");
+
+    var error =
+        onlyError(
+            request -> {
+              throw overloaded;
+            });
+
+    assertEquals(overloaded.getMessage(), error.message());
+    assertSame(overloaded, error.cause());
     assertEquals(NOTHING, error.partial());
   }
 
@@ -178,7 +198,8 @@ class ChatExchangeTest {
                     return NOTHING;
                   }
                 },
-                (message, status, cause) -> new ProviderException(message, status, cause)));
+                (message, status, cause) -> new ProviderException(message, status, cause),
+                "acme"));
   }
 
   private ChatExchange<String> exchange(ChatExchange.StreamOpener<String> opener) {

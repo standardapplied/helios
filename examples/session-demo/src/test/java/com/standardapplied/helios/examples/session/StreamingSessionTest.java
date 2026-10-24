@@ -79,7 +79,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  */
 final class StreamingSessionTest {
 
-  private static final String HOLD = "=== hold ===\n";
+  static final String HOLD = "=== hold ===\n";
 
   @ParameterizedTest
   @ValueSource(strings = {"anthropic", "gemini", "openai"})
@@ -94,7 +94,7 @@ final class StreamingSessionTest {
       var first = Await.next("the first text delta", texts);
       reply.release();
 
-      assertEquals("Hello", first);
+      assertEquals("Hello", first.text());
       var success = assertInstanceOf(ResultMessage.Success.class, result(session));
       assertEquals("Hello, world.", success.result());
       assertEquals(1, server.requests());
@@ -342,21 +342,26 @@ final class StreamingSessionTest {
     return HeldSseServer.Reply.of(Golden.read(provider + "/sessions/held-text.sse").split(HOLD));
   }
 
-  private static LinkedBlockingQueue<String> assistantTexts(AgentSession session) {
-    var texts = new LinkedBlockingQueue<String>();
+  private static LinkedBlockingQueue<QueryEvent.AssistantText> assistantTexts(
+      AgentSession session) {
+    return queued(session, QueryEvent.AssistantText.class);
+  }
+
+  static <E extends QueryEvent> LinkedBlockingQueue<E> queued(AgentSession session, Class<E> type) {
+    var queue = new LinkedBlockingQueue<E>();
     session
         .events()
         .subscribe(
             new CollectingSubscriber(
                 event -> {
-                  if (event instanceof QueryEvent.AssistantText text) {
-                    texts.add(text.text());
+                  if (type.isInstance(event)) {
+                    queue.add(type.cast(event));
                   }
                 }));
-    return texts;
+    return queue;
   }
 
-  private static ResultMessage result(AgentSession session) {
+  static ResultMessage result(AgentSession session) {
     return Await.value("the session's result", session.result());
   }
 
@@ -368,7 +373,7 @@ final class StreamingSessionTest {
     return chunk;
   }
 
-  private static Model modelAt(String provider, URI uri) {
+  static Model modelAt(String provider, URI uri) {
     return modelAt(provider, uri, ModelConfig.newBuilder());
   }
 

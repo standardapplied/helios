@@ -14,6 +14,7 @@ import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.FeedableInputStream;
 import com.standardapplied.helios.core.test.StubHttpServer;
@@ -32,9 +33,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class SseReaderTest {
 
@@ -602,31 +606,65 @@ class SseReaderTest {
 
   @Test
   void openStreamsATwoHundredResponse() throws Exception {
-    try (var server = server(200, "data: hello\n\n");
+    try (var server = server(200, Map.of(), "data: hello\n\n");
         var client = HttpClient.newHttpClient();
-        var reader =
-            SseReader.open(
-                client, get(server), NEVER_IDLE, new EchoParser(), ProviderException::new)) {
+        var reader = open(client, server)) {
 
       assertEquals(new StreamEvent.TextDelta("hello"), reader.next());
     }
   }
 
   @Test
-  void openFailsAnotherStatusWithTheProvidersExceptionAndTheBody() throws Exception {
-    try (var server = server(529, "{\"error\":\"overloaded\"}");
+  void openFailsARetryableStatusAsTransientWithTheProvidersExceptionAndTheBody() throws Exception {
+    try (var server = server(529, Map.of(), "{\"error\":\"overloaded\"}");
         var client = HttpClient.newHttpClient()) {
 
-      var failure =
-          assertThrows(
-              ProviderException.class,
-              () ->
-                  SseReader.open(
-                      client, get(server), NEVER_IDLE, new EchoParser(), ProviderException::new));
+      var failure = assertThrows(TransientStreamException.class, () -> open(client, server));
 
       assertEquals("API error (status 529): {\"error\":\"overloaded\"}", failure.getMessage());
-      assertEquals(529, failure.statusCode());
+      assertEquals("stub", failure.providerName());
+      assertEquals(Optional.empty(), failure.retryAfter());
+      var cause = assertInstanceOf(ProviderException.class, failure.getCause());
+      assertEquals(529, cause.statusCode());
+      assertEquals(failure.getMessage(), cause.getMessage());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {408, 429, 500, 503, 504, 529})
+  void openFailsEveryRetryableStatusAsTransient(int status) throws Exception {
+    try (var server = server(status, Map.of(), "busy");
+        var client = HttpClient.newHttpClient()) {
+
+      var failure = assertThrows(TransientStreamException.class, () -> open(client, server));
+
+      assertEquals(
+          status, assertInstanceOf(ProviderException.class, failure.getCause()).statusCode());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {400, 401, 403, 404, 413, 422})
+  void openFailsAnotherStatusWithTheProvidersException(int status) throws Exception {
+    try (var server = server(status, Map.of("Retry-After", "0"), "refused");
+        var client = HttpClient.newHttpClient()) {
+
+      var failure = assertThrows(ProviderException.class, () -> open(client, server));
+
+      assertEquals("API error (status " + status + "): refused", failure.getMessage());
+      assertEquals(status, failure.statusCode());
       assertNull(failure.getCause());
+    }
+  }
+
+  @Test
+  void openCarriesTheRetryAfterOfARetryableStatus() throws Exception {
+    try (var server = server(429, Map.of("Retry-After", "2"), "slow down");
+        var client = HttpClient.newHttpClient()) {
+
+      var failure = assertThrows(TransientStreamException.class, () -> open(client, server));
+
+      assertEquals(Optional.of(Duration.ofSeconds(2)), failure.retryAfter());
     }
   }
 
@@ -680,11 +718,16 @@ class SseReaderTest {
     };
   }
 
-  private static StubHttpServer server(int status, String body) {
+  private static StubHttpServer server(int status, Map<String, String> headers, String body) {
     return StubHttpServer.start(
         InetAddress.getLoopbackAddress(),
         0,
-        request -> new StubHttpServer.Reply(status, Map.of(), body));
+        request -> new StubHttpServer.Reply(status, headers, body));
+  }
+
+  private static SseReader open(HttpClient client, StubHttpServer server) throws Exception {
+    return SseReader.open(
+        client, get(server), NEVER_IDLE, new EchoParser(), ProviderException::new, "stub");
   }
 
   private static HttpRequest get(StubHttpServer server) {
