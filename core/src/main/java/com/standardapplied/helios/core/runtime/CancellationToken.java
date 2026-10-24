@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -35,13 +36,14 @@ import java.util.logging.Logger;
  *
  * <ul>
  *   <li>A registration whose {@code onCancel} is ordered before the winning {@code cancel} fires
- *       exactly once, on the cancelling thread ({@link #cancelAsync}: on a virtual thread of its
- *       own), unless its {@code remove()} is ordered in between.
+ *       exactly once, on a virtual thread of its own, unless its {@code remove()} is ordered in
+ *       between.
  *   <li>A registration ordered after the winning {@code cancel} fires exactly once, immediately, on
  *       the registering thread.
  *   <li>A {@code remove()} ordered before the winning {@code cancel} guarantees the callback never
  *       runs. A {@code remove()} ordered after it is a no-op: the callback is already claimed by
- *       the cancelling thread and may be running or complete. {@code remove()} never blocks on it.
+ *       the winning {@code cancel} and may be running or complete. {@code remove()} never blocks on
+ *       it.
  * </ul>
  *
  * <p>Callbacks always run outside the lock, so a callback may register, remove, or cancel
@@ -86,25 +88,30 @@ public final class CancellationToken {
    * the cause" from "someone else cancelled first" — useful for audit attribution.
    *
    * <p>The winning call claims every pending registration atomically with the state transition and
-   * then runs the claimed callbacks on the calling thread, in registration order, outside the lock.
-   * The method returns only after all claimed callbacks have run. A callback that blocks delays the
-   * later ones, so code whose callbacks may block cancels with {@link #cancelAsync}, as the session
-   * does.
+   * then runs the claimed callbacks as {@link #cancelAsync} does, each on a virtual thread of its
+   * own and in no order, so a callback that blocks delays no other. The method returns only after
+   * all claimed callbacks have run.
    *
    * @param reason a human-readable reason for the cancellation
    * @return {@code true} if this call transitioned the token to cancelled; {@code false} if it was
    *     already cancelled
    * @throws NullPointerException if {@code reason} is null
    * @throws IllegalArgumentException if {@code reason} is blank
-   * @throws Error the first {@code Error} thrown by a claimed callback, after every other claimed
-   *     callback has run
+   * @throws Error the first {@code Error} a claimed callback threw, with any others suppressed,
+   *     after every claimed callback has run
    */
   public boolean cancel(String reason) {
     var claimed = claim(reason);
     if (claimed.isEmpty()) {
       return false;
     }
-    fire(claimed.get());
+    var errors = new ConcurrentLinkedQueue<Error>();
+    fireAll(claimed.get(), errors::add).join();
+    var first = errors.poll();
+    if (first != null) {
+      errors.stream().distinct().filter(other -> other != first).forEach(first::addSuppressed);
+      throw first;
+    }
     return true;
   }
 
@@ -125,18 +132,23 @@ public final class CancellationToken {
    */
   public CompletableFuture<Void> cancelAsync(String reason, Consumer<Error> onError) {
     Objects.requireNonNull(onError, "onError must not be null");
+    return fireAll(claim(reason).orElse(List.of()), onError);
+  }
+
+  private static CompletableFuture<Void> fireAll(
+      List<CallbackRegistration> claimed, Consumer<Error> onError) {
     return CompletableFuture.allOf(
-        claim(reason).orElse(List.of()).stream()
+        claimed.stream()
             .map(registration -> fireAsync(registration, onError))
             .toArray(CompletableFuture[]::new));
   }
 
-  private CompletableFuture<Void> fireAsync(
+  private static CompletableFuture<Void> fireAsync(
       CallbackRegistration registration, Consumer<Error> onError) {
     return CompletableFuture.runAsync(
         () -> {
           try {
-            fire(List.of(registration));
+            fire(registration);
           } catch (Error e) {
             onError.accept(e);
           }
@@ -166,9 +178,9 @@ public final class CancellationToken {
   }
 
   /**
-   * Register a callback that runs synchronously when the token transitions to cancelled. If the
-   * token is already cancelled, the callback runs immediately on the calling thread and the
-   * returned handle is {@link Registration#NOOP}.
+   * Register a callback that runs when the token transitions to cancelled. If the token is already
+   * cancelled, the callback runs immediately on the calling thread and the returned handle is
+   * {@link Registration#NOOP}.
    *
    * <p>Callbacks are not deduplicated — register the same callback twice and it fires twice.
    *
@@ -191,27 +203,15 @@ public final class CancellationToken {
         return registration;
       }
     }
-    fire(List.of(registration));
+    fire(registration);
     return Registration.NOOP;
   }
 
-  private void fire(List<CallbackRegistration> claimed) {
-    Error hostError = null;
-    for (var registration : claimed) {
-      try {
-        registration.callback.run();
-      } catch (RuntimeException ex) {
-        LOGGER.log(Level.WARNING, "cancellation callback threw", ex);
-      } catch (Error err) {
-        if (hostError == null) {
-          hostError = err;
-        } else if (hostError != err) {
-          hostError.addSuppressed(err);
-        }
-      }
-    }
-    if (hostError != null) {
-      throw hostError;
+  private static void fire(CallbackRegistration registration) {
+    try {
+      registration.callback.run();
+    } catch (RuntimeException ex) {
+      LOGGER.log(Level.WARNING, "cancellation callback threw", ex);
     }
   }
 

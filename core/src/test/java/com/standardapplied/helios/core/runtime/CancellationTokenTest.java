@@ -282,21 +282,26 @@ final class CancellationTokenTest {
   // ── Linearization contract ───────────────────────────────────────────────
 
   @Test
-  void callbacksFireInRegistrationOrder() {
+  void cancelRunsALaterCallbackWhileAnEarlierOneBlocks() throws Exception {
     var t = new CancellationToken();
-    var order = new StringBuilder();
-    t.onCancel(() -> order.append('a'));
-    t.onCancel(() -> order.append('b'));
-    t.onCancel(() -> order.append('c'));
-    t.cancel("flush");
-    assertEquals("abc", order.toString());
+    var release = new CountDownLatch(1);
+    var later = new CountDownLatch(1);
+    t.onCancel(() -> Await.latch("the test to release the blocking callback", release));
+    t.onCancel(later::countDown);
+
+    var canceller = Thread.ofVirtual().start(() -> t.cancel("host"));
+    Await.latch("the later callback to run while the earlier one blocks", later);
+    assertTrue(canceller.isAlive(), "cancel returns only once every callback has run");
+
+    release.countDown();
+    Await.termination("the cancelling thread", canceller);
   }
 
   @Test
   void registerAndRemoveWhileCancelIsMidFireObeyContract() throws Exception {
-    // Callback A parks the cancelling thread outside the lock. While it is parked the token is
-    // already cancelled, so a new registration must fire immediately on the registering thread,
-    // and removing an already-claimed registration must be a no-op that still lets it fire.
+    // Callback A blocks the cancel outside the lock. While it blocks the token is already
+    // cancelled, so a new registration must fire immediately on the registering thread, and
+    // removing an already-claimed registration must be a no-op that still lets it fire.
     var t = new CancellationToken();
     var midFire = new CountDownLatch(1);
     var release = new CountDownLatch(1);
@@ -318,7 +323,6 @@ final class CancellationTokenTest {
     assertSame(CancellationToken.Registration.NOOP, late);
     assertEquals(1, lateFired.get(), "registration after cancellation fires on the caller");
     claimed.remove();
-    assertEquals(0, claimedFired.get(), "claimed callback has not yet run: canceller is parked");
     assertEquals(0, t.activeCallbackCountForTests(), "claimed registrations already drained");
 
     release.countDown();
@@ -368,8 +372,9 @@ final class CancellationTokenTest {
         });
     t.onCancel(cleanup::incrementAndGet);
     var thrown = assertThrows(AssertionError.class, () -> t.cancel("host-failure"));
-    assertSame(first, thrown);
-    assertEquals(List.of(second), List.of(thrown.getSuppressed()));
+    var suppressed = List.of(thrown.getSuppressed());
+    assertEquals(Set.of(first, second), Set.of(thrown, suppressed.getFirst()));
+    assertEquals(1, suppressed.size());
     assertEquals(1, cleanup.get(), "cleanup after a throwing callback must still run");
     assertTrue(t.isCancelled(), "state transition precedes callback dispatch");
     assertEquals(0, t.activeCallbackCountForTests());
@@ -393,8 +398,9 @@ final class CancellationTokenTest {
 
     var thrown = assertThrows(AssertionError.class, () -> t.cancel("host-failure"));
 
-    assertSame(first, thrown);
-    assertEquals(List.of(second), List.of(thrown.getSuppressed()));
+    var suppressed = List.of(thrown.getSuppressed());
+    assertEquals(1, suppressed.size());
+    assertEquals(Set.of(first, second), Set.of(thrown, suppressed.getFirst()));
     assertEquals(4, failures.get(), "every throwing callback must run exactly once");
     assertEquals(1, cleanup.get(), "repeated Error instances must not skip cleanup");
     assertEquals(Optional.of("host-failure"), t.reason());
