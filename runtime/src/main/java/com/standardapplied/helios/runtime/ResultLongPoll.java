@@ -71,15 +71,16 @@ final class ResultLongPoll {
     var timeoutSeconds = parseResultTimeoutSeconds(req.query().first("timeout").orElse(null));
     var result = session.result();
     var answered = new CompletableFuture<Void>();
-    Status unsettled = null;
+    var timedOut = false;
+    var interrupted = false;
     try {
       CompletableFuture.anyOf(result, caller.ended(), answered)
           .get(timeoutSeconds, TimeUnit.SECONDS);
     } catch (TimeoutException e) {
-      unsettled = Status.NO_CONTENT_204;
+      timedOut = true;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      unsettled = Status.SERVICE_UNAVAILABLE_503;
+      interrupted = true;
     } catch (ExecutionException ignored) {
     } finally {
       answered.complete(null);
@@ -87,12 +88,12 @@ final class ResultLongPoll {
     if (caller.answeredAsEnded(resp)) {
       return;
     }
-    if (unsettled == Status.NO_CONTENT_204) {
-      resp.status(unsettled).send();
+    if (timedOut) {
+      resp.status(Status.NO_CONTENT_204).send();
       return;
     }
-    if (unsettled != null) {
-      JsonBody.send(resp, unsettled, INTERRUPTED);
+    if (interrupted) {
+      JsonBody.send(resp, Status.SERVICE_UNAVAILABLE_503, INTERRUPTED);
       return;
     }
     ResultMessage terminal;
