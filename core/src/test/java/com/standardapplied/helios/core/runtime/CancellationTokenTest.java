@@ -14,6 +14,7 @@ import com.standardapplied.helios.core.test.Await;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -477,15 +478,49 @@ final class CancellationTokenTest {
   }
 
   @Test
-  void cancelAsyncRunsTheCallbacksOffTheCallingThread() {
+  void cancelAsyncWithNoCallbackReturnsACompletedFuture() {
     var token = new CancellationToken();
-    var ranOn = new AtomicReference<Thread>();
-    token.onCancel(() -> ranOn.set(Thread.currentThread()));
+
+    var fired = token.cancelAsync("closed", error -> {});
+
+    assertTrue(fired.isDone(), "nothing to run");
+    assertEquals(Optional.of("closed"), token.reason());
+  }
+
+  @Test
+  void cancelAsyncRunsEachCallbackOnAVirtualThreadOfItsOwn() {
+    var token = new CancellationToken();
+    var first = new CompletableFuture<Thread>();
+    var second = new CompletableFuture<Thread>();
+    token.onCancel(() -> first.complete(Thread.currentThread()));
+    token.onCancel(() -> second.complete(Thread.currentThread()));
 
     Await.value("the callbacks to have run", token.cancelAsync("closed", error -> {}));
 
-    assertTrue(ranOn.get().isVirtual(), "callbacks run on a virtual thread");
-    assertFalse(ranOn.get() == Thread.currentThread(), "not on the caller's thread");
+    var threads = List.of(first.join(), second.join());
+    assertTrue(threads.stream().allMatch(Thread::isVirtual), "callbacks run on virtual threads");
+    assertFalse(threads.get(0) == threads.get(1), "each callback has a thread of its own");
+    assertFalse(threads.contains(Thread.currentThread()), "not on the caller's thread");
+    assertEquals("helios-cancellation-callback", threads.get(0).getName());
+  }
+
+  @Test
+  void cancelAsyncRunsALaterCallbackWhileAnEarlierOneBlocks() {
+    var token = new CancellationToken();
+    var release = new CountDownLatch(1);
+    var later = new CountDownLatch(1);
+    token.onCancel(() -> Await.latch("the earlier callback released", release));
+    token.onCancel(later::countDown);
+
+    var fired = token.cancelAsync("closed", error -> {});
+
+    try {
+      Await.latch("the later callback to run", later);
+      assertFalse(fired.isDone(), "the earlier callback still blocks");
+    } finally {
+      release.countDown();
+    }
+    Await.value("the callbacks to have run", fired);
   }
 
   @Test
@@ -507,8 +542,10 @@ final class CancellationTokenTest {
 
     Await.value("the callbacks to have run", token.cancelAsync("closed", errors::add));
 
-    assertEquals(List.of(first, second), errors);
+    assertEquals(Set.of(first, second), Set.copyOf(errors));
+    assertEquals(2, errors.size());
     assertEquals(0, first.getSuppressed().length);
+    assertEquals(0, second.getSuppressed().length);
     assertEquals(1, laterCallbacks.get());
   }
 

@@ -759,6 +759,19 @@ cancelled call fails with `Grep: cancelled` instead of returning what it found s
 | `Grep` returned each hit line whole | each hit line is cut at `GrepTool.MAX_HIT_LINE_CHARS` (2,000) |
 | A cancelled `Grep` returned the hits found before the cancellation | `ToolResult.failure("Grep: cancelled")` |
 
+**`CancellationToken.cancelAsync` runs each callback on a virtual thread of its own.** The
+callbacks one `cancelAsync` claims run concurrently and in no order, each on a virtual thread
+named `helios-cancellation-callback`, so a callback that blocks delays no other; `onError` may be
+called concurrently. The returned future still completes once every callback has run.
+`cancel(reason)` keeps running the callbacks on the caller's thread in registration order. The
+session now wakes each of its waits (a model stream, a retry back-off, a tool call, a pending
+question, an execution) from that wait's own callback; the 10 ms poll of the token is gone.
+
+| 2.x | 3.0 |
+|---|---|
+| `cancelAsync` ran the claimed callbacks one after another on one thread, in registration order | each on its own virtual thread; register one callback for steps that must run in order |
+| `cancelAsync`'s `onError` received the callbacks' `Error`s in order, on one thread | possibly concurrently, from each callback's thread |
+
 ### Added
 
 - **`helios-core` publishes its test fixtures as `helios-core-<version>-tests.jar`.** `Await`
