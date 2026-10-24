@@ -121,11 +121,11 @@ class OpenAIExceptionTest {
   }
 
   @Test
-  void networkErrorRetryable() {
-    var ex = new OpenAIException("network error");
+  void aFailureWithoutAStatusIsNotRetryable() {
+    var ex = new OpenAIException("Stream idle timeout");
     assertEquals(0, ex.statusCode());
     assertFalse(ex.isClientError());
     assertFalse(ex.isServerError());
-    assertTrue(ex.isRetryable());
+    assertFalse(ex.isRetryable());
   }
 }

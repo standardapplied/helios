@@ -3,6 +3,7 @@
 package com.standardapplied.helios.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -113,7 +114,7 @@ class GeminiRestructuredPartsTest {
   }
 
   @Test
-  void anErrorEventWithANonPositiveCodeIsARetryableFailureWithoutAStatus() {
+  void anErrorEventWithANonPositiveCodeIsANonRetryableFailureWithoutAStatus() {
     var parser = new GeminiStreamParser(true, "v1");
 
     var error =
@@ -125,7 +126,7 @@ class GeminiRestructuredPartsTest {
     var cause = (GeminiException) error.cause();
     assertEquals("API error: -1: boom", error.message());
     assertEquals(0, cause.statusCode());
-    assertTrue(cause.isRetryable());
+    assertFalse(cause.isRetryable());
   }
 
   @Test

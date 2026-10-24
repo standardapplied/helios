@@ -2,6 +2,6 @@
 KeepAlive[]
 KeepAlive[]
 TextDelta[text=Partial]
-onError GeminiException(API error: 503: The model is overloaded) status=503
+onError TransientStreamException(API error: 503: The model is overloaded) provider=gemini caused by GeminiException(API error: 503: The model is overloaded) status=503
 == chat
-threw GeminiException(API error: 503: The model is overloaded) status=503
+threw TransientStreamException(API error: 503: The model is overloaded) provider=gemini caused by GeminiException(API error: 503: The model is overloaded) status=503

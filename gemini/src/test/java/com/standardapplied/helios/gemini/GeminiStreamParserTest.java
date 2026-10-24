@@ -23,9 +23,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.test.SseEvents;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -328,51 +330,28 @@ class GeminiStreamParserTest {
     assertEquals(1234, done.response().usage().cacheReadInputTokens());
   }
 
-  @Test
-  void sseErrorEventSurfacesAsStreamErrorWithStatusCode() {
-    var errorEvent =
-        "data: {\"event_type\":\"error\","
-            + "\"error\":{\"code\":500,\"message\":\"Internal server error\"}}\n\n";
-    try (var iterator = reader(SseEvents.body(errorEvent))) {
-      assertTrue(iterator.hasNext());
-      var event = iterator.next();
-      assertInstanceOf(StreamEvent.Error.class, event);
-      var error = (StreamEvent.Error) event;
-      assertTrue(error.message().contains("Internal server error"));
-      assertInstanceOf(GeminiException.class, error.cause());
-      var ge = (GeminiException) error.cause();
-      assertEquals(500, ge.statusCode());
-      assertTrue(ge.isRetryable(), "5xx errors must be retryable");
-      assertFalse(iterator.hasNext());
-    }
+  @ParameterizedTest
+  @ValueSource(ints = {500, 429, 503})
+  void aRetryableNumericErrorCodeIsTransientWithTheGeminiExceptionAsCause(int code) {
+    var error = onlyError("{\"code\":" + code + ",\"message\":\"Try again\"}");
+
+    assertTrue(error.message().contains("Try again"));
+    var transientFailure = assertInstanceOf(TransientStreamException.class, error.cause());
+    assertEquals("gemini", transientFailure.providerName());
+    assertEquals(Optional.empty(), transientFailure.retryAfter());
+    var cause = assertInstanceOf(GeminiException.class, transientFailure.getCause());
+    assertEquals(code, cause.statusCode());
+    assertEquals(error.message(), cause.getMessage());
   }
 
-  @Test
-  void sseErrorEvent429IsRetryable() {
-    var errorEvent =
-        "data: {\"event_type\":\"error\","
-            + "\"error\":{\"code\":429,\"message\":\"Rate limit exceeded\"}}\n\n";
-    try (var iterator = reader(SseEvents.body(errorEvent))) {
-      var event = iterator.next();
-      assertInstanceOf(StreamEvent.Error.class, event);
-      var ge = (GeminiException) ((StreamEvent.Error) event).cause();
-      assertEquals(429, ge.statusCode());
-      assertTrue(ge.isRetryable());
-    }
-  }
+  @ParameterizedTest
+  @CsvSource({"400, 400", "'\"UNAVAILABLE\"', 0"})
+  void anotherErrorCodeIsAPlainGeminiException(String code, int status) {
+    var error = onlyError("{\"code\":" + code + ",\"message\":\"No\"}");
 
-  @Test
-  void sseErrorEvent400IsNotRetryable() {
-    var errorEvent =
-        "data: {\"event_type\":\"error\","
-            + "\"error\":{\"code\":400,\"message\":\"Bad request\"}}\n\n";
-    try (var iterator = reader(SseEvents.body(errorEvent))) {
-      var event = iterator.next();
-      assertInstanceOf(StreamEvent.Error.class, event);
-      var ge = (GeminiException) ((StreamEvent.Error) event).cause();
-      assertEquals(400, ge.statusCode());
-      assertFalse(ge.isRetryable(), "4xx client errors must not be retryable");
-    }
+    var cause = assertInstanceOf(GeminiException.class, error.cause());
+    assertEquals(status, cause.statusCode());
+    assertFalse(cause.isRetryable());
   }
 
   @Test
@@ -459,5 +438,14 @@ class GeminiStreamParserTest {
     assertEquals("Hello", error.partial().content());
     assertEquals(5, error.partial().usage().outputTokens());
     assertEquals(FinishReason.ERROR, error.partial().finishReason());
+  }
+
+  private static StreamEvent.Error onlyError(String errorJson) {
+    var event = "data: {\"event_type\":\"error\",\"error\":" + errorJson + "}\n\n";
+    try (var iterator = reader(SseEvents.body(event))) {
+      var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
+      assertFalse(iterator.hasNext());
+      return error;
+    }
   }
 }

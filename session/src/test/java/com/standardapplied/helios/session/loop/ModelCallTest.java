@@ -28,6 +28,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.InstantSource;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -149,26 +150,49 @@ final class ModelCallTest {
   @Test
   void cancellationDuringTheBackOffEndsIt() {
     var model = new FailingModel(cancellation -> transientFailure());
-    var retried = new CountDownLatch(1);
-    var call =
-        modelCall(
-            model,
-            event -> {
-              if (event instanceof QueryEvent.TurnRetried) {
-                retried.countDown();
-              }
-            });
-    var streaming = run(() -> call.stream(state, SLOW_RETRY, List.of()));
 
-    Await.latch("the first attempt's retry", retried);
-    Await.until(
-        "the back-off waits on the cancellation token",
-        () -> state.cancellation().activeCallbackCountForTests() == 1);
-    state.cancellation().cancel("cancelled during the back-off");
-    var attempts = Await.value("the call", streaming);
+    var attempts = cancelledDuringTheBackOff(model);
 
     assertEquals(1, attempts.count());
     assertEquals(1, model.calls.get());
+  }
+
+  @Test
+  void theBackOffIsTheRetryAfterTheFailureCarries() {
+    var model = new FailingModel(cancellation -> transientFailure(Duration.ofSeconds(2)));
+
+    var attempts = cancelledDuringTheBackOff(model);
+
+    assertEquals(Duration.ofSeconds(2), firstRetry().backoff());
+    assertEquals(1, attempts.count());
+    assertEquals(1, model.calls.get());
+  }
+
+  @Test
+  void aZeroRetryAfterRetriesAtOnceWhateverThePolicysBackOff() {
+    var model = new FailingModel(cancellation -> transientFailure(Duration.ZERO));
+    var call = modelCall(model);
+
+    var attempts = Await.value("the call", run(() -> call.stream(state, SLOW_RETRY, List.of())));
+
+    assertEquals(Duration.ZERO, firstRetry().backoff());
+    assertEquals(3, attempts.count());
+    assertEquals(3, model.calls.get());
+  }
+
+  @Test
+  void aRetryAfterBeyondThePolicysMaximumDelayIsCappedThere() {
+    var model = new FailingModel(cancellation -> transientFailure(Duration.ofHours(1)));
+    var call = modelCall(model);
+
+    var attempts =
+        Await.value(
+            "the call",
+            run(() -> call.stream(state, retrying(2, Duration.ofMillis(1)), List.of())));
+
+    assertEquals(Duration.ofMillis(1), firstRetry().backoff());
+    assertEquals(2, attempts.count());
+    assertEquals(2, model.calls.get());
   }
 
   @Test
@@ -248,9 +272,40 @@ final class ModelCallTest {
             "the call",
             run(() -> call.stream(state, retrying(2, Duration.ofMillis(50)), List.of())));
 
+    assertEquals(Duration.ofMillis(50), firstRetry().backoff());
     assertEquals(2, attempts.count());
     assertEquals(2, model.calls.get());
     assertEquals(0, state.cancellation().activeCallbackCountForTests());
+  }
+
+  /** The attempts of a call under {@link #SLOW_RETRY} cancelled once its first back-off waits. */
+  private ModelCall.Attempts cancelledDuringTheBackOff(FailingModel model) {
+    var retried = new CountDownLatch(1);
+    var call =
+        modelCall(
+            model,
+            event -> {
+              events.add(event);
+              if (event instanceof QueryEvent.TurnRetried) {
+                retried.countDown();
+              }
+            });
+    var streaming = run(() -> call.stream(state, SLOW_RETRY, List.of()));
+
+    Await.latch("the first attempt's retry", retried);
+    Await.until(
+        "the back-off waits on the cancellation token",
+        () -> state.cancellation().activeCallbackCountForTests() == 1);
+    state.cancellation().cancel("cancelled during the back-off");
+    return Await.value("the call", streaming);
+  }
+
+  private QueryEvent.TurnRetried firstRetry() {
+    return events.stream()
+        .filter(QueryEvent.TurnRetried.class::isInstance)
+        .map(QueryEvent.TurnRetried.class::cast)
+        .findFirst()
+        .orElseThrow();
   }
 
   private static SessionLimits retrying(int attempts, Duration backoff) {
@@ -267,6 +322,11 @@ final class ModelCallTest {
 
   private static TransientStreamException transientFailure() {
     return new TransientStreamException("Stream read error", new IOException("reset"), "test");
+  }
+
+  private static TransientStreamException transientFailure(Duration retryAfter) {
+    return new TransientStreamException(
+        "API error (status 429): slow down", null, "test", Optional.of(retryAfter));
   }
 
   /** A model whose every stream fails with the throwable its script returns for the call. */

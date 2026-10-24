@@ -8,6 +8,7 @@ import com.standardapplied.helios.core.model.IteratorPublisher;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.io.IOException;
 import java.util.List;
@@ -18,8 +19,9 @@ import java.util.concurrent.Flow;
  * The {@link Exchange} every streaming provider shares: an {@link IteratorPublisher} over the
  * provider's response stream, opened on the subscriber's first request on the thread the
  * subscription owns. A failure to open it is its one {@link StreamEvent.Error}: the provider's
- * exception as it is, an {@link IOException} as a failure to communicate with the API, an interrupt
- * restored. Cancelling interrupts a request awaiting its headers and closes a body being read.
+ * exception or a {@link TransientStreamException} as it is, an {@link IOException} as a failure to
+ * communicate with the API, an interrupt restored. Cancelling interrupts a request awaiting its
+ * headers and closes a body being read.
  *
  * @param <R> the provider's request type
  */
@@ -64,7 +66,7 @@ public final class ChatExchange<R> implements Exchange<R> {
   private CloseableIterator<StreamEvent> open(R request) {
     try {
       return opener.open(request);
-    } catch (ProviderException e) {
+    } catch (ProviderException | TransientStreamException e) {
       return failed(e.getMessage(), e);
     } catch (IOException e) {
       return failed("Failed to communicate with " + apiName, e);

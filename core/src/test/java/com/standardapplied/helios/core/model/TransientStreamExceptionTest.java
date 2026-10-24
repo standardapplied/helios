@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 final class TransientStreamExceptionTest {
@@ -23,6 +25,36 @@ final class TransientStreamExceptionTest {
     assertEquals("Stream read error", ex.getMessage());
     assertSame(cause, ex.getCause());
     assertEquals("anthropic", ex.providerName());
+    assertEquals(Optional.empty(), ex.retryAfter());
+  }
+
+  @Test
+  void carriesTheRetryAfterItWasGiven() {
+    var ex =
+        new TransientStreamException(
+            "API error (status 429): slow", null, "openai", Optional.of(Duration.ZERO));
+
+    assertEquals(Optional.of(Duration.ZERO), ex.retryAfter());
+  }
+
+  @Test
+  void nullRetryAfterRejected() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new TransientStreamException("Stream read error", null, "openai", null));
+    assertEquals("retryAfter must not be null", ex.getMessage());
+  }
+
+  @Test
+  void negativeRetryAfterRejected() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new TransientStreamException(
+                    "Stream read error", null, "openai", Optional.of(Duration.ofSeconds(-1))));
+    assertEquals("retryAfter must not be negative, got PT-1S", ex.getMessage());
   }
 
   @Test

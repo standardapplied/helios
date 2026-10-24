@@ -95,6 +95,27 @@ class StreamingModelTest {
   }
 
   @Test
+  void aTransientFailureToOpenTheStreamIsWhatChatThrowsAndWhatChatStreamEndsIn() {
+    var status = "API error (status 529): busy";
+    var overloaded =
+        new TransientStreamException(status, new AcmeException(status, 529, null), "acme");
+    var model =
+        parts(config())
+            .withExchange(
+                new ChatExchange<Request>(
+                    "Acme API",
+                    request -> {
+                      throw overloaded;
+                    }))
+            .build();
+
+    assertSame(
+        overloaded,
+        assertThrows(TransientStreamException.class, () -> model.chat(MESSAGES, List.of())));
+    assertSame(overloaded, streamed(model).awaitFailure());
+  }
+
+  @Test
   void chatTurnsAReadFailureIntoARetryableFailureNamingTheProvider() {
     var reset = new IOException("reset");
 
