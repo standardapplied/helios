@@ -21,11 +21,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.loop.TurnRunner;
@@ -36,6 +39,7 @@ import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -202,18 +206,100 @@ final class SessionFinalizationTest {
 
   @Test
   void aCancellationCallbackThatNeverReturnsCannotKeepAClosedModelStreamOpen() {
-    var entered = new CountDownLatch(1);
-    var model =
-        ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
-    var provider = new RecordingProvider(order);
-    var session = AgentSession.create(withProvider(provider, model).withLimits(grace()).build());
-    provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
-    session.send("go");
-    Await.latch("the model call to start", entered);
+    var session = streamingBehindACallbackThatNeverReturns(new RecordingProvider(order));
 
     session.close();
 
     assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+  }
+
+  @Test
+  void aHostsOwnCancelOfTheSessionsTokenEndsTheModelStreamWhileACallbackNeverReturns() {
+    var provider = new RecordingProvider(order);
+    var session = streamingBehindACallbackThatNeverReturns(provider);
+
+    Thread.ofVirtual().start(() -> provider.context.cancellation().cancel("host cancelled"));
+
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+  }
+
+  private AgentSession streamingBehindACallbackThatNeverReturns(RecordingProvider provider) {
+    var entered = new CountDownLatch(1);
+    var model =
+        ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
+    var session = AgentSession.create(withProvider(provider, model).withLimits(grace()).build());
+    var token = provider.context.cancellation();
+    token.onCancel(() -> Uninterruptible.await(released));
+    var armed = token.activeCallbackCountForTests();
+    session.send("go");
+    Await.latch("the model call to start", entered);
+    Await.until(
+        "the stream to wait on the session's token",
+        () -> token.activeCallbackCountForTests() == armed + 1);
+    return session;
+  }
+
+  @Test
+  void aCancellationCallbackThatNeverReturnsCannotKeepAClosedSessionsQuestionPending() {
+    var question =
+        new ToolCall(
+            "c-ask",
+            AskUserQuestionTool.NAME,
+            Map.of(
+                "question",
+                "Proceed?",
+                "options",
+                List.of(
+                    Map.of("label", "Yes", "description", "go on"),
+                    Map.of("label", "No", "description", "stop"))));
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(question).withTextTurn("done").build();
+    var provider = new RecordingProvider(order);
+    var limits =
+        SessionLimits.newBuilder()
+            .withStopGrace(SHORT_GRACE)
+            .withToolTimeoutDefault(NOT_REACHED)
+            .build();
+    var session = AgentSession.create(withProvider(provider, model).withLimits(limits).build());
+    provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
+    var asked = opensOn(session, QueryEvent.QuestionAsked.class);
+    session.send("go");
+    Await.latch("the question to be asked", asked);
+
+    session.close();
+
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+  }
+
+  @Test
+  void aCancellationCallbackThatNeverReturnsCannotKeepAClosedSessionsBackOffAsleep() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                ModelStreams.failing(new TransientStreamException("reset", null, "test")))
+            .withTextTurn("done")
+            .build();
+    var provider = new RecordingProvider(order);
+    var limits =
+        SessionLimits.newBuilder()
+            .withStopGrace(SHORT_GRACE)
+            .withStreamRetryPolicy(
+                new StreamRetryPolicy(2, Backoff.fixed(Duration.ofHours(1)), 0.0))
+            .build();
+    var session = AgentSession.create(withProvider(provider, model).withLimits(limits).build());
+    var token = provider.context.cancellation();
+    token.onCancel(() -> Uninterruptible.await(released));
+    var armed = token.activeCallbackCountForTests();
+    var retried = opensOn(session, QueryEvent.TurnRetried.class);
+    session.send("go");
+    Await.latch("the turn to be retried", retried);
+    Await.until(
+        "the back-off to wait on the session's token",
+        () -> token.activeCallbackCountForTests() == armed + 1);
+
+    session.close();
+
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+    assertEquals(1, model.calls().size());
   }
 
   @Test
@@ -549,6 +635,21 @@ final class SessionFinalizationTest {
 
       assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
     }
+  }
+
+  /** A latch that opens on the first event of {@code type} that {@code session} publishes. */
+  private static CountDownLatch opensOn(AgentSession session, Class<? extends QueryEvent> type) {
+    var seen = new CountDownLatch(1);
+    session
+        .events()
+        .subscribe(
+            new CollectingSubscriber(
+                event -> {
+                  if (type.isInstance(event)) {
+                    seen.countDown();
+                  }
+                }));
+    return seen;
   }
 
   /** An exception whose message cannot be read, so the loop cannot serialise it. */

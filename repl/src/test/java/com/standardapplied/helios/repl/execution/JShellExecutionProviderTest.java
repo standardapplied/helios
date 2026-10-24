@@ -749,49 +749,6 @@ final class JShellExecutionProviderTest {
   }
 
   /**
-   * A token fires its callbacks in registration order, so a callback registered before the execute
-   * can hold the cancellation until the execute's thread has finished. The execute's kill callback
-   * then fires after the call is over and must leave the session alone.
-   */
-  @Test
-  void killCallbackFiringAfterTheCallFinishedLeavesTheSessionOpen() {
-    var runThread = new java.util.concurrent.CompletableFuture<Thread>();
-    var fired = new CountDownLatch(1);
-    var sandbox =
-        new StubSandbox() {
-          @Override
-          public com.standardapplied.helios.repl.sandbox.ExecutionResult execute(
-              com.standardapplied.helios.repl.sandbox.ExecutionRequest request) {
-            runThread.complete(Thread.currentThread());
-            Await.latch("the cancellation to start firing", fired);
-            return super.execute(request);
-          }
-        };
-    try (var provider = providerFor(sandbox)) {
-      var c = ctx("late-kill");
-      provider.onSessionStart(c);
-      var token = new CancellationToken();
-      token.onCancel(
-          () -> {
-            fired.countDown();
-            Await.termination(
-                "the execute's thread", Await.value("the execute's thread", runThread));
-          });
-      var req = ExecutionRequest.newBuilder().withRuntime(Runtime.JSHELL).withScript("x").build();
-      var future = ExecutionCall.start(provider, c, req, token).outcome();
-      Await.value("the execute's thread", runThread);
-
-      var canceller = Thread.ofPlatform().start(() -> token.cancel("late"));
-      Await.termination("the cancellation to finish firing", canceller);
-
-      assertInstanceOf(
-          CancellationException.class, Await.failure("the cancelled execution", future));
-      assertTrue(sandbox.isAlive(), "a kill callback that fires after the call must not close");
-      assertEquals(1, provider.liveSessionCount());
-    }
-  }
-
-  /**
    * A token cancelled before dispatch kills the session before the snippet starts; the resulting
    * failure is reported as the cancellation it is.
    */

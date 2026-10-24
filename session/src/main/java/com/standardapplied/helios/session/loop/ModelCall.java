@@ -182,10 +182,9 @@ final class ModelCall {
    * when the full delay elapsed (or {@code delay} was zero); {@code false} when the sleep was cut
    * short by cancellation or thread interruption.
    *
-   * <p>Implementation: a one-shot {@link CountDownLatch} the cancellation callback counts down,
-   * waited on through {@link TokenWait}, so an earlier callback that blocks cannot keep the loop
-   * asleep for the whole delay. The callback registration is removed in {@code finally} so a
-   * long-lived session token does not accumulate dead callbacks across many retries.
+   * <p>Implementation: a one-shot {@link CountDownLatch} the cancellation callback counts down. The
+   * callback registration is removed in {@code finally} so a long-lived session token does not
+   * accumulate dead callbacks across many retries.
    *
    * <p>{@code delay} is contractually non-null and non-negative — callers pass {@link
    * com.standardapplied.helios.session.StreamRetryPolicy#nextDelay(int)} which is itself bounded by
@@ -200,11 +199,11 @@ final class ModelCall {
     if (delay.isZero()) {
       return true;
     }
-    var until = System.nanoTime() + TimeUnit.NANOSECONDS.convert(delay);
     var latch = new CountDownLatch(1);
     var registration = token.onCancel(latch::countDown);
     try {
-      return !TokenWait.opensBy(latch, token, until) && !token.isCancelled();
+      return !latch.await(TimeUnit.NANOSECONDS.convert(delay), TimeUnit.NANOSECONDS)
+          && !token.isCancelled();
     } catch (InterruptedException ie) {
       Thread.currentThread().interrupt();
       return false;
