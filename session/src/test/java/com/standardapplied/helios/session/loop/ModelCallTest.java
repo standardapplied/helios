@@ -160,8 +160,17 @@ final class ModelCallTest {
   @Test
   void theBackOffIsTheRetryAfterTheFailureCarries() {
     var model = new FailingModel(cancellation -> transientFailure(Duration.ofSeconds(2)));
+    var call =
+        modelCall(
+            model,
+            event -> {
+              events.add(event);
+              if (event instanceof QueryEvent.TurnRetried) {
+                state.cancellation().cancel("retry delay observed");
+              }
+            });
 
-    var attempts = cancelledDuringTheBackOff(model);
+    var attempts = Await.value("the call", run(() -> call.stream(state, SLOW_RETRY, List.of())));
 
     assertEquals(Duration.ofSeconds(2), firstRetry().backoff());
     assertEquals(1, attempts.count());

@@ -10,7 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.time.Duration;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -35,6 +39,29 @@ final class TransientStreamExceptionTest {
             "API error (status 429): slow", null, "openai", Optional.of(Duration.ZERO));
 
     assertEquals(Optional.of(Duration.ZERO), ex.retryAfter());
+  }
+
+  @Test
+  void aFailureWithNoRetryAfterSurvivesSerialization() throws Exception {
+    var copy = roundTrip(new TransientStreamException("Stream read error", null, "gemini"));
+
+    assertEquals("Stream read error", copy.getMessage());
+    assertEquals("gemini", copy.providerName());
+    assertEquals(Optional.empty(), copy.retryAfter());
+  }
+
+  @Test
+  void aFailureWithARetryAfterSurvivesSerialization() throws Exception {
+    var copy =
+        roundTrip(
+            new TransientStreamException(
+                "API error (status 503): busy",
+                new ProviderException("busy", 503),
+                "gemini",
+                Optional.of(Duration.ofSeconds(2))));
+
+    assertEquals(Optional.of(Duration.ofSeconds(2)), copy.retryAfter());
+    assertEquals(503, ((ProviderException) copy.getCause()).statusCode());
   }
 
   @Test
@@ -93,5 +120,16 @@ final class TransientStreamExceptionTest {
             IllegalArgumentException.class,
             () -> new TransientStreamException("Stream read error", null, "  "));
     assertEquals("providerName must not be blank", ex.getMessage());
+  }
+
+  private static TransientStreamException roundTrip(TransientStreamException exception)
+      throws IOException, ClassNotFoundException {
+    var bytes = new ByteArrayOutputStream();
+    try (var out = new ObjectOutputStream(bytes)) {
+      out.writeObject(exception);
+    }
+    try (var in = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+      return (TransientStreamException) in.readObject();
+    }
   }
 }
