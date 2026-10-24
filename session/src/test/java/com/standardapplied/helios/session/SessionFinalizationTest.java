@@ -242,16 +242,7 @@ final class SessionFinalizationTest {
             .build();
     var session = AgentSession.create(withProvider(provider, model).withLimits(limits).build());
     provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
-    var asked = new CountDownLatch(1);
-    session
-        .events()
-        .subscribe(
-            new CollectingSubscriber(
-                event -> {
-                  if (event instanceof QueryEvent.QuestionAsked) {
-                    asked.countDown();
-                  }
-                }));
+    var asked = opensOn(session, QueryEvent.QuestionAsked.class);
     session.send("go");
     Await.latch("the question to be asked", asked);
 
@@ -277,16 +268,7 @@ final class SessionFinalizationTest {
             .build();
     var session = AgentSession.create(withProvider(provider, model).withLimits(limits).build());
     provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
-    var retried = new CountDownLatch(1);
-    session
-        .events()
-        .subscribe(
-            new CollectingSubscriber(
-                event -> {
-                  if (event instanceof QueryEvent.TurnRetried) {
-                    retried.countDown();
-                  }
-                }));
+    var retried = opensOn(session, QueryEvent.TurnRetried.class);
     session.send("go");
     Await.latch("the turn to be retried", retried);
 
@@ -629,6 +611,21 @@ final class SessionFinalizationTest {
 
       assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
     }
+  }
+
+  /** A latch that opens on the first event of {@code type} that {@code session} publishes. */
+  private static CountDownLatch opensOn(AgentSession session, Class<? extends QueryEvent> type) {
+    var seen = new CountDownLatch(1);
+    session
+        .events()
+        .subscribe(
+            new CollectingSubscriber(
+                event -> {
+                  if (type.isInstance(event)) {
+                    seen.countDown();
+                  }
+                }));
+    return seen;
   }
 
   /** An exception whose message cannot be read, so the loop cannot serialise it. */
