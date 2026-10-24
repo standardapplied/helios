@@ -17,13 +17,12 @@ import java.util.Optional;
  * key source is unreachable; the runtime answers {@code 503} and logs the exception's type, never
  * its message, since a message may quote the credential.
  *
- * <p>An {@link Error} thrown by {@link #authenticate} is not caught: it escapes the route. On a
- * {@link RuntimeServer}, or a routing with {@link UnreadBodyGuard} and no error handler of its own
- * for the {@code Error}'s type, the answer is a fixed {@code 500 Internal Server Error}. On a
- * deployer's own {@code WebServer} without the guard, Helidon puts the {@code Error}'s message in
- * the {@code 500} body when its error handling's {@code include-entity} is enabled (off by
- * default), and an error handler of the deployer's routing may send it anywhere. An implementation
- * therefore never puts a credential in an {@code Error}'s message.
+ * <p>An {@link Error} thrown by {@link #authenticate} is not caught: it escapes the route, and
+ * Helidon answers it. On a {@link RuntimeServer} the answer is a fixed {@code 500 Internal Server
+ * Error}. On a deployer's own {@code WebServer}, Helidon puts the {@code Error}'s message in the
+ * {@code 500} body when its error handling's {@code include-entity} is enabled (off by default),
+ * and an error handler of the deployer's routing may send it anywhere. An implementation therefore
+ * never puts a credential in an {@code Error}'s message.
  */
 public interface Authenticator {
 

@@ -56,8 +56,8 @@ final class AuthenticationGate {
           Objects.requireNonNull(authenticator.authenticate(req), "authenticator returned null");
     } catch (RuntimeException e) {
       LOGGER.warning("authenticator failed with " + e.getClass().getName());
-      resp.status(Status.SERVICE_UNAVAILABLE_503)
-          .send(Map.of("error", "authentication unavailable"));
+      JsonBody.send(
+          resp, Status.SERVICE_UNAVAILABLE_503, Map.of("error", "authentication unavailable"));
       return Optional.empty();
     }
     var caller =
@@ -73,9 +73,8 @@ final class AuthenticationGate {
    * says nothing about why.
    */
   private static void unauthenticated(ServerResponse resp, Challenge challenge) {
-    resp.header(HeaderNames.WWW_AUTHENTICATE, challenge.value())
-        .status(Status.UNAUTHORIZED_401)
-        .send(UNAUTHENTICATED);
+    resp.header(HeaderNames.WWW_AUTHENTICATE, challenge.value());
+    JsonBody.send(resp, Status.UNAUTHORIZED_401, UNAUTHENTICATED);
   }
 
   /**

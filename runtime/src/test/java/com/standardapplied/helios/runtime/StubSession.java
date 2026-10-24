@@ -23,7 +23,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * nothing drains, event subscribers are held until {@link #completeEvents()}, and the result
  * completes through {@link #terminate()}, standing for the end of the loop. Like a real session,
  * closing it before the first message completes the result at once, while a started one keeps
- * running until terminated. It counts its closes and runs {@link #onClose} on each.
+ * running until terminated. It counts its closes and runs {@link #onClose} on each, and counts the
+ * cancels of its event subscriptions.
  */
 final class StubSession implements AgentSession {
 
@@ -31,7 +32,12 @@ final class StubSession implements AgentSession {
   final SteeringQueue queue;
   final List<Flow.Subscriber<? super QueryEvent>> subscribers = new CopyOnWriteArrayList<>();
   final AtomicInteger closes = new AtomicInteger();
+  final AtomicInteger cancels = new AtomicInteger();
   volatile Runnable onClose = () -> {};
+
+  /** Thrown by {@link #result()} once set, standing for a session that fails to answer. */
+  volatile RuntimeException resultFailure;
+
   private final String sessionId;
   private volatile boolean started;
 
@@ -84,13 +90,18 @@ final class StubSession implements AgentSession {
             public void request(long n) {}
 
             @Override
-            public void cancel() {}
+            public void cancel() {
+              cancels.incrementAndGet();
+            }
           });
     };
   }
 
   @Override
   public CompletableFuture<ResultMessage> result() {
+    if (resultFailure != null) {
+      throw resultFailure;
+    }
     return result;
   }
 

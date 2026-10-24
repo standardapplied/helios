@@ -62,20 +62,29 @@ final class RawConnection implements AutoCloseable {
         "the server's next byte or close", CompletableFuture.supplyAsync(this::readByte));
   }
 
+  /** Read until the server has sent {@code marker}; everything read, {@code marker} included. */
+  String readUntil(String marker) {
+    return Await.value(
+        "the server to send " + marker,
+        CompletableFuture.supplyAsync(
+            () ->
+                readThrough(marker.getBytes(StandardCharsets.UTF_8), marker)
+                    .toString(StandardCharsets.UTF_8)));
+  }
+
+  /** Close the connection with a reset instead of an orderly shutdown. */
+  void reset() throws IOException {
+    socket.setSoLinger(true, 0);
+    socket.close();
+  }
+
   @Override
   public void close() throws IOException {
     socket.close();
   }
 
   private Response readResponse() {
-    var head = new ByteArrayOutputStream();
-    while (!endsWith(head.toByteArray(), END_OF_HEAD)) {
-      var b = readByte();
-      if (b < 0) {
-        throw new IllegalStateException("connection closed inside a response head: " + head);
-      }
-      head.write(b);
-    }
+    var head = readThrough(END_OF_HEAD, "the end of a response head");
     var lines = head.toString(StandardCharsets.US_ASCII).split("\r\n");
     var headers = new HashMap<String, String>();
     for (var i = 1; i < lines.length; i++) {
@@ -91,6 +100,18 @@ final class RawConnection implements AutoCloseable {
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
+  }
+
+  private ByteArrayOutputStream readThrough(byte[] end, String what) {
+    var read = new ByteArrayOutputStream();
+    while (!endsWith(read.toByteArray(), end)) {
+      var b = readByte();
+      if (b < 0) {
+        throw new IllegalStateException("connection closed before " + what + ": " + read);
+      }
+      read.write(b);
+    }
+    return read;
   }
 
   private int readByte() {
