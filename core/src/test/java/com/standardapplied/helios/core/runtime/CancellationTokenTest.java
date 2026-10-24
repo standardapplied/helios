@@ -411,6 +411,48 @@ final class CancellationTokenTest {
   }
 
   @Test
+  void cancelSuppressesAnErrorThrownTwiceOnceAndNeverInItself() {
+    var t = new CancellationToken();
+    var first = new AssertionError("first");
+    var repeated = new AssertionError("repeated");
+    var firstThread = new CompletableFuture<Thread>();
+    t.onCancel(
+        () -> {
+          firstThread.complete(Thread.currentThread());
+          throw first;
+        });
+    for (var i = 0; i < 2; i++) {
+      t.onCancel(
+          () -> {
+            Await.termination("the first error's thread", Await.value("it", firstThread));
+            throw repeated;
+          });
+    }
+
+    var thrown = assertThrows(AssertionError.class, () -> t.cancel("host-failure"));
+
+    assertSame(first, thrown);
+    assertEquals(List.of(repeated), List.of(thrown.getSuppressed()));
+  }
+
+  @Test
+  void cancelThrowsAnErrorEveryCallbackThrewWithNothingSuppressed() {
+    var t = new CancellationToken();
+    var shared = new AssertionError("shared");
+    for (var i = 0; i < 2; i++) {
+      t.onCancel(
+          () -> {
+            throw shared;
+          });
+    }
+
+    var thrown = assertThrows(AssertionError.class, () -> t.cancel("host-failure"));
+
+    assertSame(shared, thrown);
+    assertEquals(0, thrown.getSuppressed().length);
+  }
+
+  @Test
   void errorFromImmediateFireEscapesToRegisteringThread() {
     var t = new CancellationToken();
     t.cancel("already");
@@ -523,6 +565,25 @@ final class CancellationTokenTest {
     try {
       Await.latch("the later callback to run", later);
       assertFalse(fired.isDone(), "the earlier callback still blocks");
+    } finally {
+      release.countDown();
+    }
+    Await.value("the callbacks to have run", fired);
+  }
+
+  @Test
+  void cancelAsyncCompletesOnlyOnceALaterCallbackThatBlocksReturns() {
+    var token = new CancellationToken();
+    var earlier = new CompletableFuture<Thread>();
+    var release = new CountDownLatch(1);
+    token.onCancel(() -> earlier.complete(Thread.currentThread()));
+    token.onCancel(() -> Await.latch("the later callback released", release));
+
+    var fired = token.cancelAsync("closed", error -> {});
+
+    try {
+      Await.termination("the earlier callback's thread to end", Await.value("it ran", earlier));
+      assertFalse(fired.isDone(), "the later callback still blocks");
     } finally {
       release.countDown();
     }
